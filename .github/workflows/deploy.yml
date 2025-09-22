@@ -58,6 +58,9 @@ jobs:
         cd infra/cdk
         cdk deploy --require-approval never --outputs-file outputs.json
 
+    - name: Install Python dependencies for Bedrock Agent
+      run: pip install boto3
+
     - name: Create Bedrock Agent
       run: |
         python scripts/create_bedrock_agent.py > bedrock_agent_output.txt
@@ -71,7 +74,9 @@ jobs:
         CLIENT_ID=$(jq -r '.MultiTenantBedrockStack.UserPoolClientId' outputs.json)
         
         # Extract Agent ID from bedrock agent creation
-        AGENT_ID=$(grep "Agent ID:" ../bedrock_agent_output.txt | cut -d':' -f2 | xargs || echo "fallback-direct-model")
+        cd ..
+        AGENT_ID=$(grep "Agent ID:" bedrock_agent_output.txt | cut -d':' -f2 | xargs || echo "fallback-direct-model")
+        cd infra/cdk
         
         echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
         echo "client-id=$CLIENT_ID" >> $GITHUB_OUTPUT
