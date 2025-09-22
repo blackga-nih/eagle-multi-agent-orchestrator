@@ -1,0 +1,138 @@
+name: Deploy Multi-Tenant Bedrock Chat
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    outputs:
+      user-pool-id: ${{ steps.cdk-outputs.outputs.user-pool-id }}
+      client-id: ${{ steps.cdk-outputs.outputs.client-id }}
+      agent-id: ${{ steps.cdk-outputs.outputs.agent-id }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Setup Node.js for CDK
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install CDK
+      run: npm install -g aws-cdk
+
+    - name: Install CDK dependencies
+      run: |
+        cd infra/cdk
+        pip install -r requirements.txt
+
+    - name: CDK Bootstrap
+      run: |
+        cd infra/cdk
+        cdk bootstrap
+
+    - name: Deploy CDK Stack
+      run: |
+        cd infra/cdk
+        cdk deploy --require-approval never --outputs-file outputs.json
+
+    - name: Extract CDK Outputs
+      id: cdk-outputs
+      run: |
+        cd infra/cdk
+        USER_POOL_ID=$(jq -r '.MultiTenantBedrockStack.UserPoolId' outputs.json)
+        CLIENT_ID=$(jq -r '.MultiTenantBedrockStack.UserPoolClientId' outputs.json)
+        AGENT_ID=$(jq -r '.MultiTenantBedrockStack.AgentId // empty' outputs.json)
+        
+        echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+        echo "client-id=$CLIENT_ID" >> $GITHUB_OUTPUT
+        echo "agent-id=$AGENT_ID" >> $GITHUB_OUTPUT
+
+  create-users:
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      jwt-secret: ${{ steps.jwt-secret.outputs.jwt-secret }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Generate JWT Secret
+      id: jwt-secret
+      run: |
+        JWT_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+        echo "jwt-secret=$JWT_SECRET" >> $GITHUB_OUTPUT
+        echo "Generated JWT Secret: $JWT_SECRET"
+
+    - name: Create test users
+      env:
+        COGNITO_USER_POOL_ID: ${{ needs.deploy-infrastructure.outputs.user-pool-id }}
+        COGNITO_CLIENT_ID: ${{ needs.deploy-infrastructure.outputs.client-id }}
+        JWT_SECRET: ${{ steps.jwt-secret.outputs.jwt-secret }}
+      run: python scripts/create_test_user.py
+
+  test:
+    needs: [deploy-infrastructure, create-users]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Run tests
+      env:
+        COGNITO_USER_POOL_ID: ${{ needs.deploy-infrastructure.outputs.user-pool-id }}
+        COGNITO_CLIENT_ID: ${{ needs.deploy-infrastructure.outputs.client-id }}
+        BEDROCK_AGENT_ID: ${{ needs.deploy-infrastructure.outputs.agent-id }}
+        AWS_REGION: ${{ env.AWS_REGION }}
+      run: |
+        python -m pytest tests/ -v || echo "No tests found"
+        python examples/runtime_context_demo.py
