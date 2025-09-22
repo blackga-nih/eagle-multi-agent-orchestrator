@@ -134,8 +134,6 @@ jobs:
         COGNITO_USER_POOL_ID: ${{ needs.deploy-infrastructure.outputs.user-pool-id }}
         COGNITO_CLIENT_ID: ${{ needs.deploy-infrastructure.outputs.client-id }}
         BEDROCK_AGENT_ID: ${{ needs.deploy-infrastructure.outputs.agent-id }}
-        COGNITO_USER_POOL_ID: ${{ needs.deploy-infrastructure.outputs.user-pool-id }}
-        COGNITO_CLIENT_ID: ${{ needs.deploy-infrastructure.outputs.client-id }}
         AWS_REGION: ${{ env.AWS_REGION }}
       run: |
         echo "🤖 Testing Bedrock Agent Core Chatbot Application"
