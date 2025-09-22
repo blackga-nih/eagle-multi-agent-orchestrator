@@ -10,7 +10,7 @@ A production-ready multi-tenant chat application using AWS Bedrock Agent Core se
 - **Authentication**: Cognito User Pool with custom tenant attributes
 - **Usage Tracking**: Tenant-specific metrics in DynamoDB
 
-## 🚀 Quick Deployment
+## 🚀 Quick Deployment Steps
 
 ### 1. Deploy Infrastructure
 
