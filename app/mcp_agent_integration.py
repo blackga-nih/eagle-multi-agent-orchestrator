@@ -47,36 +47,52 @@ class MCPAgentCoreIntegration:
             }
         )
         
-        # Always check for subscription queries and inject MCP data
-        if self._is_subscription_query(message) and available_tools:
-            # Execute MCP tool to get subscription data
-            mcp_result = await self.mcp_client.execute_mcp_tool(
+        # Check for subscription or usage queries and inject MCP data
+        if (self._is_subscription_query(message) or self._is_usage_query(message)) and available_tools:
+            # Get both tier info and usage analytics
+            tier_result = await self.mcp_client.execute_mcp_tool(
                 "get_tier_info",
                 {"tier": subscription_tier.value},
                 subscription_tier
             )
             
-            # Inject MCP data directly into the message
-            if "result" in mcp_result and "tier_info" in mcp_result["result"]:
-                tier_info = mcp_result["result"]["tier_info"]
+            # Get actual usage data from subscription service
+            from app.subscription_service import SubscriptionService
+            from app.dynamodb_store import DynamoDBStore
+            store = DynamoDBStore()
+            subscription_service = SubscriptionService(store)
+            usage_data = await subscription_service.get_usage(tenant_context.tenant_id, subscription_tier)
+            
+            # Build comprehensive data for agent
+            if "result" in tier_result and "tier_info" in tier_result["result"]:
+                tier_info = tier_result["result"]["tier_info"]
                 enhanced_message = f"""
 User Question: {message}
 
-Subscription Information Available:
-- Plan: {tier_info['name']} ({tier_info['price']})
-- Daily Messages: {tier_info['daily_messages']}
-- Monthly Messages: {tier_info['monthly_messages']}
-- Features: {', '.join(tier_info['features'])}
-- Current Tier: {subscription_tier.value.upper()}
+Complete Subscription & Usage Information:
 
-Please provide a helpful response about the user's subscription details using this information."""
+SUBSCRIPTION DETAILS:
+- Plan: {tier_info['name']} ({tier_info['price']})
+- Daily Limit: {tier_info['daily_messages']} messages
+- Monthly Limit: {tier_info['monthly_messages']} messages
+- Features: {', '.join(tier_info['features'])}
+
+CURRENT USAGE (REAL DATA):
+- Daily Usage: {usage_data.daily_usage}/{tier_info['daily_messages']} messages
+- Monthly Usage: {usage_data.monthly_usage}/{tier_info['monthly_messages']} messages
+- Active Sessions: {usage_data.active_sessions}
+- Last Reset: {usage_data.last_reset_date.strftime('%Y-%m-%d')}
+
+Please provide an accurate response using this REAL usage data, not estimated numbers."""
             else:
                 enhanced_message = f"""
 User Question: {message}
 
-Subscription Information: User is on {subscription_tier.value.upper()} tier.
+Subscription: {subscription_tier.value.upper()} tier
+Daily Usage: {usage_data.daily_usage} messages
+Monthly Usage: {usage_data.monthly_usage} messages
 
-Please provide a helpful response about their subscription."""
+Please provide an accurate response using this real usage data."""
             
             # Invoke Agent Core with enhanced message
             agent_result = self.agentic_service.invoke_agent_with_planning(
@@ -85,8 +101,8 @@ Please provide a helpful response about their subscription."""
             
             # Add MCP integration info
             agent_result["mcp_integration"] = {
-                "tool_used": "get_tier_info",
-                "tool_result": mcp_result,
+                "tool_used": "get_tier_info_and_usage",
+                "tool_result": {"tier": tier_result, "usage": usage_data.dict()},
                 "integration_success": True
             }
             
@@ -201,11 +217,20 @@ Please provide a helpful response about their subscription."""
         """Check if message is asking about subscription details"""
         subscription_keywords = [
             "subscription", "plan", "tier", "billing", "account", 
-            "limits", "usage", "features", "pricing", "details",
+            "limits", "features", "pricing", "details",
             "what is my", "my plan", "current plan", "subscription details"
         ]
         message_lower = message.lower()
         return any(keyword in message_lower for keyword in subscription_keywords)
+    
+    def _is_usage_query(self, message: str) -> bool:
+        """Check if message is asking about usage statistics"""
+        usage_keywords = [
+            "usage", "used", "messages", "how many", "count", 
+            "sent", "remaining", "left", "consumed", "statistics"
+        ]
+        message_lower = message.lower()
+        return any(keyword in message_lower for keyword in usage_keywords)
     
     def _format_subscription_response(self, mcp_result: Dict[str, Any], tier: SubscriptionTier) -> str:
         """Format subscription information into a user-friendly response"""
