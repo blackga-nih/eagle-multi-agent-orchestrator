@@ -50,7 +50,10 @@ class SubscriptionService:
         """Get current usage for tenant"""
         try:
             response = self.store.usage_table.get_item(
-                Key={"tenant_id": f"{tenant_id}#{tier.value}"}
+                Key={
+                    "tenant_id": f"{tenant_id}#{tier.value}",
+                    "timestamp": "current"
+                }
             )
             if "Item" in response:
                 item = response["Item"]
@@ -92,6 +95,7 @@ class SubscriptionService:
         self.store.usage_table.put_item(
             Item={
                 "tenant_id": f"{tenant_id}#{tier.value}",
+                "timestamp": "current",
                 "daily_usage": usage.daily_usage,
                 "monthly_usage": usage.monthly_usage,
                 "active_sessions": usage.active_sessions,
