@@ -4,7 +4,7 @@ A production-ready multi-tenant chat application using **AWS Bedrock Agent Core 
 
 ## 🏗️ Architecture Overview
 
-![Architecture Diagram](architecture.png)
+![Architecture Diagram](architecuture.png)
 
 ### Core Components
 - **AWS Bedrock Agent Core Runtime**: Advanced AI agent with planning, reasoning, and tool execution
