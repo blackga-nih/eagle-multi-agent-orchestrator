@@ -1,6 +1,6 @@
 # Multi-Tenant AWS Bedrock Chat Application
 
-A sample multi-tenant chat application demonstrating **AWS Bedrock Agent Core Runtime**, **Cognito JWT authentication**, **DynamoDB session storage**, and **granular cost attribution**. This code serves as a reference implementation for building similar multi-tenant AI applications.
+A sample multi-tenant chat application demonstrating **AWS Bedrock Agent Core Runtime**, **Cognito JWT authentication**, **DynamoDB session storage**, and **granular cost attribution**. This code serves as a reference implementation for building similar multi-tenant AI application.
 
 ## ⚠️ Important Disclaimers
 
