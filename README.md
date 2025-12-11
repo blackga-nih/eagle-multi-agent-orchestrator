@@ -1,6 +1,29 @@
-# Multi-Tenant AWS Bedrock Chat Application
+# Multi-Tenant AWS Bedrock Agent Core Application
 
-A sample multi-tenant chat application demonstrating **AWS Bedrock Agent Core Runtime**, **Cognito JWT authentication**, **DynamoDB session storage**, and **granular cost attribution**. This code serves as a reference implementation for building similar multi-tenant AI application.
+A sample multi-tenant chat application demonstrating **AWS Bedrock Agent Core Runtime**, **Cognito JWT authentication**, **DynamoDB session storage**, and **granular cost attribution**. This code serves as a reference implementation for building similar multi-tenant AI applications.
+
+## 🎯 Core Concept
+
+This application demonstrates how to leverage **AWS Bedrock Agent Core Runtime** to serve multiple tenants from a single agent deployment by passing **tenant IDs at runtime**. The key innovation is using session attributes to:
+
+1. **Dynamic Tenant Routing**: Pass tenant_id and subscription_tier to Agent Core Runtime during each invocation, enabling one agent to serve multiple organizations
+2. **Subscription-Based Access Control**: Control feature access (models, tools, limits) based on subscription tier passed in session attributes
+3. **Granular Cost Attribution**: Track and attribute costs per tenant and user by capturing tenant context in all observability traces
+4. **Multi-Tenant Isolation**: Ensure complete data separation while sharing the same Agent Core Runtime infrastructure
+
+### How It Works
+
+```
+User Login → JWT with tenant_id → Session Attributes → Agent Core Runtime
+                                                              ↓
+                                    Tenant-specific response + cost tracking
+```
+
+**Key Benefits:**
+- **Single Agent, Multiple Tenants**: One Agent Core deployment serves all organizations
+- **Runtime Tenant Context**: No need to deploy separate agents per tenant
+- **Cost Transparency**: Automatic cost attribution per tenant for billing and analytics
+- **Flexible Subscriptions**: Different feature sets and limits per tenant based on their tier
 
 ## ⚠️ Important Disclaimers
 
@@ -15,7 +38,13 @@ A sample multi-tenant chat application demonstrating **AWS Bedrock Agent Core Ru
 
 **Responsible AI**: This system includes automated AWS operations capabilities. Users are responsible for ensuring appropriate safeguards, monitoring, and human oversight when deploying AI-driven infrastructure management tools.
 
-**Use Case**: This sample code demonstrates patterns for building multi-tenant AI applications with cost attribution, session management, and subscription tiers. Adapt and extend for your specific requirements.
+**Use Case**: This sample code demonstrates patterns for building multi-tenant SaaS AI applications where:
+- Multiple organizations share the same Agent Core Runtime infrastructure
+- Each tenant gets isolated data and personalized experiences
+- Costs are automatically tracked and attributed per tenant for billing
+- Subscription tiers control access to features, models, and usage limits
+
+Adapt and extend for your specific requirements.
 
 ## 📖 Overview
 
@@ -194,7 +223,11 @@ Application will be available at: **http://localhost:8000**
 
 ### Tenant Context Passing
 
-Tenant context is passed to Agent Core Runtime through session attributes, ensuring complete isolation and personalized responses:
+**The core mechanism**: Tenant context is passed to Agent Core Runtime through session attributes at every invocation. This enables:
+- **Multi-tenant routing**: Single agent serves multiple organizations
+- **Subscription enforcement**: Agent behavior adapts based on tenant's subscription tier
+- **Cost attribution**: All traces include tenant_id for accurate billing
+- **Data isolation**: Agent maintains separate context per tenant
 
 ```python
 session_state = {
@@ -243,12 +276,15 @@ for event in response['completion']:
 - **Orchestration Steps**: Multi-step workflow coordination
 - **Error Handling**: Failure points and retry logic
 
-#### Cost Attribution
+#### Cost Attribution Per Tenant
+
+**Critical for Multi-Tenancy**: Every trace and metric includes tenant_id, enabling accurate cost attribution:
+
 ```python
 # Track costs per tenant and user
 await cost_service.track_usage_cost(
-    tenant_id=tenant_id,
-    user_id=user_id,
+    tenant_id=tenant_id,  # Identifies which organization to bill
+    user_id=user_id,      # Tracks individual user consumption
     session_id=session_id,
     metric_type="bedrock_input_tokens",
     value=input_tokens,
@@ -256,6 +292,14 @@ await cost_service.track_usage_cost(
     trace_id=trace_id
 )
 ```
+
+**Cost Attribution Flow:**
+1. User makes request with JWT containing tenant_id
+2. Tenant context passed to Agent Core Runtime
+3. Agent processes request and generates traces
+4. All traces tagged with tenant_id and user_id
+5. Costs automatically calculated and attributed per tenant
+6. Admin dashboards show per-tenant and per-user costs
 
 #### Performance Monitoring
 - **Response Times**: End-to-end latency per request
@@ -270,15 +314,34 @@ await cost_service.track_usage_cost(
 - **Trace Storage**: All agent traces stored in DynamoDB for audit and analysis
 - **Subscription Limits**: Real-time enforcement of tier-based usage limits
 
+### Multi-Tenant Benefits
+
+**Why pass tenant_id at runtime?**
+1. **Cost Efficiency**: One Agent Core deployment instead of one per tenant
+2. **Simplified Management**: Single agent to maintain and update
+3. **Flexible Scaling**: Add new tenants without infrastructure changes
+4. **Accurate Billing**: Automatic cost attribution per tenant
+5. **Subscription Control**: Different features/limits per tenant tier
+6. **Audit Trail**: Complete trace of which tenant accessed what
+
 
 
 ## 💰 Cost Attribution System
 
+### Why Cost Attribution Matters for Multi-Tenancy
+
+When multiple tenants share the same Agent Core Runtime, accurate cost attribution is critical for:
+- **Billing**: Charge each tenant for their actual usage
+- **Analytics**: Understand which tenants consume most resources
+- **Optimization**: Identify cost-saving opportunities per tenant
+- **Transparency**: Show customers exactly what they're paying for
+
 ### Granular Cost Tracking
-- **Per-Tenant Costs**: Complete cost breakdown by tenant
+- **Per-Tenant Costs**: Complete cost breakdown by tenant (enabled by tenant_id in traces)
 - **Per-User Costs**: Individual user consumption within tenants
-- **Service-Wise Costs**: Breakdown by Bedrock, Weather API, MCP Runtime, etc.
+- **Service-Wise Costs**: Breakdown by Bedrock models, Agent Runtime orchestration, etc.
 - **Admin-Only Access**: Cost reports restricted to tenant administrators
+- **Real-Time Attribution**: Costs tracked as requests are processed
 
 ### Cost Categories
 ```json
@@ -517,10 +580,25 @@ COMMAND = "cohere.command-text-v14"
 ## 🎯 Use Cases
 
 This sample code demonstrates patterns for:
-- **Multi-tenant SaaS applications** with isolated data and billing
-- **AI-powered customer support** with conversation history
-- **Enterprise chatbots** with role-based access control
-- **Cost attribution systems** for AI service consumption
-- **Subscription-based AI services** with usage limits
+
+### Multi-Tenant SaaS AI Applications
+- **Single Agent, Multiple Customers**: One Agent Core Runtime serves all organizations
+- **Tenant-Specific Experiences**: Personalized responses based on tenant context
+- **Subscription Tiers**: Basic, Advanced, Premium with different feature access
+- **Usage-Based Billing**: Accurate cost attribution per tenant for invoicing
+
+### Enterprise AI Platforms
+- **Department Isolation**: Different departments as separate tenants
+- **Cost Center Attribution**: Track AI costs per department/team
+- **Role-Based Access**: Admin vs regular user capabilities per tenant
+- **Compliance & Audit**: Complete trace of tenant data access
+
+### AI Service Marketplaces
+- **White-Label AI**: Same agent, different branding per tenant
+- **Flexible Pricing**: Different subscription tiers with usage limits
+- **Cost Transparency**: Show customers their exact AI consumption
+- **Scalable Onboarding**: Add new customers without infrastructure changes
+
+**Key Advantage**: By passing tenant_id at runtime to Agent Core, you can serve unlimited tenants from a single agent deployment while maintaining complete isolation and accurate cost attribution.
 
 Adapt and extend this code for your specific requirements. This is a starting point, not a production-ready solution.
