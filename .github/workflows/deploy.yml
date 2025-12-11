@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 env:
   AWS_REGION: us-east-1
   PYTHON_VERSION: '3.11'

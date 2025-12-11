@@ -381,4 +381,5 @@ async def get_chat_interface():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Bind to localhost for security - use reverse proxy for external access
+    uvicorn.run(app, host="127.0.0.1", port=8000)

@@ -19,6 +19,39 @@ resource "aws_kms_key" "dynamodb_key" {
   deletion_window_in_days = 10
   enable_key_rotation     = true
 
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow DynamoDB to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "dynamodb.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "dynamodb.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+
   tags = {
     Name        = "DynamoDB-Encryption-Key"
     Environment = var.environment

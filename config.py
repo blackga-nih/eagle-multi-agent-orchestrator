@@ -12,7 +12,8 @@ class Config:
     AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
     
     # Application Configuration
-    APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
+    # Bind to localhost for security - use reverse proxy for external access
+    APP_HOST = os.getenv("APP_HOST", "127.0.0.1")
     APP_PORT = int(os.getenv("APP_PORT", "8000"))
     
     # Cognito Configuration
