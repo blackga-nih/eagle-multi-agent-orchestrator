@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AWS Bedrock Agent Core</title>
-    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js" crossorigin="anonymous" integrity="sha384-YkDOkBg8dBira7f28t9KbD0tG5OnnuU540fRBz8JgorAXLJOwtakyHNV7m36RDG4"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Amazon+Ember:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css2?family=Amazon+Ember:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous" integrity="sha384-cmj3JhQ6PRbUDt5man3nVqHXcMSvk16BQ1IsZTxTRYPLrlQTshDfe/2KAnfDExPB">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
@@ -583,12 +583,29 @@
                 // If admin role selected, add to admin group after verification
                 const isAdmin = role === 'admin';
                 
-                // Show verification code input
-                document.getElementById('registerSuccess').innerHTML = 
-                    `Registration successful! Please check your email for verification code.<br>
-                     ${isAdmin ? '<strong style="color: #dc3545;">🔒 Admin access will be granted after verification</strong><br>' : ''}
-                     <input type="text" id="verificationCode" placeholder="Enter verification code" style="margin: 10px 0; padding: 8px;">
-                     <button onclick="confirmSignUp('${email}', '${tenantId}', ${isAdmin})">Verify</button>`;
+                // Show verification code input safely
+                const successDiv = document.getElementById('registerSuccess');
+                successDiv.textContent = 'Registration successful! Please check your email for verification code.';
+                
+                if (isAdmin) {
+                    const adminMsg = document.createElement('div');
+                    adminMsg.innerHTML = '<strong style="color: #dc3545;">🔒 Admin access will be granted after verification</strong>';
+                    successDiv.appendChild(adminMsg);
+                }
+                
+                const verificationInput = document.createElement('input');
+                verificationInput.type = 'text';
+                verificationInput.id = 'verificationCode';
+                verificationInput.placeholder = 'Enter verification code';
+                verificationInput.style.cssText = 'margin: 10px 0; padding: 8px; width: 100%; border: 1px solid #ccc; border-radius: 4px;';
+                
+                const verifyButton = document.createElement('button');
+                verifyButton.textContent = 'Verify';
+                verifyButton.onclick = () => confirmSignUp(email, tenantId, isAdmin);
+                verifyButton.style.cssText = 'margin-top: 10px; padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;';
+                
+                successDiv.appendChild(verificationInput);
+                successDiv.appendChild(verifyButton);
                 document.getElementById('registerError').textContent = '';
             });
         }
