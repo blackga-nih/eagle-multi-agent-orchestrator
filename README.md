@@ -548,7 +548,10 @@ Configure the model ID in your application based on your use case and cost requi
 
 Watch the application in action:
 
-https://github.com/user-attachments/assets/demo.mp4
+<video width="800" controls>
+  <source src="Demo.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
 
 The demo showcases:
 - User registration and authentication with Cognito
