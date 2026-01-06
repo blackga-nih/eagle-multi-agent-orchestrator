@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AWS Bedrock Agent Core</title>
-    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js" crossorigin="anonymous" integrity="sha384-YkDOkBg8dBira7f28t9KbD0tG5OnnuU540fRBz8JgorAXLJOwtakyHNV7m36RDG4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Amazon+Ember:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous" integrity="sha384-cmj3JhQ6PRbUDt5man3nVqHXcMSvk16BQ1IsZTxTRYPLrlQTshDfe/2KAnfDExPB">
+    <link href="https://fonts.googleapis.com/css2?family=Amazon+Ember:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
@@ -526,8 +526,8 @@
     <script>
         // Configuration - Update these with your deployed values
         const CONFIG = {
-            userPoolId: 'YOUR_USER_POOL_ID',
-            clientId: 'YOUR_CLIENT_ID', 
+            userPoolId: 'us-east-1_1UZVUhKiZ',
+            clientId: '1jjpsqmi3qhngfmh871tgns4p2',
             region: 'us-east-1',
             apiUrl: 'http://localhost:8000'
         };
@@ -1243,8 +1243,6 @@
                     infoPanel.appendChild(errorP);
                 }
             } catch (error) {
-                const infoPanel = document.getElementById('usageInfo');
-                infoPanel.style.display = 'block';
                 const infoPanel = document.getElementById('usageInfo');
                 infoPanel.style.display = 'block';
                 infoPanel.textContent = '';
