@@ -86,6 +86,12 @@ class TraceCollector:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cost_usd = 0.0
+        self.log_lines = []  # Raw log lines for trace display
+
+    def _log(self, msg):
+        """Print and capture a log line."""
+        print(msg)
+        self.log_lines.append(msg)
 
     def process(self, message, indent: int = 0):
         prefix = "  " * indent
@@ -98,7 +104,7 @@ class TraceCollector:
                 sid = message.data.get("session_id")
                 if sid:
                     self.session_id = sid
-                    print(f"{prefix}  [SystemMessage/init] session_id={sid}")
+                    self._log(f"{prefix}  [SystemMessage/init] session_id={sid}")
             self.system_messages.append(message)
             return
 
@@ -112,12 +118,12 @@ class TraceCollector:
                     text = getattr(block, "text", "")
                     if text.strip():
                         self.text_blocks.append(text)
-                        print(f"{prefix}  [{msg_type}/TextBlock] {text[:200]}")
+                        self._log(f"{prefix}  [{msg_type}/TextBlock] {text[:200]}")
 
                 elif block_class == "ThinkingBlock":
                     thinking = getattr(block, "thinking", getattr(block, "text", ""))
                     self.thinking_blocks.append(thinking)
-                    print(f"{prefix}  [{msg_type}/ThinkingBlock] {thinking[:150]}...")
+                    self._log(f"{prefix}  [{msg_type}/ThinkingBlock] {thinking[:150]}...")
 
                 elif block_class == "ToolUseBlock":
                     name = getattr(block, "name", "?")
@@ -128,15 +134,15 @@ class TraceCollector:
                     })
                     if name == "Task":
                         subagent = inp.get("subagent_type", inp.get("description", "?"))
-                        print(f"{prefix}  [{msg_type}/ToolUseBlock] SUBAGENT -> {subagent}")
+                        self._log(f"{prefix}  [{msg_type}/ToolUseBlock] SUBAGENT -> {subagent}")
                     else:
-                        print(f"{prefix}  [{msg_type}/ToolUseBlock] {name}({json.dumps(inp)[:120]})")
+                        self._log(f"{prefix}  [{msg_type}/ToolUseBlock] {name}({json.dumps(inp)[:120]})")
 
                 elif block_class == "ToolResultBlock":
                     tool_id = getattr(block, "tool_use_id", "?")
                     content = getattr(block, "content", "")
                     content_preview = str(content)[:100] if content else ""
-                    print(f"{prefix}  [{msg_type}/ToolResultBlock] id={tool_id} {content_preview}")
+                    self._log(f"{prefix}  [{msg_type}/ToolResultBlock] id={tool_id} {content_preview}")
 
         # ResultMessage: usage is a dict, session_id and total_cost_usd are direct attrs
         if msg_type == "ResultMessage":
@@ -169,24 +175,24 @@ class TraceCollector:
                     "cache_read_input_tokens": cache_read,
                     "total_input_effective": total_in,
                 })
-                print(f"{prefix}  [{msg_type}/usage] {input_t}+{cache_create}cache_create+{cache_read}cache_read in / {output_t} out")
+                self._log(f"{prefix}  [{msg_type}/usage] {input_t}+{cache_create}cache_create+{cache_read}cache_read in / {output_t} out")
 
             # Total cost USD
             total_cost = getattr(message, "total_cost_usd", None)
             if total_cost is not None:
                 self.total_cost_usd = getattr(self, "total_cost_usd", 0) + total_cost
-                print(f"{prefix}  [{msg_type}/cost] ${total_cost:.6f}")
+                self._log(f"{prefix}  [{msg_type}/cost] ${total_cost:.6f}")
 
             # Result text
             if hasattr(message, "result") and message.result:
                 text = message.result
-                print(f"{prefix}  [{msg_type}/result] {text[:300]}")
+                self._log(f"{prefix}  [{msg_type}/result] {text[:300]}")
 
         # Subagent context
         if hasattr(message, "parent_tool_use_id") and message.parent_tool_use_id:
             parent = message.parent_tool_use_id
             is_bedrock = parent.startswith("toolu_bdrk_")
-            print(f"{prefix}  (subagent context, parent={parent}, bedrock={is_bedrock})")
+            self._log(f"{prefix}  (subagent context, parent={parent}, bedrock={is_bedrock})")
 
     def summary(self):
         return {
@@ -1102,7 +1108,39 @@ async def test_9_oa_intake_workflow():
 # Main
 # ============================================================
 
+class CapturingStream:
+    """Captures stdout while still printing."""
+
+    def __init__(self, original):
+        self.original = original
+        self.lines = []
+        self._current_test = None
+        self.per_test_logs = {}
+
+    def write(self, text):
+        self.original.write(text)
+        if text.strip():
+            self.lines.append(text.rstrip())
+            if self._current_test:
+                if self._current_test not in self.per_test_logs:
+                    self.per_test_logs[self._current_test] = []
+                self.per_test_logs[self._current_test].append(text.rstrip())
+
+    def flush(self):
+        self.original.flush()
+
+    def start_test(self, test_id):
+        self._current_test = test_id
+
+    def end_test(self):
+        self._current_test = None
+
+
 async def main():
+    # Set up capturing stream
+    capture = CapturingStream(sys.stdout)
+    sys.stdout = capture
+
     print("=" * 70)
     print("Option C Validation: Claude SDK Multi-Tenant Orchestrator")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
@@ -1111,9 +1149,11 @@ async def main():
     print("=" * 70)
 
     results = {}
+    trace_data = {}  # Per-test trace data for dashboard
     session_id = None
 
     # Test 1: Session creation
+    capture.start_test(1)
     try:
         passed, session_id = await test_1_session_creation()
         results["1_session_creation"] = passed
@@ -1122,8 +1162,10 @@ async def main():
         import traceback
         traceback.print_exc()
         results["1_session_creation"] = False
+    capture.end_test()
 
     # Test 2: Session resume (depends on test 1)
+    capture.start_test(2)
     try:
         result = await test_2_session_resume(session_id)
         results["2_session_resume"] = result
@@ -1132,8 +1174,10 @@ async def main():
         import traceback
         traceback.print_exc()
         results["2_session_resume"] = False
+    capture.end_test()
 
     # Test 3: Trace observation
+    capture.start_test(3)
     try:
         results["3_trace_observation"] = await test_3_trace_observation()
     except Exception as e:
@@ -1141,8 +1185,10 @@ async def main():
         import traceback
         traceback.print_exc()
         results["3_trace_observation"] = False
+    capture.end_test()
 
     # Test 4: Subagent orchestration
+    capture.start_test(4)
     try:
         results["4_subagent_orchestration"] = await test_4_subagent_orchestration()
     except Exception as e:
@@ -1150,8 +1196,10 @@ async def main():
         import traceback
         traceback.print_exc()
         results["4_subagent_orchestration"] = False
+    capture.end_test()
 
     # Test 5: Cost tracking
+    capture.start_test(5)
     try:
         results["5_cost_tracking"] = await test_5_cost_tracking()
     except Exception as e:
@@ -1159,8 +1207,10 @@ async def main():
         import traceback
         traceback.print_exc()
         results["5_cost_tracking"] = False
+    capture.end_test()
 
     # Test 6: Tier-gated MCP tools
+    capture.start_test(6)
     try:
         results["6_tier_gated_tools"] = await test_6_tier_gated_tools()
     except Exception as e:
@@ -1168,8 +1218,10 @@ async def main():
         import traceback
         traceback.print_exc()
         results["6_tier_gated_tools"] = False
+    capture.end_test()
 
     # Test 7: Skill loading
+    capture.start_test(7)
     try:
         results["7_skill_loading"] = await test_7_skill_loading()
     except Exception as e:
@@ -1177,8 +1229,10 @@ async def main():
         import traceback
         traceback.print_exc()
         results["7_skill_loading"] = False
+    capture.end_test()
 
     # Test 8: Subagent tool tracking
+    capture.start_test(8)
     try:
         results["8_subagent_tool_tracking"] = await test_8_subagent_tool_tracking()
     except Exception as e:
@@ -1186,8 +1240,10 @@ async def main():
         import traceback
         traceback.print_exc()
         results["8_subagent_tool_tracking"] = False
+    capture.end_test()
 
     # Test 9: OA Intake workflow
+    capture.start_test(9)
     try:
         results["9_oa_intake_workflow"] = await test_9_oa_intake_workflow()
     except Exception as e:
@@ -1195,6 +1251,7 @@ async def main():
         import traceback
         traceback.print_exc()
         results["9_oa_intake_workflow"] = False
+    capture.end_test()
 
     # Summary
     print("\n" + "=" * 70)
@@ -1228,6 +1285,40 @@ async def main():
     print(f"    Skill loading (system_prompt): {'Ready' if results.get('7_skill_loading') else 'Needs work'}")
     print(f"    Subagent tool tracking: {'Ready' if results.get('8_subagent_tool_tracking') else 'Needs work'}")
     print(f"    OA Intake workflow: {'Ready' if results.get('9_oa_intake_workflow') else 'Needs work'}")
+
+    # Restore stdout
+    sys.stdout = capture.original
+
+    # Write per-test trace logs to JSON for the dashboard
+    trace_output = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "results": {},
+    }
+    for test_id, log_lines in capture.per_test_logs.items():
+        result_key = {
+            1: "1_session_creation",
+            2: "2_session_resume",
+            3: "3_trace_observation",
+            4: "4_subagent_orchestration",
+            5: "5_cost_tracking",
+            6: "6_tier_gated_tools",
+            7: "7_skill_loading",
+            8: "8_subagent_tool_tracking",
+            9: "9_oa_intake_workflow",
+        }.get(test_id, str(test_id))
+
+        result_val = results.get(result_key)
+        status = "pass" if result_val is True else ("skip" if result_val is None else "fail")
+
+        trace_output["results"][str(test_id)] = {
+            "status": status,
+            "logs": log_lines,
+        }
+
+    trace_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trace_logs.json")
+    with open(trace_file, "w", encoding="utf-8") as f:
+        json.dump(trace_output, f, indent=2)
+    print(f"\nTrace logs written to: {trace_file}")
 
     if failed > 0:
         sys.exit(1)
