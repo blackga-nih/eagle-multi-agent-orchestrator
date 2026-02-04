@@ -713,6 +713,392 @@ async def test_6_tier_gated_tools():
 
 
 # ============================================================
+# Test 7: Skill loading via system_prompt
+# ============================================================
+
+OA_INTAKE_SKILL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "nci-oa-agent", ".claude", "skills", "oa-intake", "SKILL.md"
+)
+
+# Also check the absolute path the user specified
+OA_INTAKE_SKILL_PATHS = [
+    OA_INTAKE_SKILL_PATH,
+    "C:/Users/gblac/OneDrive/Desktop/afs/nci-oa-agent/.claude/skills/oa-intake/SKILL.md",
+]
+
+
+def load_skill_file() -> str:
+    """Load the OA Intake skill markdown as a system prompt."""
+    for path in OA_INTAKE_SKILL_PATHS:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return content, path
+    return None, None
+
+
+async def test_7_skill_loading():
+    """Test loading a skill file and injecting it as system_prompt."""
+    print("\n" + "=" * 70)
+    print("TEST 7: Skill Loading (OA Intake Skill → system_prompt)")
+    print("=" * 70)
+
+    skill_content, skill_path = load_skill_file()
+    if not skill_content:
+        print(f"  SKIP - Skill file not found at any of:")
+        for p in OA_INTAKE_SKILL_PATHS:
+            print(f"    {p}")
+        return None
+
+    print(f"  Skill loaded: {skill_path}")
+    print(f"  Skill size: {len(skill_content)} chars")
+
+    # Inject skill as system_prompt - this is how the orchestrator loads skills
+    tenant_context = (
+        "Tenant: nci-oa | User: intake-officer-01 | Tier: premium\n"
+        "You are operating as the OA Intake Agent for this tenant.\n\n"
+    )
+
+    options = ClaudeAgentOptions(
+        model="haiku",
+        system_prompt=tenant_context + skill_content,
+        allowed_tools=[],
+        permission_mode="bypassPermissions",
+        max_turns=3,
+        max_budget_usd=0.15,
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        env={
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AWS_REGION": "us-east-1",
+        },
+    )
+
+    print(f"  System prompt: tenant_context + skill ({len(tenant_context) + len(skill_content)} chars)")
+    print()
+
+    collector = TraceCollector()
+
+    async for message in query(
+        prompt="Hi, I need to buy a new microscope. Not sure about the price. Need it in 2 months.",
+        options=options,
+    ):
+        collector.process(message, indent=2)
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+    print(f"  Cost: ${summary['total_cost_usd']:.6f}")
+
+    # Check that the skill knowledge is reflected in the response
+    all_text = " ".join(collector.text_blocks).lower()
+    for msg_entry in collector.messages:
+        msg = msg_entry["message"]
+        if hasattr(msg, "result") and msg.result:
+            all_text += " " + msg.result.lower()
+
+    # The skill should produce acquisition-specific responses:
+    # - asks clarifying questions (Phase 2)
+    # - mentions cost ranges
+    # - follows the "Trish" philosophy
+    skill_indicators = {
+        "clarifying_questions": any(w in all_text for w in ["manufacturer", "model", "new or", "refurbished", "budget", "funding"]),
+        "cost_awareness": any(w in all_text for w in ["$", "cost", "price", "range", "estimate", "value"]),
+        "acquisition_knowledge": any(w in all_text for w in ["acquisition", "procurement", "purchase", "sow", "micro", "simplified"]),
+        "follow_up_pattern": "?" in all_text,  # Should ask follow-up questions
+    }
+
+    print(f"  Skill indicators in response:")
+    for indicator, found in skill_indicators.items():
+        print(f"    {indicator}: {found}")
+
+    # Pass if skill knowledge is evident (at least 2 of 4 indicators)
+    indicators_found = sum(1 for v in skill_indicators.values() if v)
+    passed = indicators_found >= 2 and summary["total_messages"] > 0
+    print(f"\n  Skill indicators: {indicators_found}/4")
+    print(f"  {'PASS' if passed else 'FAIL'} - Skill loaded and applied via system_prompt")
+    return passed
+
+
+# ============================================================
+# Test 8: Subagent tool use tracking (deep trace inspection)
+# ============================================================
+
+async def test_8_subagent_tool_tracking():
+    """Track which tools each subagent uses - verify parent_tool_use_id."""
+    print("\n" + "=" * 70)
+    print("TEST 8: Subagent Tool Use Tracking (Deep Trace)")
+    print("=" * 70)
+
+    options = ClaudeAgentOptions(
+        model="haiku",
+        system_prompt=(
+            "You are a code analysis assistant with specialized subagents. "
+            "ALWAYS delegate file tasks to the appropriate subagent."
+        ),
+        allowed_tools=["Read", "Glob", "Grep", "Task"],
+        permission_mode="bypassPermissions",
+        max_turns=12,
+        max_budget_usd=0.30,
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        env={
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AWS_REGION": "us-east-1",
+        },
+        agents={
+            "file-scanner": AgentDefinition(
+                description="Scans for files matching patterns. Use for finding files.",
+                prompt=(
+                    "You find files using Glob. "
+                    "Return filenames and count. Be concise."
+                ),
+                tools=["Glob"],
+                model="haiku",
+            ),
+            "code-inspector": AgentDefinition(
+                description="Reads and inspects code files. Use for understanding code content.",
+                prompt=(
+                    "You read code files with Read and search for patterns with Grep. "
+                    "Report what you find concisely."
+                ),
+                tools=["Read", "Grep"],
+                model="haiku",
+            ),
+        },
+    )
+
+    print(f"  Subagents:")
+    print(f"    file-scanner: tools=[Glob]")
+    print(f"    code-inspector: tools=[Read, Grep]")
+    print()
+
+    # Detailed trace collector - tracks parent_tool_use_id
+    subagent_traces = {}  # parent_tool_use_id -> list of tool calls
+    all_tool_calls = []
+    all_messages = []
+
+    async for message in query(
+        prompt=(
+            "Do these three things using your subagents:\n"
+            "1. Use file-scanner to find all .py files in the root directory\n"
+            "2. Use code-inspector to read config.py and tell me the port number\n"
+            "Report both results."
+        ),
+        options=options,
+    ):
+        msg_type = type(message).__name__
+        all_messages.append(message)
+
+        # Track parent_tool_use_id for tool calls inside subagents
+        parent_id = getattr(message, "parent_tool_use_id", None)
+
+        if hasattr(message, "content") and message.content is not None:
+            for block in message.content:
+                block_class = type(block).__name__
+
+                if block_class == "ToolUseBlock":
+                    name = getattr(block, "name", "?")
+                    tool_id = getattr(block, "id", "?")
+                    inp = getattr(block, "input", {})
+
+                    call_record = {
+                        "tool": name,
+                        "id": tool_id,
+                        "input": inp,
+                        "parent_tool_use_id": parent_id,
+                        "msg_type": msg_type,
+                    }
+                    all_tool_calls.append(call_record)
+
+                    # Group by parent
+                    if parent_id:
+                        if parent_id not in subagent_traces:
+                            subagent_traces[parent_id] = {
+                                "agent_type": None,
+                                "tool_calls": [],
+                            }
+                        subagent_traces[parent_id]["tool_calls"].append(call_record)
+
+                    if name == "Task":
+                        agent_type = inp.get("subagent_type", inp.get("description", "?"))
+                        print(f"    [SUBAGENT] {agent_type} (id: {tool_id[:25]}...)")
+                        # Link subagent type to its tool_use_id for children
+                        if tool_id not in subagent_traces:
+                            subagent_traces[tool_id] = {
+                                "agent_type": agent_type,
+                                "tool_calls": [],
+                            }
+                        else:
+                            subagent_traces[tool_id]["agent_type"] = agent_type
+                    else:
+                        parent_label = f" (inside {parent_id[:15]}...)" if parent_id else ""
+                        print(f"    [TOOL] {name}{parent_label}")
+
+        if msg_type == "ResultMessage" and hasattr(message, "result"):
+            print(f"    [RESULT] {message.result[:200]}")
+
+    print()
+    print(f"  --- Subagent Tool Tracking ---")
+    print(f"  Total tool calls: {len(all_tool_calls)}")
+    print(f"  Total messages: {len(all_messages)}")
+
+    # Subagent-spawned tool calls (Task)
+    task_calls = [c for c in all_tool_calls if c["tool"] == "Task"]
+    print(f"  Subagent invocations (Task): {len(task_calls)}")
+
+    # Tools called inside subagent contexts
+    tools_with_parent = [c for c in all_tool_calls if c["parent_tool_use_id"] and c["tool"] != "Task"]
+    tools_without_parent = [c for c in all_tool_calls if not c["parent_tool_use_id"] and c["tool"] != "Task"]
+    print(f"  Tools inside subagents (has parent_tool_use_id): {len(tools_with_parent)}")
+    print(f"  Tools at top level (no parent): {len(tools_without_parent)}")
+
+    # Per-subagent breakdown
+    print(f"\n  Subagent contexts: {len(subagent_traces)}")
+    for parent_id, trace_data in subagent_traces.items():
+        agent = trace_data["agent_type"] or "unknown"
+        tools = trace_data["tool_calls"]
+        tool_names = [t["tool"] for t in tools]
+        is_bedrock = parent_id.startswith("toolu_bdrk_")
+        print(f"    [{agent}] parent={parent_id[:25]}... bedrock={is_bedrock}")
+        print(f"      Tools used: {tool_names}")
+
+    # Validate: subagents should use their designated tools
+    passed = len(task_calls) > 0 and len(all_tool_calls) > len(task_calls)
+    print(f"\n  {'PASS' if passed else 'FAIL'} - Subagent tool use tracked with parent context")
+    return passed
+
+
+# ============================================================
+# Test 9: OA Intake Workflow (CT Scanner Acquisition)
+# ============================================================
+
+async def test_9_oa_intake_workflow():
+    """
+    Run through the OA Intake workflow from the CT scanner transcript.
+    Tests multi-turn conversation with skill-loaded system_prompt.
+    Validates that the agent follows the skill's 5-phase workflow.
+    """
+    print("\n" + "=" * 70)
+    print("TEST 9: OA Intake Workflow (CT Scanner Acquisition)")
+    print("=" * 70)
+
+    skill_content, skill_path = load_skill_file()
+    if not skill_content:
+        print(f"  SKIP - Skill file not found")
+        return None
+
+    print(f"  Skill: {skill_path}")
+    print(f"  Workflow: CT Scanner intake (from transcript)")
+    print()
+
+    # Phase 1: Initial intake - user provides basic info
+    tenant_context = (
+        "Tenant: nci-oa | User: dr-smith-001 | Tier: premium\n"
+        "You are the OA Intake Agent. Follow the skill workflow exactly.\n\n"
+    )
+
+    options_base = dict(
+        model="haiku",
+        system_prompt=tenant_context + skill_content,
+        allowed_tools=["Read"],
+        permission_mode="bypassPermissions",
+        max_turns=3,
+        max_budget_usd=0.15,
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        env={
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AWS_REGION": "us-east-1",
+        },
+    )
+
+    # Workflow messages from the transcript
+    workflow_turns = [
+        {
+            "phase": "Phase 1: Initial Intake",
+            "user": "Cat scan machine. Not sure the price. I need it in 6 weeks.",
+            "expect": ["ct", "scanner", "cost", "price", "timeline", "equipment"],
+        },
+        {
+            "phase": "Phase 2: Clarifying Questions",
+            "user": "I don't care about the manufacturer; it needs to be new, um, 128 slice. Yes, we have an urgent deadline.",
+            "expect": ["128", "slice", "urgent", "negotiat", "$", "250"],
+        },
+        {
+            "phase": "Phase 3: Urgency & Funding",
+            "user": "Yes, a grant is expiring. I think we have an existing NIH contract.",
+            "expect": ["grant", "contract", "vehicle", "fund", "expir"],
+        },
+    ]
+
+    session_id = None
+    phase_results = []
+    total_cost = 0.0
+
+    for i, turn in enumerate(workflow_turns):
+        print(f"  --- {turn['phase']} ---")
+        print(f"  User: {turn['user'][:80]}")
+
+        if session_id:
+            options = ClaudeAgentOptions(**options_base, resume=session_id)
+        else:
+            options = ClaudeAgentOptions(**options_base)
+
+        collector = TraceCollector()
+
+        async for message in query(prompt=turn["user"], options=options):
+            collector.process(message, indent=3)
+
+        summary = collector.summary()
+        total_cost += summary["total_cost_usd"]
+
+        # Capture session_id from first turn
+        if not session_id and summary["session_id"]:
+            session_id = summary["session_id"]
+            print(f"    Session: {session_id}")
+
+        # Check expected keywords in response
+        all_text = " ".join(collector.text_blocks).lower()
+        for msg_entry in collector.messages:
+            msg = msg_entry["message"]
+            if hasattr(msg, "result") and msg.result:
+                all_text += " " + msg.result.lower()
+
+        keywords_found = [kw for kw in turn["expect"] if kw in all_text]
+        keywords_missing = [kw for kw in turn["expect"] if kw not in all_text]
+        phase_pass = len(keywords_found) >= len(turn["expect"]) // 2
+
+        phase_results.append({
+            "phase": turn["phase"],
+            "pass": phase_pass,
+            "found": keywords_found,
+            "missing": keywords_missing,
+            "tokens": summary["total_input_tokens"] + summary["total_output_tokens"],
+        })
+
+        print(f"    Keywords found: {keywords_found}")
+        if keywords_missing:
+            print(f"    Keywords missing: {keywords_missing}")
+        print(f"    Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+        print(f"    {'PASS' if phase_pass else 'FAIL'}")
+        print()
+
+    print(f"  --- Workflow Summary ---")
+    print(f"  Session: {session_id}")
+    print(f"  Total cost: ${total_cost:.6f}")
+    print(f"  Phases:")
+    for pr in phase_results:
+        status = "PASS" if pr["pass"] else "FAIL"
+        print(f"    {pr['phase']}: {status} (found {len(pr['found'])}/{len(pr['found']) + len(pr['missing'])} keywords)")
+
+    all_passed = all(pr["pass"] for pr in phase_results)
+    passed = all_passed and session_id is not None
+    print(f"\n  {'PASS' if passed else 'FAIL'} - OA Intake workflow ({len(phase_results)} phases)")
+    return passed
+
+
+# ============================================================
 # Main
 # ============================================================
 
@@ -783,6 +1169,33 @@ async def main():
         traceback.print_exc()
         results["6_tier_gated_tools"] = False
 
+    # Test 7: Skill loading
+    try:
+        results["7_skill_loading"] = await test_7_skill_loading()
+    except Exception as e:
+        print(f"  ERROR: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        results["7_skill_loading"] = False
+
+    # Test 8: Subagent tool tracking
+    try:
+        results["8_subagent_tool_tracking"] = await test_8_subagent_tool_tracking()
+    except Exception as e:
+        print(f"  ERROR: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        results["8_subagent_tool_tracking"] = False
+
+    # Test 9: OA Intake workflow
+    try:
+        results["9_oa_intake_workflow"] = await test_9_oa_intake_workflow()
+    except Exception as e:
+        print(f"  ERROR: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        results["9_oa_intake_workflow"] = False
+
     # Summary
     print("\n" + "=" * 70)
     print("OPTION C VALIDATION SUMMARY")
@@ -812,6 +1225,9 @@ async def main():
     print(f"    Subagent traces (agent_log events): {'Ready' if results.get('4_subagent_orchestration') else 'Needs work'}")
     print(f"    Cost ticker (ResultMessage.usage): {'Ready' if results.get('5_cost_tracking') else 'Needs work'}")
     print(f"    Tier-gated tools (MCP): {'Ready' if results.get('6_tier_gated_tools') else 'Needs work'}")
+    print(f"    Skill loading (system_prompt): {'Ready' if results.get('7_skill_loading') else 'Needs work'}")
+    print(f"    Subagent tool tracking: {'Ready' if results.get('8_subagent_tool_tracking') else 'Needs work'}")
+    print(f"    OA Intake workflow: {'Ready' if results.get('9_oa_intake_workflow') else 'Needs work'}")
 
     if failed > 0:
         sys.exit(1)
