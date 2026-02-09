@@ -1,0 +1,203 @@
+{
+  "version": "2024-01",
+  "vehicles": {
+    "gsa_schedules": {
+      "name": "GSA Multiple Award Schedules (MAS)",
+      "description": "Pre-competed contracts with pre-negotiated pricing for commercial products and services",
+      "website": "https://www.gsa.gov/buy",
+      "ordering": {
+        "micro_purchase": "Order from one source",
+        "simplified": "Seek quotes from 3+ schedule contractors",
+        "over_sat": "Seek quotes from reasonable number of sources"
+      },
+      "categories": [
+        {
+          "name": "Information Technology",
+          "sin": "54151S",
+          "description": "IT professional services, software, hardware"
+        },
+        {
+          "name": "Professional Services",
+          "sin": "541611",
+          "description": "Management consulting, training, support"
+        },
+        {
+          "name": "Scientific Equipment",
+          "sin": "334516",
+          "description": "Laboratory and analytical instruments"
+        },
+        {
+          "name": "Medical Equipment",
+          "sin": "339112",
+          "description": "Medical devices and equipment"
+        }
+      ],
+      "pros": [
+        "Pre-negotiated pricing",
+        "Pre-competed terms",
+        "Faster procurement cycle",
+        "Fair opportunity requirement protects competition"
+      ],
+      "cons": [
+        "Limited to GSA contractors",
+        "May not have specialized requirements",
+        "Must still document price reasonableness"
+      ]
+    },
+    "nitaac": {
+      "name": "NITAAC (NIH Information Technology Acquisition and Assessment Center)",
+      "description": "Government-wide IT acquisition vehicles managed by NIH",
+      "website": "https://nitaac.nih.gov",
+      "contracts": [
+        {
+          "name": "CIO-SP3",
+          "full_name": "Chief Information Officer Solutions and Partners III",
+          "ceiling": "$40 billion",
+          "period": "10 years",
+          "type": "GWAC",
+          "pools": [
+            "Small Business",
+            "8(a)",
+            "Unrestricted"
+          ],
+          "task_areas": [
+            "Custom Computer Services",
+            "IT Operations and Maintenance",
+            "Software Development",
+            "IT Security",
+            "Systems Analysis",
+            "Health IT"
+          ]
+        },
+        {
+          "name": "CIO-CS",
+          "full_name": "Chief Information Officer Commodities and Solutions",
+          "ceiling": "$20 billion",
+          "period": "10 years",
+          "type": "GWAC",
+          "pools": [
+            "Small Business"
+          ],
+          "task_areas": [
+            "IT Commodities",
+            "Ancillary Services"
+          ]
+        }
+      ],
+      "ordering_process": [
+        "Develop Task Order Request (TOR)",
+        "Submit to NITAAC",
+        "Fair opportunity provided to pool contractors",
+        "Evaluate proposals",
+        "Award task order"
+      ],
+      "fees": "0.75% COP fee on obligations",
+      "pros": [
+        "NIH-specific IT expertise",
+        "Pre-qualified contractors",
+        "Streamlined IT procurement",
+        "Support for Health IT requirements"
+      ],
+      "cons": [
+        "IT-focused only",
+        "Specific ordering procedures required",
+        "COP fee adds to cost"
+      ]
+    },
+    "nih_bpas": {
+      "name": "NIH Blanket Purchase Agreements",
+      "description": "Pre-established agreements for recurring NIH requirements",
+      "common_types": [
+        {
+          "name": "Scientific Equipment Maintenance",
+          "description": "Preventive and corrective maintenance for lab equipment"
+        },
+        {
+          "name": "Laboratory Supplies",
+          "description": "Common lab consumables and supplies"
+        },
+        {
+          "name": "Temporary Staffing",
+          "description": "Short-term administrative and technical support"
+        },
+        {
+          "name": "Conference Support",
+          "description": "Meeting planning and logistics"
+        }
+      ],
+      "ordering": "Call against BPA with minimal documentation",
+      "pros": [
+        "Fastest ordering method",
+        "Pre-negotiated terms",
+        "Established vendor relationships"
+      ],
+      "cons": [
+        "Limited to BPA scope",
+        "Must check if BPA covers requirement",
+        "May have ceiling limits"
+      ]
+    },
+    "other_gwacs": {
+      "name": "Other Government-Wide Acquisition Contracts",
+      "contracts": [
+        {
+          "name": "SEWP V",
+          "agency": "NASA",
+          "description": "IT products and product-based services",
+          "website": "https://www.sewp.nasa.gov"
+        },
+        {
+          "name": "Alliant 2",
+          "agency": "GSA",
+          "description": "Complex IT solutions",
+          "website": "https://www.gsa.gov/alliant"
+        },
+        {
+          "name": "OASIS",
+          "agency": "GSA",
+          "description": "Complex professional services",
+          "website": "https://www.gsa.gov/oasis"
+        }
+      ]
+    },
+    "strategic_sourcing": {
+      "name": "HHS Strategic Sourcing Vehicles",
+      "contracts": [
+        {
+          "name": "PACS II",
+          "description": "Professional, Administrative, and Clerical Services",
+          "type": "IDIQ"
+        },
+        {
+          "name": "PSC",
+          "description": "Program Support Center vehicles",
+          "type": "Various"
+        }
+      ]
+    }
+  },
+  "selection_guide": {
+    "decision_factors": [
+      "Requirement type (IT, services, supplies, construction)",
+      "Estimated value",
+      "Urgency",
+      "Small business goals",
+      "Complexity of requirement"
+    ],
+    "recommendations": {
+      "it_services_complex": "NITAAC CIO-SP3 or GSA OASIS",
+      "it_commodities": "GSA IT Schedule or NITAAC CIO-CS",
+      "scientific_equipment": "GSA Schedule or full competition",
+      "medical_equipment": "GSA Medical Schedule or full competition",
+      "professional_services": "GSA PSS Schedule or OASIS",
+      "recurring_supplies": "NIH BPA if available",
+      "unique_requirements": "Full and open competition"
+    }
+  },
+  "notes": [
+    "Always verify vehicle scope covers your requirement",
+    "Check fair opportunity requirements for orders",
+    "Document vehicle selection rationale",
+    "Consider small business goals in vehicle selection"
+  ]
+}

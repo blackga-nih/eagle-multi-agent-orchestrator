@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - NCI ARTI AI Agent Platform</title>
+    <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        .admin-nav { background: var(--nci-primary); padding: 0; }
+        .admin-nav-inner { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; gap: 0; }
+        .admin-nav a { color: rgba(255,255,255,0.8); text-decoration: none; padding: 12px 20px; font-size: 14px; font-weight: 500; transition: all 0.2s; border-bottom: 3px solid transparent; }
+        .admin-nav a:hover, .admin-nav a.active { color: white; border-bottom-color: var(--nci-danger); background: rgba(255,255,255,0.1); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: var(--nci-white); border-radius: 12px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; }
+        .stat-card h4 { font-size: 14px; color: var(--nci-gray); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-card .stat-value { font-size: 32px; font-weight: 700; color: var(--nci-primary); }
+    </style>
+</head>
+<body>
+    <!-- Government Banner -->
+    <div class="gov-banner">
+        <div class="gov-banner-inner">
+            <img src="assets/images/icon-flag.svg" alt="U.S. Flag">
+            <span class="gov-banner-text">An official website of the United States government</span>
+            <button class="gov-banner-action" onclick="toggleGovBanner()">Here's how you know</button>
+        </div>
+        <div id="govBannerExpanded" class="gov-banner-expanded">
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-dot-gov.svg" alt="Dot gov">
+                <p><strong>Official websites use .gov</strong><br>A .gov website belongs to an official government organization in the United States.</p>
+            </div>
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-https.svg" alt="HTTPS">
+                <p><strong>Secure .gov websites use HTTPS</strong><br>A lock or https:// means you've safely connected to the .gov website.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NCI Header -->
+    <header class="nci-header">
+        <div class="nci-header-inner">
+            <a href="/" class="nci-header-logo">
+                <img src="assets/images/logo.svg" alt="National Cancer Institute - AI Research &amp; Translational Informatics">
+            </a>
+        </div>
+    </header>
+
+    <!-- Admin Navigation -->
+    <nav class="admin-nav">
+        <div class="admin-nav-inner">
+            <a href="admin.html" class="active">Dashboard</a>
+            <a href="admin-agents.html">Agent Management</a>
+            <a href="admin-costs.html">Cost Reports</a>
+            <a href="admin-analytics.html">Analytics</a>
+            <a href="admin-users.html">Users</a>
+        </div>
+    </nav>
+
+    <!-- Main Admin Content -->
+    <div class="app-main">
+        <div class="container">
+            <!-- Page Header -->
+            <div class="card">
+                <h2 class="card-title">Admin Dashboard</h2>
+                <p id="adminWelcome"></p>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h4>Total Users</h4>
+                    <div class="stat-value" id="statTotalUsers">--</div>
+                </div>
+                <div class="stat-card">
+                    <h4>Active Sessions</h4>
+                    <div class="stat-value" id="statActiveSessions">--</div>
+                </div>
+                <div class="stat-card">
+                    <h4>Total Cost</h4>
+                    <div class="stat-value" id="statTotalCost">--</div>
+                </div>
+                <div class="stat-card">
+                    <h4>System Health</h4>
+                    <div class="stat-value" id="statSystemHealth">--</div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="card">
+                <h3 class="card-title">Quick Actions</h3>
+                <div class="action-grid">
+                    <button class="action-btn btn-admin" id="btnOverallCost">Overall Cost</button>
+                    <button class="action-btn btn-admin" id="btnPerUserCost">Per User Cost</button>
+                    <button class="action-btn btn-admin" id="btnServiceCost">Service Cost</button>
+                    <button class="action-btn btn-admin" id="btnFullReport">Full Report</button>
+                </div>
+            </div>
+
+            <!-- Recent Activity -->
+            <div class="card">
+                <h3 class="card-title">Recent Activity</h3>
+                <div id="recentActivity">
+                    <p style="color: var(--nci-gray); font-style: italic;">Loading recent activity...</p>
+                </div>
+            </div>
+
+            <!-- Report Results Panel -->
+            <div id="usageInfo" class="info-panel" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- NCI Footer - Info Section -->
+    <footer>
+        <div class="nci-footer-info">
+            <div class="nci-footer-info-inner">
+                <div class="nci-footer-col">
+                    <h3>More Info</h3>
+                    <ul>
+                        <li><a href="mailto:ctribresearchoptimizer@mail.nih.gov">Contact Research Optimizer</a></li>
+                        <li><a href="/about">About ARTI</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: center;">
+                    <h3>System Info</h3>
+                    <ul>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Release Notes</a></li>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Current Version: 1.0.0</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: right;">
+                    <h3>Policies</h3>
+                    <ul>
+                        <li><a href="https://www.cancer.gov/policies/accessibility" target="_blank" rel="noopener noreferrer">Accessibility</a></li>
+                        <li><a href="https://www.cancer.gov/policies/foia" target="_blank" rel="noopener noreferrer">FOIA</a></li>
+                        <li><a href="https://www.cancer.gov/policies/privacy-security" target="_blank" rel="noopener noreferrer">Privacy and Security</a></li>
+                        <li><a href="https://www.cancer.gov/policies/disclaimer" target="_blank" rel="noopener noreferrer">Disclaimer</a></li>
+                        <li><a href="https://www.hhs.gov/vulnerability-disclosure-policy/index.html" target="_blank" rel="noopener noreferrer">Vulnerability Disclosure</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- NCI Footer - Primary Section -->
+        <div class="nci-footer-primary">
+            <div class="nci-footer-primary-inner">
+                <div class="nci-footer-attribution">
+                    <h3><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></h3>
+                    <h5>at the <a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></h5>
+
+                    <div class="nci-footer-social">
+                        <h3>Follow Us</h3>
+                        <div class="nci-footer-social-icons">
+                            <a href="https://www.facebook.com/cancer.gov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-facebook.svg" alt="Facebook" width="30" height="30"></a>
+                            <a href="https://x.com/thenci" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-x.svg" alt="X" width="30" height="30"></a>
+                            <a href="https://www.instagram.com/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-instagram.svg" alt="Instagram" width="30" height="30"></a>
+                            <a href="https://www.youtube.com/NCIgov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-youtube.svg" alt="YouTube" width="30" height="30"></a>
+                            <a href="https://www.linkedin.com/company/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-linkedin.svg" alt="LinkedIn" width="30" height="30"></a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="nci-footer-contact">
+                    <h3>Contact Us</h3>
+                    <div class="nci-footer-contact-links">
+                        <a href="https://livehelp.cancer.gov/" target="_blank" rel="noopener noreferrer">Live Chat</a>
+                        <a href="tel:1-800-4-CANCER">1-800-4-CANCER</a>
+                        <a href="mailto:NCIinfo@nih.gov">NCIinfo@nih.gov</a>
+                        <a href="https://nci.az1.qualtrics.com/jfe/form/SV_aeLLobt6ZeGVn5I" target="_blank" rel="noopener noreferrer">Site Feedback</a>
+                    </div>
+                    <ul class="nci-footer-gov-links">
+                        <li><a href="https://www.hhs.gov/" target="_blank" rel="noopener noreferrer">U.S. Department of Health and Human Services</a></li>
+                        <li><a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></li>
+                        <li><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></li>
+                        <li><a href="https://usa.gov/" target="_blank" rel="noopener noreferrer">USA.gov</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Configuration -->
+    <script>
+        var CONFIG = {
+            userPoolId: 'YOUR_USER_POOL_ID',
+            clientId: 'YOUR_CLIENT_ID',
+            region: 'us-east-1',
+            apiUrl: 'http://127.0.0.1:8000'
+        };
+    </script>
+
+    <!-- Application Modules (order matters: dependencies first) -->
+    <script src="js/auth.js"></script>
+    <script src="js/api-client.js"></script>
+    <script src="js/ui-components.js"></script>
+    <script src="js/admin-panels.js"></script>
+
+    <!-- Admin Dashboard Logic -->
+    <script>
+        (function () {
+            'use strict';
+
+            /**
+             * Expose toggleGovBanner globally so the inline onclick handler
+             * in the government banner HTML can invoke it.
+             */
+            window.toggleGovBanner = function () {
+                if (window.UI && typeof window.UI.toggleGovBanner === 'function') {
+                    window.UI.toggleGovBanner();
+                }
+            };
+
+            /**
+             * Set text content of an element by id.
+             * Safe helper that avoids innerHTML.
+             *
+             * @param {string} elementId - DOM element id.
+             * @param {string} text      - Text content to set.
+             */
+            function setText(elementId, text) {
+                var el = document.getElementById(elementId);
+                if (el) {
+                    el.textContent = text;
+                }
+            }
+
+            /**
+             * Display an access-denied error and redirect to the main page
+             * after a short delay.
+             *
+             * @param {string} message - Error message to show.
+             */
+            function showAccessDenied(message) {
+                var container = document.querySelector('.container');
+                if (!container) {
+                    return;
+                }
+
+                // Clear all existing content from the container
+                while (container.firstChild) {
+                    container.removeChild(container.firstChild);
+                }
+
+                var card = document.createElement('div');
+                card.className = 'card';
+
+                var heading = document.createElement('h2');
+                heading.className = 'card-title';
+                heading.textContent = 'Access Denied';
+                card.appendChild(heading);
+
+                var msgP = document.createElement('p');
+                msgP.textContent = message;
+                card.appendChild(msgP);
+
+                var redirectP = document.createElement('p');
+                redirectP.style.cssText = 'margin-top: 16px; color: var(--nci-gray); font-style: italic;';
+                redirectP.textContent = 'Redirecting to the main page...';
+                card.appendChild(redirectP);
+
+                container.appendChild(card);
+
+                setTimeout(function () {
+                    window.location.href = 'index.html';
+                }, 3000);
+            }
+
+            /**
+             * Load initial dashboard statistics from the API.
+             * Populates the four stat cards with live data when available,
+             * or shows fallback values on error.
+             *
+             * @param {string} tenantId - The current admin user's tenant id.
+             */
+            async function loadDashboardStats(tenantId) {
+                // Attempt to load usage data for the sessions and users counts
+                try {
+                    var usage = await window.ApiClient.getUsage(tenantId);
+                    setText('statTotalUsers', String(usage.total_messages || 0));
+                    setText('statActiveSessions', String(usage.sessions || 0));
+                } catch (e) {
+                    setText('statTotalUsers', '0');
+                    setText('statActiveSessions', '0');
+                }
+
+                // Attempt to load the overall cost for the past 30 days
+                try {
+                    var costData = await window.ApiClient.getAdminOverallCost(tenantId, 30);
+                    setText('statTotalCost', '$' + costData.total_cost.toFixed(2));
+                } catch (e) {
+                    setText('statTotalCost', '$0.00');
+                }
+
+                // System health is determined by a simple API connectivity check
+                setText('statSystemHealth', 'Online');
+            }
+
+            /**
+             * Populate the recent activity panel with placeholder content.
+             * Uses safe DOM APIs (createElement / createTextNode) exclusively.
+             */
+            function loadRecentActivity() {
+                var container = document.getElementById('recentActivity');
+                if (!container) {
+                    return;
+                }
+
+                // Clear loading message
+                while (container.firstChild) {
+                    container.removeChild(container.firstChild);
+                }
+
+                var activities = [
+                    { time: 'Just now', text: 'Admin dashboard loaded' },
+                    { time: 'Recent', text: 'System health check passed' },
+                    { time: 'Recent', text: 'Cost reports available' }
+                ];
+
+                for (var i = 0; i < activities.length; i++) {
+                    var entry = document.createElement('div');
+                    entry.style.cssText = 'padding: 12px 0; border-bottom: 1px solid var(--nci-border);';
+
+                    var timeSpan = document.createElement('span');
+                    timeSpan.style.cssText = 'font-size: 12px; color: var(--nci-gray); margin-right: 12px;';
+                    timeSpan.textContent = activities[i].time;
+                    entry.appendChild(timeSpan);
+
+                    var textSpan = document.createElement('span');
+                    textSpan.textContent = activities[i].text;
+                    entry.appendChild(textSpan);
+
+                    container.appendChild(entry);
+                }
+            }
+
+            /**
+             * Main initialization routine.
+             * Runs on DOMContentLoaded to:
+             *   1. Initialize Auth (Cognito user pool)
+             *   2. Check if user is logged in, redirect to "/" if not
+             *   3. Verify admin access via /api/admin/my-tenants
+             *   4. Wire up onclick handlers for admin report buttons
+             *   5. Load initial dashboard stats
+             */
+            document.addEventListener('DOMContentLoaded', function () {
+                // 1. Initialize Cognito authentication
+                Auth.init();
+
+                // 2. Check if user is logged in
+                var user = Auth.getCurrentUser();
+                if (!user) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                // Display welcome message using safe DOM APIs
+                var welcomeEl = document.getElementById('adminWelcome');
+                if (welcomeEl) {
+                    var welcomeText = document.createTextNode('Welcome, ' + user.email + ' ');
+                    welcomeEl.appendChild(welcomeText);
+
+                    var tenantBadge = document.createElement('span');
+                    tenantBadge.className = 'badge badge-advanced';
+                    tenantBadge.textContent = user.tenant_id;
+                    welcomeEl.appendChild(tenantBadge);
+                }
+
+                var tenantId = user.tenant_id;
+
+                // 3. Verify admin access
+                fetch(CONFIG.apiUrl + '/api/admin/my-tenants', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ' + Auth.getToken(),
+                        'Content-Type': 'application/json'
+                    }
+                })
+                    .then(function (response) {
+                        if (!response.ok) {
+                            throw new Error('Not authorized');
+                        }
+                        return response.json();
+                    })
+                    .then(function (adminData) {
+                        // Admin access confirmed - set up the dashboard
+
+                        // 4. Wire up onclick handlers for admin report buttons
+                        var btnOverallCost = document.getElementById('btnOverallCost');
+                        if (btnOverallCost) {
+                            btnOverallCost.onclick = function () {
+                                AdminPanels.showAdminOverallCost(tenantId);
+                            };
+                        }
+
+                        var btnPerUserCost = document.getElementById('btnPerUserCost');
+                        if (btnPerUserCost) {
+                            btnPerUserCost.onclick = function () {
+                                AdminPanels.showAdminPerUserCost(tenantId);
+                            };
+                        }
+
+                        var btnServiceCost = document.getElementById('btnServiceCost');
+                        if (btnServiceCost) {
+                            btnServiceCost.onclick = function () {
+                                AdminPanels.showAdminServiceCost(tenantId);
+                            };
+                        }
+
+                        var btnFullReport = document.getElementById('btnFullReport');
+                        if (btnFullReport) {
+                            btnFullReport.onclick = function () {
+                                AdminPanels.showComprehensiveReport(tenantId);
+                            };
+                        }
+
+                        // 5. Load initial dashboard stats and recent activity
+                        loadDashboardStats(tenantId);
+                        loadRecentActivity();
+                    })
+                    .catch(function () {
+                        showAccessDenied('You do not have admin privileges. Only users with the admin role can access this dashboard.');
+                    });
+            });
+        })();
+    </script>
+</body>
+</html>

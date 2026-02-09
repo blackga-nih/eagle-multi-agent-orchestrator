@@ -1,0 +1,49 @@
+sequenceDiagram
+    actor CO as Contracting Officer
+    participant UI as Eagle UI
+    participant Sup as Supervisor Agent
+    participant Comp as Compliance Skill
+    participant Public as Public Interest Skill
+    participant Legal as Legal Counsel Skill
+    participant DocGen as Document Generator Skill
+
+    Note over CO,DocGen: UC-05 (MVP2): CO Package Review with Public Interest Skill
+
+    CO->>UI: "Review this sole source package for $2.1M IT services"
+    UI->>Sup: Package uploaded
+    Sup->>Sup: Parse documents: AP, SOW, IGCE, J&A
+
+    rect rgb(240, 248, 255)
+        Note over Sup,Comp: Compliance Review
+        Sup->>Comp: Invoke Compliance skill
+        Comp->>Comp: J&A authority check: FAR 6.302-1 ✓<br/>Approval level: $2.1M requires HCA ✓<br/>Market research attached ✓<br/>Cost/pricing data: not required (<$2.5M) ✓
+        Comp-->>Sup: Compliance: PASS with 2 minor findings
+    end
+
+    rect rgb(255, 240, 240)
+        Note over Sup,Public: Public Interest Skill Invoked
+        Sup->>Public: Invoke Public Interest skill (sole source review)
+
+        Public->>Public: Fairness Assessment:<br/>• Sole source at $2.1M: HIGH scrutiny<br/>• Same vendor as previous contract: ⚠️<br/>• No sources sought posted: ⚠️<br/>• Congressional interest area (IT spend): ⚠️
+
+        Public->>Public: Transparency Check:<br/>• J&A rationale: adequate but thin<br/>• Market research: only 2 vendors contacted<br/>• No SAM.gov notice: required for >$25K
+
+        Public-->>Sup: Risk Assessment:<br/>🟡 MEDIUM: Appearance of vendor lock-in<br/>Recommendations:<br/>1. Post sources sought on SAM.gov<br/>2. Expand market research to 5+ vendors<br/>3. Strengthen J&A with specific capability gaps<br/>4. Document why competition not feasible
+    end
+
+    rect rgb(255, 248, 230)
+        Note over Sup,Legal: Legal Validation
+        Sup->>Legal: Invoke Legal Counsel skill
+        Legal->>Legal: Protest vulnerability:<br/>• Thin market research = protest risk<br/>• GAO B-417283: sustained where agency<br/>  failed adequate market research<br/>• Recommend: broader sources sought
+        Legal-->>Sup: Protest risk: MEDIUM<br/>Mitigate with broader market research
+    end
+
+    Sup->>UI: Package Review Findings
+    UI->>CO: Findings Report:<br/>🟡 Public interest: vendor lock-in appearance<br/>🟡 Legal: thin market research = protest risk<br/>🟢 Compliance: 2 minor items<br/><br/>Recommended actions:<br/>1. Post sources sought on SAM.gov (15 days)<br/>2. Contact 3+ additional vendors<br/>3. Strengthen J&A rationale
+
+    CO->>UI: "Post the sources sought and update the J&A"
+    Sup->>DocGen: Invoke Document Generator
+    DocGen->>DocGen: Draft SAM.gov sources sought notice
+    DocGen->>DocGen: Revised J&A with stronger rationale
+    DocGen-->>Sup: Documents ready
+    Sup->>UI: ✓ Sources Sought Notice<br/>✓ Revised J&A v2

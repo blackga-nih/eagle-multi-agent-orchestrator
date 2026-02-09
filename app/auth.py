@@ -8,7 +8,9 @@ import base64
 import json
 from app.models import SubscriptionTier
 
-security = HTTPBearer()
+DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
+
+security = HTTPBearer(auto_error=not DEV_MODE)
 
 class CognitoAuth:
     def __init__(self):
@@ -63,6 +65,18 @@ class CognitoAuth:
 
 auth_service = CognitoAuth()
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict:
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict:
     """Dependency to get current authenticated user with tenant context"""
+    if DEV_MODE and (credentials is None or credentials.credentials == "dev-mode-token"):
+        return {
+            "user_id": os.getenv("DEV_USER_ID", "dev-user"),
+            "tenant_id": os.getenv("DEV_TENANT_ID", "dev-tenant"),
+            "subscription_tier": SubscriptionTier.PREMIUM,
+            "email": "dev@nci.nih.gov",
+            "username": "dev-user",
+            "role": "admin",
+            "cognito:groups": ["dev-tenant-admins"],
+        }
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     return auth_service.verify_token(credentials.credentials)

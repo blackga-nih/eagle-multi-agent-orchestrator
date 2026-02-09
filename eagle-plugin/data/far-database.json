@@ -1,0 +1,426 @@
+[
+  {
+    "part": "1",
+    "section": "1.102",
+    "title": "Statement of Guiding Principles for the Federal Acquisition System",
+    "summary": "The vision for the Federal acquisition system is to deliver on a timely basis the best value product or service to the customer, while maintaining the public's trust and fulfilling public policy objectives.",
+    "applicability": "All federal acquisitions",
+    "keywords": ["principles", "vision", "best value", "public trust", "policy"]
+  },
+  {
+    "part": "1",
+    "section": "1.602-1",
+    "title": "Authority of Contracting Officers",
+    "summary": "Contracting officers have authority to enter into, administer, or terminate contracts and make related determinations and findings. They may bind the Government only to the extent of the authority delegated to them.",
+    "applicability": "All contracting officers",
+    "keywords": ["authority", "contracting officer", "delegation", "binding"]
+  },
+  {
+    "part": "2",
+    "section": "2.101",
+    "title": "Definitions",
+    "summary": "Micro-purchase threshold: $10,000 ($25,000 for DoD contingency operations). Simplified Acquisition Threshold (SAT): $250,000. Commercial product/service definitions provided.",
+    "applicability": "All acquisitions — defines key thresholds",
+    "keywords": ["micro-purchase", "threshold", "simplified", "sat", "definitions", "commercial", "$10,000", "$250,000"]
+  },
+  {
+    "part": "3",
+    "section": "3.104",
+    "title": "Procurement Integrity",
+    "summary": "Prohibits disclosure of contractor bid/proposal information and source selection information. Restricts employment contacts between Government officials and offerors. Violations may result in criminal penalties.",
+    "applicability": "All competitive acquisitions",
+    "keywords": ["integrity", "disclosure", "bid", "source selection", "ethics"]
+  },
+  {
+    "part": "4",
+    "section": "4.606",
+    "title": "Reporting Data (FPDS)",
+    "summary": "Contract actions reported to Federal Procurement Data System (FPDS) within 3 business days of execution. Required for actions over micro-purchase threshold.",
+    "applicability": "Actions above micro-purchase threshold",
+    "keywords": ["fpds", "reporting", "data", "contract action"]
+  },
+  {
+    "part": "4",
+    "section": "4.1102",
+    "title": "System for Award Management (SAM)",
+    "summary": "Prospective contractors must be registered in SAM prior to award of any contract. Contracting officers must verify registration before award.",
+    "applicability": "All awards",
+    "keywords": ["sam", "registration", "award", "verification"]
+  },
+  {
+    "part": "5",
+    "section": "5.101",
+    "title": "Methods of Disseminating Information",
+    "summary": "Synopsis required on SAM.gov (formerly FedBizOpps) for acquisitions exceeding $25,000. 15-day response time for most actions, 30 days for sealed bidding, 45 days for competitive proposals when certified cost or pricing data required.",
+    "applicability": "Acquisitions above $25,000",
+    "keywords": ["synopsis", "publicize", "sam.gov", "fedbizopps", "notice"]
+  },
+  {
+    "part": "6",
+    "section": "6.101",
+    "title": "Policy — Full and Open Competition",
+    "summary": "Contracting officers shall promote and provide for full and open competition. Must solicit from as many sources as practicable to ensure competition.",
+    "applicability": "All acquisitions above SAT",
+    "keywords": ["competition", "full and open", "sources", "policy"]
+  },
+  {
+    "part": "6",
+    "section": "6.302",
+    "title": "Circumstances Permitting Other Than Full and Open Competition",
+    "summary": "Seven exceptions: (1) Only one responsible source/unique supply, (2) Unusual and compelling urgency, (3) Industrial mobilization/expert services, (4) International agreement, (5) Authorized/required by statute, (6) National security, (7) Public interest determination by agency head.",
+    "applicability": "Sole source or limited competition situations",
+    "keywords": ["sole source", "competition", "exception", "j&a", "justification", "urgency", "unique"]
+  },
+  {
+    "part": "6",
+    "section": "6.303",
+    "title": "Justifications (J&A)",
+    "summary": "Written Justification and Approval (J&A) required for other than full and open competition. Must include: description of supplies, nature of action, authority cited, demonstration that proposed contractor's capabilities are unique, market research, any other facts, listing of sources solicited, actions to remove barriers to competition.",
+    "applicability": "All sole source or limited competition actions",
+    "keywords": ["justification", "j&a", "sole source", "approval", "written"]
+  },
+  {
+    "part": "6",
+    "section": "6.304",
+    "title": "Approval of Justifications",
+    "summary": "Approval thresholds: ≤$750K by Contracting Officer, ≤$15M by Competition Advocate, ≤$75M by Head of Procuring Activity, ≤$100M by Senior Procurement Executive, >$100M by agency head (non-delegable).",
+    "applicability": "All J&A approvals",
+    "keywords": ["approval", "threshold", "j&a", "competition advocate", "authority"]
+  },
+  {
+    "part": "7",
+    "section": "7.102",
+    "title": "Policy — Acquisition Planning",
+    "summary": "Agencies shall perform acquisition planning and conduct market research for all acquisitions to promote and provide for full and open competition, or when full and open competition is not required, to promote competition to the maximum extent practicable.",
+    "applicability": "All acquisitions",
+    "keywords": ["planning", "market research", "strategy"]
+  },
+  {
+    "part": "7",
+    "section": "7.105",
+    "title": "Contents of Written Acquisition Plans",
+    "summary": "Written acquisition plan required for acquisitions of supplies/services with estimated value exceeding $7M for new contracts or $50M for task/delivery orders. Plan includes: statement of need, cost, period of performance, trade-offs, risks, acquisition streamlining.",
+    "applicability": "Major acquisitions",
+    "keywords": ["acquisition plan", "written", "contents", "requirement"]
+  },
+  {
+    "part": "8",
+    "section": "8.405",
+    "title": "Ordering Procedures for Federal Supply Schedules",
+    "summary": "GSA Schedule ordering: micro-purchase (one source), $10K-$250K (consider 3+ schedule contractors), >$250K (request quotes from enough sources). Must consider small business. Fair opportunity required for BPAs.",
+    "applicability": "GSA Schedule orders",
+    "keywords": ["gsa", "schedule", "ordering", "federal supply", "bpa"]
+  },
+  {
+    "part": "9",
+    "section": "9.104-1",
+    "title": "General Standards of Responsibility",
+    "summary": "Prospective contractor must have: adequate financial resources, ability to comply with delivery schedule, satisfactory performance record, satisfactory record of integrity, necessary organization/experience/accounting/operational controls, necessary equipment/facilities, be otherwise qualified and eligible.",
+    "applicability": "All awards",
+    "keywords": ["responsibility", "financial", "performance", "integrity", "qualified"]
+  },
+  {
+    "part": "10",
+    "section": "10.001",
+    "title": "Policy — Market Research",
+    "summary": "Agencies must conduct market research appropriate to the circumstances before developing new requirements, before soliciting offers, and before awarding task/delivery orders. Used to determine if commercial products/services can meet needs.",
+    "applicability": "All acquisitions",
+    "keywords": ["market research", "commercial", "requirement", "sources"]
+  },
+  {
+    "part": "10",
+    "section": "10.002",
+    "title": "Procedures for Market Research",
+    "summary": "Techniques include: contacting knowledgeable individuals, reviewing published market research, publishing RFIs, querying GSA/government databases, participating in industry conferences, reviewing catalogs, and conducting interchange meetings with industry.",
+    "applicability": "All acquisitions",
+    "keywords": ["market research", "procedure", "rfi", "sources sought", "industry"]
+  },
+  {
+    "part": "11",
+    "section": "11.002",
+    "title": "Policy for Describing Agency Needs",
+    "summary": "Agencies should define requirements using market research. Use performance specifications rather than design specifications to the maximum extent practicable. State requirements in terms of functions, performance, or essential physical characteristics.",
+    "applicability": "All requirements",
+    "keywords": ["requirements", "performance", "specifications", "needs", "medical", "equipment"]
+  },
+  {
+    "part": "12",
+    "section": "12.000",
+    "title": "Scope of Part — Commercial Acquisition",
+    "summary": "Establishes acquisition policies and procedures for commercial products, commercial services, and COTS items. Agencies shall acquire commercial items when available to meet needs.",
+    "applicability": "Commercial acquisitions",
+    "keywords": ["commercial", "cots", "products", "services", "streamlined"]
+  },
+  {
+    "part": "12",
+    "section": "12.207",
+    "title": "Contract Type for Commercial Items",
+    "summary": "Firm-Fixed-Price (FFP) contracts or Fixed-Price with Economic Price Adjustment (FP-EPA) are preferred for commercial products and services. T&M/LH contracts may be used only if no other type is suitable and if approved at one level above the CO.",
+    "applicability": "Commercial item acquisitions",
+    "keywords": ["contract type", "ffp", "fixed price", "commercial", "time and materials"]
+  },
+  {
+    "part": "12",
+    "section": "12.602",
+    "title": "Streamlined Evaluation for Commercial Items",
+    "summary": "Evaluation of commercial items shall be based on past performance, price, and technical approach. Simplified evaluation procedures are encouraged. Oral presentations may replace written proposals.",
+    "applicability": "Commercial acquisitions",
+    "keywords": ["evaluation", "commercial", "streamlined", "past performance"]
+  },
+  {
+    "part": "13",
+    "section": "13.000",
+    "title": "Scope of Part — Simplified Acquisition Procedures",
+    "summary": "Simplified acquisition procedures (SAP) apply to acquisitions at or below the Simplified Acquisition Threshold ($250,000). Promotes competition, efficiency, and economy while reducing administrative burden. Government-wide purchase card is the preferred method for micro-purchases.",
+    "applicability": "Acquisitions ≤ $250,000",
+    "keywords": ["simplified", "sap", "threshold", "purchase card", "micro-purchase", "small purchase"]
+  },
+  {
+    "part": "13",
+    "section": "13.003",
+    "title": "Policy for Simplified Acquisition",
+    "summary": "Agencies shall use simplified acquisition procedures to the maximum extent practicable for acquisitions at or below the SAT. Promotes competition, efficiency, economy. Supports small business participation.",
+    "applicability": "Acquisitions ≤ SAT",
+    "keywords": ["simplified", "policy", "small business", "efficiency"]
+  },
+  {
+    "part": "13",
+    "section": "13.106-1",
+    "title": "Soliciting Competition Under SAP",
+    "summary": "For purchases above micro-purchase threshold: promote competition to maximum extent practicable. Consider at least 3 sources. Oral solicitations acceptable. No synopsis required under $25,000. Small business set-aside rules apply.",
+    "applicability": "SAP above micro-purchase threshold",
+    "keywords": ["competition", "soliciting", "sources", "oral", "simplified"]
+  },
+  {
+    "part": "13",
+    "section": "13.500",
+    "title": "Test Program for Certain Commercial Products (Subpart 13.5)",
+    "summary": "Allows use of simplified procedures for acquisitions of commercial products and services exceeding the SAT but not exceeding $7.5M ($15M for acquisitions as described in 13.500(c)).",
+    "applicability": "Commercial items $250K - $7.5M",
+    "keywords": ["test program", "commercial", "simplified", "subpart 13.5"]
+  },
+  {
+    "part": "14",
+    "section": "14.101",
+    "title": "Elements of Sealed Bidding",
+    "summary": "Four elements: (1) Preparation of IFB describing Government requirements, (2) Publicizing the IFB, (3) Public opening of bids at time and place stated, (4) Award to responsible bidder whose bid conforms to IFB and is most advantageous (price and price-related factors).",
+    "applicability": "Sealed bid acquisitions",
+    "keywords": ["sealed bidding", "ifb", "invitation", "bid", "public opening"]
+  },
+  {
+    "part": "15",
+    "section": "15.101",
+    "title": "Best Value Continuum",
+    "summary": "Range from Lowest Price Technically Acceptable (LPTA) to tradeoff. In tradeoff: non-price factors can justify paying a higher price. Use LPTA when best value to the Government results from selection of technically acceptable proposal at lowest price. Source selection authority decides.",
+    "applicability": "Negotiated acquisitions",
+    "keywords": ["best value", "lpta", "tradeoff", "evaluation", "negotiation", "price"]
+  },
+  {
+    "part": "15",
+    "section": "15.304",
+    "title": "Evaluation Factors and Significant Subfactors",
+    "summary": "Evaluation factors must: (a) represent key areas of importance/emphasis, (b) support meaningful comparison, (c) include price/cost as a factor. Past performance shall be evaluated unless waived. Small disadvantaged business participation may be evaluated.",
+    "applicability": "All competitive negotiated acquisitions",
+    "keywords": ["evaluation factors", "criteria", "price", "past performance", "technical"]
+  },
+  {
+    "part": "15",
+    "section": "15.404-1",
+    "title": "Proposal Analysis Techniques",
+    "summary": "Price analysis (comparing proposed prices to each other, historical, published, or independent estimates). Cost analysis (evaluating separate cost elements and profit). Certified cost or pricing data required when exceeding $2M threshold (Truth in Negotiations Act — TINA).",
+    "applicability": "Price/cost proposals",
+    "keywords": ["price analysis", "cost analysis", "tina", "certified", "proposal", "cost estimate"]
+  },
+  {
+    "part": "16",
+    "section": "16.102",
+    "title": "Policies for Contract Types",
+    "summary": "Selecting contract type requires negotiation and is a matter requiring judgment. Fixed-price types provide maximum incentive for cost control. Cost-reimbursement types place risk of cost overrun on Government. A firm-fixed-price contract is preferred when risk involved is minimal.",
+    "applicability": "All contracts",
+    "keywords": ["contract type", "fixed price", "cost reimbursement", "risk", "selection"]
+  },
+  {
+    "part": "16",
+    "section": "16.601",
+    "title": "Time-and-Materials Contracts",
+    "summary": "T&M contracts provide for acquiring supplies/services on the basis of direct labor hours at specified rates and actual cost of materials. Use only when it is not possible to estimate the extent or duration of work or costs with sufficient accuracy. Requires D&F approved one level above CO.",
+    "applicability": "When FFP not feasible",
+    "keywords": ["time and materials", "t&m", "labor hours", "rates"]
+  },
+  {
+    "part": "19",
+    "section": "19.201",
+    "title": "General Policy for Small Business",
+    "summary": "It is the policy of the Government to provide maximum practicable opportunities to small business concerns, veteran-owned, service-disabled veteran-owned, HUBZone, small disadvantaged, and women-owned small business concerns.",
+    "applicability": "All acquisitions",
+    "keywords": ["small business", "set-aside", "policy", "opportunity"]
+  },
+  {
+    "part": "19",
+    "section": "19.502-2",
+    "title": "Total Small Business Set-Asides",
+    "summary": "Set aside for small business if: (a) there is a reasonable expectation of receiving offers from two or more responsible small business concerns, and (b) award will be made at fair market prices. Applies to acquisitions between micro-purchase threshold and SAT automatically.",
+    "applicability": "Acquisitions above micro-purchase threshold",
+    "keywords": ["set-aside", "small business", "total", "automatic", "competition"]
+  },
+  {
+    "part": "19",
+    "section": "19.805",
+    "title": "8(a) Competitive Requirements",
+    "summary": "Competitive 8(a) acquisitions required above $4.5M (services) or $7M (manufacturing). Below those thresholds, sole source 8(a) awards permitted. Must have an approved offering letter from SBA.",
+    "applicability": "8(a) program acquisitions",
+    "keywords": ["8a", "competitive", "sba", "sole source", "small disadvantaged"]
+  },
+  {
+    "part": "19",
+    "section": "19.1305",
+    "title": "HUBZone Set-Aside Procedures",
+    "summary": "Set aside for HUBZone small business if reasonable expectation of two or more responsible HUBZone offers at fair market price. Contracting officer must verify HUBZone status in SAM.",
+    "applicability": "HUBZone acquisitions",
+    "keywords": ["hubzone", "set-aside", "historically underutilized"]
+  },
+  {
+    "part": "19",
+    "section": "19.1405",
+    "title": "Service-Disabled Veteran-Owned SB Set-Asides",
+    "summary": "Contracting officer may set aside acquisitions for SDVOSB if there is a reasonable expectation of receiving offers from two or more SDVOSB concerns at fair market prices.",
+    "applicability": "SDVOSB acquisitions",
+    "keywords": ["sdvosb", "veteran", "service-disabled", "set-aside"]
+  },
+  {
+    "part": "19",
+    "section": "19.1505",
+    "title": "Women-Owned Small Business Set-Asides (WOSB)",
+    "summary": "Contracting officer may set aside for WOSB/EDWOSB in designated NAICS codes where WOSB are underrepresented or substantially underrepresented.",
+    "applicability": "WOSB program acquisitions",
+    "keywords": ["wosb", "women-owned", "edwosb", "set-aside"]
+  },
+  {
+    "part": "22",
+    "section": "22.406",
+    "title": "Davis-Bacon Act Administration",
+    "summary": "Requires payment of prevailing wages to laborers and mechanics on federally funded construction contracts exceeding $2,000. Contracting officer must include applicable wage determinations from DOL.",
+    "applicability": "Construction contracts > $2,000",
+    "keywords": ["davis-bacon", "prevailing wage", "construction", "labor"]
+  },
+  {
+    "part": "22",
+    "section": "22.1003",
+    "title": "Service Contract Labor Standards",
+    "summary": "Service Contract Act requires payment of prevailing wages and fringe benefits to service employees on contracts exceeding $2,500. Applicable to service contracts performed in the US.",
+    "applicability": "Service contracts > $2,500",
+    "keywords": ["service contract act", "prevailing wage", "labor standards", "fringe benefits"]
+  },
+  {
+    "part": "25",
+    "section": "25.101",
+    "title": "Buy American Act — Supplies",
+    "summary": "Buy American Act restricts acquisition of foreign supplies. Domestic end products required unless an exception applies (public interest, unreasonable cost, non-availability, trade agreements). Evaluation preference of 20-30% for domestic products.",
+    "applicability": "Supply contracts",
+    "keywords": ["buy american", "domestic", "foreign", "supplies", "trade agreements"]
+  },
+  {
+    "part": "31",
+    "section": "31.205",
+    "title": "Selected Costs (Cost Principles)",
+    "summary": "Determines allowability of specific cost categories: compensation, travel, insurance, depreciation, independent R&D. Key disallowable costs: entertainment, alcohol, lobbying, fines/penalties, bad debts.",
+    "applicability": "Cost-reimbursement and T&M contracts",
+    "keywords": ["allowable", "cost principles", "compensation", "travel", "overhead"]
+  },
+  {
+    "part": "32",
+    "section": "32.006",
+    "title": "Reduction or Suspension of Contract Payments",
+    "summary": "Agency head may reduce or suspend payments upon substantial evidence of fraud. Contracting officer may withhold further payments pending resolution. Contractor entitled to 90% of approved payment requests on cost-reimbursement contracts.",
+    "applicability": "All contracts with financing",
+    "keywords": ["payment", "financing", "suspension", "fraud"]
+  },
+  {
+    "part": "36",
+    "section": "36.602",
+    "title": "Selection of Firms for A-E Contracts",
+    "summary": "Brooks Act requires selection based on demonstrated competence and qualifications. Price is NOT a selection factor. Negotiate fair and reasonable price with most qualified firm.",
+    "applicability": "Architect-Engineer contracts",
+    "keywords": ["architect", "engineer", "a-e", "brooks act", "qualifications"]
+  },
+  {
+    "part": "37",
+    "section": "37.102",
+    "title": "Policy for Service Contracts",
+    "summary": "Performance-Based Acquisition (PBA) methods preferred. Define requirements in terms of results, not process. Use measurable performance standards and quality assurance surveillance plans (QASP). Incentivize excellent performance.",
+    "applicability": "Service acquisitions",
+    "keywords": ["service", "performance-based", "pba", "qasp", "standards"]
+  },
+  {
+    "part": "39",
+    "section": "39.203",
+    "title": "Applicability of Section 508",
+    "summary": "Section 508 applies to all electronic and information technology (EIT) developed, procured, maintained, or used by the Federal Government. Requires EIT to be accessible to people with disabilities.",
+    "applicability": "All IT acquisitions",
+    "keywords": ["section 508", "accessibility", "eit", "electronic", "disability"]
+  },
+  {
+    "part": "42",
+    "section": "42.302",
+    "title": "Contract Administration Functions",
+    "summary": "COR duties include: monitoring contractor performance, reviewing and approving invoices, maintaining documentation, reporting performance issues. COR must be designated in writing with specific duties.",
+    "applicability": "Post-award contract administration",
+    "keywords": ["administration", "cor", "monitoring", "performance", "invoice"]
+  },
+  {
+    "part": "46",
+    "section": "46.202-4",
+    "title": "Higher-Level Quality Standards",
+    "summary": "May require ISO 9001, ISO 13485 (medical devices), or equivalent quality management certifications. Contracting officer determines appropriate quality level based on criticality of supply/service.",
+    "applicability": "Complex or critical acquisitions",
+    "keywords": ["quality", "iso", "13485", "medical", "device", "standards", "certification"]
+  },
+  {
+    "part": "52",
+    "section": "52.212-1",
+    "title": "Instructions to Offerors — Commercial Products/Services",
+    "summary": "Standard instructions for offerors on commercial acquisitions. Simplified provisions. Technical proposal, past performance information, and price proposal typically required. Electronic submissions generally accepted.",
+    "applicability": "Commercial acquisitions (FAR Part 12)",
+    "keywords": ["instructions", "offeror", "commercial", "provision", "proposal"]
+  },
+  {
+    "part": "52",
+    "section": "52.212-4",
+    "title": "Contract Terms and Conditions — Commercial Products/Services",
+    "summary": "Standard commercial contract terms including: inspection/acceptance, assignment, disputes, payment, excusable delays, termination for cause/convenience. Tailorable through addenda.",
+    "applicability": "Commercial contracts",
+    "keywords": ["terms", "conditions", "commercial", "clause", "termination"]
+  },
+  {
+    "part": "HHSAR",
+    "section": "352.270-5",
+    "title": "HHS-Specific Acquisition Requirements",
+    "summary": "Health and Human Services Acquisition Regulation supplements. Includes special clauses for research contracts, patient care, use of human subjects, animal welfare, and conflict of interest requirements specific to HHS/NIH.",
+    "applicability": "HHS/NIH acquisitions",
+    "keywords": ["hhs", "nih", "hhsar", "health", "research", "medical", "human subjects"]
+  },
+  {
+    "part": "HHSAR",
+    "section": "352.239-74",
+    "title": "Electronic and Information Technology Accessibility (Section 508)",
+    "summary": "Requires that all electronic and information technology (EIT) products and services meet Section 508 accessibility standards. Applies to all HHS IT acquisitions.",
+    "applicability": "HHS IT acquisitions",
+    "keywords": ["508", "accessibility", "eit", "electronic", "it", "hhs"]
+  },
+  {
+    "part": "HHSAR",
+    "section": "352.224-70",
+    "title": "Privacy Act",
+    "summary": "Requirements for contractor handling of personally identifiable information (PII) under HHS contracts. Contractor must protect privacy of individuals and comply with Privacy Act requirements.",
+    "applicability": "HHS contracts involving PII",
+    "keywords": ["privacy", "pii", "privacy act", "data protection", "hhs"]
+  },
+  {
+    "part": "HHSAR",
+    "section": "352.227-70",
+    "title": "Publications and Publicity",
+    "summary": "Requirements for acknowledgment of Government support in publications and restrictions on publicity. Contractor must obtain prior approval before issuing press releases.",
+    "applicability": "HHS research contracts",
+    "keywords": ["publications", "publicity", "press release", "acknowledgment", "research"]
+  }
+]

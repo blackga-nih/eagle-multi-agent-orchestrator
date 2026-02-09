@@ -1,0 +1,359 @@
+/* NCI ARTI Theme Stylesheet */
+
+/* === Font Faces === */
+@font-face {
+  font-family: "Montserrat";
+  font-weight: bold;
+  font-style: normal;
+  src: url("fonts/Montserrat-700.eot");
+  src:
+    url("fonts/Montserrat-700.eot?#iefix") format("embedded-opentype"),
+    url("fonts/Montserrat-700.woff") format("woff"),
+    url("fonts/Montserrat-700.ttf") format("truetype"),
+    url("fonts/Montserrat-700.svg#Montserrat") format("svg");
+}
+
+@font-face {
+  font-family: "Montserrat";
+  font-weight: normal;
+  font-style: normal;
+  src: url("fonts/Montserrat-regular.eot");
+  src:
+    url("fonts/Montserrat-regular.eot?#iefix") format("embedded-opentype"),
+    url("fonts/Montserrat-regular.woff") format("woff"),
+    url("fonts/Montserrat-regular.ttf") format("truetype"),
+    url("fonts/Montserrat-regular.svg#Montserrat") format("svg");
+}
+
+/* === NCI Color Palette === */
+:root {
+  --nci-primary: #003149;
+  --nci-primary-dark: #0D2648;
+  --nci-danger: #BB0E3D;
+  --nci-accent: #7740A4;
+  --nci-info: #004971;
+  --nci-link: #0B6ED7;
+  --nci-gray: #606060;
+  --nci-border: #D5DBDB;
+  --nci-bg: #FAFAFA;
+  --nci-banner-bg: #F0F0F0;
+  --nci-success: #037F0C;
+  --nci-white: #FFFFFF;
+}
+
+/* === Government Banner === */
+.gov-banner {
+  background-color: var(--nci-banner-bg);
+  font-size: 13px;
+  color: #1b1b1b;
+}
+
+.gov-banner-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 4px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gov-banner-inner img {
+  width: 16px;
+  height: auto;
+  flex-shrink: 0;
+}
+
+.gov-banner-text {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.gov-banner-action {
+  background: none;
+  border: none;
+  color: var(--nci-link);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  font-family: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+.gov-banner-action:hover {
+  color: var(--nci-primary);
+}
+
+.gov-banner-expanded {
+  display: none;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 12px 20px 16px;
+}
+
+.gov-banner-expanded.active {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.gov-banner-explainer {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.gov-banner-explainer img {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.gov-banner-explainer p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1b1b1b;
+}
+
+.gov-banner-explainer strong {
+  font-weight: 700;
+}
+
+/* === NCI Header === */
+.nci-header {
+  background: var(--nci-white);
+  border-bottom: 3px solid var(--nci-danger);
+  padding: 0;
+}
+
+.nci-header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nci-header-logo {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.nci-header-logo img {
+  height: 44px;
+  width: auto;
+}
+
+.nci-header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.nci-header-title {
+  font-family: "Montserrat", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--nci-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* === NCI Footer === */
+.nci-footer-info {
+  background-color: var(--nci-info);
+  color: var(--nci-white);
+  padding: 24px 0;
+}
+
+.nci-footer-info-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 24px;
+}
+
+.nci-footer-col h3 {
+  font-family: "Montserrat", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.nci-footer-col ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.nci-footer-col li {
+  margin-bottom: 4px;
+}
+
+.nci-footer-col a {
+  color: rgba(255, 255, 255, 0.9);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 400;
+  transition: color 0.2s;
+}
+
+.nci-footer-col a:hover {
+  color: var(--nci-white);
+  text-decoration: underline;
+}
+
+.nci-footer-primary {
+  background-color: var(--nci-primary);
+  color: var(--nci-white);
+  padding: 24px 0;
+}
+
+.nci-footer-primary-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.nci-footer-attribution h3 {
+  font-family: "Montserrat", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  margin-bottom: 2px;
+}
+
+.nci-footer-attribution h3 a,
+.nci-footer-attribution h5 a {
+  color: var(--nci-white);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.nci-footer-attribution h3 a:hover,
+.nci-footer-attribution h5 a:hover {
+  text-decoration: underline;
+}
+
+.nci-footer-attribution h5 {
+  font-size: 14px;
+  margin-bottom: 16px;
+  font-weight: 400;
+}
+
+.nci-footer-social h3 {
+  font-family: "Montserrat", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.nci-footer-social-icons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.nci-footer-social-icons a {
+  display: inline-block;
+  opacity: 0.9;
+  transition: opacity 0.2s;
+}
+
+.nci-footer-social-icons a:hover {
+  opacity: 1;
+}
+
+.nci-footer-social-icons img {
+  width: 30px;
+  height: 30px;
+}
+
+.nci-footer-contact {
+  text-align: right;
+}
+
+.nci-footer-contact h3 {
+  font-family: "Montserrat", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.nci-footer-contact-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+
+.nci-footer-contact-links a {
+  color: rgba(255, 255, 255, 0.9);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.nci-footer-contact-links a:hover {
+  color: var(--nci-white);
+  text-decoration: underline;
+}
+
+.nci-footer-gov-links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  text-align: right;
+}
+
+.nci-footer-gov-links li {
+  margin-bottom: 4px;
+}
+
+.nci-footer-gov-links a {
+  color: rgba(255, 255, 255, 0.9);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.nci-footer-gov-links a:hover {
+  color: var(--nci-white);
+  text-decoration: underline;
+}
+
+/* === Responsive === */
+@media (max-width: 768px) {
+  .nci-footer-info-inner {
+    grid-template-columns: 1fr;
+  }
+
+  .nci-footer-primary-inner {
+    grid-template-columns: 1fr;
+  }
+
+  .nci-footer-contact {
+    text-align: left;
+  }
+
+  .nci-footer-contact-links {
+    justify-content: flex-start;
+  }
+
+  .nci-footer-gov-links {
+    text-align: left;
+  }
+
+  .gov-banner-expanded.active {
+    grid-template-columns: 1fr;
+  }
+}

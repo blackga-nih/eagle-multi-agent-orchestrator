@@ -1,0 +1,34 @@
+{
+  "name": "eagle-acquisition",
+  "version": "1.0.0",
+  "description": "NCI Office of Acquisitions intake assistant - Single agent with skill-based routing",
+  "author": "NCI OA Team",
+  "agent": "supervisor",
+  "skills": [
+    "oa-intake",
+    "document-generator",
+    "compliance",
+    "knowledge-retrieval",
+    "tech-review"
+  ],
+  "commands": [
+    "intake",
+    "document",
+    "search",
+    "status"
+  ],
+  "data": [
+    "far-database.json",
+    "thresholds.json",
+    "contract-vehicles.json"
+  ],
+  "capabilities": {
+    "streaming": true,
+    "tools": true,
+    "multi-turn": true
+  },
+  "requirements": {
+    "model": "claude-sonnet-4-20250514",
+    "aws_services": ["s3", "dynamodb"]
+  }
+}

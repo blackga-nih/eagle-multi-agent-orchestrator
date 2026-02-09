@@ -1,0 +1,93 @@
+{
+  "version": "FY2024",
+  "last_updated": "2024-10-01",
+  "source": "FAR and annual adjustments",
+  "thresholds": {
+    "micro_purchase": {
+      "general": 10000,
+      "construction": 2000,
+      "services_subject_to_sca": 2500,
+      "contingency_operations": 25000,
+      "description": "Maximum for purchases using simplified methods without competition requirements"
+    },
+    "simplified_acquisition": {
+      "sat": 250000,
+      "commercial_simplified_test": 7500000,
+      "commercial_simplified_test_certain": 15000000,
+      "description": "Simplified Acquisition Threshold - full competition required above this"
+    },
+    "publicize": {
+      "synopsis_required": 25000,
+      "response_time_days": 15,
+      "sealed_bid_days": 30,
+      "competitive_proposals_days": 45,
+      "description": "Synopsis on SAM.gov required above this threshold"
+    },
+    "cost_pricing_data": {
+      "tina_threshold": 2000000,
+      "description": "Truth in Negotiations Act - certified cost or pricing data required"
+    },
+    "acquisition_plan": {
+      "new_contract": 7000000,
+      "task_delivery_order": 50000000,
+      "description": "Written acquisition plan required (FAR 7.105)"
+    },
+    "sole_source_8a": {
+      "services": 4500000,
+      "manufacturing": 7000000,
+      "description": "Competitive 8(a) required above these thresholds"
+    },
+    "subcontracting_plan": {
+      "required": 750000,
+      "construction": 1500000,
+      "description": "Small business subcontracting plan required for large business primes"
+    },
+    "j_a_approval": {
+      "contracting_officer": 750000,
+      "competition_advocate": 15000000,
+      "head_procuring_activity": 75000000,
+      "senior_procurement_executive": 100000000,
+      "agency_head": "above_100M",
+      "description": "Approval thresholds for other than full and open competition (FAR 6.304)"
+    }
+  },
+  "wage_requirements": {
+    "davis_bacon_act": {
+      "applies_above": 2000,
+      "type": "construction",
+      "description": "Prevailing wages for construction"
+    },
+    "service_contract_act": {
+      "applies_above": 2500,
+      "type": "services",
+      "description": "Prevailing wages for service employees"
+    }
+  },
+  "small_business_size_standards": {
+    "source": "SBA Table of Size Standards",
+    "common_examples": {
+      "541511": {
+        "description": "Custom Computer Programming Services",
+        "size": "$34 million"
+      },
+      "541512": {
+        "description": "Computer Systems Design Services",
+        "size": "$34 million"
+      },
+      "541714": {
+        "description": "Research and Development in Biotechnology",
+        "size": "$30 million"
+      },
+      "339112": {
+        "description": "Surgical and Medical Instrument Manufacturing",
+        "size": "1,000 employees"
+      }
+    },
+    "lookup": "https://www.sba.gov/size-standards"
+  },
+  "notes": [
+    "Thresholds are adjusted periodically. Verify current values at acquisition.gov.",
+    "DoD may have different thresholds for certain categories.",
+    "Inflation adjustments are typically made in October of odd-numbered years."
+  ]
+}

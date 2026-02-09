@@ -9,3 +9,9 @@ PyJWT==2.9.0
 cryptography==46.0.1
 requests==2.32.4
 python-dotenv==1.0.0
+# EAGLE additions
+anthropic>=0.40.0
+python-docx>=1.1.0
+reportlab>=4.1.0
+httpx==0.27.0
+websockets>=12.0

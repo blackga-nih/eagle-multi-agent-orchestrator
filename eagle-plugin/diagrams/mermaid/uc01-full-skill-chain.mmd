@@ -1,0 +1,67 @@
+sequenceDiagram
+    actor User as COR / Program Staff
+    participant Sup as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant Market as Market Intelligence Skill
+    participant Comp as Compliance Skill
+    participant Legal as Legal Counsel Skill
+    participant Tech as Tech Review Skill
+    participant DocGen as Document Generator Skill
+
+    Note over User,DocGen: UC-01: Full Skill Chain - Complex Acquisition End-to-End
+
+    User->>Sup: "IT modernization services, ~$500K, 3-year PoP"
+    Sup->>Intake: Invoke OA Intake skill
+
+    rect rgb(240, 248, 255)
+        Note over Intake: Phase 1: Intake & Determination
+        Intake->>Sup: Clarifying Q&A with user
+        Intake-->>Sup: $500K IT services, 3yr,<br/>Negotiated (Part 15),<br/>agile development, cloud migration
+    end
+
+    rect rgb(245, 255, 245)
+        Note over Market: Phase 2: Market Research
+        Sup->>Market: Invoke Market Intelligence skill
+        Market->>Market: Search GWAC vehicles (CIO-SP3, Alliant 2)<br/>GSA IT Schedule 70<br/>Small business vendor analysis<br/>Labor rate benchmarking
+        Market-->>Sup: 22 vendors, 14 small business,<br/>Recommend SB set-aside,<br/>GSA rates: $85-$210/hr by category
+    end
+
+    rect rgb(255, 248, 240)
+        Note over Comp: Phase 3: Compliance Validation
+        Sup->>Comp: Invoke Compliance skill
+        Comp->>Comp: Contract type: T&M (agile/iterative scope)<br/>D&F required for T&M<br/>FITARA: CIO approval needed (IT)<br/>Section 508: Applicable<br/>Required clauses identified
+        Comp-->>Sup: T&M with D&F, FITARA review,<br/>Section 508 checklist needed
+    end
+
+    rect rgb(255, 240, 240)
+        Note over Legal: Phase 4: Legal Risk Assessment
+        Sup->>Legal: Invoke Legal Counsel skill
+        Legal->>Legal: SB set-aside: no protest risk<br/>T&M selection: document why not FFP<br/>Agile methodology: cite FAR 39.103<br/>Appropriations: bona fide need OK for 3yr
+        Legal-->>Sup: Risk: LOW overall<br/>Document T&M rationale thoroughly
+    end
+
+    rect rgb(255, 245, 255)
+        Note over Tech: Phase 5: Technical Review
+        Sup->>Tech: Invoke Tech Review skill
+        Tech->>Tech: SOW sections for agile:<br/>• Sprint-based deliverables<br/>• Definition of done criteria<br/>• Cloud migration milestones<br/>• Acceptance testing approach
+        Tech-->>Sup: SOW structure recommendation,<br/>Eval criteria: technical approach (40%),<br/>past performance (30%), price (30%)
+    end
+
+    rect rgb(240, 255, 248)
+        Note over DocGen: Phase 6: Document Generation
+        Sup->>DocGen: Invoke Document Generator (full package)
+
+        par Generate All Documents
+            DocGen->>DocGen: Acquisition Plan
+            DocGen->>DocGen: Statement of Work
+            DocGen->>DocGen: IGCE (GSA rates)
+            DocGen->>DocGen: Market Research Report
+            DocGen->>DocGen: D&F (T&M justification)
+            DocGen->>DocGen: Section 508 Certification
+            DocGen->>DocGen: Evaluation Criteria
+        end
+
+        DocGen-->>Sup: Complete package (7 documents)
+    end
+
+    Sup->>User: Acquisition package complete:<br/>✓ AP  ✓ SOW  ✓ IGCE  ✓ Market Research<br/>✓ D&F (T&M)  ✓ 508 Cert  ✓ Eval Criteria<br/>→ Ready for CO review

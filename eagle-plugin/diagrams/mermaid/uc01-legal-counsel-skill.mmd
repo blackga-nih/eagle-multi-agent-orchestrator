@@ -1,0 +1,47 @@
+sequenceDiagram
+    actor User as COR / Program Staff
+    participant UI as Eagle UI
+    participant Sup as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant Legal as Legal Counsel Skill
+    participant Comp as Compliance Skill
+    participant DocGen as Document Generator Skill
+
+    Note over User,DocGen: UC-01: Legal Counsel Skill - Sole Source J&A with Protest Risk Check
+
+    User->>UI: "I need Illumina NovaSeq X, ~$985K, only Illumina makes it"
+    UI->>Sup: New session
+    Sup->>Intake: Invoke OA Intake skill
+
+    Intake-->>Sup: $985K, sole vendor, Negotiated (Part 15),<br/>sole source justification needed
+
+    rect rgb(240, 248, 255)
+        Note over Sup,Comp: Compliance Check
+        Sup->>Comp: Validate sole source authority
+        Comp->>Comp: FAR 6.302-1: Only One Responsible Source<br/>Proprietary equipment qualifies
+        Comp-->>Sup: Authority: FAR 6.302-1 applicable<br/>$985K requires CO + Competition Advocate approval
+    end
+
+    rect rgb(255, 240, 240)
+        Note over Sup,Legal: Legal Counsel Skill Invoked
+        Sup->>Legal: Assess protest risk for sole source
+
+        Legal->>Legal: Check GAO precedent:<br/>• B-415245: Brand name justification upheld<br/>  when no functional equivalent exists<br/>• B-412094: Protest sustained when<br/>  agency failed to consider alternatives
+
+        Legal->>Legal: Risk assessment:<br/>• Proprietary technology: STRONG basis<br/>• No functional equivalent: must document<br/>• Market research showing no alternatives: REQUIRED<br/>• Risk level: LOW if properly documented
+
+        Legal-->>Sup: Protest Risk: LOW<br/>Requirements:<br/>1. Document no functional equivalent<br/>2. Market research showing sole source<br/>3. Cite specific proprietary features<br/>4. Do NOT use brand-name-only (use salient characteristics)
+    end
+
+    Sup->>UI: "Sole source is supportable. Low protest risk if<br/>we document why no equivalent exists."
+    UI->>User: Legal assessment + requirements
+
+    User->>UI: "Generate the J&A"
+    Sup->>DocGen: Invoke Document Generator (J&A)
+
+    DocGen->>DocGen: Generate J&A per FAR 6.302-1
+    Note right of DocGen: Pre-filled with:<br/>• Legal authority citation<br/>• Protest mitigation language<br/>• Market research requirement<br/>• Proprietary justification framework
+
+    DocGen-->>Sup: J&A draft ready
+    Sup->>UI: J&A ready for download
+    UI->>User: ✓ J&A (FAR 6.302-1)<br/>→ CO + Competition Advocate signatures needed

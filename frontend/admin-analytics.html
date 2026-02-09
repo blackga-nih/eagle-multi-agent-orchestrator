@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Usage Analytics - NCI ARTI Admin</title>
+    <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        .admin-nav { background: var(--nci-primary); padding: 0; }
+        .admin-nav-inner { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; gap: 0; }
+        .admin-nav a { color: rgba(255,255,255,0.8); text-decoration: none; padding: 12px 20px; font-size: 14px; font-weight: 500; transition: all 0.2s; border-bottom: 3px solid transparent; }
+        .admin-nav a:hover, .admin-nav a.active { color: white; border-bottom-color: var(--nci-danger); background: rgba(255,255,255,0.1); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: var(--nci-white); border-radius: 12px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; }
+        .stat-card h4 { font-size: 14px; color: var(--nci-gray); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-card .stat-value { font-size: 32px; font-weight: 700; color: var(--nci-primary); }
+
+        .page-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--nci-primary);
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 3px solid var(--nci-danger);
+        }
+
+        .analytics-card {
+            background: var(--nci-white);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+        }
+
+        .analytics-card h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--nci-primary);
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--nci-border);
+        }
+
+        .analytics-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--nci-border);
+        }
+
+        .analytics-row:last-child {
+            border-bottom: none;
+        }
+
+        .analytics-label {
+            font-size: 14px;
+            color: var(--nci-gray);
+            font-weight: 500;
+        }
+
+        .analytics-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--nci-primary);
+        }
+
+        .mcp-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .mcp-status.enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .mcp-status.disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .access-denied {
+            background: #FDECEA;
+            border: 2px solid var(--nci-danger);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .access-denied h2 {
+            color: var(--nci-danger);
+            margin-bottom: 12px;
+            font-size: 22px;
+        }
+
+        .access-denied p {
+            color: var(--nci-gray);
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Government Banner -->
+    <div class="gov-banner">
+        <div class="gov-banner-inner">
+            <img src="assets/images/icon-flag.svg" alt="U.S. Flag">
+            <span class="gov-banner-text">An official website of the United States government</span>
+            <button class="gov-banner-action" onclick="UI.toggleGovBanner()">Here's how you know</button>
+        </div>
+        <div id="govBannerExpanded" class="gov-banner-expanded">
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-dot-gov.svg" alt="Dot gov">
+                <p><strong>Official websites use .gov</strong><br>A .gov website belongs to an official government organization in the United States.</p>
+            </div>
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-https.svg" alt="HTTPS">
+                <p><strong>Secure .gov websites use HTTPS</strong><br>A lock or https:// means you've safely connected to the .gov website.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NCI Header -->
+    <header class="nci-header">
+        <div class="nci-header-inner">
+            <a href="/" class="nci-header-logo">
+                <img src="assets/images/logo.svg" alt="National Cancer Institute - AI Research &amp; Translational Informatics">
+            </a>
+        </div>
+    </header>
+
+    <!-- Admin Navigation -->
+    <nav class="admin-nav">
+        <div class="admin-nav-inner">
+            <a href="admin.html">Dashboard</a>
+            <a href="admin-agents.html">Agent Management</a>
+            <a href="admin-costs.html">Cost Reports</a>
+            <a href="admin-analytics.html" class="active">Analytics</a>
+            <a href="admin-users.html">Users</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="app-main">
+        <div class="container">
+            <h1 class="page-title">Usage Analytics</h1>
+
+            <!-- Stats Overview Grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h4>Total Interactions</h4>
+                    <div class="stat-value" id="statTotalInteractions">--</div>
+                </div>
+                <div class="stat-card">
+                    <h4>Active Sessions</h4>
+                    <div class="stat-value" id="statActiveSessions">--</div>
+                </div>
+                <div class="stat-card">
+                    <h4>Agent Invocations</h4>
+                    <div class="stat-value" id="statAgentInvocations">--</div>
+                </div>
+                <div class="stat-card">
+                    <h4>MCP Tools Available</h4>
+                    <div class="stat-value" id="statMcpTools">--</div>
+                </div>
+            </div>
+
+            <!-- Processing Patterns Card -->
+            <div class="analytics-card" id="processingPatternsCard">
+                <h3>Processing Patterns</h3>
+                <div class="analytics-row">
+                    <span class="analytics-label">Agent Invocations</span>
+                    <span class="analytics-value" id="patternAgentInvocations">--</span>
+                </div>
+                <div class="analytics-row">
+                    <span class="analytics-label">Trace Analyses</span>
+                    <span class="analytics-value" id="patternTraceAnalyses">--</span>
+                </div>
+            </div>
+
+            <!-- Resource Breakdown Card -->
+            <div class="analytics-card" id="resourceBreakdownCard">
+                <h3>Resource Breakdown</h3>
+                <div class="analytics-row">
+                    <span class="analytics-label">Model Invocations</span>
+                    <span class="analytics-value" id="resourceModelInvocations">--</span>
+                </div>
+                <div class="analytics-row">
+                    <span class="analytics-label">Knowledge Base Queries</span>
+                    <span class="analytics-value" id="resourceKnowledgeBaseQueries">--</span>
+                </div>
+                <div class="analytics-row">
+                    <span class="analytics-label">Action Group Calls</span>
+                    <span class="analytics-value" id="resourceActionGroupCalls">--</span>
+                </div>
+            </div>
+
+            <!-- Tier Metrics Card -->
+            <div class="analytics-card" id="tierMetricsCard">
+                <h3>Tier Metrics</h3>
+                <div class="analytics-row">
+                    <span class="analytics-label">MCP Access</span>
+                    <span class="analytics-value" id="tierMcpAccess">--</span>
+                </div>
+                <div class="analytics-row">
+                    <span class="analytics-label">Daily Usage Limit</span>
+                    <span class="analytics-value" id="tierDailyLimit">--</span>
+                </div>
+                <div class="analytics-row">
+                    <span class="analytics-label">Usage Today</span>
+                    <span class="analytics-value" id="tierUsageToday">--</span>
+                </div>
+            </div>
+
+            <!-- Results Panel -->
+            <div id="usageInfo" class="info-panel" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- NCI Footer - Info Section -->
+    <footer>
+        <div class="nci-footer-info">
+            <div class="nci-footer-info-inner">
+                <div class="nci-footer-col">
+                    <h3>More Info</h3>
+                    <ul>
+                        <li><a href="mailto:ctribresearchoptimizer@mail.nih.gov">Contact Research Optimizer</a></li>
+                        <li><a href="/about">About ARTI</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: center;">
+                    <h3>System Info</h3>
+                    <ul>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Release Notes</a></li>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Current Version: 1.0.0</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: right;">
+                    <h3>Policies</h3>
+                    <ul>
+                        <li><a href="https://www.cancer.gov/policies/accessibility" target="_blank" rel="noopener noreferrer">Accessibility</a></li>
+                        <li><a href="https://www.cancer.gov/policies/foia" target="_blank" rel="noopener noreferrer">FOIA</a></li>
+                        <li><a href="https://www.cancer.gov/policies/privacy-security" target="_blank" rel="noopener noreferrer">Privacy and Security</a></li>
+                        <li><a href="https://www.cancer.gov/policies/disclaimer" target="_blank" rel="noopener noreferrer">Disclaimer</a></li>
+                        <li><a href="https://www.hhs.gov/vulnerability-disclosure-policy/index.html" target="_blank" rel="noopener noreferrer">Vulnerability Disclosure</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- NCI Footer - Primary Section -->
+        <div class="nci-footer-primary">
+            <div class="nci-footer-primary-inner">
+                <div class="nci-footer-attribution">
+                    <h3><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></h3>
+                    <h5>at the <a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></h5>
+
+                    <div class="nci-footer-social">
+                        <h3>Follow Us</h3>
+                        <div class="nci-footer-social-icons">
+                            <a href="https://www.facebook.com/cancer.gov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-facebook.svg" alt="Facebook" width="30" height="30"></a>
+                            <a href="https://x.com/thenci" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-x.svg" alt="X" width="30" height="30"></a>
+                            <a href="https://www.instagram.com/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-instagram.svg" alt="Instagram" width="30" height="30"></a>
+                            <a href="https://www.youtube.com/NCIgov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-youtube.svg" alt="YouTube" width="30" height="30"></a>
+                            <a href="https://www.linkedin.com/company/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-linkedin.svg" alt="LinkedIn" width="30" height="30"></a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="nci-footer-contact">
+                    <h3>Contact Us</h3>
+                    <div class="nci-footer-contact-links">
+                        <a href="https://livehelp.cancer.gov/" target="_blank" rel="noopener noreferrer">Live Chat</a>
+                        <a href="tel:1-800-4-CANCER">1-800-4-CANCER</a>
+                        <a href="mailto:NCIinfo@nih.gov">NCIinfo@nih.gov</a>
+                        <a href="https://nci.az1.qualtrics.com/jfe/form/SV_aeLLobt6ZeGVn5I" target="_blank" rel="noopener noreferrer">Site Feedback</a>
+                    </div>
+                    <ul class="nci-footer-gov-links">
+                        <li><a href="https://www.hhs.gov/" target="_blank" rel="noopener noreferrer">U.S. Department of Health and Human Services</a></li>
+                        <li><a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></li>
+                        <li><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></li>
+                        <li><a href="https://usa.gov/" target="_blank" rel="noopener noreferrer">USA.gov</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Configuration -->
+    <script>
+        var CONFIG = {
+            userPoolId: 'YOUR_USER_POOL_ID',
+            clientId: 'YOUR_CLIENT_ID',
+            region: 'us-east-1',
+            apiUrl: 'http://127.0.0.1:8000'
+        };
+    </script>
+
+    <!-- Application Modules (order matters: dependencies first) -->
+    <script src="js/auth.js"></script>
+    <script src="js/api-client.js"></script>
+    <script src="js/ui-components.js"></script>
+
+    <!-- Analytics Page Logic -->
+    <script>
+        (function () {
+            'use strict';
+
+            /**
+             * Tenant ID for the current authenticated admin user.
+             * Set after successful login check.
+             * @type {string|null}
+             */
+            var tenantId = null;
+
+            /**
+             * Set the text content of a DOM element by its id.
+             * Uses textContent (never innerHTML) for XSS safety.
+             *
+             * @param {string} elementId - The DOM element id.
+             * @param {string} text      - The text content to set.
+             */
+            function setText(elementId, text) {
+                var el = document.getElementById(elementId);
+                if (el) {
+                    el.textContent = text;
+                }
+            }
+
+            /**
+             * Display an access denied message when the user is not an admin.
+             * Replaces the main content area with an error notice and a link
+             * back to the main application page.
+             */
+            function showAccessDenied() {
+                var container = document.querySelector('.container');
+                if (!container) {
+                    return;
+                }
+                container.textContent = '';
+
+                var denied = document.createElement('div');
+                denied.className = 'access-denied';
+
+                var heading = document.createElement('h2');
+                heading.textContent = 'Access Denied';
+                denied.appendChild(heading);
+
+                var message = document.createElement('p');
+                message.textContent = 'You do not have admin privileges to view usage analytics. Please contact your administrator.';
+                denied.appendChild(message);
+
+                var backLink = document.createElement('a');
+                backLink.href = 'index.html';
+                backLink.textContent = 'Return to Dashboard';
+                backLink.style.cssText = 'display: inline-block; margin-top: 16px; color: var(--nci-link); font-weight: 600;';
+                denied.appendChild(backLink);
+
+                container.appendChild(denied);
+            }
+
+            /**
+             * Render the MCP access status badge into the tier metrics card.
+             * Creates a styled span element with enabled/disabled state.
+             *
+             * @param {boolean} enabled - Whether MCP access is enabled for the tenant.
+             */
+            function renderMcpStatus(enabled) {
+                var el = document.getElementById('tierMcpAccess');
+                if (!el) {
+                    return;
+                }
+                el.textContent = '';
+
+                var badge = document.createElement('span');
+                badge.className = 'mcp-status ' + (enabled ? 'enabled' : 'disabled');
+                badge.textContent = enabled ? 'Enabled' : 'Disabled';
+                el.appendChild(badge);
+            }
+
+            /**
+             * Fetch analytics data from the API and populate all dashboard
+             * sections. Gracefully handles missing or malformed response
+             * fields by displaying fallback values.
+             *
+             * Expected API response shape from /api/tenants/{tenant_id}/analytics:
+             * {
+             *   total_interactions: number,
+             *   active_sessions: number,
+             *   agent_invocations: number,
+             *   mcp_tools_available: number,
+             *   processing_patterns: {
+             *     agent_invocations: number,
+             *     trace_analyses: number
+             *   },
+             *   resource_breakdown: {
+             *     model_invocations: number,
+             *     knowledge_base_queries: number,
+             *     action_group_calls: number
+             *   },
+             *   tier_metrics: {
+             *     mcp_access_enabled: boolean,
+             *     daily_limit: number,
+             *     usage_today: number
+             *   }
+             * }
+             */
+            async function loadAnalytics() {
+                try {
+                    var data = await ApiClient.get(
+                        '/api/tenants/' + encodeURIComponent(tenantId) + '/analytics'
+                    );
+
+                    // --- Stats Overview Grid ---
+                    setText('statTotalInteractions', String(data.total_interactions || 0));
+                    setText('statActiveSessions', String(data.active_sessions || 0));
+                    setText('statAgentInvocations', String(data.agent_invocations || 0));
+                    setText('statMcpTools', String(data.mcp_tools_available || 0));
+
+                    // --- Processing Patterns ---
+                    var patterns = data.processing_patterns || {};
+                    setText('patternAgentInvocations', String(patterns.agent_invocations || 0));
+                    setText('patternTraceAnalyses', String(patterns.trace_analyses || 0));
+
+                    // --- Resource Breakdown ---
+                    var resources = data.resource_breakdown || {};
+                    setText('resourceModelInvocations', String(resources.model_invocations || 0));
+                    setText('resourceKnowledgeBaseQueries', String(resources.knowledge_base_queries || 0));
+                    setText('resourceActionGroupCalls', String(resources.action_group_calls || 0));
+
+                    // --- Tier Metrics ---
+                    var tier = data.tier_metrics || {};
+                    renderMcpStatus(!!tier.mcp_access_enabled);
+                    setText('tierDailyLimit', String(tier.daily_limit || 0));
+                    setText('tierUsageToday', String(tier.usage_today || 0));
+
+                } catch (err) {
+                    // Populate with fallback zeros on error
+                    setText('statTotalInteractions', '0');
+                    setText('statActiveSessions', '0');
+                    setText('statAgentInvocations', '0');
+                    setText('statMcpTools', '0');
+
+                    setText('patternAgentInvocations', '0');
+                    setText('patternTraceAnalyses', '0');
+
+                    setText('resourceModelInvocations', '0');
+                    setText('resourceKnowledgeBaseQueries', '0');
+                    setText('resourceActionGroupCalls', '0');
+
+                    renderMcpStatus(false);
+                    setText('tierDailyLimit', '0');
+                    setText('tierUsageToday', '0');
+
+                    // Show error details in the usageInfo panel
+                    var panel = document.getElementById('usageInfo');
+                    if (panel) {
+                        panel.textContent = '';
+                        panel.style.display = 'block';
+
+                        var errorDiv = document.createElement('div');
+                        errorDiv.className = 'error';
+
+                        var errorText = document.createTextNode(
+                            'Failed to load analytics data. ' + (err.message || 'Unknown error')
+                        );
+                        errorDiv.appendChild(errorText);
+                        panel.appendChild(errorDiv);
+                    }
+                }
+            }
+
+            /**
+             * Main initialization routine.
+             * Runs on DOMContentLoaded to:
+             *   1. Initialize Auth (Cognito user pool)
+             *   2. Check if user is logged in; redirect to login page if not
+             *   3. Verify admin access via /api/admin/my-tenants
+             *   4. Fetch and render analytics data
+             */
+            document.addEventListener('DOMContentLoaded', function () {
+                // 1. Initialize Cognito authentication
+                Auth.init();
+
+                // 2. Check if user is logged in
+                var user = Auth.getCurrentUser();
+                if (!user) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                tenantId = user.tenant_id;
+
+                // 3. Verify admin access before loading analytics
+                ApiClient.getAdminTenants()
+                    .then(function () {
+                        // Admin access confirmed - load analytics data
+                        loadAnalytics();
+                    })
+                    .catch(function () {
+                        showAccessDenied();
+                    });
+            });
+        })();
+    </script>
+</body>
+</html>

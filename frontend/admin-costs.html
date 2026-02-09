@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cost Reports - NCI ARTI Admin</title>
+    <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        .admin-nav { background: var(--nci-primary); padding: 0; }
+        .admin-nav-inner { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; gap: 0; }
+        .admin-nav a { color: rgba(255,255,255,0.8); text-decoration: none; padding: 12px 20px; font-size: 14px; font-weight: 500; transition: all 0.2s; border-bottom: 3px solid transparent; }
+        .admin-nav a:hover, .admin-nav a.active { color: white; border-bottom-color: var(--nci-danger); background: rgba(255,255,255,0.1); }
+
+        .page-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--nci-primary);
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 3px solid var(--nci-danger);
+        }
+
+        .report-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .date-range-selector {
+            background: var(--nci-white);
+            border-radius: 12px;
+            padding: 20px 25px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .date-range-selector label {
+            display: inline;
+            margin-bottom: 0;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--nci-primary);
+            white-space: nowrap;
+        }
+
+        .date-range-selector input[type="date"] {
+            width: auto;
+            padding: 10px 14px;
+            border: 2px solid var(--nci-border);
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
+            background: var(--nci-white);
+            transition: all 0.3s ease;
+        }
+
+        .date-range-selector input[type="date"]:focus {
+            outline: none;
+            border-color: var(--nci-primary);
+            box-shadow: 0 0 0 3px rgba(0, 49, 73, 0.1);
+        }
+
+        .date-range-separator {
+            font-size: 14px;
+            color: var(--nci-gray);
+            font-weight: 500;
+        }
+
+        .btn-generate {
+            background: var(--nci-primary);
+            color: var(--nci-white);
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Inter', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-generate:hover {
+            background: var(--nci-primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 49, 73, 0.25);
+        }
+
+        .access-denied {
+            background: #FDECEA;
+            border: 2px solid var(--nci-danger);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .access-denied h2 {
+            color: var(--nci-danger);
+            margin-bottom: 12px;
+            font-size: 22px;
+        }
+
+        .access-denied p {
+            color: var(--nci-gray);
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Government Banner -->
+    <div class="gov-banner">
+        <div class="gov-banner-inner">
+            <img src="assets/images/icon-flag.svg" alt="U.S. Flag">
+            <span class="gov-banner-text">An official website of the United States government</span>
+            <button class="gov-banner-action" onclick="UI.toggleGovBanner()">Here's how you know</button>
+        </div>
+        <div id="govBannerExpanded" class="gov-banner-expanded">
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-dot-gov.svg" alt="Dot gov">
+                <p><strong>Official websites use .gov</strong><br>A .gov website belongs to an official government organization in the United States.</p>
+            </div>
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-https.svg" alt="HTTPS">
+                <p><strong>Secure .gov websites use HTTPS</strong><br>A lock or https:// means you've safely connected to the .gov website.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NCI Header -->
+    <header class="nci-header">
+        <div class="nci-header-inner">
+            <a href="/" class="nci-header-logo">
+                <img src="assets/images/logo.svg" alt="National Cancer Institute - AI Research &amp; Translational Informatics">
+            </a>
+        </div>
+    </header>
+
+    <!-- Admin Navigation -->
+    <nav class="admin-nav">
+        <div class="admin-nav-inner">
+            <a href="admin.html">Dashboard</a>
+            <a href="admin-agents.html">Agent Management</a>
+            <a href="admin-costs.html" class="active">Cost Reports</a>
+            <a href="admin-analytics.html">Analytics</a>
+            <a href="admin-users.html">Users</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="app-main">
+        <div class="container">
+            <h1 class="page-title">Cost Reports</h1>
+
+            <!-- Report Action Buttons -->
+            <div class="report-actions">
+                <button class="action-btn btn-admin" id="btnOverallCost">Overall Tenant Cost</button>
+                <button class="action-btn btn-admin" id="btnPerUserCost">Per User Cost</button>
+                <button class="action-btn btn-admin" id="btnServiceCost">Service Cost</button>
+                <button class="action-btn btn-admin" id="btnComprehensiveReport">Comprehensive Report</button>
+            </div>
+
+            <!-- Date Range Selector -->
+            <div class="date-range-selector">
+                <label for="startDate">Start Date:</label>
+                <input type="date" id="startDate">
+                <span class="date-range-separator">to</span>
+                <label for="endDate">End Date:</label>
+                <input type="date" id="endDate">
+                <button class="btn-generate" id="btnGenerate">Generate</button>
+            </div>
+
+            <!-- Results Panel -->
+            <div id="usageInfo" class="info-panel" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- NCI Footer - Info Section -->
+    <footer>
+        <div class="nci-footer-info">
+            <div class="nci-footer-info-inner">
+                <div class="nci-footer-col">
+                    <h3>More Info</h3>
+                    <ul>
+                        <li><a href="mailto:ctribresearchoptimizer@mail.nih.gov">Contact Research Optimizer</a></li>
+                        <li><a href="/about">About ARTI</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: center;">
+                    <h3>System Info</h3>
+                    <ul>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Release Notes</a></li>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Current Version: 1.0.0</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: right;">
+                    <h3>Policies</h3>
+                    <ul>
+                        <li><a href="https://www.cancer.gov/policies/accessibility" target="_blank" rel="noopener noreferrer">Accessibility</a></li>
+                        <li><a href="https://www.cancer.gov/policies/foia" target="_blank" rel="noopener noreferrer">FOIA</a></li>
+                        <li><a href="https://www.cancer.gov/policies/privacy-security" target="_blank" rel="noopener noreferrer">Privacy and Security</a></li>
+                        <li><a href="https://www.cancer.gov/policies/disclaimer" target="_blank" rel="noopener noreferrer">Disclaimer</a></li>
+                        <li><a href="https://www.hhs.gov/vulnerability-disclosure-policy/index.html" target="_blank" rel="noopener noreferrer">Vulnerability Disclosure</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- NCI Footer - Primary Section -->
+        <div class="nci-footer-primary">
+            <div class="nci-footer-primary-inner">
+                <div class="nci-footer-attribution">
+                    <h3><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></h3>
+                    <h5>at the <a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></h5>
+
+                    <div class="nci-footer-social">
+                        <h3>Follow Us</h3>
+                        <div class="nci-footer-social-icons">
+                            <a href="https://www.facebook.com/cancer.gov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-facebook.svg" alt="Facebook" width="30" height="30"></a>
+                            <a href="https://x.com/thenci" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-x.svg" alt="X" width="30" height="30"></a>
+                            <a href="https://www.instagram.com/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-instagram.svg" alt="Instagram" width="30" height="30"></a>
+                            <a href="https://www.youtube.com/NCIgov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-youtube.svg" alt="YouTube" width="30" height="30"></a>
+                            <a href="https://www.linkedin.com/company/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-linkedin.svg" alt="LinkedIn" width="30" height="30"></a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="nci-footer-contact">
+                    <h3>Contact Us</h3>
+                    <div class="nci-footer-contact-links">
+                        <a href="https://livehelp.cancer.gov/" target="_blank" rel="noopener noreferrer">Live Chat</a>
+                        <a href="tel:1-800-4-CANCER">1-800-4-CANCER</a>
+                        <a href="mailto:NCIinfo@nih.gov">NCIinfo@nih.gov</a>
+                        <a href="https://nci.az1.qualtrics.com/jfe/form/SV_aeLLobt6ZeGVn5I" target="_blank" rel="noopener noreferrer">Site Feedback</a>
+                    </div>
+                    <ul class="nci-footer-gov-links">
+                        <li><a href="https://www.hhs.gov/" target="_blank" rel="noopener noreferrer">U.S. Department of Health and Human Services</a></li>
+                        <li><a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></li>
+                        <li><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></li>
+                        <li><a href="https://usa.gov/" target="_blank" rel="noopener noreferrer">USA.gov</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Configuration -->
+    <script>
+        var CONFIG = {
+            userPoolId: 'YOUR_USER_POOL_ID',
+            clientId: 'YOUR_CLIENT_ID',
+            region: 'us-east-1',
+            apiUrl: 'http://127.0.0.1:8000'
+        };
+    </script>
+
+    <!-- Application Modules (order matters: dependencies first) -->
+    <script src="js/auth.js"></script>
+    <script src="js/api-client.js"></script>
+    <script src="js/ui-components.js"></script>
+    <script src="js/admin-panels.js"></script>
+
+    <!-- Page-specific initialization -->
+    <script>
+        (function () {
+            'use strict';
+
+            /**
+             * Tenant ID for the current authenticated admin user.
+             * Set after successful login check.
+             * @type {string|null}
+             */
+            var tenantId = null;
+
+            /**
+             * Initialize authentication, verify admin access, and wire up
+             * the cost report buttons. Redirects to the main login page if
+             * the user is not authenticated or lacks admin privileges.
+             */
+            function initPage() {
+                Auth.init();
+
+                var user = Auth.getCurrentUser();
+                if (!user) {
+                    // Not logged in - redirect to main login page
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                tenantId = user.tenant_id;
+
+                // Verify admin access before enabling controls
+                ApiClient.getAdminTenants()
+                    .then(function () {
+                        wireUpButtons();
+                    })
+                    .catch(function () {
+                        showAccessDenied();
+                    });
+            }
+
+            /**
+             * Display an access denied message when the user is not an admin.
+             * Replaces the main content area with an error notice.
+             */
+            function showAccessDenied() {
+                var container = document.querySelector('.container');
+                if (!container) {
+                    return;
+                }
+                container.textContent = '';
+
+                var denied = document.createElement('div');
+                denied.className = 'access-denied';
+
+                var heading = document.createElement('h2');
+                heading.textContent = 'Access Denied';
+                denied.appendChild(heading);
+
+                var message = document.createElement('p');
+                message.textContent = 'You do not have admin privileges to view cost reports. Please contact your administrator.';
+                denied.appendChild(message);
+
+                var backLink = document.createElement('a');
+                backLink.href = 'index.html';
+                backLink.textContent = 'Return to Dashboard';
+                backLink.style.cssText = 'display: inline-block; margin-top: 16px; color: var(--nci-link); font-weight: 600;';
+                denied.appendChild(backLink);
+
+                container.appendChild(denied);
+            }
+
+            /**
+             * Attach click handlers to the four cost report buttons and
+             * the date range Generate button.
+             */
+            function wireUpButtons() {
+                var btnOverall = document.getElementById('btnOverallCost');
+                var btnPerUser = document.getElementById('btnPerUserCost');
+                var btnService = document.getElementById('btnServiceCost');
+                var btnComprehensive = document.getElementById('btnComprehensiveReport');
+                var btnGenerate = document.getElementById('btnGenerate');
+
+                if (btnOverall) {
+                    btnOverall.addEventListener('click', function () {
+                        AdminPanels.showAdminOverallCost(tenantId);
+                    });
+                }
+
+                if (btnPerUser) {
+                    btnPerUser.addEventListener('click', function () {
+                        AdminPanels.showAdminPerUserCost(tenantId);
+                    });
+                }
+
+                if (btnService) {
+                    btnService.addEventListener('click', function () {
+                        AdminPanels.showAdminServiceCost(tenantId);
+                    });
+                }
+
+                if (btnComprehensive) {
+                    btnComprehensive.addEventListener('click', function () {
+                        AdminPanels.showComprehensiveReport(tenantId);
+                    });
+                }
+
+                if (btnGenerate) {
+                    btnGenerate.addEventListener('click', function () {
+                        handleDateRangeGenerate();
+                    });
+                }
+
+                // Set default date range: last 30 days
+                setDefaultDateRange();
+            }
+
+            /**
+             * Set the start and end date inputs to sensible defaults.
+             * Start date defaults to 30 days ago; end date defaults to today.
+             */
+            function setDefaultDateRange() {
+                var endInput = document.getElementById('endDate');
+                var startInput = document.getElementById('startDate');
+
+                if (!endInput || !startInput) {
+                    return;
+                }
+
+                var today = new Date();
+                var thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(today.getDate() - 30);
+
+                endInput.value = formatDateISO(today);
+                startInput.value = formatDateISO(thirtyDaysAgo);
+            }
+
+            /**
+             * Format a Date object as an ISO date string (YYYY-MM-DD).
+             *
+             * @param {Date} date - The date to format.
+             * @returns {string} ISO date string.
+             */
+            function formatDateISO(date) {
+                var year = date.getFullYear();
+                var month = String(date.getMonth() + 1).padStart(2, '0');
+                var day = String(date.getDate()).padStart(2, '0');
+                return year + '-' + month + '-' + day;
+            }
+
+            /**
+             * Handle the Generate button click from the date range selector.
+             * Calculates the number of days between start and end dates and
+             * runs the comprehensive report for that period.
+             */
+            function handleDateRangeGenerate() {
+                var startInput = document.getElementById('startDate');
+                var endInput = document.getElementById('endDate');
+
+                if (!startInput || !endInput) {
+                    return;
+                }
+
+                var startDate = new Date(startInput.value);
+                var endDate = new Date(endInput.value);
+
+                if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                    renderDateError('Please select both a start and end date.');
+                    return;
+                }
+
+                if (startDate > endDate) {
+                    renderDateError('Start date must be before end date.');
+                    return;
+                }
+
+                // Calculate the number of days between the two dates
+                var diffMs = endDate.getTime() - startDate.getTime();
+                var days = Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1;
+
+                // Run the comprehensive report using the calculated days
+                AdminPanels.showComprehensiveReport(tenantId);
+            }
+
+            /**
+             * Display an error message in the usageInfo panel for date
+             * validation errors.
+             *
+             * @param {string} message - The error message to display.
+             */
+            function renderDateError(message) {
+                var panel = document.getElementById('usageInfo');
+                if (!panel) {
+                    return;
+                }
+                panel.textContent = '';
+                panel.style.display = 'block';
+
+                var errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                errorDiv.textContent = message;
+                panel.appendChild(errorDiv);
+            }
+
+            // Initialize when the DOM is ready
+            document.addEventListener('DOMContentLoaded', initPage);
+        })();
+    </script>
+</body>
+</html>

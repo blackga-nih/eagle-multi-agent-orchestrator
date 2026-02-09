@@ -1,0 +1,60 @@
+sequenceDiagram
+    actor CO as Contracting Officer
+    participant UI as Eagle UI
+    participant Agent as Supervisor Agent
+    participant Tech as Tech Review Skill
+    participant DocGen as Document Generator Skill
+    participant S3 as S3 Document Store
+
+    Note over CO,S3: UC-09: Technical Score Sheet Consolidation
+
+    CO->>UI: "I have 180 score sheets from 9 reviewers on 20 proposals"
+    UI->>Agent: New session (evaluation consolidation)
+
+    Agent->>UI: "Upload all score sheets"
+    CO->>UI: Uploads 180 score sheet documents
+    UI->>Agent: Documents received
+
+    rect rgb(240, 248, 255)
+        Note over Agent,Tech: Score Sheet Analysis
+        Agent->>Tech: Invoke Tech Review skill (score analysis)
+
+        Tech->>Tech: Parse all 180 score sheets
+        Tech->>Tech: Extract scores per evaluation factor
+        Tech->>Tech: Identify reviewer × proposal matrix
+
+        Tech->>Tech: Cross-reviewer analysis:<br/>- Score variance per factor<br/>- Outlier detection<br/>- Consensus vs divergence areas
+
+        Tech-->>Agent: Analysis complete:<br/>20 proposals scored across 5 factors<br/>3 proposals with high reviewer divergence
+    end
+
+    Agent->>UI: "Analysis complete. 3 proposals have significant score disagreements."
+    UI->>CO: Score summary + flagged divergences
+
+    rect rgb(245, 255, 245)
+        Note over Agent,Tech: Question Deduplication
+        Agent->>Tech: Invoke Tech Review skill (question consolidation)
+
+        Tech->>Tech: Extract all reviewer questions<br/>(847 total across 180 sheets)
+        Tech->>Tech: Cluster by topic/theme
+        Tech->>Tech: Identify duplicates:<br/>847 → 312 unique questions
+        Tech->>Tech: Categorize:<br/>- 89 answerable from RFP<br/>- 156 need Core input<br/>- 42 need RFP amendment<br/>- 25 administrative
+
+        Tech-->>Agent: Consolidated question list
+    end
+
+    Agent->>DocGen: Invoke Document Generator (evaluation report)
+
+    par Generate Evaluation Documents
+        DocGen->>DocGen: Consensus Score Matrix<br/>(20 proposals × 5 factors)
+        DocGen->>DocGen: Consolidated Question List<br/>(312 unique, categorized)
+        DocGen->>DocGen: Per-Contractor Question Sheet<br/>(20 individual sheets)
+        DocGen->>DocGen: Evaluation Summary Report
+    end
+
+    DocGen->>S3: Store evaluation package
+    S3-->>DocGen: Download URLs
+    DocGen-->>Agent: Reports ready
+
+    Agent->>UI: Evaluation consolidation complete
+    UI->>CO: ✓ Consensus Score Matrix<br/>✓ 312 Consolidated Questions (from 847)<br/>✓ 20 Per-Contractor Question Sheets<br/>✓ Evaluation Summary Report

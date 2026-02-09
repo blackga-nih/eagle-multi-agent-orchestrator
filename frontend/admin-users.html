@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - NCI ARTI Admin</title>
+    <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        .admin-nav { background: var(--nci-primary); padding: 0; }
+        .admin-nav-inner { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; gap: 0; }
+        .admin-nav a { color: rgba(255,255,255,0.8); text-decoration: none; padding: 12px 20px; font-size: 14px; font-weight: 500; transition: all 0.2s; border-bottom: 3px solid transparent; }
+        .admin-nav a:hover, .admin-nav a.active { color: white; border-bottom-color: var(--nci-danger); background: rgba(255,255,255,0.1); }
+
+        .page-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--nci-primary);
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 3px solid var(--nci-danger);
+        }
+
+        .user-table { width: 100%; border-collapse: collapse; }
+        .user-table th { background: var(--nci-primary); color: white; padding: 12px 16px; text-align: left; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .user-table td { padding: 12px 16px; border-bottom: 1px solid var(--nci-border); font-size: 14px; }
+        .user-table tr:hover { background: var(--nci-bg); }
+
+        .search-bar { display: flex; gap: 12px; margin-bottom: 20px; align-items: flex-end; }
+        .search-bar input, .search-bar select { padding: 10px 14px; border: 2px solid var(--nci-border); border-radius: 8px; font-size: 14px; font-family: 'Inter', sans-serif; }
+        .search-bar input { flex: 1; }
+
+        .search-bar .btn-search {
+            background: var(--nci-primary);
+            color: var(--nci-white);
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Inter', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .search-bar .btn-search:hover {
+            background: var(--nci-primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 49, 73, 0.25);
+        }
+
+        .table-wrapper {
+            background: var(--nci-white);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+
+        .table-wrapper table { margin: 0; }
+
+        .table-loading {
+            padding: 40px;
+            text-align: center;
+            color: var(--nci-gray);
+            font-style: italic;
+            font-size: 14px;
+        }
+
+        .user-detail-panel {
+            background: var(--nci-white);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .user-detail-panel h3 {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--nci-primary);
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--nci-border);
+        }
+
+        .user-detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px 24px;
+        }
+
+        .user-detail-grid p {
+            margin: 0;
+            font-size: 14px;
+            color: var(--nci-primary);
+        }
+
+        .user-detail-grid strong {
+            color: var(--nci-info);
+        }
+
+        .btn-view-cost {
+            background: var(--nci-info);
+            color: var(--nci-white);
+            padding: 6px 14px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: 'Inter', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .btn-view-cost:hover {
+            background: var(--nci-primary);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .no-results {
+            padding: 30px;
+            text-align: center;
+            color: var(--nci-gray);
+            font-style: italic;
+            font-size: 14px;
+        }
+
+        .access-denied {
+            background: #FDECEA;
+            border: 2px solid var(--nci-danger);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .access-denied h2 {
+            color: var(--nci-danger);
+            margin-bottom: 12px;
+            font-size: 22px;
+        }
+
+        .access-denied p {
+            color: var(--nci-gray);
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Government Banner -->
+    <div class="gov-banner">
+        <div class="gov-banner-inner">
+            <img src="assets/images/icon-flag.svg" alt="U.S. Flag">
+            <span class="gov-banner-text">An official website of the United States government</span>
+            <button class="gov-banner-action" onclick="UI.toggleGovBanner()">Here's how you know</button>
+        </div>
+        <div id="govBannerExpanded" class="gov-banner-expanded">
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-dot-gov.svg" alt="Dot gov">
+                <p><strong>Official websites use .gov</strong><br>A .gov website belongs to an official government organization in the United States.</p>
+            </div>
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-https.svg" alt="HTTPS">
+                <p><strong>Secure .gov websites use HTTPS</strong><br>A lock or https:// means you've safely connected to the .gov website.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NCI Header -->
+    <header class="nci-header">
+        <div class="nci-header-inner">
+            <a href="/" class="nci-header-logo">
+                <img src="assets/images/logo.svg" alt="National Cancer Institute - AI Research &amp; Translational Informatics">
+            </a>
+        </div>
+    </header>
+
+    <!-- Admin Navigation -->
+    <nav class="admin-nav">
+        <div class="admin-nav-inner">
+            <a href="admin.html">Dashboard</a>
+            <a href="admin-agents.html">Agent Management</a>
+            <a href="admin-costs.html">Cost Reports</a>
+            <a href="admin-analytics.html">Analytics</a>
+            <a href="admin-users.html" class="active">Users</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="app-main">
+        <div class="container">
+            <h1 class="page-title">User Management</h1>
+
+            <!-- Search/Filter Bar -->
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="Search by email or user ID...">
+                <select id="tierFilter">
+                    <option value="all">All Tiers</option>
+                    <option value="basic">Basic</option>
+                    <option value="advanced">Advanced</option>
+                    <option value="premium">Premium</option>
+                </select>
+                <button class="btn-search" id="btnSearch">Search</button>
+            </div>
+
+            <!-- User Table -->
+            <div class="table-wrapper">
+                <div id="tableLoading" class="table-loading">Loading users...</div>
+                <table class="user-table" id="userTable" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>User ID</th>
+                            <th>Organization</th>
+                            <th>Subscription Tier</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userTableBody"></tbody>
+                </table>
+                <div id="noResults" class="no-results" style="display: none;">No users match your search criteria.</div>
+            </div>
+
+            <!-- User Detail Panel -->
+            <div id="userDetailPanel" class="user-detail-panel">
+                <h3 id="detailTitle">User Details</h3>
+                <div id="detailContent" class="user-detail-grid"></div>
+            </div>
+
+            <!-- Report Results Panel -->
+            <div id="usageInfo" class="info-panel" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- NCI Footer - Info Section -->
+    <footer>
+        <div class="nci-footer-info">
+            <div class="nci-footer-info-inner">
+                <div class="nci-footer-col">
+                    <h3>More Info</h3>
+                    <ul>
+                        <li><a href="mailto:ctribresearchoptimizer@mail.nih.gov">Contact Research Optimizer</a></li>
+                        <li><a href="/about">About ARTI</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: center;">
+                    <h3>System Info</h3>
+                    <ul>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Release Notes</a></li>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Current Version: 1.0.0</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: right;">
+                    <h3>Policies</h3>
+                    <ul>
+                        <li><a href="https://www.cancer.gov/policies/accessibility" target="_blank" rel="noopener noreferrer">Accessibility</a></li>
+                        <li><a href="https://www.cancer.gov/policies/foia" target="_blank" rel="noopener noreferrer">FOIA</a></li>
+                        <li><a href="https://www.cancer.gov/policies/privacy-security" target="_blank" rel="noopener noreferrer">Privacy and Security</a></li>
+                        <li><a href="https://www.cancer.gov/policies/disclaimer" target="_blank" rel="noopener noreferrer">Disclaimer</a></li>
+                        <li><a href="https://www.hhs.gov/vulnerability-disclosure-policy/index.html" target="_blank" rel="noopener noreferrer">Vulnerability Disclosure</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- NCI Footer - Primary Section -->
+        <div class="nci-footer-primary">
+            <div class="nci-footer-primary-inner">
+                <div class="nci-footer-attribution">
+                    <h3><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></h3>
+                    <h5>at the <a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></h5>
+
+                    <div class="nci-footer-social">
+                        <h3>Follow Us</h3>
+                        <div class="nci-footer-social-icons">
+                            <a href="https://www.facebook.com/cancer.gov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-facebook.svg" alt="Facebook" width="30" height="30"></a>
+                            <a href="https://x.com/thenci" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-x.svg" alt="X" width="30" height="30"></a>
+                            <a href="https://www.instagram.com/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-instagram.svg" alt="Instagram" width="30" height="30"></a>
+                            <a href="https://www.youtube.com/NCIgov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-youtube.svg" alt="YouTube" width="30" height="30"></a>
+                            <a href="https://www.linkedin.com/company/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-linkedin.svg" alt="LinkedIn" width="30" height="30"></a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="nci-footer-contact">
+                    <h3>Contact Us</h3>
+                    <div class="nci-footer-contact-links">
+                        <a href="https://livehelp.cancer.gov/" target="_blank" rel="noopener noreferrer">Live Chat</a>
+                        <a href="tel:1-800-4-CANCER">1-800-4-CANCER</a>
+                        <a href="mailto:NCIinfo@nih.gov">NCIinfo@nih.gov</a>
+                        <a href="https://nci.az1.qualtrics.com/jfe/form/SV_aeLLobt6ZeGVn5I" target="_blank" rel="noopener noreferrer">Site Feedback</a>
+                    </div>
+                    <ul class="nci-footer-gov-links">
+                        <li><a href="https://www.hhs.gov/" target="_blank" rel="noopener noreferrer">U.S. Department of Health and Human Services</a></li>
+                        <li><a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></li>
+                        <li><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></li>
+                        <li><a href="https://usa.gov/" target="_blank" rel="noopener noreferrer">USA.gov</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Configuration -->
+    <script>
+        var CONFIG = {
+            userPoolId: 'YOUR_USER_POOL_ID',
+            clientId: 'YOUR_CLIENT_ID',
+            region: 'us-east-1',
+            apiUrl: 'http://127.0.0.1:8000'
+        };
+    </script>
+
+    <!-- Application Modules (order matters: dependencies first) -->
+    <script src="js/auth.js"></script>
+    <script src="js/api-client.js"></script>
+    <script src="js/ui-components.js"></script>
+    <script src="js/admin-panels.js"></script>
+
+    <!-- User Management Page Logic -->
+    <script>
+        (function () {
+            'use strict';
+
+            /**
+             * Tenant ID for the current authenticated admin user.
+             * Set after successful login check.
+             * @type {string|null}
+             */
+            var tenantId = null;
+
+            /**
+             * Full list of user data objects fetched from the API.
+             * Each entry contains user cost and metadata information.
+             * @type {Array<Object>}
+             */
+            var allUsers = [];
+
+            // -----------------------------------------------------------------
+            // Initialization
+            // -----------------------------------------------------------------
+
+            /**
+             * Main initialization routine.
+             *
+             * Runs on DOMContentLoaded to:
+             *   1. Initialize Auth (Cognito user pool)
+             *   2. Check if user is logged in, redirect to index.html if not
+             *   3. Verify admin access via /api/admin/my-tenants
+             *   4. Fetch per-user cost data and populate the table
+             *   5. Wire up search/filter functionality
+             */
+            function initPage() {
+                // 1. Initialize Cognito authentication
+                Auth.init();
+
+                // 2. Check if user is logged in
+                var user = Auth.getCurrentUser();
+                if (!user) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                tenantId = user.tenant_id;
+
+                // 3. Verify admin access
+                ApiClient.getAdminTenants()
+                    .then(function () {
+                        // Admin access confirmed - load data and wire up controls
+                        wireUpControls();
+                        loadUsers();
+                    })
+                    .catch(function () {
+                        showAccessDenied();
+                    });
+            }
+
+            // -----------------------------------------------------------------
+            // Access Denied
+            // -----------------------------------------------------------------
+
+            /**
+             * Display an access denied message when the user is not an admin.
+             * Replaces the main content area with an error notice and a link
+             * back to the main page.
+             */
+            function showAccessDenied() {
+                var container = document.querySelector('.container');
+                if (!container) {
+                    return;
+                }
+                container.textContent = '';
+
+                var denied = document.createElement('div');
+                denied.className = 'access-denied';
+
+                var heading = document.createElement('h2');
+                heading.textContent = 'Access Denied';
+                denied.appendChild(heading);
+
+                var message = document.createElement('p');
+                message.textContent = 'You do not have admin privileges to view user management. Please contact your administrator.';
+                denied.appendChild(message);
+
+                var backLink = document.createElement('a');
+                backLink.href = 'index.html';
+                backLink.textContent = 'Return to Dashboard';
+                backLink.style.cssText = 'display: inline-block; margin-top: 16px; color: var(--nci-link); font-weight: 600;';
+                denied.appendChild(backLink);
+
+                container.appendChild(denied);
+            }
+
+            // -----------------------------------------------------------------
+            // Data Loading
+            // -----------------------------------------------------------------
+
+            /**
+             * Fetch per-user cost data from the API and populate the user table.
+             *
+             * Calls ApiClient.getAdminPerUserCost(tenantId, 30) to retrieve
+             * user cost data for the last 30 days. On success, transforms the
+             * response into an array of user objects and renders the table.
+             * On failure, displays an error in the loading area.
+             */
+            async function loadUsers() {
+                var tableLoading = document.getElementById('tableLoading');
+                var userTable = document.getElementById('userTable');
+
+                try {
+                    var data = await ApiClient.getAdminPerUserCost(tenantId, 30);
+
+                    // Transform the API response into an array of user objects.
+                    // The API returns { users: { userId: { total_cost, usage_stats, ... }, ... } }
+                    allUsers = [];
+                    var userIds = Object.keys(data.users);
+                    for (var i = 0; i < userIds.length; i++) {
+                        var userId = userIds[i];
+                        var userData = data.users[userId];
+
+                        allUsers.push({
+                            email: userData.email || userId,
+                            user_id: userId,
+                            organization: userData.organization || tenantId,
+                            subscription_tier: userData.subscription_tier || 'basic',
+                            role: userData.role || 'user',
+                            status: userData.status || 'active',
+                            total_cost: userData.total_cost || 0,
+                            usage_stats: userData.usage_stats || { invocations: 0, tokens: { input: 0, output: 0 } }
+                        });
+                    }
+
+                    // Hide loading, show table
+                    if (tableLoading) {
+                        tableLoading.style.display = 'none';
+                    }
+                    if (userTable) {
+                        userTable.style.display = 'table';
+                    }
+
+                    renderUserTable(allUsers);
+
+                } catch (error) {
+                    if (tableLoading) {
+                        tableLoading.textContent = 'Failed to load user data. Please verify admin access and try again.';
+                        tableLoading.style.color = 'var(--nci-danger)';
+                    }
+                }
+            }
+
+            // -----------------------------------------------------------------
+            // Table Rendering
+            // -----------------------------------------------------------------
+
+            /**
+             * Render the user table body with the provided array of user objects.
+             *
+             * Clears the existing table body and creates a new row for each user.
+             * Uses safe DOM APIs exclusively (createElement, createTextNode).
+             * If no users are available, shows the "no results" message.
+             *
+             * @param {Array<Object>} users - Array of user objects to display.
+             */
+            function renderUserTable(users) {
+                var tbody = document.getElementById('userTableBody');
+                var noResults = document.getElementById('noResults');
+                var userTable = document.getElementById('userTable');
+
+                if (!tbody) {
+                    return;
+                }
+
+                // Clear existing rows
+                while (tbody.firstChild) {
+                    tbody.removeChild(tbody.firstChild);
+                }
+
+                if (users.length === 0) {
+                    if (userTable) {
+                        userTable.style.display = 'none';
+                    }
+                    if (noResults) {
+                        noResults.style.display = 'block';
+                    }
+                    return;
+                }
+
+                if (userTable) {
+                    userTable.style.display = 'table';
+                }
+                if (noResults) {
+                    noResults.style.display = 'none';
+                }
+
+                for (var i = 0; i < users.length; i++) {
+                    var user = users[i];
+                    var row = document.createElement('tr');
+
+                    // Email column
+                    var emailTd = document.createElement('td');
+                    emailTd.textContent = user.email;
+                    row.appendChild(emailTd);
+
+                    // User ID column
+                    var userIdTd = document.createElement('td');
+                    userIdTd.style.cssText = 'font-family: monospace; font-size: 12px;';
+                    userIdTd.textContent = user.user_id;
+                    row.appendChild(userIdTd);
+
+                    // Organization column
+                    var orgTd = document.createElement('td');
+                    orgTd.textContent = user.organization;
+                    row.appendChild(orgTd);
+
+                    // Subscription Tier column (colored badge)
+                    var tierTd = document.createElement('td');
+                    var tierBadgeClass = getTierBadgeClass(user.subscription_tier);
+                    var tierBadge = UI.createBadge(user.subscription_tier, tierBadgeClass);
+                    tierTd.appendChild(tierBadge);
+                    row.appendChild(tierTd);
+
+                    // Role column
+                    var roleTd = document.createElement('td');
+                    var roleText = user.role.charAt(0).toUpperCase() + user.role.slice(1);
+                    roleTd.textContent = roleText;
+                    row.appendChild(roleTd);
+
+                    // Status column
+                    var statusTd = document.createElement('td');
+                    var statusSpan = document.createElement('span');
+                    statusSpan.style.cssText = user.status === 'active'
+                        ? 'color: var(--nci-success); font-weight: 600;'
+                        : 'color: var(--nci-gray); font-weight: 600;';
+                    statusSpan.textContent = user.status.charAt(0).toUpperCase() + user.status.slice(1);
+                    statusTd.appendChild(statusSpan);
+                    row.appendChild(statusTd);
+
+                    // Actions column
+                    var actionsTd = document.createElement('td');
+                    var viewCostBtn = createViewCostButton(user);
+                    actionsTd.appendChild(viewCostBtn);
+                    row.appendChild(actionsTd);
+
+                    tbody.appendChild(row);
+                }
+            }
+
+            /**
+             * Return the appropriate badge CSS class for a given subscription tier.
+             *
+             * @param {string} tier - The subscription tier (basic, advanced, or premium).
+             * @returns {string} The CSS class name for the tier badge.
+             */
+            function getTierBadgeClass(tier) {
+                var lowerTier = tier.toLowerCase();
+                if (lowerTier === 'premium') {
+                    return 'badge-premium';
+                }
+                if (lowerTier === 'advanced') {
+                    return 'badge-advanced';
+                }
+                return 'badge-basic';
+            }
+
+            /**
+             * Create a "View Cost" button element for a specific user.
+             *
+             * When clicked, the button shows the user detail panel with the
+             * user's information and triggers the per-user cost view in the
+             * AdminPanels #usageInfo panel.
+             *
+             * @param {Object} user - The user object containing cost and metadata.
+             * @returns {HTMLButtonElement} The constructed button element.
+             */
+            function createViewCostButton(user) {
+                var btn = document.createElement('button');
+                btn.className = 'btn-view-cost';
+                btn.textContent = 'View Cost';
+
+                btn.addEventListener('click', function () {
+                    showUserDetail(user);
+                    showUserCostInPanel(user);
+                });
+
+                return btn;
+            }
+
+            // -----------------------------------------------------------------
+            // User Detail Panel
+            // -----------------------------------------------------------------
+
+            /**
+             * Display the detail panel for a selected user.
+             *
+             * Populates the user detail panel below the table with the user's
+             * email, user ID, organization, tier, role, total cost, invocations,
+             * and token usage. Uses safe DOM APIs exclusively.
+             *
+             * @param {Object} user - The user object to display details for.
+             */
+            function showUserDetail(user) {
+                var panel = document.getElementById('userDetailPanel');
+                var title = document.getElementById('detailTitle');
+                var content = document.getElementById('detailContent');
+
+                if (!panel || !title || !content) {
+                    return;
+                }
+
+                // Update title
+                title.textContent = 'User Details: ' + user.email;
+
+                // Clear existing content
+                while (content.firstChild) {
+                    content.removeChild(content.firstChild);
+                }
+
+                // Build detail items
+                var details = [
+                    { label: 'Email', value: user.email },
+                    { label: 'User ID', value: user.user_id },
+                    { label: 'Organization', value: user.organization },
+                    { label: 'Subscription Tier', value: user.subscription_tier },
+                    { label: 'Role', value: user.role },
+                    { label: 'Status', value: user.status },
+                    { label: 'Total Cost (30 days)', value: '$' + user.total_cost.toFixed(4) },
+                    { label: 'Invocations', value: String(user.usage_stats.invocations) },
+                    { label: 'Input Tokens', value: String(user.usage_stats.tokens.input) },
+                    { label: 'Output Tokens', value: String(user.usage_stats.tokens.output) }
+                ];
+
+                for (var i = 0; i < details.length; i++) {
+                    var p = document.createElement('p');
+                    var strong = document.createElement('strong');
+                    strong.textContent = details[i].label + ': ';
+                    p.appendChild(strong);
+                    p.appendChild(document.createTextNode(details[i].value));
+                    content.appendChild(p);
+                }
+
+                // Show the panel
+                panel.style.display = 'block';
+            }
+
+            /**
+             * Show the selected user's cost information in the #usageInfo panel.
+             *
+             * Uses the UI.createInfoPanel helper to build a structured view of
+             * the user's cost data, including total cost, invocations, and token
+             * breakdown with a visual stat display.
+             *
+             * @param {Object} user - The user object containing cost data.
+             */
+            function showUserCostInPanel(user) {
+                UI.createInfoPanel('Cost Details: ' + user.email, function (panel) {
+                    var costDiv = UI.createStyledDiv(
+                        'background: var(--nci-bg); padding: 20px; border-radius: 8px; margin-bottom: 12px;'
+                    );
+
+                    // Total cost
+                    var costH4 = document.createElement('h4');
+                    costH4.style.cssText = 'color: var(--nci-primary); margin-bottom: 12px;';
+                    costH4.textContent = 'Total Cost (30 days): $' + user.total_cost.toFixed(4);
+                    costDiv.appendChild(costH4);
+
+                    panel.appendChild(costDiv);
+
+                    // Usage stats
+                    panel.appendChild(
+                        UI.createStatItem('Invocations', String(user.usage_stats.invocations))
+                    );
+
+                    var totalTokens = user.usage_stats.tokens.input + user.usage_stats.tokens.output;
+                    panel.appendChild(
+                        UI.createStatItem('Total Tokens', String(totalTokens))
+                    );
+                    panel.appendChild(
+                        UI.createStatItem('Input Tokens', String(user.usage_stats.tokens.input))
+                    );
+                    panel.appendChild(
+                        UI.createStatItem('Output Tokens', String(user.usage_stats.tokens.output))
+                    );
+
+                    // Tier badge
+                    var tierP = document.createElement('p');
+                    tierP.style.marginTop = '12px';
+                    var tierStrong = document.createElement('strong');
+                    tierStrong.textContent = 'Tier: ';
+                    tierP.appendChild(tierStrong);
+                    tierP.appendChild(UI.createBadge(user.subscription_tier, getTierBadgeClass(user.subscription_tier)));
+                    panel.appendChild(tierP);
+                });
+            }
+
+            // -----------------------------------------------------------------
+            // Search and Filter
+            // -----------------------------------------------------------------
+
+            /**
+             * Wire up event listeners for the search input, tier filter
+             * dropdown, and search button.
+             *
+             * The search button triggers filterUsers(). The input field also
+             * triggers filtering on Enter key press. The tier dropdown triggers
+             * filtering on change.
+             */
+            function wireUpControls() {
+                var searchInput = document.getElementById('searchInput');
+                var tierFilter = document.getElementById('tierFilter');
+                var btnSearch = document.getElementById('btnSearch');
+
+                if (btnSearch) {
+                    btnSearch.addEventListener('click', function () {
+                        filterUsers();
+                    });
+                }
+
+                if (searchInput) {
+                    searchInput.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            filterUsers();
+                        }
+                    });
+                }
+
+                if (tierFilter) {
+                    tierFilter.addEventListener('change', function () {
+                        filterUsers();
+                    });
+                }
+            }
+
+            /**
+             * Apply client-side filtering to the user list based on the current
+             * values of the search input and tier filter dropdown.
+             *
+             * The search text is matched case-insensitively against each user's
+             * email and user_id fields. The tier filter matches the
+             * subscription_tier field. Both filters are combined (AND logic).
+             * The filtered results are re-rendered into the table.
+             */
+            function filterUsers() {
+                var searchInput = document.getElementById('searchInput');
+                var tierFilter = document.getElementById('tierFilter');
+
+                var searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
+                var tierValue = tierFilter ? tierFilter.value.toLowerCase() : 'all';
+
+                var filtered = [];
+
+                for (var i = 0; i < allUsers.length; i++) {
+                    var user = allUsers[i];
+
+                    // Check text search (email or user ID)
+                    var matchesSearch = true;
+                    if (searchTerm) {
+                        var emailLower = user.email.toLowerCase();
+                        var userIdLower = user.user_id.toLowerCase();
+                        matchesSearch = emailLower.indexOf(searchTerm) !== -1 ||
+                                        userIdLower.indexOf(searchTerm) !== -1;
+                    }
+
+                    // Check tier filter
+                    var matchesTier = true;
+                    if (tierValue !== 'all') {
+                        matchesTier = user.subscription_tier.toLowerCase() === tierValue;
+                    }
+
+                    if (matchesSearch && matchesTier) {
+                        filtered.push(user);
+                    }
+                }
+
+                renderUserTable(filtered);
+            }
+
+            // -----------------------------------------------------------------
+            // Bootstrap
+            // -----------------------------------------------------------------
+
+            document.addEventListener('DOMContentLoaded', initPage);
+        })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,269 @@
+{
+  "version": "1.0.0",
+  "description": "Tool definitions for EAGLE acquisition assistant in Anthropic tool_use format",
+  "tools": [
+    {
+      "name": "search_far",
+      "description": "Search the Federal Acquisition Regulation (FAR) and Defense Federal Acquisition Regulation Supplement (DFARS) for relevant clauses, requirements, and guidance. Returns part numbers, sections, titles, full text summaries, and applicability notes.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query — topic, clause number, or keyword"
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specific FAR part numbers to search (e.g. ['6', '13', '15'])"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "create_document",
+      "description": "Generate acquisition documents including Statement of Work (SOW), Independent Government Cost Estimate (IGCE), Market Research Report, and Justification & Approval (J&A). Documents are saved to S3.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "doc_type": {
+            "type": "string",
+            "enum": ["sow", "igce", "market_research", "justification", "acquisition_plan"],
+            "description": "Type of acquisition document to generate"
+          },
+          "title": {
+            "type": "string",
+            "description": "Title of the acquisition/document"
+          },
+          "data": {
+            "type": "object",
+            "description": "Document-specific fields (description, line_items, vendors, etc.)",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "Detailed description of the requirement"
+              },
+              "period_of_performance": {
+                "type": "string",
+                "description": "Duration of the contract (e.g., '12 months from award')"
+              },
+              "deliverables": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "List of deliverables"
+              },
+              "tasks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "List of tasks to be performed"
+              },
+              "line_items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "type": "number"
+                    },
+                    "unit_price": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "description": "Line items for IGCE"
+              },
+              "overhead_rate": {
+                "type": "number",
+                "description": "Overhead rate percentage (default: 12)"
+              },
+              "contingency_rate": {
+                "type": "number",
+                "description": "Contingency rate percentage (default: 10)"
+              },
+              "authority": {
+                "type": "string",
+                "description": "FAR authority for J&A (e.g., 'FAR 6.302-1')"
+              },
+              "contractor": {
+                "type": "string",
+                "description": "Proposed contractor name for J&A"
+              },
+              "rationale": {
+                "type": "string",
+                "description": "Rationale for sole source"
+              },
+              "estimated_value": {
+                "type": "string",
+                "description": "Estimated contract value"
+              },
+              "naics_code": {
+                "type": "string",
+                "description": "NAICS code for market research"
+              },
+              "vendors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "string"
+                    },
+                    "vehicles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "description": "Potential vendors for market research"
+              }
+            }
+          }
+        },
+        "required": ["doc_type", "title"]
+      }
+    },
+    {
+      "name": "s3_document_ops",
+      "description": "Read, write, or list documents stored in S3. All documents are scoped per-tenant. Use this to manage acquisition documents, templates, and generated files.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": ["list", "read", "write"],
+            "description": "Operation to perform: list files, read a file, or write a file"
+          },
+          "bucket": {
+            "type": "string",
+            "description": "S3 bucket name (default: nci-documents)"
+          },
+          "key": {
+            "type": "string",
+            "description": "S3 key/path for read or write operations"
+          },
+          "content": {
+            "type": "string",
+            "description": "Content to write (for write operation)"
+          }
+        },
+        "required": ["operation"]
+      }
+    },
+    {
+      "name": "dynamodb_intake",
+      "description": "Create, read, update, list, or query intake records in DynamoDB. All records are scoped per-tenant using PK/SK patterns. Use this to track acquisition intake packages.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": ["create", "read", "update", "list", "query"],
+            "description": "CRUD operation to perform"
+          },
+          "table": {
+            "type": "string",
+            "description": "DynamoDB table name (default: eagle)"
+          },
+          "item_id": {
+            "type": "string",
+            "description": "Unique item identifier for read/update"
+          },
+          "data": {
+            "type": "object",
+            "description": "Data fields for create/update operations",
+            "properties": {
+              "requirement": {
+                "type": "string",
+                "description": "Description of the requirement"
+              },
+              "estimated_value": {
+                "type": "number",
+                "description": "Estimated dollar value"
+              },
+              "acquisition_type": {
+                "type": "string",
+                "description": "Type of acquisition (micro/simplified/negotiated)"
+              },
+              "status": {
+                "type": "string",
+                "description": "Current status of the intake"
+              },
+              "timeline": {
+                "type": "string",
+                "description": "Required timeline"
+              }
+            }
+          },
+          "filter_expression": {
+            "type": "string",
+            "description": "Optional filter expression for queries"
+          }
+        },
+        "required": ["operation"]
+      }
+    },
+    {
+      "name": "get_intake_status",
+      "description": "Get the current intake package status and completeness. Shows which documents exist, which are missing, and next actions needed.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "intake_id": {
+            "type": "string",
+            "description": "Intake package ID (defaults to active intake if not provided)"
+          }
+        }
+      }
+    },
+    {
+      "name": "cloudwatch_logs",
+      "description": "Read CloudWatch logs filtered by user/session. Use this to inspect application logs, debug issues, or audit user activity.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": ["search", "recent", "get_stream"],
+            "description": "Log operation: search with filter, get recent events, or get a specific stream"
+          },
+          "log_group": {
+            "type": "string",
+            "description": "CloudWatch log group name (default: /eagle/app)"
+          },
+          "filter_pattern": {
+            "type": "string",
+            "description": "CloudWatch filter pattern for searching logs"
+          },
+          "start_time": {
+            "type": "string",
+            "description": "Start time for log search (ISO format or relative like '-1h')"
+          },
+          "end_time": {
+            "type": "string",
+            "description": "End time for log search (ISO format)"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of log events to return (default: 50)"
+          }
+        },
+        "required": ["operation"]
+      }
+    }
+  ]
+}

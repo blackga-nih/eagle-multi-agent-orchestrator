@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Management - NCI ARTI Admin</title>
+    <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        /* Admin Navigation */
+        .admin-nav { background: var(--nci-primary); padding: 0; }
+        .admin-nav-inner { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; gap: 0; }
+        .admin-nav a { color: rgba(255,255,255,0.8); text-decoration: none; padding: 12px 20px; font-size: 14px; font-weight: 500; transition: all 0.2s; border-bottom: 3px solid transparent; }
+        .admin-nav a:hover, .admin-nav a.active { color: white; border-bottom-color: var(--nci-danger); background: rgba(255,255,255,0.1); }
+
+        /* Page Layout */
+        .admin-content { max-width: 1200px; margin: 0 auto; padding: 30px 20px; }
+        .admin-page-title { font-size: 28px; font-weight: 700; color: var(--nci-primary); margin-bottom: 30px; }
+
+        /* Agent Cards Grid */
+        .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 24px; margin-bottom: 40px; }
+
+        .agent-card {
+            background: var(--nci-white);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .agent-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        }
+
+        .agent-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .agent-card-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--nci-primary);
+        }
+
+        .agent-card-description {
+            color: var(--nci-gray);
+            font-size: 14px;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            flex: 1;
+        }
+
+        .agent-card-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .agent-card-actions button {
+            flex: 1;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-chat {
+            background: var(--nci-primary);
+            color: var(--nci-white);
+        }
+        .btn-chat:hover {
+            background: var(--nci-primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,49,73,0.25);
+        }
+
+        .btn-logs {
+            background: var(--nci-bg);
+            color: var(--nci-primary);
+            border: 2px solid var(--nci-border);
+        }
+        .btn-logs:hover {
+            background: var(--nci-border);
+        }
+
+        /* Agent Configuration Table */
+        .config-table-wrapper {
+            overflow-x: auto;
+        }
+
+        .config-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .config-table th {
+            background: var(--nci-bg);
+            color: var(--nci-primary);
+            font-weight: 600;
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 2px solid var(--nci-border);
+            white-space: nowrap;
+        }
+
+        .config-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--nci-border);
+            color: var(--nci-gray);
+        }
+
+        .config-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .config-table tr:hover td {
+            background: var(--nci-bg);
+        }
+
+        /* Chat Panel */
+        .agent-chat-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .agent-chat-overlay.active {
+            display: flex;
+        }
+
+        .agent-chat-panel {
+            background: var(--nci-white);
+            border-radius: 12px;
+            width: 600px;
+            max-width: 90vw;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+
+        .agent-chat-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 2px solid var(--nci-border);
+        }
+
+        .agent-chat-panel-header h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--nci-primary);
+        }
+
+        .agent-chat-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            color: var(--nci-gray);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-transform: none;
+            letter-spacing: normal;
+            font-weight: 400;
+        }
+        .agent-chat-close:hover {
+            background: var(--nci-bg);
+            color: var(--nci-primary);
+        }
+
+        .agent-chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            min-height: 300px;
+            max-height: 400px;
+            background: var(--nci-bg);
+        }
+
+        .agent-chat-input-area {
+            display: flex;
+            gap: 10px;
+            padding: 16px 20px;
+            border-top: 2px solid var(--nci-border);
+        }
+
+        .agent-chat-input-area input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 2px solid var(--nci-border);
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
+        }
+        .agent-chat-input-area input:focus {
+            outline: none;
+            border-color: var(--nci-primary);
+            box-shadow: 0 0 0 3px rgba(0,49,73,0.1);
+        }
+
+        .agent-chat-send {
+            background: var(--nci-primary);
+            color: var(--nci-white);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .agent-chat-send:hover {
+            background: var(--nci-primary-dark);
+        }
+
+        /* Loading spinner */
+        .loading-row td {
+            text-align: center;
+            padding: 30px;
+            color: var(--nci-gray);
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            .agent-grid { grid-template-columns: 1fr; }
+            .admin-nav-inner { flex-wrap: wrap; }
+            .admin-nav a { padding: 10px 14px; font-size: 13px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Government Banner -->
+    <div class="gov-banner">
+        <div class="gov-banner-inner">
+            <img src="assets/images/icon-flag.svg" alt="U.S. Flag">
+            <span class="gov-banner-text">An official website of the United States government</span>
+            <button class="gov-banner-action" onclick="toggleGovBanner()">Here's how you know</button>
+        </div>
+        <div id="govBannerExpanded" class="gov-banner-expanded">
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-dot-gov.svg" alt="Dot gov">
+                <p><strong>Official websites use .gov</strong><br>A .gov website belongs to an official government organization in the United States.</p>
+            </div>
+            <div class="gov-banner-explainer">
+                <img src="assets/images/icon-https.svg" alt="HTTPS">
+                <p><strong>Secure .gov websites use HTTPS</strong><br>A lock or https:// means you've safely connected to the .gov website.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NCI Header -->
+    <header class="nci-header">
+        <div class="nci-header-inner">
+            <a href="/" class="nci-header-logo">
+                <img src="assets/images/logo.svg" alt="National Cancer Institute - AI Research &amp; Translational Informatics">
+            </a>
+        </div>
+    </header>
+
+    <!-- Admin Navigation -->
+    <nav class="admin-nav">
+        <div class="admin-nav-inner">
+            <a href="admin.html">Dashboard</a>
+            <a href="admin-agents.html" class="active">Agent Management</a>
+            <a href="admin-costs.html">Cost Reports</a>
+            <a href="admin-analytics.html">Analytics</a>
+            <a href="admin-users.html">Users</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="app-main">
+        <div class="admin-content">
+            <h1 class="admin-page-title">Agent Management</h1>
+
+            <!-- Agent Cards Grid -->
+            <div id="agentGrid" class="agent-grid"></div>
+
+            <!-- Agent Configuration Table -->
+            <div class="card">
+                <h3 class="card-title">Agent Configuration</h3>
+                <div class="config-table-wrapper">
+                    <table class="config-table">
+                        <thead>
+                            <tr>
+                                <th>Agent ID</th>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Model</th>
+                                <th>Last Active</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agentConfigBody">
+                            <tr class="loading-row">
+                                <td colspan="5">Loading agent configuration...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Chat Overlay -->
+    <div id="agentChatOverlay" class="agent-chat-overlay">
+        <div class="agent-chat-panel">
+            <div class="agent-chat-panel-header">
+                <h3 id="agentChatTitle">Chat with Agent</h3>
+                <button class="agent-chat-close" id="agentChatClose">X</button>
+            </div>
+            <div class="agent-chat-messages" id="agentChatMessages"></div>
+            <div class="agent-chat-input-area">
+                <input type="text" id="agentChatInput" placeholder="Type a message...">
+                <button class="agent-chat-send" id="agentChatSend">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NCI Footer - Info Section -->
+    <footer>
+        <div class="nci-footer-info">
+            <div class="nci-footer-info-inner">
+                <div class="nci-footer-col">
+                    <h3>More Info</h3>
+                    <ul>
+                        <li><a href="mailto:ctribresearchoptimizer@mail.nih.gov">Contact Research Optimizer</a></li>
+                        <li><a href="/about">About ARTI</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: center;">
+                    <h3>System Info</h3>
+                    <ul>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Release Notes</a></li>
+                        <li><a href="https://github.com/CBIIT/nci-webtools-ctri-arti/releases" target="_blank" rel="noopener noreferrer">Current Version: 1.0.0</a></li>
+                    </ul>
+                </div>
+                <div class="nci-footer-col" style="text-align: right;">
+                    <h3>Policies</h3>
+                    <ul>
+                        <li><a href="https://www.cancer.gov/policies/accessibility" target="_blank" rel="noopener noreferrer">Accessibility</a></li>
+                        <li><a href="https://www.cancer.gov/policies/foia" target="_blank" rel="noopener noreferrer">FOIA</a></li>
+                        <li><a href="https://www.cancer.gov/policies/privacy-security" target="_blank" rel="noopener noreferrer">Privacy and Security</a></li>
+                        <li><a href="https://www.cancer.gov/policies/disclaimer" target="_blank" rel="noopener noreferrer">Disclaimer</a></li>
+                        <li><a href="https://www.hhs.gov/vulnerability-disclosure-policy/index.html" target="_blank" rel="noopener noreferrer">Vulnerability Disclosure</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- NCI Footer - Primary Section -->
+        <div class="nci-footer-primary">
+            <div class="nci-footer-primary-inner">
+                <div class="nci-footer-attribution">
+                    <h3><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></h3>
+                    <h5>at the <a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></h5>
+
+                    <div class="nci-footer-social">
+                        <h3>Follow Us</h3>
+                        <div class="nci-footer-social-icons">
+                            <a href="https://www.facebook.com/cancer.gov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-facebook.svg" alt="Facebook" width="30" height="30"></a>
+                            <a href="https://x.com/thenci" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-x.svg" alt="X" width="30" height="30"></a>
+                            <a href="https://www.instagram.com/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-instagram.svg" alt="Instagram" width="30" height="30"></a>
+                            <a href="https://www.youtube.com/NCIgov" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-youtube.svg" alt="YouTube" width="30" height="30"></a>
+                            <a href="https://www.linkedin.com/company/nationalcancerinstitute" target="_blank" rel="noopener noreferrer"><img src="assets/images/footer/icon-linkedin.svg" alt="LinkedIn" width="30" height="30"></a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="nci-footer-contact">
+                    <h3>Contact Us</h3>
+                    <div class="nci-footer-contact-links">
+                        <a href="https://livehelp.cancer.gov/" target="_blank" rel="noopener noreferrer">Live Chat</a>
+                        <a href="tel:1-800-4-CANCER">1-800-4-CANCER</a>
+                        <a href="mailto:NCIinfo@nih.gov">NCIinfo@nih.gov</a>
+                        <a href="https://nci.az1.qualtrics.com/jfe/form/SV_aeLLobt6ZeGVn5I" target="_blank" rel="noopener noreferrer">Site Feedback</a>
+                    </div>
+                    <ul class="nci-footer-gov-links">
+                        <li><a href="https://www.hhs.gov/" target="_blank" rel="noopener noreferrer">U.S. Department of Health and Human Services</a></li>
+                        <li><a href="https://www.nih.gov/" target="_blank" rel="noopener noreferrer">National Institutes of Health</a></li>
+                        <li><a href="https://www.cancer.gov/" target="_blank" rel="noopener noreferrer">National Cancer Institute</a></li>
+                        <li><a href="https://usa.gov/" target="_blank" rel="noopener noreferrer">USA.gov</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Configuration -->
+    <script>
+        var CONFIG = {
+            userPoolId: 'YOUR_USER_POOL_ID',
+            clientId: 'YOUR_CLIENT_ID',
+            region: 'us-east-1',
+            apiUrl: 'http://127.0.0.1:8000'
+        };
+    </script>
+
+    <!-- Application Modules (order matters: dependencies first) -->
+    <script src="js/auth.js"></script>
+    <script src="js/api-client.js"></script>
+    <script src="js/ui-components.js"></script>
+
+    <!-- Page-specific logic -->
+    <script>
+    (function () {
+        'use strict';
+
+        // -----------------------------------------------------------------
+        // Static agent definitions
+        // -----------------------------------------------------------------
+
+        var AGENTS = [
+            {
+                id: 'supervisor',
+                name: 'Supervisor Agent',
+                description: 'Routes incoming requests to the appropriate specialist agent based on intent classification. Manages multi-agent orchestration and response aggregation.',
+                defaultModel: 'claude-3.5-sonnet',
+                status: 'unknown'
+            },
+            {
+                id: 'oa-intake',
+                name: 'OA Intake Agent',
+                description: 'Handles acquisition intake workflow including requirement gathering, document preparation, and routing through the Office of Acquisitions approval process.',
+                defaultModel: 'claude-3.5-sonnet',
+                status: 'unknown'
+            },
+            {
+                id: 'knowledge-retrieval',
+                name: 'Knowledge Retrieval Agent',
+                description: 'Searches regulatory databases, FAR/DFARS references, contract vehicle catalogs, and internal knowledge bases to provide accurate procurement guidance.',
+                defaultModel: 'claude-3.5-sonnet',
+                status: 'unknown'
+            }
+        ];
+
+        // -----------------------------------------------------------------
+        // Government banner toggle (exposed globally for onclick handler)
+        // -----------------------------------------------------------------
+
+        window.toggleGovBanner = function () {
+            if (window.UI && typeof window.UI.toggleGovBanner === 'function') {
+                window.UI.toggleGovBanner();
+            }
+        };
+
+        // -----------------------------------------------------------------
+        // Agent card rendering
+        // -----------------------------------------------------------------
+
+        /**
+         * Build and populate the agent cards grid.
+         *
+         * Creates one card per agent in the AGENTS array using safe DOM
+         * APIs only (createElement, createTextNode). Each card includes
+         * the agent name, a health-indicator status badge, description
+         * text, a "Chat with Agent" button, and a "View Logs" button.
+         */
+        function renderAgentCards() {
+            var grid = document.getElementById('agentGrid');
+            if (!grid) {
+                return;
+            }
+            grid.textContent = '';
+
+            for (var i = 0; i < AGENTS.length; i++) {
+                var agent = AGENTS[i];
+
+                var card = document.createElement('div');
+                card.className = 'agent-card';
+                card.setAttribute('data-agent-id', agent.id);
+
+                // Header row: name + status badge
+                var header = document.createElement('div');
+                header.className = 'agent-card-header';
+
+                var nameEl = document.createElement('div');
+                nameEl.className = 'agent-card-name';
+                nameEl.textContent = agent.name;
+
+                var statusBadge = document.createElement('span');
+                statusBadge.className = 'health-indicator ' + (agent.status === 'online' ? 'online' : 'offline');
+                statusBadge.setAttribute('data-status-badge', agent.id);
+
+                var dot = document.createElement('span');
+                dot.className = 'health-dot';
+                statusBadge.appendChild(dot);
+
+                var statusText = document.createTextNode(agent.status === 'online' ? 'Online' : 'Offline');
+                statusBadge.appendChild(statusText);
+
+                header.appendChild(nameEl);
+                header.appendChild(statusBadge);
+
+                // Description
+                var desc = document.createElement('div');
+                desc.className = 'agent-card-description';
+                desc.textContent = agent.description;
+
+                // Actions
+                var actions = document.createElement('div');
+                actions.className = 'agent-card-actions';
+
+                var chatBtn = document.createElement('button');
+                chatBtn.className = 'btn-chat';
+                chatBtn.textContent = 'Chat with Agent';
+                chatBtn.setAttribute('data-agent-id', agent.id);
+                chatBtn.setAttribute('data-agent-name', agent.name);
+                chatBtn.addEventListener('click', handleChatClick);
+
+                var logsBtn = document.createElement('button');
+                logsBtn.className = 'btn-logs';
+                logsBtn.textContent = 'View Logs';
+                logsBtn.setAttribute('data-agent-id', agent.id);
+                logsBtn.addEventListener('click', handleLogsClick);
+
+                actions.appendChild(chatBtn);
+                actions.appendChild(logsBtn);
+
+                card.appendChild(header);
+                card.appendChild(desc);
+                card.appendChild(actions);
+                grid.appendChild(card);
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Health endpoint and agent configuration table
+        // -----------------------------------------------------------------
+
+        /**
+         * Fetch /api/health and update both agent card status badges and
+         * the configuration table body.
+         *
+         * The /api/health response is expected to contain an `agents`
+         * object keyed by agent ID with fields: name, status, model,
+         * last_active. If the endpoint is unreachable or returns an
+         * unexpected shape, the table shows a "Could not load" message
+         * and card badges remain in their default offline state.
+         */
+        async function fetchAgentHealth() {
+            var tbody = document.getElementById('agentConfigBody');
+            if (!tbody) {
+                return;
+            }
+
+            try {
+                var token = window.Auth.getToken();
+                var headers = { 'Content-Type': 'application/json' };
+                if (token) {
+                    headers['Authorization'] = 'Bearer ' + token;
+                }
+
+                var response = await fetch(CONFIG.apiUrl + '/api/health', {
+                    method: 'GET',
+                    headers: headers
+                });
+
+                if (!response.ok) {
+                    throw new Error('Health endpoint returned ' + response.status);
+                }
+
+                var data = await response.json();
+
+                // Update AGENTS status from health response
+                var agents = data.agents || {};
+                for (var i = 0; i < AGENTS.length; i++) {
+                    var agentDef = AGENTS[i];
+                    if (agents[agentDef.id]) {
+                        agentDef.status = agents[agentDef.id].status || 'offline';
+                        agentDef.model = agents[agentDef.id].model || agentDef.defaultModel;
+                        agentDef.lastActive = agents[agentDef.id].last_active || 'N/A';
+                    }
+                }
+
+                // Re-render agent cards with updated status
+                renderAgentCards();
+
+                // Populate the configuration table
+                tbody.textContent = '';
+
+                for (var j = 0; j < AGENTS.length; j++) {
+                    var agent = AGENTS[j];
+                    var tr = document.createElement('tr');
+
+                    var tdId = document.createElement('td');
+                    tdId.textContent = agent.id;
+
+                    var tdName = document.createElement('td');
+                    tdName.textContent = agent.name;
+
+                    var tdStatus = document.createElement('td');
+                    var statusIndicator = document.createElement('span');
+                    statusIndicator.className = 'health-indicator ' + (agent.status === 'online' ? 'online' : 'offline');
+                    var statusDot = document.createElement('span');
+                    statusDot.className = 'health-dot';
+                    statusIndicator.appendChild(statusDot);
+                    statusIndicator.appendChild(document.createTextNode(agent.status === 'online' ? 'Online' : 'Offline'));
+                    tdStatus.appendChild(statusIndicator);
+
+                    var tdModel = document.createElement('td');
+                    tdModel.textContent = agent.model || agent.defaultModel;
+
+                    var tdLastActive = document.createElement('td');
+                    tdLastActive.textContent = agent.lastActive || 'N/A';
+
+                    tr.appendChild(tdId);
+                    tr.appendChild(tdName);
+                    tr.appendChild(tdStatus);
+                    tr.appendChild(tdModel);
+                    tr.appendChild(tdLastActive);
+                    tbody.appendChild(tr);
+                }
+
+                // If health data included agents not in our static list, add them
+                var knownIds = {};
+                for (var k = 0; k < AGENTS.length; k++) {
+                    knownIds[AGENTS[k].id] = true;
+                }
+
+                var agentKeys = Object.keys(agents);
+                for (var m = 0; m < agentKeys.length; m++) {
+                    var key = agentKeys[m];
+                    if (!knownIds[key]) {
+                        var extra = agents[key];
+                        var extraTr = document.createElement('tr');
+
+                        var extraTdId = document.createElement('td');
+                        extraTdId.textContent = key;
+
+                        var extraTdName = document.createElement('td');
+                        extraTdName.textContent = extra.name || key;
+
+                        var extraTdStatus = document.createElement('td');
+                        var extraStatusIndicator = document.createElement('span');
+                        extraStatusIndicator.className = 'health-indicator ' + (extra.status === 'online' ? 'online' : 'offline');
+                        var extraStatusDot = document.createElement('span');
+                        extraStatusDot.className = 'health-dot';
+                        extraStatusIndicator.appendChild(extraStatusDot);
+                        extraStatusIndicator.appendChild(document.createTextNode(extra.status === 'online' ? 'Online' : 'Offline'));
+                        extraTdStatus.appendChild(extraStatusIndicator);
+
+                        var extraTdModel = document.createElement('td');
+                        extraTdModel.textContent = extra.model || 'N/A';
+
+                        var extraTdLastActive = document.createElement('td');
+                        extraTdLastActive.textContent = extra.last_active || 'N/A';
+
+                        extraTr.appendChild(extraTdId);
+                        extraTr.appendChild(extraTdName);
+                        extraTr.appendChild(extraTdStatus);
+                        extraTr.appendChild(extraTdModel);
+                        extraTr.appendChild(extraTdLastActive);
+                        tbody.appendChild(extraTr);
+                    }
+                }
+
+            } catch (error) {
+                // Show error in table
+                tbody.textContent = '';
+                var errorTr = document.createElement('tr');
+                var errorTd = document.createElement('td');
+                errorTd.setAttribute('colspan', '5');
+                errorTd.style.textAlign = 'center';
+                errorTd.style.padding = '30px';
+                errorTd.style.color = '#BB0E3D';
+                errorTd.textContent = 'Could not load agent configuration. ' + error.message;
+                errorTr.appendChild(errorTd);
+                tbody.appendChild(errorTr);
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Chat panel handlers
+        // -----------------------------------------------------------------
+
+        /** @type {string|null} Currently active agent ID in the chat panel */
+        var activeChatAgentId = null;
+
+        /**
+         * Open the chat panel for a specific agent.
+         *
+         * @param {Event} event - Click event from the "Chat with Agent" button.
+         */
+        function handleChatClick(event) {
+            var btn = event.currentTarget;
+            var agentId = btn.getAttribute('data-agent-id');
+            var agentName = btn.getAttribute('data-agent-name');
+
+            activeChatAgentId = agentId;
+
+            var overlay = document.getElementById('agentChatOverlay');
+            var title = document.getElementById('agentChatTitle');
+            var messages = document.getElementById('agentChatMessages');
+            var input = document.getElementById('agentChatInput');
+
+            title.textContent = 'Chat with ' + agentName;
+            messages.textContent = '';
+
+            // Add a system welcome message
+            var welcomeMsg = document.createElement('div');
+            welcomeMsg.className = 'message system';
+            welcomeMsg.textContent = 'Connected to ' + agentName + '. Type a message to begin.';
+            messages.appendChild(welcomeMsg);
+
+            overlay.classList.add('active');
+            input.value = '';
+            input.focus();
+        }
+
+        /**
+         * Close the agent chat overlay panel.
+         */
+        function closeChatPanel() {
+            var overlay = document.getElementById('agentChatOverlay');
+            overlay.classList.remove('active');
+            activeChatAgentId = null;
+        }
+
+        /**
+         * Send a message in the agent chat panel.
+         *
+         * Creates a user message bubble, sends the message to the backend
+         * via POST /api/chat with the agent_id in the tenant_context, and
+         * appends the agent response as a new message bubble.
+         */
+        async function sendAgentChatMessage() {
+            var input = document.getElementById('agentChatInput');
+            var messages = document.getElementById('agentChatMessages');
+            var messageText = input.value.trim();
+
+            if (!messageText || !activeChatAgentId) {
+                return;
+            }
+
+            // Show user message
+            var userMsg = document.createElement('div');
+            userMsg.className = 'message user';
+            var userLabel = document.createElement('strong');
+            userLabel.textContent = 'You';
+            userMsg.appendChild(userLabel);
+            userMsg.appendChild(document.createTextNode(messageText));
+            messages.appendChild(userMsg);
+
+            input.value = '';
+            messages.scrollTop = messages.scrollHeight;
+
+            // Show typing indicator
+            var typingMsg = document.createElement('div');
+            typingMsg.className = 'message agent';
+            typingMsg.textContent = 'Thinking...';
+            messages.appendChild(typingMsg);
+            messages.scrollTop = messages.scrollHeight;
+
+            try {
+                var user = window.Auth.getCurrentUser();
+                var response = await window.ApiClient.post('/api/chat', {
+                    message: messageText,
+                    tenant_context: {
+                        tenant_id: user ? user.tenant_id : 'unknown',
+                        user_id: user ? user.user_id : 'unknown',
+                        agent_id: activeChatAgentId
+                    }
+                });
+
+                // Replace typing indicator with actual response
+                var agentMsg = document.createElement('div');
+                agentMsg.className = 'message agent';
+                var agentLabel = document.createElement('strong');
+                agentLabel.textContent = activeChatAgentId;
+                agentMsg.appendChild(agentLabel);
+                agentMsg.appendChild(document.createTextNode(response.response || response.message || 'No response received.'));
+
+                messages.removeChild(typingMsg);
+                messages.appendChild(agentMsg);
+            } catch (error) {
+                // Replace typing indicator with error
+                var errorMsg = document.createElement('div');
+                errorMsg.className = 'message system';
+                errorMsg.textContent = 'Error: ' + error.message;
+
+                messages.removeChild(typingMsg);
+                messages.appendChild(errorMsg);
+            }
+
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        /**
+         * Placeholder handler for the "View Logs" button.
+         *
+         * @param {Event} event - Click event from the "View Logs" button.
+         */
+        function handleLogsClick(event) {
+            var agentId = event.currentTarget.getAttribute('data-agent-id');
+            alert('Log viewer for agent "' + agentId + '" is not yet implemented.');
+        }
+
+        // -----------------------------------------------------------------
+        // Chat panel event wiring
+        // -----------------------------------------------------------------
+
+        /**
+         * Wire up the chat panel close button, send button, and Enter key
+         * handler for the chat input field.
+         */
+        function wireChatPanelEvents() {
+            var closeBtn = document.getElementById('agentChatClose');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closeChatPanel);
+            }
+
+            var sendBtn = document.getElementById('agentChatSend');
+            if (sendBtn) {
+                sendBtn.addEventListener('click', sendAgentChatMessage);
+            }
+
+            var chatInput = document.getElementById('agentChatInput');
+            if (chatInput) {
+                chatInput.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendAgentChatMessage();
+                    }
+                });
+            }
+
+            // Close overlay when clicking outside the panel
+            var overlay = document.getElementById('agentChatOverlay');
+            if (overlay) {
+                overlay.addEventListener('click', function (e) {
+                    if (e.target === overlay) {
+                        closeChatPanel();
+                    }
+                });
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Initialization
+        // -----------------------------------------------------------------
+
+        /**
+         * Page initialization handler.
+         *
+         * 1. Initializes Auth module
+         * 2. Checks that the user is logged in and has admin access
+         *    (redirects to "/" if not)
+         * 3. Renders the initial agent cards grid
+         * 4. Fetches /api/health to populate live agent status
+         * 5. Wires up chat panel event handlers
+         */
+        document.addEventListener('DOMContentLoaded', function () {
+            Auth.init();
+
+            // Check login status
+            var user = Auth.getCurrentUser();
+            if (!user) {
+                window.location.href = 'index.html';
+                return;
+            }
+
+            // Verify admin access
+            window.ApiClient.getAdminTenants()
+                .then(function () {
+                    // User has admin access - proceed with page setup
+                    renderAgentCards();
+                    fetchAgentHealth();
+                    wireChatPanelEvents();
+                })
+                .catch(function () {
+                    // Not an admin - redirect to home
+                    window.location.href = 'index.html';
+                });
+        });
+    })();
+    </script>
+</body>
+</html>

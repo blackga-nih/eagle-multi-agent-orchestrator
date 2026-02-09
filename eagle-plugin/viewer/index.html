@@ -1,0 +1,1745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EAGLE Workflow Viewer</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+  <style>
+    :root {
+      --sidebar-width: 300px;
+      --header-height: 56px;
+      --detail-height: 80px;
+      --bg: #0f1117;
+      --bg-card: #1a1d27;
+      --bg-sidebar: #141620;
+      --border: #2a2d3a;
+      --text: #e4e4e7;
+      --text-muted: #9ca3af;
+      --accent: #6366f1;
+      --accent-light: #818cf8;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; height: 100vh; }
+
+    /* Header */
+    .header {
+      height: var(--header-height);
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 16px;
+      z-index: 10;
+    }
+    .header .logo { font-size: 20px; font-weight: 700; color: var(--accent-light); letter-spacing: -0.5px; }
+    .header .logo span { color: var(--text-muted); font-weight: 400; font-size: 14px; margin-left: 8px; }
+    .header select {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      min-width: 320px;
+    }
+    .header select:focus { outline: none; border-color: var(--accent); }
+    .header .nav-controls { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .header .step-counter { color: var(--text-muted); font-size: 13px; min-width: 80px; text-align: center; }
+    .header button {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .header button:hover { background: var(--accent); border-color: var(--accent); }
+    .header button:disabled { opacity: 0.3; cursor: not-allowed; }
+    .header button:disabled:hover { background: var(--bg); border-color: var(--border); }
+
+    /* Layout */
+    .layout {
+      display: flex;
+      height: calc(100vh - var(--header-height) - var(--detail-height));
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: var(--sidebar-width);
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 12px 0;
+      flex-shrink: 0;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .phase-group { margin-bottom: 4px; }
+    .phase-label {
+      padding: 8px 16px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+    .step-item {
+      padding: 8px 16px 8px 24px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      transition: background 0.1s;
+      line-height: 1.4;
+      border-left: 3px solid transparent;
+    }
+    .step-item:hover { background: rgba(99, 102, 241, 0.08); }
+    .step-item.active {
+      background: rgba(99, 102, 241, 0.15);
+      border-left-color: var(--accent);
+      color: white;
+    }
+    .step-item .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      flex-shrink: 0;
+      margin-top: 3px;
+    }
+    .step-item.active .dot { background: var(--accent); border-color: var(--accent); }
+    .step-item.visited .dot { background: var(--success); border-color: var(--success); }
+    .step-item .label { color: var(--text-muted); }
+    .step-item.active .label { color: var(--text); }
+
+    /* Diagram area */
+    .diagram-area {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      cursor: grab;
+    }
+    .diagram-area.dragging { cursor: grabbing; }
+    .diagram-area svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* SVG styles */
+    .actor-box { cursor: pointer; }
+    .actor-box:hover rect { filter: brightness(1.2); }
+    .actor-box text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+    .lifeline { stroke-dasharray: 6 4; }
+    .message-arrow { cursor: pointer; }
+    .message-arrow:hover line, .message-arrow:hover path { stroke-width: 2.5; }
+    .message-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 11px; }
+    .phase-rect { rx: 8; ry: 8; }
+    .phase-title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-weight: 600; font-size: 11px; }
+    .note-box rect { rx: 4; ry: 4; }
+    .note-box text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 10px; }
+    .step-highlight rect { fill: rgba(99, 102, 241, 0.15); stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 2; rx: 4; ry: 4; }
+    .self-arrow path { fill: none; }
+
+    /* Zoom controls */
+    .zoom-controls {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      z-index: 5;
+    }
+    .zoom-controls button {
+      width: 36px;
+      height: 36px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .zoom-controls button:hover { background: var(--accent); }
+    .zoom-label { font-size: 11px; color: var(--text-muted); text-align: center; padding: 2px 0; }
+
+    /* Detail bar */
+    .detail-bar {
+      height: var(--detail-height);
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .detail-bar .step-info { flex: 1; }
+    .detail-bar .step-info .actors {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+    .detail-bar .step-info .actors .from { font-weight: 600; }
+    .detail-bar .step-info .message { font-size: 14px; color: var(--text); }
+    .detail-bar .step-info .description { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .detail-bar .view-prompt-btn {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .detail-bar .view-prompt-btn:hover { background: var(--accent-light); }
+    .detail-bar .view-prompt-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+      padding: 40px;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 800px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+    }
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .modal-header h2 { font-size: 16px; font-weight: 600; }
+    .modal-header .section-badge {
+      font-size: 11px;
+      background: var(--accent);
+      color: white;
+      padding: 3px 10px;
+      border-radius: 12px;
+    }
+    .modal-header .close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    .modal-header .close-btn:hover { color: var(--text); }
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    /* Markdown rendering */
+    .modal-body h1 { font-size: 20px; margin: 24px 0 12px; color: var(--accent-light); }
+    .modal-body h2 { font-size: 17px; margin: 20px 0 10px; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    .modal-body h3 { font-size: 14px; margin: 16px 0 8px; color: var(--text); }
+    .modal-body p { font-size: 13px; line-height: 1.7; margin: 8px 0; color: var(--text-muted); }
+    .modal-body ul, .modal-body ol { padding-left: 20px; margin: 8px 0; }
+    .modal-body li { font-size: 13px; line-height: 1.6; color: var(--text-muted); margin: 4px 0; }
+    .modal-body code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; color: var(--accent-light); }
+    .modal-body pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 12px 0; overflow-x: auto; }
+    .modal-body pre code { background: none; padding: 0; color: var(--text); }
+    .modal-body table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+    .modal-body th { background: var(--bg); padding: 8px 12px; text-align: left; border: 1px solid var(--border); font-weight: 600; color: var(--text); }
+    .modal-body td { padding: 8px 12px; border: 1px solid var(--border); color: var(--text-muted); }
+    .modal-body blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 12px 0; background: rgba(99, 102, 241, 0.05); border-radius: 0 4px 4px 0; }
+    .modal-body blockquote p { color: var(--text); }
+    .modal-body strong { color: var(--text); }
+    .modal-body hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+    .modal-footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .modal-footer .file-ref { font-size: 11px; color: var(--text-muted); font-family: monospace; }
+    .modal-footer button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      :root { --sidebar-width: 0px; }
+      .sidebar { display: none; }
+      .header select { min-width: 200px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">EAGLE <span>Workflow Viewer</span></div>
+    <select id="uc-select"></select>
+    <div class="nav-controls">
+      <button id="btn-prev" title="Previous step (Left arrow)">&#9664; Prev</button>
+      <span class="step-counter" id="step-counter">1 / 20</span>
+      <button id="btn-next" title="Next step (Right arrow)">Next &#9654;</button>
+    </div>
+  </div>
+
+  <!-- Main layout -->
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="diagram-area" id="diagram-area">
+      <svg id="diagram" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="zoom-controls">
+        <button id="zoom-in" title="Zoom in">+</button>
+        <div class="zoom-label" id="zoom-label">100%</div>
+        <button id="zoom-out" title="Zoom out">-</button>
+        <button id="zoom-fit" title="Fit to screen" style="font-size:13px;">Fit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail bar -->
+  <div class="detail-bar" id="detail-bar">
+    <div class="step-info" id="step-info">
+      <div class="actors"><span class="from">Select a step</span></div>
+      <div class="message">Click a step in the sidebar or use the arrow keys to navigate</div>
+    </div>
+    <button class="view-prompt-btn" id="btn-view-prompt" disabled>View Prompt</button>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="modal-title">Skill Name</h2>
+          <span class="section-badge" id="modal-section"></span>
+        </div>
+        <button class="close-btn" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer">
+        <span class="file-ref" id="modal-file-ref"></span>
+        <button id="modal-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>
+// ============================================================
+// DATA: Use Cases
+// ============================================================
+const USE_CASES = [
+{
+  id: "uc01-happy",
+  title: "UC-01: New Acquisition (Happy Path)",
+  subtitle: "Simple $85K lab equipment with complete user knowledge",
+  actors: [
+    { id: "user", name: "COR / Program Staff", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "sup", name: "Supervisor Agent", color: "#50c878" },
+    { id: "intake", name: "OA Intake Skill", color: "#ff6b6b" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" },
+    { id: "s3", name: "S3 Store", color: "#808080" }
+  ],
+  phases: [
+    { name: "Phase 1: Minimal Intake", color: "#1a2636", border: "#2a4a6a", startStep: 4, endStep: 7 },
+    { name: "Phase 2: Clarifying Questions", color: "#1a2a1a", border: "#2a5a2a", startStep: 8, endStep: 13 },
+    { name: "Phase 3: Determination", color: "#2a2218", border: "#5a4a2a", startStep: 14, endStep: 17 },
+    { name: "Phase 4: Document Generation", color: "#261a26", border: "#5a2a5a", startStep: 21, endStep: 26 }
+  ],
+  steps: [
+    { type: "message", from: "user", to: "ui", label: '"I need to buy lab equipment"', desc: "COR initiates an acquisition request through natural language" },
+    { type: "message", from: "ui", to: "sup", label: "New session created", desc: "UI creates a new session and routes to the Supervisor Agent" },
+    { type: "self", actor: "sup", label: "Detect intent: acquisition request", desc: "Supervisor analyzes the message and identifies it as an acquisition request" },
+    { type: "message", from: "sup", to: "intake", label: "Delegate to OA Intake", desc: "Routes to the OA Intake Skill for guided intake workflow", prompt: "intake" },
+    { type: "message", from: "intake", to: "ui", label: "Ask basics (what, cost, timeline)", desc: "Intake asks only 3 fields: requirement, estimated cost, timeline", prompt: "intake", section: "Phase 1: Minimal Intake Form" },
+    { type: "message", from: "ui", to: "user", label: "Display intake form", desc: "UI renders the intake questions conversationally" },
+    { type: "message", from: "user", to: "ui", label: '"$85K Illumina sequencer, need by March"', desc: "User provides all three basic data points in one response" },
+    { type: "message", from: "ui", to: "intake", label: "Form submission", desc: "Answers sent to Intake Skill for processing" },
+    { type: "message", from: "intake", to: "ui", label: '"Product or Service? Sole source?"', desc: "Smart follow-ups based on initial answers, not a rigid form", prompt: "intake", section: "Phase 2: Clarifying Questions" },
+    { type: "message", from: "user", to: "ui", label: '"Product, only Illumina makes it"', desc: "User indicates sole source - triggers J&A requirement" },
+    { type: "message", from: "ui", to: "intake", label: "Answers", desc: "Forward answers to Intake Skill" },
+    { type: "message", from: "intake", to: "ui", label: '"Funding available? Existing contract?"', desc: "Follow-up on funding and contract vehicle", prompt: "intake", section: "Phase 2: Clarifying Questions" },
+    { type: "message", from: "user", to: "ui", label: '"Grant funding, new purchase"', desc: "Confirms funding source and that this is a new acquisition" },
+    { type: "message", from: "ui", to: "intake", label: "Answers", desc: "Forward to Intake Skill" },
+    { type: "self", actor: "intake", label: "Apply decision tree", desc: "Intake applies determination logic based on all collected data", prompt: "intake", section: "Phase 3: Acquisition Pathway Determination" },
+    { type: "note", actor: "intake", text: "$85K \u2192 Simplified (Part 13)\nSole vendor \u2192 J&A needed\nProduct \u2192 Fixed Price", desc: "Key determination: Simplified Acquisition, needs sole source justification" },
+    { type: "message", from: "intake", to: "ui", label: "Display Acquisition Summary", desc: "Shows the determined pathway and key facts" },
+    { type: "message", from: "intake", to: "ui", label: "Display Document Checklist", desc: "Lists required documents: SOW, IGCE, J&A, Market Research" },
+    { type: "message", from: "user", to: "ui", label: '"Help me draft the SOW"', desc: "User requests document generation" },
+    { type: "message", from: "ui", to: "sup", label: "Document generation request", desc: "Routes back through Supervisor for skill routing" },
+    { type: "message", from: "sup", to: "docgen", label: "Generate SOW with intake data", desc: "Supervisor delegates to Document Generator with full context", prompt: "docgen" },
+    { type: "self", actor: "docgen", label: "Apply SOW template", desc: "Loads SOW template from data/templates/sow-template.md", prompt: "docgen", section: "Document 1: Statement of Work (SOW)" },
+    { type: "self", actor: "docgen", label: "Fill from intake context", desc: "Populates template with data collected during intake" },
+    { type: "message", from: "docgen", to: "s3", label: "Store SOW v1 (.docx)", desc: "Saves generated document to S3 document store" },
+    { type: "message", from: "s3", to: "docgen", label: "Pre-signed download URL", desc: "S3 returns a secure, time-limited download link", dashed: true },
+    { type: "message", from: "docgen", to: "ui", label: "SOW ready for download", desc: "Document Generator notifies UI that document is ready" },
+    { type: "message", from: "ui", to: "user", label: "Display SOW + download link", desc: "User can preview and download the generated SOW" },
+    { type: "note", actor: "ui", text: "Checklist: SOW \u2713", desc: "Document checklist updates to show SOW complete" },
+    { type: "message", from: "user", to: "ui", label: '"Now the IGCE"', desc: "User requests next document" },
+    { type: "message", from: "ui", to: "sup", label: "Next document request", desc: "Routes IGCE request through Supervisor" },
+    { type: "message", from: "sup", to: "docgen", label: "Generate IGCE", desc: "Delegates to Document Generator", prompt: "docgen", section: "Document 2: Independent Government Cost Estimate (IGCE)" },
+    { type: "self", actor: "docgen", label: "Apply IGCE template + cost data", desc: "Uses IGCE template and populates with cost estimates" },
+    { type: "message", from: "docgen", to: "s3", label: "Store IGCE v1", desc: "Saves IGCE to S3" },
+    { type: "message", from: "docgen", to: "ui", label: "IGCE ready", desc: "Notifies UI" },
+    { type: "message", from: "ui", to: "user", label: "Display IGCE + download link", desc: "User can download IGCE" },
+    { type: "note", actor: "ui", text: "Checklist: SOW \u2713 IGCE \u2713", desc: "Two documents complete, J&A and Market Research remain" }
+  ]
+},
+{
+  id: "uc01-complex",
+  title: "UC-01 Complex: Skill Invocation on \"I Don't Know\"",
+  subtitle: ">$250K CT scanner where user lacks information",
+  actors: [
+    { id: "user", name: "COR / Program Staff", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "agent", name: "Supervisor Agent", color: "#50c878" },
+    { id: "intake", name: "OA Intake Skill", color: "#ff6b6b" },
+    { id: "comp", name: "Compliance Skill", color: "#daa520" },
+    { id: "tech", name: "Tech Review Skill", color: "#20b2aa" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" }
+  ],
+  phases: [
+    { name: "Skill Invocation: User Needs Help", color: "#2a1a1a", border: "#5a2a2a", startStep: 8, endStep: 14 },
+    { name: "Skill Invocation: Quality Check", color: "#2a2218", border: "#5a4a2a", startStep: 20, endStep: 25 }
+  ],
+  steps: [
+    { type: "message", from: "user", to: "ui", label: '"CT scanner, not sure on price, 6 weeks"', desc: "User has incomplete information - doesn't know the price" },
+    { type: "message", from: "ui", to: "agent", label: "New session", desc: "Session created" },
+    { type: "message", from: "agent", to: "intake", label: "Invoke OA Intake skill", desc: "Supervisor routes to intake", prompt: "intake" },
+    { type: "message", from: "intake", to: "ui", label: "Equipment clarification questions", desc: "Intake asks targeted questions about the CT scanner" },
+    { type: "message", from: "user", to: "ui", label: '"New, 128-slice, grant expiring"', desc: "User provides technical details" },
+    { type: "message", from: "ui", to: "intake", label: "Answers", desc: "Forward to Intake" },
+    { type: "message", from: "intake", to: "agent", label: "Estimate: $400K-$1M+ \u2192 Negotiated (Part 15)", desc: "Intake estimates cost range based on equipment type", dashed: true },
+    { type: "message", from: "intake", to: "ui", label: '"Existing contract vehicle? Grant details?"', desc: "Asks about contract vehicle" },
+    { type: "message", from: "user", to: "ui", label: '"I don\'t know"', desc: "KEY MOMENT: User doesn't have the information" },
+    { type: "message", from: "intake", to: "agent", label: "User lacks info (contract vehicle)", desc: "Intake signals to Supervisor that user needs help", dashed: true },
+    { type: "message", from: "agent", to: "comp", label: "Invoke Compliance skill (vehicle search)", desc: "Supervisor proactively invokes Compliance to find vehicles", prompt: "compliance" },
+    { type: "self", actor: "comp", label: "Search: NIH IDIQs, GSA MAS, HHS BPAs", desc: "Compliance searches knowledge base for applicable vehicles", prompt: "compliance", section: "Contract Vehicles" },
+    { type: "message", from: "comp", to: "agent", label: "Found: NITAAC CIO-SP3, GSA 66 III, NIH BPA", desc: "Returns matching contract vehicles", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: "Present vehicle options to user", desc: "Supervisor presents findings to user" },
+    { type: "message", from: "ui", to: "user", label: '"Here are available contract vehicles..."', desc: "User sees options they didn't know about" },
+    { type: "message", from: "user", to: "ui", label: '"Show me my checklist"', desc: "User wants to see full requirements" },
+    { type: "message", from: "agent", to: "ui", label: "Full document checklist (10 items)", desc: "Shows all required documents with status" },
+    { type: "note", actor: "ui", text: "SOW \u2718 | IGCE \u2718 | AP \u2718\nMarket Research \u2718 | J&A TBD", desc: "10 items needed for Negotiated acquisition" },
+    { type: "message", from: "user", to: "ui", label: '"Generate the Acquisition Plan"', desc: "User requests the most complex document" },
+    { type: "message", from: "ui", to: "agent", label: "Document request", desc: "Routes to Supervisor" },
+    { type: "message", from: "agent", to: "docgen", label: "Invoke Doc Generator (Full AP)", desc: "Delegates AP generation", prompt: "docgen", section: "Document 3: Acquisition Plan (AP)" },
+    { type: "self", actor: "docgen", label: "Apply Full AP template (FAR 7.105)", desc: "Uses the comprehensive AP template", prompt: "docgen" },
+    { type: "message", from: "docgen", to: "agent", label: "AP draft ready", desc: "Draft complete, but needs quality check", dashed: true },
+    { type: "message", from: "agent", to: "tech", label: "Invoke Tech Review skill", desc: "Supervisor proactively sends for technical review", prompt: "tech-review" },
+    { type: "self", actor: "tech", label: "Check specs, installation, training", desc: "Reviews technical requirements completeness", prompt: "tech-review", section: "Specification Validation" },
+    { type: "message", from: "tech", to: "agent", label: "Missing: site prep, HVAC, electrical", desc: "Tech Review finds gaps", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: '"Before finalizing, we need: site details..."', desc: "Supervisor relays findings to user" },
+    { type: "message", from: "user", to: "ui", label: "Provides additional details", desc: "User fills in the technical gaps" },
+    { type: "message", from: "agent", to: "docgen", label: "Update AP with new details", desc: "Sends updated info for AP revision" },
+    { type: "message", from: "docgen", to: "ui", label: "AP v2 ready for download", desc: "Revised AP with complete technical details" }
+  ]
+},
+{
+  id: "uc02",
+  title: "UC-02: Micro-Purchase (<$15K)",
+  subtitle: "Fast path for small purchases - ~2 minutes total",
+  actors: [
+    { id: "user", name: "COR / Program Staff", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "agent", name: "Supervisor Agent", color: "#50c878" },
+    { id: "intake", name: "OA Intake Skill", color: "#ff6b6b" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" },
+    { id: "s3", name: "S3 Store", color: "#808080" }
+  ],
+  phases: [
+    { name: "Streamlined Intake", color: "#1a2636", border: "#2a4a6a", startStep: 3, endStep: 5 },
+    { name: "Minimal Questions", color: "#1a2a1a", border: "#2a5a2a", startStep: 8, endStep: 10 }
+  ],
+  steps: [
+    { type: "message", from: "user", to: "ui", label: '"I have a $14K quote for lab supplies"', desc: "User already has a quote - streamlined path" },
+    { type: "message", from: "ui", to: "agent", label: "New session", desc: "Session created" },
+    { type: "message", from: "agent", to: "intake", label: "Invoke OA Intake skill", desc: "Routes to intake", prompt: "intake" },
+    { type: "message", from: "intake", to: "ui", label: '"Can you share the quote details?"', desc: "Intake recognizes this is likely micro-purchase" },
+    { type: "message", from: "user", to: "ui", label: "Uploads quote / provides details", desc: "User provides the Fisher Scientific quote" },
+    { type: "message", from: "ui", to: "intake", label: "Quote: $13,800 from Fisher Scientific", desc: "Quote parsed and sent to Intake" },
+    { type: "self", actor: "intake", label: "$13,800 < $15K \u2192 Micro-purchase", desc: "Automatic determination: micro-purchase threshold", prompt: "intake", section: "Phase 3: Acquisition Pathway Determination" },
+    { type: "message", from: "intake", to: "agent", label: "Determination: micro-purchase", desc: "Notifies Supervisor of pathway", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: '"Just a few quick items:"', desc: "Only 3 questions needed for micro-purchase" },
+    { type: "note", actor: "agent", text: "1. Funding source?\n2. Delivery location?\n3. Purchase card or PO?", desc: "Minimal questions for micro-purchase" },
+    { type: "message", from: "user", to: "ui", label: '"Grant funds, Building 37, purchase card"', desc: "User provides all answers" },
+    { type: "message", from: "ui", to: "agent", label: "Answers", desc: "Forward to Supervisor" },
+    { type: "message", from: "agent", to: "docgen", label: "Generate purchase request", desc: "Only one document needed", prompt: "docgen" },
+    { type: "self", actor: "docgen", label: "Generate purchase request form", desc: "Simple form with quote details" },
+    { type: "message", from: "docgen", to: "s3", label: "Store purchase request", desc: "Save to S3" },
+    { type: "message", from: "s3", to: "docgen", label: "Download URL", desc: "Return download link", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: "Purchase request ready", desc: "Notify UI" },
+    { type: "message", from: "ui", to: "user", label: '"All set! Here\'s your purchase request."', desc: "User gets document immediately" },
+    { type: "note", actor: "ui", text: "\u2713 Purchase Request\n\u2713 Quote attached\n\u2192 Ready for card holder", desc: "Total interaction: ~2 minutes" }
+  ]
+},
+{
+  id: "uc03",
+  title: "UC-03: Option Exercise Package",
+  subtitle: "Prepare option year package from previous year documents",
+  actors: [
+    { id: "user", name: "COR / CO", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "agent", name: "Supervisor Agent", color: "#50c878" },
+    { id: "intake", name: "OA Intake Skill", color: "#ff6b6b" },
+    { id: "comp", name: "Compliance Skill", color: "#daa520" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" },
+    { id: "s3", name: "S3 Store", color: "#808080" }
+  ],
+  phases: [
+    { name: "Previous Package Ingestion", color: "#1a2636", border: "#2a4a6a", startStep: 3, endStep: 7 },
+    { name: "Tuning Questions", color: "#1a2a1a", border: "#2a5a2a", startStep: 8, endStep: 10 },
+    { name: "Option Validation", color: "#261a26", border: "#5a2a5a", startStep: 11, endStep: 13 }
+  ],
+  steps: [
+    { type: "message", from: "user", to: "ui", label: '"Exercise Option Year 3 on contract HHSN261..."', desc: "COR needs to exercise a contract option" },
+    { type: "message", from: "ui", to: "agent", label: "New session", desc: "Session created" },
+    { type: "message", from: "agent", to: "intake", label: "Invoke (option exercise mode)", desc: "Intake activated in option exercise mode", prompt: "intake" },
+    { type: "message", from: "intake", to: "ui", label: '"Upload your previous option package"', desc: "Needs prior year docs as baseline" },
+    { type: "message", from: "user", to: "ui", label: "Uploads previous AP, SOW, IGCE (Year 2)", desc: "User provides last year's documents" },
+    { type: "message", from: "ui", to: "intake", label: "Parse uploaded documents", desc: "Documents sent for analysis" },
+    { type: "self", actor: "intake", label: "Extract: scope, costs, personnel, PoP", desc: "Parse and extract key data from prior year" },
+    { type: "message", from: "intake", to: "agent", label: "Previous package context loaded", desc: "Baseline data extracted", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: '"I\'ve reviewed Year 2. Questions:"', desc: "Agent asks targeted tuning questions" },
+    { type: "note", actor: "agent", text: "1. Scope changes?\n2. Personnel changes?\n3. Cost escalation?\n4. Performance issues?", desc: "Only asks what might have changed" },
+    { type: "message", from: "user", to: "ui", label: '"Same scope, new COR, 3% escalation, no issues"', desc: "User provides updates" },
+    { type: "message", from: "agent", to: "comp", label: "Invoke Compliance (option validation)", desc: "Verify option is exercisable", prompt: "compliance" },
+    { type: "self", actor: "comp", label: "Verify option clause, ceiling, dates", desc: "Checks contract terms allow option exercise", prompt: "compliance" },
+    { type: "message", from: "comp", to: "agent", label: "Valid: Option 3 exercisable", desc: "Compliance confirms option is valid", dashed: true },
+    { type: "message", from: "agent", to: "docgen", label: "Generate option package", desc: "Generate all 5 documents", prompt: "docgen" },
+    { type: "note", actor: "docgen", text: "Parallel:\n- Updated AP\n- Updated SOW\n- Updated IGCE (3%)\n- Option Exercise Letter\n- COR Nomination", desc: "Five documents generated simultaneously" },
+    { type: "message", from: "docgen", to: "s3", label: "Store option package", desc: "Save all documents" },
+    { type: "message", from: "s3", to: "docgen", label: "Download URLs", desc: "Return links", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: "Option package complete", desc: "All documents ready" },
+    { type: "message", from: "ui", to: "user", label: "5 documents ready for download", desc: "Complete option exercise package" }
+  ]
+},
+{
+  id: "uc04",
+  title: "UC-04: Contract Modification",
+  subtitle: "Add funding and extend period of performance",
+  actors: [
+    { id: "user", name: "COR / CO", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "sup", name: "Supervisor Agent", color: "#50c878" },
+    { id: "intake", name: "OA Intake Skill", color: "#ff6b6b" },
+    { id: "comp", name: "Compliance Skill", color: "#daa520" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" },
+    { id: "s3", name: "S3 Store", color: "#808080" }
+  ],
+  phases: [
+    { name: "Modification Type Collection", color: "#1a2636", border: "#2a4a6a", startStep: 4, endStep: 7 },
+    { name: "Modification Details", color: "#1a2a1a", border: "#2a5a2a", startStep: 8, endStep: 13 },
+    { name: "Compliance Validation", color: "#261a26", border: "#5a2a5a", startStep: 15, endStep: 17 }
+  ],
+  steps: [
+    { type: "message", from: "user", to: "ui", label: '"Modify contract HHSN261201500003I"', desc: "User needs to modify an existing contract" },
+    { type: "message", from: "ui", to: "sup", label: "New session - modification intent", desc: "Session created" },
+    { type: "self", actor: "sup", label: "Detect intent: contract modification", desc: "Supervisor identifies modification request" },
+    { type: "message", from: "sup", to: "intake", label: "Delegate (modification mode)", desc: "Routes to Intake in modification mode", prompt: "intake" },
+    { type: "message", from: "intake", to: "ui", label: '"What type of modification?"', desc: "Asks for modification category" },
+    { type: "note", actor: "intake", text: "\u25cb Add funding\n\u25cb Extend PoP\n\u25cb Change scope\n\u25cb Admin change\n\u25cb Multiple changes", desc: "Modification type options" },
+    { type: "message", from: "user", to: "ui", label: '"Add funding and extend PoP by 6 months"', desc: "User selects multiple changes" },
+    { type: "message", from: "ui", to: "intake", label: "Modification details", desc: "Forward to Intake" },
+    { type: "message", from: "intake", to: "ui", label: '"How much additional funding?"', desc: "Collect modification specifics" },
+    { type: "message", from: "user", to: "ui", label: '"$150K for FY2026"', desc: "Funding amount specified" },
+    { type: "message", from: "intake", to: "ui", label: '"New end date?"', desc: "Collect PoP extension" },
+    { type: "message", from: "user", to: "ui", label: '"September 30, 2027"', desc: "New end date provided" },
+    { type: "message", from: "intake", to: "ui", label: '"Within existing scope?"', desc: "Critical question - determines if J&A needed" },
+    { type: "message", from: "user", to: "ui", label: '"Yes, same work continuing"', desc: "Within scope = no J&A needed" },
+    { type: "self", actor: "intake", label: "Determine: bilateral mod, within scope", desc: "Intake determines modification approach" },
+    { type: "message", from: "sup", to: "comp", label: "Validate modification approach", desc: "Send to Compliance for validation", prompt: "compliance" },
+    { type: "self", actor: "comp", label: "Check FAR: scope \u2713, funding \u2713, bilateral", desc: "Validates all compliance requirements met", prompt: "compliance" },
+    { type: "message", from: "comp", to: "sup", label: "Validated: Standard bilateral mod", desc: "No additional justifications needed", dashed: true },
+    { type: "message", from: "sup", to: "docgen", label: "Generate modification package", desc: "Generate all mod documents", prompt: "docgen" },
+    { type: "note", actor: "docgen", text: "Parallel:\n- SF-30 Cover Page\n- Updated IGCE\n- Funds Certification\n- Updated AP", desc: "Four documents generated in parallel" },
+    { type: "message", from: "docgen", to: "s3", label: "Store modification package", desc: "Save to S3" },
+    { type: "message", from: "s3", to: "docgen", label: "Download URLs", desc: "Return links", dashed: true },
+    { type: "message", from: "docgen", to: "ui", label: "Package ready", desc: "All documents ready" },
+    { type: "message", from: "ui", to: "user", label: "4 documents ready for download", desc: "Complete modification package" },
+    { type: "note", actor: "ui", text: "Checklist: All items \u2713\nReady for CO signature", desc: "Package complete and ready for signature" }
+  ]
+},
+{
+  id: "uc05",
+  title: "UC-05: CO Package Review",
+  subtitle: "Contracting Officer reviews package and gets findings",
+  actors: [
+    { id: "co", name: "Contracting Officer", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "agent", name: "Supervisor Agent", color: "#50c878" },
+    { id: "comp", name: "Compliance Skill", color: "#daa520" },
+    { id: "tech", name: "Tech Review Skill", color: "#20b2aa" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" }
+  ],
+  phases: [
+    { name: "Compliance Review", color: "#1a2636", border: "#2a4a6a", startStep: 4, endStep: 7 },
+    { name: "Technical Review", color: "#1a2a1a", border: "#2a5a2a", startStep: 8, endStep: 11 }
+  ],
+  steps: [
+    { type: "message", from: "co", to: "ui", label: '"Review this acquisition package"', desc: "CO wants package reviewed before signature" },
+    { type: "message", from: "ui", to: "agent", label: "New session (CO role)", desc: "Session created with CO role" },
+    { type: "message", from: "co", to: "ui", label: "Uploads: AP, SOW, IGCE, Market Research", desc: "Full package uploaded for review" },
+    { type: "self", actor: "agent", label: "Parse all documents, identify types", desc: "Agent identifies document types and prepares for review" },
+    { type: "message", from: "agent", to: "comp", label: "Invoke Compliance (package review)", desc: "Send to Compliance for FAR review", prompt: "compliance" },
+    { type: "self", actor: "comp", label: "Check FAR, clauses, cross-reference", desc: "Comprehensive compliance check across all documents", prompt: "compliance", section: "Compliance Checklist" },
+    { type: "message", from: "comp", to: "agent", label: "5 Findings", desc: "Missing clause, cost mismatch, set-aside, PoP mismatch, outdated research", dashed: true },
+    { type: "note", actor: "comp", text: "1. Missing FAR 52.219 clause\n2. AP cost \u2260 IGCE total\n3. Set-aside not justified\n4. PoP mismatch\n5. Market research >12mo", desc: "Five compliance issues found" },
+    { type: "message", from: "agent", to: "tech", label: "Invoke Tech Review (SOW)", desc: "Send SOW for technical review", prompt: "tech-review" },
+    { type: "self", actor: "tech", label: "Check specificity, deliverables, criteria", desc: "Reviews technical completeness", prompt: "tech-review", section: "Specification Validation" },
+    { type: "message", from: "tech", to: "agent", label: "3 Findings", desc: "Undefined deliverable, no acceptance criteria, security incomplete", dashed: true },
+    { type: "note", actor: "tech", text: "1. Task 3 deliverable undefined\n2. No acceptance criteria\n3. Security requirements incomplete", desc: "Three technical issues found" },
+    { type: "message", from: "agent", to: "docgen", label: "Generate findings report", desc: "Create organized report", prompt: "docgen" },
+    { type: "note", actor: "docgen", text: "\ud83d\udd34 Critical (2)\n\ud83d\udfe1 Moderate (4)\n\ud83d\udfe2 Minor (2)", desc: "Findings organized by severity" },
+    { type: "message", from: "agent", to: "ui", label: "Package review complete", desc: "Results ready" },
+    { type: "message", from: "ui", to: "co", label: "8 findings by severity", desc: "CO sees organized findings report" },
+    { type: "message", from: "co", to: "ui", label: '"Fix the cost mismatch for me"', desc: "CO requests automated remediation" },
+    { type: "message", from: "agent", to: "docgen", label: "Update IGCE", desc: "Auto-fix the IGCE to match AP" },
+    { type: "self", actor: "docgen", label: "Reconcile IGCE total with AP", desc: "Adjusts IGCE numbers to match AP" },
+    { type: "message", from: "agent", to: "ui", label: '"IGCE updated. Now shows $487,500."', desc: "Fix applied and confirmed" },
+    { type: "message", from: "ui", to: "co", label: "Updated IGCE + download link", desc: "CO gets corrected document" }
+  ]
+},
+{
+  id: "uc07",
+  title: "UC-07: Contract Close-Out",
+  subtitle: "Generate close-out checklist and documents",
+  actors: [
+    { id: "co", name: "Contracting Officer", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "agent", name: "Supervisor Agent", color: "#50c878" },
+    { id: "comp", name: "Compliance Skill", color: "#daa520" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" },
+    { id: "s3", name: "S3 Store", color: "#808080" }
+  ],
+  phases: [
+    { name: "Contract Analysis", color: "#1a2636", border: "#2a4a6a", startStep: 3, endStep: 5 },
+    { name: "Close-Out Requirements", color: "#261a26", border: "#5a2a5a", startStep: 6, endStep: 8 }
+  ],
+  steps: [
+    { type: "message", from: "co", to: "ui", label: '"Close out contract HHSN261200900045C"', desc: "CO needs to close out a completed contract" },
+    { type: "message", from: "ui", to: "agent", label: "New session (close-out mode)", desc: "Session created" },
+    { type: "message", from: "agent", to: "ui", label: '"Upload contract and final deliverables"', desc: "Requests supporting documents" },
+    { type: "message", from: "co", to: "ui", label: "Uploads: contract, final invoice, deliverable log", desc: "CO provides documentation" },
+    { type: "self", actor: "agent", label: "Parse contract: FFP, all options exercised", desc: "Identifies contract type and status" },
+    { type: "note", actor: "agent", text: "Close-out type: FFP\nAll options exercised\nFinal payment: check", desc: "Contract analysis summary" },
+    { type: "message", from: "agent", to: "comp", label: "Invoke Compliance (close-out checklist)", desc: "Get FAR 4.804 requirements", prompt: "compliance" },
+    { type: "self", actor: "comp", label: "Generate FAR 4.804 checklist (12 items)", desc: "Identifies all required close-out actions", prompt: "compliance" },
+    { type: "message", from: "comp", to: "agent", label: "Close-out action list (12 items)", desc: "Complete checklist", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: "Close-out checklist", desc: "Display to CO" },
+    { type: "note", actor: "ui", text: "\u2713 Final invoice paid\n\u2713 Deliverables accepted\n\u26a0 Release of claims\n\u26a0 Patent report\n\u2718 Property disposition\n\u2718 COR assessment", desc: "Status of each close-out item" },
+    { type: "message", from: "co", to: "ui", label: '"Draft COR assessment and claims letter"', desc: "CO requests document generation" },
+    { type: "message", from: "agent", to: "docgen", label: "Generate close-out docs", desc: "Generate 3 documents in parallel", prompt: "docgen" },
+    { type: "note", actor: "docgen", text: "Parallel:\n- COR Final Assessment\n- Release of Claims Letter\n- Contract Completion Statement", desc: "Three close-out documents" },
+    { type: "message", from: "docgen", to: "s3", label: "Store close-out package", desc: "Save to S3" },
+    { type: "message", from: "s3", to: "docgen", label: "Download URLs", desc: "Return links", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: "Close-out documents ready", desc: "All documents complete" },
+    { type: "message", from: "ui", to: "co", label: "3 documents + send claims to contractor", desc: "CO gets documents with next step guidance" }
+  ]
+},
+{
+  id: "uc08",
+  title: "UC-08: Government Shutdown Notification",
+  subtitle: "Time-critical: classify 200+ contracts and generate emails",
+  actors: [
+    { id: "co", name: "Contracting Officer", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "agent", name: "Supervisor Agent", color: "#50c878" },
+    { id: "comp", name: "Compliance Skill", color: "#daa520" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" }
+  ],
+  phases: [
+    { name: "Classify Each Contract (URGENT)", color: "#2a1a1a", border: "#5a2a2a", startStep: 3, endStep: 7 },
+    { name: "Batch Email Generation", color: "#1a2a1a", border: "#2a5a2a", startStep: 9, endStep: 14 }
+  ],
+  steps: [
+    { type: "message", from: "co", to: "ui", label: '"Shutdown in 4 hours. Need notifications."', desc: "URGENT: Government shutdown imminent" },
+    { type: "message", from: "co", to: "ui", label: "Uploads active contract spreadsheet (200+)", desc: "CO provides full contract portfolio" },
+    { type: "message", from: "ui", to: "agent", label: "Contract list received", desc: "200+ contracts to process" },
+    { type: "message", from: "agent", to: "comp", label: "Invoke Compliance (shutdown classification)", desc: "Classify each contract by shutdown rules", prompt: "compliance" },
+    { type: "self", actor: "comp", label: "Classify 200+ contracts by category", desc: "Applies shutdown rules to each contract" },
+    { type: "note", actor: "comp", text: "Cat A: 78 Continue (FFP)\nCat B: 45 Stop at limit\nCat C: 62 Stop work\nCat D: 15 Excepted", desc: "Four categories based on contract type and funding" },
+    { type: "message", from: "comp", to: "agent", label: "Classification complete", desc: "All 200 classified", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: "Summary: 78 | 45 | 62 | 15", desc: "Present classification summary" },
+    { type: "message", from: "ui", to: "co", label: "Classification summary by category", desc: "CO reviews the breakdown" },
+    { type: "message", from: "co", to: "ui", label: '"Generate all notification emails"', desc: "CO approves batch generation" },
+    { type: "message", from: "agent", to: "docgen", label: "Invoke Doc Generator (batch)", desc: "Generate 200 personalized emails", prompt: "docgen" },
+    { type: "self", actor: "docgen", label: "Generate 4 templates + 200 emails", desc: "Template per category, personalized per contract" },
+    { type: "note", actor: "docgen", text: "Template A: Continue\nTemplate B: Stop at limit\nTemplate C: Stop work\nTemplate D: Excepted", desc: "Four email templates, 200 personalized emails" },
+    { type: "message", from: "docgen", to: "agent", label: "200 emails generated", desc: "All emails ready", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: "All notifications ready", desc: "Ready for CO review" },
+    { type: "message", from: "ui", to: "co", label: "200 draft emails by category", desc: "CO reviews and sends" },
+    { type: "note", actor: "ui", text: "Hours of manual work\n\u2192 Minutes of review", desc: "Dramatic time savings in crisis scenario" }
+  ]
+},
+{
+  id: "uc09",
+  title: "UC-09: Score Sheet Consolidation",
+  subtitle: "180 score sheets from 9 reviewers on 20 proposals",
+  actors: [
+    { id: "co", name: "Contracting Officer", color: "#4a90d9" },
+    { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+    { id: "agent", name: "Supervisor Agent", color: "#50c878" },
+    { id: "tech", name: "Tech Review Skill", color: "#20b2aa" },
+    { id: "docgen", name: "Doc Generator", color: "#ffa500" },
+    { id: "s3", name: "S3 Store", color: "#808080" }
+  ],
+  phases: [
+    { name: "Score Sheet Analysis", color: "#1a2636", border: "#2a4a6a", startStep: 3, endStep: 7 },
+    { name: "Question Deduplication", color: "#1a2a1a", border: "#2a5a2a", startStep: 9, endStep: 13 }
+  ],
+  steps: [
+    { type: "message", from: "co", to: "ui", label: '"180 score sheets, 9 reviewers, 20 proposals"', desc: "Massive evaluation consolidation task" },
+    { type: "message", from: "co", to: "ui", label: "Uploads 180 score sheet documents", desc: "All score sheets uploaded" },
+    { type: "message", from: "ui", to: "agent", label: "Documents received", desc: "Agent receives all documents" },
+    { type: "message", from: "agent", to: "tech", label: "Invoke Tech Review (score analysis)", desc: "Send for score analysis", prompt: "tech-review" },
+    { type: "self", actor: "tech", label: "Parse 180 sheets, extract scores", desc: "Extract scores per evaluation factor", prompt: "tech-review" },
+    { type: "self", actor: "tech", label: "Cross-reviewer analysis, outlier detection", desc: "Identify score variance and consensus areas" },
+    { type: "message", from: "tech", to: "agent", label: "20 proposals, 5 factors, 3 divergent", desc: "Analysis complete", dashed: true },
+    { type: "note", actor: "tech", text: "Score variance per factor\nOutlier detection\n3 proposals flagged", desc: "Statistical analysis of reviewer agreement" },
+    { type: "message", from: "agent", to: "ui", label: '"3 proposals have significant disagreements"', desc: "Flags potential issues" },
+    { type: "message", from: "agent", to: "tech", label: "Invoke Tech Review (question consolidation)", desc: "Consolidate reviewer questions", prompt: "tech-review" },
+    { type: "self", actor: "tech", label: "847 questions \u2192 312 unique", desc: "Deduplicate and categorize questions" },
+    { type: "note", actor: "tech", text: "89 answerable from RFP\n156 need Core input\n42 need amendment\n25 administrative", desc: "Questions categorized by action needed" },
+    { type: "message", from: "tech", to: "agent", label: "Consolidated question list", desc: "312 unique questions categorized", dashed: true },
+    { type: "message", from: "agent", to: "docgen", label: "Generate evaluation report", desc: "Create comprehensive report package", prompt: "docgen" },
+    { type: "note", actor: "docgen", text: "Parallel:\n- Consensus Score Matrix\n- Consolidated Questions\n- 20 Per-Contractor Sheets\n- Evaluation Summary", desc: "Four evaluation documents" },
+    { type: "message", from: "docgen", to: "s3", label: "Store evaluation package", desc: "Save all documents" },
+    { type: "message", from: "s3", to: "docgen", label: "Download URLs", desc: "Return links", dashed: true },
+    { type: "message", from: "agent", to: "ui", label: "Evaluation consolidation complete", desc: "All documents ready" },
+    { type: "message", from: "ui", to: "co", label: "4 documents ready", desc: "Complete evaluation package" },
+    { type: "note", actor: "ui", text: "\u2713 Consensus Score Matrix\n\u2713 312 Consolidated Questions\n\u2713 20 Per-Contractor Sheets\n\u2713 Evaluation Summary Report", desc: "From 180 score sheets to 4 organized documents" }
+  ]
+}
+];
+
+// ============================================================
+// DATA: Prompts (condensed from SKILL.md files)
+// ============================================================
+const PROMPTS = {
+  "supervisor": {
+    title: "EAGLE Supervisor Agent",
+    file: "eagle-plugin/agent/supervisor.md",
+    content: `# EAGLE Supervisor Agent
+
+You are EAGLE (Enterprise Acquisitions Guidance & Logistics Engine), the NCI Office of Acquisitions intake assistant.
+
+## Your Role
+
+You orchestrate the acquisition intake process by:
+1. Analyzing incoming user queries to detect intent
+2. Routing to the appropriate skill for specialized handling
+3. Coordinating multi-step workflows that require multiple skills
+4. Maintaining conversation context across interactions
+5. Handling "I don't know" responses by invoking helper skills
+
+## Available Skills
+
+| Skill | ID | Use When... |
+|-------|----|----|
+| **OA Intake** | \`oa-intake\` | User starts/continues acquisition request |
+| **Document Generator** | \`document-generator\` | User needs SOW, IGCE, AP, J&A, or Market Research |
+| **Compliance** | \`compliance\` | FAR/DFAR, clauses, vehicles, socioeconomic |
+| **Knowledge Retrieval** | \`knowledge-retrieval\` | Policies, precedents, documentation |
+| **Tech Review** | \`tech-review\` | Technical specification validation |
+
+## Routing Logic
+
+\`\`\`
+1. Parse user message for intent signals
+2. Match against skill trigger patterns
+3. If multiple skills match:
+   - Prioritize based on context (current workflow stage)
+   - For document generation in intake context → Document Generator
+   - For compliance questions in intake context → Compliance
+4. If no clear match:
+   - Default to OA Intake for acquisition-related queries
+   - Ask clarifying question if truly ambiguous
+5. Hand off with context summary
+\`\`\`
+
+## Philosophy
+
+Act like "Trish" - a senior contracting expert who intuitively knows what to do with any package. Guide users conversationally, not interrogatively.`
+  },
+  "intake": {
+    title: "OA Intake Skill",
+    file: "eagle-plugin/skills/oa-intake/SKILL.md",
+    content: `# OA Intake Skill - Acquisition Request Workflow
+
+Guide CORs and program staff through the acquisition intake process like a knowledgeable contract specialist colleague.
+
+## Philosophy: Think Like Trish
+
+Act like "Trish" - a senior contracting expert who intuitively knows what to do with any package. Don't require users to understand all the branching logic upfront.
+
+1. **Start minimal** - Collect just enough to begin
+2. **Ask smart follow-ups** - Based on their answers, not a rigid form
+3. **Determine the path** - Acquisition type, documents needed
+4. **Guide to completion** - Help generate each required document
+
+## Workflow
+
+\`\`\`
+START → Minimal Form → Clarifying Questions → Determination → Document Generation
+         (3 fields)       (contextual)         (pathway)         (assisted)
+\`\`\`
+
+## Phase 1: Minimal Intake Form
+
+| Field | Question | Why We Ask |
+|-------|----------|------------|
+| **Requirement** | "What do you need?" | Understand the core need |
+| **Estimated Cost** | "Estimated total value?" | Determines acquisition type |
+| **Timeline** | "When do you need it?" | Affects urgency and pathway |
+
+### Cost Range Options
+\`\`\`
+○ Under $10,000 (Micro-purchase)
+○ $10,000 - $250,000 (Simplified Acquisition)
+○ Over $250,000 (Negotiated Acquisition)
+○ I don't know yet
+\`\`\`
+
+## Phase 2: Clarifying Questions
+
+Based on initial answers, ask targeted follow-ups:
+- **Product vs Service** - Determines contract type considerations
+- **Source Knowledge** - Sole source → J&A requirement
+- **Existing Vehicles** - IDIQs, BPAs, GSA schedules
+- **Timeline & Urgency** - Grant deadlines, equipment failures
+- **Funding** - Appropriated, multi-year, no-year funds
+
+## Phase 3: Acquisition Pathway Determination
+
+### Decision Tree: Acquisition Type
+\`\`\`
+COST < $10,000?
+├── YES → MICRO-PURCHASE (minimal docs, purchase card)
+└── NO → COST $10,000 - $250,000?
+         ├── YES → SIMPLIFIED ACQUISITION (FAR Part 13)
+         └── NO → NEGOTIATED ACQUISITION (FAR Part 15)
+\`\`\`
+
+### Decision Tree: Contract Type
+\`\`\`
+Requirements clearly defined?
+├── YES → FIXED PRICE (FFP preferred)
+└── NO → Level of effort estimable?
+         ├── YES → TIME & MATERIALS (T&M)
+         └── NO → COST REIMBURSEMENT
+\`\`\`
+
+## Phase 4: Document Requirements Matrix
+
+| Document | Micro | Simplified | Negotiated |
+|----------|:-----:|:----------:|:----------:|
+| Purchase Request | ✓ | ✓ | ✓ |
+| SOW | - | ✓ | ✓ |
+| IGCE | - | ✓ | ✓ |
+| Market Research | - | ✓ | ✓ |
+| Acquisition Plan | - | If >$7M | ✓ |
+| J&A (if sole source) | - | If needed | If needed |
+
+## Key Thresholds
+
+| Threshold | Amount | Significance |
+|-----------|--------|--------------|
+| Micro-Purchase | $10,000 | Minimal docs, purchase card |
+| Publicize | $25,000 | Synopsis on SAM.gov |
+| Simplified (SAT) | $250,000 | Full competition above |
+| Written AP | $7,000,000 | FAR 7.105 requirements |`
+  },
+  "docgen": {
+    title: "Document Generator Skill",
+    file: "eagle-plugin/skills/document-generator/SKILL.md",
+    content: `# Document Generator Skill
+
+Generate professional acquisition documents based on intake context and user inputs.
+
+## Supported Documents
+
+| Document | Abbreviation | When Required |
+|----------|--------------|---------------|
+| Statement of Work | SOW | All above micro-purchase |
+| Independent Government Cost Estimate | IGCE | All above micro-purchase |
+| Acquisition Plan | AP | Acquisitions > $7M |
+| Justification & Approval | J&A | Sole source / limited competition |
+| Market Research Report | MRR | All above micro-purchase |
+
+## Document 1: Statement of Work (SOW)
+
+Defines the work to be performed, deliverables, and performance requirements.
+
+### Template Structure
+- 1. BACKGROUND AND PURPOSE
+- 2. SCOPE
+- 3. PERIOD OF PERFORMANCE
+- 4. APPLICABLE DOCUMENTS AND STANDARDS
+- 5. TASKS AND REQUIREMENTS
+- 6. DELIVERABLES
+- 7. GOVERNMENT-FURNISHED PROPERTY
+- 8. PLACE OF PERFORMANCE
+- 9. SECURITY REQUIREMENTS
+- 10. QUALITY ASSURANCE SURVEILLANCE PLAN
+
+## Document 2: IGCE
+
+Independent estimate of anticipated costs.
+
+### Template Sections
+- 1. PURPOSE
+- 2. METHODOLOGY (GSA rates, historical data, BLS)
+- 3. COST BREAKDOWN (Direct, Labor, Indirect, Other)
+- 4. TOTAL ESTIMATED COST
+- 5. ASSUMPTIONS AND LIMITATIONS
+- 6. CONFIDENCE LEVEL
+- 7. DATA SOURCES
+
+## Document 3: Acquisition Plan (AP)
+
+Strategy document per FAR 7.105.
+
+### Template (FAR 7.105)
+- 1. ACQUISITION BACKGROUND AND OBJECTIVES
+  - Statement of Need, Applicable Conditions, Cost, Risks
+- 2. PLAN OF ACTION
+  - Sources, Competition, Source-Selection, Contract Type
+  - Milestones for the Acquisition Cycle
+- 3. APPROVALS
+
+## Document 4: Justification & Approval (J&A)
+
+Justifies other than full and open competition (FAR 6.3).
+
+### Authority Reference
+| Authority | When to Use |
+|-----------|-------------|
+| 6.302-1 | Only one source |
+| 6.302-2 | Unusual urgency |
+| 6.302-5 | Authorized by statute |
+
+## Generation Workflow
+
+1. Receive request with document type and context
+2. Validate inputs - Check for required fields
+3. Load template from \`data/templates/\`
+4. Populate fields from intake context
+5. Apply business logic - Thresholds, requirements
+6. Generate document with proper formatting
+7. Save to S3
+8. Return confirmation with preview`
+  },
+  "compliance": {
+    title: "Compliance Skill",
+    file: "eagle-plugin/skills/compliance/SKILL.md",
+    content: `# Compliance Skill
+
+Ensure acquisition packages meet FAR, DFAR, and HHSAR requirements.
+
+## Core Functions
+
+1. **FAR/DFAR/HHSAR Search** - Search regulations for relevant clauses
+2. **Clause Identification** - Determine required clauses by contract type/value
+3. **Contract Vehicle Recommendation** - GSA, NITAAC, NIH BPAs, full competition
+4. **Socioeconomic Compliance** - Small business set-aside requirements
+
+## Competition Requirements (FAR Part 6)
+
+All acquisitions above SAT must use full and open competition unless exception applies.
+
+### Exceptions (FAR 6.302)
+
+| Exception | Authority | Common Use Cases |
+|-----------|-----------|------------------|
+| Only One Source | 6.302-1 | Proprietary technology |
+| Urgency | 6.302-2 | Safety, research continuity |
+| Authorized by Statute | 6.302-5 | 8(a) sole source |
+
+### J&A Approval Thresholds
+
+| Value | Approval Authority |
+|-------|-------------------|
+| ≤ $750K | Contracting Officer |
+| ≤ $15M | Competition Advocate |
+| ≤ $75M | Head of Procuring Activity |
+| > $100M | Agency Head |
+
+## Contract Vehicles
+
+### GSA MAS
+- Pre-negotiated pricing, pre-competed terms
+- ≤ $10K: one source | $10K-$250K: 3+ quotes | >$250K: reasonable number
+
+### NITAAC (NIH IT)
+- CIO-SP3: IT services, $40B ceiling
+- CIO-CS: IT commodities, $20B ceiling
+
+### 8(a) Program
+- Sole Source: ≤ $4.5M services, ≤ $7M manufacturing
+- Above limits: competitive
+
+## Required Clauses by Threshold
+
+| Threshold | Key Clauses |
+|-----------|-------------|
+| All contracts | FAR 52.203-3 Gratuities, 52.223-6 Drug-Free |
+| > $10K | 52.222-26 Equal Opportunity |
+| > $25K | 52.204-25 Telecommunications Ban |
+| > $150K | 52.219-8 Small Business Utilization |
+| > $750K | 52.219-9 Subcontracting Plan |`
+  },
+  "tech-review": {
+    title: "Tech Review Skill",
+    file: "eagle-plugin/skills/tech-review/SKILL.md",
+    content: `# Tech Review Skill
+
+Validate technical requirements, specifications, and ensure compliance with accessibility and technical standards.
+
+## Core Functions
+
+1. **Specification Validation** - Completeness, clarity, compliance
+2. **Installation Requirements** - Site prep, integration, safety
+3. **Training & Support Review** - Adequacy of training and maintenance
+4. **Accessibility Compliance** - Section 508, WCAG 2.0 Level AA
+
+## Specification Validation
+
+### Completeness Checklist
+
+**Products/Equipment:**
+- Make/model, dimensions, power requirements
+- Environmental requirements (temp, humidity)
+- Performance specifications
+- Warranty and maintenance requirements
+
+**Services:**
+- Scope clearly defined
+- Performance standards measurable
+- Deliverables with acceptance criteria
+- Security clearance requirements
+
+**Software/IT:**
+- Functional and technical requirements
+- Integration and security requirements
+- Hosting and licensing terms
+
+### Quality Criteria
+
+| Criterion | Description |
+|-----------|-------------|
+| Clarity | Unambiguous, no subjective terms |
+| Measurable | Quantifiable acceptance criteria |
+| Achievable | Technically feasible |
+| Non-restrictive | Doesn't limit competition |
+
+### Common Issues to Flag
+- **Overly Restrictive**: Brand name without "or equal"
+- **Ambiguous**: "state-of-the-art," "best available"
+- **Missing**: No acceptance criteria, unclear deliverables
+
+## Section 508 Accessibility
+
+**Applies to:** All electronic and information technology
+
+### WCAG 2.0 Level AA
+- Perceivable, Operable, Understandable, Robust
+
+### Exceptions
+| Exception | When Applies |
+|-----------|--------------|
+| Undue burden | Significant difficulty/expense |
+| Commercial non-availability | Compliant product doesn't exist |
+| National security | NIST/NSA approval required |`
+  },
+  "knowledge-retrieval": {
+    title: "Knowledge Retrieval Skill",
+    file: "eagle-plugin/skills/knowledge-retrieval/SKILL.md",
+    content: `# Knowledge Retrieval Skill
+
+Search and retrieve acquisition-related knowledge including FAR/DFAR regulations, NCI policies, precedent acquisitions, and technical documentation.
+
+## Core Functions
+
+1. **Regulation Search** - FAR, DFAR, HHSAR full-text search
+2. **Policy Lookup** - NCI-specific acquisition policies
+3. **Precedent Search** - Similar past acquisitions
+4. **Technical Documentation** - Standards, specifications, guides
+
+## Search Types
+
+| Type | Source | Use Case |
+|------|--------|----------|
+| Regulation | FAR/DFAR database | Specific clause lookup |
+| Policy | NCI policy documents | Internal procedures |
+| Precedent | Historical awards | Similar acquisitions |
+| Technical | Standards databases | Specification references |`
+  }
+};
+
+// ============================================================
+// SVG RENDERER
+// ============================================================
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+class DiagramRenderer {
+  constructor(svgEl) {
+    this.svg = svgEl;
+    this.ACTOR_W = 130;
+    this.ACTOR_H = 50;
+    this.ACTOR_GAP = 30;
+    this.STEP_H = 42;
+    this.TOP_MARGIN = 90;
+    this.LEFT_MARGIN = 30;
+    this.NOTE_W = 160;
+    this.viewBox = { x: 0, y: 0, w: 0, h: 0 };
+    this.zoom = 1;
+    this.stepElements = [];
+  }
+
+  clear() {
+    this.svg.innerHTML = '';
+    this.stepElements = [];
+  }
+
+  render(uc) {
+    this.clear();
+    this.uc = uc;
+    const actors = uc.actors;
+    const steps = uc.steps;
+    const phases = uc.phases;
+
+    const totalW = this.LEFT_MARGIN * 2 + actors.length * (this.ACTOR_W + this.ACTOR_GAP) - this.ACTOR_GAP;
+    const totalH = this.TOP_MARGIN + steps.length * this.STEP_H + 80;
+
+    this.viewBox = { x: -20, y: -10, w: totalW + 40, h: totalH + 20 };
+    this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.w} ${this.viewBox.h}`);
+
+    // Compute actor X positions
+    const actorX = {};
+    actors.forEach((a, i) => {
+      actorX[a.id] = this.LEFT_MARGIN + i * (this.ACTOR_W + this.ACTOR_GAP) + this.ACTOR_W / 2;
+    });
+    this.actorX = actorX;
+
+    // Defs: arrowhead markers
+    const defs = this._el('defs');
+    const marker = this._el('marker', { id: 'arrowhead', markerWidth: 10, markerHeight: 7, refX: 10, refY: 3.5, orient: 'auto' });
+    marker.appendChild(this._el('polygon', { points: '0 0, 10 3.5, 0 7', fill: '#9ca3af' }));
+    defs.appendChild(marker);
+    const markerH = this._el('marker', { id: 'arrowhead-hl', markerWidth: 10, markerHeight: 7, refX: 10, refY: 3.5, orient: 'auto' });
+    markerH.appendChild(this._el('polygon', { points: '0 0, 10 3.5, 0 7', fill: '#818cf8' }));
+    defs.appendChild(markerH);
+    this.svg.appendChild(defs);
+
+    // Draw phases (background rects)
+    phases.forEach(p => {
+      const y1 = this.TOP_MARGIN + p.startStep * this.STEP_H - 15;
+      const y2 = this.TOP_MARGIN + (p.endStep + 1) * this.STEP_H + 5;
+      const g = this._el('g', { class: 'phase-group-svg' });
+      g.appendChild(this._el('rect', {
+        x: this.LEFT_MARGIN - 15, y: y1,
+        width: totalW - this.LEFT_MARGIN * 2 + 30, height: y2 - y1,
+        fill: p.color, stroke: p.border, 'stroke-width': 1,
+        class: 'phase-rect', rx: 8, ry: 8
+      }));
+      const label = this._el('text', {
+        x: this.LEFT_MARGIN - 5, y: y1 + 14,
+        fill: p.border, class: 'phase-title', 'font-size': '11'
+      });
+      label.textContent = p.name;
+      g.appendChild(label);
+      this.svg.appendChild(g);
+    });
+
+    // Draw lifelines
+    actors.forEach(a => {
+      const x = actorX[a.id];
+      this.svg.appendChild(this._el('line', {
+        x1: x, y1: this.TOP_MARGIN + 5, x2: x, y2: totalH - 20,
+        stroke: '#2a2d3a', 'stroke-width': 1, 'stroke-dasharray': '6 4',
+        class: 'lifeline'
+      }));
+    });
+
+    // Draw steps
+    steps.forEach((step, i) => {
+      const y = this.TOP_MARGIN + i * this.STEP_H + 25;
+      const g = this._el('g', { class: 'step-group', 'data-step': i });
+      this.stepElements.push(g);
+
+      if (step.type === 'message') {
+        this._drawMessage(g, step, actorX, y, i);
+      } else if (step.type === 'self') {
+        this._drawSelf(g, step, actorX, y, i);
+      } else if (step.type === 'note') {
+        this._drawNote(g, step, actorX, y, i);
+      }
+
+      g.addEventListener('click', () => {
+        if (window.app) window.app.goToStep(i);
+      });
+      g.style.cursor = 'pointer';
+      this.svg.appendChild(g);
+    });
+
+    // Draw actor headers (on top)
+    actors.forEach((a, i) => {
+      const x = actorX[a.id];
+      const g = this._el('g', { class: 'actor-box' });
+      g.appendChild(this._el('rect', {
+        x: x - this.ACTOR_W / 2, y: 10,
+        width: this.ACTOR_W, height: this.ACTOR_H,
+        fill: a.color, rx: 8, ry: 8,
+        stroke: 'rgba(255,255,255,0.2)', 'stroke-width': 1
+      }));
+      const text = this._el('text', {
+        x: x, y: 35 + (a.name.length > 18 ? -4 : 0),
+        fill: 'white', 'text-anchor': 'middle',
+        'font-size': a.name.length > 18 ? '10' : '11',
+        'font-weight': '600',
+        'font-family': "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+      });
+      // Wrap long names
+      if (a.name.length > 18) {
+        const parts = a.name.split(/[\s/]+/);
+        const mid = Math.ceil(parts.length / 2);
+        const line1 = parts.slice(0, mid).join(' ');
+        const line2 = parts.slice(mid).join(' ');
+        const ts1 = this._el('tspan', { x: x, dy: '0' }); ts1.textContent = line1;
+        const ts2 = this._el('tspan', { x: x, dy: '13' }); ts2.textContent = line2;
+        text.appendChild(ts1);
+        text.appendChild(ts2);
+      } else {
+        text.textContent = a.name;
+        text.setAttribute('y', '40');
+      }
+      g.appendChild(text);
+
+      // Click to view supervisor prompt
+      g.addEventListener('click', () => {
+        const promptKey = a.id === 'sup' || a.id === 'agent' ? 'supervisor' : a.id;
+        if (PROMPTS[promptKey]) {
+          window.app.showPrompt(promptKey);
+        }
+      });
+      this.svg.appendChild(g);
+    });
+
+    // Draw title
+    const title = this._el('text', {
+      x: totalW / 2, y: -2,
+      fill: '#6b7280', 'text-anchor': 'middle',
+      'font-size': '10', 'font-weight': '400',
+      'font-family': "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    });
+    title.textContent = uc.title;
+    this.svg.appendChild(title);
+  }
+
+  highlightStep(index) {
+    // Remove all highlights
+    this.stepElements.forEach((g, i) => {
+      g.querySelectorAll('.hl-rect').forEach(r => r.remove());
+      g.querySelectorAll('line, path').forEach(el => {
+        if (el.getAttribute('stroke') === '#818cf8') {
+          el.setAttribute('stroke', '#6b7280');
+          el.setAttribute('stroke-width', '1.5');
+          el.setAttribute('marker-end', 'url(#arrowhead)');
+        }
+      });
+      g.style.opacity = i === index ? '1' : '0.5';
+    });
+
+    // Highlight current
+    if (index >= 0 && index < this.stepElements.length) {
+      const g = this.stepElements[index];
+      g.style.opacity = '1';
+      g.querySelectorAll('line[marker-end], path[marker-end]').forEach(el => {
+        el.setAttribute('stroke', '#818cf8');
+        el.setAttribute('stroke-width', '2.5');
+        el.setAttribute('marker-end', 'url(#arrowhead-hl)');
+      });
+
+      // Scroll step into view
+      const y = this.TOP_MARGIN + index * this.STEP_H;
+      const svgRect = this.svg.getBoundingClientRect();
+      const visibleH = this.viewBox.h;
+      if (y < this.viewBox.y + 100 || y > this.viewBox.y + visibleH - 100) {
+        this.viewBox.y = Math.max(-10, y - visibleH / 2);
+        this._updateViewBox();
+      }
+    }
+  }
+
+  clearHighlight() {
+    this.stepElements.forEach(g => { g.style.opacity = '1'; });
+  }
+
+  fitToView() {
+    const uc = this.uc;
+    if (!uc) return;
+    const totalW = this.LEFT_MARGIN * 2 + uc.actors.length * (this.ACTOR_W + this.ACTOR_GAP) - this.ACTOR_GAP;
+    const totalH = this.TOP_MARGIN + uc.steps.length * this.STEP_H + 80;
+    this.viewBox = { x: -20, y: -10, w: totalW + 40, h: totalH + 20 };
+    this.zoom = 1;
+    this._updateViewBox();
+  }
+
+  zoomIn() { this._zoomBy(0.8); }
+  zoomOut() { this._zoomBy(1.25); }
+
+  _zoomBy(factor) {
+    const cx = this.viewBox.x + this.viewBox.w / 2;
+    const cy = this.viewBox.y + this.viewBox.h / 2;
+    this.viewBox.w *= factor;
+    this.viewBox.h *= factor;
+    this.viewBox.x = cx - this.viewBox.w / 2;
+    this.viewBox.y = cy - this.viewBox.h / 2;
+    this.zoom /= factor;
+    this._updateViewBox();
+  }
+
+  pan(dx, dy) {
+    this.viewBox.x -= dx;
+    this.viewBox.y -= dy;
+    this._updateViewBox();
+  }
+
+  _updateViewBox() {
+    this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.w} ${this.viewBox.h}`);
+    const zoomLabel = document.getElementById('zoom-label');
+    if (zoomLabel) zoomLabel.textContent = Math.round(this.zoom * 100) + '%';
+  }
+
+  _drawMessage(g, step, actorX, y, idx) {
+    const x1 = actorX[step.from];
+    const x2 = actorX[step.to];
+    const line = this._el('line', {
+      x1: x1, y1: y, x2: x2 - (x2 > x1 ? 8 : -8), y2: y,
+      stroke: '#6b7280', 'stroke-width': 1.5,
+      'stroke-dasharray': step.dashed ? '5 3' : 'none',
+      'marker-end': 'url(#arrowhead)',
+      class: 'message-arrow'
+    });
+    g.appendChild(line);
+    const midX = (x1 + x2) / 2;
+    const label = this._el('text', {
+      x: midX, y: y - 8,
+      fill: '#d1d5db', 'text-anchor': 'middle',
+      'font-size': '10', class: 'message-label',
+      'font-family': "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    });
+    const text = step.label.length > 45 ? step.label.substring(0, 42) + '...' : step.label;
+    label.textContent = text;
+    g.appendChild(label);
+  }
+
+  _drawSelf(g, step, actorX, y, idx) {
+    const x = actorX[step.actor];
+    const path = this._el('path', {
+      d: `M ${x} ${y} C ${x + 40} ${y}, ${x + 40} ${y + 20}, ${x + 8} ${y + 20}`,
+      stroke: '#6b7280', 'stroke-width': 1.5, fill: 'none',
+      'marker-end': 'url(#arrowhead)',
+      class: 'self-arrow'
+    });
+    g.appendChild(path);
+    const label = this._el('text', {
+      x: x + 48, y: y + 6,
+      fill: '#d1d5db', 'font-size': '10', class: 'message-label',
+      'font-family': "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    });
+    const text = step.label.length > 40 ? step.label.substring(0, 37) + '...' : step.label;
+    label.textContent = text;
+    g.appendChild(label);
+  }
+
+  _drawNote(g, step, actorX, y, idx) {
+    const x = actorX[step.actor] + this.ACTOR_W / 2 + 10;
+    const lines = step.text.split('\n');
+    const h = lines.length * 14 + 10;
+    const w = Math.min(this.NOTE_W, Math.max(...lines.map(l => l.length * 6)) + 20);
+    const noteG = this._el('g', { class: 'note-box' });
+    noteG.appendChild(this._el('rect', {
+      x: x, y: y - 10, width: w, height: h,
+      fill: '#1e2030', stroke: '#3a3d4a', 'stroke-width': 1, rx: 4, ry: 4
+    }));
+    lines.forEach((line, li) => {
+      const t = this._el('text', {
+        x: x + 8, y: y + 4 + li * 14,
+        fill: '#9ca3af', 'font-size': '9',
+        'font-family': "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+      });
+      t.textContent = line;
+      noteG.appendChild(t);
+    });
+    g.appendChild(noteG);
+  }
+
+  _el(tag, attrs = {}) {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+}
+
+// ============================================================
+// APP CONTROLLER
+// ============================================================
+class App {
+  constructor() {
+    this.renderer = new DiagramRenderer(document.getElementById('diagram'));
+    this.currentUC = null;
+    this.currentStep = -1;
+    this.setupUI();
+    this.loadUseCase(USE_CASES[0].id);
+  }
+
+  setupUI() {
+    // Populate use case select
+    const select = document.getElementById('uc-select');
+    USE_CASES.forEach(uc => {
+      const opt = document.createElement('option');
+      opt.value = uc.id;
+      opt.textContent = uc.title;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', () => this.loadUseCase(select.value));
+
+    // Navigation buttons
+    document.getElementById('btn-prev').addEventListener('click', () => this.prevStep());
+    document.getElementById('btn-next').addEventListener('click', () => this.nextStep());
+
+    // Zoom controls
+    document.getElementById('zoom-in').addEventListener('click', () => this.renderer.zoomIn());
+    document.getElementById('zoom-out').addEventListener('click', () => this.renderer.zoomOut());
+    document.getElementById('zoom-fit').addEventListener('click', () => this.renderer.fitToView());
+
+    // View prompt button
+    document.getElementById('btn-view-prompt').addEventListener('click', () => this.viewCurrentPrompt());
+
+    // Modal close
+    document.getElementById('modal-close').addEventListener('click', () => this.closeModal());
+    document.getElementById('modal-close-btn').addEventListener('click', () => this.closeModal());
+    document.getElementById('modal-overlay').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) this.closeModal();
+    });
+
+    // Keyboard navigation
+    document.addEventListener('keydown', (e) => {
+      if (document.getElementById('modal-overlay').classList.contains('active')) {
+        if (e.key === 'Escape') this.closeModal();
+        return;
+      }
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); this.nextStep(); }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); this.prevStep(); }
+      if (e.key === 'Enter') { e.preventDefault(); this.viewCurrentPrompt(); }
+      if (e.key === 'Home') { e.preventDefault(); this.goToStep(0); }
+      if (e.key === 'End') { e.preventDefault(); this.goToStep(this.currentUC.steps.length - 1); }
+      if (e.key === '+' || e.key === '=') { this.renderer.zoomIn(); }
+      if (e.key === '-') { this.renderer.zoomOut(); }
+      if (e.key === '0') { this.renderer.fitToView(); }
+    });
+
+    // Pan/zoom with mouse
+    const diagramArea = document.getElementById('diagram-area');
+    let isPanning = false;
+    let lastX, lastY;
+
+    diagramArea.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.actor-box') || e.target.closest('.step-group')) return;
+      isPanning = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      diagramArea.classList.add('dragging');
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      const svgRect = this.renderer.svg.getBoundingClientRect();
+      const scaleX = this.renderer.viewBox.w / svgRect.width;
+      const scaleY = this.renderer.viewBox.h / svgRect.height;
+      this.renderer.pan((e.clientX - lastX) * scaleX, (e.clientY - lastY) * scaleY);
+      lastX = e.clientX;
+      lastY = e.clientY;
+    });
+
+    document.addEventListener('mouseup', () => {
+      isPanning = false;
+      diagramArea.classList.remove('dragging');
+    });
+
+    diagramArea.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (e.deltaY < 0) this.renderer.zoomIn();
+      else this.renderer.zoomOut();
+    }, { passive: false });
+  }
+
+  loadUseCase(id) {
+    const uc = USE_CASES.find(u => u.id === id);
+    if (!uc) return;
+    this.currentUC = uc;
+    this.currentStep = -1;
+    document.getElementById('uc-select').value = id;
+
+    // Render diagram
+    this.renderer.render(uc);
+
+    // Build sidebar
+    this.buildSidebar(uc);
+
+    // Update controls
+    this.updateStepInfo();
+    this.renderer.clearHighlight();
+
+    // Auto-start at step 0
+    setTimeout(() => this.goToStep(0), 100);
+  }
+
+  buildSidebar(uc) {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.innerHTML = '';
+
+    // Title
+    const titleDiv = document.createElement('div');
+    titleDiv.style.cssText = 'padding: 12px 16px; border-bottom: 1px solid var(--border);';
+    titleDiv.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:4px;">${uc.title}</div><div style="font-size:11px;color:var(--text-muted);">${uc.subtitle}</div>`;
+    sidebar.appendChild(titleDiv);
+
+    // Group steps by phase
+    let currentPhase = null;
+    uc.steps.forEach((step, i) => {
+      // Check if this step starts a new phase
+      const phase = uc.phases.find(p => p.startStep === i);
+      if (phase) {
+        currentPhase = phase;
+        const phaseLabel = document.createElement('div');
+        phaseLabel.className = 'phase-label';
+        phaseLabel.style.borderLeft = `3px solid ${phase.border}`;
+        phaseLabel.style.paddingLeft = '13px';
+        phaseLabel.textContent = phase.name;
+        sidebar.appendChild(phaseLabel);
+      }
+
+      // Check if we exited a phase
+      if (currentPhase && i > currentPhase.endStep) {
+        const nextPhase = uc.phases.find(p => p.startStep === i);
+        if (!nextPhase) {
+          currentPhase = null;
+        }
+      }
+
+      const item = document.createElement('div');
+      item.className = 'step-item';
+      item.dataset.step = i;
+
+      let labelText = '';
+      if (step.type === 'message') {
+        const fromName = uc.actors.find(a => a.id === step.from)?.name || step.from;
+        const toName = uc.actors.find(a => a.id === step.to)?.name || step.to;
+        const shortFrom = fromName.split(/[\s/]+/)[0];
+        const shortTo = toName.split(/[\s/]+/)[0];
+        labelText = `${shortFrom} \u2192 ${shortTo}: ${step.label}`;
+      } else if (step.type === 'self') {
+        const actorName = uc.actors.find(a => a.id === step.actor)?.name || step.actor;
+        labelText = `${actorName.split(/[\s/]+/)[0]}: ${step.label}`;
+      } else if (step.type === 'note') {
+        labelText = `[Note] ${step.text.split('\n')[0]}`;
+      }
+
+      // Truncate
+      if (labelText.length > 60) labelText = labelText.substring(0, 57) + '...';
+
+      item.innerHTML = `<div class="dot"></div><div class="label">${labelText}</div>`;
+
+      if (step.prompt) {
+        const badge = document.createElement('span');
+        badge.style.cssText = 'font-size:9px;background:var(--accent);color:white;padding:1px 5px;border-radius:8px;margin-left:auto;flex-shrink:0;';
+        badge.textContent = 'prompt';
+        item.appendChild(badge);
+      }
+
+      item.addEventListener('click', () => this.goToStep(i));
+      sidebar.appendChild(item);
+    });
+  }
+
+  goToStep(index) {
+    if (!this.currentUC || index < 0 || index >= this.currentUC.steps.length) return;
+    this.currentStep = index;
+    this.renderer.highlightStep(index);
+    this.updateStepInfo();
+    this.updateSidebarActive();
+  }
+
+  nextStep() {
+    if (!this.currentUC) return;
+    const next = this.currentStep + 1;
+    if (next < this.currentUC.steps.length) this.goToStep(next);
+  }
+
+  prevStep() {
+    if (!this.currentUC) return;
+    const prev = this.currentStep - 1;
+    if (prev >= 0) this.goToStep(prev);
+  }
+
+  updateStepInfo() {
+    const info = document.getElementById('step-info');
+    const counter = document.getElementById('step-counter');
+    const btn = document.getElementById('btn-view-prompt');
+
+    if (!this.currentUC || this.currentStep < 0) {
+      info.innerHTML = '<div class="actors"><span class="from">Select a step</span></div><div class="message">Click a step or use arrow keys to navigate</div>';
+      counter.textContent = '- / -';
+      btn.disabled = true;
+      return;
+    }
+
+    const step = this.currentUC.steps[this.currentStep];
+    const total = this.currentUC.steps.length;
+    counter.textContent = `${this.currentStep + 1} / ${total}`;
+
+    let actorsHtml = '';
+    if (step.type === 'message') {
+      const fromName = this.currentUC.actors.find(a => a.id === step.from)?.name || step.from;
+      const toName = this.currentUC.actors.find(a => a.id === step.to)?.name || step.to;
+      const fromColor = this.currentUC.actors.find(a => a.id === step.from)?.color || '#999';
+      const toColor = this.currentUC.actors.find(a => a.id === step.to)?.color || '#999';
+      actorsHtml = `<span class="from" style="color:${fromColor}">${fromName}</span> <span style="color:var(--text-muted)">\u2192</span> <span class="from" style="color:${toColor}">${toName}</span>`;
+    } else if (step.type === 'self') {
+      const actorName = this.currentUC.actors.find(a => a.id === step.actor)?.name || step.actor;
+      const actorColor = this.currentUC.actors.find(a => a.id === step.actor)?.color || '#999';
+      actorsHtml = `<span class="from" style="color:${actorColor}">${actorName}</span> <span style="color:var(--text-muted)">(self)</span>`;
+    } else if (step.type === 'note') {
+      const actorName = this.currentUC.actors.find(a => a.id === step.actor)?.name || step.actor;
+      actorsHtml = `<span class="from" style="color:var(--warning)">Note</span> <span style="color:var(--text-muted)">on ${actorName}</span>`;
+    }
+
+    info.innerHTML = `
+      <div class="actors">${actorsHtml}</div>
+      <div class="message">${step.label || step.text || ''}</div>
+      <div class="description">${step.desc || ''}</div>
+    `;
+
+    // Enable prompt button if step has a prompt ref
+    btn.disabled = !step.prompt;
+    if (step.prompt) {
+      btn.textContent = `View ${PROMPTS[step.prompt]?.title || 'Prompt'}`;
+    } else {
+      btn.textContent = 'View Prompt';
+    }
+
+    // Update nav button states
+    document.getElementById('btn-prev').disabled = this.currentStep <= 0;
+    document.getElementById('btn-next').disabled = this.currentStep >= total - 1;
+  }
+
+  updateSidebarActive() {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.querySelectorAll('.step-item').forEach(item => {
+      const idx = parseInt(item.dataset.step);
+      item.classList.toggle('active', idx === this.currentStep);
+      item.classList.toggle('visited', idx < this.currentStep);
+    });
+
+    // Scroll active item into view
+    const active = sidebar.querySelector('.step-item.active');
+    if (active) {
+      active.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  viewCurrentPrompt() {
+    if (!this.currentUC || this.currentStep < 0) return;
+    const step = this.currentUC.steps[this.currentStep];
+    if (!step.prompt) return;
+    this.showPrompt(step.prompt, step.section);
+  }
+
+  showPrompt(key, section) {
+    const prompt = PROMPTS[key];
+    if (!prompt) return;
+
+    document.getElementById('modal-title').textContent = prompt.title;
+    document.getElementById('modal-section').textContent = section || 'Full Prompt';
+    document.getElementById('modal-file-ref').textContent = prompt.file;
+
+    // Render markdown
+    let content = prompt.content;
+
+    // If a section is specified, try to extract it
+    if (section) {
+      const sectionRegex = new RegExp(`(## ${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?)(?=\\n## |$)`, 'i');
+      const match = content.match(sectionRegex);
+      if (match) {
+        content = match[1];
+      }
+    }
+
+    const html = marked.parse(content);
+    document.getElementById('modal-body').innerHTML = html;
+
+    // Syntax highlight code blocks
+    document.querySelectorAll('#modal-body pre code').forEach(block => {
+      hljs.highlightElement(block);
+    });
+
+    document.getElementById('modal-overlay').classList.add('active');
+  }
+
+  closeModal() {
+    document.getElementById('modal-overlay').classList.remove('active');
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  window.app = new App();
+});
+  </script>
+</body>
+</html>

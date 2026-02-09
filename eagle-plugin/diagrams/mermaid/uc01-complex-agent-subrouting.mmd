@@ -1,0 +1,57 @@
+sequenceDiagram
+    actor User as COR / Program Staff
+    participant UI as Eagle UI
+    participant Agent as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant Comp as Compliance Skill
+    participant Tech as Tech Review Skill
+    participant DocGen as Document Generator Skill
+
+    Note over User,DocGen: UC-01 Complex: >$250K with "I Don't Know" Skill Invocation
+
+    User->>UI: "CT scanner, not sure on price, 6 weeks"
+    UI->>Agent: New session
+    Agent->>Intake: Invoke OA Intake skill
+
+    Intake->>UI: Equipment clarification questions
+    User->>UI: "New, 128-slice, grant expiring"
+    UI->>Intake: Answers
+
+    Intake-->>Agent: Estimate: $400K-$1M+ → Negotiated (Part 15)
+
+    Intake->>UI: "Existing contract vehicle? Grant details?"
+    User->>UI: "I don't know"
+
+    rect rgb(255, 240, 240)
+        Note over Agent,Comp: Skill Invocation: User Needs Help
+        Intake-->>Agent: User lacks info (contract vehicle)
+        Agent->>Comp: Invoke Compliance skill (vehicle search)
+
+        Comp->>Comp: Search knowledge base:<br/>NIH IDIQs, GSA MAS,<br/>HHS BPAs for medical equipment
+        Comp-->>Agent: Found options:<br/>1. NITAAC CIO-SP3<br/>2. GSA Schedule 66 III<br/>3. NIH BPA for imaging
+
+        Agent->>UI: Present vehicle options to user
+        UI->>User: "Here are available contract vehicles..."
+    end
+
+    User->>UI: "Show me my checklist"
+    Agent->>UI: Full document checklist (10 items)
+    Note over UI: SOW ❌ | IGCE ❌ | AP ❌<br/>Market Research ❌ | J&A TBD<br/>Funding ⚠️ | Urgency ⚠️
+
+    User->>UI: "Generate the Acquisition Plan"
+    UI->>Agent: Document request
+    Agent->>DocGen: Invoke Document Generator (Full AP)
+    DocGen->>DocGen: Apply Full AP template (FAR 7.105)
+
+    rect rgb(255, 248, 230)
+        Note over Agent,Tech: Skill Invocation: Quality Check
+        DocGen-->>Agent: AP draft ready
+        Agent->>Tech: Invoke Tech Review skill
+        Tech->>Tech: Check specs, installation,<br/>training requirements
+        Tech-->>Agent: Findings: missing site prep,<br/>HVAC, electrical requirements
+        Agent->>UI: "Before finalizing, we need:<br/>installation site details..."
+    end
+
+    User->>UI: Provides additional details
+    Agent->>DocGen: Invoke Document Generator (update AP)
+    DocGen->>UI: AP v2 ready for download

@@ -1,0 +1,50 @@
+sequenceDiagram
+    actor User as COR / Program Staff
+    participant UI as Eagle UI
+    participant Sup as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant Market as Market Intelligence Skill
+    participant DocGen as Document Generator Skill
+
+    Note over User,DocGen: UC-01: Market Intelligence Skill - Vendor & Vehicle Search
+
+    User->>UI: "I need bioinformatics analysis services, ~$200K"
+    UI->>Sup: New session
+    Sup->>Intake: Invoke OA Intake skill
+
+    Intake->>UI: Clarifying questions
+    User->>UI: "Service, 12-month PoP, no specific vendor"
+    UI->>Intake: Answers
+
+    Intake-->>Sup: $200K service, no vendor preference,<br/>Simplified Acquisition (Part 13)
+
+    rect rgb(240, 248, 255)
+        Note over Sup,Market: Market Intelligence Skill Invoked
+        Sup->>Market: Find vendors for bioinformatics analysis
+
+        Market->>Market: Search GSA Schedule 70/STARS III
+        Market->>Market: Check SAM.gov registrations
+        Market->>Market: Identify small business candidates
+        Market->>Market: Pull GSA labor rate benchmarks
+
+        Market-->>Sup: Market Research Results:<br/>• 12 vendors on GSA STARS III<br/>• 8 are small business (4 are 8(a))<br/>• GSA rates: $95-$165/hr (Sr. Analyst)<br/>• Recommend: Small Business Set-Aside<br/>• 8(a) sole source eligible (<$4M)
+    end
+
+    Sup->>UI: Market research summary
+    UI->>User: "Found 12 qualified vendors.<br/>8 are small businesses.<br/>Recommend small business set-aside.<br/>GSA rates: $95-$165/hr."
+
+    User->>UI: "Let's go with small business set-aside"
+
+    rect rgb(245, 255, 245)
+        Note over Sup,DocGen: Document Generation with Market Data
+        Sup->>DocGen: Generate Market Research Report
+        DocGen->>DocGen: Apply market data from skill results
+        DocGen-->>Sup: Market Research Report ready
+
+        Sup->>DocGen: Generate IGCE using GSA rate benchmarks
+        DocGen->>DocGen: Apply GSA rates to labor estimate
+        DocGen-->>Sup: IGCE ready (based on market rates)
+    end
+
+    Sup->>UI: Documents ready
+    UI->>User: ✓ Market Research Report<br/>✓ IGCE (using GSA benchmarks)<br/>→ Next: SOW, Acquisition Plan
