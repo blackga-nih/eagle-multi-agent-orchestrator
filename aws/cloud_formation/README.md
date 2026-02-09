@@ -1,12 +1,12 @@
 # Create the AWS Stack
 
-**Objective**: Create (or destroy) AWS resources such as:
- - Common resources, ECR, IAM policies
- - S3 
- - ECS Cluster, Task Definition...
- - Target Groups
- - ELB Forwarding Rules
- - And other related artifacts
+**Objective**: Deploy the Eagle application infrastructure using CloudFormation templates. This collection of parameterized templates establishes the initial foundational stack pattern, which will be progressively extended to include the complete infrastructure ecosystem.  For example:
+
+ - Common resources (ECR, IAM policies)
+ - S3 buckets with encryption, versioning, and access logging
+ - ECS Cluster, Task Definitions, and orchestration
+ - Load Balancing Target Groups, Forwarding Rules...
+ - Environment-specific configurations (dev, qa, stage, prod)
 
 ## Pre-conditions
  - AWS CLI must be installed and configured correctly
