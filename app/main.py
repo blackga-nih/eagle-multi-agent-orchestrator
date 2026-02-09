@@ -18,8 +18,7 @@ else:
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
@@ -75,7 +74,11 @@ app = FastAPI(
 # ── CORS Middleware ──────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -998,62 +1001,18 @@ app.include_router(streaming_router)
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STATIC FILES & FRONTEND (preserved from C1-C6 integration)
+# HEALTH CHECK (frontend now served by Next.js on port 3000)
 # ══════════════════════════════════════════════════════════════════════
 
-# Mount static files - assets first (fonts, images, theme CSS), then general frontend
-app.mount("/assets", StaticFiles(directory="frontend/assets"), name="assets")
-app.mount("/css", StaticFiles(directory="frontend/css"), name="css")
-app.mount("/js", StaticFiles(directory="frontend/js"), name="js")
-app.mount("/static", StaticFiles(directory="frontend"), name="static")
-
-
-@app.get("/", response_class=HTMLResponse)
-@app.get("/index.html", response_class=HTMLResponse)
-async def get_chat_interface():
-    """Serve the chat interface with NCI branding"""
-    with open("frontend/index.html", "r", encoding="utf-8") as f:
-        return f.read()
-
-
-@app.get("/admin", response_class=HTMLResponse)
-@app.get("/admin.html", response_class=HTMLResponse)
-async def get_admin_dashboard_page():
-    """Serve the admin dashboard page"""
-    with open("frontend/admin.html", "r", encoding="utf-8") as f:
-        return f.read()
-
-
-@app.get("/admin-agents", response_class=HTMLResponse)
-@app.get("/admin-agents.html", response_class=HTMLResponse)
-async def get_admin_agents():
-    """Serve the agent management page"""
-    with open("frontend/admin-agents.html", "r", encoding="utf-8") as f:
-        return f.read()
-
-
-@app.get("/admin-costs", response_class=HTMLResponse)
-@app.get("/admin-costs.html", response_class=HTMLResponse)
-async def get_admin_costs():
-    """Serve the cost reports page"""
-    with open("frontend/admin-costs.html", "r", encoding="utf-8") as f:
-        return f.read()
-
-
-@app.get("/admin-analytics", response_class=HTMLResponse)
-@app.get("/admin-analytics.html", response_class=HTMLResponse)
-async def get_admin_analytics():
-    """Serve the analytics page"""
-    with open("frontend/admin-analytics.html", "r", encoding="utf-8") as f:
-        return f.read()
-
-
-@app.get("/admin-users", response_class=HTMLResponse)
-@app.get("/admin-users.html", response_class=HTMLResponse)
-async def get_admin_users_page():
-    """Serve the user management page"""
-    with open("frontend/admin-users.html", "r", encoding="utf-8") as f:
-        return f.read()
+@app.get("/api/health")
+async def health_check():
+    """Backend health check endpoint."""
+    return {
+        "status": "healthy",
+        "service": "eagle-backend",
+        "version": "4.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 if __name__ == "__main__":

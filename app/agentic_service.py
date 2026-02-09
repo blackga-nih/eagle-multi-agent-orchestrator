@@ -18,7 +18,9 @@ from botocore.exceptions import ClientError, BotoCoreError
 logger = logging.getLogger("eagle.agent")
 
 # ── Configuration ────────────────────────────────────────────────────
-MODEL = "claude-sonnet-4-20250514"
+_USE_BEDROCK = os.getenv("USE_BEDROCK", "false").lower() == "true"
+_BEDROCK_REGION = os.getenv("AWS_REGION", "us-east-1")
+MODEL = os.getenv("ANTHROPIC_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0" if _USE_BEDROCK else "claude-haiku-4-5-20251001")
 
 SYSTEM_PROMPT = (
     # ── 1. Identity & Mission ──────────────────────────────────────────
@@ -2202,7 +2204,14 @@ def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> st
 # ── Anthropic Client ─────────────────────────────────────────────────
 
 def get_client() -> anthropic.Anthropic:
-    """Create an Anthropic client using the API key from environment."""
+    """Create an Anthropic client.
+
+    When USE_BEDROCK=true, returns an AnthropicBedrock client that routes
+    requests through Amazon Bedrock using AWS credentials (no API key needed).
+    Otherwise, uses the direct Anthropic API with ANTHROPIC_API_KEY.
+    """
+    if _USE_BEDROCK:
+        return anthropic.AnthropicBedrock(aws_region=_BEDROCK_REGION)
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY not set")

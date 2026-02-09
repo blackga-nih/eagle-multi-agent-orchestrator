@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DEV_MODE=true
+    volumes:
+      - ./app:/app/app
+
+  frontend:
+    build:
+      context: ./nextjs-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - FASTAPI_URL=http://backend:8000
+    depends_on:
+      - backend
+    volumes:
+      - ./nextjs-frontend/app:/app/app
+      - ./nextjs-frontend/components:/app/components
+      - ./nextjs-frontend/hooks:/app/hooks
+      - ./nextjs-frontend/contexts:/app/contexts
+      - ./nextjs-frontend/lib:/app/lib
+      - ./nextjs-frontend/types:/app/types

@@ -59,3 +59,8 @@ htmlcov/
 
 # Docker
 .dockerignore
+
+# Node / Next.js
+node_modules/
+.next/
+next-env.d.ts

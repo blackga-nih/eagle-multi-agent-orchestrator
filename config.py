@@ -32,6 +32,8 @@ class Config:
 
     # EAGLE Configuration
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    USE_BEDROCK = os.getenv("USE_BEDROCK", "false").lower() == "true"
+    ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "")
     S3_BUCKET = os.getenv("S3_BUCKET", "nci-documents")
     S3_PREFIX = os.getenv("S3_PREFIX", "eagle/")
 
@@ -63,8 +65,8 @@ class Config:
         if not cls.COGNITO_CLIENT_ID:
             errors.append("COGNITO_CLIENT_ID is required")
 
-        if not cls.ANTHROPIC_API_KEY:
-            warnings.append("ANTHROPIC_API_KEY not set - EAGLE chat will not work")
+        if not cls.ANTHROPIC_API_KEY and not cls.USE_BEDROCK:
+            warnings.append("ANTHROPIC_API_KEY not set and USE_BEDROCK is false - EAGLE chat will not work")
 
         if cls.DEV_MODE:
             warnings.append("DEV_MODE is enabled - auth is bypassed")
@@ -77,7 +79,8 @@ class Config:
                 "agent_id": cls.BEDROCK_AGENT_ID,
                 "agent_alias_id": cls.BEDROCK_AGENT_ALIAS_ID,
                 "aws_region": cls.AWS_REGION,
-                "anthropic_configured": bool(cls.ANTHROPIC_API_KEY),
+                "anthropic_configured": bool(cls.ANTHROPIC_API_KEY) or cls.USE_BEDROCK,
+                "use_bedrock": cls.USE_BEDROCK,
                 "s3_bucket": cls.S3_BUCKET,
                 "persistent_sessions": cls.USE_PERSISTENT_SESSIONS,
                 "dev_mode": cls.DEV_MODE,
