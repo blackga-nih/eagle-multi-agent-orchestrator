@@ -152,6 +152,79 @@ const USE_CASES: UseCase[] = [
     ]
   },
   {
+    id: "uc01-full-chain",
+    title: "UC-01 Full Chain: All 6 Skills End-to-End",
+    subtitle: "$500K IT modernization — Intake → Market → Compliance → Legal → Tech → DocGen (7 documents)",
+    actors: [
+      { id: "user", name: "COR / Program Staff", color: "#4a90d9" },
+      { id: "sup", name: "Supervisor Agent", color: "#50c878" },
+      { id: "intake", name: "OA Intake Skill", color: "#ff6b6b" },
+      { id: "market", name: "Market Intelligence Skill", color: "#20b2aa" },
+      { id: "comp", name: "Compliance Skill", color: "#daa520" },
+      { id: "legal", name: "Legal Counsel Skill", color: "#e06090" },
+      { id: "tech", name: "Tech Review Skill", color: "#7b68ee" },
+      { id: "docgen", name: "Doc Generator Skill", color: "#ffa500" }
+    ],
+    phases: [
+      { name: "Phase 1: Intake & Determination", color: "#1a2636", border: "#2a4a6a", startStep: 2, endStep: 5 },
+      { name: "Phase 2: Market Research", color: "#1a2a1a", border: "#2a5a2a", startStep: 6, endStep: 9 },
+      { name: "Phase 3: Compliance Validation", color: "#2a2218", border: "#5a4a2a", startStep: 10, endStep: 13 },
+      { name: "Phase 4: Legal Risk Assessment", color: "#2a1a1a", border: "#5a2a2a", startStep: 14, endStep: 17 },
+      { name: "Phase 5: Technical Review", color: "#261a26", border: "#5a2a5a", startStep: 18, endStep: 21 },
+      { name: "Phase 6: Document Generation", color: "#1a2620", border: "#2a5a3a", startStep: 22, endStep: 32 }
+    ],
+    steps: [
+      // Initial request
+      { type: "message", from: "user", to: "sup", label: '"IT modernization services, ~$500K, 3-year PoP"', desc: "COR requests a complex IT acquisition: agile development and cloud migration" },
+      { type: "message", from: "sup", to: "intake", label: "Invoke OA Intake skill", desc: "Supervisor delegates to Intake for guided data collection", prompt: "intake" },
+
+      // Phase 1: Intake
+      { type: "message", from: "intake", to: "sup", label: "Clarifying Q&A with user", desc: "Intake asks targeted questions about scope, timeline, and requirements", prompt: "intake", section: "Phase 1: Minimal Intake Form" },
+      { type: "message", from: "user", to: "sup", label: "Answers: agile dev, cloud migration, 3yr", desc: "User provides details on methodology and scope" },
+      { type: "self", actor: "intake", label: "Determine: $500K → Negotiated (Part 15)", desc: "Intake applies decision tree: value above SAT, IT services, T&M likely", prompt: "intake", section: "Phase 3: Acquisition Pathway Determination" },
+      { type: "note", actor: "intake", text: "$500K IT services, 3yr\nNegotiated (Part 15)\nAgile development\nCloud migration", desc: "Key determination: Negotiated acquisition, agile approach" },
+
+      // Phase 2: Market Research
+      { type: "message", from: "sup", to: "market", label: "Invoke Market Intelligence skill", desc: "Supervisor routes to Market Intelligence for vendor analysis", prompt: "compliance" },
+      { type: "self", actor: "market", label: "Search GWAC vehicles (CIO-SP3, Alliant 2)", desc: "Searches government-wide contract vehicles for IT services" },
+      { type: "self", actor: "market", label: "Small business analysis + labor rate benchmarking", desc: "Analyzes 22 vendors, 14 small business, GSA rate ranges $85-$210/hr" },
+      { type: "message", from: "market", to: "sup", label: "22 vendors, recommend SB set-aside, GSA rates", desc: "Market research complete: recommends small business set-aside with GSA Schedule rates", dashed: true },
+
+      // Phase 3: Compliance
+      { type: "message", from: "sup", to: "comp", label: "Invoke Compliance skill", desc: "Supervisor sends to Compliance for regulatory validation", prompt: "compliance" },
+      { type: "self", actor: "comp", label: "Contract type: T&M (agile/iterative scope)", desc: "Determines Time & Materials appropriate for agile methodology", prompt: "compliance", section: "Contract Vehicles" },
+      { type: "self", actor: "comp", label: "D&F required, FITARA review, Section 508", desc: "Identifies: D&F for T&M, CIO approval for IT, 508 compliance needed" },
+      { type: "message", from: "comp", to: "sup", label: "T&M with D&F, FITARA, 508 checklist needed", desc: "Compliance findings: three additional requirements identified", dashed: true },
+
+      // Phase 4: Legal
+      { type: "message", from: "sup", to: "legal", label: "Invoke Legal Counsel skill", desc: "Supervisor sends to Legal for risk assessment", prompt: "compliance" },
+      { type: "self", actor: "legal", label: "SB set-aside: no protest risk", desc: "Assesses bid protest risk — low for small business set-aside" },
+      { type: "self", actor: "legal", label: "T&M rationale: cite FAR 39.103, appropriations OK", desc: "Documents T&M justification and confirms 3-year funding is bona fide need" },
+      { type: "message", from: "legal", to: "sup", label: "Risk: LOW overall. Document T&M rationale.", desc: "Legal assessment complete: low risk, recommend thorough T&M documentation", dashed: true },
+
+      // Phase 5: Tech Review
+      { type: "message", from: "sup", to: "tech", label: "Invoke Tech Review skill", desc: "Supervisor sends to Tech Review for SOW quality check", prompt: "tech-review" },
+      { type: "self", actor: "tech", label: "SOW sections: sprints, DoD, cloud milestones", desc: "Recommends agile-specific SOW structure: sprint deliverables, definition of done, migration milestones", prompt: "tech-review", section: "Specification Validation" },
+      { type: "self", actor: "tech", label: "Eval criteria: technical 40%, past perf 30%, price 30%", desc: "Recommends evaluation factor weighting for best-value tradeoff" },
+      { type: "message", from: "tech", to: "sup", label: "SOW structure + eval criteria recommendation", desc: "Tech review complete: SOW outline and scoring methodology ready", dashed: true },
+
+      // Phase 6: Document Generation
+      { type: "message", from: "sup", to: "docgen", label: "Invoke Document Generator (full package)", desc: "Supervisor delegates full 7-document package generation", prompt: "docgen" },
+      { type: "self", actor: "docgen", label: "Generate Acquisition Plan", desc: "Full AP per FAR 7.105 with agile methodology justification", prompt: "docgen", section: "Document 1: Statement of Work (SOW)" },
+      { type: "self", actor: "docgen", label: "Generate Statement of Work", desc: "Agile SOW with sprint structure, DoD criteria, cloud migration phases" },
+      { type: "self", actor: "docgen", label: "Generate IGCE (GSA rates)", desc: "Independent Government Cost Estimate using GSA Schedule labor rates" },
+      { type: "self", actor: "docgen", label: "Generate Market Research Report", desc: "Documents 22 vendors analyzed, SB set-aside justification" },
+      { type: "self", actor: "docgen", label: "Generate D&F (T&M justification)", desc: "Determination & Findings for Time & Materials contract type" },
+      { type: "self", actor: "docgen", label: "Generate Section 508 Certification", desc: "Accessibility compliance certification for IT deliverables" },
+      { type: "self", actor: "docgen", label: "Generate Evaluation Criteria", desc: "Best-value tradeoff: technical approach 40%, past performance 30%, price 30%" },
+      { type: "message", from: "docgen", to: "sup", label: "Complete package (7 documents)", desc: "All 7 documents generated and stored in S3", dashed: true },
+
+      // Final delivery
+      { type: "message", from: "sup", to: "user", label: "Acquisition package complete — ready for CO review", desc: "Full package delivered: AP, SOW, IGCE, Market Research, D&F, 508 Cert, Eval Criteria" },
+      { type: "note", actor: "user", text: "\u2713 Acquisition Plan\n\u2713 SOW\n\u2713 IGCE\n\u2713 Market Research\n\u2713 D&F (T&M)\n\u2713 508 Certification\n\u2713 Eval Criteria\n\u2192 Ready for CO review", desc: "7 documents complete — package ready for Contracting Officer review" }
+    ]
+  },
+  {
     id: "uc02",
     title: "UC-02: Micro-Purchase (<$15K)",
     subtitle: "Fast path for small purchases - ~2 minutes total",
