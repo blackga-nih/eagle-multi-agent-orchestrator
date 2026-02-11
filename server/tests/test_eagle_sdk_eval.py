@@ -138,6 +138,8 @@ TIER_BUDGETS = {
 
 # Module-level store: test_id -> trace JSON from TraceCollector.to_trace_json()
 _test_traces: dict[int, list] = {}
+# Module-level store: test_id -> TraceCollector.summary() dict (tokens, cost, session_id)
+_test_summaries: dict[int, dict] = {}
 
 class TraceCollector:
     """Collects and categorizes SDK message traces."""
@@ -3071,11 +3073,33 @@ class CapturingStream:
 
 LOG_GROUP = "/eagle/test-runs"
 
+def _extract_agents_and_tools(test_id: int) -> tuple[list[str], list[str]]:
+    """Extract unique agent names and tool names from a test's trace data."""
+    agents = []
+    tools = []
+    trace = _test_traces.get(test_id, [])
+    for entry in trace:
+        if entry.get("type") in ("AssistantMessage", "UserMessage"):
+            for block in entry.get("content", []):
+                if block.get("type") == "tool_use":
+                    tool_name = block.get("tool", "")
+                    if tool_name == "Task":
+                        subagent = block.get("input", {}).get("subagent_type", "")
+                        if subagent and subagent not in agents:
+                            agents.append(subagent)
+                    elif tool_name and tool_name not in tools:
+                        tools.append(tool_name)
+    return agents, tools
+
+
 def emit_to_cloudwatch(trace_output: dict, results: dict):
     """Emit structured test results to CloudWatch Logs.
 
     Non-fatal: catches all exceptions so local trace files are always the fallback.
     Uses /eagle/test-runs log group with a per-run log stream.
+
+    Enriched fields per test: model, input_tokens, output_tokens, cost_usd,
+    session_id, agents, tools_used.
     """
     try:
         import boto3
@@ -3121,8 +3145,28 @@ def emit_to_cloudwatch(trace_output: dict, results: dict):
             28: "28_sdk_skill_subagent_orchestration",
         }
 
+        # Aggregate token/cost counters for run_summary
+        run_input_tokens = 0
+        run_output_tokens = 0
+        run_cost_usd = 0.0
+
         for test_id_str, test_data in trace_output.get("results", {}).items():
             test_id = int(test_id_str)
+
+            # Per-test telemetry from TraceCollector summary
+            summary = _test_summaries.get(test_id, {})
+            input_tokens = summary.get("total_input_tokens", 0)
+            output_tokens = summary.get("total_output_tokens", 0)
+            cost_usd = summary.get("total_cost_usd", 0.0)
+            session_id = summary.get("session_id")
+
+            run_input_tokens += input_tokens
+            run_output_tokens += output_tokens
+            run_cost_usd += cost_usd
+
+            # Extract agent/tool names from trace
+            agents, tools_used = _extract_agents_and_tools(test_id)
+
             event = {
                 "type": "test_result",
                 "test_id": test_id,
@@ -3130,7 +3174,18 @@ def emit_to_cloudwatch(trace_output: dict, results: dict):
                 "status": test_data.get("status", "unknown"),
                 "log_lines": len(test_data.get("logs", [])),
                 "run_timestamp": run_ts,
+                "model": MODEL,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": round(cost_usd, 6),
             }
+            if session_id:
+                event["session_id"] = session_id
+            if agents:
+                event["agents"] = agents
+            if tools_used:
+                event["tools_used"] = tools_used
+
             events.append({
                 "timestamp": now_ms + test_id,
                 "message": json.dumps(event),
@@ -3141,7 +3196,7 @@ def emit_to_cloudwatch(trace_output: dict, results: dict):
         skipped = sum(1 for r in results.values() if r is None)
         failed = sum(1 for r in results.values() if r is not True and r is not None)
 
-        summary = {
+        summary_event = {
             "type": "run_summary",
             "run_timestamp": run_ts,
             "total_tests": len(results),
@@ -3149,10 +3204,14 @@ def emit_to_cloudwatch(trace_output: dict, results: dict):
             "skipped": skipped,
             "failed": failed,
             "pass_rate": round(passed / max(len(results), 1) * 100, 1),
+            "model": MODEL,
+            "total_input_tokens": run_input_tokens,
+            "total_output_tokens": run_output_tokens,
+            "total_cost_usd": round(run_cost_usd, 6),
         }
         events.append({
             "timestamp": now_ms + 100,
-            "message": json.dumps(summary),
+            "message": json.dumps(summary_event),
         })
 
         # Sort events by timestamp (required by CloudWatch)
@@ -3248,10 +3307,11 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         except Exception as e:
             print(f"  [recorder] Failed to finalize recording for test {test_id}: {e}")
 
-    # Auto-capture full conversation trace from the latest TraceCollector
+    # Auto-capture full conversation trace and summary from the latest TraceCollector
     if TraceCollector._latest is not None and TraceCollector._latest.messages:
         try:
             _test_traces[test_id] = TraceCollector._latest.to_trace_json()
+            _test_summaries[test_id] = TraceCollector._latest.summary()
         except Exception:
             pass  # non-fatal
         TraceCollector._latest = None
@@ -3466,7 +3526,7 @@ async def main():
 
     # Publish metrics + archive to S3 (non-fatal, no-op without boto3)
     if _HAS_AWS_PUBLISHER:
-        publish_eval_metrics(results, run_ts_file)
+        publish_eval_metrics(results, run_ts_file, test_summaries=_test_summaries)
         archive_results_to_s3(trace_file, run_ts_file)
         archive_videos_to_s3(
             os.path.join(_repo_root, "data", "eval", "videos"), run_ts_file

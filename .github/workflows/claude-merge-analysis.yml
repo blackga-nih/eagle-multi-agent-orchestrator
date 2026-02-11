@@ -1,0 +1,401 @@
+name: Claude Merge Analysis & Feature Branch Creation
+
+# This workflow implements a merge analysis system using Claude Code
+# that triggers on PRs/issues, performs analysis, creates reports, and
+# optionally creates feature branches with recommended changes.
+#
+# Based on patterns from:
+# - anthropics/claude-code-action: https://github.com/anthropics/claude-code-action
+# - Claude Code GitHub Actions docs: https://code.claude.com/docs/en/github-actions
+# - pull_request_target pattern for secure fork handling
+
+on:
+  # Trigger on PR events (use pull_request_target for secure fork handling)
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  # Trigger on issue comments (e.g., "@claude analyze merge")
+  issue_comment:
+    types: [created]
+  # Trigger on issue creation with specific labels
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: write      # Required to create branches and PRs
+  issues: write        # Required to comment on issues
+  pull-requests: write # Required to create PRs and comment
+  id-token: write      # For OIDC if using cloud providers
+
+env:
+  # Claude API configuration - set in repository secrets
+  # Options: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN
+  # For AWS Bedrock: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+  # For Google Vertex: GOOGLE_APPLICATION_CREDENTIALS
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+jobs:
+  # Job 1: Merge Analysis - Analyzes PR/issue and generates structured plan
+  merge-analysis:
+    name: Run Merge Analysis
+    runs-on: ubuntu-latest
+    # Only run on PRs or when explicitly triggered via comment
+    if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude-analyze'))
+    
+    outputs:
+      analysis-report: ${{ steps.parse-analysis.outputs.report }}
+      structured-plan: ${{ steps.parse-analysis.outputs.plan }}
+      suggested-branch: ${{ steps.parse-analysis.outputs.branch_name }}
+      has-changes: ${{ steps.parse-analysis.outputs.has_changes }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          # For pull_request_target, checkout the base branch for security
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0  # Full history for better analysis
+
+      - name: Collect PR/Issue Context
+        id: context
+        run: |
+          # Determine if this is a PR or issue
+          if [ "${{ github.event_name }}" == "pull_request" ] || [ "${{ github.event_name }}" == "pull_request_target" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+            HEAD_BRANCH="${{ github.event.pull_request.head.ref }}"
+            PR_TITLE="${{ github.event.pull_request.title }}"
+            PR_BODY="${{ github.event.pull_request.body }}"
+            
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "base_branch=$BASE_BRANCH" >> $GITHUB_OUTPUT
+            echo "head_branch=$HEAD_BRANCH" >> $GITHUB_OUTPUT
+            echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
+            echo "context_type=pr" >> $GITHUB_OUTPUT
+            
+            # Fetch PR diff
+            git fetch origin $HEAD_BRANCH:$HEAD_BRANCH || true
+            git diff $BASE_BRANCH..$HEAD_BRANCH > pr_diff.txt || echo "" > pr_diff.txt
+            
+          elif [ "${{ github.event_name }}" == "issues" ] || [ "${{ github.event_name }}" == "issue_comment" ]; then
+            ISSUE_NUMBER="${{ github.event.issue.number || github.event.issue.number }}"
+            ISSUE_TITLE="${{ github.event.issue.title }}"
+            ISSUE_BODY="${{ github.event.issue.body }}"
+            
+            echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+            echo "issue_title=$ISSUE_TITLE" >> $GITHUB_OUTPUT
+            echo "context_type=issue" >> $GITHUB_OUTPUT
+            
+            echo "" > pr_diff.txt
+          fi
+          
+          # Create context summary
+          cat > context_summary.txt << EOF
+          Repository: ${{ github.repository }}
+          Event: ${{ github.event_name }}
+          Actor: ${{ github.actor }}
+          Ref: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          EOF
+
+      - name: Run Claude Merge Analysis
+        id: claude-analysis
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Core prompt for merge analysis
+          # Pattern: Instruct Claude to analyze and produce structured JSON output
+          prompt: |
+            You are a senior code reviewer performing merge analysis for this repository.
+            
+            **Context:**
+            - Repository: ${{ github.repository }}
+            - Event: ${{ github.event_name }}
+            - Base branch: ${{ steps.context.outputs.base_branch || 'main' }}
+            
+            **Task:**
+            1. Analyze the provided PR diff or issue context
+            2. Identify potential merge conflicts, risks, and required changes
+            3. Assess test coverage and suggest improvements
+            4. Generate a prioritized action plan
+            5. Recommend a feature branch name if changes are needed
+            
+            **Output Format (JSON):**
+            You MUST output a valid JSON object with this exact structure:
+            {
+              "summary": "Brief summary of analysis",
+              "risk_level": "low|medium|high",
+              "conflicts_detected": boolean,
+              "test_coverage_adequate": boolean,
+              "action_items": [
+                {
+                  "priority": "high|medium|low",
+                  "description": "What needs to be done",
+                  "files_affected": ["path/to/file1", "path/to/file2"]
+                }
+              ],
+              "suggested_branch_name": "feature/claude-analysis-YYYYMMDD-HHMMSS",
+              "recommended_changes": {
+                "files_to_modify": ["path/to/file"],
+                "suggested_commits": [
+                  {
+                    "message": "Commit message",
+                    "files": ["path/to/file"]
+                  }
+                ]
+              },
+              "has_changes": boolean
+            }
+            
+            **PR Diff:**
+            $(cat pr_diff.txt)
+            
+            **Additional Context:**
+            $(cat context_summary.txt)
+            
+            Now perform the analysis and output ONLY the JSON object (no markdown, no explanation).
+          
+          # Claude configuration
+          # Pattern: Use claude_args for advanced configuration per v1 docs
+          claude_args: |
+            --model claude-opus-4-6
+            --max-tokens 8000
+            --temperature 0.2
+          
+          # Enable structured outputs (validated JSON)
+          # Pattern: Structured outputs become GitHub Action outputs
+          structured_outputs: true
+          
+          # Output file for the JSON plan
+          output_file: claude_analysis_plan.json
+
+      - name: Parse Claude Analysis Output
+        id: parse-analysis
+        run: |
+          if [ -f "claude_analysis_plan.json" ]; then
+            # Extract key values from JSON
+            REPORT=$(jq -r '.summary // "No summary provided"' claude_analysis_plan.json)
+            PLAN=$(cat claude_analysis_plan.json | jq -c '.')
+            BRANCH_NAME=$(jq -r '.suggested_branch_name // "feature/claude-analysis-'"$(date +%Y%m%d-%H%M%S)"'"' claude_analysis_plan.json)
+            HAS_CHANGES=$(jq -r '.has_changes // false' claude_analysis_plan.json)
+            
+            echo "report<<EOF" >> $GITHUB_OUTPUT
+            echo "$REPORT" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            echo "plan<<EOF" >> $GITHUB_OUTPUT
+            echo "$PLAN" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+            echo "has_changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Analysis file not found"
+            echo "report=Analysis failed - no output generated" >> $GITHUB_OUTPUT
+            echo "plan={}" >> $GITHUB_OUTPUT
+            echo "branch_name=feature/claude-analysis-failed" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post Analysis Report as Comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1d3799c619 # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = JSON.parse(fs.readFileSync('claude_analysis_plan.json', 'utf8'));
+            
+            // Format markdown report
+            const report = `## 🔍 Claude Merge Analysis Report
+             
+            **Risk Level:** ${plan.risk_level || 'unknown'}  
+            **Conflicts Detected:** ${plan.conflicts_detected ? '⚠️ Yes' : '✅ No'}  
+            **Test Coverage:** ${plan.test_coverage_adequate ? '✅ Adequate' : '⚠️ Needs Improvement'}
+            
+            ### Summary
+            ${plan.summary || 'No summary provided'}
+            
+            ### Action Items
+            ${plan.action_items?.map(item => `- **[${item.priority}]** ${item.description}`).join('\n') || 'None'}
+            
+            ### Recommended Changes
+            ${plan.recommended_changes ? JSON.stringify(plan.recommended_changes, null, 2) : 'None'}
+            
+            ---
+            *Generated by Claude Code Action*
+            `;
+            
+            // Post to PR or Issue
+            if (context.payload.pull_request) {
+              github.rest.issues.createComment({
+                issue_number: context.payload.pull_request.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report
+              });
+            } else if (context.payload.issue) {
+              github.rest.issues.createComment({
+                issue_number: context.payload.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report
+              });
+            }
+
+      - name: Upload Analysis Artifact
+        uses: actions/upload-artifact@5d5d22ded9d0f1f39e4c3333968e8c85e0c03a42 # v4.3.1
+        with:
+          name: claude-analysis-plan
+          path: |
+            claude_analysis_plan.json
+            pr_diff.txt
+            context_summary.txt
+          retention-days: 30
+
+  # Job 2: Create Feature Branch with Recommended Changes
+  create-feature-branch:
+    name: Create Feature Branch with Recommended Changes
+    runs-on: ubuntu-latest
+    needs: merge-analysis
+    # Only run if analysis indicates changes are needed
+    if: needs.merge-analysis.outputs.has-changes == 'true'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Analysis Artifact
+        uses: actions/download-artifact@c850b930e6ba138125429b7c5c93cc787a0d6e56 # v4.1.4
+        with:
+          name: claude-analysis-plan
+          path: ./
+
+      - name: Create Feature Branch
+        id: create-branch
+        run: |
+          BRANCH_NAME="${{ needs.merge-analysis.outputs.suggested-branch }}"
+          
+          # Ensure branch name is valid
+          BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9\/_-]/-/g')
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create and checkout new branch
+          # Note: Each GitHub Actions job already runs in an isolated environment,
+          # so a regular branch checkout provides sufficient isolation.
+          # Worktrees would only be needed if we needed multiple branches
+          # checked out simultaneously in the same job.
+          git checkout -b "$BRANCH_NAME"
+          
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Created branch: $BRANCH_NAME"
+
+      - name: Apply Recommended Changes
+        id: claude-implementation
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |
+            You are implementing recommended changes from a merge analysis.
+            
+            **Analysis Plan:**
+            Review the analysis plan in claude_analysis_plan.json to understand:
+            - What issues were identified
+            - What changes are recommended
+            - Which files need to be modified
+            
+            **Task:**
+            Based on the analysis plan, implement the recommended changes:
+            1. Review the action items from the analysis
+            2. Apply the suggested changes to the codebase
+            3. Ensure code quality and consistency
+            4. Create appropriate commit messages
+            
+            **Important:**
+            - Only modify files mentioned in the plan
+            - Follow the repository's coding standards
+            - Ensure all changes are properly formatted
+            - Add appropriate comments where needed
+            
+            **Output:**
+            After making changes, provide a summary of what was implemented.
+          
+          claude_args: |
+            --model claude-opus-4-6
+            --max-tokens 8000
+            --temperature 0.1
+          
+          # Pass the analysis plan as context
+          context_files: |
+            claude_analysis_plan.json
+
+      - name: Commit and Push Changes
+        run: |
+          git add -A
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            PLAN=$(cat claude_analysis_plan.json | jq -r '.')
+            COMMIT_MSG="feat: Apply Claude merge analysis recommendations
+
+            Changes:
+            $(echo "$PLAN" | jq -r '.action_items[]? | "- \(.description)"' || echo "- Various improvements")
+            
+            Generated by Claude Code Action"
+            
+            git commit -m "$COMMIT_MSG" || echo "Nothing to commit"
+            git push origin "${{ steps.create-branch.outputs.branch_name }}" || echo "Push failed"
+          fi
+
+      - name: Create Pull Request
+        uses: actions/github-script@60a0d83039c74aee543508d2ffcb1d3799c619 # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = JSON.parse(fs.readFileSync('claude_analysis_plan.json', 'utf8'));
+            
+            const prBody = `## 🤖 Automated Feature Branch from Merge Analysis
+            
+            This PR was automatically created based on Claude's merge analysis recommendations.
+            
+            **Analysis Summary:**
+            ${plan.summary || 'No summary'}
+            
+            **Action Items Addressed:**
+            ${plan.action_items?.map(item => `- [${item.priority}] ${item.description}`).join('\n') || 'None'}
+            
+            ---
+            *This PR was created automatically by the Claude Merge Analysis workflow*
+            `;
+            
+            // Check if PR already exists
+            const existingPRs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${{ steps.create-branch.outputs.branch_name }}`,
+              state: 'open'
+            });
+            
+            if (existingPRs.data.length === 0) {
+              const pr = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🤖 Automated: ${plan.summary?.substring(0, 50) || 'Merge Analysis Recommendations'}`,
+                body: prBody,
+                head: '${{ steps.create-branch.outputs.branch_name }}',
+                base: '${{ github.event.pull_request?.base?.ref || github.event.repository.default_branch || "main" }}'
+              });
+              
+              console.log(`Created PR #${pr.data.number}: ${pr.data.html_url}`);
+            } else {
+              console.log(`PR already exists: ${existingPRs.data[0].html_url}`);
+            }

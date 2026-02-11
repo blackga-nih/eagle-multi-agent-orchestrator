@@ -4,7 +4,7 @@ parent: "[[cloudwatch/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, cloudwatch, telemetry, aws, boto3, logging]
-last_updated: 2026-02-09T00:00:00
+last_updated: 2026-02-11T22:00:00
 ---
 
 # CloudWatch Expertise (Complete Mental Model)
@@ -84,18 +84,32 @@ One event per test in a run. Emitted as JSON in the `message` field of a CloudWa
   "test_name": "1_session_creation",
   "status": "pass",
   "log_lines": 42,
-  "run_timestamp": "2026-02-09T14:30:00.000000+00:00"
+  "run_timestamp": "2026-02-09T14:30:00.000000+00:00",
+  "model": "haiku",
+  "input_tokens": 14330,
+  "output_tokens": 29,
+  "cost_usd": 0.018057,
+  "session_id": "d454c326-...",
+  "agents": ["legal-counsel"],
+  "tools_used": ["create_document"]
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | string | Always `"test_result"` |
-| `test_id` | integer | Test number (1-20) |
+| `test_id` | integer | Test number (1-28) |
 | `test_name` | string | Format: `{N}_{snake_case_name}` |
 | `status` | string | One of: `"pass"`, `"fail"`, `"skip"`, `"unknown"` |
 | `log_lines` | integer | Number of captured stdout lines for this test |
 | `run_timestamp` | string | ISO 8601 timestamp of the run |
+| `model` | string | Model used for the run (e.g., `"haiku"`, `"sonnet"`) |
+| `input_tokens` | integer | Total input tokens (incl. cache) for this test; 0 if no LLM call |
+| `output_tokens` | integer | Total output tokens for this test; 0 if no LLM call |
+| `cost_usd` | float | Total cost in USD for this test; 0.0 if no LLM call |
+| `session_id` | string? | SDK session ID if available (omitted if none) |
+| `agents` | string[]? | Subagent names invoked via Task tool (omitted if empty) |
+| `tools_used` | string[]? | Non-Task tool names used (omitted if empty) |
 
 #### test_name Mapping
 
@@ -136,7 +150,11 @@ One event per run, emitted after all test_result events.
   "passed": 18,
   "skipped": 1,
   "failed": 1,
-  "pass_rate": 90.0
+  "pass_rate": 90.0,
+  "model": "haiku",
+  "total_input_tokens": 45000,
+  "total_output_tokens": 12000,
+  "total_cost_usd": 0.045
 }
 ```
 
@@ -149,6 +167,10 @@ One event per run, emitted after all test_result events.
 | `skipped` | integer | Count where result is `None` |
 | `failed` | integer | Count where result is not `True` and not `None` |
 | `pass_rate` | float | `round(passed / max(total_tests, 1) * 100, 1)` |
+| `model` | string | Model used for the run |
+| `total_input_tokens` | integer | Aggregate input tokens across all tests |
+| `total_output_tokens` | integer | Aggregate output tokens across all tests |
+| `total_cost_usd` | float | Aggregate cost in USD across all tests |
 
 #### Invariant
 
@@ -164,11 +186,17 @@ This is validated by test 20 (`cloudwatch_e2e_verification`).
 
 ### emit_to_cloudwatch Function
 
-Location: `server/tests/test_eagle_sdk_eval.py` (~line 2224)
+Location: `server/tests/test_eagle_sdk_eval.py` (~line 3076)
 
 ```python
 def emit_to_cloudwatch(trace_output: dict, results: dict):
 ```
+
+#### Data Sources
+
+The function reads from two module-level stores populated by `_run_test()`:
+- `_test_summaries[test_id]` — `TraceCollector.summary()` dict with tokens, cost, session_id
+- `_test_traces[test_id]` — `TraceCollector.to_trace_json()` list for agent/tool extraction
 
 #### Parameters
 
@@ -182,11 +210,12 @@ def emit_to_cloudwatch(trace_output: dict, results: dict):
 1. **Create boto3 client**: `boto3.client("logs", region_name="us-east-1")`
 2. **Ensure log group**: `create_log_group(logGroupName="/eagle/test-runs")` - catches `ResourceAlreadyExistsException`
 3. **Create log stream**: `create_log_stream(logGroupName=..., logStreamName=stream_name)` - catches `ResourceAlreadyExistsException`
-4. **Build test_result events**: Iterates `trace_output["results"]`, creates one event per test with `timestamp = now_ms + test_id`
-5. **Build run_summary event**: Aggregates results, `timestamp = now_ms + 100`
+4. **Build test_result events**: Iterates `trace_output["results"]`, enriches each with model, tokens, cost, session_id, agents, tools from `_test_summaries` and `_test_traces`; `timestamp = now_ms + test_id`
+5. **Build run_summary event**: Aggregates results + token/cost totals, `timestamp = now_ms + 100`
 6. **Sort events**: `events.sort(key=lambda e: e["timestamp"])` - **required by CloudWatch**
 7. **Put events**: `client.put_log_events(logGroupName=..., logStreamName=..., logEvents=events)`
 8. **Print confirmation**: `"CloudWatch: emitted {N} events to {LOG_GROUP}/{stream_name}"`
+9. **Local mirror**: Writes events JSON to `data/eval/telemetry/cw-{ts}.json`
 
 #### Timestamp Assignment
 
@@ -639,7 +668,48 @@ The `_exec_cloudwatch_logs` tool truncates event messages to 500 characters:
 "message": e["message"][:500]
 ```
 
-For test_result events (~150 bytes), this is fine. For run_summary events (~150 bytes), this is fine. But if event schemas grow, truncation could hide data.
+With enriched events (tokens, cost, model, agents, tools), test_result events are ~300-500 bytes. run_summary events ~250 bytes. Still within 500 chars but getting close — watch for truncation if adding more fields.
+
+---
+
+## Part 8: CloudWatch Custom Metrics (EAGLE/Eval)
+
+Location: `server/tests/eval_aws_publisher.py` — `publish_eval_metrics()`
+
+### Namespace
+
+`EAGLE/Eval`
+
+### Aggregate Metrics (no dimensions)
+
+| Metric | Unit | Description |
+|--------|------|-------------|
+| `PassRate` | Percent | Overall pass rate for the run |
+| `TestsPassed` | Count | Number of passing tests |
+| `TestsFailed` | Count | Number of failing tests |
+| `TestsSkipped` | Count | Number of skipped tests |
+| `TotalCost` | None | Total USD cost for the run (if > 0) |
+| `TotalInputTokens` | Count | Aggregate input tokens across all tests (if > 0) |
+| `TotalOutputTokens` | Count | Aggregate output tokens across all tests (if > 0) |
+
+### Per-Run Metrics (RunId dimension)
+
+| Metric | Dimension | Unit |
+|--------|-----------|------|
+| `PassRate` | `RunId=<timestamp>` | Percent |
+
+### Per-Test Metrics (TestName dimension)
+
+| Metric | Dimension | Unit | Description |
+|--------|-----------|------|-------------|
+| `TestStatus` | `TestName` | None | 1.0 = pass, 0.0 = fail/skip |
+| `InputTokens` | `TestName` | Count | Per-test input tokens (if > 0) |
+| `OutputTokens` | `TestName` | Count | Per-test output tokens (if > 0) |
+| `CostUSD` | `TestName` | None | Per-test cost in USD (if > 0) |
+
+### API Batching
+
+CloudWatch `put_metric_data` has a limit of 1000 metric data points per call. The publisher batches in chunks of 1000.
 
 ---
 
@@ -651,20 +721,29 @@ For test_result events (~150 bytes), this is fine. For run_summary events (~150 
 - Idempotent create_log_group/create_log_stream handles first-run and race conditions
 - Timestamp offset by test_id ensures deterministic event ordering
 - run_summary invariant (passed + skipped + failed == total) enables validation
+- `_test_summaries` dict (parallel to `_test_traces`) captures per-test token/cost data from TraceCollector.summary() before it's cleared
+- Enriched test_result events include model, input_tokens, output_tokens, cost_usd, session_id, agents[], tools_used[] — all optional/gracefully defaulting
+- `_extract_agents_and_tools()` helper walks trace JSON to find Task tool invocations (agents) and other tool names
+- publish_eval_metrics batches put_metric_data in chunks of 1000 (CloudWatch API limit)
+- Per-test InputTokens/OutputTokens/CostUSD metrics use TestName dimension for drill-down
 
 ### patterns_to_avoid
 - Don't query the current run's events in the same execution (eventual consistency)
 - Don't rely on the tool's default log_group when querying test-runs
 - Don't use the `search` operation for test-runs without accounting for tenant scoping
 - Don't embed large payloads in event messages (256 KB limit)
+- Don't clear TraceCollector._latest before capturing both trace and summary
 
 ### common_issues
 - AWS credentials not configured -> emission silently skipped
 - Log group doesn't exist on first run -> auto-created, but describe_log_streams returns empty
 - `search` operation adds tenant_id prefix -> unexpected results for test-run queries
+- boto3-only tests (18, 20) report tokens=0, cost=0 — this is correct, not a bug (no LLM calls)
 
 ### tips
 - Test 18 validates the CloudWatch tool; test 20 validates the emission pipeline
 - Use `get_stream` operation to find the latest run, then `get_log_events` to read it
 - The `recent` operation is better than `search` for test-runs (no tenant scoping)
 - Check `trace_logs.json` first for quick debugging; CloudWatch is for historical analysis
+- Local telemetry mirror at `data/eval/telemetry/cw-*.json` has the same events as CloudWatch — useful for offline verification
+- To verify enriched fields, run a single LLM test (e.g., `--tests 1`) and check the telemetry mirror JSON

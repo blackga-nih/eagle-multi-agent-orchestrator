@@ -80,8 +80,16 @@ def publish_eval_metrics(
     results: dict,
     run_timestamp: str,
     total_cost_usd: float = 0.0,
+    test_summaries: dict = None,
 ) -> bool:
     """Publish eval metrics to CloudWatch EAGLE/Eval namespace.
+
+    Args:
+        results: test_id/result_key -> True/False/None
+        run_timestamp: ISO timestamp string for the run
+        total_cost_usd: aggregate cost for the run
+        test_summaries: optional dict[int, dict] from TraceCollector.summary() per test
+            Keys: total_input_tokens, total_output_tokens, total_cost_usd, session_id
 
     Returns True on success, False on failure (non-fatal).
     """
@@ -112,17 +120,55 @@ def publish_eval_metrics(
                 {"MetricName": "TotalCost", "Value": total_cost_usd, "Unit": "None"}
             )
 
-        # Per-test status (1.0 = pass, 0.0 = fail/skip)
+        # Aggregate token metrics from per-test summaries
+        summaries = test_summaries or {}
+        total_input = sum(s.get("total_input_tokens", 0) for s in summaries.values())
+        total_output = sum(s.get("total_output_tokens", 0) for s in summaries.values())
+        if total_input > 0:
+            metric_data.append(
+                {"MetricName": "TotalInputTokens", "Value": float(total_input), "Unit": "Count"}
+            )
+        if total_output > 0:
+            metric_data.append(
+                {"MetricName": "TotalOutputTokens", "Value": float(total_output), "Unit": "Count"}
+            )
+
+        # Per-test status (1.0 = pass, 0.0 = fail/skip) + per-test tokens/cost
         for test_id, test_name in _TEST_NAMES.items():
             result_val = results.get(test_id)
+            dims = [{"Name": "TestName", "Value": test_name}]
             metric_data.append({
                 "MetricName": "TestStatus",
                 "Value": 1.0 if result_val is True else 0.0,
                 "Unit": "None",
-                "Dimensions": [{"Name": "TestName", "Value": test_name}],
+                "Dimensions": dims,
             })
 
-        _get_cw().put_metric_data(Namespace=_NAMESPACE, MetricData=metric_data)
+            # Per-test token/cost metrics (only if we have summary data)
+            ts = summaries.get(test_id, {})
+            in_tok = ts.get("total_input_tokens", 0)
+            out_tok = ts.get("total_output_tokens", 0)
+            cost = ts.get("total_cost_usd", 0.0)
+            if in_tok > 0:
+                metric_data.append({
+                    "MetricName": "InputTokens", "Value": float(in_tok),
+                    "Unit": "Count", "Dimensions": dims,
+                })
+            if out_tok > 0:
+                metric_data.append({
+                    "MetricName": "OutputTokens", "Value": float(out_tok),
+                    "Unit": "Count", "Dimensions": dims,
+                })
+            if cost > 0:
+                metric_data.append({
+                    "MetricName": "CostUSD", "Value": cost,
+                    "Unit": "None", "Dimensions": dims,
+                })
+
+        # CloudWatch put_metric_data limit: 1000 metric data points per call
+        cw = _get_cw()
+        for i in range(0, len(metric_data), 1000):
+            cw.put_metric_data(Namespace=_NAMESPACE, MetricData=metric_data[i:i+1000])
         count = len(metric_data)
         print(f"CloudWatch Metrics: published {count} metrics to {_NAMESPACE}")
         return True

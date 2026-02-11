@@ -107,6 +107,17 @@ Future State (CDK + CI/CD)
         |-- CloudFront + S3 OR ECS Fargate
 ```
 
+## Cross-References
+
+| Related Expert | When to Use |
+|---------------|-------------|
+| aws | For CDK stack authoring, DynamoDB design, IAM policies — the AWS expert is the expanded successor to this deployment expert |
+| git | For GitHub Actions workflows, CI/CD pipelines, release management |
+| cloudwatch | For CloudWatch dashboards, alarms, and metrics configuration |
+| eval | For eval suite infrastructure (eval CDK stack) |
+
+> **Note**: The `aws` expert is the expanded version of this deployment expert, adding CDK authoring, DynamoDB design, and IAM policy generation. All deployment commands still work. For new AWS infrastructure work, prefer `/experts:aws:*` commands.
+
 ## ACT-LEARN-REUSE Pattern
 
 ```
