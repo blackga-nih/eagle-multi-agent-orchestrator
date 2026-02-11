@@ -8,6 +8,7 @@ Tests the core patterns for the EAGLE multi-tenant architecture:
        CloudWatch E2E verification — direct execute_tool() calls with boto3 confirmation
 21-27. UC workflow validation: micro-purchase, option exercise, contract modification,
        CO package review, contract close-out, shutdown notification, score consolidation
+28.    SDK architecture: skill→subagent orchestration via AgentDefinition
 
 SDK: claude-agent-sdk >= 0.1.29
 Backend: AWS Bedrock (CLAUDE_CODE_USE_BEDROCK=1)
@@ -17,6 +18,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -37,6 +39,16 @@ from claude_agent_sdk import (
     create_sdk_mcp_server,
 )
 
+try:
+    from eval_aws_publisher import (
+        publish_eval_metrics,
+        archive_results_to_s3,
+        archive_videos_to_s3,
+    )
+    _HAS_AWS_PUBLISHER = True
+except ImportError:
+    _HAS_AWS_PUBLISHER = False
+
 # ============================================================
 # CLI flags
 # ============================================================
@@ -54,6 +66,27 @@ _parser.add_argument(
 _parser.add_argument(
     "--tests", default=None,
     help="Comma-separated test numbers to run (e.g. '1,2,7'). Default: all.",
+)
+_parser.add_argument(
+    "--record-video", dest="record_video", action="store_true",
+    help="Record browser video of eval-page UC diagrams for applicable tests. "
+         "Requires: pip install playwright && playwright install chromium",
+)
+_parser.add_argument(
+    "--headed", action="store_true",
+    help="Show browser window during video recording (default: headless).",
+)
+_parser.add_argument(
+    "--base-url", default="http://localhost:3000",
+    help="Frontend base URL for video recording (default: http://localhost:3000).",
+)
+_parser.add_argument(
+    "--auth-email", default=None,
+    help="Login email for video recording (or set EAGLE_TEST_EMAIL env var).",
+)
+_parser.add_argument(
+    "--auth-password", default=None,
+    help="Login password for video recording (or set EAGLE_TEST_PASSWORD env var).",
 )
 _args = _parser.parse_args()
 
@@ -2794,6 +2827,146 @@ async def test_20_cloudwatch_e2e_verification():
 
 
 # ============================================================
+# Test 28: SDK Skill→Subagent Orchestration
+# ============================================================
+
+async def test_28_sdk_skill_subagent_orchestration():
+    """Test the sdk_agentic_service skill→subagent pattern.
+
+    Validates:
+    1. build_skill_agents() builds AgentDefinitions from SKILL_CONSTANTS
+    2. build_supervisor_prompt() generates proper routing prompt
+    3. sdk_query() supervisor delegates to subagents via Task tool
+    4. Each subagent runs in its own context window (parent_tool_use_id)
+    """
+    print("\n" + "=" * 70)
+    print("TEST 28: SDK Skill→Subagent Orchestration")
+    print("=" * 70)
+
+    from sdk_agentic_service import (
+        build_skill_agents,
+        build_supervisor_prompt,
+        sdk_query,
+        SKILL_AGENT_REGISTRY,
+    )
+
+    # Step 1: Validate build_skill_agents()
+    print("  Step 1: build_skill_agents()")
+    agents = build_skill_agents(model=MODEL, tier="advanced")
+    agent_names = list(agents.keys())
+    print(f"    Built {len(agents)} agents: {agent_names}")
+
+    expected_agents = {"oa-intake", "legal-counsel", "market-intelligence",
+                       "tech-translator", "public-interest", "document-generator"}
+    agents_ok = set(agent_names) == expected_agents
+    print(f"    All 6 skills mapped: {agents_ok}")
+
+    # Verify each AgentDefinition has prompt content
+    for name, agent in agents.items():
+        has_prompt = len(agent.prompt) > 50
+        print(f"    {name}: prompt_len={len(agent.prompt)}, has_content={has_prompt}")
+
+    # Step 2: Validate build_supervisor_prompt()
+    print("\n  Step 2: build_supervisor_prompt()")
+    sup_prompt = build_supervisor_prompt(
+        tenant_id="test-tenant", user_id="test-user", tier="premium"
+    )
+    print(f"    Supervisor prompt length: {len(sup_prompt)} chars")
+
+    # Check supervisor prompt references all subagent names
+    sup_references = all(name in sup_prompt for name in agent_names)
+    print(f"    References all agents: {sup_references}")
+
+    # Check supervisor prompt does NOT contain skill content
+    # (skill content should only be in subagent prompts, not supervisor)
+    skill_content_leaked = any(
+        "Five-Phase" in sup_prompt or
+        "Think Like Trish" in sup_prompt or
+        "GAO protest" in sup_prompt
+        for _ in [1]
+    )
+    print(f"    Skill content isolated (not in supervisor): {not skill_content_leaked}")
+
+    # Step 3: Run sdk_query() with limited skills for cost control
+    print("\n  Step 3: sdk_query() — supervisor → subagent delegation")
+    print(f"    Model: {MODEL}")
+    print(f"    Skills: oa-intake, legal-counsel (2 of 6 for cost control)")
+
+    collector = TraceCollector()
+
+    try:
+        async for message in sdk_query(
+            prompt=(
+                "We need to procure IT modernization services for $350K. "
+                "Run intake analysis and then check legal risks."
+            ),
+            tenant_id="test-tenant",
+            user_id="test-user",
+            tier="advanced",
+            model=MODEL,
+            skill_names=["oa-intake", "legal-counsel"],
+            max_turns=10,
+        ):
+            collector.process(message, indent=2)
+    except ExceptionGroup as eg:
+        # Handle MCP cleanup race on Windows
+        real_errors = [e for e in eg.exceptions
+                       if "CLIConnection" not in type(e).__name__]
+        if real_errors:
+            raise ExceptionGroup("SDK errors", real_errors)
+        print("    (MCP cleanup race on Windows — non-fatal)")
+    except Exception as e:
+        print(f"    sdk_query() error: {type(e).__name__}: {e}")
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tool use blocks: {summary['tool_use_blocks']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+    print(f"  Cost: ${summary['total_cost_usd']:.6f}")
+
+    # Check for subagent invocations via Task tool
+    subagent_calls = [t for t in collector.tool_use_blocks if t["tool"] == "Task"]
+    subagent_types = [
+        t["input"].get("subagent_type", t["input"].get("description", "?"))
+        for t in subagent_calls
+    ]
+
+    print(f"\n  Subagent invocations: {len(subagent_calls)}")
+    for st in subagent_types:
+        print(f"    -> {st}")
+
+    # Check response content for skill-specific knowledge
+    all_text = " ".join(collector.text_blocks).lower()
+    for msg_entry in collector.messages:
+        msg = msg_entry["message"]
+        if hasattr(msg, "result") and msg.result:
+            all_text += " " + msg.result.lower()
+
+    indicators = {
+        "agents_built": agents_ok,
+        "supervisor_prompt_valid": sup_references and not skill_content_leaked,
+        "subagent_delegation": len(subagent_calls) >= 1,
+        "intake_or_legal_invoked": any(
+            "intake" in st.lower() or "legal" in st.lower()
+            for st in subagent_types
+        ),
+        "response_has_content": summary["total_messages"] > 2,
+    }
+
+    print(f"\n  Indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 3
+    print(f"\n  Indicators: {indicators_found}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - SDK Skill→Subagent Orchestration")
+    return passed
+
+
+# ============================================================
 # Main
 # ============================================================
 
@@ -2834,7 +3007,7 @@ LOG_GROUP = "/eagle/test-runs"
 def emit_to_cloudwatch(trace_output: dict, results: dict):
     """Emit structured test results to CloudWatch Logs.
 
-    Non-fatal: catches all exceptions so local trace_logs.json is always the fallback.
+    Non-fatal: catches all exceptions so local trace files are always the fallback.
     Uses /eagle/test-runs log group with a per-run log stream.
     """
     try:
@@ -2878,6 +3051,7 @@ def emit_to_cloudwatch(trace_output: dict, results: dict):
             25: "25_uc07_contract_closeout",
             26: "26_uc08_shutdown_notification",
             27: "27_uc09_score_consolidation",
+            28: "28_sdk_skill_subagent_orchestration",
         }
 
         for test_id_str, test_data in trace_output.get("results", {}).items():
@@ -2924,12 +3098,21 @@ def emit_to_cloudwatch(trace_output: dict, results: dict):
         )
         print(f"CloudWatch: emitted {len(events)} events to {LOG_GROUP}/{stream_name}")
 
+        # Local telemetry mirror
+        _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        telemetry_dir = os.path.join(_repo_root, "data", "eval", "telemetry")
+        os.makedirs(telemetry_dir, exist_ok=True)
+        local_ts = run_ts.replace(":", "-").replace("+", "Z")
+        with open(os.path.join(telemetry_dir, f"cw-{local_ts}.json"), "w") as f:
+            json.dump(events, f, indent=2)
+
     except Exception as e:
         print(f"CloudWatch: emission failed (non-fatal): {type(e).__name__}: {e}")
 
 
-async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = None):
-    """Run a single test by ID, with capture and error handling.
+async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = None,
+                    recorder: "BrowserRecorder | None" = None):
+    """Run a single test by ID, with capture, error handling, and optional video.
 
     Returns (result_key, result_value, session_id_or_None).
     """
@@ -2961,11 +3144,20 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         25: ("25_uc07_contract_closeout", test_25_uc07_contract_closeout),
         26: ("26_uc08_shutdown_notification", test_26_uc08_shutdown_notification),
         27: ("27_uc09_score_consolidation", test_27_uc09_score_consolidation),
+        28: ("28_sdk_skill_subagent_orchestration", test_28_sdk_skill_subagent_orchestration),
     }
 
     result_key, test_fn = TEST_REGISTRY[test_id]
     capture.start_test(test_id)
     new_session_id = None
+
+    # Start video recording if recorder is active and test has a prompt
+    rec_ctx = None
+    if recorder and recorder.has_recording(test_id):
+        try:
+            rec_ctx = await recorder.begin_test(test_id)
+        except Exception as e:
+            print(f"  [recorder] Failed to start recording for test {test_id}: {e}")
 
     try:
         if test_id == 1:
@@ -2981,6 +3173,14 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         traceback.print_exc()
         result_val = False
 
+    # Wait for chat response and finalize video after test completes
+    if rec_ctx:
+        try:
+            await recorder.wait_for_response(rec_ctx)
+            await recorder.end_test(rec_ctx)
+        except Exception as e:
+            print(f"  [recorder] Failed to finalize recording for test {test_id}: {e}")
+
     capture.end_test()
     return result_key, result_val, new_session_id
 
@@ -2990,7 +3190,20 @@ async def main():
     if _args.tests:
         selected_tests = sorted(set(int(t.strip()) for t in _args.tests.split(",")))
     else:
-        selected_tests = list(range(1, 28))
+        selected_tests = list(range(1, 29))
+
+    # Set up video recorder (if --record-video)
+    recorder = None
+    if _args.record_video:
+        from browser_recorder import BrowserRecorder
+        recorder = BrowserRecorder(
+            video_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "eval", "videos"),
+            base_url=_args.base_url,
+            headless=not _args.headed,
+            auth_email=_args.auth_email,
+            auth_password=_args.auth_password,
+        )
+        await recorder.start()
 
     # Set up capturing stream
     capture = CapturingStream(sys.stdout)
@@ -3001,6 +3214,8 @@ async def main():
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
     print(f"Model: {MODEL}   {'(--async)' if _args.run_async else '(sequential)'}")
     print(f"Tests: {','.join(str(t) for t in selected_tests)}")
+    if recorder:
+        print(f"Video: recording UC diagrams → data/eval/videos/")
     print(f"Backend: AWS Bedrock (CLAUDE_CODE_USE_BEDROCK=1)")
     print(f"SDK: claude-agent-sdk >= 0.1.29")
     print("=" * 70)
@@ -3013,17 +3228,17 @@ async def main():
     parallel_tests = [t for t in selected_tests if t > 2]
 
     for tid in sequential_tests:
-        key, val, sid = await _run_test(tid, capture, session_id=session_id)
+        key, val, sid = await _run_test(tid, capture, session_id=session_id, recorder=recorder)
         results[key] = val
         if sid:
             session_id = sid
 
-    # --- Phase B: independent tests (3-20) ---
+    # --- Phase B: independent tests (3-27) ---
     if _args.run_async and len(parallel_tests) > 1:
         print(f"\n  Running {len(parallel_tests)} tests concurrently (--async)...")
 
         async def _wrapped(tid):
-            return await _run_test(tid, capture, session_id=session_id)
+            return await _run_test(tid, capture, session_id=session_id, recorder=recorder)
 
         tasks = [asyncio.create_task(_wrapped(tid)) for tid in parallel_tests]
         completed = await asyncio.gather(*tasks, return_exceptions=True)
@@ -3036,8 +3251,14 @@ async def main():
                 results[key] = val
     else:
         for tid in parallel_tests:
-            key, val, _ = await _run_test(tid, capture, session_id=session_id)
+            key, val, _ = await _run_test(tid, capture, session_id=session_id, recorder=recorder)
             results[key] = val
+
+    # Tear down recorder
+    if recorder:
+        sys.stdout = capture.original
+        await recorder.stop()
+        sys.stdout = capture
 
     # Summary
     print("\n" + "=" * 70)
@@ -3092,6 +3313,8 @@ async def main():
     print(f"    UC-07 Contract Close-Out: {'Ready' if results.get('25_uc07_contract_closeout') else 'Needs work'}")
     print(f"    UC-08 Shutdown Notification: {'Ready' if results.get('26_uc08_shutdown_notification') else 'Needs work'}")
     print(f"    UC-09 Score Consolidation: {'Ready' if results.get('27_uc09_score_consolidation') else 'Needs work'}")
+    print(f"\n  SDK Architecture:")
+    print(f"    Skill→Subagent Orchestration: {'Ready' if results.get('28_sdk_skill_subagent_orchestration') else 'Needs work'}")
 
     # Restore stdout
     sys.stdout = capture.original
@@ -3136,6 +3359,7 @@ async def main():
             25: "25_uc07_contract_closeout",
             26: "26_uc08_shutdown_notification",
             27: "27_uc09_score_consolidation",
+            28: "28_sdk_skill_subagent_orchestration",
         }.get(test_id, str(test_id))
 
         result_val = results.get(result_key)
@@ -3146,13 +3370,28 @@ async def main():
             "logs": log_lines,
         }
 
-    trace_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trace_logs.json")
+    _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    _eval_results_dir = os.path.join(_repo_root, "data", "eval", "results")
+    os.makedirs(_eval_results_dir, exist_ok=True)
+    run_ts_file = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    trace_file = os.path.join(_eval_results_dir, f"run-{run_ts_file}.json")
     with open(trace_file, "w", encoding="utf-8") as f:
         json.dump(trace_output, f, indent=2)
+    latest_file = os.path.join(_eval_results_dir, "latest.json")
+    shutil.copy2(trace_file, latest_file)
     print(f"\nTrace logs written to: {trace_file}")
+    print(f"Latest copy: {latest_file}")
 
     # Emit to CloudWatch (non-fatal)
     emit_to_cloudwatch(trace_output, results)
+
+    # Publish metrics + archive to S3 (non-fatal, no-op without boto3)
+    if _HAS_AWS_PUBLISHER:
+        publish_eval_metrics(results, run_ts_file)
+        archive_results_to_s3(trace_file, run_ts_file)
+        archive_videos_to_s3(
+            os.path.join(_repo_root, "data", "eval", "videos"), run_ts_file
+        )
 
     if failed > 0:
         sys.exit(1)

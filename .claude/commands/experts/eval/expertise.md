@@ -4,7 +4,7 @@ parent: "[[eval/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, eval, testing, eagle, aws, cloudwatch]
-last_updated: 2026-02-09T00:00:00
+last_updated: 2026-02-10T00:00:00
 ---
 
 # Eval Expertise (Complete Mental Model)
@@ -18,10 +18,12 @@ last_updated: 2026-02-09T00:00:00
 ### File Layout
 
 ```
-server/tests/test_eagle_sdk_eval.py        # 20 tests, CLI entry point
+server/tests/test_eagle_sdk_eval.py        # 28 tests, CLI entry point
+server/tests/eval_aws_publisher.py         # S3 archival + CloudWatch custom metrics
 server/eagle_skill_constants.py      # Embedded skill/prompt constants
 server/app/agentic_service.py        # execute_tool(), AWS tool implementations
-trace_logs.json               # Per-run output for dashboard eval
+data/eval/results/                   # Per-run JSON results (run-<ts>.json, latest.json)
+data/eval/videos/                    # Browser recording videos (.webm/.mp4)
 ```
 
 ### Test Tiers
@@ -31,6 +33,8 @@ trace_logs.json               # Per-run output for dashboard eval
 | SDK Patterns | 1-6 | claude-agent-sdk query() | Yes (Bedrock) | AWS Bedrock |
 | Skill Validation | 7-15 | query() with skill system_prompt | Yes (Bedrock) | eagle_skill_constants |
 | AWS Tool Integration | 16-20 | execute_tool() direct | None | boto3, AWS services |
+| UC Workflow Validation | 21-27 | Multi-turn workflow queries | Yes (Bedrock) | Skills, tools |
+| SDK Architecture | 28 | sdk_agentic_service AgentDefinition | Yes (Bedrock) | sdk_agentic_service, SKILL_CONSTANTS |
 
 ### CLI Interface
 
@@ -51,10 +55,14 @@ python server/tests/test_eagle_sdk_eval.py --model haiku --async
 main()
   |-- Parse args (--model, --tests, --async)
   |-- Phase A: Sequential tests 1-2 (session create/resume, linked)
-  |-- Phase B: Independent tests 3-20 (sequential or --async parallel)
+  |-- Phase B: Independent tests 3-27 (sequential or --async parallel)
   |-- Summary printout
-  |-- Write trace_logs.json
-  |-- emit_to_cloudwatch() -> /eagle/test-runs
+  |-- Write data/eval/results/run-<ts>.json + latest.json
+  |-- emit_to_cloudwatch() -> /eagle/test-runs (structured log events)
+  |-- if _HAS_AWS_PUBLISHER:
+  |     |-- publish_eval_metrics() -> EAGLE/Eval namespace (custom CW metrics)
+  |     |-- archive_results_to_s3() -> s3://eagle-eval-artifacts/eval/results/
+  |     |-- archive_videos_to_s3() -> s3://eagle-eval-artifacts/eval/videos/
 ```
 
 ---
@@ -196,6 +204,18 @@ Steps: describe_log_streams -> get_log_events -> parse structure -> check run_su
 - Checks structured JSON (type, test_id, status fields)
 - Verifies run_summary tally: passed + skipped + failed == total
 
+## Part 4b: SDK Architecture Tests (28)
+
+### Test 28: SDK Skill→Subagent Orchestration
+- Tests `sdk_agentic_service.py` — the skill→subagent pattern with separate context windows
+- Step 1: `build_skill_agents()` builds all 6 AgentDefinitions from SKILL_CONSTANTS
+- Step 2: `build_supervisor_prompt()` generates routing prompt (no skill content leaked)
+- Step 3: `sdk_query()` runs supervisor that delegates to subagents via Task tool
+- Uses only 2 skills (oa-intake, legal-counsel) for cost control
+- Handles ExceptionGroup for Windows MCP cleanup
+- 5 indicators: agents_built, supervisor_prompt_valid, subagent_delegation, intake_or_legal_invoked, response_has_content
+- **Depends on**: `server/app/sdk_agentic_service.py`, `eagle_skill_constants.py`
+
 ---
 
 ## Part 5: CloudWatch Telemetry
@@ -237,10 +257,41 @@ Steps: describe_log_streams -> get_log_events -> parse structure -> check run_su
 ### Emission Pattern
 
 ```python
+# Stage 1: Structured log events (emit_to_cloudwatch)
 emit_to_cloudwatch(trace_output, results)
 # Non-fatal: catches all exceptions
 # Creates log group + stream if needed
 # Sorts events by timestamp (CloudWatch requirement)
+
+# Stage 2: Custom metrics + S3 archival (eval_aws_publisher)
+if _HAS_AWS_PUBLISHER:
+    publish_eval_metrics(results, run_ts)    # ~32 metrics to EAGLE/Eval namespace
+    archive_results_to_s3(trace_file, run_ts)  # JSON to s3://eagle-eval-artifacts/
+    archive_videos_to_s3(video_dir, run_ts)    # .webm/.mp4 to s3://eagle-eval-artifacts/
+```
+
+### Custom Metrics (EAGLE/Eval Namespace)
+
+Published by `eval_aws_publisher.publish_eval_metrics()`:
+
+| Metric | Unit | Dimensions | Purpose |
+|--------|------|------------|---------|
+| `PassRate` | Percent | (none) | Dashboard trending |
+| `PassRate` | Percent | `RunId` | Per-run detail |
+| `TestsPassed` | Count | (none) | Aggregate pass count |
+| `TestsFailed` | Count | (none) | Aggregate fail count |
+| `TestsSkipped` | Count | (none) | Aggregate skip count |
+| `TotalCost` | None | (none) | USD cost if > 0 |
+| `TestStatus` (x27) | None | `TestName` | 1.0=pass, 0.0=fail per test |
+
+### S3 Artifact Archival
+
+Published by `eval_aws_publisher.archive_results_to_s3()` and `archive_videos_to_s3()`:
+
+```
+s3://eagle-eval-artifacts/
+  eval/results/run-<ISO-ts>.json                # Results JSON per run
+  eval/videos/<run-ts>/<test_dir>/<file>.webm   # Browser recordings
 ```
 
 ---
@@ -518,20 +569,37 @@ All tests that create AWS resources MUST clean up:
 - boto3 independent confirmation prevents false positives
 - Cleanup with try/except prevents test pollution
 - Structured CloudWatch events enable dashboard querying
+- Import-guard pattern (`try: from eval_aws_publisher import ...; _HAS_AWS_PUBLISHER = True except ImportError: _HAS_AWS_PUBLISHER = False`) makes AWS publisher zero-impact when module unavailable (discovered: 2026-02-10, component: eval_aws_publisher integration)
+- Lazy-loaded boto3 clients in eval_aws_publisher avoid import-time AWS calls — clients only created on first use (discovered: 2026-02-10, component: eval_aws_publisher)
+- Each publisher function is independently non-fatal — one failure doesn't block others (discovered: 2026-02-10, component: eval_aws_publisher)
+- Publishing ~32 CloudWatch custom metrics in a single put_metric_data call is well under the 1000-per-call limit (discovered: 2026-02-10, component: eval_aws_publisher)
+- `run_ts_file` format `%Y-%m-%dT%H-%M-%SZ` is shared between local file naming and S3 key paths for consistent cross-referencing (discovered: 2026-02-10, component: eval_aws_publisher)
+- Testing `sdk_agentic_service` functions (build_skill_agents, build_supervisor_prompt) deterministically before running live sdk_query() — catches import/config issues without LLM cost (discovered: 2026-02-10, component: test_28)
+- Limiting subagent skills in test (2 of 6) for cost control while still validating the delegation pattern (discovered: 2026-02-10, component: test_28)
 
 ### patterns_to_avoid
 - Don't rely on LLM output for deterministic assertions
 - Don't skip cleanup — leaves artifacts that confuse future runs
 - Don't test CloudWatch writes in same run as reads (eventual consistency)
+- Don't import eval_aws_publisher at module top-level without guard — breaks eval suite on machines without boto3 (discovered: 2026-02-10, component: eval_aws_publisher)
 
 ### common_issues
 - AWS credentials not configured -> all tool tests fail
 - S3 bucket "nci-documents" doesn't exist -> test 16/19 fail
 - DynamoDB table "eagle" doesn't exist -> test 17 fails
 - CloudWatch log group doesn't exist -> test 18/20 may still pass (get_stream returns empty)
+- S3 bucket "eagle-eval-artifacts" doesn't exist -> archive_results_to_s3 and archive_videos_to_s3 print non-fatal error and return None/0 (component: eval_aws_publisher)
+- CloudWatch EAGLE/Eval namespace has no data -> publish_eval_metrics prints non-fatal error, dashboard shows no data until first successful publish (component: eval_aws_publisher)
 
 ### tips
 - Run tests 16-20 first when debugging AWS connectivity
 - Use `--tests 16` to isolate a single test
-- Check `trace_logs.json` for per-test logs after a run
+- Check `data/eval/results/latest.json` for per-test logs after a run
 - CloudWatch test 20 validates the PREVIOUS run's data
+- After an eval run, check S3 archival: `aws s3 ls s3://eagle-eval-artifacts/eval/results/`
+- Check custom metrics: `aws cloudwatch list-metrics --namespace "EAGLE/Eval"`
+- View eval dashboard in CloudWatch console: search for `EAGLE-Eval-Dashboard`
+- The publisher module lives at `server/tests/eval_aws_publisher.py` — import it from the same directory as the eval suite
+- Test 28 depends on `server/app/sdk_agentic_service.py` — import via `sys.path` (server/app already in path from line 30)
+- When testing AgentDefinition-based services, verify `build_skill_agents()` and `build_supervisor_prompt()` deterministically first, then run live `sdk_query()` — layered validation
+- Test 28 is in the "SDK Architecture" tier — runs with `--tests 28` or as part of the full suite
