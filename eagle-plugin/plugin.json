@@ -4,6 +4,15 @@
   "description": "NCI Office of Acquisitions intake assistant - Single agent with skill-based routing",
   "author": "NCI OA Team",
   "agent": "supervisor",
+  "agents": [
+    "legal-counsel",
+    "market-intelligence",
+    "tech-translator",
+    "public-interest",
+    "policy-supervisor",
+    "policy-librarian",
+    "policy-analyst"
+  ],
   "skills": [
     "oa-intake",
     "document-generator",

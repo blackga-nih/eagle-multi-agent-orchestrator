@@ -36,7 +36,7 @@ _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
-from eagle_skill_constants import SKILL_CONSTANTS
+from eagle_skill_constants import SKILL_CONSTANTS, AGENTS, SKILLS, PLUGIN_CONTENTS
 
 logger = logging.getLogger("eagle.sdk_agent")
 
@@ -61,66 +61,60 @@ TIER_BUDGETS = {
 MAX_SKILL_PROMPT_CHARS = 4000
 
 
-# ── Skill → AgentDefinition Registry ────────────────────────────────
+# ── Skill → AgentDefinition Registry (built from plugin metadata) ───
 
-# Map skill keys to AgentDefinition metadata.
-# prompt content comes from SKILL_CONSTANTS at build time.
-SKILL_AGENT_REGISTRY = {
-    "oa-intake": {
-        "description": (
-            "Gathers acquisition requirements and determines type/threshold. "
-            "Use for initial intake when a user has a new procurement need."
-        ),
-        "skill_key": "oa-intake",
-        "tools": [],
-        "model": None,  # inherit from supervisor
-    },
-    "legal-counsel": {
-        "description": (
-            "Assesses legal risks, protest vulnerabilities, FAR compliance, "
-            "and appropriations law. Use for legal review of acquisitions."
-        ),
-        "skill_key": "02-legal.txt",
-        "tools": [],
-        "model": None,
-    },
-    "market-intelligence": {
-        "description": (
-            "Researches market conditions, vendors, pricing, GSA schedules, "
-            "and small business opportunities. Use for market research."
-        ),
-        "skill_key": "04-market.txt",
-        "tools": [],
-        "model": None,
-    },
-    "tech-translator": {
-        "description": (
-            "Bridges technical requirements with contract language. "
-            "Translates scientific/IT needs into measurable contract requirements."
-        ),
-        "skill_key": "03-tech.txt",
-        "tools": [],
-        "model": None,
-    },
-    "public-interest": {
-        "description": (
-            "Ensures fair competition, transparency, and public accountability. "
-            "Evaluates taxpayer value and flags fairness issues."
-        ),
-        "skill_key": "05-public.txt",
-        "tools": [],
-        "model": None,
-    },
-    "document-generator": {
-        "description": (
-            "Generates acquisition documents: SOW, IGCE, Market Research, "
-            "J&A, Acquisition Plan, Eval Criteria, and more."
-        ),
-        "skill_key": "document-generator",
-        "tools": [],
-        "model": None,
-    },
-}
+# Read plugin.json to determine which agents/skills are wired as subagents
+_PLUGIN_JSON_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "eagle-plugin", "plugin.json"
+)
+
+def _load_plugin_config() -> dict:
+    """Load plugin.json to determine active agents and skills."""
+    try:
+        with open(_PLUGIN_JSON_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _build_registry() -> dict:
+    """Build SKILL_AGENT_REGISTRY dynamically from AGENTS + SKILLS metadata.
+
+    Uses plugin.json to determine which agents/skills are wired as subagents.
+    The supervisor agent is excluded (it's the orchestrator, not a subagent).
+    """
+    config = _load_plugin_config()
+    active_agents = set(config.get("agents", []))
+    active_skills = set(config.get("skills", []))
+
+    registry = {}
+
+    # Add active agents (excluding supervisor — it orchestrates, not a subagent)
+    for name, entry in AGENTS.items():
+        if name == config.get("agent", "supervisor"):
+            continue
+        if active_agents and name not in active_agents:
+            continue
+        registry[name] = {
+            "description": entry["description"],
+            "skill_key": name,
+            "tools": entry["tools"] if entry["tools"] else [],
+            "model": entry["model"],
+        }
+
+    # Add active skills
+    for name, entry in SKILLS.items():
+        if active_skills and name not in active_skills:
+            continue
+        registry[name] = {
+            "description": entry["description"],
+            "skill_key": name,
+            "tools": entry["tools"] if entry["tools"] else [],
+            "model": entry["model"],
+        }
+
+    return registry
+
+SKILL_AGENT_REGISTRY = _build_registry()
 
 
 def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> str:
@@ -156,14 +150,14 @@ def build_skill_agents(
         if skill_names and name not in skill_names:
             continue
 
-        skill_content = SKILL_CONSTANTS.get(meta["skill_key"])
-        if not skill_content:
-            logger.warning("Skill content not found for %s (key=%s)", name, meta["skill_key"])
+        entry = PLUGIN_CONTENTS.get(meta["skill_key"])
+        if not entry:
+            logger.warning("Plugin content not found for %s (key=%s)", name, meta["skill_key"])
             continue
 
         agents[name] = AgentDefinition(
             description=meta["description"],
-            prompt=_truncate_skill(skill_content),
+            prompt=_truncate_skill(entry["body"]),
             tools=meta["tools"] or tier_tools,
             model=meta.get("model") or agent_model,
         )
@@ -181,8 +175,8 @@ def build_supervisor_prompt(
 ) -> str:
     """Build the supervisor system prompt with available subagent descriptions.
 
-    The supervisor only orchestrates — it delegates to skill subagents
-    via the Task tool. It does NOT contain skill content itself.
+    Loads the base prompt from agents/supervisor/agent.md and appends
+    the dynamic subagent list and tenant context.
     """
     names = agent_names or list(SKILL_AGENT_REGISTRY.keys())
     agent_list = "\n".join(
@@ -191,17 +185,18 @@ def build_supervisor_prompt(
         if name in SKILL_AGENT_REGISTRY
     )
 
+    # Load base supervisor prompt from agent.md
+    supervisor_entry = AGENTS.get("supervisor")
+    if supervisor_entry:
+        base_prompt = supervisor_entry["body"].strip()
+    else:
+        base_prompt = "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
+
     return (
-        f"You are the EAGLE Supervisor Agent for NCI Office of Acquisitions.\n"
         f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}\n\n"
-        f"You orchestrate acquisition workflows by delegating to specialized skill subagents.\n"
-        f"Each subagent has its own expertise and separate context — use them for focused analysis.\n\n"
-        f"Available subagents:\n{agent_list}\n\n"
-        f"WORKFLOW GUIDELINES:\n"
-        f"1. For new acquisitions: start with oa-intake, then market-intelligence, then legal-counsel\n"
-        f"2. For document generation: use document-generator after intake is complete\n"
-        f"3. For specific reviews: use the appropriate specialist directly\n"
-        f"4. Always synthesize subagent findings into a coherent summary for the user\n\n"
+        f"{base_prompt}\n\n"
+        f"--- ACTIVE SUBAGENTS ---\n"
+        f"Available subagents for delegation via Task tool:\n{agent_list}\n\n"
         f"IMPORTANT: Use the Task tool to delegate to subagents. "
         f"Include relevant context in the prompt you pass to each subagent. "
         f"Do not try to answer specialized questions yourself — delegate to the expert."
@@ -299,9 +294,10 @@ async def sdk_query_single_skill(
         SDK message objects
     """
     skill_key = SKILL_AGENT_REGISTRY.get(skill_name, {}).get("skill_key", skill_name)
-    skill_content = SKILL_CONSTANTS.get(skill_key)
-    if not skill_content:
+    entry = PLUGIN_CONTENTS.get(skill_key)
+    if not entry:
         raise ValueError(f"Skill not found: {skill_name} (key={skill_key})")
+    skill_content = entry["body"]
 
     agent_model = model or MODEL
     tenant_context = (

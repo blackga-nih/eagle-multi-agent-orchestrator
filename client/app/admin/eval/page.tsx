@@ -499,6 +499,156 @@ const USE_CASES: UseCase[] = [
       { type: "message", from: "ui", to: "co", label: "4 documents ready", desc: "Complete evaluation package" },
       { type: "note", actor: "ui", text: "\u2713 Consensus Score Matrix\n\u2713 312 Consolidated Questions\n\u2713 20 Per-Contractor Sheets\n\u2713 Evaluation Summary Report", desc: "From 180 score sheets to 4 organized documents" }
     ]
+  },
+  {
+    id: "skill-09-intake",
+    title: "Skill-09: OA Intake — CT Scanner Acquisition",
+    subtitle: "Multi-turn intake workflow with cost-threshold detection",
+    actors: [
+      { id: "user", name: "COR / Program Staff", color: "#4a90d9" },
+      { id: "ui", name: "Eagle UI", color: "#7b68ee" },
+      { id: "sup", name: "Supervisor Agent", color: "#50c878" },
+      { id: "intake", name: "OA Intake Skill", color: "#ff6b6b" }
+    ],
+    phases: [
+      { name: "Phase 1: Equipment Intake", color: "#1a2636", border: "#2a4a6a", startStep: 3, endStep: 5 },
+      { name: "Phase 2: Clarification & Cost Estimation", color: "#1a2a1a", border: "#2a5a2a", startStep: 6, endStep: 9 },
+      { name: "Phase 3: Funding & Vehicle Determination", color: "#2a2218", border: "#5a4a2a", startStep: 10, endStep: 12 }
+    ],
+    steps: [
+      { type: "message", from: "user", to: "ui", label: '"I need to buy a cat scan machine, not sure the price"', desc: "User provides vague requirement — no cost estimate" },
+      { type: "message", from: "ui", to: "sup", label: "New session created", desc: "UI creates session and routes to Supervisor" },
+      { type: "message", from: "sup", to: "intake", label: "Delegate to OA Intake", desc: "Supervisor routes to OA Intake for guided intake", prompt: "oa-intake" },
+      { type: "message", from: "intake", to: "ui", label: '"What type of CT scanner? Clinical or research?"', desc: "Intake asks clarifying questions about equipment type", prompt: "oa-intake", section: "Phase 1: Equipment Intake" },
+      { type: "message", from: "user", to: "ui", label: '"Research CT for small animal imaging"', desc: "User clarifies it's a preclinical micro-CT" },
+      { type: "message", from: "ui", to: "intake", label: "Equipment details", desc: "Forward clarification to Intake" },
+      { type: "self", actor: "intake", label: "Estimate cost: micro-CT ~$250K–$500K", desc: "Intake estimates cost based on equipment type — above SAT", prompt: "oa-intake", section: "Phase 2: Clarification & Cost Estimation" },
+      { type: "note", actor: "intake", text: "$250K+ → Above SAT\nNegotiated / FAR Part 15\nFull & Open Competition likely", desc: "Cost threshold triggers formal acquisition pathway" },
+      { type: "message", from: "intake", to: "ui", label: '"Estimated $250K+. Sole source or competitive?"', desc: "Intake asks about competition strategy" },
+      { type: "message", from: "user", to: "ui", label: '"There are a few vendors, competitive is fine"', desc: "User confirms competitive approach" },
+      { type: "message", from: "ui", to: "intake", label: "Competition preference", desc: "Forward to Intake" },
+      { type: "self", actor: "intake", label: "Determine: Negotiated, Full & Open, FAR 15", desc: "Apply decision tree with cost + competition data", prompt: "oa-intake", section: "Phase 3: Funding & Vehicle Determination" },
+      { type: "message", from: "intake", to: "ui", label: "Acquisition Summary + Document Checklist", desc: "Presents pathway determination and required documents" },
+      { type: "note", actor: "intake", text: "Pathway: Negotiated (Part 15)\nVehicle: Full & Open\nDocs: SOW, IGCE, Eval Criteria,\nAcquisition Plan, Market Research", desc: "Complete intake determination for CT scanner" }
+    ]
+  },
+  {
+    id: "skill-10-legal",
+    title: "Skill-10: Legal Counsel — Sole Source J&A Review",
+    subtitle: "$985K sole-source Illumina sequencer — FAR 6.302 authority check",
+    actors: [
+      { id: "sup", name: "Supervisor Agent", color: "#50c878" },
+      { id: "legal", name: "Legal Counsel", color: "#e06090" }
+    ],
+    phases: [
+      { name: "Phase 1: Sole Source Submission", color: "#1a2636", border: "#2a4a6a", startStep: 0, endStep: 1 },
+      { name: "Phase 2: FAR / Case Law Analysis", color: "#1a2a1a", border: "#2a5a2a", startStep: 2, endStep: 4 },
+      { name: "Phase 3: Recommendation", color: "#2a2218", border: "#5a4a2a", startStep: 5, endStep: 6 }
+    ],
+    steps: [
+      { type: "message", from: "sup", to: "legal", label: "Review J&A: $985K Illumina sequencer, sole source", desc: "Supervisor delegates sole source justification review to Legal Counsel", prompt: "legal-counsel" },
+      { type: "self", actor: "legal", label: "Parse J&A: vendor, amount, authority cited", desc: "Legal Counsel extracts key facts from the J&A submission", prompt: "legal-counsel" },
+      { type: "self", actor: "legal", label: "Check FAR 6.302-1: Only one responsible source", desc: "Validates the cited authority against FAR requirements", prompt: "legal-counsel", section: "FAR Authority Analysis" },
+      { type: "self", actor: "legal", label: "Search GAO case law for Illumina precedents", desc: "Checks protest history for similar sole-source scientific equipment", prompt: "legal-counsel" },
+      { type: "note", actor: "legal", text: "FAR 6.302-1 applicable ✓\nIllumina proprietary tech ✓\nGAO: B-417xxx sustained (weak market research)\nProtest risk: MODERATE", desc: "Legal analysis summary with risk assessment" },
+      { type: "message", from: "legal", to: "sup", label: "J&A supportable with conditions", desc: "Legal Counsel returns recommendation", dashed: true },
+      { type: "note", actor: "legal", text: "Recommendation:\n1. Strengthen market research section\n2. Document proprietary features\n3. Add brand-name justification\nProtest risk: Moderate → Low with fixes", desc: "Actionable legal recommendations to strengthen J&A" }
+    ]
+  },
+  {
+    id: "skill-11-market",
+    title: "Skill-11: Market Intelligence — IT Modernization Research",
+    subtitle: "$500K IT modernization — GSA vehicles, small business, pricing",
+    actors: [
+      { id: "sup", name: "Supervisor Agent", color: "#50c878" },
+      { id: "market", name: "Market Intelligence", color: "#20b2aa" }
+    ],
+    phases: [
+      { name: "Phase 1: Research Request", color: "#1a2636", border: "#2a4a6a", startStep: 0, endStep: 1 },
+      { name: "Phase 2: Vendor & Vehicle Analysis", color: "#1a2a1a", border: "#2a5a2a", startStep: 2, endStep: 4 },
+      { name: "Phase 3: Market Findings", color: "#2a2218", border: "#5a4a2a", startStep: 5, endStep: 6 }
+    ],
+    steps: [
+      { type: "message", from: "sup", to: "market", label: "Market research: $500K IT modernization", desc: "Supervisor delegates market research for IT infrastructure upgrade", prompt: "market-intelligence" },
+      { type: "self", actor: "market", label: "Search GSA IT Schedule 70 / MAS vehicles", desc: "Identifies applicable GSA contract vehicles and BPAs", prompt: "market-intelligence", section: "GSA Vehicle Search" },
+      { type: "self", actor: "market", label: "Small business set-aside analysis", desc: "Checks SBA size standards, HUBZone, 8(a), SDVOSB availability", prompt: "market-intelligence" },
+      { type: "self", actor: "market", label: "Labor rate benchmarking (GSA rates vs market)", desc: "Compares GSA schedule rates against commercial market data", prompt: "market-intelligence" },
+      { type: "note", actor: "market", text: "GSA MAS IT Category available ✓\n12 vendors on schedule\n4 small business eligible\nLabor rates: $95-$145/hr (GS-comparable)\nSet-aside recommended: SB or SDVOSB", desc: "Market research findings summary" },
+      { type: "message", from: "market", to: "sup", label: "Market research complete — SB set-aside recommended", desc: "Returns comprehensive market research report", dashed: true },
+      { type: "note", actor: "market", text: "Deliverables:\n- Vendor capability matrix\n- GSA pricing comparison\n- Small business analysis\n- Recommended acquisition strategy", desc: "Market Intelligence report package" }
+    ]
+  },
+  {
+    id: "skill-12-tech",
+    title: "Skill-12: Tech Translator — Agile SOW Translation",
+    subtitle: "Translate agile cloud migration requirements into contract language",
+    actors: [
+      { id: "user", name: "Program Staff", color: "#4a90d9" },
+      { id: "tech", name: "Tech Translator", color: "#7b68ee" }
+    ],
+    phases: [
+      { name: "Phase 1: Technical Requirements", color: "#1a2636", border: "#2a4a6a", startStep: 0, endStep: 1 },
+      { name: "Phase 2: Contract Translation", color: "#1a2a1a", border: "#2a5a2a", startStep: 2, endStep: 4 },
+      { name: "Phase 3: Evaluation Criteria", color: "#2a2218", border: "#5a4a2a", startStep: 5, endStep: 6 }
+    ],
+    steps: [
+      { type: "message", from: "user", to: "tech", label: '"Translate agile cloud migration SOW requirements"', desc: "Program staff provides technical requirements in agile/DevOps language", prompt: "tech-translator" },
+      { type: "self", actor: "tech", label: "Parse agile terminology: sprints, stories, velocity", desc: "Identifies agile-specific terms that need contract-language equivalents", prompt: "tech-translator", section: "Term Mapping" },
+      { type: "self", actor: "tech", label: "Map sprints → milestones, stories → deliverables", desc: "Translates agile concepts into FAR-compatible contract terms", prompt: "tech-translator" },
+      { type: "self", actor: "tech", label: "Add FedRAMP compliance requirements", desc: "Inserts mandatory cloud security and compliance language", prompt: "tech-translator", section: "Compliance Drivers" },
+      { type: "note", actor: "tech", text: "Sprint → Performance Period Milestone\nUser Story → Functional Requirement\nVelocity → Performance Metric\nCI/CD → Continuous Delivery Capability\nFedRAMP High required", desc: "Technical-to-contract term mapping" },
+      { type: "message", from: "tech", to: "user", label: "Translated SOW sections + eval criteria", desc: "Returns contract-ready language with evaluation criteria", dashed: true },
+      { type: "note", actor: "tech", text: "Deliverables:\n- Translated SOW sections\n- Performance metrics table\n- Evaluation criteria (Technical/Management/Past Performance)\n- FedRAMP compliance matrix", desc: "Tech Translator output package" }
+    ]
+  },
+  {
+    id: "skill-13-public",
+    title: "Skill-13: Public Interest — Fairness Review",
+    subtitle: "$2.1M sole-source to incumbent — fairness & transparency check",
+    actors: [
+      { id: "sup", name: "Supervisor Agent", color: "#50c878" },
+      { id: "public", name: "Public Interest", color: "#daa520" }
+    ],
+    phases: [
+      { name: "Phase 1: Risky Acquisition Flagged", color: "#1a2636", border: "#2a4a6a", startStep: 0, endStep: 1 },
+      { name: "Phase 2: Fairness Analysis", color: "#1a2a1a", border: "#2a5a2a", startStep: 2, endStep: 4 },
+      { name: "Phase 3: Risk Mitigation", color: "#2a2218", border: "#5a4a2a", startStep: 5, endStep: 6 }
+    ],
+    steps: [
+      { type: "message", from: "sup", to: "public", label: "Review: $2.1M sole-source IT to incumbent", desc: "Supervisor flags high-risk acquisition for fairness review", prompt: "public-interest" },
+      { type: "self", actor: "public", label: "Check SAM.gov posting history", desc: "Verifies whether opportunity was posted for public notice", prompt: "public-interest", section: "Transparency Check" },
+      { type: "self", actor: "public", label: "Assess vendor lock-in indicators", desc: "Analyzes incumbent dependency and switching costs", prompt: "public-interest" },
+      { type: "self", actor: "public", label: "Evaluate congressional interest / IG risk", desc: "Checks for political sensitivity and oversight exposure", prompt: "public-interest" },
+      { type: "note", actor: "public", text: "⚠ No SAM posting found\n⚠ Incumbent 5+ years, no recompete\n⚠ Limited market research on file\n⚠ Congressional interest: district-level", desc: "Multiple fairness red flags identified" },
+      { type: "message", from: "public", to: "sup", label: "HIGH RISK — 4 fairness flags identified", desc: "Public Interest returns risk assessment with mitigation plan", dashed: true },
+      { type: "note", actor: "public", text: "Mitigation Plan:\n1. Post RFI on SAM.gov (30 days)\n2. Conduct market research with 3+ sources\n3. Document incumbent justification\n4. Brief congressional liaison\nRisk: HIGH → MODERATE with actions", desc: "Actionable steps to reduce fairness risk" }
+    ]
+  },
+  {
+    id: "skill-14-docgen",
+    title: "Skill-14: Document Generator — Acquisition Plan",
+    subtitle: "FAR Part 13 Acquisition Plan for $300K lab centrifuge",
+    actors: [
+      { id: "user", name: "Program Staff", color: "#4a90d9" },
+      { id: "docgen", name: "Document Generator", color: "#ffa500" },
+      { id: "s3", name: "S3 Store", color: "#808080" }
+    ],
+    phases: [
+      { name: "Phase 1: AP Request", color: "#1a2636", border: "#2a4a6a", startStep: 0, endStep: 1 },
+      { name: "Phase 2: Document Assembly", color: "#1a2a1a", border: "#2a5a2a", startStep: 2, endStep: 5 },
+      { name: "Phase 3: Storage & Delivery", color: "#2a2218", border: "#5a4a2a", startStep: 6, endStep: 8 }
+    ],
+    steps: [
+      { type: "message", from: "user", to: "docgen", label: '"Generate Acquisition Plan for $300K centrifuge"', desc: "Request to generate AP for lab equipment procurement", prompt: "document-generator" },
+      { type: "self", actor: "docgen", label: "Load AP template (FAR Part 13 simplified)", desc: "Selects appropriate template based on dollar threshold", prompt: "document-generator", section: "Template Selection" },
+      { type: "self", actor: "docgen", label: "Populate Section 1: Purpose & Authority", desc: "Fills acquisition authority, funding, and background sections", prompt: "document-generator" },
+      { type: "self", actor: "docgen", label: "Populate Sections 2-5: Scope, Strategy, Schedule", desc: "Fills technical scope, acquisition strategy, milestones", prompt: "document-generator" },
+      { type: "self", actor: "docgen", label: "Generate cost table + signature blocks", desc: "Adds IGCE reference table and approval signature lines", prompt: "document-generator" },
+      { type: "note", actor: "docgen", text: "AP Sections:\n1. Purpose & Authority\n2. Requirements Description\n3. Acquisition Strategy\n4. Cost/Schedule\n5. Approval & Signatures\nFAR 7.105 compliant", desc: "Complete AP structure per FAR requirements" },
+      { type: "message", from: "docgen", to: "s3", label: "Store AP v1 (.docx)", desc: "Save generated Acquisition Plan to S3" },
+      { type: "message", from: "s3", to: "docgen", label: "Pre-signed download URL", desc: "S3 returns secure download link", dashed: true },
+      { type: "message", from: "docgen", to: "user", label: "Acquisition Plan ready for download", desc: "Document Generator delivers the completed AP with download link" }
+    ]
   }
 ];
 
@@ -507,25 +657,40 @@ const USE_CASES: UseCase[] = [
 // ============================================================
 // Prompt titles used as fallback while API loads
 const PROMPT_TITLES: Record<string, string> = {
+  // Agents
   supervisor: 'EAGLE Supervisor Agent',
-  intake: 'OA Intake Skill',
-  docgen: 'Document Generator Skill',
+  'legal-counsel': 'Legal Counsel Agent',
+  'market-intelligence': 'Market Intelligence Agent',
+  'tech-translator': 'Tech Translator Agent',
+  'public-interest': 'Public Interest Agent',
+  'policy-supervisor': 'Policy Supervisor Agent',
+  'policy-librarian': 'Policy Librarian Agent',
+  'policy-analyst': 'Policy Analyst Agent',
+  // Skills
+  'oa-intake': 'OA Intake Skill',
+  'document-generator': 'Document Generator Skill',
   compliance: 'Compliance Skill',
   'tech-review': 'Tech Review Skill',
   'knowledge-retrieval': 'Knowledge Retrieval Skill',
+  // Aliases for USE_CASES diagram actor IDs
+  intake: 'OA Intake Skill',
+  docgen: 'Document Generator Skill',
 };
 
 // Map prompt keys to test numbers for cross-referencing
 const SKILL_TEST_MAP: Record<string, number[]> = {
-  intake: [7, 9, 21, 22, 23],
-  docgen: [14],
+  'oa-intake': [7, 9, 21, 22, 23],
+  'document-generator': [14],
   'tech-review': [12, 27],
   compliance: [10, 24, 25, 26],
   supervisor: [15, 28],
-  '02-legal.txt': [10, 24, 25, 26, 28],
-  '04-market.txt': [11, 28],
-  '03-tech.txt': [12, 27],
-  '05-public.txt': [13],
+  'legal-counsel': [10, 24, 25, 26, 28],
+  'market-intelligence': [11, 28],
+  'tech-translator': [12, 27],
+  'public-interest': [13],
+  'policy-supervisor': [],
+  'policy-librarian': [],
+  'policy-analyst': [],
   'sdk-skill-subagent': [28],
   s3_document_ops: [16],
   dynamodb_intake: [17],
@@ -544,9 +709,29 @@ interface RunMeta {
   total_tests?: number;
 }
 
+interface TraceBlock {
+  type: string;
+  text?: string;
+  tool?: string;
+  id?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  content?: string;
+}
+
+interface TraceMessage {
+  type: string;
+  session_id?: string;
+  result?: string;
+  cost_usd?: number;
+  usage?: Record<string, number>;
+  content?: TraceBlock[];
+}
+
 interface TraceResult {
   status: string;
   logs: string[];
+  trace?: TraceMessage[];
 }
 
 interface CWEvent {
@@ -637,6 +822,7 @@ export default function EvalViewer() {
   const [traceResults, setTraceResults] = useState<Record<string, TraceResult>>({});
   const [cwEvents, setCwEvents] = useState<CWEvent[]>([]);
   const [modalTab, setModalTab] = useState<'prompt' | 'traces' | 'logs'>('prompt');
+  const [expandedTraces, setExpandedTraces] = useState<Set<string>>(new Set());
 
   // Fetch real prompts from eagle-plugin/ skill files via API
   useEffect(() => {
@@ -1314,7 +1500,10 @@ export default function EvalViewer() {
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          {testTraces.map(({ testId, result }) => (
+                          {testTraces.map(({ testId, result }) => {
+                            const traceExpanded = expandedTraces.has(testId);
+                            const hasTrace = result.trace && result.trace.length > 0;
+                            return (
                             <div key={testId} className="bg-[#0f1117] border border-[#2a2d3a] rounded-lg overflow-hidden">
                               <div className="flex items-center gap-2 px-4 py-2 bg-[#161822]">
                                 <span className={`w-2 h-2 rounded-full ${result.status === 'pass' ? 'bg-green-500' : result.status === 'skip' ? 'bg-yellow-500' : 'bg-red-500'}`} />
@@ -1326,12 +1515,82 @@ export default function EvalViewer() {
                                 }`}>
                                   {result.status.toUpperCase()}
                                 </span>
+                                {hasTrace && (
+                                  <button
+                                    onClick={() => setExpandedTraces(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(testId)) next.delete(testId); else next.add(testId);
+                                      return next;
+                                    })}
+                                    className="ml-auto text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition-colors"
+                                  >
+                                    {traceExpanded ? 'Hide' : 'Show'} Full Trace ({result.trace!.length} msgs)
+                                  </button>
+                                )}
                               </div>
+                              {/* Summary logs (always shown) */}
                               <pre className="text-[10px] text-gray-400 font-mono whitespace-pre-wrap p-4 max-h-48 overflow-y-auto leading-relaxed">
                                 {result.logs.join('\n')}
                               </pre>
+                              {/* Full conversation trace (expandable) */}
+                              {traceExpanded && hasTrace && (
+                                <div className="border-t border-[#2a2d3a] p-4 space-y-2">
+                                  <div className="text-[10px] font-medium text-indigo-300 uppercase tracking-wider mb-2">Full Conversation Trace</div>
+                                  {result.trace!.map((msg, i) => (
+                                    <div key={i} className={`rounded p-2 text-[10px] font-mono ${
+                                      msg.type === 'SystemMessage' ? 'bg-gray-800/50 border-l-2 border-gray-500' :
+                                      msg.type === 'AssistantMessage' ? 'bg-emerald-900/20 border-l-2 border-emerald-500' :
+                                      msg.type === 'UserMessage' ? 'bg-blue-900/20 border-l-2 border-blue-500' :
+                                      msg.type === 'ResultMessage' ? 'bg-amber-900/20 border-l-2 border-amber-500' :
+                                      'bg-gray-800/30 border-l-2 border-gray-600'
+                                    }`}>
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className={`font-bold ${
+                                          msg.type === 'SystemMessage' ? 'text-gray-400' :
+                                          msg.type === 'AssistantMessage' ? 'text-emerald-400' :
+                                          msg.type === 'UserMessage' ? 'text-blue-400' :
+                                          msg.type === 'ResultMessage' ? 'text-amber-400' :
+                                          'text-gray-400'
+                                        }`}>{msg.type}</span>
+                                        {msg.session_id && <span className="text-gray-600">sid={msg.session_id.slice(0, 8)}...</span>}
+                                        {msg.cost_usd != null && <span className="text-amber-300">${msg.cost_usd.toFixed(4)}</span>}
+                                        {msg.usage && <span className="text-gray-500">{msg.usage.input_tokens || 0}in/{msg.usage.output_tokens || 0}out</span>}
+                                      </div>
+                                      {/* Content blocks */}
+                                      {msg.content && msg.content.map((block, j) => (
+                                        <div key={j} className="ml-3 mt-1">
+                                          {block.type === 'text' && (
+                                            <div className="text-gray-300 whitespace-pre-wrap max-h-60 overflow-y-auto">{block.text}</div>
+                                          )}
+                                          {block.type === 'thinking' && (
+                                            <div className="text-purple-300 italic max-h-40 overflow-y-auto">
+                                              <span className="text-purple-500 not-italic">[thinking] </span>{block.text}
+                                            </div>
+                                          )}
+                                          {block.type === 'tool_use' && (
+                                            <div className="text-cyan-300">
+                                              <span className="text-cyan-500">[tool] </span>{block.tool}
+                                              <pre className="text-gray-500 ml-4 mt-0.5 max-h-20 overflow-y-auto">{JSON.stringify(block.input, null, 2)}</pre>
+                                            </div>
+                                          )}
+                                          {block.type === 'tool_result' && (
+                                            <div className="text-gray-400 max-h-20 overflow-y-auto">
+                                              <span className="text-gray-500">[result] </span>{block.content}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                      {/* ResultMessage result text */}
+                                      {msg.result && (
+                                        <div className="ml-3 mt-1 text-gray-300 whitespace-pre-wrap max-h-60 overflow-y-auto">{msg.result}</div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>

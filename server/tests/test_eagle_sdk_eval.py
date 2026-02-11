@@ -136,8 +136,14 @@ TIER_BUDGETS = {
 # Trace collector
 # ============================================================
 
+# Module-level store: test_id -> trace JSON from TraceCollector.to_trace_json()
+_test_traces: dict[int, list] = {}
+
 class TraceCollector:
     """Collects and categorizes SDK message traces."""
+
+    # Class-level: most recently created collector (used by _run_test to auto-capture)
+    _latest: "TraceCollector | None" = None
 
     def __init__(self):
         self.messages = []
@@ -151,6 +157,7 @@ class TraceCollector:
         self.total_output_tokens = 0
         self.total_cost_usd = 0.0
         self.log_lines = []  # Raw log lines for trace display
+        TraceCollector._latest = self  # auto-register as latest
 
     def _log(self, msg):
         """Print and capture a log line."""
@@ -271,6 +278,61 @@ class TraceCollector:
             "total_output_tokens": self.total_output_tokens,
             "total_cost_usd": self.total_cost_usd,
         }
+
+    def to_trace_json(self):
+        """Serialize the full conversation trace to a JSON-safe structure."""
+        trace = []
+        for entry in self.messages:
+            msg_type = entry["type"]
+            message = entry["message"]
+            item: dict[str, Any] = {"type": msg_type}
+
+            if msg_type == "SystemMessage":
+                if hasattr(message, "data") and isinstance(message.data, dict):
+                    item["session_id"] = message.data.get("session_id")
+            elif msg_type == "ResultMessage":
+                item["result"] = getattr(message, "result", None)
+                item["session_id"] = getattr(message, "session_id", None)
+                cost = getattr(message, "total_cost_usd", None)
+                if cost is not None:
+                    item["cost_usd"] = cost
+                usage = getattr(message, "usage", None)
+                if usage is not None:
+                    if isinstance(usage, dict):
+                        item["usage"] = usage
+                    else:
+                        item["usage"] = {
+                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                        }
+            else:
+                # AssistantMessage / UserMessage — serialize content blocks
+                blocks = []
+                if hasattr(message, "content") and message.content:
+                    for block in message.content:
+                        bc = type(block).__name__
+                        if bc == "TextBlock":
+                            blocks.append({"type": "text", "text": getattr(block, "text", "")})
+                        elif bc == "ThinkingBlock":
+                            blocks.append({"type": "thinking", "text": getattr(block, "thinking", getattr(block, "text", ""))})
+                        elif bc == "ToolUseBlock":
+                            blocks.append({
+                                "type": "tool_use",
+                                "tool": getattr(block, "name", ""),
+                                "id": getattr(block, "id", ""),
+                                "input": getattr(block, "input", {}),
+                            })
+                        elif bc == "ToolResultBlock":
+                            content = getattr(block, "content", "")
+                            blocks.append({
+                                "type": "tool_result",
+                                "tool_use_id": getattr(block, "tool_use_id", ""),
+                                "content": str(content)[:2000] if content else "",
+                            })
+                item["content"] = blocks
+
+            trace.append(item)
+        return trace
 
 
 # ============================================================
@@ -796,15 +858,15 @@ async def test_6_tier_gated_tools():
 # Test 7: Skill loading via system_prompt
 # ============================================================
 
-from eagle_skill_constants import SKILL_CONSTANTS, OA_INTAKE_SKILL
+from eagle_skill_constants import SKILL_CONSTANTS, OA_INTAKE_SKILL, PLUGIN_CONTENTS
 
 
 def load_skill_or_prompt(skill_name: str = None, prompt_file: str = None) -> tuple:
-    """Load a skill or legacy agent prompt from embedded constants.
+    """Load a skill or agent prompt from plugin contents.
 
     Args:
-        skill_name: Name of skill (e.g., "oa-intake", "document-generator")
-        prompt_file: Name of legacy prompt file (e.g., "02-legal.txt")
+        skill_name: Name of agent/skill (e.g., "oa-intake", "legal-counsel")
+        prompt_file: Legacy prompt file name (e.g., "02-legal.txt") — still supported
 
     Returns:
         (content, source_key) tuple, or (None, None) if not found
@@ -1183,14 +1245,14 @@ async def test_9_oa_intake_workflow():
 # ============================================================
 
 async def test_10_legal_counsel_skill():
-    """Test Legal Counsel skill loaded from legacy prompt 02-legal.txt.
+    """Test Legal Counsel agent loaded from agents/legal-counsel/agent.md.
     Validates protest risk assessment, FAR citation, and case law references.
     """
     print("\n" + "=" * 70)
     print("TEST 10: Legal Counsel Skill (Sole Source J&A Review)")
     print("=" * 70)
 
-    skill_content, skill_path = load_skill_or_prompt(prompt_file="02-legal.txt")
+    skill_content, skill_path = load_skill_or_prompt(skill_name="legal-counsel")
     if not skill_content:
         print(f"  SKIP - Legal prompt not found")
         return None
@@ -1268,14 +1330,14 @@ async def test_10_legal_counsel_skill():
 # ============================================================
 
 async def test_11_market_intelligence_skill():
-    """Test Market Intelligence skill loaded from legacy prompt 04-market.txt.
+    """Test Market Intelligence agent loaded from agents/market-intelligence/agent.md.
     Validates vendor analysis, GSA pricing, and small business advocacy.
     """
     print("\n" + "=" * 70)
     print("TEST 11: Market Intelligence Skill (Vendor Research)")
     print("=" * 70)
 
-    skill_content, skill_path = load_skill_or_prompt(prompt_file="04-market.txt")
+    skill_content, skill_path = load_skill_or_prompt(skill_name="market-intelligence")
     if not skill_content:
         print(f"  SKIP - Market prompt not found")
         return None
@@ -1352,14 +1414,14 @@ async def test_11_market_intelligence_skill():
 # ============================================================
 
 async def test_12_tech_review_skill():
-    """Test Tech Review skill loaded from legacy prompt 03-tech.txt.
+    """Test Tech Translator agent loaded from agents/tech-translator/agent.md.
     Validates technical-to-contract language translation and eval criteria.
     """
     print("\n" + "=" * 70)
     print("TEST 12: Tech Review Skill (SOW Requirements Translation)")
     print("=" * 70)
 
-    skill_content, skill_path = load_skill_or_prompt(prompt_file="03-tech.txt")
+    skill_content, skill_path = load_skill_or_prompt(skill_name="tech-translator")
     if not skill_content:
         print(f"  SKIP - Tech prompt not found")
         return None
@@ -1437,14 +1499,14 @@ async def test_12_tech_review_skill():
 # ============================================================
 
 async def test_13_public_interest_skill():
-    """Test Public Interest skill loaded from legacy prompt 05-public.txt.
+    """Test Public Interest agent loaded from agents/public-interest/agent.md.
     Validates fairness assessment, transparency check, and protest prevention.
     """
     print("\n" + "=" * 70)
     print("TEST 13: Public Interest Skill (Fairness & Transparency)")
     print("=" * 70)
 
-    skill_content, skill_path = load_skill_or_prompt(prompt_file="05-public.txt")
+    skill_content, skill_path = load_skill_or_prompt(skill_name="public-interest")
     if not skill_content:
         print(f"  SKIP - Public Interest prompt not found")
         return None
@@ -1623,17 +1685,17 @@ async def test_15_supervisor_multi_skill_chain():
     print("=" * 70)
 
     # Load skill prompts for subagents
-    legal_content, _ = load_skill_or_prompt(prompt_file="02-legal.txt")
-    market_content, _ = load_skill_or_prompt(prompt_file="04-market.txt")
+    legal_content, _ = load_skill_or_prompt(skill_name="legal-counsel")
+    market_content, _ = load_skill_or_prompt(skill_name="market-intelligence")
     intake_content, _ = load_skill_or_prompt(skill_name="oa-intake")
 
     missing = []
     if not legal_content:
-        missing.append("02-legal.txt")
+        missing.append("legal-counsel")
     if not market_content:
-        missing.append("04-market.txt")
+        missing.append("market-intelligence")
     if not intake_content:
-        missing.append("oa-intake SKILL.md")
+        missing.append("oa-intake")
 
     if missing:
         print(f"  SKIP - Missing skill files: {missing}")
@@ -2015,10 +2077,10 @@ async def test_24_uc05_co_package_review():
     print("TEST 24: UC-05 CO Package Review & Findings Generation")
     print("=" * 70)
 
-    # This UC uses compliance + tech review skills
-    comp_content, _ = load_skill_or_prompt(prompt_file="02-legal.txt")
+    # This UC uses compliance + legal counsel agents
+    comp_content, _ = load_skill_or_prompt(skill_name="legal-counsel")
     if not comp_content:
-        print(f"  SKIP - Compliance/legal prompt not found")
+        print(f"  SKIP - Legal counsel agent not found")
         return None
 
     print(f"  Scenario: CO reviews acquisition package for $487K IT services")
@@ -2104,9 +2166,9 @@ async def test_25_uc07_contract_closeout():
     print("TEST 25: UC-07 Contract Close-Out")
     print("=" * 70)
 
-    comp_content, _ = load_skill_or_prompt(prompt_file="02-legal.txt")
+    comp_content, _ = load_skill_or_prompt(skill_name="legal-counsel")
     if not comp_content:
-        print(f"  SKIP - Compliance/legal prompt not found")
+        print(f"  SKIP - Legal counsel agent not found")
         return None
 
     print(f"  Scenario: Close out FFP contract HHSN261200900045C")
@@ -2190,9 +2252,9 @@ async def test_26_uc08_shutdown_notification():
     print("TEST 26: UC-08 Government Shutdown Notification")
     print("=" * 70)
 
-    comp_content, _ = load_skill_or_prompt(prompt_file="02-legal.txt")
+    comp_content, _ = load_skill_or_prompt(skill_name="legal-counsel")
     if not comp_content:
-        print(f"  SKIP - Compliance/legal prompt not found")
+        print(f"  SKIP - Legal counsel agent not found")
         return None
 
     print(f"  Scenario: Government shutdown in 4 hours, classify 200+ contracts")
@@ -2277,9 +2339,9 @@ async def test_27_uc09_score_consolidation():
     print("TEST 27: UC-09 Technical Score Sheet Consolidation")
     print("=" * 70)
 
-    tech_content, _ = load_skill_or_prompt(prompt_file="03-tech.txt")
+    tech_content, _ = load_skill_or_prompt(skill_name="tech-translator")
     if not tech_content:
-        print(f"  SKIP - Tech Review prompt not found")
+        print(f"  SKIP - Tech Translator agent not found")
         return None
 
     print(f"  Scenario: Consolidate 180 score sheets from 9 reviewers on 20 proposals")
@@ -2834,8 +2896,8 @@ async def test_28_sdk_skill_subagent_orchestration():
     """Test the sdk_agentic_service skill→subagent pattern.
 
     Validates:
-    1. build_skill_agents() builds AgentDefinitions from SKILL_CONSTANTS
-    2. build_supervisor_prompt() generates proper routing prompt
+    1. build_skill_agents() builds AgentDefinitions from PLUGIN_CONTENTS
+    2. build_supervisor_prompt() generates proper routing prompt from agent.md
     3. sdk_query() supervisor delegates to subagents via Task tool
     4. Each subagent runs in its own context window (parent_tool_use_id)
     """
@@ -2856,10 +2918,15 @@ async def test_28_sdk_skill_subagent_orchestration():
     agent_names = list(agents.keys())
     print(f"    Built {len(agents)} agents: {agent_names}")
 
-    expected_agents = {"oa-intake", "legal-counsel", "market-intelligence",
-                       "tech-translator", "public-interest", "document-generator"}
+    expected_agents = {
+        # Agents (from plugin.json agents list)
+        "legal-counsel", "market-intelligence", "tech-translator",
+        "public-interest", "policy-supervisor", "policy-librarian", "policy-analyst",
+        # Skills (from plugin.json skills list)
+        "oa-intake", "document-generator", "compliance", "knowledge-retrieval", "tech-review",
+    }
     agents_ok = set(agent_names) == expected_agents
-    print(f"    All 6 skills mapped: {agents_ok}")
+    print(f"    All {len(expected_agents)} agents+skills mapped: {agents_ok}")
 
     # Verify each AgentDefinition has prompt content
     for name, agent in agents.items():
@@ -3181,6 +3248,14 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         except Exception as e:
             print(f"  [recorder] Failed to finalize recording for test {test_id}: {e}")
 
+    # Auto-capture full conversation trace from the latest TraceCollector
+    if TraceCollector._latest is not None and TraceCollector._latest.messages:
+        try:
+            _test_traces[test_id] = TraceCollector._latest.to_trace_json()
+        except Exception:
+            pass  # non-fatal
+        TraceCollector._latest = None
+
     capture.end_test()
     return result_key, result_val, new_session_id
 
@@ -3365,10 +3440,14 @@ async def main():
         result_val = results.get(result_key)
         status = "pass" if result_val is True else ("skip" if result_val is None else "fail")
 
-        trace_output["results"][str(test_id)] = {
+        test_entry: dict[str, Any] = {
             "status": status,
             "logs": log_lines,
         }
+        # Attach full conversation trace if available
+        if test_id in _test_traces:
+            test_entry["trace"] = _test_traces[test_id]
+        trace_output["results"][str(test_id)] = test_entry
 
     _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     _eval_results_dir = os.path.join(_repo_root, "data", "eval", "results")
