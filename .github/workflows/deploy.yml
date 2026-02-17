@@ -1,11 +1,20 @@
-name: Deploy MCP-Agent Core Multi-Tenant System
+name: Deploy EAGLE Platform
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy_infra:
+        description: 'Deploy CDK infrastructure'
+        required: false
+        default: 'true'
+        type: boolean
+      deploy_app:
+        description: 'Build and deploy application'
+        required: false
+        default: 'true'
+        type: boolean
 
 permissions:
   contents: read
@@ -13,132 +22,186 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  PYTHON_VERSION: '3.11'
-  COGNITO_USER_POOL_ID: ${{ secrets.COGNITO_USER_POOL_ID }}
-  COGNITO_CLIENT_ID: ${{ secrets.COGNITO_CLIENT_ID }}
-  BEDROCK_AGENT_ID: ${{ secrets.BEDROCK_AGENT_ID }}
-  OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-  EAGLE_SESSIONS_TABLE: ${{ secrets.EAGLE_SESSIONS_TABLE }}
+  CDK_DIR: infrastructure/cdk-eagle
+  CLUSTER_NAME: eagle-dev
+  BACKEND_SERVICE: eagle-backend-dev
+  FRONTEND_SERVICE: eagle-frontend-dev
 
 jobs:
-  deploy-infrastructure:
+  # ── Deploy CDK Infrastructure ───────────────────────────────
+  deploy-infra:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.deploy_infra == 'true'
     outputs:
-      user-pool-id: ${{ steps.cdk-outputs.outputs.user-pool-id }}
-      client-id: ${{ steps.cdk-outputs.outputs.client-id }}
-      agent-id: ${{ steps.cdk-outputs.outputs.agent-id }}
-      
+      user-pool-id: ${{ steps.outputs.outputs.user-pool-id }}
+      user-pool-client-id: ${{ steps.outputs.outputs.user-pool-client-id }}
+      backend-repo-uri: ${{ steps.outputs.outputs.backend-repo-uri }}
+      frontend-repo-uri: ${{ steps.outputs.outputs.frontend-repo-uri }}
+      backend-url: ${{ steps.outputs.outputs.backend-url }}
+      frontend-url: ${{ steps.outputs.outputs.frontend-url }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
-    - name: Configure AWS credentials
+    - name: Configure AWS credentials (OIDC)
       uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: Setup Python
-      uses: actions/setup-python@65d7f2d534ac1bc67fcd62888c5f4f3d2cb2b236  # v4.7.1
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Setup Node.js for CDK
+    - name: Setup Node.js
       uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8  # v4.0.2
       with:
-        node-version: '18'
-
-    - name: Install CDK
-      run: npm install -g aws-cdk
+        node-version: '20'
 
     - name: Install CDK dependencies
       run: |
-        cd infrastructure/cdk
-        pip install -r requirements.txt
+        cd ${{ env.CDK_DIR }}
+        npm ci
+        npx cdk --version
 
-    - name: CDK Bootstrap
+    - name: CDK Diff
       run: |
-        cd infrastructure/cdk
-        cdk bootstrap
+        cd ${{ env.CDK_DIR }}
+        npx cdk diff --all 2>&1 || true
 
-    - name: Deploy CDK Stack
+    - name: CDK Deploy
       run: |
-        cd infrastructure/cdk
-        cdk deploy --require-approval never --outputs-file outputs.json
-
-    - name: Install Python dependencies for Bedrock Agent
-      run: pip install boto3
-
-    - name: Create Bedrock Agent
-      run: |
-        python deployment/scripts/create_bedrock_agent.py > bedrock_agent_output.txt 2>&1 || echo "Bedrock Agent creation failed, using fallback"
-        echo "📝 Bedrock Agent Output:"
-        cat bedrock_agent_output.txt
+        cd ${{ env.CDK_DIR }}
+        npx cdk deploy --all --require-approval never --outputs-file outputs.json
 
     - name: Extract CDK Outputs
-      id: cdk-outputs
+      id: outputs
       run: |
-        # Get CDK outputs
-        USER_POOL_ID=$(jq -r '.MultiTenantBedrockStack.UserPoolId' infrastructure/cdk/outputs.json)
-        CLIENT_ID=$(jq -r '.MultiTenantBedrockStack.UserPoolClientId' infra/cdk/outputs.json)
-        
-        # Extract Agent ID from bedrock agent creation output
-        if [ -f "bedrock_agent_output.txt" ]; then
-          AGENT_ID=$(grep "Agent ID:" bedrock_agent_output.txt | cut -d':' -f2 | xargs)
-        else
-          AGENT_ID="fallback-direct-model"
-        fi
-        
-        echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
-        echo "client-id=$CLIENT_ID" >> $GITHUB_OUTPUT
-        echo "agent-id=$AGENT_ID" >> $GITHUB_OUTPUT
-        
-        echo "✅ Extracted outputs:"
-        echo "   User Pool ID: $USER_POOL_ID"
-        echo "   Client ID: $CLIENT_ID"
-        echo "   Agent ID: $AGENT_ID"
+        cd ${{ env.CDK_DIR }}
+        echo "user-pool-id=$(jq -r '.EagleCoreStack.UserPoolId' outputs.json)" >> $GITHUB_OUTPUT
+        echo "user-pool-client-id=$(jq -r '.EagleCoreStack.UserPoolClientId' outputs.json)" >> $GITHUB_OUTPUT
+        echo "backend-repo-uri=$(jq -r '.EagleComputeStack.BackendRepoUri' outputs.json)" >> $GITHUB_OUTPUT
+        echo "frontend-repo-uri=$(jq -r '.EagleComputeStack.FrontendRepoUri' outputs.json)" >> $GITHUB_OUTPUT
+        echo "backend-url=$(jq -r '.EagleComputeStack.BackendUrl' outputs.json)" >> $GITHUB_OUTPUT
+        echo "frontend-url=$(jq -r '.EagleComputeStack.FrontendUrl' outputs.json)" >> $GITHUB_OUTPUT
 
-  setup-frontend:
-    needs: deploy-infrastructure
+        echo "--- CDK Outputs ---"
+        cat outputs.json | jq .
+
+  # ── Build & Push Backend Container ──────────────────────────
+  deploy-backend:
+    needs: deploy-infra
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    env:
-      COGNITO_USER_POOL_ID: ${{ secrets.COGNITO_USER_POOL_ID }}
-      COGNITO_CLIENT_ID: ${{ secrets.COGNITO_CLIENT_ID }}
-      BEDROCK_AGENT_ID: ${{ secrets.BEDROCK_AGENT_ID }}
-      OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-      EAGLE_SESSIONS_TABLE: ${{ secrets.EAGLE_SESSIONS_TABLE }}
+    if: github.event_name == 'push' || inputs.deploy_app == 'true'
 
     steps:
     - name: Checkout code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
-    - name: Update Frontend Configuration
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      with:
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to ECR
+      id: ecr-login
+      uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2.0.1
+
+    - name: Build and push backend image
+      env:
+        REPO_URI: ${{ needs.deploy-infra.outputs.backend-repo-uri }}
       run: |
-        USER_POOL_ID="${{ needs.deploy-infrastructure.outputs.user-pool-id }}"
-        CLIENT_ID="${{ needs.deploy-infrastructure.outputs.client-id }}"
+        docker build \
+          -f deployment/docker/Dockerfile.backend \
+          -t $REPO_URI:${{ github.sha }} \
+          -t $REPO_URI:latest \
+          .
+        docker push $REPO_URI:${{ github.sha }}
+        docker push $REPO_URI:latest
 
-        # Next.js client uses environment variables via client/.env.local
-        echo "NEXT_PUBLIC_COGNITO_USER_POOL_ID=$USER_POOL_ID" >> client/.env.local
-        echo "NEXT_PUBLIC_COGNITO_CLIENT_ID=$CLIENT_ID" >> client/.env.local
-
-        echo "✅ Frontend configured with:"
-        echo "   User Pool ID: $USER_POOL_ID"
-        echo "   Client ID: $CLIENT_ID"
-        echo "🌐 Frontend (Next.js) in client/"
-        
-    - name: Create Environment File
+    - name: Update ECS backend service
       run: |
-        cat > .env << EOF
-        COGNITO_USER_POOL_ID=${{ env.COGNITO_USER_POOL_ID }}
-        COGNITO_CLIENT_ID=${{ env.COGNITO_CLIENT_ID }}
-        BEDROCK_AGENT_ID=${{ env.BEDROCK_AGENT_ID }}
-        OPENWEATHER_API_KEY=${{ env.OPENWEATHER_API_KEY }}
-        EAGLE_SESSIONS_TABLE=${{ env.EAGLE_SESSIONS_TABLE }}
-        AWS_REGION=us-east-1
-        DEBUG=false
-        PORT=8000
-        EOF
-        echo "✅ Environment file created for deployment"
+        aws ecs update-service \
+          --cluster ${{ env.CLUSTER_NAME }} \
+          --service ${{ env.BACKEND_SERVICE }} \
+          --force-new-deployment \
+          --region ${{ env.AWS_REGION }}
 
+    - name: Wait for backend deployment
+      run: |
+        aws ecs wait services-stable \
+          --cluster ${{ env.CLUSTER_NAME }} \
+          --services ${{ env.BACKEND_SERVICE }} \
+          --region ${{ env.AWS_REGION }}
+        echo "Backend deployment stable"
+
+  # ── Build & Push Frontend Container ─────────────────────────
+  deploy-frontend:
+    needs: deploy-infra
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.deploy_app == 'true'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      with:
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to ECR
+      id: ecr-login
+      uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2.0.1
+
+    - name: Build and push frontend image
+      env:
+        REPO_URI: ${{ needs.deploy-infra.outputs.frontend-repo-uri }}
+      run: |
+        docker build \
+          -f deployment/docker/Dockerfile.frontend \
+          --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_ID=${{ needs.deploy-infra.outputs.user-pool-id }} \
+          --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID=${{ needs.deploy-infra.outputs.user-pool-client-id }} \
+          --build-arg NEXT_PUBLIC_COGNITO_REGION=${{ env.AWS_REGION }} \
+          -t $REPO_URI:${{ github.sha }} \
+          -t $REPO_URI:latest \
+          .
+        docker push $REPO_URI:${{ github.sha }}
+        docker push $REPO_URI:latest
+
+    - name: Update ECS frontend service
+      run: |
+        aws ecs update-service \
+          --cluster ${{ env.CLUSTER_NAME }} \
+          --service ${{ env.FRONTEND_SERVICE }} \
+          --force-new-deployment \
+          --region ${{ env.AWS_REGION }}
+
+    - name: Wait for frontend deployment
+      run: |
+        aws ecs wait services-stable \
+          --cluster ${{ env.CLUSTER_NAME }} \
+          --services ${{ env.FRONTEND_SERVICE }} \
+          --region ${{ env.AWS_REGION }}
+        echo "Frontend deployment stable"
+
+  # ── Post-Deploy Verification ────────────────────────────────
+  verify:
+    needs: [deploy-infra, deploy-backend, deploy-frontend]
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Health check
+      run: |
+        BACKEND_URL="${{ needs.deploy-infra.outputs.backend-url }}"
+        FRONTEND_URL="${{ needs.deploy-infra.outputs.frontend-url }}"
+
+        echo "--- Backend Health Check ---"
+        curl -sf "${BACKEND_URL}/api/health" | jq . || echo "Backend health check failed"
+
+        echo "--- Frontend Check ---"
+        curl -sf "${FRONTEND_URL}/" -o /dev/null -w "HTTP %{http_code}" || echo "Frontend check failed"
+
+        echo ""
+        echo "=== Deployment Complete ==="
+        echo "Frontend: ${FRONTEND_URL}"
+        echo "Backend:  ${BACKEND_URL}"

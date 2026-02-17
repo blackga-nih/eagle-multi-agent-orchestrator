@@ -34,6 +34,12 @@ venv.bak/
 infrastructure/cdk/cdk.out/
 infrastructure/cdk/outputs.json
 infrastructure/cdk/.cdk.staging/
+infrastructure/cdk-eagle/cdk.out/
+infrastructure/cdk-eagle/node_modules/
+infrastructure/cdk-eagle/dist/
+infrastructure/cdk-eagle/outputs.json
+infrastructure/cdk-eagle/*.js
+infrastructure/cdk-eagle/*.d.ts
 
 # Terraform
 infrastructure/terraform/.terraform/

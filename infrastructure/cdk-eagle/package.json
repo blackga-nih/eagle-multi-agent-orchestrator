@@ -1,0 +1,27 @@
+{
+  "name": "eagle-cdk",
+  "version": "1.0.0",
+  "description": "EAGLE platform CDK infrastructure — Core, Compute, CI/CD stacks",
+  "bin": {
+    "eagle-cdk": "bin/eagle.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "~5.4.0",
+    "aws-cdk": "^2.196.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.196.0",
+    "constructs": "^10.0.0",
+    "source-map-support": "^0.5.21"
+  }
+}

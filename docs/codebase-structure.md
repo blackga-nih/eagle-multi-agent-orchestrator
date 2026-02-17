@@ -96,23 +96,32 @@ Infrastructure as Code definitions for AWS resources.
 
 ```
 infrastructure/
+├── cdk-eagle/          # EAGLE CDK TypeScript stacks (primary)
+│   ├── bin/eagle.ts   # CDK app entry — instantiates all stacks
+│   ├── lib/
+│   │   ├── core-stack.ts      # VPC, Cognito, IAM, S3/DDB imports
+│   │   ├── compute-stack.ts   # ECS Fargate, ECR, ALB
+│   │   └── cicd-stack.ts      # OIDC + GitHub Actions role
+│   ├── config/
+│   │   └── environments.ts    # Per-env config (dev, staging, prod)
+│   ├── cdk.json
+│   ├── tsconfig.json
+│   └── package.json
+├── cdk/                # DEPRECATED — Python reference stack (not deployed)
 ├── terraform/          # Terraform infrastructure definitions
-│   ├── main.tf         # Main resource definitions
-│   ├── variables.tf    # Input variables
-│   └── outputs.tf     # Output values
-├── cdk/                # AWS CDK Python definitions
-│   ├── app.py         # CDK application entry
-│   ├── bedrock_agents.py  # Bedrock agent definitions
-│   └── requirements.txt
-└── eval/               # Evaluation infrastructure (CDK TypeScript)
-    ├── lib/
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+└── eval/               # Evaluation observability (CDK TypeScript)
+    ├── lib/eval-stack.ts
     └── bin/
 ```
 
 **Purpose:**
-- Terraform: Core infrastructure (Cognito, DynamoDB, IAM)
-- CDK: Bedrock Agent definitions and Lambda deployments
-- Eval: Testing and evaluation infrastructure
+- CDK-Eagle: Primary infrastructure — VPC, Cognito, ECS Fargate, OIDC
+- Terraform: Legacy core infrastructure reference
+- Eval: CloudWatch dashboards, alarms, S3 artifacts
+- CDK (old): Deprecated Python reference — see `DEPRECATED.md`
 
 ### Deployment (`deployment/`)
 
@@ -121,7 +130,8 @@ Deployment scripts, Docker configurations, and deployment orchestration.
 ```
 deployment/
 ├── docker/                          # Docker files
-│   └── Dockerfile.backend           # Backend Docker image
+│   ├── Dockerfile.backend           # Backend Docker image (ECS Fargate)
+│   └── Dockerfile.frontend          # Frontend Docker image (Next.js standalone)
 ├── docker-compose.dev.yml           # Local development compose
 └── scripts/                         # Deployment and setup scripts
     ├── create_bedrock_agent.py      # Bedrock agent creation

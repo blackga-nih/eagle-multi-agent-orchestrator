@@ -23,7 +23,7 @@ This expert covers:
 
 ## Current State
 
-**Hybrid provisioning** — Core resources (S3, DynamoDB, Bedrock) are manually provisioned. Eval observability stack (`infrastructure/eval/`) is CDK-managed.
+**Hybrid provisioning** — Core resources (S3, DynamoDB, Bedrock) are manually provisioned. Platform infrastructure (`infrastructure/cdk-eagle/`) provides VPC, Cognito, ECS, ECR, and OIDC via 3 CDK stacks. Eval observability stack (`infrastructure/eval/`) is also CDK-managed.
 
 | Resource | Name | Region | Provisioning |
 |----------|------|--------|-------------|
@@ -33,6 +33,14 @@ This expert covers:
 | CloudWatch Log Group | `/eagle/test-runs` | us-east-1 | CDK (EagleEvalStack) |
 | CloudWatch Dashboard | `EAGLE-Eval-Dashboard` | us-east-1 | CDK (EagleEvalStack) |
 | SNS Topic | `eagle-eval-alerts` | us-east-1 | CDK (EagleEvalStack) |
+| VPC | `eagle-vpc-dev` | us-east-1 | CDK (EagleCoreStack) |
+| Cognito User Pool | `eagle-users-dev` | us-east-1 | CDK (EagleCoreStack) |
+| IAM Role | `eagle-app-role-dev` | us-east-1 | CDK (EagleCoreStack) |
+| ECS Cluster | `eagle-dev` | us-east-1 | CDK (EagleComputeStack) |
+| ECR Repository | `eagle-backend-dev` | us-east-1 | CDK (EagleComputeStack) |
+| ECR Repository | `eagle-frontend-dev` | us-east-1 | CDK (EagleComputeStack) |
+| IAM OIDC Provider | GitHub Actions | us-east-1 | CDK (EagleCiCdStack) |
+| IAM Role | `eagle-github-actions-dev` | us-east-1 | CDK (EagleCiCdStack) |
 | Bedrock | Anthropic Haiku/Sonnet | us-east-1 | AWS Console |
 
 ## Available Commands
@@ -82,6 +90,10 @@ AWS Resources (EAGLE Platform)
   |     |-- Anthropic models (Console) — Haiku, Sonnet, Opus
   |
   |-- CDK Stacks
+  |     |-- infrastructure/cdk-eagle/ (TypeScript) — 3 stacks:
+  |     |     |-- EagleCoreStack (VPC, Cognito, IAM, storage imports)
+  |     |     |-- EagleComputeStack (ECS Fargate, ECR, ALB)
+  |     |     |-- EagleCiCdStack (OIDC provider, deploy role)
   |     |-- infrastructure/eval/ (TypeScript) — EagleEvalStack
   |     |-- infrastructure/cdk/ (Python) — Reference MultiTenantBedrockStack
   |

@@ -17,16 +17,17 @@ last_updated: 2026-02-11T00:00:00
 
 ### Provisioning Model
 
-Core AWS resources (S3, DynamoDB, Bedrock) are **manually provisioned**. The eval observability stack (`infrastructure/eval/`) is managed by **TypeScript CDK**.
+Core AWS resources (S3, DynamoDB, Bedrock) are **manually provisioned**. Platform infrastructure (`infrastructure/cdk-eagle/`) provides VPC, Cognito, ECS, ECR, and OIDC via **3 TypeScript CDK stacks**. The eval observability stack (`infrastructure/eval/`) is also CDK-managed.
 
 ```
 Provisioning: Hybrid (Manual + CDK)
 Region: us-east-1
 Account: Accessed via ~/.aws/credentials (local profile)
 IAM: Developer credentials with broad permissions
+CDK: infrastructure/cdk-eagle/ (TypeScript, 3 stacks: EagleCoreStack, EagleComputeStack, EagleCiCdStack)
 CDK: infrastructure/eval/ (TypeScript, EagleEvalStack)
 CI/CD: GitHub Actions (deploy.yml, claude-merge-analysis.yml)
-Docker: Not configured
+Docker: ECS Fargate (backend + frontend containers)
 ```
 
 ### Credential Configuration
@@ -57,15 +58,17 @@ Docker: Not configured
 | CloudWatch dashboard | Yes | `EAGLE-Eval-Dashboard`, CDK-managed |
 | SNS topic | Yes | `eagle-eval-alerts`, CDK-managed |
 | Bedrock model access | Yes | Anthropic models enabled in Console |
+| CDK project (platform) | Yes | `infrastructure/cdk-eagle/` — EagleCoreStack, EagleComputeStack, EagleCiCdStack |
 | CDK project (eval) | Yes | `infrastructure/eval/` — EagleEvalStack |
 | CDK project (reference) | Yes | `infrastructure/cdk/` — Python, not deployed |
 | GitHub Actions | Yes | `deploy.yml`, `claude-merge-analysis.yml` |
-| Dockerfile | No | No container configuration |
-| CloudFront distribution | No | Frontend runs locally only |
-| ECS cluster/service | No | No container orchestration |
-| ECR repository | No | No container registry |
-| IAM OIDC provider | No | deploy.yml uses static keys |
-| VPC | No | All services use default/public endpoints |
+| VPC | Yes | `eagle-vpc-dev`, CDK-managed (EagleCoreStack) |
+| Cognito User Pool | Yes | `eagle-users-dev`, CDK-managed (EagleCoreStack) |
+| ECS Cluster | Yes | `eagle-dev`, CDK-managed (EagleComputeStack) |
+| ECR Repository (backend) | Yes | `eagle-backend-dev`, CDK-managed (EagleComputeStack) |
+| ECR Repository (frontend) | Yes | `eagle-frontend-dev`, CDK-managed (EagleComputeStack) |
+| IAM OIDC Provider | Yes | GitHub Actions federation, CDK-managed (EagleCiCdStack) |
+| CloudFront distribution | No | Frontend served via public ALB |
 
 ---
 
@@ -152,6 +155,42 @@ Auth: Same AWS credentials as other services
 ## Part 3: CDK Patterns
 
 ### Active CDK Stacks
+
+#### `infrastructure/cdk-eagle/` — Platform Infrastructure (3 Stacks)
+
+```
+infrastructure/cdk-eagle/
+  |-- bin/eagle.ts                    # CDK app entry point
+  |-- lib/core-stack.ts              # EagleCoreStack
+  |-- lib/compute-stack.ts           # EagleComputeStack
+  |-- lib/cicd-stack.ts              # EagleCiCdStack
+  |-- config/environments.ts         # EagleConfig (dev, staging, prod)
+  |-- cdk.json                       # app: npx ts-node --prefer-ts-exts bin/eagle.ts
+  |-- tsconfig.json
+  |-- package.json
+
+EagleCoreStack:
+  - VPC: eagle-vpc-dev (2 AZ, 1 NAT, public + private subnets)
+  - Cognito User Pool: eagle-users-dev (email sign-in, tenant_id custom attr)
+  - Cognito App Client: eagle-app-client-dev
+  - IAM Role: eagle-app-role-dev (S3, DynamoDB, Bedrock, CW, Cognito)
+  - CW Log Group: /eagle/app (90-day retention)
+  - Imports: nci-documents (S3), eagle (DynamoDB)
+
+EagleComputeStack (depends on EagleCoreStack):
+  - ECS Cluster: eagle-dev (Fargate, Container Insights)
+  - ECR: eagle-backend-dev, eagle-frontend-dev (10-image lifecycle)
+  - Backend Fargate Service: internal ALB, port 8000, auto-scale 1-4
+  - Frontend Fargate Service: public ALB, port 3000, auto-scale 1-4
+  - CW Log Groups: /eagle/ecs/backend-dev, /eagle/ecs/frontend-dev
+
+EagleCiCdStack (independent):
+  - IAM OIDC Provider: token.actions.githubusercontent.com
+  - IAM Role: eagle-github-actions-dev (CDK deploy, ECR push, ECS update)
+
+Deploy: cd infrastructure/cdk-eagle && npx cdk deploy --all
+Synth:  cd infrastructure/cdk-eagle && npx cdk synth
+```
 
 #### `infrastructure/eval/` — EagleEvalStack (Eval Observability)
 
