@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, Search, Filter, ArrowUpDown, Eye, Edit2, Trash2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { Plus, Search, Filter, ArrowUpDown, Eye, Edit2, CheckCircle2, Circle, FileText } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
 import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
-import { Tabs, TabPanel } from '@/components/ui/tabs';
+import { Tabs } from '@/components/ui/tabs';
 import {
   CURRENT_WORKFLOW,
   PAST_WORKFLOWS,
@@ -17,23 +18,54 @@ import {
   formatCurrency,
   formatDate,
 } from '@/lib/mock-data';
+import { getPackages, PackageData } from '@/lib/document-store';
 import { Workflow, WorkflowStatus } from '@/types/schema';
 
-const allWorkflows = [CURRENT_WORKFLOW, ...PAST_WORKFLOWS];
+const mockWorkflows = [CURRENT_WORKFLOW, ...PAST_WORKFLOWS];
 
-const statusTabs = [
-  { id: 'all', label: 'All', badge: allWorkflows.length },
-  { id: 'in_progress', label: 'In Progress', badge: allWorkflows.filter(w => w.status === 'in_progress').length },
-  { id: 'pending_review', label: 'Pending Review', badge: allWorkflows.filter(w => w.status === 'pending_review').length },
-  { id: 'approved', label: 'Approved', badge: allWorkflows.filter(w => w.status === 'approved').length },
-  { id: 'completed', label: 'Completed', badge: allWorkflows.filter(w => w.status === 'completed').length },
-];
+/** Convert a localStorage PackageData into a Workflow shape for the grid. */
+function packageToWorkflow(pkg: PackageData): Workflow {
+  const completed = pkg.checklist.filter((c) => c.status === 'completed').length;
+  const total = pkg.checklist.length;
+  return {
+    id: pkg.id,
+    user_id: 'local',
+    title: pkg.title,
+    description: `${completed}/${total} documents generated`,
+    status: pkg.status,
+    created_at: pkg.created_at,
+    updated_at: pkg.updated_at,
+    metadata: { _source: 'localStorage' },
+    archived: false,
+  };
+}
 
 export default function WorkflowsPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<PackageData | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [localPackages, setLocalPackages] = useState<PackageData[]>([]);
+
+  // Load localStorage packages on mount
+  useEffect(() => {
+    setLocalPackages(getPackages());
+  }, []);
+
+  const allWorkflows = useMemo(() => {
+    const localAsWorkflows = localPackages.map(packageToWorkflow);
+    return [...localAsWorkflows, ...mockWorkflows];
+  }, [localPackages]);
+
+  const statusTabs = useMemo(() => [
+    { id: 'all', label: 'All', badge: allWorkflows.length },
+    { id: 'in_progress', label: 'In Progress', badge: allWorkflows.filter(w => w.status === 'in_progress').length },
+    { id: 'pending_review', label: 'Pending Review', badge: allWorkflows.filter(w => w.status === 'pending_review').length },
+    { id: 'approved', label: 'Approved', badge: allWorkflows.filter(w => w.status === 'approved').length },
+    { id: 'completed', label: 'Completed', badge: allWorkflows.filter(w => w.status === 'completed').length },
+  ], [allWorkflows]);
 
   const filteredWorkflows = allWorkflows.filter(w => {
     const matchesSearch = w.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -41,6 +73,16 @@ export default function WorkflowsPage() {
     const matchesStatus = activeTab === 'all' || w.status === activeTab;
     return matchesSearch && matchesStatus;
   });
+
+  const handleWorkflowClick = (workflow: Workflow) => {
+    // If it's a localStorage package, show the document checklist modal
+    if ((workflow.metadata as Record<string, unknown>)?._source === 'localStorage') {
+      const pkg = localPackages.find((p) => p.id === workflow.id) ?? null;
+      setSelectedPackage(pkg);
+    } else {
+      setSelectedWorkflow(workflow);
+    }
+  };
 
   return (
     <AuthGuard>
@@ -96,7 +138,7 @@ export default function WorkflowsPage() {
               <div
                 key={workflow.id}
                 className="bg-white rounded-2xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-lg transition-all cursor-pointer group"
-                onClick={() => setSelectedWorkflow(workflow)}
+                onClick={() => handleWorkflowClick(workflow)}
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
@@ -124,6 +166,9 @@ export default function WorkflowsPage() {
                   {workflow.urgency_level === 'critical' && (
                     <Badge variant="danger" size="sm">Critical</Badge>
                   )}
+                  {(workflow.metadata as Record<string, unknown>)?._source === 'localStorage' && (
+                    <Badge variant="info" size="sm">AI Generated</Badge>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between pt-4 border-t border-gray-100">
@@ -148,7 +193,7 @@ export default function WorkflowsPage() {
         </div>
       </main>
 
-      {/* Workflow Detail Modal */}
+      {/* Mock Workflow Detail Modal */}
       <Modal
         isOpen={!!selectedWorkflow}
         onClose={() => setSelectedWorkflow(null)}
@@ -240,6 +285,91 @@ export default function WorkflowsPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+      </Modal>
+
+      {/* localStorage Package Detail Modal — Document Checklist */}
+      <Modal
+        isOpen={!!selectedPackage}
+        onClose={() => setSelectedPackage(null)}
+        title={selectedPackage?.title}
+        size="lg"
+        footer={
+          <div className="flex justify-end">
+            <button
+              onClick={() => setSelectedPackage(null)}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800"
+            >
+              Close
+            </button>
+          </div>
+        }
+      >
+        {selectedPackage && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-gray-500 uppercase tracking-wide">Status</label>
+                <p className="mt-1">
+                  <span className={`inline-block text-xs font-bold uppercase px-2 py-1 rounded-full ${getWorkflowStatusColor(selectedPackage.status)}`}>
+                    {selectedPackage.status.replace('_', ' ')}
+                  </span>
+                </p>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 uppercase tracking-wide">Documents</label>
+                <p className="mt-1 text-sm font-medium">
+                  {selectedPackage.checklist.filter((c) => c.status === 'completed').length} / {selectedPackage.checklist.length} completed
+                </p>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 uppercase tracking-wide">Created</label>
+                <p className="mt-1 text-sm font-medium">{formatDate(selectedPackage.created_at)}</p>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 uppercase tracking-wide">Last Updated</label>
+                <p className="mt-1 text-sm font-medium">{formatDate(selectedPackage.updated_at)}</p>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">Document Checklist</label>
+              <div className="space-y-2">
+                {selectedPackage.checklist.map((item) => (
+                  <div
+                    key={item.document_type}
+                    className={`flex items-center gap-3 p-3 rounded-lg ${
+                      item.status === 'completed' ? 'bg-green-50' : 'bg-gray-50'
+                    } ${item.document_id ? 'cursor-pointer hover:bg-green-100 transition-colors' : ''}`}
+                    onClick={() => {
+                      if (item.document_id) {
+                        router.push(`/documents/${item.document_id}`);
+                      }
+                    }}
+                  >
+                    {item.status === 'completed' ? (
+                      <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
+                    ) : (
+                      <Circle className="w-5 h-5 text-gray-300 shrink-0" />
+                    )}
+                    <div className="flex-1">
+                      <p className={`text-sm font-medium ${item.status === 'completed' ? 'text-green-900' : 'text-gray-700'}`}>
+                        {item.label}
+                      </p>
+                    </div>
+                    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${
+                      item.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                    }`}>
+                      {item.status}
+                    </span>
+                    {item.document_id && (
+                      <FileText className="w-4 h-4 text-green-600 shrink-0" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </Modal>

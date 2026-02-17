@@ -1,9 +1,16 @@
 /**
  * Multi-Agent Stream Types
- * 
+ *
  * These types define the protocol for streaming events from
  * multiple agents in the EAGLE system.
  */
+
+// Import shared chat types for local use and re-export for backward compatibility.
+import type { Message as _Message } from './chat';
+export type { ChatMessage, Message, DocumentInfo } from './chat';
+
+// Local alias so functions in this file can reference the type.
+type Message = _Message;
 
 export type StreamEventType =
   | 'text'
@@ -67,22 +74,6 @@ export interface StreamEvent {
   tool_result?: ToolResult;
   elicitation?: Elicitation;
   metadata?: Record<string, any>;
-}
-
-/**
- * Message in the chat interface.
- * Extended to include agent information.
- */
-export interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  reasoning?: string;
-  
-  // Multi-agent fields
-  agent_id?: string;
-  agent_name?: string;
 }
 
 /**

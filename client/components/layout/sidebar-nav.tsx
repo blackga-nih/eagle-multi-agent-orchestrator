@@ -103,7 +103,7 @@ export default function SidebarNav() {
         <div className="flex flex-col flex-1 min-h-0">
           {/* New Chat button */}
           <button
-            onClick={() => { createNewSession(); router.push('/'); }}
+            onClick={() => { createNewSession(); router.push('/chat'); }}
             className="flex items-center justify-center px-3 py-2.5 mb-2 rounded-xl text-sm font-medium transition-all w-full bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-200"
           >
             <span>New Chat</span>
@@ -125,7 +125,7 @@ export default function SidebarNav() {
                 {sortedSessions.map((session) => (
                   <button
                     key={session.id}
-                    onClick={() => { setCurrentSession(session.id); router.push('/'); }}
+                    onClick={() => { setCurrentSession(session.id); router.push('/chat'); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
                       session.id === currentSessionId
                         ? 'bg-blue-50 text-blue-700'

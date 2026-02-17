@@ -24,16 +24,11 @@ import {
     formatDate,
     formatTime,
 } from '@/lib/mock-data';
+import type { ChatMessage } from '@/types/chat';
 
-export interface Message {
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    timestamp: Date;
-    reasoning?: string;
-    agent_id?: string;
-    agent_name?: string;
-}
+// Re-export shared types so existing imports from this file keep working.
+export type { ChatMessage, DocumentInfo } from '@/types/chat';
+export type Message = ChatMessage;
 
 export interface AcquisitionData {
     requirement?: string;

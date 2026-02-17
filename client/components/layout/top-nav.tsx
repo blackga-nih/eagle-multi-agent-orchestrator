@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { checkBackendHealth } from '@/hooks/use-agent-stream';
 
 const navLinks = [
-  { href: '/', label: 'Chat', icon: <MessageSquare className="w-4 h-4" /> },
+  { href: '/chat', label: 'Chat', icon: <MessageSquare className="w-4 h-4" /> },
   { href: '/workflows', label: 'Packages', icon: <FolderKanban className="w-4 h-4" /> },
   { href: '/documents', label: 'Documents', icon: <FileText className="w-4 h-4" /> },
   { href: '/admin', label: 'Admin', icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -29,7 +29,7 @@ export default function TopNav() {
   }, []);
 
   const isActive = (href: string) => {
-    if (href === '/') return pathname === '/';
+    if (href === '/chat') return pathname === '/chat';
     return pathname.startsWith(href);
   };
 

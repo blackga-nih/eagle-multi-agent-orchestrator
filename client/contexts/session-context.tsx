@@ -4,18 +4,20 @@ import { createContext, useContext, ReactNode } from 'react';
 import { useSessionPersistence } from '@/hooks/use-session-persistence';
 import { Message, AcquisitionData } from '@/components/chat/chat-interface';
 import { ChatSession } from '@/components/layout/chat-history-dropdown';
+import { DocumentInfo } from '@/types/chat';
 
 interface SessionContextValue {
     sessions: ChatSession[];
     currentSessionId: string;
     isLoading: boolean;
-    saveSession: (messages: Message[], acquisitionData: AcquisitionData) => void;
+    saveSession: (messages: Message[], acquisitionData: AcquisitionData, documents?: Record<string, DocumentInfo[]>) => void;
     loadSession: (sessionId: string) => {
         id: string;
         title: string;
         summary?: string;
         messages: Message[];
         acquisitionData: AcquisitionData;
+        documents?: Record<string, DocumentInfo[]>;
         createdAt: string;
         updatedAt: string;
         status: 'in_progress' | 'completed' | 'draft';

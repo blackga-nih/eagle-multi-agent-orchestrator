@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Message, AcquisitionData } from '@/components/chat/chat-interface';
 import { ChatSession } from '@/components/layout/chat-history-dropdown';
+import { DocumentInfo } from '@/types/chat';
 import { generateUUID } from '@/lib/uuid';
 
 const STORAGE_KEY = 'eagle_chat_sessions';
@@ -14,6 +15,7 @@ interface SessionData {
     summary?: string;
     messages: Message[];
     acquisitionData: AcquisitionData;
+    documents?: Record<string, DocumentInfo[]>;
     createdAt: string;
     updatedAt: string;
     status: 'in_progress' | 'completed' | 'draft';
@@ -24,7 +26,7 @@ interface UseSessionPersistenceReturn {
     currentSessionId: string;
     currentSession: SessionData | null;
     isLoading: boolean;
-    saveSession: (messages: Message[], acquisitionData: AcquisitionData) => void;
+    saveSession: (messages: Message[], acquisitionData: AcquisitionData, documents?: Record<string, DocumentInfo[]>) => void;
     loadSession: (sessionId: string) => SessionData | null;
     createNewSession: () => string;
     deleteSession: (sessionId: string) => void;
@@ -104,7 +106,7 @@ export function useSessionPersistence(): UseSessionPersistenceReturn {
         }
     }, []);
 
-    const saveSession = useCallback((messages: Message[], acquisitionData: AcquisitionData) => {
+    const saveSession = useCallback((messages: Message[], acquisitionData: AcquisitionData, documents?: Record<string, DocumentInfo[]>) => {
         if (!currentSessionId || messages.length === 0) return;
 
         try {
@@ -113,6 +115,16 @@ export function useSessionPersistence(): UseSessionPersistenceReturn {
 
             const existingSession = allSessions[currentSessionId];
             const now = new Date().toISOString();
+
+            // Strip content from documents to avoid localStorage bloat —
+            // card rendering only needs metadata; full content lives in sessionStorage.
+            let strippedDocs: Record<string, DocumentInfo[]> | undefined;
+            if (documents && Object.keys(documents).length > 0) {
+                strippedDocs = {};
+                for (const [msgId, docs] of Object.entries(documents)) {
+                    strippedDocs[msgId] = docs.map(({ content, ...meta }) => meta);
+                }
+            }
 
             const sessionData: SessionData = {
                 id: currentSessionId,
@@ -123,6 +135,7 @@ export function useSessionPersistence(): UseSessionPersistenceReturn {
                     timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
                 })) as any,
                 acquisitionData,
+                documents: strippedDocs,
                 createdAt: existingSession?.createdAt || now,
                 updatedAt: now,
                 status: existingSession?.status || 'in_progress',

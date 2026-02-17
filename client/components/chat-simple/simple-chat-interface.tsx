@@ -10,17 +10,20 @@ import { useSlashCommands } from '@/hooks/use-slash-commands';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
 import { SlashCommand } from '@/lib/slash-commands';
-import { Message } from '@/components/chat/chat-interface';
+import { ChatMessage, DocumentInfo } from '@/types/chat';
+import { saveGeneratedDocument } from '@/lib/document-store';
 
 export default function SimpleChatInterface() {
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isLoadingSession, setIsLoadingSession] = useState(true);
+    const [documents, setDocuments] = useState<Record<string, DocumentInfo[]>>({});
 
     const { currentSessionId, saveSession, loadSession } = useSession();
     const { getToken } = useAuth();
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const lastAssistantIdRef = useRef<string | null>(null);
 
     // Load session data
     useEffect(() => {
@@ -31,8 +34,10 @@ export default function SimpleChatInterface() {
         const sessionData = loadSession(currentSessionId);
         if (sessionData) {
             setMessages(sessionData.messages);
+            setDocuments(sessionData.documents || {});
         } else {
             setMessages([]);
+            setDocuments({});
         }
         setIsLoadingSession(false);
     }, [currentSessionId, loadSession]);
@@ -40,9 +45,9 @@ export default function SimpleChatInterface() {
     // Auto-save session
     const saveSessionDebounced = useCallback(() => {
         if (messages.length > 0) {
-            saveSession(messages, {});
+            saveSession(messages, {}, documents);
         }
-    }, [messages, saveSession]);
+    }, [messages, documents, saveSession]);
 
     useEffect(() => {
         const timeoutId = setTimeout(saveSessionDebounced, 500);
@@ -69,7 +74,7 @@ export default function SimpleChatInterface() {
     const { sendQuery, isStreaming, error } = useAgentStream({
         getToken,
         onMessage: (msg) => {
-            const newMessage: Message = {
+            const newMessage: ChatMessage = {
                 id: msg.id,
                 role: 'assistant',
                 content: msg.content,
@@ -78,7 +83,26 @@ export default function SimpleChatInterface() {
                 agent_id: msg.agent_id,
                 agent_name: msg.agent_name,
             };
+            lastAssistantIdRef.current = msg.id;
             setMessages((prev) => [...prev, newMessage]);
+        },
+        onDocumentGenerated: (doc) => {
+            // Attach document to latest assistant message
+            const attachTo = lastAssistantIdRef.current;
+            if (attachTo) {
+                setDocuments((prev) => ({
+                    ...prev,
+                    [attachTo]: [...(prev[attachTo] || []), doc],
+                }));
+            }
+
+            // Persist to localStorage for Packages & Documents pages
+            if (currentSessionId) {
+                const title =
+                    messages.find((m) => m.role === 'user')?.content.slice(0, 80) ||
+                    'Untitled Package';
+                saveGeneratedDocument(doc, currentSessionId, title);
+            }
         },
     });
 
@@ -99,12 +123,13 @@ export default function SimpleChatInterface() {
     const handleSend = async () => {
         if (!input.trim() || isStreaming) return;
 
-        const userMessage: Message = {
+        const userMessage: ChatMessage = {
             id: Date.now().toString(),
             role: 'user',
             content: input,
             timestamp: new Date(),
         };
+        lastAssistantIdRef.current = null;
         setMessages((prev) => [...prev, userMessage]);
         const query = input;
         setInput('');
@@ -128,7 +153,12 @@ export default function SimpleChatInterface() {
             {!hasMessages && !isLoadingSession ? (
                 <SimpleWelcome onAction={insertText} />
             ) : (
-                <SimpleMessageList messages={messages} isTyping={isStreaming} />
+                <SimpleMessageList
+                    messages={messages}
+                    isTyping={isStreaming}
+                    documents={documents}
+                    sessionId={currentSessionId}
+                />
             )}
 
             {/* Input footer */}
@@ -177,7 +207,7 @@ export default function SimpleChatInterface() {
                             disabled={!input.trim() || isStreaming}
                             className="p-3 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-all shadow-md shrink-0"
                         >
-                            <span className="text-base">➤</span>
+                            <span className="text-base">&#10148;</span>
                         </button>
                     </div>
                     <p className="text-center text-[10px] text-[#8896A6] mt-2">

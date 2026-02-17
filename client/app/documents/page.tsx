@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, Filter, FileText, Eye, Download, Edit2, Clock, User, CheckCircle2, Copy, Check } from 'lucide-react';
+import { Plus, Search, Filter, FileText, Eye, Download, Edit2, Clock, Copy } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
@@ -16,6 +16,7 @@ import {
   getDocumentStatusColor,
   formatDate,
 } from '@/lib/mock-data';
+import { getGeneratedDocuments, StoredDocument } from '@/lib/document-store';
 import { Document, DocumentTemplate, DocumentType, DocumentStatus } from '@/types/schema';
 
 const documentTypeLabels: Record<DocumentType, string> = {
@@ -36,13 +37,20 @@ const documentTypeIcons: Record<DocumentType, string> = {
   funding_doc: 'F',
 };
 
-const statusTabs = [
-  { id: 'all', label: 'All Documents', badge: MOCK_DOCUMENTS.length },
-  { id: 'not_started', label: 'Not Started', badge: MOCK_DOCUMENTS.filter(d => d.status === 'not_started').length },
-  { id: 'in_progress', label: 'In Progress', badge: MOCK_DOCUMENTS.filter(d => d.status === 'in_progress').length },
-  { id: 'draft', label: 'Draft', badge: MOCK_DOCUMENTS.filter(d => d.status === 'draft').length },
-  { id: 'approved', label: 'Approved', badge: MOCK_DOCUMENTS.filter(d => d.status === 'approved').length },
-];
+/** Convert a StoredDocument from localStorage into the Document shape used by the UI. */
+function storedToDocument(sd: StoredDocument): Document {
+  return {
+    id: sd.id,
+    workflow_id: sd.session_id,
+    document_type: sd.document_type,
+    title: sd.title,
+    status: sd.status,
+    content: sd.content,
+    version: sd.version,
+    created_at: sd.created_at,
+    updated_at: sd.updated_at,
+  };
+}
 
 export default function DocumentsPage() {
   const router = useRouter();
@@ -51,12 +59,47 @@ export default function DocumentsPage() {
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
+  const [localDocs, setLocalDocs] = useState<Document[]>([]);
 
-  const filteredDocuments = MOCK_DOCUMENTS.filter(d => {
+  // Load localStorage docs on mount
+  useEffect(() => {
+    setLocalDocs(getGeneratedDocuments().map(storedToDocument));
+  }, []);
+
+  const allDocuments = useMemo(() => {
+    return [...localDocs, ...MOCK_DOCUMENTS];
+  }, [localDocs]);
+
+  const statusTabs = useMemo(() => [
+    { id: 'all', label: 'All Documents', badge: allDocuments.length },
+    { id: 'not_started', label: 'Not Started', badge: allDocuments.filter(d => d.status === 'not_started').length },
+    { id: 'in_progress', label: 'In Progress', badge: allDocuments.filter(d => d.status === 'in_progress').length },
+    { id: 'draft', label: 'Draft', badge: allDocuments.filter(d => d.status === 'draft').length },
+    { id: 'approved', label: 'Approved', badge: allDocuments.filter(d => d.status === 'approved').length },
+  ], [allDocuments]);
+
+  const filteredDocuments = allDocuments.filter(d => {
     const matchesSearch = d.title.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = activeTab === 'all' || d.status === activeTab;
     return matchesSearch && matchesStatus;
   });
+
+  const handleDocumentClick = (doc: Document) => {
+    // For localStorage docs, populate sessionStorage so the viewer can load them
+    const isLocal = localDocs.some((ld) => ld.id === doc.id);
+    if (isLocal && doc.content) {
+      try {
+        sessionStorage.setItem(`doc-content-${doc.id}`, JSON.stringify({
+          title: doc.title,
+          document_type: doc.document_type,
+          content: doc.content,
+        }));
+      } catch {
+        // sessionStorage unavailable
+      }
+    }
+    setSelectedDocument(doc);
+  };
 
   return (
     <AuthGuard>
@@ -117,7 +160,7 @@ export default function DocumentsPage() {
               <div
                 key={doc.id}
                 className="bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
-                onClick={() => setSelectedDocument(doc)}
+                onClick={() => handleDocumentClick(doc)}
               >
                 <div className="flex items-center gap-4">
                   {/* Icon */}
