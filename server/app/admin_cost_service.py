@@ -6,14 +6,14 @@ Provides detailed cost breakdown by tenant, user, and service for admin users on
 from decimal import Decimal
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-from app.dynamodb_store import DynamoDBStore
+from app import session_store
 from app.models import SubscriptionTier
 
 class AdminCostService:
     """Admin-only granular cost attribution with service-wise breakdown"""
-    
+
     def __init__(self):
-        self.dynamodb_store = DynamoDBStore()
+        pass
         
         # Service-wise pricing
         self.service_pricing = {
@@ -46,7 +46,7 @@ class AdminCostService:
     async def get_tenant_overall_cost(self, tenant_id: str, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """1. Overall Tenant Cost - Admin Only"""
         
-        usage_metrics = await self.dynamodb_store.get_tenant_usage_metrics(tenant_id, start_date, end_date)
+        usage_metrics = session_store.get_usage_metrics(tenant_id, start_date, end_date)
         
         total_cost = Decimal("0")
         service_costs = {
@@ -76,7 +76,7 @@ class AdminCostService:
     async def get_tenant_per_user_cost(self, tenant_id: str, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """2. Per User Cost - Admin Only"""
         
-        usage_metrics = await self.dynamodb_store.get_tenant_usage_metrics(tenant_id, start_date, end_date)
+        usage_metrics = session_store.get_usage_metrics(tenant_id, start_date, end_date)
         
         user_costs = {}
         
@@ -127,7 +127,7 @@ class AdminCostService:
     async def get_tenant_service_wise_cost(self, tenant_id: str, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """3. Overall Tenant Service-wise Consumption Cost - Admin Only"""
         
-        usage_metrics = await self.dynamodb_store.get_tenant_usage_metrics(tenant_id, start_date, end_date)
+        usage_metrics = session_store.get_usage_metrics(tenant_id, start_date, end_date)
         
         service_breakdown = {}
         
@@ -182,7 +182,7 @@ class AdminCostService:
     async def get_user_service_wise_cost(self, tenant_id: str, user_id: str, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """4. User Service-wise Consumption Cost - Admin Only"""
         
-        usage_metrics = await self.dynamodb_store.get_tenant_usage_metrics(tenant_id, start_date, end_date)
+        usage_metrics = session_store.get_usage_metrics(tenant_id, start_date, end_date)
         user_metrics = [m for m in usage_metrics if m.get("user_id") == user_id]
         
         user_service_breakdown = {}

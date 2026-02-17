@@ -22,7 +22,6 @@ from typing import AsyncGenerator, Optional
 from .cognito_auth import extract_user_context, UserContext
 from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWriter
 from .models import ChatMessage
-from .dynamodb_store import DynamoDBStore
 from .subscription_service import SubscriptionService
 from .agentic_service import stream_chat, MODEL, EAGLE_TOOLS
 
@@ -36,7 +35,6 @@ async def stream_generator(
     message: str,
     tenant_context,
     tier,
-    store: DynamoDBStore,
     subscription_service: SubscriptionService,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events using EAGLE's Anthropic SDK streaming.
@@ -100,20 +98,17 @@ async def stream_generator(
 
 
 def create_streaming_router(
-    store: DynamoDBStore,
     subscription_service: SubscriptionService,
 ) -> APIRouter:
     """Factory to create router with service dependencies.
 
     This pattern allows main.py to wire up concrete service instances::
 
-        streaming_router = create_streaming_router(store, subscription_service)
+        streaming_router = create_streaming_router(subscription_service)
         app.include_router(streaming_router)
 
     Parameters
     ----------
-    store : DynamoDBStore
-        The initialised DynamoDB store.
     subscription_service : SubscriptionService
         The initialised subscription/usage service.
 
@@ -158,7 +153,6 @@ def create_streaming_router(
                 message=message.message,
                 tenant_context=message.tenant_context,
                 tier=user.tier,
-                store=store,
                 subscription_service=subscription_service,
             ),
             media_type="text/event-stream",

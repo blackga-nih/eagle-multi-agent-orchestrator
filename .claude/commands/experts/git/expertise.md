@@ -130,8 +130,7 @@ Jobs:
 | `COGNITO_CLIENT_ID` | Cognito auth | deploy.yml |
 | `BEDROCK_AGENT_ID` | Bedrock agent | deploy.yml |
 | `OPENWEATHER_API_KEY` | Weather API | deploy.yml |
-| `SESSIONS_TABLE` | DynamoDB table | deploy.yml |
-| `USAGE_TABLE` | DynamoDB table | deploy.yml |
+| `EAGLE_SESSIONS_TABLE` | DynamoDB table | deploy.yml |
 
 ### OIDC Authentication Pattern
 

@@ -40,7 +40,8 @@ from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
     update_session as eagle_update_session, delete_session as eagle_delete_session,
     list_sessions as eagle_list_sessions,
-    add_message, get_messages, get_messages_for_anthropic, record_usage, get_usage_summary
+    add_message, get_messages, get_messages_for_anthropic, record_usage, get_usage_summary,
+    get_tenant_usage_overview, list_tenant_sessions,
 )
 from .cognito_auth import (
     UserContext, extract_user_context,
@@ -53,7 +54,6 @@ from .admin_service import (
 
 # Existing multi-tenant modules (preserved)
 from .models import ChatMessage, ChatResponse, TenantContext, UsageMetric, SubscriptionTier
-from .dynamodb_store import DynamoDBStore
 from .auth import get_current_user
 from .subscription_service import SubscriptionService
 from .cost_attribution import CostAttributionService
@@ -89,8 +89,7 @@ USE_PERSISTENT_SESSIONS = os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() =
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
 
 # ── Initialize existing services ─────────────────────────────────────
-store = DynamoDBStore()
-subscription_service = SubscriptionService(store)
+subscription_service = SubscriptionService()
 cost_service = CostAttributionService()
 admin_cost_service = AdminCostService()
 
@@ -775,7 +774,7 @@ async def get_tenant_usage(tenant_id: str, current_user: dict = Depends(get_curr
     """Get usage metrics for authenticated tenant"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    return store.get_tenant_usage(tenant_id)
+    return get_tenant_usage_overview(tenant_id)
 
 
 @app.get("/api/tenants/{tenant_id}/costs")
@@ -825,7 +824,7 @@ async def get_tenant_sessions(tenant_id: str, current_user: dict = Depends(get_c
         raise HTTPException(status_code=403, detail="Access denied")
     return {
         "tenant_id": tenant_id,
-        "sessions": store.get_tenant_sessions(tenant_id)
+        "sessions": list_tenant_sessions(tenant_id)
     }
 
 
@@ -834,7 +833,7 @@ async def get_tenant_analytics(tenant_id: str, current_user: dict = Depends(get_
     """Get enhanced analytics with trace data for authenticated tenant"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    usage_data = store.get_tenant_usage(tenant_id)
+    usage_data = get_tenant_usage_overview(tenant_id)
     tier = current_user["subscription_tier"]
     analytics = {
         "tenant_id": tenant_id,
@@ -996,7 +995,7 @@ async def add_user_to_admin_group(request: dict):
 # ══════════════════════════════════════════════════════════════════════
 
 # Include SSE streaming router - uses EAGLE agentic_service now
-streaming_router = create_streaming_router(store, subscription_service)
+streaming_router = create_streaming_router(subscription_service)
 app.include_router(streaming_router)
 
 

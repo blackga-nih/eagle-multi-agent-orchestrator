@@ -18,8 +18,7 @@ env:
   COGNITO_CLIENT_ID: ${{ secrets.COGNITO_CLIENT_ID }}
   BEDROCK_AGENT_ID: ${{ secrets.BEDROCK_AGENT_ID }}
   OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-  SESSIONS_TABLE: ${{ secrets.SESSIONS_TABLE }}
-  USAGE_TABLE: ${{ secrets.USAGE_TABLE }}
+  EAGLE_SESSIONS_TABLE: ${{ secrets.EAGLE_SESSIONS_TABLE }}
 
 jobs:
   deploy-infrastructure:
@@ -109,9 +108,8 @@ jobs:
       COGNITO_CLIENT_ID: ${{ secrets.COGNITO_CLIENT_ID }}
       BEDROCK_AGENT_ID: ${{ secrets.BEDROCK_AGENT_ID }}
       OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-      SESSIONS_TABLE: ${{ secrets.SESSIONS_TABLE }}
-      USAGE_TABLE: ${{ secrets.USAGE_TABLE }}
-    
+      EAGLE_SESSIONS_TABLE: ${{ secrets.EAGLE_SESSIONS_TABLE }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
@@ -137,8 +135,7 @@ jobs:
         COGNITO_CLIENT_ID=${{ env.COGNITO_CLIENT_ID }}
         BEDROCK_AGENT_ID=${{ env.BEDROCK_AGENT_ID }}
         OPENWEATHER_API_KEY=${{ env.OPENWEATHER_API_KEY }}
-        SESSIONS_TABLE=${{ env.SESSIONS_TABLE }}
-        USAGE_TABLE=${{ env.USAGE_TABLE }}
+        EAGLE_SESSIONS_TABLE=${{ env.EAGLE_SESSIONS_TABLE }}
         AWS_REGION=us-east-1
         DEBUG=false
         PORT=8000

@@ -21,8 +21,6 @@ class Config:
     COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID", "")
 
     # DynamoDB Configuration
-    SESSIONS_TABLE = os.getenv("SESSIONS_TABLE", "tenant-sessions")
-    USAGE_TABLE = os.getenv("USAGE_TABLE", "tenant-usage")
     EAGLE_SESSIONS_TABLE = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
 
     # JWT Configuration

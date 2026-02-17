@@ -554,6 +554,218 @@ def get_usage_summary(
         }
 
 
+# ── Tenant-Level Queries (Admin/Cost Services) ──────────────────────
+
+def get_usage_metrics(
+    tenant_id: str,
+    start_date: datetime,
+    end_date: datetime
+) -> List[Dict[str, Any]]:
+    """Query USAGE# records for a tenant within a date range."""
+    try:
+        table = _get_table()
+        response = table.query(
+            KeyConditionExpression="PK = :pk AND SK BETWEEN :start AND :end",
+            ExpressionAttributeValues={
+                ":pk": f"USAGE#{tenant_id}",
+                ":start": f"USAGE#{start_date.strftime('%Y-%m-%d')}",
+                ":end": f"USAGE#{end_date.strftime('%Y-%m-%d')}~",
+            }
+        )
+        return [_serialize_item(i) for i in response.get("Items", [])]
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to get usage metrics: %s", e)
+        return []
+
+
+def get_all_tenants() -> List[Dict[str, str]]:
+    """Scan for unique tenant IDs across all SESSION# records."""
+    try:
+        table = _get_table()
+        response = table.scan(
+            FilterExpression="begins_with(PK, :prefix) AND begins_with(SK, :sk_prefix)",
+            ExpressionAttributeValues={
+                ":prefix": "SESSION#",
+                ":sk_prefix": "SESSION#",
+            },
+            ProjectionExpression="PK, tenant_id"
+        )
+        tenant_ids = set()
+        for item in response.get("Items", []):
+            tid = item.get("tenant_id")
+            if tid:
+                tenant_ids.add(tid)
+            else:
+                parts = item.get("PK", "").split("#")
+                if len(parts) >= 2:
+                    tenant_ids.add(parts[1])
+        return [{"tenant_id": tid} for tid in tenant_ids]
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to get all tenants: %s", e)
+        return []
+
+
+def get_tenants_by_tier(tier: str) -> List[Dict[str, str]]:
+    """Scan sessions filtered by subscription tier metadata."""
+    try:
+        table = _get_table()
+        response = table.scan(
+            FilterExpression="begins_with(SK, :sk_prefix) AND metadata.subscription_tier = :tier",
+            ExpressionAttributeValues={
+                ":sk_prefix": "SESSION#",
+                ":tier": tier,
+            },
+            ProjectionExpression="PK, tenant_id"
+        )
+        tenant_ids = set()
+        for item in response.get("Items", []):
+            tid = item.get("tenant_id")
+            if tid:
+                tenant_ids.add(tid)
+            else:
+                parts = item.get("PK", "").split("#")
+                if len(parts) >= 2:
+                    tenant_ids.add(parts[1])
+        return [{"tenant_id": tid} for tid in tenant_ids]
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to get tenants by tier: %s", e)
+        return []
+
+
+def store_cost_metric(
+    tenant_id: str,
+    user_id: str,
+    session_id: str,
+    metric_type: str,
+    value: float,
+    **metadata
+) -> None:
+    """Store a cost/usage metric in the eagle table."""
+    now = datetime.utcnow()
+    item = {
+        "PK": f"COST#{tenant_id}",
+        "SK": f"COST#{now.strftime('%Y-%m-%d')}#{int(now.timestamp() * 1000)}",
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "session_id": session_id,
+        "metric_type": metric_type,
+        "value": Decimal(str(value)),
+        "timestamp": now.isoformat(),
+        "created_at": now.isoformat(),
+        **{k: v for k, v in metadata.items()},
+    }
+    try:
+        table = _get_table()
+        table.put_item(Item=item)
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to store cost metric: %s", e)
+
+
+def get_tenant_usage_overview(tenant_id: str) -> Dict[str, Any]:
+    """Get tenant usage overview (replaces DynamoDBStore.get_tenant_usage).
+
+    Returns a dict with total_messages, sessions count, and recent metrics.
+    """
+    try:
+        table = _get_table()
+
+        # Count usage records (recent metrics)
+        usage_resp = table.query(
+            KeyConditionExpression="PK = :pk",
+            ExpressionAttributeValues={":pk": f"USAGE#{tenant_id}"},
+            ScanIndexForward=False,
+            Limit=50
+        )
+        metrics = [_serialize_item(i) for i in usage_resp.get("Items", [])]
+
+        # Count sessions for this tenant (scan for PK prefix)
+        sessions_resp = table.scan(
+            FilterExpression="begins_with(PK, :prefix) AND begins_with(SK, :sk_prefix)",
+            ExpressionAttributeValues={
+                ":prefix": f"SESSION#{tenant_id}#",
+                ":sk_prefix": "SESSION#",
+            },
+            ProjectionExpression="PK",
+            Select="COUNT"
+        )
+        session_count = sessions_resp.get("Count", 0)
+
+        return {
+            "tenant_id": tenant_id,
+            "total_messages": len(metrics),
+            "sessions": session_count,
+            "metrics": metrics[:10],
+        }
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to get tenant usage overview: %s", e)
+        return {
+            "tenant_id": tenant_id,
+            "total_messages": 0,
+            "sessions": 0,
+            "metrics": [],
+            "error": str(e),
+        }
+
+
+def list_tenant_sessions(tenant_id: str) -> List[Dict[str, Any]]:
+    """List all sessions for a tenant (replaces DynamoDBStore.get_tenant_sessions)."""
+    try:
+        table = _get_table()
+        response = table.scan(
+            FilterExpression="begins_with(PK, :prefix) AND begins_with(SK, :sk_prefix)",
+            ExpressionAttributeValues={
+                ":prefix": f"SESSION#{tenant_id}#",
+                ":sk_prefix": "SESSION#",
+            }
+        )
+        return [_serialize_item(i) for i in response.get("Items", [])]
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to list tenant sessions: %s", e)
+        return []
+
+
+def get_subscription_usage(tenant_id: str, tier: str) -> Optional[Dict[str, Any]]:
+    """Get current subscription usage counters for a tenant/tier."""
+    try:
+        table = _get_table()
+        response = table.get_item(
+            Key={
+                "PK": f"SUB#{tenant_id}",
+                "SK": f"SUB#{tier}#current",
+            }
+        )
+        item = response.get("Item")
+        return _serialize_item(item) if item else None
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to get subscription usage: %s", e)
+        return None
+
+
+def put_subscription_usage(
+    tenant_id: str,
+    tier: str,
+    daily_usage: int,
+    monthly_usage: int,
+    active_sessions: int,
+    last_reset_date: str
+) -> None:
+    """Store subscription usage counters for a tenant/tier."""
+    try:
+        table = _get_table()
+        table.put_item(Item={
+            "PK": f"SUB#{tenant_id}",
+            "SK": f"SUB#{tier}#current",
+            "tenant_id": tenant_id,
+            "tier": tier,
+            "daily_usage": daily_usage,
+            "monthly_usage": monthly_usage,
+            "active_sessions": active_sessions,
+            "last_reset_date": last_reset_date,
+        })
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to put subscription usage: %s", e)
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _serialize_item(item: Dict) -> Dict:

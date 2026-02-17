@@ -6,15 +6,14 @@ Calculates costs per tenant and user based on consumption metrics
 from decimal import Decimal
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-import boto3
-from app.dynamodb_store import DynamoDBStore
+from app import session_store
 from app.models import SubscriptionTier
 
 class CostAttributionService:
     """Calculate and track costs per tenant and user"""
-    
+
     def __init__(self):
-        self.dynamodb_store = DynamoDBStore()
+        pass
         
         # AWS Bedrock pricing (per 1K tokens)
         self.bedrock_pricing = {
@@ -34,7 +33,7 @@ class CostAttributionService:
         """Calculate total costs for a tenant within date range"""
         
         # Get all usage metrics for tenant
-        usage_metrics = await self.dynamodb_store.get_tenant_usage_metrics(
+        usage_metrics = session_store.get_usage_metrics(
             tenant_id, start_date, end_date
         )
         
@@ -169,7 +168,7 @@ class CostAttributionService:
             }
         else:
             # Multi-tenant report
-            all_tenants = await self.dynamodb_store.get_all_tenants()
+            all_tenants = session_store.get_all_tenants()
             tenant_reports = []
             
             total_platform_cost = Decimal("0")
@@ -193,7 +192,7 @@ class CostAttributionService:
         """Track usage and calculate real-time cost"""
         
         # Store usage metric
-        await self.dynamodb_store.store_usage_metric(
+        session_store.store_cost_metric(
             tenant_id, user_id, session_id, metric_type, value, **metadata
         )
         
@@ -216,7 +215,7 @@ class CostAttributionService:
         
         # Store cost attribution
         if cost > 0:
-            await self.dynamodb_store.store_usage_metric(
+            session_store.store_cost_metric(
                 tenant_id, user_id, session_id, f"{metric_type}_cost", float(cost),
                 original_metric=metric_type, **metadata
             )
@@ -228,7 +227,7 @@ class CostAttributionService:
         start_date = end_date - timedelta(days=days)
         
         # Get all tenants with this tier
-        tenants_by_tier = await self.dynamodb_store.get_tenants_by_tier(tier)
+        tenants_by_tier = session_store.get_tenants_by_tier(tier.value)
         
         total_cost = Decimal("0")
         tenant_count = 0

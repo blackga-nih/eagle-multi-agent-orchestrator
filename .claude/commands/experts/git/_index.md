@@ -78,7 +78,7 @@ Git/CI-CD Ecosystem
   |     |-- AWS_ACCESS_KEY_ID (static, should migrate to OIDC)
   |     |-- AWS_SECRET_ACCESS_KEY
   |     |-- ANTHROPIC_API_KEY
-  |     |-- COGNITO_*, BEDROCK_*, SESSIONS_TABLE, USAGE_TABLE
+  |     |-- COGNITO_*, BEDROCK_*, EAGLE_SESSIONS_TABLE
   |
   |-- Future
         |-- CI pipeline (lint + test + build on PR)

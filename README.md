@@ -125,7 +125,7 @@ JWT Token → Tenant Context → Session Attributes → Bedrock Agent Core Runti
   - Claude 3.5 Sonnet: `anthropic.claude-3-5-sonnet-20240620-v1:0`
   - Titan Text: `amazon.titan-text-express-v1`
 - **Amazon Cognito**: User Pool with custom attributes (`tenant_id`, `subscription_tier`)
-- **Amazon DynamoDB**: Two tables (`tenant-sessions`, `tenant-usage`)
+- **Amazon DynamoDB**: Unified `eagle` table (single-table design with PK/SK patterns)
 - **AWS IAM**: Permissions for Bedrock Agent Runtime, Cognito, and DynamoDB
 
 ### Development Tools
@@ -153,7 +153,7 @@ terraform apply
 This will create:
 - Cognito User Pool with custom attributes (tenant_id, subscription_tier)
 - Cognito User Pool Client
-- DynamoDB Tables (tenant-sessions, tenant-usage)
+- DynamoDB Table (eagle — unified single-table design)
 - IAM Roles and Policies for Bedrock, Cognito, and DynamoDB
 
 **Note the outputs** from Terraform:
@@ -180,8 +180,7 @@ cat > .env << EOF
 COGNITO_USER_POOL_ID=<FROM_TERRAFORM_OUTPUT>
 COGNITO_CLIENT_ID=<FROM_TERRAFORM_OUTPUT>
 BEDROCK_AGENT_ID=<BEDROCK_AGENT_ID>
-SESSIONS_TABLE=tenant-sessions
-USAGE_TABLE=tenant-usage
+EAGLE_SESSIONS_TABLE=eagle
 AWS_REGION=us-east-1
 EOF
 ```
@@ -451,29 +450,32 @@ POST /api/admin/add-to-group
 
 ### DynamoDB Tables
 
-**Sessions Table** (`tenant-sessions`)
+**Unified Table** (`eagle`) — Single-table design with PK/SK patterns
+
+Session record:
 ```json
 {
-  "session_key": "acme-corp-premium-user123-uuid",
+  "PK": "SESSION#acme-corp#user123",
+  "SK": "SESSION#s-1234567890-abc12345",
   "tenant_id": "acme-corp",
   "user_id": "user123",
-  "subscription_tier": "premium",
-  "created_at": "2024-01-01T00:00:00Z",
-  "message_count": 15
+  "title": "New Conversation",
+  "message_count": 15,
+  "status": "active"
 }
 ```
 
-**Usage Metrics Table** (`tenant-usage`)
+Usage record:
 ```json
 {
+  "PK": "USAGE#acme-corp",
+  "SK": "USAGE#2024-01-01#s-123#1704067200000",
   "tenant_id": "acme-corp",
-  "timestamp": "2024-01-01T00:00:00Z",
   "user_id": "user123",
-  "metric_type": "bedrock_input_tokens",
-  "value": 150,
-  "session_id": "uuid",
-  "model_id": "anthropic.claude-3-haiku-20240307-v1:0",
-  "agent_id": "BAUOKJ4UDH"
+  "input_tokens": 150,
+  "output_tokens": 50,
+  "model": "claude-sonnet-4-5-20250929",
+  "cost_usd": 0.0025
 }
 ```
 
