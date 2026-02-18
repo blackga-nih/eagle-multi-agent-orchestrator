@@ -1,11 +1,11 @@
 ---
-description: Log into the EAGLE frontend and run a smoke test across all major pages
+description: Log into the EAGLE frontend and run a comprehensive smoke test across all pages and features
 argument-hint: [url] [headed]
 ---
 
 # EAGLE Frontend Smoke Test
 
-Log into the EAGLE frontend application and verify all major pages load correctly, the backend API responds, and the chat interface works end-to-end.
+Log into the EAGLE frontend application and verify all major pages load correctly, the backend API responds, chat works end-to-end, session persistence works, and key features function properly.
 
 ## Variables
 
@@ -53,6 +53,7 @@ If {PROMPT} contains a URL, use that. Otherwise default to `http://localhost:300
     - A sidebar navigation panel
     - A chat input area / message box
     - The EAGLE header
+    - Quick action buttons (New Intake, Generate SOW, Search FAR, Cost Estimate, Small Business)
 11. Take a screenshot of the chat page
 12. Type a test message: "Hello, can you confirm you are the EAGLE acquisition assistant?"
 13. Wait for a response (up to 30 seconds)
@@ -63,45 +64,112 @@ If {PROMPT} contains a URL, use that. Otherwise default to `http://localhost:300
 15. Take a screenshot showing the conversation
 16. Report: PASS or FAIL with response preview
 
-### Phase 4: Documents Page Test
+### Phase 4: Quick Action Buttons
 
-17. Navigate to {URL}/documents
-18. Verify the documents page loads — look for:
-    - A page heading or layout for documents
-    - No error/crash screens
-19. Take a screenshot
-20. Report: PASS or FAIL
+17. Click the "New Intake" quick action button (or type the equivalent command)
+18. Wait for a response (up to 30 seconds)
+19. Verify:
+    - The assistant responds with an intake-related prompt (asking about acquisition needs, requirements, etc.)
+    - No error messages
+20. Take a screenshot
+21. Report: PASS or FAIL
 
-### Phase 5: Workflows Page Test
+### Phase 5: Session Persistence
 
-21. Navigate to {URL}/workflows
-22. Verify the workflows page loads — look for:
-    - Workflow-related content (package list, workflow cards, or empty state)
-    - No error/crash screens
-23. Take a screenshot
-24. Report: PASS or FAIL
-
-### Phase 6: Admin Page Test
-
-25. Navigate to {URL}/admin
-26. Verify the admin dashboard loads — look for:
-    - Dashboard statistics or admin navigation
-    - No error/crash screens or "Access Denied"
-27. Take a screenshot
+22. Note the current session name in the sidebar (it should show the conversation we just had)
+23. Click "New Chat" to start a fresh session
+24. Verify the welcome screen appears ("Welcome to EAGLE")
+25. Click back on the previous session in the sidebar
+26. Verify:
+    - The previous conversation loads with all messages intact
+    - Both the user message and assistant response are visible
+    - The message timestamps are present
+27. Take a screenshot showing the restored session
 28. Report: PASS or FAIL
 
-### Phase 7: Backend Health Check
+### Phase 6: Documents Page Test
 
-29. Navigate to {URL}/api/health (or use the browser to fetch it)
-30. Verify the response contains:
+29. Navigate to {URL}/documents
+30. Verify the documents page loads — look for:
+    - "Documents" heading
+    - Status filter tabs (All Documents, Not Started, In Progress, Draft, Approved)
+    - Document cards with title, status badge, type, date, and version
+    - Search bar and filter controls
+    - "Templates" and "New Document" buttons
+31. Click the "Templates" button
+32. Verify templates view loads (or a modal/page appears) — no crash
+33. Navigate back to {URL}/documents if needed
+34. Take a screenshot
+35. Report: PASS or FAIL
+
+### Phase 7: Workflows Page Test
+
+36. Navigate to {URL}/workflows
+37. Verify the workflows page loads — look for:
+    - "Acquisition Packages" heading
+    - Status filter tabs (All, In Progress, Pending Review, Approved, Completed)
+    - Package cards with title, ID, status, description, acquisition type, value, and date
+    - "New Package" button, search bar, filter and sort controls
+38. Click into the first workflow/package to verify detail view loads
+39. Take a screenshot of the detail view (or the list if click doesn't navigate)
+40. Navigate back to {URL}/workflows if needed
+41. Report: PASS or FAIL
+
+### Phase 8: Admin Dashboard Test
+
+42. Navigate to {URL}/admin
+43. Verify the admin dashboard loads — look for:
+    - Dashboard statistics cards (Active Workflows, Total Value, Documents Generated, Avg Completion Time)
+    - Quick Actions section with links (Test Results, Eval Viewer, Manage Users, Document Templates, Agent Skills)
+    - Recent Activity feed
+    - System Health section (AI Services, Database, API Rate Limit)
+44. Take a screenshot of the admin dashboard
+45. Report: PASS or FAIL
+
+### Phase 9: Admin Sub-Pages
+
+46. Click "Test Results" (or navigate to {URL}/admin/tests)
+47. Verify the page loads without errors — take a screenshot
+48. Navigate to {URL}/admin/eval
+49. Verify the eval viewer loads without errors — take a screenshot
+50. Navigate to {URL}/admin/users
+51. Verify the users page loads without errors — take a screenshot
+52. Navigate to {URL}/admin/templates
+53. Verify the templates page loads without errors — take a screenshot
+54. Navigate to {URL}/admin/skills
+55. Verify the skills page loads without errors — take a screenshot
+56. Report: PASS or FAIL for each sub-page (count any that error as failures)
+
+### Phase 10: Backend API Endpoints
+
+57. Use the browser console or navigate to verify these backend API endpoints:
+    - `{URL}/api/tools` — should return a JSON array of available tools
+    - `{URL}/api/sessions` — should return a JSON array of sessions (may be empty)
+    - `{URL}/api/prompts` — should return agent/skill metadata
+58. For each endpoint, verify:
+    - HTTP 200 response (no 500 errors)
+    - Valid JSON in the response body
+59. Report: PASS or FAIL with status codes
+
+### Phase 11: Backend Health Check
+
+60. Navigate to {URL}/api/health (or use evaluate_script to fetch it)
+61. Verify the response contains:
     - `"status": "healthy"`
     - `"service": "eagle-backend"`
     - `"version"` field present
-31. Report: PASS or FAIL with response data
+62. If the browser shows "Internal Server Error" due to trailing-slash rewrite, use evaluate_script to fetch directly:
+    ```javascript
+    async () => {
+      const resp = await fetch('/api/health');
+      return { status: resp.status, body: await resp.json() };
+    }
+    ```
+63. Report: PASS or FAIL with response data
 
-### Phase 8: Summary Report
+### Phase 12: Summary Report
 
-32. Compile the results:
+64. Compile the results:
 
 ```
 # EAGLE Smoke Test Report
@@ -112,16 +180,26 @@ If {PROMPT} contains a URL, use that. Otherwise default to `http://localhost:300
 
 ## Results
 
-| # | Test                    | Status  | Notes                          |
-|---|-------------------------|---------|--------------------------------|
-| 1 | Login Page              | ✅/❌   | {details}                      |
-| 2 | Home Page               | ✅/❌   | {details}                      |
-| 3 | Chat Page Load          | ✅/❌   | {details}                      |
-| 4 | Chat Send/Receive       | ✅/❌   | {response preview}             |
-| 5 | Documents Page          | ✅/❌   | {details}                      |
-| 6 | Workflows Page          | ✅/❌   | {details}                      |
-| 7 | Admin Dashboard         | ✅/❌   | {details}                      |
-| 8 | Backend Health          | ✅/❌   | {health response}              |
+| #  | Test                    | Status  | Notes                          |
+|----|-------------------------|---------|--------------------------------|
+| 1  | Login Page              | ✅/❌   | {details}                      |
+| 2  | Home Page               | ✅/❌   | {details}                      |
+| 3  | Chat Page Load          | ✅/❌   | {details}                      |
+| 4  | Chat Send/Receive       | ✅/❌   | {response preview}             |
+| 5  | Quick Action Button     | ✅/❌   | {details}                      |
+| 6  | Session Persistence     | ✅/❌   | {details}                      |
+| 7  | Documents Page          | ✅/❌   | {details}                      |
+| 8  | Workflows Page          | ✅/❌   | {details}                      |
+| 9  | Admin Dashboard         | ✅/❌   | {details}                      |
+| 10 | Admin: Test Results     | ✅/❌   | {details}                      |
+| 11 | Admin: Eval Viewer      | ✅/❌   | {details}                      |
+| 12 | Admin: Users            | ✅/❌   | {details}                      |
+| 13 | Admin: Templates        | ✅/❌   | {details}                      |
+| 14 | Admin: Skills           | ✅/❌   | {details}                      |
+| 15 | API: /api/tools         | ✅/❌   | {status code, tool count}      |
+| 16 | API: /api/sessions      | ✅/❌   | {status code}                  |
+| 17 | API: /api/prompts       | ✅/❌   | {status code}                  |
+| 18 | Backend Health          | ✅/❌   | {health response}              |
 
 **Overall:** ✅ ALL PASSED / ❌ {N} FAILED
 
@@ -132,4 +210,4 @@ If {PROMPT} contains a URL, use that. Otherwise default to `http://localhost:300
 (only if failures occurred — describe each issue)
 ```
 
-33. STOP — report the summary to the user
+65. STOP — report the summary to the user
