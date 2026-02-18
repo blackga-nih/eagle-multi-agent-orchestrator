@@ -81,6 +81,12 @@ User Login -> JWT with tenant_id -> Session Attributes -> Bedrock Agent Core Run
 
 ![Architecture Diagram](data/media/architecuture.png)
 
+> **Detailed interactive diagrams** available in [`excalidraw-diagrams/aws/`](excalidraw-diagrams/aws/) — open in [Excalidraw](https://excalidraw.com) or the Obsidian Excalidraw plugin:
+> - [`eagle-aws-architecture.excalidraw.md`](excalidraw-diagrams/aws/eagle-aws-architecture.excalidraw.md) — Dark theme
+> - [`eagle-aws-architecture-light.excalidraw.md`](excalidraw-diagrams/aws/eagle-aws-architecture-light.excalidraw.md) — Light theme
+>
+> These diagrams show the full request flow: **Users → ALB → Next.js Frontend (ECS Fargate) → Internal ALB → FastAPI Backend (ECS Fargate) → AWS Services** (DynamoDB, S3, Bedrock/Claude, CloudWatch, Cognito), including VPC boundaries, subnets, NAT Gateway, ECR repos, and the GitHub Actions CI/CD pipeline with OIDC.
+
 ### EAGLE Plugin Architecture
 
 The **EAGLE plugin** (`eagle-plugin/`) defines a supervisor agent with 12 specialist subagents:
