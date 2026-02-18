@@ -140,36 +140,99 @@ If {PROMPT} contains a URL, use that. Otherwise default to `http://localhost:300
 55. Verify the skills page loads without errors — take a screenshot
 56. Report: PASS or FAIL for each sub-page (count any that error as failures)
 
-### Phase 10: Backend API Endpoints
+### Phase 10: Sidebar Session List (hoquemi)
 
-57. Use the browser console or navigate to verify these backend API endpoints:
+57. Navigate to {URL}/chat (if not already there)
+58. Verify the sidebar shows a list of past conversation sessions — look for:
+    - Session titles with `MessageSquare` icons
+    - Relative timestamps ("Today", or date) and message counts
+    - The current/active session highlighted with a blue background (`bg-blue-50`)
+    - "New Chat" button at the top of the sidebar
+    - "Acquisition Packages" and "Documents" links in a Resources section at the bottom
+59. Take a screenshot of the sidebar
+60. Report: PASS or FAIL
+
+### Phase 11: Sidebar Session Rename (hoquemi)
+
+61. Hover over a session row in the sidebar — verify a pencil/edit icon appears
+62. Click the pencil icon — verify:
+    - The title text becomes an editable input field
+    - The current title is pre-filled and selected
+63. Type a new name: "Smoke Test Renamed Session"
+64. Press Enter to save
+65. Verify the title updates to "Smoke Test Renamed Session"
+66. Take a screenshot showing the renamed session
+67. Report: PASS or FAIL
+
+### Phase 12: Sidebar New Chat & Switch (hoquemi)
+
+68. Click "New Chat" in the sidebar
+69. Verify:
+    - A new blank chat session loads (welcome screen or empty chat)
+    - The previous session still appears in the sidebar list
+70. Click back on the previous session ("Smoke Test Renamed Session") in the sidebar
+71. Verify:
+    - The previous conversation loads with all messages intact
+    - The switched-to session is now highlighted in blue
+72. Take a screenshot
+73. Report: PASS or FAIL
+
+### Phase 13: Session Persistence on Reload (hoquemi)
+
+74. Note the current session title and message count
+75. Reload the page (navigate to {URL}/chat again or use browser reload)
+76. Verify:
+    - The sidebar still shows the same sessions after reload
+    - The previously active session is still accessible
+    - Click into it — messages should still be present
+77. Take a screenshot
+78. Report: PASS or FAIL
+
+### Phase 14: Document Checklist Panel (hoquemi)
+
+79. Navigate to {URL}/chat and open a session that has had a conversation (or start a new one and send a message)
+80. Look for the Document Checklist panel on the right side of the chat — verify:
+    - Up to 6 document rows: SOW, IGCE, Market Research, Acquisition Plan, Funding Doc, Justification
+    - Each row has a status icon: Clock (pending), spinning Loader (in-progress), or green CheckCircle (completed)
+    - Rows have colored backgrounds: gray (pending), blue (in-progress), green (completed)
+81. Click a pending or in-progress document row
+82. Verify a modal opens showing:
+    - A "Template" badge in the header
+    - "Preview:" prefix in the title
+    - Template content for that document type
+83. Close the modal by clicking the X button
+84. Take a screenshot of the checklist panel
+85. Report: PASS or FAIL (note: checklist may not appear if no acquisition data in the session — report as SKIP in that case)
+
+### Phase 15: Backend API Endpoints
+
+86. Use the browser console or navigate to verify these backend API endpoints:
     - `{URL}/api/tools` — should return a JSON array of available tools
     - `{URL}/api/sessions` — should return a JSON array of sessions (may be empty)
     - `{URL}/api/prompts` — should return agent/skill metadata
-58. For each endpoint, verify:
+87. For each endpoint, verify:
     - HTTP 200 response (no 500 errors)
     - Valid JSON in the response body
-59. Report: PASS or FAIL with status codes
+88. Report: PASS or FAIL with status codes
 
-### Phase 11: Backend Health Check
+### Phase 16: Backend Health Check
 
-60. Navigate to {URL}/api/health (or use evaluate_script to fetch it)
-61. Verify the response contains:
-    - `"status": "healthy"`
-    - `"service": "eagle-backend"`
-    - `"version"` field present
-62. If the browser shows "Internal Server Error" due to trailing-slash rewrite, use evaluate_script to fetch directly:
+89. Use evaluate_script to fetch the health endpoint:
     ```javascript
     async () => {
       const resp = await fetch('/api/health');
       return { status: resp.status, body: await resp.json() };
     }
     ```
-63. Report: PASS or FAIL with response data
+90. Verify the response contains:
+    - `"status": "healthy"`
+    - `"service"` field present
+    - `"version"` field present
+91. Report: PASS or FAIL with response data
 
-### Phase 12: Summary Report
+### Phase 17: Summary Report
 
-64. Compile the results:
+92. Compile the results:
 
 ```
 # EAGLE Smoke Test Report
@@ -180,26 +243,30 @@ If {PROMPT} contains a URL, use that. Otherwise default to `http://localhost:300
 
 ## Results
 
-| #  | Test                    | Status  | Notes                          |
-|----|-------------------------|---------|--------------------------------|
-| 1  | Login Page              | ✅/❌   | {details}                      |
-| 2  | Home Page               | ✅/❌   | {details}                      |
-| 3  | Chat Page Load          | ✅/❌   | {details}                      |
-| 4  | Chat Send/Receive       | ✅/❌   | {response preview}             |
-| 5  | Quick Action Button     | ✅/❌   | {details}                      |
-| 6  | Session Persistence     | ✅/❌   | {details}                      |
-| 7  | Documents Page          | ✅/❌   | {details}                      |
-| 8  | Workflows Page          | ✅/❌   | {details}                      |
-| 9  | Admin Dashboard         | ✅/❌   | {details}                      |
-| 10 | Admin: Test Results     | ✅/❌   | {details}                      |
-| 11 | Admin: Eval Viewer      | ✅/❌   | {details}                      |
-| 12 | Admin: Users            | ✅/❌   | {details}                      |
-| 13 | Admin: Templates        | ✅/❌   | {details}                      |
-| 14 | Admin: Skills           | ✅/❌   | {details}                      |
-| 15 | API: /api/tools         | ✅/❌   | {status code, tool count}      |
-| 16 | API: /api/sessions      | ✅/❌   | {status code}                  |
-| 17 | API: /api/prompts       | ✅/❌   | {status code}                  |
-| 18 | Backend Health          | ✅/❌   | {health response}              |
+| #  | Test                       | Status  | Notes                          |
+|----|----------------------------|---------|--------------------------------|
+| 1  | Login Page                 | ✅/❌   | {details}                      |
+| 2  | Home Page                  | ✅/❌   | {details}                      |
+| 3  | Chat Page Load             | ✅/❌   | {details}                      |
+| 4  | Chat Send/Receive          | ✅/❌   | {response preview}             |
+| 5  | Quick Action Button        | ✅/❌   | {details}                      |
+| 6  | Session Persistence        | ✅/❌   | {details}                      |
+| 7  | Documents Page             | ✅/❌   | {details}                      |
+| 8  | Workflows Page             | ✅/❌   | {details}                      |
+| 9  | Admin Dashboard            | ✅/❌   | {details}                      |
+| 10 | Admin: Test Results        | ✅/❌   | {details}                      |
+| 11 | Admin: Eval Viewer         | ✅/❌   | {details}                      |
+| 12 | Admin: Users               | ✅/❌   | {details}                      |
+| 13 | Admin: Templates           | ✅/❌   | {details}                      |
+| 14 | Admin: Skills              | ✅/❌   | {details}                      |
+| 15 | Sidebar Session List       | ✅/❌   | {session count, highlights}    |
+| 16 | Sidebar Rename             | ✅/❌   | {rename result}                |
+| 17 | Sidebar New Chat & Switch  | ✅/❌   | {switch result}                |
+| 18 | Session Reload Persistence | ✅/❌   | {survives reload?}             |
+| 19 | Document Checklist Panel   | ✅/❌/⏭️ | {doc rows, status icons}       |
+| 20 | API: /api/sessions         | ✅/❌   | {status code}                  |
+| 21 | API: /api/prompts          | ✅/❌   | {status code}                  |
+| 22 | Backend Health             | ✅/❌   | {health response}              |
 
 **Overall:** ✅ ALL PASSED / ❌ {N} FAILED
 
