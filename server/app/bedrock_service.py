@@ -1,5 +1,6 @@
 import boto3
 import json
+import os
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -7,8 +8,9 @@ from .models import TenantContext, UsageMetric
 
 class BedrockAgentService:
     def __init__(self, agent_id: str, agent_alias_id: str = "TSTALIASID"):
-        self.bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
-        self.bedrock_runtime = boto3.client('bedrock-runtime')
+        region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+        self.bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=region)
+        self.bedrock_runtime = boto3.client('bedrock-runtime', region_name=region)
         self.agent_id = agent_id
         self.agent_alias_id = agent_alias_id
         self.model_id = "anthropic.claude-3-haiku-20240307-v1:0"

@@ -1,4 +1,4 @@
-"""Bedrock invoke_model call to Gemini marketplace model for metadata extraction."""
+"""Bedrock invoke_model call to Claude for metadata extraction."""
 
 from __future__ import annotations
 
@@ -37,15 +37,17 @@ Return ONLY the JSON object, no markdown fences or explanation."""
 
 
 def extract_metadata(document_text: str, file_name: str) -> dict:
-    """Call Gemini via Bedrock Marketplace to extract metadata from document text."""
+    """Call Claude via Bedrock to extract metadata from document text."""
     model_id = os.environ["BEDROCK_MODEL_ID"]
 
     prompt = EXTRACTION_PROMPT.format(document_text=document_text[:40_000])
 
     body = json.dumps(
         {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048},
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 2048,
+            "temperature": 0.1,
+            "messages": [{"role": "user", "content": prompt}],
         }
     )
 
@@ -54,11 +56,10 @@ def extract_metadata(document_text: str, file_name: str) -> dict:
     response = bedrock.invoke_model(modelId=model_id, body=body)
     result = json.loads(response["body"].read())
 
-    # Parse Gemini response — extract text from candidates
+    # Parse Claude response — extract text from content array
     try:
-        text = result["candidates"][0]["content"]["parts"][0]["text"]
+        text = result["content"][0]["text"].strip()
         # Strip markdown fences if present
-        text = text.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1]
         if text.endswith("```"):
@@ -67,7 +68,7 @@ def extract_metadata(document_text: str, file_name: str) -> dict:
 
         metadata = json.loads(text)
     except (KeyError, IndexError, json.JSONDecodeError):
-        logger.exception("Failed to parse Gemini response for %s", file_name)
+        logger.exception("Failed to parse Claude response for %s", file_name)
         metadata = {
             "title": file_name,
             "summary": "",

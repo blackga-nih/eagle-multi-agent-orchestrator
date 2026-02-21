@@ -14,9 +14,16 @@ security = HTTPBearer(auto_error=not DEV_MODE)
 
 class CognitoAuth:
     def __init__(self):
-        self.cognito_client = boto3.client('cognito-idp')
+        self._cognito_client = None
         self.user_pool_id = os.getenv("COGNITO_USER_POOL_ID")
         self.client_id = os.getenv("COGNITO_CLIENT_ID")
+
+    @property
+    def cognito_client(self):
+        if self._cognito_client is None:
+            region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+            self._cognito_client = boto3.client('cognito-idp', region_name=region)
+        return self._cognito_client
     
     def verify_token(self, token: str) -> Dict:
         """Verify Cognito JWT token and extract tenant context"""

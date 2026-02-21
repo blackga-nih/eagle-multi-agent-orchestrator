@@ -148,6 +148,26 @@ export class EagleCoreStack extends cdk.Stack {
       ],
     }));
 
+    // Document bucket: read access for ECS backend (static ARN avoids cross-stack token cycle)
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'DocumentBucketRead',
+      actions: ['s3:GetObject', 's3:ListBucket'],
+      resources: [
+        `arn:aws:s3:::${config.documentBucketName}`,
+        `arn:aws:s3:::${config.documentBucketName}/*`,
+      ],
+    }));
+
+    // Metadata DynamoDB: read access for ECS backend
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'DocumentMetadataRead',
+      actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan'],
+      resources: [
+        `arn:aws:dynamodb:${config.region}:${this.account}:table/${config.documentMetadataTableName}`,
+        `arn:aws:dynamodb:${config.region}:${this.account}:table/${config.documentMetadataTableName}/index/*`,
+      ],
+    }));
+
     // Bedrock: Invoke models (foundation models + cross-region inference profiles)
     this.appRole.addToPolicy(new iam.PolicyStatement({
       sid: 'BedrockInvoke',

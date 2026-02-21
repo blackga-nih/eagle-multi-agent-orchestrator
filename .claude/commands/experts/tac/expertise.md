@@ -554,12 +554,33 @@ Components that enable multi-domain, self-improving agent behavior.
 - Flat hook structure with dispatcher enables easy discovery and composition
 - ACT-LEARN-REUSE as default workflow captures institutional knowledge
 - Frontmatter in command files enables tool discovery and metadata
+- SSVA (Specialized Self-Validating Agents): scoped hooks per agent/command, not global (agentic-finance-review, 2026-02-18)
+- Block/retry self-correction: hook reason string becomes Claude's next correction task (agentic-finance-review, 2026-02-18)
+- `uv run --script` with PEP 723 inline deps for zero-install portable validators (agentic-finance-review, 2026-02-18)
+- Agents for parallelism + isolation, Commands for logic: Skill() delegation pattern (agentic-finance-review, 2026-02-18)
+- Deterministic script + generative agent hybrid: scripts for baseline, agent for novel output (agentic-finance-review, 2026-02-18)
+- Fail-fast sequential pipeline gating: orchestrator stops if any agent's Stop hook blocks (agentic-finance-review, 2026-02-18)
+- CLAUDE.md as minimal variable registry: one source of truth for shared constants (agentic-finance-review, 2026-02-18)
+- Two-tier tool restriction: global settings.json allowlist + per-command allowed-tools narrowing (agentic-finance-review, 2026-02-18)
+- prime.md session initialization: one command loads all agents/commands/hooks context (agentic-finance-review, 2026-02-18)
+- Progressive Execution Modes: Deterministic (hooks) → Agentic (hook+prompt) → Interactive (hook+questions) — 3 tiers for install/maintenance (install-and-maintain, 2026-02-18)
+- Hook → Prompt → Report flow: hooks execute deterministically → write to log → agentic prompt reads log and reports — decouples execution from analysis (install-and-maintain, 2026-02-18)
+- Living Documentation: scripts are the source of truth, agents provide supervision — docs that execute themselves (install-and-maintain, 2026-02-18)
+- Setup hooks with matchers: `claude --init` triggers `"matcher": "init"`, `claude --maintenance` triggers `"matcher": "maintenance"` in settings.json (install-and-maintain, 2026-02-18)
+- SessionStart hook for env var loading: read .env → write to CLAUDE_ENV_FILE for persistence — never log values (install-and-maintain, 2026-02-18)
+- Human-in-the-loop (HIL) install: AskUserQuestion for onboarding — questions determine which branches of deterministic script to run (install-and-maintain, 2026-02-18)
+- External doc scraping: ai_docs/README.md indexes URLs → docs-scraper agent fetches + caches as markdown — freshness check with `find -mtime -1` (install-and-maintain, 2026-02-18)
+- Reset recipe: remove all generated artifacts for clean install testing — idempotent just reset + just init (install-and-maintain, 2026-02-18)
 
 ### patterns_to_avoid
 - Deep directory nesting for hooks (breaks agent discovery)
 - Kitchen-sink system prompts (violates One Agent One Prompt)
 - Manual steps in agent workflows (breaks Stay Out of the Loop)
 - Expertise files without self-improve command (knowledge decays)
+- Vague hook block reasons like "Validation failed" — write the reason as a clear correction instruction (agentic-finance-review, 2026-02-18)
+- Global hooks for agent-specific validation — scope hooks to the agent frontmatter instead (agentic-finance-review, 2026-02-18)
+- Logging or displaying env variable values in hooks — only validate existence with pattern matching (install-and-maintain, 2026-02-18)
+- Agentic commands that RE-EXECUTE what the hook already did — the prompt should READ the log, not re-run commands (install-and-maintain, 2026-02-18)
 
 ### common_issues
 - Context window overflow: too many expertise files loaded simultaneously
@@ -572,3 +593,8 @@ Components that enable multi-domain, self-improving agent behavior.
 - Run maintenance commands weekly to catch drift
 - Keep CLAUDE.md under 200 lines; move details to expertise files
 - Use the Core Four checklist when setting up new projects
+- Use PostToolUse hooks for per-operation validation (immediate catch), Stop hooks for final-state validation (pipeline gating)
+- Write block reasons like instructions, not log lines: "Missing column 'date'. Add with format YYYY-MM-DD." not "Validation failed"
+- The 4 abstraction layers: Command (logic) → Agent (isolation) → Orchestrator (pipeline) → Just (reusability)
+- Setup hooks always append to log files (not overwrite) — enables trend analysis across maintenance runs
+- For progressive modes: always support deterministic-only for CI/CD, agentic for dev oversight, interactive for onboarding

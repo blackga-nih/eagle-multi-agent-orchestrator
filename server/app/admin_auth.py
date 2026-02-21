@@ -11,9 +11,10 @@ from app.auth import get_current_user
 
 class AdminAuthService:
     """Admin authentication using Cognito Groups"""
-    
+
     def __init__(self):
-        self.cognito_client = boto3.client('cognito-idp')
+        region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+        self.cognito_client = boto3.client('cognito-idp', region_name=region)
         self.user_pool_id = os.getenv("COGNITO_USER_POOL_ID")
     
     def is_tenant_admin(self, user_context: Dict[str, str], tenant_id: str) -> bool:

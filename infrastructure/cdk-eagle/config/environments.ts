@@ -43,7 +43,7 @@ export const DEV_CONFIG: EagleConfig = {
 
   documentBucketName: 'eagle-documents-dev',
   documentMetadataTableName: 'eagle-document-metadata-dev',
-  bedrockMetadataModelId: 'google.gemini-1-5-flash-v1',
+  bedrockMetadataModelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
   metadataLambdaMemory: 512,
   metadataLambdaTimeout: 120,
 

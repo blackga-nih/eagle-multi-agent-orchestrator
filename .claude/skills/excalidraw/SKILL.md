@@ -225,7 +225,7 @@ Each element includes:
 All excalidraw files should be saved in:
 
 ```
-{workspace_root}/excalidraw-diagrams/{context}/*.excalidraw.md
+{workspace_root}/docs/excalidraw-diagrams/{context}/*.excalidraw.md
 ```
 
 Where `{context}` represents the context-specific subdirectory based on:
@@ -234,10 +234,10 @@ Where `{context}` represents the context-specific subdirectory based on:
 - Feature or component being visualized
 
 ### Examples
-- `excalidraw-diagrams/backend/agentic-service-architecture.excalidraw.md`
-- `excalidraw-diagrams/frontend/component-hierarchy.excalidraw.md`
-- `excalidraw-diagrams/deployment/ci-cd-pipeline.excalidraw.md`
-- `excalidraw-diagrams/claude-sdk/session-flow.excalidraw.md`
+- `docs/excalidraw-diagrams/backend/agentic-service-architecture.excalidraw.md`
+- `docs/excalidraw-diagrams/frontend/component-hierarchy.excalidraw.md`
+- `docs/excalidraw-diagrams/deployment/ci-cd-pipeline.excalidraw.md`
+- `docs/excalidraw-diagrams/claude-sdk/session-flow.excalidraw.md`
 
 ## Knowledge Base
 
@@ -331,25 +331,25 @@ This skill is designed to work seamlessly with any expert in `.claude/commands/e
 ### 1. Backend Service Architecture
 ```bash
 Input: @server/app/agentic_service.py
-Output: excalidraw-diagrams/backend/agentic-service-architecture.excalidraw.md
+Output: docs/excalidraw-diagrams/backend/agentic-service-architecture.excalidraw.md
 ```
 
 ### 2. Frontend Component Hierarchy
 ```bash
 Input: Create component tree for React app
-Output: excalidraw-diagrams/frontend/component-hierarchy.excalidraw.md
+Output: docs/excalidraw-diagrams/frontend/component-hierarchy.excalidraw.md
 ```
 
 ### 3. Deployment Pipeline
 ```bash
 Input: Show CI/CD workflow from commit to production
-Output: excalidraw-diagrams/deployment/ci-cd-pipeline.excalidraw.md
+Output: docs/excalidraw-diagrams/deployment/ci-cd-pipeline.excalidraw.md
 ```
 
 ### 4. Claude SDK Session Flow
 ```bash
 Input: Visualize session lifecycle with subagents and hooks
-Output: excalidraw-diagrams/claude-sdk/session-flow.excalidraw.md
+Output: docs/excalidraw-diagrams/claude-sdk/session-flow.excalidraw.md
 ```
 
 ## Quality Standards

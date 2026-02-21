@@ -7,7 +7,7 @@ test.describe('Workflows Page', () => {
 
   test('displays workflow list', async ({ page }) => {
     // Check page header
-    await expect(page.getByRole('heading', { name: 'Workflows', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Acquisition Packages', level: 1 })).toBeVisible();
 
     // Check filter tabs exist (actual button names include counts)
     await expect(page.getByRole('button', { name: /All \d+/ })).toBeVisible();
@@ -33,11 +33,11 @@ test.describe('Workflows Page', () => {
     await expect(page).toHaveURL(/\/workflows/);
   });
 
-  test('has New Workflow button', async ({ page }) => {
-    await expect(page.getByRole('button', { name: 'New Workflow' })).toBeVisible();
+  test('has New Package button', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'New Package' })).toBeVisible();
   });
 
   test('search input is available', async ({ page }) => {
-    await expect(page.getByPlaceholder('Search workflows...')).toBeVisible();
+    await expect(page.getByPlaceholder('Search acquisition packages...')).toBeVisible();
   });
 });

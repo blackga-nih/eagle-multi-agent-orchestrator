@@ -4,7 +4,7 @@ parent: "[[aws/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, aws, cdk, dynamodb, iam, s3]
-last_updated: 2026-02-17T00:00:00
+last_updated: 2026-02-20T22:30:00
 ---
 
 # AWS Expertise (Complete Mental Model)
@@ -24,7 +24,7 @@ Provisioning: Hybrid (Manual + CDK)
 Region: us-east-1
 Account: Accessed via ~/.aws/credentials (local profile) + CDK_DEFAULT_ACCOUNT env var
 IAM: Developer credentials with broad permissions
-CDK: infrastructure/cdk-eagle/ (TypeScript, 3 stacks: EagleCoreStack, EagleComputeStack, EagleCiCdStack)
+CDK: infrastructure/cdk-eagle/ (TypeScript, 4 stacks: EagleCoreStack, EagleComputeStack, EagleCiCdStack, EagleStorageStack)
 CDK: infrastructure/eval/ (TypeScript, EvalObservabilityStack)
 CDK: infrastructure/cdk/ (Python, reference only — not deployed)
 CI/CD: GitHub Actions (deploy.yml: 4-job pipeline, claude-merge-analysis.yml: AI code review)
@@ -72,6 +72,9 @@ CDK lib: aws-cdk-lib ^2.196.0 (both projects)
 | ECR Repository (frontend) | Yes | `eagle-frontend-dev`, CDK-managed (EagleComputeStack) |
 | IAM OIDC Provider | Yes | GitHub Actions federation, CDK-managed (EagleCiCdStack) |
 | CloudFront distribution | No | Frontend served via public ALB |
+| S3 bucket (documents CDK) | Yes | `eagle-documents-dev`, CDK-managed (EagleStorageStack) |
+| DynamoDB table (doc metadata) | Yes | `eagle-document-metadata-dev`, CDK-managed (EagleStorageStack) |
+| Lambda (metadata extractor) | Yes | `eagle-metadata-extractor-dev`, CDK-managed (EagleStorageStack) |
 
 ### Deployed Resource IDs (Account 274487662938, us-east-1, 2026-02-17)
 
@@ -114,6 +117,55 @@ Key Structure:
 **Used by**:
 - `server/app/agentic_service.py` — `_exec_s3_document_ops()` for read/write/list/delete
 - `server/tests/test_eagle_sdk_eval.py` — Tests 16 and 19 (with cleanup)
+
+### S3 Bucket: `eagle-documents-dev` (CDK-managed, EagleStorageStack)
+
+```
+Bucket: eagle-documents-dev
+Region: us-east-1
+Encryption: SSE-S3
+Versioning: Yes
+Public Access: Blocked
+Removal Policy: RETAIN
+Lifecycle: Noncurrent → IA after 90d, expire after 365d
+CORS: GET + PUT from * (presigned uploads)
+
+Key Structure:
+  eagle/knowledge-base/{agent-name}/        # KB documents uploaded from rh-eagle.zip
+  metadata/metadata-catalog.json            # Lambda-maintained catalog of all extracted metadata
+
+S3 Event Notifications:
+  .txt, .md, .pdf, .doc, .docx → eagle-metadata-extractor-dev Lambda
+```
+
+### DynamoDB Table: `eagle-document-metadata-dev` (CDK-managed, EagleStorageStack)
+
+```
+Table: eagle-document-metadata-dev
+Region: us-east-1
+Billing: On-demand (PAY_PER_REQUEST)
+PITR: Enabled
+Removal Policy: RETAIN
+Key Schema:
+  PK: document_id (String) — S3 key used as document ID
+
+GSIs:
+  primary_topic-index:   PK=primary_topic, SK=last_updated
+  primary_agent-index:   PK=primary_agent, SK=last_updated
+  document_type-index:   PK=document_type, SK=last_updated
+
+Access Patterns:
+  Get metadata by document ID (direct lookup)
+  List by topic (primary_topic-index)
+  List by agent affinity (primary_agent-index)
+  List by document type (document_type-index)
+
+Item Schema (from models.py — stdlib dataclasses, no pydantic):
+  document_id, file_name, file_type, file_size_bytes, s3_bucket, s3_key
+  title, summary, document_type, primary_topic, primary_agent
+  keywords[], agencies[], far_references[]
+  confidence_score (stored as String in DDB), upload_date, last_updated, extraction_model
+```
 
 ### S3 Bucket: `eagle-eval-artifacts` (CDK-managed)
 
@@ -181,6 +233,19 @@ Region: us-east-1
 Provider: Anthropic
 Models: Claude Haiku, Sonnet, Opus
 Auth: Same AWS credentials as other services
+
+On-Demand Invocation (Claude 3.5+):
+  Use cross-region inference profiles — direct model IDs require provisioned throughput:
+  CORRECT:   us.anthropic.claude-3-5-haiku-20241022-v1:0   ← note "us." prefix
+  INCORRECT: anthropic.claude-3-5-haiku-20241022-v1:0      ← ValidationException
+
+IAM Resources needed for inference profiles:
+  arn:aws:bedrock:{region}:{account}:inference-profile/us.anthropic.*   ← profile
+  arn:aws:bedrock:*::foundation-model/anthropic.*                        ← underlying model
+
+Used by:
+  - ECS app role (eagle-app-role-dev) — InvokeModel + InvokeModelWithResponseStream
+  - Lambda (eagle-metadata-extractor-dev) — InvokeModel via inference profile
 ```
 
 ---
@@ -252,6 +317,32 @@ Tags: Project=eagle, ManagedBy=cdk, Environment={env} (applied to all stacks in 
 Deploy: cd infrastructure/cdk-eagle && npx cdk deploy --all
 Synth:  cd infrastructure/cdk-eagle && npx cdk synth
 ```
+
+#### EagleStorageStack (in `infrastructure/cdk-eagle/lib/storage-stack.ts`)
+
+```
+Resources:
+  - S3 Bucket: eagle-documents-dev (versioned, SSE-S3, BLOCK_ALL, RETAIN)
+    - Lifecycle: noncurrent versions → IA after 90d, expire after 365d
+    - CORS: GET + PUT allowed from * (for presigned URL uploads)
+    - S3 event notifications → Lambda on .txt, .md, .pdf, .doc, .docx uploads
+  - DynamoDB Table: eagle-document-metadata-dev (PAY_PER_REQUEST, PITR, RETAIN)
+    - PK: document_id (String)
+    - GSI: primary_topic-index, primary_agent-index, document_type-index (all sort by last_updated)
+  - Lambda: eagle-metadata-extractor-dev (Python 3.12, 512 MiB, 120s timeout)
+    - Reads S3 object → extracts text → Claude via Bedrock → writes DynamoDB + S3 catalog
+    - Model: us.anthropic.claude-3-5-haiku-20241022-v1:0 (cross-region inference profile)
+    - IAM: S3 read/put on eagle-documents-dev, DynamoDB write on metadata table,
+           Bedrock InvokeModel on inference-profile/us.anthropic.* + foundation-model/anthropic.*
+    - Bundler: infrastructure/cdk-eagle/scripts/bundle-lambda.py (manylinux2014_x86_64 on Windows)
+    - Log Group: /eagle/lambda/metadata-extraction-dev (30-day retention)
+  - CW Alarms: errors >= 3 in 5min, duration p99 >= 80% of timeout, throttles >= 1
+
+Deploy: cd infrastructure/cdk-eagle && npx cdk deploy EagleStorageStack
+Lambda bundler script: infrastructure/cdk-eagle/scripts/bundle-lambda.py
+```
+
+---
 
 #### `infrastructure/eval/` — EvalObservabilityStack (Eval Observability)
 
@@ -641,6 +732,42 @@ steps:
 - Debian/Ubuntu: `RUN apt-get update && apt-get install -y --no-install-recommends curl`
 - Alpine: `RUN apk add --no-cache curl`
 
+### Lambda Native Extension Fails on Linux (Windows Dev)
+
+**Issue**: CDK `local.tryBundle()` runs pip on Windows → installs Windows binary wheels (`.pyd`, `.dll`). Lambda runs Linux x86_64. Native C extensions (`lxml`, `pydantic_core`, `numpy`, `cryptography`, etc.) fail at import: `Unable to import module 'handler': No module named 'xxx._xxx'`
+**Root Cause**: pip installs wheels for the current OS by default. Windows wheels are incompatible with Lambda's Linux runtime.
+**Fix (preferred)**: Use `infrastructure/cdk-eagle/scripts/bundle-lambda.py` as the CDK local bundler. It detects Windows and runs `pip install --platform manylinux2014_x86_64 --implementation cp --python-version 312 --only-binary :all:` to download Linux-compatible binary wheels from PyPI.
+**Fix (fallback)**: Remove native extension dependencies — replace pydantic v2 with stdlib dataclasses, etc.
+**FORCE_LINUX_BUNDLE=1**: Set this env var on macOS ARM CI/CD to force Linux-targeted bundling.
+**Sign of correct bundling**: Lambda code size increases (Linux manylinux binaries are often larger than Windows counterparts).
+
+### Bedrock Model IDs and Inference Profiles
+
+**Issue 1**: `google.gemini-1-5-flash-v1` → `ValidationException: The provided model identifier is invalid`
+**Root Cause**: Google Gemini is not a standard Bedrock foundation model. Requires explicit Marketplace subscription. Also, Gemini API format (`{"contents": [...]}`) is incompatible with Claude Messages API format.
+
+**Issue 2**: `anthropic.claude-3-5-haiku-20241022-v1:0` → `ValidationException: Invocation of model ID ... with on-demand throughput isn't supported. Retry your request with the ID or ARN of an inference profile that contains this model.`
+**Root Cause**: Claude 3.5+ models (Haiku, Sonnet) require **cross-region inference profiles** for on-demand invocation in Bedrock. Direct model IDs only work with provisioned throughput.
+
+**Fix**: Use the cross-region inference profile ID: `us.anthropic.claude-3-5-haiku-20241022-v1:0` (note `us.` prefix). For Claude 3.5 Sonnet: `us.anthropic.claude-3-5-sonnet-20241022-v2:0`.
+
+**IAM**: Lambda role needs BOTH resources in the Bedrock policy:
+```
+arn:aws:bedrock:{region}:{account}:inference-profile/us.anthropic.*   ← inference profile
+arn:aws:bedrock:*::foundation-model/anthropic.*                        ← underlying model
+```
+
+**Claude Messages API body format** (for use with `bedrock:invoke_model`):
+```python
+body = json.dumps({
+    "anthropic_version": "bedrock-2023-05-31",
+    "max_tokens": 2048,
+    "temperature": 0.1,
+    "messages": [{"role": "user", "content": prompt}],
+})
+# Response: result["content"][0]["text"]
+```
+
 ### Git Bash Path Conversion (Windows/MSYS)
 
 **Issue**: On Windows Git Bash, AWS CLI args starting with `/` get converted to Windows paths: `/eagle/ecs/backend-dev` → `C:/Program Files/Git/eagle/ecs/backend-dev`. Causes `InvalidParameterException` for CloudWatch log group names, S3 paths, etc.
@@ -674,6 +801,13 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - `aws ecs update-service --force-new-deployment` to force fresh image pulls after ECR push with same tag (discovered: 2026-02-17, component: ecs)
 - `MSYS_NO_PATHCONV=1` prefix on Windows Git Bash for AWS CLI commands with `/` paths (discovered: 2026-02-17, component: tooling)
 
+- `pip install --platform manylinux2014_x86_64 --implementation cp --python-version 312 --only-binary :all:` installs Linux Lambda-compatible binary wheels on any OS (discovered: 2026-02-20, component: lambda-bundler)
+- `bundle-lambda.py` script at `infrastructure/cdk-eagle/scripts/` is the canonical CDK local bundler — detects Windows and uses --platform flag automatically (discovered: 2026-02-20)
+- Lambda code size increase after platform-targeted bundling is expected and correct (Linux manylinux binaries larger than Windows counterparts) (discovered: 2026-02-20)
+- `LogType='Tail'` in Lambda invoke returns base64-encoded log tail inline — far faster than polling CloudWatch for debugging (discovered: 2026-02-20)
+- Cross-region inference profiles (`us.anthropic.claude-3-5-haiku-20241022-v1:0`) enable on-demand Claude 3.5+ invocation in Bedrock — direct model IDs only work with provisioned throughput (discovered: 2026-02-20)
+- Bedrock inference profile IAM: need both `inference-profile/us.anthropic.*` AND `foundation-model/anthropic.*` resources (discovered: 2026-02-20)
+
 ### patterns_to_avoid
 - Don't create new CDK resources that conflict with existing manual resources
 - Don't use `Vpc.fromLookup()` in CI/CD pipelines
@@ -681,6 +815,10 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - Don't use `NodeNext` module/moduleResolution in tsconfig with ts-node
 - Don't append `.js` extension to TypeScript imports in CDK projects using commonjs
 - Don't use static IAM keys in GitHub Actions when OIDC is available
+- Don't run `pip install` directly in CDK `local.tryBundle()` on Windows — always use `bundle-lambda.py` which handles platform targeting (discovered: 2026-02-20, component: lambda-bundler)
+- Don't use Bedrock model IDs from other cloud providers (Google, etc.) without verifying they're subscribed in Bedrock Marketplace — use `bedrock:ListFoundationModels` to check what's available (discovered: 2026-02-20)
+- Don't use direct Anthropic model IDs (`anthropic.claude-3-5-haiku-20241022-v1:0`) for Claude 3.5+ on-demand — use the cross-region inference profile (`us.anthropic.claude-3-5-haiku-20241022-v1:0`) (discovered: 2026-02-20)
+- Don't use `--only-binary :all:` without `--platform` — it restricts to wheels for the current host OS, which still misses cross-platform (discovered: 2026-02-20)
 - Don't use `removalPolicy: DESTROY` on stateful resources (S3, DDB, Cognito) — only safe for log groups (discovered: 2026-02-16)
 - Don't use `containerInsights` (v1) — use `containerInsightsV2` for ECS clusters (discovered: 2026-02-16)
 - cdk-eagle tsconfig omits explicit moduleResolution — add `"moduleResolution": "node"` to match eval stack for consistency (discovered: 2026-02-16)
@@ -720,3 +858,6 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - Placeholder images only need to pass health checks: backend → FastAPI with `GET /api/health` + curl installed; frontend → Express with `GET /` + curl installed (discovered: 2026-02-17)
 - When redeploying after deleting a stack with RETAIN ECR repos, always use `npx cdk deploy --import-existing-resources` (discovered: 2026-02-17)
 - On Windows Git Bash, always prefix AWS CLI commands that have `/path` args with `MSYS_NO_PATHCONV=1` (discovered: 2026-02-17)
+- When adding new Lambda to CDK, always wire local bundler to `bundle-lambda.py` — never use raw `pip install` in tryBundle on Windows dev machines (discovered: 2026-02-20)
+- Use `LogType='Tail'` in `lambda.invoke()` to get execution logs inline — no CloudWatch polling needed for debugging (discovered: 2026-02-20)
+- Before using a Bedrock model ID, verify with `bedrock.list_foundation_models()` or in the Bedrock Console — avoid assuming model IDs from other cloud providers translate to Bedrock (discovered: 2026-02-20)

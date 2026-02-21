@@ -1,3 +1,4 @@
-pydantic>=2.0,<3.0
+# Lambda dependencies — installed as manylinux2014_x86_64 wheels on Windows via bundle-lambda.py
+# lxml (python-docx dependency) has native extensions; must be Linux-compatible
 python-docx>=1.0,<2.0
 PyPDF2>=3.0,<4.0
