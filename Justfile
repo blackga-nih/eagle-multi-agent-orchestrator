@@ -57,17 +57,17 @@ smoke LEVEL="base":
       base)
         cd client && BASE_URL=http://localhost:3000 npx playwright test \
           navigation.spec.ts intake.spec.ts \
-          --project=chromium
+          --project=chromium --workers=4
         ;;
       mid)
         cd client && BASE_URL=http://localhost:3000 npx playwright test \
           navigation.spec.ts intake.spec.ts admin-dashboard.spec.ts documents.spec.ts workflows.spec.ts \
-          --project=chromium
+          --project=chromium --workers=4
         ;;
       full)
         cd client && BASE_URL=http://localhost:3000 npx playwright test \
           navigation.spec.ts intake.spec.ts admin-dashboard.spec.ts documents.spec.ts workflows.spec.ts chat.spec.ts \
-          --project=chromium
+          --project=chromium --workers=4
         ;;
       *)
         echo "Unknown level '{{LEVEL}}'. Valid: base | mid | full" && exit 1
@@ -276,13 +276,75 @@ urls:
 check-aws:
     python scripts/check_aws.py
 
+# ── Validation Ladder ──────────────────────────────────────
+
+# L5: Smoke tests against deployed Fargate environment (requires AWS creds + live stack)
+# Levels: base (nav+home) | mid (all pages) | full (all + chat)
+smoke-prod LEVEL="mid":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ALB=$(python -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); lbs=c.describe_load_balancers()['LoadBalancers']; front=next(lb['DNSName'] for lb in lbs if 'Front' in lb['LoadBalancerName']); print(f'http://{front}')")
+    echo "Smoke testing against: $ALB"
+    case "{{LEVEL}}" in
+      base)
+        cd client && BASE_URL=$ALB npx playwright test \
+          navigation.spec.ts intake.spec.ts \
+          --project=chromium --workers=4
+        ;;
+      mid)
+        cd client && BASE_URL=$ALB npx playwright test \
+          navigation.spec.ts intake.spec.ts admin-dashboard.spec.ts documents.spec.ts workflows.spec.ts \
+          --project=chromium --workers=4
+        ;;
+      full)
+        cd client && BASE_URL=$ALB npx playwright test \
+          navigation.spec.ts intake.spec.ts admin-dashboard.spec.ts documents.spec.ts workflows.spec.ts chat.spec.ts \
+          --project=chromium --workers=4
+        ;;
+      *)
+        echo "Unknown level '{{LEVEL}}'. Valid: base | mid | full" && exit 1
+        ;;
+    esac
+
+# Full local validation: L1 lint → L2 unit → L4 CDK synth → L5 integration smoke
+# Starts and tears down the docker stack automatically.
+validate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== L1: Lint (Python + TypeScript) ==="
+    just lint
+    echo ""
+    echo "=== L2: Unit tests ==="
+    just test
+    echo ""
+    echo "=== L4: CDK synth ==="
+    just cdk-synth
+    echo ""
+    echo "=== L5: Integration smoke (docker stack + mid smoke) ==="
+    just dev-up
+    trap 'just dev-down' EXIT
+    just smoke mid
+    echo ""
+    echo "=== validate PASSED: L1-L5 all green ==="
+
+# Full validation including L6 eval suite (requires AWS creds)
+validate-full:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just validate
+    echo ""
+    echo "=== L6: Eval suite (AWS eval tests) ==="
+    just eval-aws
+    echo ""
+    echo "=== validate-full PASSED: L1-L6 all green ==="
+
 # ── Composite Workflows ────────────────────────────────────
 
-# CI pipeline: lint + test + AWS eval tests
-ci: lint test eval-aws
+# CI pipeline: L1 lint + L2 unit + L4 CDK synth + L6 AWS eval
+ci: lint test cdk-synth eval-aws
 
-# Ship: lint + build + deploy + verify
-ship: lint deploy
+# Ship: lint + CDK synth gate + build + deploy + L5 smoke verify
+ship: lint cdk-synth deploy smoke-prod
 
 # ── Internal Helpers (prefixed with _) ──────────────────────
 

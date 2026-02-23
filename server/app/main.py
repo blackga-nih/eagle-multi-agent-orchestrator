@@ -34,7 +34,8 @@ import uuid
 import io
 
 # EAGLE modules (new)
-from .agentic_service import stream_chat, get_client, MODEL, EAGLE_TOOLS
+from .agentic_service import get_client, MODEL, EAGLE_TOOLS
+from .sdk_agentic_service import sdk_query
 from .document_export import export_document
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
@@ -171,7 +172,30 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         add_message(session_id, "user", req.message, tenant_id, user_id)
 
     try:
-        result = await stream_chat(messages, session_id=session_id)
+        _text_parts: list[str] = []
+        _usage: dict = {}
+        _tools_called: list[str] = []
+        async for _sdk_msg in sdk_query(
+            prompt=req.message,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            tier=user.tier or "advanced",
+            session_id=session_id,
+        ):
+            _msg_type = type(_sdk_msg).__name__
+            if _msg_type == "AssistantMessage":
+                for _block in _sdk_msg.content:
+                    if getattr(_block, "type", None) == "text":
+                        _text_parts.append(_block.text)
+                    elif getattr(_block, "type", None) == "tool_use":
+                        _tools_called.append(getattr(_block, "name", ""))
+            elif _msg_type == "ResultMessage":
+                _raw = getattr(_sdk_msg, "usage", {})
+                _usage = _raw if isinstance(_raw, dict) else {
+                    "input_tokens": getattr(_raw, "input_tokens", 0),
+                    "output_tokens": getattr(_raw, "output_tokens", 0),
+                }
+        result = {"text": "".join(_text_parts), "usage": _usage, "model": MODEL, "tools_called": _tools_called}
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
@@ -730,13 +754,32 @@ async def websocket_chat(ws: WebSocket):
                         "output": display_output,
                     })
 
-                result = await stream_chat(
-                    messages,
-                    on_text=on_text,
-                    on_tool_use=on_tool_use,
-                    on_tool_result=on_tool_result,
+                _text_parts: list[str] = []
+                _usage: dict = {}
+                async for _sdk_msg in sdk_query(
+                    prompt=user_message,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    tier=user.tier or "advanced",
                     session_id=session_id,
-                )
+                ):
+                    _msg_type = type(_sdk_msg).__name__
+                    if _msg_type == "AssistantMessage":
+                        for _block in _sdk_msg.content:
+                            _bt = getattr(_block, "type", None)
+                            if _bt == "text":
+                                _text_parts.append(_block.text)
+                                await on_text(_block.text)
+                            elif _bt == "tool_use":
+                                tools_called.append(getattr(_block, "name", ""))
+                                await on_tool_use(getattr(_block, "name", ""), getattr(_block, "input", {}))
+                    elif _msg_type == "ResultMessage":
+                        _raw = getattr(_sdk_msg, "usage", {})
+                        _usage = _raw if isinstance(_raw, dict) else {
+                            "input_tokens": getattr(_raw, "input_tokens", 0),
+                            "output_tokens": getattr(_raw, "output_tokens", 0),
+                        }
+                result = {"text": "".join(_text_parts), "usage": _usage, "model": MODEL, "tools_called": tools_called}
 
                 if USE_PERSISTENT_SESSIONS:
                     add_message(session_id, "assistant", result["text"], tenant_id, user_id)

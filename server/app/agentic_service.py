@@ -2218,6 +2218,7 @@ def get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=api_key)
 
 
+# DEPRECATED: use sdk_query() from sdk_agentic_service instead. Kept for reference only.
 async def stream_chat(
     messages: List[dict],
     on_text: Any = None,

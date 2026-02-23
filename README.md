@@ -6,8 +6,8 @@ A multi-tenant AI platform built for the **NCI Office of Acquisitions**, using t
 
 EAGLE (Enhanced Acquisition Guidance & Lifecycle Engine) uses a **supervisor + subagent architecture** to guide contracting officers through the federal acquisition lifecycle. The backend has two orchestration modes:
 
-1. **Anthropic SDK** (`agentic_service.py`): Single system prompt with all skills injected — currently active in `main.py`
-2. **Claude Agent SDK** (`sdk_agentic_service.py`): Supervisor delegates to skill subagents via the `Task` tool, each with a fresh context window — the target architecture
+1. **Claude Agent SDK** (`sdk_agentic_service.py`): Supervisor delegates to skill subagents via the `Task` tool, each with a fresh context window — **active** in `main.py` and `streaming_routes.py`
+2. **Anthropic SDK** (`agentic_service.py`): Single system prompt with all skills injected — deprecated, kept for reference
 
 Both modes use **Claude on Amazon Bedrock** for model inference (not Amazon Bedrock AgentCore).
 
@@ -63,10 +63,14 @@ just lint           # Ruff (Python) + tsc (TypeScript)
 just test           # Backend pytest
 
 # Smoke Tests — verify pages load and backend is reachable (stack must be running)
-just smoke          # base: nav + home page (10 tests, headless, ~14s)
-just smoke mid      # all pages: nav, home, admin, documents, workflows (27 tests, ~22s)
-just smoke full     # all pages + basic agent response (31 tests, ~27s)
+just smoke          # base: nav + home page (~10 tests, headless)
+just smoke mid      # all pages: nav, home, admin, documents, workflows (~27 tests, headless)
+just smoke full     # all pages + basic agent response (~31 tests, headless)
 just smoke-ui       # same as smoke base, headed (visible browser)
+
+# Smoke against deployed Fargate (requires AWS creds)
+just smoke-prod        # mid-level smoke against Fargate ALB (auto-discovers URL)
+just smoke-prod full   # full smoke + chat against Fargate
 
 # E2E Use Case Tests — complete acquisition workflows through the UI (headed)
 just e2e intake     # OA Intake: describe need → agent returns pathway + document list
@@ -89,7 +93,7 @@ just deploy-backend # Backend only
 just deploy-frontend # Frontend only
 
 # Infrastructure
-just cdk-synth      # Compile CDK stacks
+just cdk-synth      # Compile CDK stacks (L4 gate)
 just cdk-diff       # Preview changes
 just cdk-deploy     # Deploy all stacks
 
@@ -100,9 +104,13 @@ just check-aws      # Verify AWS connectivity (all 8 resources)
 just logs           # Tail backend ECS logs
 just logs frontend  # Tail frontend ECS logs
 
+# Validation Ladder
+just validate       # L1-L5: lint → unit → CDK synth → docker stack → smoke mid (auto-teardown)
+just validate-full  # L1-L6: validate + eval suite (requires AWS creds)
+
 # Composite
-just ci             # lint → test → eval-aws
-just ship           # lint → deploy
+just ci             # L1 lint + L2 unit + L4 CDK synth + L6 eval-aws
+just ship           # lint + CDK synth gate + deploy + smoke-prod verify
 ```
 
 ---
@@ -170,8 +178,8 @@ All stacks in `infrastructure/cdk-eagle/`:
 ├── server/                  # FastAPI backend (Python 3.11+, Anthropic SDK)
 │   ├── app/
 │   │   ├── main.py          # FastAPI entry point
-│   │   ├── agentic_service.py      # Anthropic SDK orchestration (active)
-│   │   ├── sdk_agentic_service.py  # Claude Agent SDK orchestration (target)
+│   │   ├── sdk_agentic_service.py  # Claude Agent SDK orchestration (active)
+│   │   ├── agentic_service.py      # Anthropic SDK orchestration (deprecated)
 │   │   ├── session_store.py # Unified DynamoDB access layer
 │   │   ├── cognito_auth.py
 │   │   ├── streaming_routes.py
@@ -257,10 +265,15 @@ Open **http://localhost:3000** — you should see the EAGLE landing page with a 
 Start with smoke, then use case workflows:
 
 ```bash
+# Full local validation gate (recommended before committing)
+just validate       # L1-L5: lint → unit → CDK synth → docker stack → smoke mid (auto teardown)
+
+# Or run individually:
+
 # Smoke — pages load and backend is reachable (headless, fast)
-just smoke          # nav + home page (~14s)
-just smoke mid      # all pages including admin, documents, workflows (~22s)
-just smoke full     # all pages + basic agent response check (~27s)
+just smoke          # nav + home page
+just smoke mid      # all pages including admin, documents, workflows
+just smoke full     # all pages + basic agent response check
 
 # E2E Use Cases — complete acquisition workflows (headed, visible browser)
 just e2e intake     # describe acquisition → agent returns pathway + document list
@@ -431,6 +444,36 @@ just test-e2e
 
 ---
 
+## Validation Ladder
+
+Every change type has a minimum required validation level. All levels are runnable via `just`:
+
+| Level | Gate | Command | When |
+|-------|------|---------|------|
+| **L1 — Lint** | `ruff check` + `tsc --noEmit` | `just lint` | Every change |
+| **L2 — Unit** | `pytest tests/` | `just test` | Backend logic changes |
+| **L3 — E2E** | Playwright smoke (local stack) | `just smoke mid` | Frontend/UI changes |
+| **L4 — Infra** | `cdk synth --quiet` | `just cdk-synth` | CDK changes |
+| **L5 — Integration** | Docker Compose + smoke | `just validate` | Before any PR |
+| **L6 — Eval** | 28-test eval suite + AWS tools | `just validate-full` | Before merging to main |
+
+```bash
+just validate       # L1-L5: full local gate — lint, unit, CDK synth, docker stack, smoke
+just validate-full  # L1-L6: adds eval suite (requires AWS creds)
+just ship           # deploy gate: lint + CDK synth + deploy + smoke-prod verify
+```
+
+| Change Type | Minimum Level |
+|-------------|---------------|
+| Typo / copy | L1 |
+| Backend logic | L1 + L2 |
+| Frontend UI | L1 + L3 |
+| CDK change | L1 + L4 |
+| Cross-stack feature | L1–L5 (`just validate`) |
+| Merge to main | L1–L6 (`just validate-full`) |
+
+---
+
 ## CI/CD Pipeline
 
 The GitHub Actions workflow (`.github/workflows/deploy.yml`) runs on push to `main`:
@@ -441,6 +484,13 @@ The GitHub Actions workflow (`.github/workflows/deploy.yml`) runs on push to `ma
 4. **verify** — Health checks on `/api/health` and `/`
 
 Authentication uses GitHub OIDC federation — no static IAM keys.
+
+The local equivalent of the full CI+deploy pipeline:
+
+```bash
+just ci     # L1 lint + L2 unit + L4 CDK synth + L6 eval-aws (pre-deploy check)
+just ship   # lint + CDK synth gate + deploy + L5 smoke-prod verify (full ship)
+```
 
 ---
 

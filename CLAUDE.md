@@ -15,36 +15,41 @@ Next.js + FastAPI + CDK + Claude SDK. Developed through TAC methodology.
 
 ## File Traceability
 
-Every generated artifact gets a timestamp prefix: `yyyymmdd-hhmmss-{slug}.md`.
-No exceptions. This enables chronological auditing and prevents filename collisions.
+Every generated artifact follows the canonical naming pattern:
 
-| Artifact | Destination | Example |
-|----------|-------------|---------|
-| Expert plans | `.claude/specs/` | `20260217-143000-claude-sdk-add-signing-skill.md` |
-| Expert plan_build_improve | `.claude/specs/` | `20260217-143000-frontend-pbi-dark-mode.md` |
-| Context / research | `.claude/context/` | `20260217-150000-kms-signing-research.md` |
-| Eval results | `server/tests/` | `20260217-160000-eval-signing-accuracy.md` |
-| Meeting notes | `docs/development/meeting-transcripts/` | `20260217-170000-sprint.md` |
-
-**Expert plan flow**:
 ```
-/experts:claude-sdk:plan "Add document-signing skill"
-  → .claude/specs/20260217-143000-claude-sdk-add-signing-skill.md
-
-/experts:claude-sdk:plan "Add document-signing skill"   (re-run later)
-  → .claude/specs/20260217-160000-claude-sdk-add-signing-skill.md  (new timestamp, old preserved)
-
-/experts:frontend:plan_build_improve "Add signing UI"
-  → .claude/specs/20260217-170000-frontend-pbi-signing-ui.md  (plan phase)
-  → builds from plan → self-improves expertise
+{YYYYMMDD}-{HHMMSS}-{type}-{slug}-v{N}.{ext}
 ```
 
-**Rules**:
-- Old plans are never overwritten — each run creates a new timestamped file
-- Expert `plan` and `plan_build_improve` commands always output to `.claude/specs/`
-- Domain name is included after the timestamp for quick filtering
-- Context and research artifacts use the same prefix in `.claude/context/`
-- Filenames use lowercase kebab-case after the timestamp
+| Component | Rule |
+|-----------|------|
+| `YYYYMMDD-HHMMSS` | Timestamp at generation time. Never omitted. |
+| `{type}` | Document type prefix from the Type Registry below. |
+| `{slug}` | Kebab-case title, max 5 words, no stop words (the/a/and/of/for). |
+| `v{N}` | Version integer starting at `v1`. Increment when regenerating the same type+slug. |
+| `{ext}` | `.md` · `.ppt.md` (Marp) · `.excalidraw.md` |
+
+**Type Registry**:
+
+| Type prefix | Content | Destination | Example |
+|-------------|---------|-------------|---------|
+| `plan` | Expert plans, specs | `.claude/specs/` | `20260217-143000-plan-claude-sdk-signing-v1.md` |
+| `pbi` | Plan-build-improve cycles | `.claude/specs/` | `20260217-143000-pbi-frontend-dark-mode-v1.md` |
+| `context` | Research, spike notes | `.claude/context/` | `20260217-150000-context-kms-signing-v1.md` |
+| `eval` | Eval run results | `server/tests/` | `20260217-160000-eval-sdk-patterns-v1.md` |
+| `meeting` | Meeting notes | `docs/development/meeting-transcripts/` | `20260217-170000-meeting-sprint-planning-v1.md` |
+| `code-review` | Code review presentations | `docs/development/` | `20260222-143000-code-review-eagle-full-v1.md` |
+| `arch` | Architecture reports | `docs/architecture/` | `20260222-150000-arch-eagle-streaming-v1.excalidraw.md` |
+| `report` | Generic analysis | `docs/development/` | `20260222-160000-report-cost-attribution-v1.md` |
+
+**Versioning rule**: Before writing, scan the destination directory for files matching
+`*-{type}-{slug}-v*.{ext}`. Take the highest `N` found and write `v{N+1}`. If no match, write `v1`.
+Old files are never overwritten — every run appends to the chronological audit trail.
+
+**Slug rules**: lowercase · kebab-case · max 5 words · strip stop words (a/an/the/and/or/of/in/to/for/with)
+
+**Scribe is the enforcer** — run `/scribe` to format any report and have the convention applied automatically.
+See `.claude/commands/scribe.md` for the full spec.
 
 ---
 
