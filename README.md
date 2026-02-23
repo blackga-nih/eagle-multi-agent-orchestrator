@@ -117,7 +117,47 @@ just ship           # lint + CDK synth gate + deploy + smoke-prod verify
 
 ## Architecture
 
-![Architecture Diagram](data/media/architecuture.png)
+```
+┌──────────────────────────────────────────── AWS Cloud ────────────────────────────────────────────┐
+│                                                                                                     │
+│   ┌──────────┐          ┌───────────────────────────────────────────────────────────────────────┐  │
+│   │  Users   │─ HTTPS ─▶│                           ECS Fargate                                 │  │
+│   └────┬─────┘          │                                                                        │  │
+│        │                │  ┌────────────────────┐   SSE / REST   ┌────────────────────────────┐ │  │
+│        │ JWT auth        │  │  Next.js Frontend   │◀─────────────▶│      FastAPI Backend        │ │  │
+│        └───────────────▶│  │  App Router · TS    │               │  streaming_routes.py        │ │  │
+│                          │  └────────────────────┘               │  sdk_agentic_service.py     │ │  │
+│   ┌────────────────┐     │                                        └─────────────┬──────────────┘ │  │
+│   │    Cognito     │     └──────────────────────────────────────────────────────┼────────────────┘  │
+│   │  tenant_id     │                                                             │                   │
+│   │  user_id       │                                              Claude Agent SDK                   │
+│   │  tier (JWT)    │                                                             │                   │
+│   └────────────────┘                                                             ▼                   │
+│                                                              ┌───────────────────────────────────┐   │
+│                                                              │         Supervisor Agent           │   │
+│                                                              │   routes request to subagents      │   │
+│                                                              └─────────────────┬─────────────────┘   │
+│                                                                                │                      │
+│                                      ┌──────────┬───────────┬─────────────────┼──────────┬─────────┐ │
+│                                      ▼          ▼           ▼                 ▼          ▼         ▼ │
+│                                  legal-      market-     policy-*          oa-intake  document-  comp │
+│                                  counsel  intelligence  (supervisor,        skill      generator  liance│
+│                                                         librarian,                               skill │
+│                                                         analyst)                                       │
+│                                                                                                        │
+│                                                    ▼  Amazon Bedrock                                  │
+│                                             Claude 3.5 Haiku / Sonnet                                 │
+│                                                                                                        │
+│   ┌───────────────────────────────────┐       ┌────────────────────────────────────────────────────┐ │
+│   │            DynamoDB               │       │                        S3                           │ │
+│   │  SESSION# · MSG# · USAGE#         │       │  eagle-documents · nci-documents                   │ │
+│   │  COST#    · SUB#                  │       │  metadata Lambda (triggered on upload)              │ │
+│   └───────────────────────────────────┘       └────────────────────────────────────────────────────┘ │
+│                                                                                                        │
+│   CloudWatch  ·  EagleEvalStack dashboards + alarms  ·  SNS alerts                                   │
+│   GitHub Actions  ──▶  ECR (backend + frontend images)  ──▶  ECS rolling deploy                      │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
 > **Interactive diagrams** in [`docs/excalidraw-diagrams/aws/`](docs/excalidraw-diagrams/aws/) — open in [Excalidraw](https://excalidraw.com) or Obsidian:
 > - [`eagle-aws-architecture.excalidraw.md`](docs/excalidraw-diagrams/aws/eagle-aws-architecture.excalidraw.md) (dark)
@@ -126,9 +166,13 @@ just ship           # lint + CDK synth gate + deploy + smoke-prod verify
 ### System Flow
 
 ```
-JWT Token -> Tenant Context -> Session Attributes -> Anthropic SDK (Bedrock) -> Supervisor -> Subagent
-                                                          |
-                                                   Observability Traces -> DynamoDB + CloudWatch
+User ──▶ Cognito (JWT: tenant_id · user_id · tier)
+     ──▶ Next.js Frontend
+     ──▶ FastAPI Backend (ECS Fargate)
+     ──▶ Claude Agent SDK ──▶ Supervisor Agent
+                          ──▶ Skill Subagents (each with fresh context window)
+                          ──▶ Amazon Bedrock (Claude 3.5 Haiku / Sonnet)
+                          ──▶ DynamoDB (session · usage · cost)  +  CloudWatch
 ```
 
 ### EAGLE Plugin
