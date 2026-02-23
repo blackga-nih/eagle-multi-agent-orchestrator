@@ -2,8 +2,8 @@
 Streaming Routes for EAGLE NCI Acquisition Assistant
 
 Provides SSE (Server-Sent Events) streaming chat and health check endpoints.
-Updated to use EAGLE's agentic_service.stream_chat() with Anthropic SDK
-instead of the original Bedrock Agent wrapper.
+Updated to use sdk_agentic_service.sdk_query() with Claude Agent SDK
+subagent delegation instead of the legacy stream_chat() prompt-injection path.
 
 # NOTE: main.py should include this router:
 #   from app.streaming_routes import create_streaming_router
@@ -23,7 +23,8 @@ from .cognito_auth import extract_user_context, UserContext
 from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
-from .agentic_service import stream_chat, MODEL, EAGLE_TOOLS
+from .agentic_service import MODEL, EAGLE_TOOLS
+from .sdk_agentic_service import sdk_query
 
 import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
@@ -37,15 +38,15 @@ async def stream_generator(
     tier,
     subscription_service: SubscriptionService,
 ) -> AsyncGenerator[str, None]:
-    """Generate SSE events using EAGLE's Anthropic SDK streaming.
+    """Generate SSE events from sdk_query() subagent orchestration.
 
     The flow is:
-      1. Yield a metadata event with agent info (initial connection handshake).
-      2. Call agentic_service.stream_chat() with SSE-mapping callbacks.
-      3. on_text callbacks → TEXT SSE events (real-time streaming).
-      4. on_tool_use callbacks → TOOL_USE SSE events.
-      5. on_tool_result callbacks → TOOL_RESULT SSE events.
-      6. Yield a COMPLETE event on success, or an ERROR event on failure.
+      1. Yield a metadata event (initial connection handshake).
+      2. Consume sdk_query() async generator.
+      3. AssistantMessage text blocks → TEXT SSE events.
+      4. AssistantMessage tool_use blocks → TOOL_USE SSE events.
+      5. ResultMessage → drain queue, emit COMPLETE.
+      6. On exception → emit ERROR event.
     """
     writer = MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
     queue: asyncio.Queue[str] = asyncio.Queue()
@@ -55,39 +56,35 @@ async def stream_generator(
     yield await queue.get()
 
     try:
-        # Build session_id from tenant context
-        session_id = f"{tenant_context.tenant_id}-{tenant_context.user_id}-{tenant_context.session_id}"
+        tenant_id = getattr(tenant_context, "tenant_id", "demo-tenant")
+        user_id = getattr(tenant_context, "user_id", "demo-user")
 
-        # Build messages list with just the current message
-        # (In a full implementation, you'd load conversation history here)
-        messages = [{"role": "user", "content": message}]
+        async for sdk_msg in sdk_query(
+            prompt=message,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            tier=tier or "advanced",
+        ):
+            msg_type = type(sdk_msg).__name__
+            if msg_type == "AssistantMessage":
+                for block in sdk_msg.content:
+                    block_type = getattr(block, "type", None)
+                    if block_type == "text":
+                        await writer.write_text(queue, block.text)
+                    elif block_type == "tool_use":
+                        await writer.write_tool_use(queue, block.name, getattr(block, "input", {}))
+                    while not queue.empty():
+                        yield await queue.get()
+            elif msg_type == "ResultMessage":
+                while not queue.empty():
+                    yield await queue.get()
+                await writer.write_complete(queue)
+                yield await queue.get()
+                return
 
-        # Define SSE-mapping callbacks
-        async def on_text(delta: str):
-            await writer.write_text(queue, delta)
-
-        async def on_tool_use(tool_name: str, tool_input: dict):
-            await writer.write_tool_use(queue, tool_name, tool_input)
-
-        async def on_tool_result(tool_name: str, output: str):
-            # Truncate large tool results for SSE display
-            display_output = output[:2000] + "..." if len(output) > 2000 else output
-            await writer.write_tool_result(queue, tool_name, display_output)
-
-        # Stream chat using EAGLE's Anthropic SDK
-        result = await stream_chat(
-            messages,
-            on_text=on_text,
-            on_tool_use=on_tool_use,
-            on_tool_result=on_tool_result,
-            session_id=session_id,
-        )
-
-        # Drain all queued events
+        # Fallback COMPLETE if generator exhausts without a ResultMessage
         while not queue.empty():
             yield await queue.get()
-
-        # Signal completion
         await writer.write_complete(queue)
         yield await queue.get()
 
