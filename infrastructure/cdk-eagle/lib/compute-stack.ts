@@ -3,14 +3,14 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as ecs_patterns from 'aws-cdk-lib/aws-ecs-patterns';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { EagleConfig } from '../config/environments';
 
 export interface EagleComputeStackProps extends cdk.StackProps {
   config: EagleConfig;
-  vpc: ec2.Vpc;
+  vpc: ec2.IVpc;
   appRole: iam.Role;
   userPoolId: string;
   userPoolClientId: string;
@@ -94,26 +94,6 @@ export class EagleComputeStack extends cdk.Stack {
       },
     });
 
-    // ── Backend Fargate Service (internal ALB) ───────────────
-    const backendService = new ecs_patterns.ApplicationLoadBalancedFargateService(
-      this, 'BackendService', {
-        cluster: this.cluster,
-        serviceName: `eagle-backend-${config.env}`,
-        taskDefinition: backendTaskDef,
-        desiredCount: config.desiredCount,
-        publicLoadBalancer: false,
-        listenerPort: 80,
-        minHealthyPercent: 100,
-      },
-    );
-
-    backendService.targetGroup.configureHealthCheck({
-      path: '/api/health',
-      healthyThresholdCount: 2,
-      unhealthyThresholdCount: 3,
-      interval: cdk.Duration.seconds(30),
-    });
-
     // ── Frontend Task Definition ─────────────────────────────
     const frontendTaskDef = new ecs.FargateTaskDefinition(this, 'FrontendTaskDef', {
       family: `eagle-frontend-${config.env}`,
@@ -127,12 +107,77 @@ export class EagleComputeStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    // backendAlb is referenced in frontend env — declared below but used here via DNS reference
+    // We use a placeholder; the real value comes from the Cfn output or a token.
+    // Solution: create ALBs before task definitions to allow token reference.
+    // Refactored: ALB creation moved before frontend task definition (see below).
+
+    // ── Backend ALB & Service ────────────────────────────────
+    // NCI VPC: Private subnets tagged aws-cdk:subnet-type=Private, one per AZ.
+    // Using PRIVATE_WITH_EGRESS to select exactly those 2 subnets for both ALB and tasks.
+
+    const backendLBSG = new ec2.SecurityGroup(this, 'BackendLBSG', {
+      vpc,
+      description: 'eagle-backend ALB security group',
+    });
+    // Allow HTTP from entire VPC CIDR (NCI private-only VPC)
+    backendLBSG.addIngressRule(ec2.Peer.ipv4(vpc.vpcCidrBlock), ec2.Port.tcp(80));
+
+    const backendAlb = new elbv2.ApplicationLoadBalancer(this, 'BackendALB', {
+      vpc,
+      internetFacing: false,
+      securityGroup: backendLBSG,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+    });
+
+    const backendTargetGroup = new elbv2.ApplicationTargetGroup(this, 'BackendTargetGroup', {
+      vpc,
+      port: 8000,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targetType: elbv2.TargetType.IP,
+      healthCheck: {
+        path: '/api/health',
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 3,
+        interval: cdk.Duration.seconds(30),
+      },
+      deregistrationDelay: cdk.Duration.seconds(30),
+    });
+
+    backendAlb.addListener('BackendListener', {
+      port: 80,
+      defaultTargetGroups: [backendTargetGroup],
+      open: false,
+    });
+
+    const backendServiceSG = new ec2.SecurityGroup(this, 'BackendServiceSG', {
+      vpc,
+      description: 'eagle-backend ECS task security group',
+    });
+    backendServiceSG.addIngressRule(backendLBSG, ec2.Port.tcp(8000), 'from backend ALB');
+
+    // desiredCount=0: infrastructure-only deploy — no image pull attempted.
+    // CI/CD sets desired count to 1+ after pushing the first image to ECR.
+    const backendService = new ecs.FargateService(this, 'BackendService', {
+      cluster: this.cluster,
+      serviceName: `eagle-backend-${config.env}`,
+      taskDefinition: backendTaskDef,
+      desiredCount: 0,
+      securityGroups: [backendServiceSG],
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      assignPublicIp: false,
+    });
+
+    backendService.attachToApplicationTargetGroup(backendTargetGroup);
+
+    // ── Frontend Task Definition ─────────────────────────────
+    // Backend ALB DNS is now available as a token after backendAlb is created.
     frontendTaskDef.addContainer('frontend', {
       containerName: 'eagle-frontend',
       image: ecs.ContainerImage.fromEcrRepository(this.frontendRepo),
       portMappings: [{ containerPort: 3000 }],
       environment: {
-        FASTAPI_URL: `http://${backendService.loadBalancer.loadBalancerDnsName}`,
+        FASTAPI_URL: `http://${backendAlb.loadBalancerDnsName}`,
         HOSTNAME: '0.0.0.0',
         PORT: '3000',
         NODE_ENV: 'production',
@@ -153,29 +198,61 @@ export class EagleComputeStack extends cdk.Stack {
       },
     });
 
-    // ── Frontend Fargate Service (public ALB) ────────────────
-    const frontendService = new ecs_patterns.ApplicationLoadBalancedFargateService(
-      this, 'FrontendService', {
-        cluster: this.cluster,
-        serviceName: `eagle-frontend-${config.env}`,
-        taskDefinition: frontendTaskDef,
-        desiredCount: config.desiredCount,
-        publicLoadBalancer: true,
-        listenerPort: 80,
-        minHealthyPercent: 100,
-      },
-    );
+    // ── Frontend ALB & Service ───────────────────────────────
+    const frontendLBSG = new ec2.SecurityGroup(this, 'FrontendLBSG', {
+      vpc,
+      description: 'eagle-frontend ALB security group',
+    });
+    frontendLBSG.addIngressRule(ec2.Peer.ipv4(vpc.vpcCidrBlock), ec2.Port.tcp(80));
 
-    frontendService.targetGroup.configureHealthCheck({
-      path: '/',
-      healthyThresholdCount: 2,
-      unhealthyThresholdCount: 3,
-      interval: cdk.Duration.seconds(30),
+    const frontendAlb = new elbv2.ApplicationLoadBalancer(this, 'FrontendALB', {
+      vpc,
+      internetFacing: false,
+      securityGroup: frontendLBSG,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
     });
 
+    const frontendTargetGroup = new elbv2.ApplicationTargetGroup(this, 'FrontendTargetGroup', {
+      vpc,
+      port: 3000,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targetType: elbv2.TargetType.IP,
+      healthCheck: {
+        path: '/',
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 3,
+        interval: cdk.Duration.seconds(30),
+      },
+      deregistrationDelay: cdk.Duration.seconds(30),
+    });
+
+    frontendAlb.addListener('FrontendListener', {
+      port: 80,
+      defaultTargetGroups: [frontendTargetGroup],
+      open: false,
+    });
+
+    const frontendServiceSG = new ec2.SecurityGroup(this, 'FrontendServiceSG', {
+      vpc,
+      description: 'eagle-frontend ECS task security group',
+    });
+    frontendServiceSG.addIngressRule(frontendLBSG, ec2.Port.tcp(3000), 'from frontend ALB');
+
+    const frontendService = new ecs.FargateService(this, 'FrontendService', {
+      cluster: this.cluster,
+      serviceName: `eagle-frontend-${config.env}`,
+      taskDefinition: frontendTaskDef,
+      desiredCount: 0,
+      securityGroups: [frontendServiceSG],
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      assignPublicIp: false,
+    });
+
+    frontendService.attachToApplicationTargetGroup(frontendTargetGroup);
+
     // ── Auto-Scaling ─────────────────────────────────────────
-    const backendScaling = backendService.service.autoScaleTaskCount({
-      minCapacity: config.desiredCount,
+    const backendScaling = backendService.autoScaleTaskCount({
+      minCapacity: 0,
       maxCapacity: config.maxCount,
     });
     backendScaling.scaleOnCpuUtilization('BackendCpuScaling', {
@@ -184,8 +261,8 @@ export class EagleComputeStack extends cdk.Stack {
       scaleOutCooldown: cdk.Duration.seconds(60),
     });
 
-    const frontendScaling = frontendService.service.autoScaleTaskCount({
-      minCapacity: config.desiredCount,
+    const frontendScaling = frontendService.autoScaleTaskCount({
+      minCapacity: 0,
       maxCapacity: config.maxCount,
     });
     frontendScaling.scaleOnCpuUtilization('FrontendCpuScaling', {
@@ -208,11 +285,11 @@ export class EagleComputeStack extends cdk.Stack {
       exportName: `eagle-cluster-name-${config.env}`,
     });
     new cdk.CfnOutput(this, 'FrontendUrl', {
-      value: `http://${frontendService.loadBalancer.loadBalancerDnsName}`,
-      description: 'Public URL for the EAGLE frontend',
+      value: `http://${frontendAlb.loadBalancerDnsName}`,
+      description: 'Internal URL for the EAGLE frontend',
     });
     new cdk.CfnOutput(this, 'BackendUrl', {
-      value: `http://${backendService.loadBalancer.loadBalancerDnsName}`,
+      value: `http://${backendAlb.loadBalancerDnsName}`,
       description: 'Internal URL for the EAGLE backend',
     });
   }

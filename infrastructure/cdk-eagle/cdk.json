@@ -1,5 +1,8 @@
 {
   "app": "npx ts-node bin/eagle.ts",
+  "toolkitStackName": "CDKToolkit",
+  "roleArn": "arn:aws:iam::695681773636:role/power-user-cdk-deploy-695681773636",
+  "cloudFormationExecutionRole": "arn:aws:iam::695681773636:role/power-user-cdk-cfn-exec-695681773636",
   "watch": {
     "include": ["**"],
     "exclude": [

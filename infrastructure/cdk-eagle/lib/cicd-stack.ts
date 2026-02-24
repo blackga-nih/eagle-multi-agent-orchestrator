@@ -15,11 +15,12 @@ export class EagleCiCdStack extends cdk.Stack {
     const { config } = props;
 
     // ── GitHub Actions OIDC Provider ─────────────────────────
-    const githubProvider = new iam.OpenIdConnectProvider(this, 'GitHubOIDC', {
-      url: 'https://token.actions.githubusercontent.com',
-      clientIds: ['sts.amazonaws.com'],
-      thumbprints: ['6938fd4d98bab03faadb97b34396831e3780aea1'],
-    });
+    // Import existing provider — NCI SCP explicitly denies iam:CreateOpenIDConnectProvider.
+    // The provider already exists (deployed by StackSet-StackSet-Github-OIDC-*).
+    const githubProvider = iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+      this, 'GitHubOIDC',
+      `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`,
+    );
 
     // ── Deploy Role ──────────────────────────────────────────
     // Trusted by GitHub Actions from the specific repo/branch

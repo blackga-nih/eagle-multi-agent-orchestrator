@@ -34,14 +34,14 @@ export interface EagleConfig {
 
 export const DEV_CONFIG: EagleConfig = {
   env: 'dev',
-  account: process.env.CDK_DEFAULT_ACCOUNT!,
+  account: '695681773636',
   region: 'us-east-1',
 
   eagleTableName: 'eagle',
   docsBucketName: 'nci-documents',
-  evalBucketName: 'eagle-eval-artifacts',
+  evalBucketName: 'eagle-eval-artifacts-695681773636-dev',
 
-  documentBucketName: 'eagle-documents-dev',
+  documentBucketName: 'eagle-documents-695681773636-dev',
   documentMetadataTableName: 'eagle-document-metadata-dev',
   bedrockMetadataModelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
   metadataLambdaMemory: 512,
