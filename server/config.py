@@ -32,7 +32,7 @@ class Config:
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
     USE_BEDROCK = os.getenv("USE_BEDROCK", "false").lower() == "true"
     ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "")
-    S3_BUCKET = os.getenv("S3_BUCKET", "nci-documents")
+    S3_BUCKET = os.getenv("S3_BUCKET", "")
     S3_PREFIX = os.getenv("S3_PREFIX", "eagle/")
 
     # Feature Flags

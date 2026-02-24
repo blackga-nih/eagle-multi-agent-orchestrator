@@ -1,5 +1,4 @@
 import * as cdk from 'aws-cdk-lib';
-import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -21,11 +20,6 @@ export class EagleCoreStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: EagleCoreStackProps) {
     super(scope, id, props);
     const { config } = props;
-
-    // ── Import existing S3 bucket ──────────────────────────────
-    const docsBucket = s3.Bucket.fromBucketName(
-      this, 'DocsBucket', config.docsBucketName,
-    );
 
     // ── DynamoDB: Eagle single-table ─────────────────────────
     const eagleTable = new dynamodb.Table(this, 'EagleTable', {
@@ -104,20 +98,6 @@ export class EagleCoreStack extends cdk.Stack {
       roleName: `eagle-app-role-${config.env}`,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
-
-    // S3: Document operations scoped to eagle/ prefix
-    this.appRole.addToPolicy(new iam.PolicyStatement({
-      actions: [
-        's3:GetObject',
-        's3:PutObject',
-        's3:DeleteObject',
-        's3:ListBucket',
-      ],
-      resources: [
-        docsBucket.bucketArn,
-        `${docsBucket.bucketArn}/eagle/*`,
-      ],
-    }));
 
     // DynamoDB: Full CRUD on eagle table
     this.appRole.addToPolicy(new iam.PolicyStatement({

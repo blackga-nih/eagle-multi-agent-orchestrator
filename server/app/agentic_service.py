@@ -188,7 +188,7 @@ EAGLE_TOOLS = [
                 },
                 "bucket": {
                     "type": "string",
-                    "description": "S3 bucket name (default: nci-documents)",
+                    "description": "S3 bucket name (uses S3_BUCKET env var if not specified)",
                 },
                 "key": {
                     "type": "string",
@@ -384,7 +384,7 @@ EAGLE_TOOLS = [
 def _exec_s3_document_ops(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Real S3 operations scoped per-user."""
     operation = params.get("operation", "list")
-    bucket = params.get("bucket", "nci-documents")
+    bucket = params.get("bucket") or os.getenv("S3_BUCKET", "")
     key = params.get("key", "")
     content = params.get("content", "")
     # Per-user prefix: eagle/{tenant}/{user}/
@@ -1058,7 +1058,7 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     # Save to S3 - per-user path
     user_id = _extract_user_id(session_id)
     s3_key = f"eagle/{tenant_id}/{user_id}/documents/{doc_type}_{timestamp}.md"
-    bucket = "nci-documents"
+    bucket = os.getenv("S3_BUCKET", "")
 
     try:
         s3 = _get_s3()
@@ -1836,7 +1836,7 @@ def _exec_get_intake_status(params: dict, tenant_id: str, session_id: str = None
     try:
         s3 = _get_s3()
         resp = s3.list_objects_v2(
-            Bucket="nci-documents",
+            Bucket=os.getenv("S3_BUCKET", ""),
             Prefix=f"eagle/{tenant_id}/{user_id}/documents/",
             MaxKeys=50,
         )

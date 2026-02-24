@@ -67,7 +67,7 @@ export class EagleComputeStack extends cdk.Stack {
       portMappings: [{ containerPort: 8000 }],
       environment: {
         EAGLE_SESSIONS_TABLE: config.eagleTableName,
-        S3_BUCKET: config.docsBucketName,
+        S3_BUCKET: props.documentBucketName,
         S3_PREFIX: 'eagle/',
         AWS_REGION: config.region,
         USE_BEDROCK: 'true',

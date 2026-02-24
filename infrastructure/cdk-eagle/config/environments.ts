@@ -5,7 +5,6 @@ export interface EagleConfig {
 
   // Storage (import existing)
   eagleTableName: string;
-  docsBucketName: string;
 
   // Compute
   vpcMaxAzs: number;
@@ -38,7 +37,6 @@ export const DEV_CONFIG: EagleConfig = {
   region: 'us-east-1',
 
   eagleTableName: 'eagle',
-  docsBucketName: 'nci-documents',
   evalBucketName: 'eagle-eval-artifacts-695681773636-dev',
 
   documentBucketName: 'eagle-documents-695681773636-dev',

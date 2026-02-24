@@ -150,7 +150,7 @@
           },
           "bucket": {
             "type": "string",
-            "description": "S3 bucket name (default: nci-documents)"
+            "description": "S3 bucket name (uses S3_BUCKET env var if not specified)"
           },
           "key": {
             "type": "string",

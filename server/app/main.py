@@ -467,7 +467,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = os.getenv("S3_BUCKET", "")
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
@@ -502,7 +502,7 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = os.getenv("S3_BUCKET", "")
 
     # Security: ensure key is within user's prefix
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):

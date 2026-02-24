@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """AWS connectivity and resource check for the EAGLE platform.
 
-Verifies credentials, core resources (nci-documents, eagle table, ECS),
-and EagleStorageStack resources (eagle-documents-dev, metadata table, Lambda).
+Verifies credentials, core resources (eagle table, ECS),
+and EagleStorageStack resources (eagle-documents-695681773636-dev, metadata table, Lambda).
 """
 
 import sys
@@ -27,8 +27,7 @@ lmb = boto3.client("lambda", region_name=REGION)
 sts = boto3.client("sts", region_name=REGION)
 
 check("AWS Identity", lambda: f'Account {sts.get_caller_identity()["Account"]}')
-check("S3 nci-documents", lambda: (s3.head_bucket(Bucket="nci-documents"), "Accessible")[1])
-check("S3 eagle-documents-dev", lambda: (s3.head_bucket(Bucket="eagle-documents-dev"), "Accessible")[1])
+check("S3 eagle-documents-695681773636-dev", lambda: (s3.head_bucket(Bucket="eagle-documents-695681773636-dev"), "Accessible")[1])
 check("DynamoDB eagle", lambda: ddb.describe_table(TableName="eagle")["Table"]["TableStatus"])
 check("DynamoDB eagle-document-metadata-dev", lambda: ddb.describe_table(TableName="eagle-document-metadata-dev")["Table"]["TableStatus"])
 check("Lambda eagle-metadata-extractor-dev", lambda: lmb.get_function(FunctionName="eagle-metadata-extractor-dev")["Configuration"]["State"])
