@@ -43,8 +43,19 @@ aws cloudformation create-stack --stack-name ${APP_NAME}-s3-${AWS_ENV} \
   --profile ${AWS_PROFILE}
 ```
 
+## Create EC2 GitHub Self-Hosted Runner
+Creates an EC2 instance (Amazon Linux 2023) with a baked-in PowerUser IAM role, key pair, and security group. See [EC2_README.md](EC2_README.md) for full details and connection instructions.
+```
+aws cloudformation create-stack --stack-name ${APP_NAME}-ec2-${AWS_ENV} \
+  --template-body "$(<ec2.yml)" \
+  --parameters "$(<params/${AWS_ENV}/ec2.json)" \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --profile ${AWS_PROFILE}
+```
+
 ## Cleanup 
 ```
+aws cloudformation delete-stack --stack-name ${APP_NAME}-ec2-${AWS_ENV} --profile ${AWS_PROFILE}
 aws cloudformation delete-stack --stack-name ${APP_NAME}-s3-${AWS_ENV} --profile ${AWS_PROFILE}
 aws cloudformation delete-stack --stack-name ${APP_NAME}-common --profile ${AWS_PROFILE}
 ```
