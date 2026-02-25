@@ -24,7 +24,7 @@ class TenantContext(BaseModel):
 
 class ChatMessage(BaseModel):
     message: str
-    tenant_context: TenantContext
+    tenant_context: Optional[TenantContext] = None
 
 class ChatResponse(BaseModel):
     response: str

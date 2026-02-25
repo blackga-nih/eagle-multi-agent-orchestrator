@@ -256,6 +256,7 @@ async def sdk_query(
         max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
         cwd=os.path.dirname(os.path.abspath(__file__)),
         env={
+            **os.environ,
             "CLAUDE_CODE_USE_BEDROCK": "1",
             "AWS_REGION": "us-east-1",
         },
@@ -314,6 +315,7 @@ async def sdk_query_single_skill(
         max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
         cwd=os.path.dirname(os.path.abspath(__file__)),
         env={
+            **os.environ,
             "CLAUDE_CODE_USE_BEDROCK": "1",
             "AWS_REGION": "us-east-1",
         },
