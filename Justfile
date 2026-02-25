@@ -282,18 +282,24 @@ aws-login PROFILE="eagle":
     echo "  export AWS_PROFILE={{PROFILE}}"
 
 
-# Stop the dev box to avoid idle charges (~$0.04/hr)
-# Usage: just devbox-stop <instance-id>
-devbox-stop INSTANCE_ID:
-    aws ec2 stop-instances --instance-ids {{INSTANCE_ID}}
-    echo "Dev box stopped. Start again with: just devbox-start {{INSTANCE_ID}}"
+# Stop the EC2 dev box to avoid idle charges (~$0.04/hr)
+# Looks up instance from CloudFormation stack eagle-ec2-dev
+devbox-stop:
+    python scripts/devbox.py stop
 
-# Start the dev box back up
-devbox-start INSTANCE_ID:
-    aws ec2 start-instances --instance-ids {{INSTANCE_ID}}
-    aws ec2 wait instance-running --instance-ids {{INSTANCE_ID}}
-    echo "Dev box running. Get IP with:"
-    echo "  aws ec2 describe-instances --instance-ids {{INSTANCE_ID}} --query 'Reservations[].Instances[].PublicIpAddress' --output text"
+# Start the EC2 dev box and wait until running
+devbox-start:
+    python scripts/devbox.py start
+
+# Connect to dev box via SSM Session Manager (no SSH key or inbound port needed)
+# Requires: AWS Session Manager plugin installed
+# Install: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
+devbox-ssm:
+    python scripts/devbox.py ssm
+
+# Show dev box status and connection info
+devbox-status:
+    python scripts/devbox.py status
 
 # ── Operations ──────────────────────────────────────────────
 

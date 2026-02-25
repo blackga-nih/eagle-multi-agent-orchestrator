@@ -4,7 +4,7 @@ parent: "[[deployment/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, deployment, aws, cdk]
-last_updated: 2026-02-20T21:00:00
+last_updated: 2026-02-23T18:00:00
 ---
 
 # Deployment Expertise (Complete Mental Model)
@@ -1062,6 +1062,12 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 ## Learnings
 
 ### patterns_that_work
+- **CloudFormation for EC2 dev boxes (non-CDK resources)**: Use `aws/cloud_formation/` CF templates for stand-alone resources (EC2, S3) that don't need CDK cross-stack integration. Keep CDK for ECS/VPC/Cognito; use CF for dev-ops tooling. Deploy with `aws cloudformation deploy --capabilities CAPABILITY_NAMED_IAM` (discovered: 2026-02-23, component: aws/cloud_formation/ec2.yml)
+- **`PermissionBoundary_PowerUser` is NIH/CBIIT-only**: This IAM policy only exists in CBIIT org accounts. Remove `PermissionsBoundary` line from CF IAM roles before deploying to account 274487662938 (discovered: 2026-02-23, component: aws/cloud_formation/ec2.yml)
+- **CF params files for account-specific values**: Store VPC ID + subnet IDs in `aws/cloud_formation/params/dev/ec2.json` per-account. Account 274487662938: VPC `vpc-0ede565d9119f98aa`, public subnet `subnet-0dafab85c993a5dd8` (discovered: 2026-02-23, component: aws/cloud_formation/params)
+- **Auto-lookup CF stack outputs in scripts**: `scripts/devbox.py` resolves instance ID from CF stack `eagle-ec2-dev` outputs automatically — no instance ID arg needed in Justfile targets. Pattern: `cf.describe_stacks(StackName=STACK_NAME)['Stacks'][0]['Outputs']` (discovered: 2026-02-23, component: scripts/devbox.py)
+- **SSM Session Manager over SSH for Windows dev boxes**: No inbound port 22 needed, no key file management. `aws ssm start-session --target <instance-id>` works from Windows Git Bash. Requires Session Manager plugin installed once. Better than SSH for org-managed Windows machines (discovered: 2026-02-23, component: EC2 dev box)
+- **EC2 dev box bootstrap with `just` + Node 20 + Docker Compose**: AL2023 UserData: `curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin` for just; `curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && dnf install -y nodejs` for Node 20; Docker Compose v2 plugin via curl to `/usr/local/lib/docker/cli-plugins/` (discovered: 2026-02-23, component: aws/cloud_formation/ec2.yml UserData)
 - **Two-checklist README structure** for new developers: Checklist A (local dev: Docker + .env + just dev-up + smoke-ui) vs Checklist B (cloud: AWS creds + CDK + containers + verify). Separates concerns and prevents cloud-first confusion for devs who just want to run locally (discovered: 2026-02-20, component: README/onboarding)
 - **`just dev-up` + `wait_for_backend.py` pattern**: `docker compose up --detach` then poll `localhost:8000/health` every 2s for up to 60s — reliably gates downstream commands without blocking the terminal (discovered: 2026-02-20, component: local smoke workflow)
 - **`--headed` flag for Playwright smoke tests**: adding `--headed` to Playwright commands gives a visible browser window with zero extra configuration — perfect for "show the new dev it works" moment without extra tooling (discovered: 2026-02-20, component: smoke-ui / test-e2e-ui)

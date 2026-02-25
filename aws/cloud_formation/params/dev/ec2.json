@@ -13,11 +13,11 @@
   },
   {
     "ParameterKey": "vpcId",
-    "ParameterValue": "vpc-09def43fcabfa4df6"
+    "ParameterValue": "vpc-0ede565d9119f98aa"
   },
   {
     "ParameterKey": "subnetId",
-    "ParameterValue": "subnet-0acfc5795a31620c4"
+    "ParameterValue": "subnet-0dafab85c993a5dd8"
   },
   {
     "ParameterKey": "allowedSshCidr",

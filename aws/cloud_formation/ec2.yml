@@ -85,7 +85,6 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub 'power-user-${appName}-ec2Role-${environment}'
-      PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/PermissionBoundary_PowerUser'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -173,7 +172,7 @@ Resources:
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:
-            VolumeSize: 30
+            VolumeSize: 50
             VolumeType: gp3
             Encrypted: true
             DeleteOnTermination: true
@@ -212,6 +211,23 @@ Resources:
           # Create runner directory
           mkdir -p /opt/actions-runner
           chown ec2-user:ec2-user /opt/actions-runner
+
+          # Node 20 (for CDK / npm)
+          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+          dnf install -y nodejs
+
+          # pip upgrade
+          python3 -m ensurepip --upgrade
+          python3 -m pip install --upgrade pip
+
+          # just (task runner)
+          curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+          # Docker Compose v2 plugin
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+            -o /usr/local/lib/docker/cli-plugins/docker-compose
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
           # Signal success
           echo "Bootstrap complete" > /var/log/bootstrap-complete.log
