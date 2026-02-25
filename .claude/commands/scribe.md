@@ -2,7 +2,7 @@
 allowed-tools: Read, Write, Bash, Glob, Task
 description: Standardizes documentation reports into consistent output formats. Supports markdown, PPT (Marp), and Excalidraw output.
 argument-hint: [content or file path] [--format=markdown|ppt|excalidraw]
-model: opus
+model: sonnet
 ---
 
 # Scribe Agent

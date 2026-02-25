@@ -2,7 +2,7 @@
 description: "Add a new test to the EAGLE eval suite — scaffolds function, registers in all 8 locations, validates"
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob
 argument-hint: [test description, tier, and what to validate]
-model: opus
+model: sonnet
 ---
 
 # Eval Expert - Add New Test

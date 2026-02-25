@@ -1,7 +1,7 @@
 ---
 name: bowser-qa-agent
 description: UI validation agent that executes user stories against web apps and reports pass/fail results with screenshots at every step. Use for QA, acceptance testing, user story validation, or UI verification. Supports parallel instances. Keywords - QA, validation, user story, UI testing, acceptance testing, bowser.
-model: opus
+model: sonnet
 color: green
 skills:
   - playwright-bowser

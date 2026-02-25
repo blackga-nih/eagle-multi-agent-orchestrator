@@ -1,7 +1,7 @@
 ---
 name: claude-bowser-agent
 description: Browser automation agent. Use when you need to browse websites, take screenshots, interact with web pages, or perform browser tasks. Cannot run in parallel — only one instance at a time. Keywords - browse, screenshot, browser, chrome, bowser, ui testing.
-model: opus
+model: sonnet
 color: orange
 skills:
   - claude-bowser

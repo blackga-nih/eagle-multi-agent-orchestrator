@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 description: Run a saved browser automation workflow with configurable skill, mode, and vision settings
 argument-hint: <workflow-name> [prompt] [playwright|claude] [headed|headless] [vision]
 ---

@@ -2,7 +2,7 @@
 allowed-tools: Write, Read, Bash, Grep, Glob, Edit, Task
 description: Fix issues identified in a code review report by implementing recommended solutions
 argument-hint: [user prompt describing work], [path to plan file], [path to review report]
-model: opus
+model: sonnet
 ---
 
 # Fix Agent

@@ -2,7 +2,7 @@
 allowed-tools: Read, Write, Bash, Grep, Glob, Task
 description: Generates a structured code review presentation from the codebase, then formats it via the Scribe agent
 argument-hint: [scope] [--format=markdown|ppt|excalidraw]
-model: opus
+model: sonnet
 ---
 
 # Code Review Skill

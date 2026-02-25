@@ -1,7 +1,7 @@
 ---
 name: tac-expert-agent
 description: TAC (Tactical Agentic Coding) expert for the EAGLE project. Applies the 8 TAC tactics, selects ADW patterns, classifies problems, chooses autonomy levels, designs context engineering, and runs Plan→Build→Improve cycles. Invoke with "tac", "tactical agentic", "adw", "plan build improve", "autonomy level", "context engineering", "agent pattern", "stop coding".
-model: opus
+model: sonnet
 color: purple
 tools: Read, Glob, Grep, Write
 ---

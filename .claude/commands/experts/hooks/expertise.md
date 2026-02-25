@@ -295,7 +295,7 @@ Agents can define their own PostToolUse hooks for validation:
 ```markdown
 ---
 name: builder
-model: opus
+model: sonnet
 color: cyan
 hooks:
   PostToolUse:

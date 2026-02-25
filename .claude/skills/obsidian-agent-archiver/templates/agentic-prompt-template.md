@@ -8,7 +8,7 @@ mtg_edition: "8th Edition"
 mtg_set_code: "8ed"
 status: active
 version: 1.0.0
-model: opus
+model: sonnet
 total_steps: 3
 created: <% tp.date.now("YYYY-MM-DD") %>
 updated: <% tp.date.now("YYYY-MM-DD") %>
