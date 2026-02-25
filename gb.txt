@@ -17,3 +17,322 @@ alias.revstar-mcp-servers  !cmd /c "C:/Users/gblac/OneDrive/Desktop/aws/revstar-
 alias.start-archon         !docker start archon-mcp archon-server archon-ui archon-container && docker ps --filter name=archon
 alias.claude-verify        !f() { unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; PROJECT_DIR=$(pwd); export AWS_SHARED_CREDENTIALS_FILE=$PROJECT_DIR/.aws/credentials; export AWS_CONFIG_FILE=$PROJECT_DIR/.aws/config; export AWS_DEFAULT_REGION=us-east-1; echo 🔐 AWS Credentials: $AWS_SHARED_CREDENTIALS_FILE; aws sts get-caller-identity --query Account --output text 2>/dev/null | xargs -I {} echo ✅ AWS Account: {}; echo 🚀 Launching Claude Code...; claude; }; f
 alias.claude               !f() { unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; PROJECT_DIR=$(pwd); export AWS_SHARED_CREDENTIALS_FILE=$PROJECT_DIR/.aws/credentials; export AWS_CONFIG_FILE=$PROJECT_DIR/.aws/config; export AWS_DEFAULT_REGION=us-east-1; claude; }; f
+
+---
+
+
+# OpenClaw × Pi Patterns Plan
+**Created:** 2026-02-23
+**Source:** IndyDevDan video `f8cfH5XX-XU` — "The Pi Coding Agent: The ONLY REAL Claude Code COMPETITOR"
+**Repo:** https://github.com/disler/pi-vs-claude-code
+
+---
+
+## Architecture Truth
+
+OpenClaw is built ON TOP of Pi. Confirmed via live instance package.json:
+
+```
+@mariozechner/pi-agent-core      0.53.0  → agent types, tool definitions
+@mariozechner/pi-ai              0.53.0  → LLM calls, streaming, OAuth
+@mariozechner/pi-coding-agent    0.53.0  → tools (read/write/edit/bash), SKILL.md loading, estimateTokens
+@mariozechner/pi-tui             0.53.0  → terminal UI
+```
+
+```
+Pi (Mario Zechner)
+├── LLM calls / streaming / OAuth
+├── Core tools: read, write, edit, bash
+├── SKILL.md loading (loadSkillsFromDir)
+└── estimateTokens, NormalizedUsage
+
+OpenClaw wraps Pi and adds:
+├── Gateway daemon (keeps Pi alive 24/7)
+├── Plugin SDK (TypeScript API over Pi internals)
+├── Multi-channel messaging (Telegram, Discord, WhatsApp, Slack, Line, Lark...)
+├── Cron scheduler
+├── Web dashboard + iOS/macOS apps
+└── Plugin marketplace
+```
+
+**Key distinction:** Dan's video showed Pi's **TUI extension system** (`pi.on("tool_call", ...)`).
+That's the terminal layer. OpenClaw has its own **Plugin SDK** one layer above.
+His code can't be copy-pasted but every pattern is achievable via the Plugin SDK.
+
+---
+
+## What OpenClaw Already Has (Built-in)
+
+Discovered in Plugin SDK source on live instance:
+
+```typescript
+// Already in OpenClaw Plugin SDK — just needs a config toggle:
+formatResponseUsageLine({ usage, showCost: true, costConfig })
+appendUsageLine(payloads, line)
+formatTokenCount(value)        // → "47.2K"
+formatUsd(value)               // → "$0.003"
+estimateUsageCost({ usage, cost })
+resolveModelCostConfig({ provider, model, config })
+
+// NormalizedUsage type (per-response):
+type NormalizedUsage = {
+  input?: number;      // input tokens
+  output?: number;     // output tokens
+  cacheRead?: number;  // cache read tokens
+  cacheWrite?: number; // cache write tokens
+  total?: number;
+}
+```
+
+The token counter functionality is **already written** inside OpenClaw. Needs enabling.
+
+---
+
+## Pi Extension → OpenClaw Plugin Mapping
+
+| Dan's Pi Extension | OpenClaw Equivalent | Method |
+|---|---|---|
+| `tool-counter-widget.ts` | Token/cost footer on every reply | Config toggle OR Plugin SDK |
+| `damage-control.ts` | Safety plugin intercepting tool calls | OpenClaw Plugin SDK `onToolCall` |
+| `agent-chain.ts` | Sequential agent workflow | SKILL.md orchestration |
+| `agent-team.ts` | Multi-agent dispatch | OpenClaw named agents + routing skill |
+| `pi-pi.ts` meta-agent | Parallel expert sub-agents | Meta-skill using `openclaw agent` |
+| `tilldone.ts` | Loop-until-complete skill | SKILL.md retry pattern |
+| `subagent-widget.ts` | Background task delegation | `openclaw agent --message` dispatch |
+
+**Plugin SDK API** (different from Pi TUI API):
+```typescript
+// Pi TUI (Dan's extensions — NOT for OpenClaw):
+pi.on("tool_call", handler)
+pi.registerTool(...)
+pi.registerCommand(...)
+
+// OpenClaw Plugin SDK (what we use):
+api.registerTool({ name, description, parameters, execute })
+api.onReply(callback)
+api.onToolCall(callback)
+```
+
+---
+
+## Plugin Structure (OpenClaw)
+
+```
+~/.openclaw/plugins/<plugin-id>/
+├── openclaw.plugin.json     ← REQUIRED: manifest + JSON Schema
+├── package.json             ← "openclaw": { "extensions": ["./index.ts"] }
+└── index.ts                 ← plugin entry point
+```
+
+```json
+// openclaw.plugin.json (minimum required)
+{
+  "id": "token-counter",
+  "name": "Token Counter",
+  "description": "Appends token count and cost to every reply",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
+```
+
+Enable in `~/.openclaw/openclaw.json`:
+```json
+{
+  "plugins": {
+    "entries": {
+      "token-counter": { "enabled": true }
+    }
+  }
+}
+```
+
+---
+
+## Phase 0 — Enable Built-in Token Counter (5 min, today)
+
+OpenClaw already has `formatResponseUsageLine` wired into the reply pipeline.
+There's a `showCost: boolean` parameter. Find the config key that enables it.
+
+**TODO:** SSH in and check:
+```bash
+grep -r "showCost\|show_cost\|showUsage" ~/.npm-global/lib/node_modules/openclaw/dist/ | grep -v ".d.ts" | head -20
+# Also check the zod schema:
+cat ~/.npm-global/lib/node_modules/openclaw/dist/plugin-sdk/config/zod-schema* | grep -i "cost\|usage\|token" | head -20
+```
+
+If found, add to `~/.openclaw/openclaw.json`:
+```json
+{
+  "agents": {
+    "showCost": true    // (or whatever the actual key is)
+  }
+}
+```
+
+**Result:** Every Telegram/Discord message ends with:
+```
+💬 47.2K in · 1.8K out · 📦 42.1K cache · $0.003
+```
+
+---
+
+## Phase 1 — Token Counter Plugin (2 hrs, if Phase 0 config doesn't exist)
+
+Build a custom plugin that uses OpenClaw's existing `formatResponseUsageLine`:
+
+```
+~/.openclaw/plugins/token-counter/
+├── openclaw.plugin.json
+├── package.json
+└── index.ts
+```
+
+```typescript
+// index.ts
+import { formatTokenCount, formatUsd, estimateUsageCost, resolveModelCostConfig } from "openclaw/plugin-sdk";
+
+export default function(api) {
+  api.onReply(async ({ usage, model, provider, config }, append) => {
+    const costConfig = resolveModelCostConfig({ provider, model, config });
+    const cost = estimateUsageCost({ usage, cost: costConfig });
+    const line = [
+      `💬 ${formatTokenCount(usage?.input)} in`,
+      `${formatTokenCount(usage?.output)} out`,
+      usage?.cacheRead ? `📦 ${formatTokenCount(usage.cacheRead)} cache` : null,
+      cost ? `$${formatUsd(cost)}` : null,
+    ].filter(Boolean).join(" · ");
+    append(`\n\`${line}\``);
+  });
+}
+```
+
+---
+
+## Phase 2 — Damage Control Plugin (3 hrs)
+
+Port Dan's `.pi/damage-control-rules.yaml` to an OpenClaw plugin.
+
+**Rules file** (same YAML format as Dan's):
+```yaml
+# ~/.openclaw/plugins/damage-control/damage-control-rules.yaml
+blocked_bash_patterns:
+  - "rm -rf"
+  - "rm -f"
+  - "git reset --hard"
+  - "git push --force"
+  - "DROP TABLE"
+  - "DROP DATABASE"
+  - "TRUNCATE TABLE"
+  - "aws.*delete"
+  - "gcloud.*delete"
+
+zero_access_paths:
+  - "**/.env*"
+  - "**/.ssh/**"
+  - "**/id_rsa*"
+  - "**/credentials.json"
+  - "**/*.pem"
+  - "**/kubeconfig*"
+
+read_only_paths:
+  - "/etc/**"
+  - "~/.bashrc"
+  - "~/.bash_profile"
+```
+
+```typescript
+// index.ts
+export default function(api) {
+  api.onToolCall(async ({ name, params }, { block, warn }) => {
+    if (name === "bash") {
+      const matched = findBlockedPattern(params.cmd, rules.blocked_bash_patterns);
+      if (matched) return block(`🛡️ Damage Control: blocked \`${matched}\``);
+    }
+    if (name === "read" || name === "write" || name === "edit") {
+      if (isZeroAccess(params.path, rules.zero_access_paths)) {
+        return block(`🛡️ Damage Control: zero-access path ${params.path}`);
+      }
+    }
+  });
+}
+```
+
+---
+
+## Phase 3 — Agent Chain Skill (1 hr)
+
+No TypeScript needed — pure SKILL.md:
+
+```markdown
+---
+name: agent-chain
+description: Run plan-build-review or other sequential agent chains
+trigger: /chain <workflow> <task>
+---
+
+Available chains: plan-build-review, plan-build, scout-flow
+
+For plan-build-review:
+1. Run planner agent: `openclaw agent --agent planner --message "<task>" --deliver`
+2. Capture plan output, pass to builder: `openclaw agent --agent builder --message "<plan>" --deliver`
+3. Pass to reviewer: `openclaw agent --agent reviewer --message "<implementation>" --deliver`
+4. Deliver final reviewer output to user with chain summary
+
+Report each step's completion before moving to next.
+```
+
+---
+
+## Phase 4 — Pi Pi Meta-Agent (2 hrs)
+
+Port Dan's parallel expert research pattern. OpenClaw supports `subagents.maxConcurrent: 8`.
+
+```markdown
+---
+name: pi-pi
+description: Meta-agent that builds other agents by querying domain experts in parallel
+trigger: /build-agent <description>
+---
+
+To build a new agent for <description>:
+
+1. Dispatch these expert sub-agents IN PARALLEL:
+   - skill-expert: "What skills and tools are needed for <description>?"
+   - config-expert: "What openclaw.json config is needed for <description>?"
+   - agent-expert: "What agent workspace files (SOUL/IDENTITY/HEARTBEAT) suit <description>?"
+   - prompt-expert: "What system prompt and instructions work best for <description>?"
+
+2. Synthesize all expert findings
+3. Write the complete agent package:
+   - IDENTITY.md, SOUL.md, HEARTBEAT.md
+   - skills/*.md for each workflow
+   - openclaw.json additions
+   - Deployment justfile commands
+
+Deliver: full agent package ready for `just deploy-agents`
+```
+
+---
+
+## Build Order
+
+| Phase | What | Est. Time | Payoff |
+|-------|------|-----------|--------|
+| **0** | Find & enable `showCost` config toggle | 5 min | Token/cost on every message NOW |
+| **1** | Token Counter Plugin (if Phase 0 fails) | 2 hrs | Same, custom implementation |
+| **2** | Damage Control Plugin | 3 hrs | Safety layer for Gelby |
+| **3** | Agent Chain Skill | 1 hr | plan-build-review workflow |
+| **4** | Meta-Agent Skill | 2 hrs | Build agents that build agents |
+
+---
+
+## Reference Files
+
+- IndyDevDan transcript: `.claude/context/tac-scan/f8cfH5XX-XU_transcript.txt`
+- Pi vs Claude Code repo: https://github.com/disler/pi-vs-claude-code
+- OpenClaw Plugin SDK: `/home/ubuntu/.npm-global/lib/node_modules/openclaw/dist/plugin-sdk/`
+- OpenClaw Plugin docs: `/home/ubuntu/.npm-global/lib/node_modules/openclaw/docs/plugins/`
+- Live instance: `ubuntu@18.234.126.236`
