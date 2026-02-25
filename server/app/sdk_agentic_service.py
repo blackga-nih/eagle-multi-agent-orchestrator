@@ -165,6 +165,7 @@ def build_skill_agents(
     tier_tools = TIER_TOOLS.get(tier, TIER_TOOLS["basic"])
     agents = {}
 
+    # Build base registry from bundled PLUGIN_CONTENTS + workspace overrides
     for name, meta in SKILL_AGENT_REGISTRY.items():
         if skill_names and name not in skill_names:
             continue
@@ -194,6 +195,28 @@ def build_skill_agents(
             tools=meta["tools"] or tier_tools,
             model=meta.get("model") or agent_model,
         )
+
+    # Merge active user-created SKILL# items (tenant-defined skills override bundled when same name)
+    try:
+        from .skill_store import list_active_skills
+        user_skills = list_active_skills(tenant_id)
+        for skill in user_skills:
+            name = skill.get("name", "")
+            if not name:
+                continue
+            if skill_names and name not in skill_names:
+                continue
+            prompt_body = skill.get("prompt_body", "")
+            if not prompt_body:
+                continue
+            agents[name] = AgentDefinition(
+                description=skill.get("description", f"{name} specialist"),
+                prompt=_truncate_skill(prompt_body),
+                tools=skill.get("tools") or tier_tools,
+                model=skill.get("model") or agent_model,
+            )
+    except Exception as exc:
+        logger.warning("skill_store.list_active_skills failed for %s: %s — skipping user skills", tenant_id, exc)
 
     return agents
 
