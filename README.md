@@ -474,7 +474,27 @@ just status      # ECS running counts
 just urls        # frontend + backend ALB URLs
 ```
 
-### B5 — Run Smoke Tests from EC2
+### B5 — Access the App
+
+The ALBs are **VPC-internal** — not reachable from the public internet. Access requires being on the NCI network (VPN or SSM port-forward).
+
+**Get the frontend URL:**
+```bash
+AWS_PROFILE=eagle aws cloudformation describe-stacks --stack-name EagleComputeStack \
+  --query "Stacks[0].Outputs[?contains(OutputKey,'FrontendUrl')].OutputValue" \
+  --output text --region us-east-1
+```
+
+**Login credentials** (created by `just create-users`):
+
+| Role | Email | Password |
+|------|-------|----------|
+| Standard user | testuser@example.com | EagleTest2024! |
+| Admin | admin@example.com | EagleAdmin2024! |
+
+> **First login note**: Cognito may prompt for a password change. Enter `EagleTest2024!` as both old and new password to clear the prompt.
+
+### B6 — Run Smoke Tests from EC2
 
 The EC2 runner also supports running the full smoke + eval suite:
 

@@ -156,13 +156,11 @@ export class EagleComputeStack extends cdk.Stack {
     });
     backendServiceSG.addIngressRule(backendLBSG, ec2.Port.tcp(8000), 'from backend ALB');
 
-    // desiredCount=0: infrastructure-only deploy — no image pull attempted.
-    // CI/CD sets desired count to 1+ after pushing the first image to ECR.
     const backendService = new ecs.FargateService(this, 'BackendService', {
       cluster: this.cluster,
       serviceName: `eagle-backend-${config.env}`,
       taskDefinition: backendTaskDef,
-      desiredCount: 0,
+      desiredCount: config.desiredCount,
       securityGroups: [backendServiceSG],
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       assignPublicIp: false,
@@ -242,7 +240,7 @@ export class EagleComputeStack extends cdk.Stack {
       cluster: this.cluster,
       serviceName: `eagle-frontend-${config.env}`,
       taskDefinition: frontendTaskDef,
-      desiredCount: 0,
+      desiredCount: config.desiredCount,
       securityGroups: [frontendServiceSG],
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       assignPublicIp: false,
