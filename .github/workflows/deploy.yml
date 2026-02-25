@@ -9,12 +9,12 @@ on:
         description: 'Deploy CDK infrastructure'
         required: false
         default: 'true'
-        type: boolean
+        type: string
       deploy_app:
         description: 'Build and deploy application'
         required: false
         default: 'true'
-        type: boolean
+        type: string
 
 permissions:
   contents: read
