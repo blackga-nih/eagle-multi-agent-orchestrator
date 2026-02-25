@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import asyncio
 import json
 import logging
+from contextlib import suppress
 from typing import AsyncGenerator, Optional
 
 from .cognito_auth import extract_user_context, UserContext
@@ -34,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 async def stream_generator(
     message: str,
-    tenant_context,
+    tenant_id: str,
+    user_id: str,
     tier,
     subscription_service: SubscriptionService,
 ) -> AsyncGenerator[str, None]:
@@ -56,15 +58,14 @@ async def stream_generator(
     yield await queue.get()
 
     try:
-        tenant_id = getattr(tenant_context, "tenant_id", "demo-tenant")
-        user_id = getattr(tenant_context, "user_id", "demo-user")
-
-        async for sdk_msg in sdk_query(
+        sdk_messages = sdk_query(
             prompt=message,
             tenant_id=tenant_id,
             user_id=user_id,
             tier=tier or "advanced",
-        ):
+        )
+
+        async for sdk_msg in sdk_messages:
             msg_type = type(sdk_msg).__name__
             if msg_type == "AssistantMessage":
                 for block in sdk_msg.content:
@@ -88,10 +89,19 @@ async def stream_generator(
         await writer.write_complete(queue)
         yield await queue.get()
 
+    except asyncio.CancelledError:
+        # Client disconnected mid-stream; treat as expected cancellation path.
+        logger.info("Streaming client disconnected")
+        return
     except Exception as e:
         logger.error("Streaming chat error: %s", str(e), exc_info=True)
         await writer.write_error(queue, str(e))
         yield await queue.get()
+    finally:
+        # Ensure SDK async generator is closed from this task.
+        if "sdk_messages" in locals():
+            with suppress(Exception):
+                await sdk_messages.aclose()
 
 
 def create_streaming_router(
@@ -148,7 +158,8 @@ def create_streaming_router(
         return StreamingResponse(
             stream_generator(
                 message=message.message,
-                tenant_context=message.tenant_context,
+                tenant_id=tenant_id,
+                user_id=user_id,
                 tier=user.tier,
                 subscription_service=subscription_service,
             ),

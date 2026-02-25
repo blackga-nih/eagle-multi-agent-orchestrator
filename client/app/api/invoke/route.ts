@@ -1,15 +1,46 @@
 /**
- * FastAPI Chat Streaming API Route
+ * FastAPI Chat API Route
  *
- * Proxies requests to the FastAPI backend and streams
- * multi-agent SSE events back to the frontend.
+ * Proxies requests to the FastAPI backend and emits SSE-formatted
+ * events back to the frontend for compatibility.
  *
- * Backend: FastAPI POST /api/chat/stream (SSE)
+ * Backend: FastAPI POST /api/chat (JSON)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
+
+function normalizeSlashCommand(input: string): string {
+  const message = input.trim();
+  if (!message.startsWith('/')) return message;
+
+  const [rawCommand, ...restParts] = message.split(/\s+/);
+  const command = rawCommand.toLowerCase();
+  const rest = restParts.join(' ').trim();
+
+  switch (command) {
+    case '/document':
+      return rest
+        ? `Create the requested acquisition document(s): ${rest}`
+        : 'Create the requested acquisition document(s).';
+    case '/research':
+      return rest
+        ? `Research this acquisition/regulatory question and provide guidance: ${rest}`
+        : 'Research acquisition/regulatory guidance for me.';
+    case '/status':
+      return 'Show the current acquisition package status, completed artifacts, and next steps.';
+    case '/help':
+      return 'List your capabilities and the best commands/prompts to generate acquisition artifacts.';
+    case '/acquisition-package':
+      return rest
+        ? `Start a new acquisition package using this information: ${rest}`
+        : 'Start a new acquisition package and ask me for the minimum required intake details.';
+    default:
+      // Unknown slash command: remove the leading command token and keep user intent text.
+      return rest || message.replace(/^\//, '');
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,7 +54,8 @@ export async function POST(request: NextRequest) {
     }
 
     const sessionId = body.session_id || crypto.randomUUID();
-    const message = body.prompt || body.query;
+    const rawMessage = body.prompt || body.query;
+    const message = normalizeSlashCommand(rawMessage);
 
     // Forward Authorization header from client
     const authHeader = request.headers.get('authorization');
@@ -41,108 +73,60 @@ export async function POST(request: NextRequest) {
       session_id: sessionId,
     };
 
-    // Try SSE streaming endpoint first
-    const response = await fetch(`${FASTAPI_URL}/api/chat/stream`, {
+    const response = await fetch(`${FASTAPI_URL}/api/chat`, {
       method: 'POST',
       headers,
       body: JSON.stringify(fastApiBody),
     });
 
     if (!response.ok) {
-      // Fall back to REST chat endpoint
-      const restResponse = await fetch(`${FASTAPI_URL}/api/chat`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(fastApiBody),
-      });
-
-      if (!restResponse.ok) {
-        const errorText = await restResponse.text();
-        console.error(`FastAPI error: ${restResponse.status} - ${errorText}`);
-        return NextResponse.json(
-          { error: `Backend error: ${restResponse.status}` },
-          { status: restResponse.status }
-        );
-      }
-
-      // Convert REST response to SSE format for consistent frontend handling
-      const data = await restResponse.json();
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        start(controller) {
-          const event = {
-            type: 'text',
-            agent_id: 'eagle-assistant',
-            agent_name: 'EAGLE Assistant',
-            content: data.response,
-            timestamp: new Date().toISOString(),
-          };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-
-          const complete = {
-            type: 'complete',
-            agent_id: 'eagle-assistant',
-            agent_name: 'EAGLE Assistant',
-            metadata: {
-              session_id: data.session_id,
-              usage: data.usage,
-              model: data.model,
-              tools_called: data.tools_called,
-              cost_usd: data.cost_usd,
-            },
-            timestamp: new Date().toISOString(),
-          };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(complete)}\n\n`));
-          controller.close();
-        },
-      });
-
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
-      });
+      const errorText = await response.text();
+      console.error(`FastAPI error: ${response.status} - ${errorText}`);
+      return NextResponse.json(
+        { error: `Backend error: ${response.status}` },
+        { status: response.status }
+      );
     }
 
-    const contentType = response.headers.get('content-type');
-
-    if (contentType?.includes('text/event-stream')) {
-      // Pass through SSE stream directly — formats are compatible
-      return new Response(response.body, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
-      });
-    }
-
-    // Handle JSON response (batch of events)
+    // Convert REST response to SSE format for consistent frontend handling
     const data = await response.json();
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        const event = {
+          type: 'text',
+          agent_id: 'eagle-assistant',
+          agent_name: 'EAGLE Assistant',
+          content: data.response,
+          timestamp: new Date().toISOString(),
+        };
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
 
-    if (data.stream_events && Array.isArray(data.stream_events)) {
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        start(controller) {
-          for (const event of data.stream_events) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-          }
-          controller.close();
-        },
-      });
+        const complete = {
+          type: 'complete',
+          agent_id: 'eagle-assistant',
+          agent_name: 'EAGLE Assistant',
+          metadata: {
+            session_id: data.session_id,
+            usage: data.usage,
+            model: data.model,
+            tools_called: data.tools_called,
+            cost_usd: data.cost_usd,
+          },
+          timestamp: new Date().toISOString(),
+        };
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(complete)}\n\n`));
+        controller.close();
+      },
+    });
 
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
-      });
-    }
-
-    return NextResponse.json(data);
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
   } catch (error) {
     console.error('API route error:', error);
 
@@ -164,7 +148,7 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Health check — pings FastAPI backend
+ * Health check - pings FastAPI backend
  */
 export async function GET() {
   try {
