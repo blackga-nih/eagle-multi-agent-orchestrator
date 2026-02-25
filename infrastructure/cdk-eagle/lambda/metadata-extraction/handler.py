@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import urllib.parse
+import uuid
 from datetime import datetime, timezone
 
 import boto3
@@ -22,6 +24,19 @@ s3 = boto3.client(
     "s3",
     region_name=os.environ.get("AWS_REGION_NAME", "us-east-1"),
 )
+bedrock = boto3.client(
+    "bedrock-runtime",
+    region_name=os.environ.get("AWS_REGION_NAME", "us-east-1"),
+)
+ddb = boto3.resource(
+    "dynamodb",
+    region_name=os.environ.get("AWS_REGION_NAME", "us-east-1"),
+)
+
+_KB_PREFIX = "eagle-knowledge-base/pending/"
+_MATRIX_S3_KEY = os.environ.get("MATRIX_S3_KEY", "eagle-plugin/data/matrix.json")
+_METADATA_TABLE = os.environ.get("METADATA_TABLE", "eagle-document-metadata-dev")
+_BEDROCK_MODEL = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
 
 
 def lambda_handler(event, context):
@@ -39,7 +54,13 @@ def lambda_handler(event, context):
 
             logger.info("Processing s3://%s/%s (%d bytes)", bucket, key, size)
 
-            # Determine file type from extension
+            # ── KB ingestion branch ───────────────────────────────────
+            if key.startswith(_KB_PREFIX):
+                result_entry = handle_kb_ingestion(bucket, key, size)
+                results.append(result_entry)
+                continue
+
+            # ── Standard metadata extraction ──────────────────────────
             file_name = key.split("/")[-1]
             file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
 
@@ -56,7 +77,7 @@ def lambda_handler(event, context):
             if not text.strip():
                 logger.warning("No text extracted from %s, using filename as metadata", key)
 
-            # Call Gemini via Bedrock for metadata extraction
+            # Call Claude via Bedrock for metadata extraction
             extracted = extract_metadata(text, file_name) if text.strip() else {}
 
             # Build metadata model
@@ -102,3 +123,102 @@ def lambda_handler(event, context):
         "statusCode": 200,
         "body": {"processed": len(results), "results": results},
     }
+
+
+def handle_kb_ingestion(bucket: str, key: str, size: int) -> dict:
+    """Handle a document dropped into eagle-knowledge-base/pending/."""
+    file_name = key.split("/")[-1]
+    file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+    logger.info("KB ingestion: %s", key)
+
+    # Download and extract text
+    try:
+        response = s3.get_object(Bucket=bucket, Key=key)
+        body_bytes = response["Body"].read()
+        text = extract_text(body_bytes, file_ext) if file_ext in ("txt", "md", "pdf", "doc", "docx") else ""
+    except Exception as e:
+        logger.error("Failed to download KB document %s: %s", key, e)
+        return {"document_id": key, "status": "error", "error": str(e)}
+
+    if not text.strip():
+        logger.warning("No text extracted from KB doc %s", key)
+        text = f"[File: {file_name}, size: {size} bytes — text extraction failed]"
+
+    # Load current matrix.json from S3 (canonical copy)
+    try:
+        matrix_resp = s3.get_object(Bucket=bucket, Key=_MATRIX_S3_KEY)
+        matrix = json.loads(matrix_resp["Body"].read().decode("utf-8"))
+    except Exception as e:
+        logger.warning("Could not load matrix.json from S3 (%s); using empty baseline", e)
+        matrix = {}
+
+    matrix_summary = json.dumps(matrix, indent=2)[:4000]  # truncate for prompt
+
+    # Prompt Claude to produce a structured diff
+    prompt = f"""You are an acquisition policy analyst. A new regulatory document has been uploaded to the knowledge base.
+
+## New Document
+Filename: {file_name}
+Content (truncated to 6000 chars):
+{text[:6000]}
+
+## Current matrix.json (truncated)
+{matrix_summary}
+
+## Task
+Analyze the document and identify any changes it requires to the matrix.json.
+Return a JSON object with exactly these keys:
+- "analysis_summary": (string) 1-3 sentence plain-English summary of what changed and why
+- "proposed_diff": (array) JSON Patch operations (RFC 6902) using op/path/value keys
+
+Only include changes that are clearly supported by the document. If no changes are needed, return an empty proposed_diff array.
+Return ONLY the JSON object, no markdown fences."""
+
+    try:
+        br_resp = bedrock.invoke_model(
+            modelId=_BEDROCK_MODEL,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 2048,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+        )
+        raw = json.loads(br_resp["body"].read())
+        content_text = raw["content"][0]["text"]
+        diff_result = json.loads(content_text)
+    except Exception as e:
+        logger.error("Bedrock diff analysis failed: %s", e)
+        diff_result = {
+            "analysis_summary": f"Automated analysis failed: {e}. Manual review required.",
+            "proposed_diff": [],
+        }
+
+    # Write KB_REVIEW# record to DynamoDB
+    now = datetime.now(timezone.utc).isoformat()
+    review_id = f"{now[:19].replace(':', '-')}-{uuid.uuid4().hex[:8]}"
+    pk = f"KB_REVIEW#{review_id}"
+
+    try:
+        table = ddb.Table(_METADATA_TABLE)
+        table.put_item(Item={
+            "PK": pk,
+            "SK": "META",
+            "review_id": review_id,
+            "filename": file_name,
+            "s3_key": key,
+            "s3_bucket": bucket,
+            "status": "pending",
+            "analysis_summary": diff_result.get("analysis_summary", ""),
+            "proposed_diff": diff_result.get("proposed_diff", []),
+            "created_at": now,
+            "reviewed_by": None,
+            "reviewed_at": None,
+        })
+        logger.info("KB_REVIEW# record created: %s", review_id)
+    except Exception as e:
+        logger.error("DynamoDB write failed for KB review: %s", e)
+        return {"document_id": key, "status": "error", "error": str(e)}
+
+    return {"document_id": key, "status": "kb_review_pending", "review_id": review_id}

@@ -17,7 +17,7 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -524,6 +524,289 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
         if e.response["Error"]["Code"] == "NoSuchKey":
             raise HTTPException(status_code=404, detail="Document not found")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── User document upload ─────────────────────────────────────────────
+
+_ALLOWED_UPLOAD_MIME = {
+    "application/pdf", "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain", "text/markdown",
+}
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+
+
+@app.post("/api/documents/upload")
+async def api_upload_document(
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Upload a document to the user's S3 workspace and trigger metadata extraction."""
+    import boto3
+    from botocore.exceptions import ClientError
+    import re
+
+    # Validate content type
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in _ALLOWED_UPLOAD_MIME:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type: {content_type}. Accepted: PDF, Word, plain text, Markdown."
+        )
+
+    body = await file.read()
+    if len(body) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 25 MB limit.")
+
+    tenant_id = user.tenant_id
+    user_id = user.user_id
+    bucket = os.getenv("S3_BUCKET", "")
+
+    # Sanitize filename
+    safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
+    key = f"eagle/{tenant_id}/{user_id}/uploads/{safe_name}"
+
+    try:
+        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+    except ClientError as e:
+        logger.error("S3 upload error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    logger.info("Uploaded %s → s3://%s/%s", safe_name, bucket, key)
+    return {"key": key, "filename": safe_name, "size_bytes": len(body), "content_type": content_type}
+
+
+# ── Admin KB review endpoints ─────────────────────────────────────────
+
+def _get_dynamo():
+    import boto3
+    return boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+
+@app.get("/api/admin/kb-reviews")
+async def api_list_kb_reviews(
+    status: Optional[str] = "pending",
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List KB review records from DynamoDB (admin only)."""
+    from boto3.dynamodb.conditions import Key, Attr
+    table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
+    try:
+        ddb = _get_dynamo()
+        table = ddb.Table(table_name)
+        resp = table.scan(
+            FilterExpression=Attr("PK").begins_with("KB_REVIEW#") & Attr("status").eq(status),
+        )
+        reviews = resp.get("Items", [])
+        reviews.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        return {"reviews": reviews, "count": len(reviews)}
+    except Exception as e:
+        logger.error("KB review list error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/kb-review/{review_id}/approve")
+async def api_approve_kb_review(
+    review_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Approve a KB review: apply diff to matrix.json, update HTML, move doc to approved/."""
+    import boto3
+    import json as _json
+    from botocore.exceptions import ClientError
+
+    table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
+    bucket = os.getenv("S3_BUCKET", "")
+    ddb = _get_dynamo()
+    table = ddb.Table(table_name)
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+    # Fetch the review record
+    pk = f"KB_REVIEW#{review_id}"
+    try:
+        item = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not item:
+        raise HTTPException(status_code=404, detail="KB review not found")
+    if item.get("status") != "pending":
+        raise HTTPException(status_code=409, detail=f"Review already {item.get('status')}")
+
+    proposed_diff = item.get("proposed_diff", [])
+
+    # Apply diff to matrix.json (file on disk relative to this server)
+    matrix_path = _Path(__file__).resolve().parent.parent.parent.parent / "eagle-plugin" / "data" / "matrix.json"
+    if matrix_path.exists():
+        try:
+            matrix = _json.loads(matrix_path.read_text(encoding="utf-8"))
+            matrix = _apply_json_patch(matrix, proposed_diff)
+            matrix["version"] = datetime.utcnow().strftime("%Y-%m-%d")
+            matrix_path.write_text(_json.dumps(matrix, indent=2, ensure_ascii=False), encoding="utf-8")
+            logger.info("matrix.json updated after KB review %s", review_id)
+
+            # Regenerate HTML THRESHOLDS/TYPES arrays
+            _regenerate_html_arrays(matrix)
+        except Exception as e:
+            logger.warning("matrix.json patch failed (non-fatal): %s", e)
+    else:
+        logger.warning("matrix.json not found at %s — skipping patch", matrix_path)
+
+    # Move S3 doc from pending/ to approved/
+    old_key = item.get("s3_key", "")
+    if old_key and old_key.startswith("eagle-knowledge-base/pending/"):
+        new_key = old_key.replace("eagle-knowledge-base/pending/", "eagle-knowledge-base/approved/")
+        try:
+            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": old_key}, Key=new_key)
+            s3.delete_object(Bucket=bucket, Key=old_key)
+        except ClientError as e:
+            logger.warning("S3 move failed: %s", e)
+
+    # Update DynamoDB record
+    now = datetime.utcnow().isoformat()
+    table.update_item(
+        Key={"PK": pk, "SK": "META"},
+        UpdateExpression="SET #st = :s, reviewed_by = :u, reviewed_at = :t",
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={":s": "approved", ":u": user.user_id, ":t": now},
+    )
+    return {"status": "approved", "review_id": review_id, "reviewed_at": now}
+
+
+@app.post("/api/admin/kb-review/{review_id}/reject")
+async def api_reject_kb_review(
+    review_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Reject a KB review: mark rejected, move doc to rejected/."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
+    bucket = os.getenv("S3_BUCKET", "")
+    ddb = _get_dynamo()
+    table = ddb.Table(table_name)
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+    pk = f"KB_REVIEW#{review_id}"
+    try:
+        item = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not item:
+        raise HTTPException(status_code=404, detail="KB review not found")
+    if item.get("status") != "pending":
+        raise HTTPException(status_code=409, detail=f"Review already {item.get('status')}")
+
+    # Move S3 doc from pending/ to rejected/
+    old_key = item.get("s3_key", "")
+    if old_key and old_key.startswith("eagle-knowledge-base/pending/"):
+        new_key = old_key.replace("eagle-knowledge-base/pending/", "eagle-knowledge-base/rejected/")
+        try:
+            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": old_key}, Key=new_key)
+            s3.delete_object(Bucket=bucket, Key=old_key)
+        except ClientError as e:
+            logger.warning("S3 move failed: %s", e)
+
+    now = datetime.utcnow().isoformat()
+    table.update_item(
+        Key={"PK": pk, "SK": "META"},
+        UpdateExpression="SET #st = :s, reviewed_by = :u, reviewed_at = :t",
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={":s": "rejected", ":u": user.user_id, ":t": now},
+    )
+    return {"status": "rejected", "review_id": review_id, "reviewed_at": now}
+
+
+def _apply_json_patch(obj: dict, patch: list) -> dict:
+    """Apply a simplified JSON Patch (RFC 6902) to a dict. Supports replace, add, remove."""
+    import copy
+    result = copy.deepcopy(obj)
+    for op in patch:
+        operation = op.get("op")
+        path = op.get("path", "")
+        parts = [p for p in path.split("/") if p]
+        try:
+            if operation == "replace":
+                target = result
+                for part in parts[:-1]:
+                    target = target[int(part)] if isinstance(target, list) else target[part]
+                last = parts[-1]
+                if isinstance(target, list):
+                    target[int(last)] = op["value"]
+                else:
+                    target[last] = op["value"]
+            elif operation == "add":
+                target = result
+                for part in parts[:-1]:
+                    target = target[int(part)] if isinstance(target, list) else target[part]
+                last = parts[-1]
+                if isinstance(target, list):
+                    target.append(op["value"])
+                else:
+                    target[last] = op["value"]
+            elif operation == "remove":
+                target = result
+                for part in parts[:-1]:
+                    target = target[int(part)] if isinstance(target, list) else target[part]
+                last = parts[-1]
+                if isinstance(target, list):
+                    del target[int(last)]
+                else:
+                    del target[last]
+        except (KeyError, IndexError, TypeError) as e:
+            logger.warning("JSON patch op failed (%s %s): %s", operation, path, e)
+    return result
+
+
+def _regenerate_html_arrays(matrix: dict) -> None:
+    """Replace THRESHOLDS and TYPES JS arrays in contract-requirements-matrix.html."""
+    import json as _json
+    import re as _re
+
+    html_path = _Path(__file__).resolve().parent.parent.parent.parent / "contract-requirements-matrix.html"
+    if not html_path.exists():
+        logger.warning("contract-requirements-matrix.html not found, skipping HTML regeneration")
+        return
+
+    html = html_path.read_text(encoding="utf-8")
+
+    # Build new THRESHOLDS array from matrix
+    thresholds_js = "const THRESHOLDS = [\n"
+    for t in matrix.get("thresholds", []):
+        thresholds_js += (
+            f"  {{ value: {t['value']:<12} label: {_json.dumps(t['label'])}, "
+            f"short: {_json.dumps(t['short'])} }},\n"
+        )
+    thresholds_js += "];"
+
+    # Build new TYPES array from contract_types
+    types_js = "const TYPES = [\n"
+    for ct in matrix.get("contract_types", []):
+        parts = [f"id: {_json.dumps(ct['id'])}", f"label: {_json.dumps(ct['label'])}",
+                 f"risk: {ct['risk']}", f"category: {_json.dumps(ct['category'])}"]
+        if ct.get("fee_cap"):
+            parts.append(f"feeCap: {_json.dumps(ct['fee_cap'])}")
+        if ct.get("prereqs"):
+            parts.append(f"prereqs: {_json.dumps(ct['prereqs'])}")
+        types_js += "  { " + ", ".join(parts) + " },\n"
+    types_js += "];"
+
+    # Replace blocks using regex
+    html = _re.sub(
+        r"const THRESHOLDS\s*=\s*\[[\s\S]*?\];",
+        thresholds_js,
+        html,
+    )
+    html = _re.sub(
+        r"const TYPES\s*=\s*\[[\s\S]*?\];",
+        types_js,
+        html,
+    )
+    html_path.write_text(html, encoding="utf-8")
+    logger.info("Regenerated THRESHOLDS/TYPES in contract-requirements-matrix.html")
 
 
 def _get_doc_type(name: str) -> str:
