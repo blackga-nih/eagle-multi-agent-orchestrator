@@ -288,6 +288,42 @@ AWS_DEFAULT_REGION=us-east-1
 > **DynamoDB note**: Session storage still uses the real `eagle` DynamoDB table.
 > Set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in `.env`, or configure `aws configure`.
 
+#### Using AWS SSO for Bedrock
+
+If you're using AWS SSO (Single Sign-On) for credentials, you can mount your AWS credentials directory into the Docker container:
+
+1. **Login to AWS SSO:**
+   ```bash
+   aws sso login --profile <your-profile>
+   ```
+
+2. **Verify credentials work:**
+   ```bash
+   just check-sso
+   ```
+
+3. **Start the stack with SSO:**
+   ```bash
+   # Uses default AWS profile
+   just dev-sso
+   
+   # Or specify a profile
+   just dev-sso <profile-name>
+   ```
+
+   For detached mode:
+   ```bash
+   just dev-up-sso [profile-name]
+   ```
+
+The Docker container will mount your `~/.aws` directory (or `%USERPROFILE%\.aws` on Windows) so it can use your SSO credentials to access Bedrock and other AWS services.
+
+> **Windows Note**: If `${HOME}/.aws` doesn't resolve correctly, set `AWS_CONFIG_DIR` environment variable:
+> ```bash
+> export AWS_CONFIG_DIR=C:/Users/YourUsername/.aws
+> just dev-sso
+> ```
+
 ### A2 — Start the Stack
 
 ```bash

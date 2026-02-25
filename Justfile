@@ -33,11 +33,46 @@ create-users:
 # ── Development ─────────────────────────────────────────────
 
 # Start backend + frontend via docker compose (foreground, with logs)
+# For AWS SSO: run 'just dev-sso' instead, or set AWS_PROFILE before running
 dev:
     docker compose -f {{COMPOSE_FILE}} up --build
 
+# Start dev stack with AWS SSO credentials (mounts ~/.aws for SSO support)
+# Requires: AWS SSO login completed (aws sso login)
+# Usage: just dev-sso [PROFILE_NAME]
+#   If PROFILE_NAME is provided, sets AWS_PROFILE; otherwise uses default profile
+dev-sso PROFILE="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{PROFILE}}" ]; then
+        export AWS_PROFILE="{{PROFILE}}"
+    fi
+    # Verify AWS SSO credentials are available
+    if ! aws sts get-caller-identity &>/dev/null; then
+        echo "⚠️  AWS SSO credentials not found. Run: aws sso login"
+        echo "   Or set AWS_PROFILE if using a specific profile"
+        exit 1
+    fi
+    echo "✅ AWS credentials verified"
+    docker compose -f {{COMPOSE_FILE}} up --build
+
 # Start stack detached and wait for backend health (ready for smoke tests)
+# For AWS SSO: run 'just dev-up-sso' instead
 dev-up:
+    docker compose -f {{COMPOSE_FILE}} up --build --detach
+    python scripts/wait_for_backend.py
+
+# Start stack detached with AWS SSO credentials
+dev-up-sso PROFILE="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{PROFILE}}" ]; then
+        export AWS_PROFILE="{{PROFILE}}"
+    fi
+    if ! aws sts get-caller-identity &>/dev/null; then
+        echo "⚠️  AWS SSO credentials not found. Run: aws sso login"
+        exit 1
+    fi
     docker compose -f {{COMPOSE_FILE}} up --build --detach
     python scripts/wait_for_backend.py
 
@@ -275,6 +310,25 @@ urls:
 # Verify AWS credentials and service connectivity (all EAGLE resources)
 check-aws:
     python scripts/check_aws.py
+
+# Verify AWS SSO credentials are valid and can access Bedrock
+check-sso:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Checking AWS SSO Credentials ==="
+    echo ""
+    echo "1. Testing AWS identity..."
+    aws sts get-caller-identity || (echo "❌ Failed to get caller identity" && exit 1)
+    echo "✅ AWS identity verified"
+    echo ""
+    echo "2. Testing Bedrock access..."
+    aws bedrock list-foundation-models --region us-east-1 --query 'modelSummaries[?contains(modelId, `claude`)].modelId' --output table || (echo "❌ Failed to access Bedrock" && exit 1)
+    echo "✅ Bedrock access verified"
+    echo ""
+    echo "3. Testing S3 access..."
+    aws s3 ls s3://nci-documents --region us-east-1 &>/dev/null || echo "⚠️  S3 bucket 'nci-documents' not accessible (may not exist)"
+    echo ""
+    echo "=== All checks passed ==="
 
 # ── Validation Ladder ──────────────────────────────────────
 
