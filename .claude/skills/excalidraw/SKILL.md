@@ -187,6 +187,8 @@ Files MUST use the Obsidian Excalidraw plugin format (NOT raw JSON). Raw JSON fi
 - Drawing section wrapped in `%%` with json code block
 - File extension: `.excalidraw.md` (NOT `.excalidraw` or `.excalidrawlib`)
 
+**Viewing:** In Obsidian, open the note → **More options** (top-right) → **Switch to EXCALIDRAW VIEW**. Raw `.excalidraw` files do not render in Obsidian; open them at https://excalidraw.com. Full guide and file template: `.claude/skills/excalidraw/docs/viewing-excalidraw-diagrams.md`, `.claude/skills/excalidraw/templates/obsidian-excalidraw-template.md`.
+
 ### Library File Structure (for reference)
 ```json
 {
@@ -238,6 +240,108 @@ Where `{context}` represents the context-specific subdirectory based on:
 - `docs/excalidraw-diagrams/frontend/component-hierarchy.excalidraw.md`
 - `docs/excalidraw-diagrams/deployment/ci-cd-pipeline.excalidraw.md`
 - `docs/excalidraw-diagrams/claude-sdk/session-flow.excalidraw.md`
+
+## PNG Export (Required After Every Diagram)
+
+After saving the `.excalidraw.md` file, **always export a PNG** alongside it. PNG files go into the `images/` subdirectory of the same project folder.
+
+### Obsidian Vault Target
+
+```
+C:\Users\blackga\Desktop\eagle-obsidian\{author}\images\{stem}.png
+```
+
+The vault uses an author-namespaced layout to leave room for multiple contributors:
+```
+eagle-obsidian/
+├── blackga-nih/          ← author namespace
+│   ├── *.excalidraw.md
+│   ├── *.png
+│   └── images/
+│       └── *.png
+└── {other-author}/       ← future contributors
+```
+
+For example, for a diagram saved by `blackga-nih`:
+```
+C:\Users\blackga\Desktop\eagle-obsidian\blackga-nih\images\arch-cdk-stack-v1.png
+```
+
+### Export Pipeline
+
+The Obsidian `.excalidraw.md` format uses `compressed-json` (LZ-string base64). Export to PNG using:
+
+```
+lz-string (decompression) → raw .excalidraw JSON → @tommywalkie/excalidraw-cli → PNG
+```
+
+**One-time setup** (already installed globally):
+```bash
+npm install -g @tommywalkie/excalidraw-cli
+# lz-string lives at C:/tmp/excali-export/node_modules/lz-string
+```
+
+**Export script** (`C:/tmp/excali-export/export-pngs.js`):
+```javascript
+const LZString = require('lz-string');
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+// Usage: node export-pngs.js <input_dir> <project_name>
+// e.g.:  node export-pngs.js "C:/Users/blackga/Desktop/Gbautomation/excalidraw-diagrams/nci" nci
+
+const INPUT_DIR = process.argv[2];
+const PROJECT   = process.argv[3] || path.basename(INPUT_DIR);
+const OUTPUT_DIR = path.join(
+  'C:/Users/blackga/Desktop/Gbautomation/excalidraw-diagrams',
+  PROJECT, 'images'
+);
+const TMP_DIR = 'C:/tmp/excali-export/tmp';
+
+fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+fs.mkdirSync(TMP_DIR, { recursive: true });
+
+const files = fs.readdirSync(INPUT_DIR).filter(f => f.endsWith('.excalidraw.md'));
+console.log(`Exporting ${files.length} diagrams → ${OUTPUT_DIR}\n`);
+
+for (const file of files) {
+  const stem = file.replace('.excalidraw.md', '');
+  const content = fs.readFileSync(path.join(INPUT_DIR, file), 'utf8');
+  const m = content.match(/```compressed-json\n([\s\S]*?)\n```/);
+  if (!m) { console.log(`⚠ ${stem}: no compressed-json block — skipped`); continue; }
+
+  const json = LZString.decompressFromBase64(m[1].replace(/\n/g, ''));
+  if (!json) { console.log(`⚠ ${stem}: decompression failed — skipped`); continue; }
+
+  const excalidrawPath = path.join(TMP_DIR, stem + '.excalidraw');
+  fs.writeFileSync(excalidrawPath, json);
+
+  try {
+    execSync(`excalidraw-cli "${stem}.excalidraw" .`, { cwd: TMP_DIR, stdio: 'inherit' });
+    fs.copyFileSync(path.join(TMP_DIR, stem + '.png'), path.join(OUTPUT_DIR, stem + '.png'));
+    console.log(`✓ ${stem}.png`);
+  } catch (e) {
+    console.log(`✗ ${stem}: ${e.message}`);
+  }
+}
+console.log('\nDone.');
+```
+
+**Run after generating diagrams:**
+```bash
+node "C:/tmp/excali-export/export-pngs.js"
+# defaults to eagle-obsidian/blackga-nih → images/ subfolder
+
+# Other author:
+node "C:/tmp/excali-export/export-pngs.js" \
+  "C:/Users/blackga/Desktop/eagle-obsidian/other-author" other-author
+```
+
+### Notes
+- Font warnings (`couldn't load font "Virgil"`) are cosmetic; install the [Virgil font](https://virgil.excalidraw.com) to fix
+- PNGs are 1–2 MB at default scale; add `-s 2` flag to `excalidraw-cli` for 2× resolution
+- The script auto-creates the `images/` subdirectory if it doesn't exist
 
 ## Knowledge Base
 
