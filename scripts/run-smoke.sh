@@ -33,6 +33,10 @@ AWS_DEFAULT_REGION=us-east-1
 DEBUG=true
 USE_PERSISTENT_SESSIONS=true
 ENVEOF
+# Append live IMDS credentials so Docker containers can call AWS APIs
+echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}" >> /root/eagle/.env
+echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}" >> /root/eagle/.env
+echo "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}" >> /root/eagle/.env
 
 echo "=== Pulling latest config from S3 ==="
 aws s3 cp s3://eagle-documents-695681773636-dev/scripts/global-setup.ts \
@@ -41,6 +45,28 @@ aws s3 cp s3://eagle-documents-695681773636-dev/scripts/playwright.config.ts \
   /root/eagle/client/playwright.config.ts --region us-east-1
 aws s3 cp s3://eagle-documents-695681773636-dev/scripts/chat.spec.ts \
   /root/eagle/client/tests/chat.spec.ts --region us-east-1
+aws s3 cp s3://eagle-documents-695681773636-dev/scripts/Dockerfile.backend \
+  /root/eagle/deployment/docker/Dockerfile.backend --region us-east-1
+aws s3 cp s3://eagle-documents-695681773636-dev/scripts/sdk_agentic_service.py \
+  /root/eagle/server/app/sdk_agentic_service.py --region us-east-1
+
+# Patch docker-compose to remove lines that break credential resolution in headless EC2 context.
+# AWS_PROFILE="" (empty string) causes boto3 to look for a named profile "" instead of
+# using the AWS_ACCESS_KEY_ID/SECRET/TOKEN env vars that are already in the container.
+python3 -c "
+import re
+path = 'deployment/docker-compose.dev.yml'
+with open(path) as f:
+    content = f.read()
+# Remove AWS_PROFILE and AWS_SDK_LOAD_CONFIG — both interfere with env-var credential chain
+content = re.sub(r'[ \t]*-[ \t]*AWS_PROFILE=.*\n', '', content)
+content = re.sub(r'[ \t]*-[ \t]*AWS_SDK_LOAD_CONFIG=.*\n', '', content)
+# Remove .aws volume mount — no valid .aws dir on headless EC2 (HOME is unset in SSM)
+content = re.sub(r'[ \t]*-[ \t]*\\\$\{(?:AWS_CONFIG_DIR|HOME)[^}]*\}[^\n]*\.aws[^\n]*\n', '', content)
+with open(path, 'w') as f:
+    f.write(content)
+print('Patched docker-compose.dev.yml (removed AWS_PROFILE, AWS_SDK_LOAD_CONFIG, .aws mount)')
+"
 
 echo "=== Starting docker compose ==="
 docker compose -f deployment/docker-compose.dev.yml down --remove-orphans 2>&1 | tail -3 || true
