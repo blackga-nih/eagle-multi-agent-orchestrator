@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────
+# Claude Code Assistant
+# ─────────────────────────────────────────────────────────────
+#
+# Adds Claude as an AI assistant on PRs and issues.
+# Uses anthropics/claude-code-action@v1 which auto-detects mode:
+#
+#   - Pull requests  → Claude reviews the diff and posts feedback
+#   - Issue comments  → "@claude <request>" triggers Claude to respond
+#   - Issues labeled  → Adding the "claude" label triggers Claude
+#
+# The action handles checkout, branching, commenting, and cleanup
+# automatically — no manual shell scripting needed.
+#
+# Requirements:
+#   - Repository secret: ANTHROPIC_API_KEY
+#
+# Usage:
+#   - Open a PR → Claude reviews automatically
+#   - Comment "@claude fix the typo on line 42" → Claude responds
+#   - Add label "claude" to an issue → Claude analyzes and responds
+#
+# Docs: https://github.com/anthropics/claude-code-action
+# ─────────────────────────────────────────────────────────────
+
+name: Claude Code Assistant
+
+on:
+  # PR events — Claude reviews the diff automatically
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+  # Issue/PR comments — respond when someone writes "@claude ..."
+  issue_comment:
+    types: [created]
+
+  # Issues — trigger when the "claude" label is added
+  issues:
+    types: [opened, labeled]
+
+  # Manual trigger for testing (visible in Actions tab → Run workflow)
+  workflow_dispatch:
+
+# Permissions needed by the action to read code, post comments, and create branches
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  claude:
+    name: Claude Code
+    runs-on: ubuntu-latest
+
+    # Skip bot-generated comments to prevent infinite loops.
+    # For issue_comment events, only run when the comment contains "@claude".
+    # For all other events (PRs, issues, workflow_dispatch), always run.
+    if: |
+      (github.event_name != 'issue_comment' || contains(github.event.comment.body, '@claude')) &&
+      github.event.sender.type != 'Bot'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history so Claude can understand the codebase
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Pass the API key from repository secrets
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # Lock to Haiku to avoid Sonnet/Opus charges on every PR/issue
+          claude_model: claude-haiku-4-5-20251001
+
+          # Project-specific instructions for Claude
+          prompt: |
+            You are a code reviewer and assistant for the EAGLE multi-agent orchestrator project.
+
+            This is a government acquisition platform built with:
+            - Frontend: Next.js (client/)
+            - Backend: FastAPI (server/)
+            - Infrastructure: AWS CDK (infrastructure/cdk-eagle/)
+            - Agent definitions: eagle-plugin/
+
+            When reviewing PRs, focus on:
+            - Correctness and potential bugs
+            - Security issues (injection, auth gaps, credential exposure)
+            - CDK best practices (removal policies, least-privilege IAM)
+            - Consistency with existing patterns in the codebase
+
+            When responding to @claude requests on issues, help with analysis,
+            code suggestions, and implementation guidance.
+
+          # Use a single sticky comment instead of multiple comments per run
+          use_sticky_comment: 'true'
