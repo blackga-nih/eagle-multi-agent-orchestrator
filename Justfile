@@ -321,7 +321,7 @@ logs SERVICE="backend":
     python -c "\
     import boto3, sys, time; \
     svc = '{{SERVICE}}'; \
-    lg = f'/ecs/eagle-{svc}-dev'; \
+    lg = f'/eagle/ecs/{svc}-dev'; \
     client = boto3.client('logs', region_name='us-east-1'); \
     import datetime; \
     start = int((datetime.datetime.now() - datetime.timedelta(minutes=30)).timestamp() * 1000); \

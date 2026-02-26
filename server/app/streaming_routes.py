@@ -37,6 +37,7 @@ async def stream_generator(
     tenant_context,
     tier,
     subscription_service: SubscriptionService,
+    session_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events from sdk_query() subagent orchestration.
 
@@ -64,6 +65,7 @@ async def stream_generator(
             tenant_id=tenant_id,
             user_id=user_id,
             tier=tier or "advanced",
+            session_id=session_id,
         ):
             msg_type = type(sdk_msg).__name__
             if msg_type == "AssistantMessage":
@@ -151,6 +153,7 @@ def create_streaming_router(
                 tenant_context=message.tenant_context,
                 tier=user.tier,
                 subscription_service=subscription_service,
+                session_id=message.session_id,
             ),
             media_type="text/event-stream",
             headers={

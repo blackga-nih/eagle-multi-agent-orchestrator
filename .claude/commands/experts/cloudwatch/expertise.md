@@ -4,7 +4,7 @@ parent: "[[cloudwatch/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, cloudwatch, telemetry, aws, boto3, logging]
-last_updated: 2026-02-11T22:00:00
+last_updated: 2026-02-23T19:00:00
 ---
 
 # CloudWatch Expertise (Complete Mental Model)
@@ -716,6 +716,9 @@ CloudWatch `put_metric_data` has a limit of 1000 metric data points per call. Th
 ## Learnings
 
 ### patterns_that_work
+- **ECS log group naming is `/eagle/ecs/{service}-{env}`** — not `/ecs/eagle-{service}`. The Justfile `logs` recipe uses the wrong prefix `/ecs/eagle-{svc}-dev`; correct pattern is `/eagle/ecs/backend-dev` and `/eagle/ecs/frontend-dev`. Always verify with `describe_log_groups(logGroupNamePrefix='/eagle')` (discovered: 2026-02-23, component: /eagle/ecs log groups)
+- **Filter pattern with `?TERM` (question mark) performs OR matching** — `?ERROR ?error ?500 ?failed` returns any line containing any of those terms. Useful for broad error sweeps across ECS logs (discovered: 2026-02-23, component: backend error diagnosis)
+- **Context window scan pattern for errors**: fetch all events from a stream, then scan for error keywords and print surrounding lines (`lines[max(0,i-3):i+8]`) — gives full exception context without needing CloudWatch Insights (discovered: 2026-02-23, component: backend error diagnosis)
 - Per-run streams with ISO timestamp naming provide clean run isolation
 - Non-fatal emission with local file fallback ensures no data loss
 - Idempotent create_log_group/create_log_stream handles first-run and race conditions
@@ -735,6 +738,8 @@ CloudWatch `put_metric_data` has a limit of 1000 metric data points per call. Th
 - Don't clear TraceCollector._latest before capturing both trace and summary
 
 ### common_issues
+- **`just logs` fails with ResourceNotFoundException**: Justfile had wrong log group `/ecs/eagle-{svc}-dev`; correct pattern is `/eagle/ecs/{svc}-dev`. Fixed in Justfile `logs` recipe (2026-02-23)
+- **Claude Agent SDK CLI refuses to run in ECS**: Error `--dangerously-skip-permissions cannot be used with root/sudo privileges`. Fix: add non-root user to Dockerfile.backend — `RUN useradd --no-create-home appuser && chown -R appuser:appuser /app` + `USER appuser`. This is the same fix pattern needed any time the SDK runs inside a container (2026-02-23)
 - AWS credentials not configured -> emission silently skipped
 - Log group doesn't exist on first run -> auto-created, but describe_log_streams returns empty
 - `search` operation adds tenant_id prefix -> unexpected results for test-run queries

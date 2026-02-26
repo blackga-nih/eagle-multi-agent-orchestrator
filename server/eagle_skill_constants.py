@@ -152,3 +152,11 @@ LEGAL_COUNSEL_PROMPT = SKILL_CONSTANTS.get("legal-counsel", "")
 TECH_TRANSLATOR_PROMPT = SKILL_CONSTANTS.get("tech-translator", "")
 MARKET_INTELLIGENCE_PROMPT = SKILL_CONSTANTS.get("market-intelligence", "")
 PUBLIC_INTEREST_PROMPT = SKILL_CONSTANTS.get("public-interest", "")
+
+# ── Seed DynamoDB from bundled plugin files if not already seeded ────
+# Wrapped in try/except so local dev without DynamoDB continues to work.
+try:
+    from app.plugin_store import ensure_plugin_seeded
+    ensure_plugin_seeded()
+except Exception:
+    pass  # DynamoDB unavailable — bundled files remain primary
