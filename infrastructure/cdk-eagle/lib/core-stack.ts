@@ -101,7 +101,6 @@ export class EagleCoreStack extends cdk.Stack {
 
     // DynamoDB: Full CRUD on eagle table
     this.appRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'DynamoDBAccess',
       actions: [
         'dynamodb:GetItem',
         'dynamodb:PutItem',
@@ -119,7 +118,6 @@ export class EagleCoreStack extends cdk.Stack {
 
     // Document bucket: read access for ECS backend (static ARN avoids cross-stack token cycle)
     this.appRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'DocumentBucketRead',
       actions: ['s3:GetObject', 's3:ListBucket'],
       resources: [
         `arn:aws:s3:::${config.documentBucketName}`,
@@ -129,7 +127,6 @@ export class EagleCoreStack extends cdk.Stack {
 
     // Metadata DynamoDB: read access for ECS backend
     this.appRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'DocumentMetadataRead',
       actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan'],
       resources: [
         `arn:aws:dynamodb:${config.region}:${this.account}:table/${config.documentMetadataTableName}`,
@@ -140,7 +137,6 @@ export class EagleCoreStack extends cdk.Stack {
     // Bedrock: Invoke models — restricted to Haiku 4.5 only to prevent Opus/Sonnet charges.
     // To allow other models, add their ARNs here and re-deploy the core stack.
     this.appRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'BedrockInvoke',
       actions: [
         'bedrock:InvokeModel',
         'bedrock:InvokeModelWithResponseStream',
@@ -158,7 +154,6 @@ export class EagleCoreStack extends cdk.Stack {
 
     // CloudWatch: App + eval logging
     this.appRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'CloudWatchLogs',
       actions: [
         'logs:CreateLogStream',
         'logs:PutLogEvents',
@@ -173,7 +168,6 @@ export class EagleCoreStack extends cdk.Stack {
 
     // Cognito: User management
     this.appRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'CognitoUserManagement',
       actions: [
         'cognito-idp:GetUser',
         'cognito-idp:AdminGetUser',
