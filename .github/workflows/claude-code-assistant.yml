@@ -73,7 +73,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
           # Lock to Haiku to avoid Sonnet/Opus charges on every PR/issue
-          claude_model: claude-haiku-4-5-20251001
+          claude_args: "--model claude-haiku-4-5-20251001"
 
           # Project-specific instructions for Claude
           prompt: |
