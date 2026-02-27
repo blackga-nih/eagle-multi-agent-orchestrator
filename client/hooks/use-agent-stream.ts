@@ -181,6 +181,10 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     const finalSessionId = sessionId || generateUUID();
     const queryStartTime = new Date();
     let accumulatedText = '';
+    // Stable ID used for the single streaming assistant message.
+    // All text chunks for one response share this ID so the UI upserts
+    // rather than appending a new bubble per chunk.
+    const streamingMsgId = `stream-${Date.now()}`;
     let shouldFetchDocs = false;
     const emittedDocKeys = new Set<string>();
 
@@ -287,14 +291,24 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
       setLogs(prev => [...prev, logEntry]);
       options.onEvent?.(event);
 
-      // Handle text messages
+      // Handle text messages — accumulate into a single streaming bubble.
+      // The backend sends one event per text chunk (and an empty one as a
+      // connection handshake). We use a stable streamingMsgId so the UI can
+      // upsert the same message rather than appending a new one each chunk.
       if (event.type === 'text') {
         accumulatedText += event.content || '';
-        const message = streamEventToMessage(event, logEntry.id);
-        if (message) {
-          setLastMessage(message);
-          options.onMessage?.(message);
-        }
+        if (!accumulatedText) return; // skip empty handshake event
+        const message: Message = {
+          id: streamingMsgId,
+          role: 'assistant',
+          content: accumulatedText,
+          timestamp: new Date(event.timestamp),
+          reasoning: event.reasoning,
+          agent_id: event.agent_id,
+          agent_name: event.agent_name,
+        };
+        setLastMessage(message);
+        options.onMessage?.(message);
       }
 
       // Handle create_document tool results (streaming path)
