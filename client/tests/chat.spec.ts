@@ -33,12 +33,33 @@ test.describe('Chat Page', () => {
     test.slow();
     await page.goto('/chat/');
     await page.getByRole('button', { name: 'New Chat' }).click();
-    // Blank new session — welcome screen, no agent messages yet
-    await expect(page.locator('main').getByText('🦅 EAGLE')).toHaveCount(0, { timeout: 5000 });
-    const input = page.getByPlaceholder(/Ask EAGLE/i);
-    await input.fill('Hello');
+
+    const textarea = page.locator('textarea');
+    await expect(textarea).toBeEnabled();
+
+    // Send a message to the agent
+    await textarea.fill('Hello');
     await page.getByRole('button', { name: '➤' }).click();
-    // Wait for the first agent response header to appear
-    await expect(page.locator('main').getByText('🦅 EAGLE')).toHaveCount(1, { timeout: 60000 });
+
+    // Phase 1: streaming started — typing indicator (bouncing dots) appears.
+    // The '🦅 EAGLE' label renders on BOTH the typing indicator AND completed messages,
+    // so we track .typing-dot as the ground-truth streaming signal instead.
+    await expect(page.locator('.typing-dot').first()).toBeVisible({ timeout: 10000 });
+
+    // Phase 2: streaming finished — typing indicator disappears (isStreaming → false).
+    // SimpleChatInterface passes isStreaming as isTyping to SimpleMessageList,
+    // which only renders .typing-dot while isTyping===true.
+    await expect(page.locator('.typing-dot').first()).not.toBeVisible({ timeout: 90000 });
+
+    // Phase 3: textarea re-enabled — confirms isStreaming fully cleared in React state
+    await expect(textarea).toBeEnabled();
+
+    // Phase 4: agent message label visible — '🦅 EAGLE' now belongs to a real message,
+    // not the typing indicator (which is gone)
+    await expect(page.locator('text=🦅 EAGLE')).toBeVisible();
+
+    // Phase 5: main content has substantive text from the agent response
+    const mainText = await page.locator('main').textContent() ?? '';
+    expect(mainText.length).toBeGreaterThan(100);
   });
 });

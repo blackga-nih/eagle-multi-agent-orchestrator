@@ -11,19 +11,13 @@ services:
       - DEV_MODE=true
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_REGION=us-east-1
+      - AWS_PROFILE=${AWS_PROFILE:-eagle}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      # AWS SSO support: if AWS_PROFILE is set, use credential process
-      - AWS_PROFILE=${AWS_PROFILE:-}
-      - AWS_SDK_LOAD_CONFIG=1
     volumes:
       - ../server/app:/app/app
-      # Mount AWS credentials directory for SSO (read-only)
-      # On Windows Git Bash: ${HOME}/.aws works
-      # On Windows CMD/PowerShell: use %USERPROFILE%\.aws
-      # Alternative: set AWS_CONFIG_DIR env var before running docker compose
-      - ${AWS_CONFIG_DIR:-${HOME}/.aws}:/root/.aws:ro
+      - ${HOME}/.aws:/home/appuser/.aws
 
   frontend:
     build:
