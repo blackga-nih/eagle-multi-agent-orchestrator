@@ -7,17 +7,18 @@ tags: [expert, tac, methodology, agentic-coding, claude-code, hooks, agents]
 
 # TAC Expert
 
-> Tactical Agentic Coding (TAC) methodology specialist for agent-first development, hook architecture, prompt engineering, and Claude Code ecosystem mastery.
+> Tactical Agentic Coding (TAC) methodology specialist for agent-first development, hook architecture, prompt engineering, multi-agent orchestration, and Claude Code ecosystem mastery.
 
 ## Domain Scope
 
 This expert covers:
 - **8 Fundamental Tactics** - Stop Coding, Adopt Agent's Perspective, Template Engineering, Stay Out Loop, Feedback Loops, One Agent One Prompt, Zero-Touch, Prioritize Agentics
 - **Advanced Lessons (9-14)** - Context Engineering, Prompt Engineering, Specialized Agents, Multi-Agent Orchestration, Agent Experts, Codebase Singularity
-- **Core Frameworks** - PITER, R&D, ACT-LEARN-REUSE, Core Four, 8 Tactics Memory Aid
+- **Core Frameworks** - PITER, R&D, ACT-LEARN-REUSE, Core Five, 8 Tactics Memory Aid
 - **Agentic Layer Classification** - Class 1 (Foundation), Class 2 (Out-Loop), Class 3 (Orchestration)
-- **Hook Architecture** - Flat structure, dispatcher pattern, domain handlers, stop hook filtering, hook chaining
-- **Claude Code Ecosystem** - ADW patterns, agents, commands, hooks, skills, component graph
+- **Hook Architecture** - Python-based hooks, settings.json configuration, dispatcher pattern, matcher system, 12 hook events
+- **Claude Code Ecosystem** - ADW patterns, agent definitions, commands, hooks, skills, parallel execution, component graph
+- **Eval Architecture** - 3-layer eval suite (38 tests), 6 test files (65 total tests)
 
 ## Available Commands
 
@@ -33,7 +34,7 @@ This expert covers:
 
 | File | Purpose |
 |------|---------|
-| `expertise.md` | Complete mental model for TAC methodology |
+| `expertise.md` | Complete mental model for TAC methodology (Parts 1-8) |
 | `question.md` | Query command for read-only questions |
 | `plan.md` | Planning command using TAC principles |
 | `self-improve.md` | Expertise update command |
@@ -45,7 +46,7 @@ This expert covers:
 ```
 .claude/commands/experts/tac/
   |-- _index.md           # This file - expert overview
-  |-- expertise.md        # Complete TAC mental model (Parts 1-7)
+  |-- expertise.md        # Complete TAC mental model (Parts 1-8)
   |-- question.md         # Read-only Q&A about TAC
   |-- plan.md             # Plan using TAC principles
   |-- self-improve.md     # Update expertise with learnings
@@ -53,9 +54,11 @@ This expert covers:
   |-- maintenance.md      # Validate TAC compliance
 
 Related project paths:
-  |-- .claude/commands/experts/   # All expert domains
-  |-- .claude/commands/           # Slash commands root
-  |-- .claude/                    # Claude Code configuration root
+  |-- .claude/agents/              # 14 agent definition files
+  |-- .claude/commands/experts/    # 10 expert domains
+  |-- .claude/commands/            # 11 slash commands
+  |-- .claude/specs/               # 26 versioned spec files
+  |-- .claude/                     # Claude Code configuration root
 ```
 
 ## ACT-LEARN-REUSE Pattern

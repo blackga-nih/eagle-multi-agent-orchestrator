@@ -4,7 +4,7 @@ parent: "[[cloudwatch/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, cloudwatch, telemetry, aws, boto3, logging]
-last_updated: 2026-02-23T19:00:00
+last_updated: 2026-02-25T21:00:00
 ---
 
 # CloudWatch Expertise (Complete Mental Model)
@@ -229,7 +229,7 @@ timestamp = now_ms + test_id
 timestamp = now_ms + 100
 ```
 
-This ensures deterministic ordering: tests 1-20 first, then summary at +100.
+This ensures deterministic ordering: tests 1-38 first, then summary at +100.
 
 #### Error Handling
 
@@ -719,6 +719,9 @@ CloudWatch `put_metric_data` has a limit of 1000 metric data points per call. Th
 - **ECS log group naming is `/eagle/ecs/{service}-{env}`** — not `/ecs/eagle-{service}`. The Justfile `logs` recipe uses the wrong prefix `/ecs/eagle-{svc}-dev`; correct pattern is `/eagle/ecs/backend-dev` and `/eagle/ecs/frontend-dev`. Always verify with `describe_log_groups(logGroupNamePrefix='/eagle')` (discovered: 2026-02-23, component: /eagle/ecs log groups)
 - **Filter pattern with `?TERM` (question mark) performs OR matching** — `?ERROR ?error ?500 ?failed` returns any line containing any of those terms. Useful for broad error sweeps across ECS logs (discovered: 2026-02-23, component: backend error diagnosis)
 - **Context window scan pattern for errors**: fetch all events from a stream, then scan for error keywords and print surrounding lines (`lines[max(0,i-3):i+8]`) — gives full exception context without needing CloudWatch Insights (discovered: 2026-02-23, component: backend error diagnosis)
+- **Test suite expanded to 38 tests with 3 distinct layers** — Layer 1 (Core + Use Cases, tests 1-28), Layer 2 (Requirements Matrix with canonical acquisition scenarios, tests 29-33), Layer 3 (SDK Path AWS Integration validating full SDK→MCP→AWS tool chain, tests 34-38 including CloudWatch audit trail test 38). emit_to_cloudwatch and test_names dict updated to handle all 38 test IDs (discovered: 2026-02-25, component: eval-suite-expansion)
+- **Layer 3 SDK Path AWS Integration test 38 validates CloudWatch audit trail retrieval** — test_38_sdk_cloudwatch_audit_trail prompts EAGLE to retrieve the last 5 log entries for the session's intake work, validating the agent can query CloudWatch logs. Emitted as structured event: `{"type":"test_result","test_id":38,"test_name":"38_sdk_cloudwatch_audit_trail",...}` (discovered: 2026-02-25, component: SDK-Path-AWS-Integration)
+- **Timestamp offset scaling: test_id ∈ [1, 38] ensures unique deterministic ordering** — emit_to_cloudwatch uses `timestamp = now_ms + test_id` for test_result events, meaning test 38 is offset by +38ms, and run_summary at +100ms sorts last. All 39 events fit within margin with no collisions (discovered: 2026-02-25, component: event-ordering)
 - Per-run streams with ISO timestamp naming provide clean run isolation
 - Non-fatal emission with local file fallback ensures no data loss
 - Idempotent create_log_group/create_log_stream handles first-run and race conditions
@@ -736,10 +739,12 @@ CloudWatch `put_metric_data` has a limit of 1000 metric data points per call. Th
 - Don't use the `search` operation for test-runs without accounting for tenant scoping
 - Don't embed large payloads in event messages (256 KB limit)
 - Don't clear TraceCollector._latest before capturing both trace and summary
+- Don't assume test_id range is 1-20 or 1-28; the suite now has 38 tests across 3 layers
 
 ### common_issues
 - **`just logs` fails with ResourceNotFoundException**: Justfile had wrong log group `/ecs/eagle-{svc}-dev`; correct pattern is `/eagle/ecs/{svc}-dev`. Fixed in Justfile `logs` recipe (2026-02-23)
 - **Claude Agent SDK CLI refuses to run in ECS**: Error `--dangerously-skip-permissions cannot be used with root/sudo privileges`. Fix: add non-root user to Dockerfile.backend — `RUN useradd --no-create-home appuser && chown -R appuser:appuser /app` + `USER appuser`. This is the same fix pattern needed any time the SDK runs inside a container (2026-02-23)
+- **Test suite expanded to 38 tests but emit_to_cloudwatch and _run_test TEST_REGISTRY not updated**: Requires updating test_names dict with tests 29-38 and TEST_REGISTRY with Layer 2 and Layer 3 test functions. Fixed in commit cd8eb26 (2026-02-25, component: eval-suite-expansion)
 - AWS credentials not configured -> emission silently skipped
 - Log group doesn't exist on first run -> auto-created, but describe_log_streams returns empty
 - `search` operation adds tenant_id prefix -> unexpected results for test-run queries
@@ -752,3 +757,5 @@ CloudWatch `put_metric_data` has a limit of 1000 metric data points per call. Th
 - Check `trace_logs.json` first for quick debugging; CloudWatch is for historical analysis
 - Local telemetry mirror at `data/eval/telemetry/cw-*.json` has the same events as CloudWatch — useful for offline verification
 - To verify enriched fields, run a single LLM test (e.g., `--tests 1`) and check the telemetry mirror JSON
+- Tests 34-38 (Layer 3: SDK Path AWS Integration) validate full SDK→MCP→AWS tool chain, including test 38's CloudWatch audit trail retrieval
+- When test suite expands, update both test_names dict in emit_to_cloudwatch AND _run_test TEST_REGISTRY in parallel to avoid mismatches

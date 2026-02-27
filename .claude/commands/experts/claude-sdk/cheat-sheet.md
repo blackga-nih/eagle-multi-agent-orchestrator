@@ -298,15 +298,46 @@ options = ClaudeAgentOptions(
 )
 ```
 
-### Tier-Gated Tools
+### EAGLE Production TIER_TOOLS (Bare Names for Subagents)
 
 ```python
+# sdk_agentic_service.py — bare tool names passed to AgentDefinition.tools
 TIER_TOOLS = {
-    "basic":    ["Read", "Glob"],
-    "advanced": ["Read", "Glob", "Grep", "Task"],
-    "premium":  ["Read", "Glob", "Grep", "Task", "mcp__inventory__lookup_product"],
+    "basic":    [],
+    "advanced": ["Read", "Glob", "Grep", "s3_document_ops", "create_document"],
+    "premium":  ["Read", "Glob", "Grep", "Bash", "s3_document_ops",
+                 "dynamodb_intake", "cloudwatch_logs", "create_document",
+                 "get_intake_status", "intake_workflow", "search_far"],
 }
-TIER_BUDGETS = {"basic": 0.05, "advanced": 0.15, "premium": 0.50}
+TIER_BUDGETS = {"basic": 0.10, "advanced": 0.25, "premium": 0.75}
+```
+
+### EAGLE MCP Server — create_eagle_mcp_server()
+
+```python
+from app.eagle_tools_mcp import create_eagle_mcp_server
+
+# Create the server scoped to a tenant and session
+mcp_server = create_eagle_mcp_server(
+    tenant_id="nci-oa",
+    session_id="nci-oa-premium-u1-s1",
+)
+
+# Wire into sdk_query via mcp_servers (non-fatal pattern)
+mcp_servers: dict = {}
+try:
+    mcp_servers = {"eagle-tools": create_eagle_mcp_server(
+        tenant_id=tenant_id,
+        session_id=session_id or f"{tenant_id}-{tier}-sdk",
+    )}
+except Exception as err:
+    logger.warning("eagle_tools_mcp unavailable: %s", err)
+
+options = ClaudeAgentOptions(
+    # ...
+    **({"mcp_servers": mcp_servers} if mcp_servers else {}),
+    **({"resume": session_id} if session_id else {}),
+)
 ```
 
 ### Bedrock Detection
@@ -344,11 +375,10 @@ try:
     async for msg in query(prompt="...", options=options):
         collector.process(msg)
 except ExceptionGroup as eg:
-    cli_errors = [e for e in eg.exceptions if "CLIConnection" in type(e).__name__]
-    if cli_errors:
-        pass  # Expected MCP server cleanup race on Windows
-    else:
-        raise
+    real_errors = [e for e in eg.exceptions if "CLIConnection" not in type(e).__name__]
+    if real_errors:
+        raise ExceptionGroup("SDK errors", real_errors)
+    # CLIConnection-only errors are expected MCP cleanup race on Windows
 ```
 
 ---
@@ -357,4 +387,6 @@ except ExceptionGroup as eg:
 
 - SDK package: `pip install claude-agent-sdk`
 - Hook documentation: See `expertise.md` Part 7
+- EAGLE MCP server: `server/app/eagle_tools_mcp.py` — 7 business tools
+- Production SDK service: `server/app/sdk_agentic_service.py`
 - Test examples: `server/tests/test_eagle_sdk_eval.py`, `server/tests/test_agent_sdk.py`
