@@ -246,3 +246,45 @@ agent-browser highlight @e1                          # Highlight element
 agent-browser trace start                            # Start recording trace
 agent-browser trace stop trace.zip                   # Stop and save trace
 ```
+
+## Platform Notes — Windows / Git Bash (MINGW64)
+
+**Problem**: agent-browser uses Unix domain sockets which fail in Git Bash / MINGW64.
+
+**Solution**: A WSL2 proxy wrapper at `/c/Users/gblac/bin/agent-browser` intercepts every call
+and re-executes it inside WSL Ubuntu via PowerShell, where sockets work natively.
+
+```
+Windows Git Bash
+  └─ agent-browser <cmd>
+       └─ /c/Users/gblac/bin/agent-browser  (wrapper — first in PATH)
+            └─ powershell.exe -Command "wsl -d Ubuntu -- bash /tmp/cmd-$$.sh"
+                 └─ /home/gblac/.npm-global/bin/agent-browser <cmd>  (real binary in WSL)
+```
+
+The wrapper is **transparent** — all commands work exactly as documented above.
+No changes to syntax are needed when running in Git Bash.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_BROWSER_WSL_DISTRO` | `Ubuntu` | WSL distro to run in |
+| `AGENT_BROWSER_WSL_PATH` | `/home/gblac/.npm-global/bin` | Path to real agent-browser inside WSL |
+| `AGENT_BROWSER_NO_WSL` | _(unset)_ | Set to `1` to bypass WSL and use the Windows `.exe` directly |
+
+### Troubleshooting
+
+```bash
+# Verify the wrapper is the one being invoked
+which agent-browser          # Should print /c/Users/gblac/bin/agent-browser
+
+# Test WSL connectivity manually
+powershell.exe -Command "wsl -d Ubuntu -- which agent-browser"
+
+# Skip WSL and use Windows exe directly (useful to isolate WSL issues)
+AGENT_BROWSER_NO_WSL=1 agent-browser snapshot
+
+# Check if already inside WSL (wrapper runs native binary, no proxy)
+cat /proc/version             # Contains "microsoft" if in WSL
+```
