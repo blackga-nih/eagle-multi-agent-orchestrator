@@ -71,9 +71,9 @@ jobs:
       run: |
         cd ${{ env.CDK_DIR }}
         # Skip EagleCoreStack — stable core infra (Cognito, DDB, IAM) managed manually.
-        # Deploy only the stacks that change with application releases.
+        # --exclusively prevents CDK from following addDependency() to EagleCoreStack.
         npx cdk deploy EagleCiCdStack EagleStorageStack EagleComputeStack EagleEvalStack \
-          --require-approval never --outputs-file outputs.json
+          --exclusively --require-approval never --outputs-file outputs.json
 
     - name: Extract CDK Outputs
       id: outputs
