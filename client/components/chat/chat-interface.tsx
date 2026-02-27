@@ -489,6 +489,7 @@ export default function ChatInterface() {
                     <MessageList
                         messages={streamingMsg ? [...messages, streamingMsg] : messages}
                         isTyping={isStreaming}
+                        streamingMessageId={streamingMsg?.id}
                         activeForm={activeForm}
                         onInitialIntakeSubmit={handleInitialIntakeSubmit}
                         onEquipmentSubmit={handleEquipmentSubmit}

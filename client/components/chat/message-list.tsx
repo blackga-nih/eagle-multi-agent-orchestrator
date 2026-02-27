@@ -11,6 +11,7 @@ import SuggestedPrompts from './suggested-prompts';
 interface MessageListProps {
     messages: Message[];
     isTyping: boolean;
+    streamingMessageId?: string;
     activeForm?: 'initial' | 'equipment' | 'funding' | null;
     onInitialIntakeSubmit?: (data: any) => void;
     onEquipmentSubmit?: (data: any) => void;
@@ -23,6 +24,7 @@ interface MessageListProps {
 export default function MessageList({
     messages,
     isTyping,
+    streamingMessageId,
     activeForm,
     onInitialIntakeSubmit,
     onEquipmentSubmit,
@@ -37,10 +39,12 @@ export default function MessageList({
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({
-            behavior: 'smooth',
+            // Use instant scroll while streaming so the view tracks new tokens
+            // without the jitter that smooth causes on rapid updates
+            behavior: streamingMessageId ? 'instant' : 'smooth',
             block: 'end',
         });
-    }, [messages, isTyping, activeForm]);
+    }, [messages, isTyping, activeForm, streamingMessageId]);
 
     const toggleReasoning = (id: string) => {
         setExpandedReasoning(prev => ({ ...prev, [id]: !prev[id] }));
@@ -166,7 +170,9 @@ export default function MessageList({
                                                 strong: ({ children }) => <strong className="font-bold">{children}</strong>,
                                             }}
                                         >
-                                            {message.content}
+                                            {message.id === streamingMessageId
+                                                ? message.content + '▌'
+                                                : message.content}
                                         </ReactMarkdown>
                                     </div>
                                     <div className="text-[10px] mt-3 font-medium text-gray-400">
@@ -198,8 +204,10 @@ export default function MessageList({
                     </div>
                 )}
 
-                {/* Typing indicator with bouncing dots */}
-                {isTyping && (
+                {/* Typing indicator — only shown while waiting for the first token.
+                    Once the streaming message starts appearing, the cursor (▌) inside
+                    the message bubble takes over as the "still typing" signal. */}
+                {isTyping && !streamingMessageId && (
                     <div className="flex justify-start msg-slide-in">
                         <div className="rounded-2xl rounded-bl-sm p-4 bg-white border border-gray-200 shadow-sm">
                             <div className="flex items-center gap-2 mb-2">
