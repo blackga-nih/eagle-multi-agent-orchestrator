@@ -39,7 +39,6 @@ jobs:
       frontend-repo-uri: ${{ steps.outputs.outputs.frontend-repo-uri }}
       backend-url: ${{ steps.outputs.outputs.backend-url }}
       frontend-url: ${{ steps.outputs.outputs.frontend-url }}
-      eagle-table-name: ${{ steps.outputs.outputs.eagle-table-name }}
 
     steps:
     - name: Checkout code
@@ -70,30 +69,34 @@ jobs:
     - name: CDK Deploy
       run: |
         cd ${{ env.CDK_DIR }}
-        # Skip EagleCoreStack — stable core infra (Cognito, DDB, IAM) managed manually.
-        # --exclusively prevents CDK from following addDependency() to EagleCoreStack.
-        npx cdk deploy EagleCiCdStack EagleStorageStack EagleComputeStack EagleEvalStack \
+        # EagleCoreStack: skip — DynamoDB table exists outside CloudFormation, managed manually.
+        # EagleComputeStack: skip — ECS service logical IDs changed, avoid rollback. ECS
+        #   updates happen in deploy-backend/deploy-frontend via force-new-deployment instead.
+        # --exclusively: prevent CDK from following addDependency() chains to skipped stacks.
+        npx cdk deploy EagleCiCdStack EagleStorageStack EagleEvalStack \
           --exclusively --require-approval never --outputs-file outputs.json
 
-    - name: Extract CDK Outputs
+    - name: Resolve deployment outputs
       id: outputs
       run: |
-        cd ${{ env.CDK_DIR }}
-        # Compute/storage outputs come from this deploy's outputs.json
-        echo "backend-repo-uri=$(jq -r '.EagleComputeStack.BackendRepoUri' outputs.json)" >> $GITHUB_OUTPUT
-        echo "frontend-repo-uri=$(jq -r '.EagleComputeStack.FrontendRepoUri' outputs.json)" >> $GITHUB_OUTPUT
-        echo "backend-url=$(jq -r '.EagleComputeStack.BackendUrl' outputs.json)" >> $GITHUB_OUTPUT
-        echo "frontend-url=$(jq -r '.EagleComputeStack.FrontendUrl' outputs.json)" >> $GITHUB_OUTPUT
-        echo "eagle-table-name=$(jq -r '.EagleCoreStack.EagleTableName' outputs.json)" >> $GITHUB_OUTPUT
-
-        # Cognito IDs come from the stable EagleCoreStack (already deployed)
-        CORE_OUTPUTS=$(aws cloudformation describe-stacks --stack-name EagleCoreStack \
+        # Stable compute values — read from existing deployed stacks via AWS API
+        CORE=$(aws cloudformation describe-stacks --stack-name EagleCoreStack \
           --query "Stacks[0].Outputs" --output json)
-        echo "user-pool-id=$(echo $CORE_OUTPUTS | jq -r '.[] | select(.OutputKey=="UserPoolId") | .OutputValue')" >> $GITHUB_OUTPUT
-        echo "user-pool-client-id=$(echo $CORE_OUTPUTS | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue')" >> $GITHUB_OUTPUT
+        COMPUTE=$(aws cloudformation describe-stacks --stack-name EagleComputeStack \
+          --query "Stacks[0].Outputs" --output json)
 
-        echo "--- CDK Outputs ---"
-        cat outputs.json | jq .
+        echo "user-pool-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolId") | .OutputValue')" >> $GITHUB_OUTPUT
+        echo "user-pool-client-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue')" >> $GITHUB_OUTPUT
+        echo "backend-url=$(echo $COMPUTE | jq -r '.[] | select(.OutputKey=="BackendUrl") | .OutputValue')" >> $GITHUB_OUTPUT
+        echo "frontend-url=$(echo $COMPUTE | jq -r '.[] | select(.OutputKey=="FrontendUrl") | .OutputValue')" >> $GITHUB_OUTPUT
+
+        # ECR URIs — stable, derived from account ID
+        ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        echo "backend-repo-uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-backend-dev" >> $GITHUB_OUTPUT
+        echo "frontend-repo-uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-frontend-dev" >> $GITHUB_OUTPUT
+
+        echo "--- CDK outputs (EagleCiCdStack, EagleStorageStack, EagleEvalStack) ---"
+        cat outputs.json | jq . 2>/dev/null || echo "(no outputs.json)"
 
   # ── Build & Push Backend Container ──────────────────────────
   deploy-backend:
@@ -289,7 +292,7 @@ jobs:
         USE_BEDROCK: 'true'
         CLAUDE_CODE_USE_BEDROCK: '1'
         AWS_REGION: ${{ env.AWS_REGION }}
-        EAGLE_SESSIONS_TABLE: ${{ needs.deploy-infra.outputs.eagle-table-name }}
+        EAGLE_SESSIONS_TABLE: eagle
         S3_BUCKET: ${{ steps.s3.outputs.document-bucket }}
         EVAL_BUCKET: ${{ steps.s3.outputs.eval-bucket }}
       run: |
