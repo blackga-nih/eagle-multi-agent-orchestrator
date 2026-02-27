@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  s3-smoke-test:
+    runs-on: [self-hosted, eagle-github-runner]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Create S3 bucket
+        run: |
+          BUCKET="eagle-smoke-test-$(date +%s)"
+          echo "BUCKET=$BUCKET" >> $GITHUB_ENV
+          aws s3 mb "s3://$BUCKET"
+          echo "Created bucket: $BUCKET"
+
+      - name: Upload hello world file
+        run: |
+          echo "hello world $(date)" > /tmp/hello.txt
+          aws s3 cp /tmp/hello.txt "s3://$BUCKET/hello.txt"
+          echo "Uploaded hello.txt to s3://$BUCKET/"
+
+      - name: Upload testing.txt from repo
+        run: |
+          aws s3 cp testing.txt "s3://$BUCKET/testing.txt"
+          echo "Uploaded testing.txt to s3://$BUCKET/"
+
+      - name: Read hello.txt from bucket
+        run: |
+          echo "--- hello.txt ---"
+          aws s3 cp "s3://$BUCKET/hello.txt" -
+
+      - name: Read testing.txt from bucket
+        run: |
+          echo "--- testing.txt ---"
+          aws s3 cp "s3://$BUCKET/testing.txt" -
+
+      - name: List bucket contents
+        run: |
+          aws s3 ls "s3://$BUCKET/"
+
+      - name: Destroy bucket
+        if: always()
+        run: |
+          aws s3 rm "s3://$BUCKET" --recursive
+          aws s3 rb "s3://$BUCKET"
+          echo "Bucket $BUCKET destroyed"

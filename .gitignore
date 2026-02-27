@@ -79,6 +79,10 @@ node_modules/
 .next/
 next-env.d.ts
 
+# Playwright test artifacts
+client/playwright-report/
+client/test-results/
+
 # Dev-only (not on main)
 notes/
 data/

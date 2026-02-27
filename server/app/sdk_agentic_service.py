@@ -40,6 +40,34 @@ from eagle_skill_constants import SKILL_CONSTANTS, AGENTS, SKILLS, PLUGIN_CONTEN
 
 logger = logging.getLogger("eagle.sdk_agent")
 
+
+def _get_bedrock_env() -> dict:
+    """Resolve AWS credentials via boto3 (handles SSO, IAM roles, env vars) and
+    return as a flat env dict for the Claude CLI subprocess.
+
+    The bundled Claude Code CLI is Node.js and cannot use botocore's SSO resolver,
+    so we bridge the gap: resolve here in Python and pass static creds to the CLI.
+    """
+    import boto3
+
+    env: dict = {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_REGION": os.getenv("AWS_REGION", "us-east-1"),
+        "HOME": os.getenv("HOME", "/home/appuser"),
+    }
+    try:
+        creds = boto3.Session().get_credentials()
+        if creds:
+            frozen = creds.get_frozen_credentials()
+            env["AWS_ACCESS_KEY_ID"] = frozen.access_key
+            env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
+            if frozen.token:
+                env["AWS_SESSION_TOKEN"] = frozen.token
+    except Exception as e:
+        logger.warning("Could not resolve AWS credentials for CLI subprocess: %s", e)
+    return env
+
+
 # ── Configuration ────────────────────────────────────────────────────
 
 MODEL = os.getenv("EAGLE_SDK_MODEL", "haiku")
@@ -335,11 +363,7 @@ async def sdk_query(
         max_turns=max_turns,
         max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
         cwd=os.path.dirname(os.path.abspath(__file__)),
-        env={
-            **os.environ,
-            "CLAUDE_CODE_USE_BEDROCK": "1",
-            "AWS_REGION": "us-east-1",
-        },
+        env=_get_bedrock_env(),
         agents=agents,
         **({"resume": session_id} if session_id else {}),
     )
@@ -394,11 +418,7 @@ async def sdk_query_single_skill(
         max_turns=max_turns,
         max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
         cwd=os.path.dirname(os.path.abspath(__file__)),
-        env={
-            **os.environ,
-            "CLAUDE_CODE_USE_BEDROCK": "1",
-            "AWS_REGION": "us-east-1",
-        },
+        env=_get_bedrock_env(),
     )
 
     async for message in query(prompt=prompt, options=options):
