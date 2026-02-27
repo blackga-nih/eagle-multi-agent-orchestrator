@@ -15,6 +15,9 @@ import { saveGeneratedDocument } from '@/lib/document-store';
 
 export default function SimpleChatInterface() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    // In-flight streaming message kept separate — avoids React batching/duplicate-key issues.
+    const [streamingMsg, setStreamingMsg] = useState<ChatMessage | null>(null);
+    const streamingMsgRef = useRef<ChatMessage | null>(null);
     const [input, setInput] = useState('');
     const [isLoadingSession, setIsLoadingSession] = useState(true);
     const [documents, setDocuments] = useState<Record<string, DocumentInfo[]>>({});
@@ -84,7 +87,21 @@ export default function SimpleChatInterface() {
                 agent_name: msg.agent_name,
             };
             lastAssistantIdRef.current = msg.id;
-            setMessages((prev) => [...prev, newMessage]);
+            streamingMsgRef.current = newMessage;
+            setStreamingMsg(newMessage);
+        },
+        onComplete: () => {
+            const completedMsg = streamingMsgRef.current;
+            if (completedMsg) {
+                lastAssistantIdRef.current = completedMsg.id;
+                setMessages((prev) => [...prev, completedMsg]);
+            }
+            streamingMsgRef.current = null;
+            setStreamingMsg(null);
+        },
+        onError: () => {
+            streamingMsgRef.current = null;
+            setStreamingMsg(null);
         },
         onDocumentGenerated: (doc) => {
             // Attach document to latest assistant message
@@ -142,7 +159,8 @@ export default function SimpleChatInterface() {
         textareaRef.current?.focus();
     };
 
-    const hasMessages = messages.length > 0;
+    const displayMessages = streamingMsg ? [...messages, streamingMsg] : messages;
+    const hasMessages = displayMessages.length > 0;
 
     return (
         <div className="h-full flex flex-col bg-[#F5F7FA]">
@@ -154,7 +172,7 @@ export default function SimpleChatInterface() {
                 <SimpleWelcome onAction={insertText} />
             ) : (
                 <SimpleMessageList
-                    messages={messages}
+                    messages={displayMessages}
                     isTyping={isStreaming}
                     documents={documents}
                     sessionId={currentSessionId}

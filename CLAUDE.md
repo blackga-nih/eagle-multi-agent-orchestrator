@@ -1,254 +1,150 @@
-## EAGLE
+# CLAUDE.md
 
-Multi-tenant Bedrock Agent Core app. Government acquisition domain.
-Next.js + FastAPI + CDK + Claude SDK. Developed through TAC methodology.
+This file provides guidance to Claude Code when working with this repository.
 
----
+## Project Overview
 
-## Constraints
-
-- Specs → `.claude/specs/` (all plans written here with validation commands)
-- Agent/skill source of truth → `eagle-plugin/` (not server code)
-- Subscription tiers gate features: basic / advanced / premium
-- Session ID format: `{tenant_id}-{tier}-{user_id}-{session_id}`
-- DynamoDB single-table: `SESSION#`, `MSG#`, `USAGE#`, `COST#`, `SUB#`
-
-## File Traceability
-
-Every generated artifact follows the canonical naming pattern:
-
-```
-{YYYYMMDD}-{HHMMSS}-{type}-{slug}-v{N}.{ext}
-```
-
-| Component | Rule |
-|-----------|------|
-| `YYYYMMDD-HHMMSS` | Timestamp at generation time. Never omitted. |
-| `{type}` | Document type prefix from the Type Registry below. |
-| `{slug}` | Kebab-case title, max 5 words, no stop words (the/a/and/of/for). |
-| `v{N}` | Version integer starting at `v1`. Increment when regenerating the same type+slug. |
-| `{ext}` | `.md` · `.ppt.md` (Marp) · `.excalidraw.md` |
-
-**Type Registry**:
-
-| Type prefix | Content | Destination | Example |
-|-------------|---------|-------------|---------|
-| `plan` | Expert plans, specs | `.claude/specs/` | `20260217-143000-plan-claude-sdk-signing-v1.md` |
-| `pbi` | Plan-build-improve cycles | `.claude/specs/` | `20260217-143000-pbi-frontend-dark-mode-v1.md` |
-| `context` | Research, spike notes | `.claude/context/` | `20260217-150000-context-kms-signing-v1.md` |
-| `eval` | Eval run results | `server/tests/` | `20260217-160000-eval-sdk-patterns-v1.md` |
-| `meeting` | Meeting notes | `docs/development/meeting-transcripts/` | `20260217-170000-meeting-sprint-planning-v1.md` |
-| `code-review` | Code review presentations | `docs/development/` | `20260222-143000-code-review-eagle-full-v1.md` |
-| `arch` | Architecture reports | `docs/architecture/` | `20260222-150000-arch-eagle-streaming-v1.excalidraw.md` |
-| `report` | Generic analysis | `docs/development/` | `20260222-160000-report-cost-attribution-v1.md` |
-
-**Versioning rule**: Before writing, scan the destination directory for files matching
-`*-{type}-{slug}-v*.{ext}`. Take the highest `N` found and write `v{N+1}`. If no match, write `v1`.
-Old files are never overwritten — every run appends to the chronological audit trail.
-
-**Slug rules**: lowercase · kebab-case · max 5 words · strip stop words (a/an/the/and/or/of/in/to/for/with)
-
-**Scribe is the enforcer** — run `/scribe` to format any report and have the convention applied automatically.
-See `.claude/commands/scribe.md` for the full spec.
+EAGLE is a multi-tenant AI acquisition assistant for NCI (National Cancer Institute). It helps contracting officers navigate federal procurement — intake, FAR/DFARS guidance, document generation (SOW, IGCE, AP). Built with TAC methodology: supervisor orchestrates specialist subagents via Claude Agent SDK, streamed over SSE to a Next.js frontend.
 
 ---
 
-## Primitive Map
+## Tech Stack
 
-> "If you've done it twice, template it. If it needs domain knowledge, make it an expert." — TAC #3
+| Technology | Purpose |
+|------------|---------|
+| Next.js (App Router) | Frontend — chat UI, admin dashboard, Playwright E2E |
+| FastAPI | Backend — SSE streaming, tool dispatch, Cognito auth |
+| Claude Agent SDK | Supervisor → subagent orchestration (primary path) |
+| Anthropic API | Direct fallback when SDK subprocess fails |
+| AWS CDK (TypeScript) | Infrastructure — ECS Fargate, Cognito, DynamoDB, S3 |
+| DynamoDB single-table | Sessions, messages, usage, costs, subscriptions |
 
-| Signal | Primitive | Location |
-|--------|-----------|----------|
-| Frontend task | `/experts:frontend:plan` | `.claude/commands/experts/frontend/` |
-| Backend task | `/experts:backend:plan` | `.claude/commands/experts/backend/` |
-| CDK / AWS task | `/experts:aws:plan` | `.claude/commands/experts/aws/` |
-| Agent orchestration | `/experts:claude-sdk:plan` | `.claude/commands/experts/claude-sdk/` |
-| Deploy / CI-CD | `/experts:deployment:plan` | `.claude/commands/experts/deployment/` |
-| Monitoring | `/experts:cloudwatch:plan` | `.claude/commands/experts/cloudwatch/` |
-| Eval / testing | `/experts:eval:plan` | `.claude/commands/experts/eval/` |
-| Git workflow | `/experts:git:plan` | `.claude/commands/experts/git/` |
-| TAC methodology | `/experts:tac:plan` | `.claude/commands/experts/tac/` |
+---
 
-### Composition Examples
+## Commands
+
 ```bash
-# Simple: single expert
-/experts:backend:plan "Add health check endpoint"
+# Frontend (client/)
+npm run dev                              # → localhost:3000
+npx tsc --noEmit                         # Type check
+npx playwright test                      # E2E tests
 
-# Composed: expert plans, then executes with self-improvement
-/experts:frontend:plan_build_improve "Add dark mode to admin dashboard"
+# Backend (server/)
+uvicorn app.main:app --reload --port 8000
+ruff check app/                          # Lint
+python -m pytest tests/ -v              # Unit + eval tests
 
-# Cross-domain: chain experts
-/experts:claude-sdk:plan "Add document-signing skill"
-# → then: /experts:backend:plan "Wire skill to streaming route"
-# → then: /experts:frontend:plan "Add signing UI to document viewer"
-# → then: /experts:aws:plan "Add KMS key for document signing"
+# Infrastructure (infrastructure/cdk-eagle/)
+npm run build && npx cdk synth --quiet
 ```
 
 ---
 
-## Layer Reference
-
-### Frontend (`client/`)
-
-| Concern | Key Files |
-|---------|-----------|
-| Pages | `app/chat/`, `app/admin/`, `app/documents/`, `app/workflows/` |
-| Components | `components/chat/`, `components/agents/`, `components/forms/`, `components/ui/` |
-| State | `contexts/auth-context.tsx`, `contexts/session-context.tsx` |
-| Hooks | `hooks/use-agent-stream.ts`, `hooks/use-expertise.ts`, `hooks/use-mcp-client.ts` |
-| Types | `types/chat.ts`, `types/conversation.ts`, `types/expertise.ts`, `types/mcp.ts` |
-| Tests | `tests/*.spec.ts` (Playwright E2E) |
-| Templates | `public/templates/` (SOW, IGCE, AP, Market Research) |
-
-**Patterns**: App Router, React Context for state, custom hooks for data fetching,
-Zod for form validation, Tailwind for styling, Lucide for icons.
-
-**Validate**: `npx tsc --noEmit && npx playwright test`
-
----
-
-### Backend (`server/`)
-
-| Concern | Key Files |
-|---------|-----------|
-| Entry point | `app/main.py` (FastAPI routes, CORS, middleware) |
-| Orchestration | `app/sdk_agentic_service.py` (Claude SDK — PRIMARY) |
-| Legacy orch | `app/agentic_service.py` (prompt injection — DEPRECATED) |
-| Auth | `app/cognito_auth.py` (JWT → tenant context) |
-| Storage | `app/session_store.py` (DynamoDB single-table CRUD) |
-| Costs | `app/cost_attribution.py` + `app/admin_cost_service.py` |
-| Models | `app/models.py` (Pydantic schemas) |
-| Streaming | `app/stream_protocol.py` + `app/streaming_routes.py` |
-| Doc export | `app/document_export.py` (PDF/Word) |
-| Skill loader | `eagle_skill_constants.py` (auto-discovery) |
-| Tests | `tests/test_agent_sdk.py`, `tests/test_eagle_sdk_eval.py` |
-
-**Patterns**: Pydantic models for all data, DynamoDB single-table with PK/SK prefixes,
-SSE streaming for agent responses, Cognito JWT for multi-tenant auth.
-
-**Validate**: `ruff check app/ && python -m pytest tests/ -v`
-
----
-
-### Infrastructure (`infrastructure/cdk-eagle/`)
-
-| Stack | Responsibility |
-|-------|----------------|
-| `core-stack.ts` | VPC, Cognito user pool, IAM roles, S3 buckets, DynamoDB tables |
-| `compute-stack.ts` | ECS Fargate services, ECR repos, ALB, target groups |
-| `cicd-stack.ts` | GitHub OIDC provider, deploy IAM role |
-| `eval-stack.ts` | CloudWatch dashboards, alarms, eval metrics |
-| `config/environments.ts` | Per-env settings (CPU, memory, domain, etc.) |
-
-**Environments**: dev (512/1024 MiB) → staging → prod (1024/2048 MiB)
-
-**Validate**: `npm run build && npx cdk synth --quiet`
-
----
-
-### EAGLE Plugin (`eagle-plugin/`)
-
-Single source of truth for all agent and skill definitions.
+## Project Structure
 
 ```
-eagle-plugin/
-├── plugin.json              ← Manifest (agent list, skill list)
-├── agents/
-│   ├── supervisor/agent.md  ← Orchestrator (YAML frontmatter + system prompt)
-│   ├── legal-counsel/
-│   ├── market-intelligence/
-│   ├── tech-translator/
-│   ├── public-interest/
-│   ├── policy-supervisor/
-│   ├── policy-librarian/
-│   └── policy-analyst/
-├── skills/
-│   ├── oa-intake/SKILL.md
-│   ├── document-generator/SKILL.md
-│   ├── compliance/SKILL.md
-│   ├── knowledge-retrieval/SKILL.md
-│   └── tech-review/SKILL.md
-└── commands/                ← Plugin-specific commands
+/
+├── client/              ← Next.js frontend
+├── server/              ← FastAPI + Claude SDK backend
+│   └── app/             ← Routes, services, stores
+├── eagle-plugin/        ← Agent + skill definitions (source of truth)
+│   ├── plugin.json      ← Active agents + skills manifest
+│   ├── agents/          ← supervisor + 7 specialists
+│   └── skills/          ← 5 skill definitions
+├── infrastructure/
+│   └── cdk-eagle/       ← CDK stacks (Core, Compute, CiCd, Eval)
+├── .claude/
+│   ├── commands/experts/ ← 9 expert domains
+│   └── specs/           ← Implementation plans
+└── docs/                ← Architecture, meeting notes
 ```
-
-**Format**: Each agent/skill has YAML frontmatter (name, type, triggers, tools) + markdown body.
-**Rule**: Modify agents/skills HERE, not in `server/app/`. The server auto-loads from plugin.
 
 ---
 
-## Expert System (ACT-LEARN-REUSE)
+## Architecture
 
-```
-.claude/commands/experts/{domain}/
-├── expertise.md|yaml     ← Accumulated mental model (never edit manually)
-├── question.md           ← Query the expert (REUSE)
-├── plan.md               ← Domain-aware planning (REUSE)
-├── plan_build_improve.md ← Full cycle: plan → build → self-improve (ACT → LEARN → REUSE)
-└── self-improve.md       ← Validate & update expertise (LEARN)
-```
+**Flow**: `POST /api/chat/stream` → `sdk_query()` → supervisor (Task tool) → specialist subagents (each gets a fresh context window via `AgentDefinition`). Falls back to direct Anthropic API when the SDK subprocess can't start (e.g. nested Claude Code session).
 
-**9 Active Domains**: frontend, backend, aws, claude-sdk, deployment, cloudwatch, eval, git, tac
+**Streaming**: `StreamingResponse` → `asyncio.Queue` → `MultiAgentStreamWriter` → SSE events (`text`, `tool_use`, `complete`, `error`) → `use-agent-stream.ts` hook.
 
-### When to Create a New Expert
-- You've asked the same domain question 3+ times
-- A domain has non-obvious patterns that agents keep getting wrong
-- You need accumulated knowledge across sessions (not just one-off context)
-
-### Expert Golden Rules
-1. Never edit expertise files manually — run `/experts:{domain}:self-improve`
-2. Run self-improve after significant changes to that domain's code
-3. Each expert validates its knowledge against the actual codebase, not assumptions
+**Plugin loading**: `eagle_skill_constants.py` auto-discovers `eagle-plugin/agents/*/agent.md` + `skills/*/SKILL.md` via YAML frontmatter. Never put agent content in `server/app/` — modify `eagle-plugin/` only.
 
 ---
 
-## Validation Ladder (TAC #5)
+## Code Patterns
 
-```
-Level 1 — Lint          ruff check (Python) / tsc --noEmit (TypeScript)
-Level 2 — Unit          pytest tests/ (backend) / vitest (if added)
-Level 3 — E2E           playwright test (frontend flows)
-Level 4 — Infra         cdk synth --quiet (CDK compiles)
-Level 5 — Integration   docker compose up --build (full stack)
-Level 6 — Eval          CloudWatch dashboard post-deploy metrics
-```
+**Naming**
+- Artifacts: `{YYYYMMDD}-{HHMMSS}-{type}-{slug}-v{N}.{ext}` (scan dest dir for highest `vN`, never overwrite)
+- DynamoDB keys: `SESSION#`, `MSG#`, `USAGE#`, `COST#`, `SUB#`
+- Session IDs: `{tenant_id}-{tier}-{user_id}-{session_id}`
 
-| Change Type | Minimum Level |
-|-------------|---------------|
-| Typo / copy fix | Level 1 |
-| Backend logic | Level 1 + 2 |
-| Frontend UI | Level 1 + 3 |
-| CDK change | Level 1 + 4 |
-| Cross-stack feature | Level 1-5 |
-| Production deploy | Level 1-6 |
+**Rules**
+- Subscription tiers gate features: `basic` / `advanced` / `premium`
+- Never edit `expertise.md` files manually — run `/experts:{domain}:self-improve`
+- Specs go in `.claude/specs/` with validation commands included
 
 ---
 
-## Context Engineering (R&D)
+## Validation
 
-### Reduce
-- CLAUDE.md stays under 200 lines (production cut)
-- Don't duplicate `eagle-plugin/` content — reference it
-- Don't inline architecture diagrams — point to `docs/architecture/`
-- Each expert loads its context on invocation, not always-on
+```bash
+ruff check app/          # Level 1 — Python lint
+npx tsc --noEmit         # Level 1 — TypeScript check
+python -m pytest tests/  # Level 2 — Unit + eval
+npx playwright test      # Level 3 — E2E
+npx cdk synth --quiet    # Level 4 — Infra compile
+```
 
-### Delegate
-- Domain questions → `/experts:{domain}:question`
-- Architecture reference → `docs/` directory
-- Agent/skill definitions → `eagle-plugin/` (auto-loaded by server)
-- Implementation specs → `.claude/specs/`
-- Meeting context → `docs/development/meeting-transcripts/`
+| Change type | Minimum |
+|-------------|---------|
+| Backend logic | 1 + 2 |
+| Frontend UI | 1 + 3 |
+| CDK change | 1 + 4 |
+| Production deploy | 1–4 + docker compose |
 
 ---
 
-## Maturity Tracker
+## Key Files
 
-| Workflow | Current Level | Target |
-|----------|---------------|--------|
-| Frontend features | In-Loop | Out-Loop |
-| Backend endpoints | Out-Loop | Out-Loop |
-| CDK changes | In-Loop | Out-Loop |
-| Agent skill additions | In-Loop | Out-Loop |
-| Bug fixes | Out-Loop | Zero-Touch |
-| Eval runs | Out-Loop | Zero-Touch |
+| File | Purpose |
+|------|---------|
+| `server/app/sdk_agentic_service.py` | Claude SDK orchestration — supervisor + subagents |
+| `server/app/streaming_routes.py` | SSE endpoint + fallback to direct API |
+| `server/app/stream_protocol.py` | SSE event format (`MultiAgentStreamWriter`) |
+| `server/eagle_skill_constants.py` | Auto-discovery of plugin content |
+| `eagle-plugin/plugin.json` | Active agents + skills manifest |
+| `client/hooks/use-agent-stream.ts` | Frontend SSE consumer |
+| `client/components/chat-simple/simple-chat-interface.tsx` | Active chat UI |
+| `infrastructure/cdk-eagle/lib/` | CDK stacks (Core, Compute, CiCd) |
 
-**Graduation path**: In-Loop (3+ successes) → Template as command → Add validation → Out-Loop ADW → Zero-Touch
+---
+
+## On-Demand Context
+
+| Need | Where |
+|------|-------|
+| Frontend patterns | `/experts:frontend:question` |
+| Backend patterns | `/experts:backend:question` |
+| AWS / CDK | `/experts:aws:question` |
+| Claude SDK | `/experts:claude-sdk:question` |
+| Deployment | `/experts:deployment:question` |
+| Eval suite | `/experts:eval:question` |
+| Architecture diagrams | `docs/architecture/` |
+| Implementation specs | `.claude/specs/` |
+
+**Expert system**: `.claude/commands/experts/{domain}/` — 9 domains: `frontend` · `backend` · `aws` · `claude-sdk` · `deployment` · `cloudwatch` · `eval` · `git` · `tac`. Run `/experts:{domain}:plan` to plan, `/experts:{domain}:self-improve` after significant changes.
+
+---
+
+## Notes
+
+### Artifact Naming
+
+| Type | Destination | Example |
+|------|-------------|---------|
+| `plan` | `.claude/specs/` | `20260217-143000-plan-sdk-signing-v1.md` |
+| `pbi` | `.claude/specs/` | `20260217-143000-pbi-frontend-dark-mode-v1.md` |
+| `eval` | `server/tests/` | `20260217-160000-eval-sdk-patterns-v1.md` |
+| `arch` | `docs/architecture/` | `20260222-150000-arch-streaming-v1.excalidraw.md` |
+| `report` | `docs/development/` | `20260222-160000-report-cost-v1.md` |
+| `meeting` | `docs/development/meeting-transcripts/` | `20260217-170000-meeting-sprint-planning-v1.md` |

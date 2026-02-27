@@ -4,7 +4,7 @@ parent: "[[frontend/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, frontend, nextjs, tailwind, chat, dashboard, test-results]
-last_updated: 2026-02-09T00:00:00
+last_updated: 2026-02-25T00:00:00
 ---
 
 # Frontend Expertise (Complete Mental Model)
@@ -28,7 +28,8 @@ last_updated: 2026-02-09T00:00:00
 
 | Route | File | Description |
 |-------|------|-------------|
-| `/` | `app/page.tsx` | Minimalist chat (EAGLE reference design) |
+| `/` | `app/page.tsx` | Feature hub — 4 cards: Chat, Templates, Acquisition Packages, Admin |
+| `/chat` | `app/chat/page.tsx` | Minimalist chat with sidebar nav (SimpleChatInterface) |
 | `/chat-advanced` | `app/chat-advanced/page.tsx` | Complex chat with sidebar, forms, agent logs |
 | `/login` | `app/login/page.tsx` | Cognito sign-in page |
 | `/admin` | `app/admin/page.tsx` | Admin dashboard home |
@@ -50,13 +51,19 @@ last_updated: 2026-02-09T00:00:00
 
 | Route | Purpose |
 |-------|---------|
+| `/api/health` | Proxies to FastAPI `/api/health`; returns 502 if backend unreachable |
 | `/api/trace-logs` | Serves trace_logs.json; `?list=1` lists all runs, `?run=<file>` loads specific run |
 | `/api/cloudwatch` | `?runs=1` lists CW streams; `?stream=<name>&group=test-runs` loads events |
 | `/api/prompts` | Loads skill prompt files from eagle-plugin/ |
 | `/api/invoke` | Agent invocation endpoint |
 | `/api/conversations` | Conversation CRUD |
+| `/api/conversations/[agentId]` | Agent-specific conversation history |
+| `/api/conversations/context` | Conversation context endpoint |
 | `/api/sessions` | Session management |
+| `/api/sessions/[sessionId]` | Single session CRUD |
+| `/api/sessions/[sessionId]/messages` | Session messages |
 | `/api/documents` | Document CRUD |
+| `/api/documents/[id]` | Single document operations |
 | `/api/user` | Current user info |
 | `/api/user/usage` | Usage tracking |
 | `/api/admin/dashboard` | Admin dashboard data |
@@ -79,12 +86,13 @@ components/
   |   |-- inline-funding-form.tsx    # Funding detail form
   |   |-- agent-message.tsx          # Agent message bubble
   |
-  |-- chat-simple/                   # Minimalist chat (used at /)
+  |-- chat-simple/                   # Minimalist chat (used at /chat)
   |   |-- simple-chat-interface.tsx  # Simple chat main
   |   |-- simple-message-list.tsx    # Simple message list
   |   |-- simple-welcome.tsx         # Simple welcome
   |   |-- simple-header.tsx          # Simple header
   |   |-- simple-quick-actions.tsx   # Quick action buttons
+  |   |-- document-card.tsx          # Document result card (links to /documents/[id])
   |
   |-- layout/
   |   |-- top-nav.tsx                # Top navigation bar
@@ -197,7 +205,7 @@ interface AcquisitionData {
 - `isStreaming` controls UI state
 - Falls back to mock response when backend offline
 
-### Minimalist Chat (`/`)
+### Minimalist Chat (`/chat`)
 
 **Components**: `components/chat-simple/`
 - `simple-chat-interface.tsx`: Minimal layout, no sidebar
@@ -205,6 +213,20 @@ interface AcquisitionData {
 - `simple-welcome.tsx`: Simple welcome card
 - `simple-header.tsx`: Minimal header
 - `simple-quick-actions.tsx`: Quick action buttons
+- `document-card.tsx`: Renders document results from agent (links to `/documents/[id]`)
+
+**Layout**: `SimpleHeader` + `SidebarNav` + `SimpleChatInterface` (no form-heavy sidebar)
+
+### Home Page (`/`)
+
+Not a chat page — it is a feature hub landing page with:
+- Left column: EAGLE branding + description
+- Right column: 4 `<Link>` feature cards:
+  1. **Chat** → `/chat`
+  2. **Document Templates** → `/admin/templates`
+  3. **Acquisition Packages** → `/workflows`
+  4. **Admin** → `/admin`
+- Footer: "EAGLE · National Cancer Institute · Powered by Claude (Anthropic SDK)"
 
 ### Welcome Message
 
@@ -274,15 +296,16 @@ interface TraceData {
 
 **Key Data Structures**:
 
-1. **USE_CASES** array: 8 use cases (UC-01 happy, UC-01 complex, UC-02 through UC-09)
+1. **USE_CASES** array: 10 use cases
+   - `uc01-happy`, `uc01-complex`, `uc01-full-chain`, `uc02`, `uc03`, `uc04`, `uc05`, `uc07`, `uc08`, `uc09`
    - Each has: id, title, subtitle, actors[], phases[], steps[]
    - Step types: `message`, `self`, `note`
    - Steps can have `prompt` key linking to skill prompts
 
-2. **PROMPT_TITLES** Record: Human names for skill prompt keys
-   - supervisor, intake, docgen, compliance, tech-review, knowledge-retrieval
+2. **PROMPT_TITLES** Record: Human names for all agent/skill prompt keys (~line 659)
+   - 8 agents + 5 skills + 2 diagram aliases (see Part 4)
 
-3. **SKILL_TEST_MAP** Record: Maps prompt/tool keys to test IDs (see Part 4)
+3. **SKILL_TEST_MAP** Record: Maps plugin-slug keys to test IDs (~line 681)
 
 **Features**:
 - SVG sequence diagram with actor headers, lifelines, message arrows, self-loops, notes
@@ -305,7 +328,7 @@ interface TraceData {
 
 ### TEST_NAMES (`client/app/admin/tests/page.tsx` ~line 28)
 
-Maps test ID strings to human-readable names for the Next.js test results page:
+Maps test ID strings to human-readable names for the Next.js test results page. Currently 27 entries:
 
 ```typescript
 const TEST_NAMES: Record<string, string> = {
@@ -329,24 +352,36 @@ const TEST_NAMES: Record<string, string> = {
     '18': 'CloudWatch Logs Operations',
     '19': 'Document Generation',
     '20': 'CloudWatch E2E Verification',
+    '21': 'UC-02 Micro-Purchase (<$15K)',
+    '22': 'UC-03 Option Exercise',
+    '23': 'UC-04 Contract Modification',
+    '24': 'UC-05 CO Package Review',
+    '25': 'UC-07 Contract Close-Out',
+    '26': 'UC-08 Shutdown Notification',
+    '27': 'UC-09 Score Consolidation',
 };
 ```
 
-### SKILL_TEST_MAP (`client/app/admin/eval/page.tsx` ~line 446)
+### SKILL_TEST_MAP (`client/app/admin/eval/page.tsx` ~line 681)
 
-Maps skill/tool keys to test IDs for cross-referencing in the eval modal:
+Maps plugin-slug keys (full agent/skill names) to test IDs for cross-referencing in the eval modal.
+Keys use full plugin slugs — NOT the short diagram actor IDs:
 
 ```typescript
 const SKILL_TEST_MAP: Record<string, number[]> = {
-    intake: [7, 9],
-    docgen: [14],
-    'tech-review': [12],
-    compliance: [10],
-    supervisor: [15],
-    '02-legal.txt': [10],
-    '04-market.txt': [11],
-    '03-tech.txt': [12],
-    '05-public.txt': [13],
+    'oa-intake': [7, 9, 21, 22, 23],
+    'document-generator': [14],
+    'tech-review': [12, 27],
+    compliance: [10, 24, 25, 26],
+    supervisor: [15, 28],
+    'legal-counsel': [10, 24, 25, 26, 28],
+    'market-intelligence': [11, 28],
+    'tech-translator': [12, 27],
+    'public-interest': [13],
+    'policy-supervisor': [],
+    'policy-librarian': [],
+    'policy-analyst': [],
+    'sdk-skill-subagent': [28],
     s3_document_ops: [16],
     dynamodb_intake: [17],
     cloudwatch_logs: [18],
@@ -355,18 +390,32 @@ const SKILL_TEST_MAP: Record<string, number[]> = {
 };
 ```
 
-### PROMPT_TITLES (`client/app/admin/eval/page.tsx` ~line 436)
+Note: Test 28 is referenced in SKILL_TEST_MAP but not yet in TEST_NAMES — it will need a TEST_NAMES entry when the test is added.
 
-Fallback display names for skill prompts while API loads:
+### PROMPT_TITLES (`client/app/admin/eval/page.tsx` ~line 659)
+
+Fallback display names for all agents, skills, and diagram actor aliases while API loads:
 
 ```typescript
 const PROMPT_TITLES: Record<string, string> = {
+    // Agents
     supervisor: 'EAGLE Supervisor Agent',
-    intake: 'OA Intake Skill',
-    docgen: 'Document Generator Skill',
+    'legal-counsel': 'Legal Counsel Agent',
+    'market-intelligence': 'Market Intelligence Agent',
+    'tech-translator': 'Tech Translator Agent',
+    'public-interest': 'Public Interest Agent',
+    'policy-supervisor': 'Policy Supervisor Agent',
+    'policy-librarian': 'Policy Librarian Agent',
+    'policy-analyst': 'Policy Analyst Agent',
+    // Skills
+    'oa-intake': 'OA Intake Skill',
+    'document-generator': 'Document Generator Skill',
     compliance: 'Compliance Skill',
     'tech-review': 'Tech Review Skill',
     'knowledge-retrieval': 'Knowledge Retrieval Skill',
+    // Aliases for USE_CASES diagram actor IDs
+    intake: 'OA Intake Skill',
+    docgen: 'Document Generator Skill',
 };
 ```
 
@@ -413,6 +462,8 @@ const TEST_DEFS = [
     { id: 20, name: "CloudWatch E2E Verification", desc: "...", category: "aws" },
 ];
 ```
+
+Note: The HTML dashboard TEST_DEFS still covers tests 1-20 only. Tests 21-27 (UC use-case tests) are in TEST_NAMES on the Next.js page but may not yet be added to the HTML dashboard.
 
 ### Category System
 
@@ -633,9 +684,11 @@ When adding a new test, the following 3 frontend locations must be updated:
 |---|------|----------|--------|
 | 1 | `test_results_dashboard.html` | `TEST_DEFS` (~line 124) | `{ id: N, name: "...", desc: "...", category: "..." }` |
 | 2 | `client/app/admin/tests/page.tsx` | `TEST_NAMES` (~line 28) | `'N': 'Human Name'` |
-| 3 | `client/app/admin/eval/page.tsx` | `SKILL_TEST_MAP` (~line 446) | `key: [N]` (if skill/tool test) |
+| 3 | `client/app/admin/eval/page.tsx` | `SKILL_TEST_MAP` (~line 681) | `key: [N]` (if skill/tool test) |
 
 Plus the readiness panel in `test_results_dashboard.html` (~line 306).
+
+**Important**: Tests 21-27 (UC use-case tests) exist in TEST_NAMES but the HTML dashboard TEST_DEFS has not been updated to include them. When adding new UC tests, update both. SKILL_TEST_MAP references test 28 but it does not yet have a TEST_NAMES entry.
 
 ### Data Flow
 
@@ -661,7 +714,8 @@ CloudWatch /eagle/test-runs
 - Dark theme for eval page (SVG-based), light theme for chat and tests
 - Inline forms in message list (not separate pages)
 - Debounced session saves (500ms timeout)
-- Backend health check with 30-second polling interval
+- Backend health check via `/api/health` proxy route (30-second polling interval)
+- Full plugin slugs as SKILL_TEST_MAP keys (e.g., `'oa-intake'`, `'document-generator'`) matching eagle-plugin/ directory names
 
 ### Patterns To Avoid
 
@@ -669,22 +723,25 @@ CloudWatch /eagle/test-runs
 - Don't use server components for pages with useState/useEffect (must be 'use client')
 - Don't forget to update both frontends when adding tests (HTML + Next.js)
 - Don't hardcode test counts in descriptions/labels (derive from data)
+- Don't use short diagram actor aliases (`intake`, `docgen`) as SKILL_TEST_MAP keys — use the full plugin slug
 
 ### Common Issues
 
-- **Backend offline**: Chat falls back to mock responses; health indicator shows red
+- **Backend offline**: Chat falls back to mock responses; health indicator shows red; `/api/health` returns 502
 - **trace_logs.json missing**: Tests page shows error with run instructions
 - **Cognito not configured**: Auth runs in dev mode with mock user (premium tier)
 - **API routes fail**: Eval page shows empty run selector, traces tab says "No test traces"
 - **SKILL_TEST_MAP missing key**: Eval modal "Test Traces" tab shows no results for that skill
+- **TEST_NAMES/TEST_DEFS out of sync**: New tests show raw IDs on Next.js page or are missing from HTML dashboard
 
 ### Tips
 
-- Open `test_results_dashboard.html` directly in browser for quick test result viewing
+- Open `test_results_dashboard.html` directly in browser for quick test result viewing (tests 1-20)
 - The eval page keyboard shortcuts: arrows (navigate), +/- (zoom), 0 (fit), Enter (view prompt)
 - Filter buttons in HTML dashboard support category-based filtering (skills, workflow, aws)
 - The eval page's run selector prefers CloudWatch runs first, then local files
 - Dev mode auth (no Cognito) gives premium tier with admin role
+- `/api/health` proxies to FastAPI and returns 502 if backend is unreachable — useful for health indicator polling
 
 ---
 
@@ -695,17 +752,22 @@ CloudWatch /eagle/test-runs
 - TEST_NAMES as simple Record<string, string> makes adding tests trivial
 - SKILL_TEST_MAP enables automatic cross-referencing in eval modal
 - Readiness panel provides at-a-glance status for all capabilities
+- Full plugin slugs as SKILL_TEST_MAP keys keeps eval page in sync with eagle-plugin/ naming
+- Home page as feature hub (not chat) provides cleaner first-use experience
 
 ### patterns_to_avoid
 - Don't rely on embedded data in HTML dashboard for production (use API)
 - Don't mix dark and light themes within a single page component
+- Don't use short diagram aliases (intake, docgen) as SKILL_TEST_MAP keys — they differ from plugin slugs
 
 ### common_issues
 - trace_logs.json must exist for /admin/tests to show data
 - CloudWatch runs require AWS credentials configured in the environment
 - Eval modal tabs show empty state when no run is selected
+- HTML dashboard TEST_DEFS lags behind TEST_NAMES when new UC tests are added — check both before reporting test count
 
 ### tips
-- Use /admin/eval to demonstrate EAGLE workflow to stakeholders (8 use cases)
+- Use /admin/eval to demonstrate EAGLE workflow to stakeholders (10 use cases as of 2026-02-25)
 - The eval page's SVG diagram supports export (right-click save as SVG)
 - Run `npm run build` in client/ to verify no TypeScript errors
+- SKILL_TEST_MAP line numbers shift as USE_CASES array grows — always verify line numbers with grep before editing

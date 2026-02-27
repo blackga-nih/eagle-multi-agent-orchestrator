@@ -4,7 +4,7 @@ parent: "[[deployment/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, deployment, aws, cdk]
-last_updated: 2026-02-23T18:00:00
+last_updated: 2026-02-25T12:00:00
 ---
 
 # Deployment Expertise (Complete Mental Model)
@@ -19,10 +19,20 @@ last_updated: 2026-02-23T18:00:00
 
 Infrastructure is managed by **5 CDK stacks** in `infrastructure/cdk-eagle/` (TypeScript). Some resources (S3 `nci-documents`, DynamoDB `eagle`, Bedrock access) were manually provisioned and are imported by CDK.
 
+### Account Architecture (Two-Account Model)
+
+| Account | ID | Role | Deploy from local? |
+|---------|----|------|--------------------|
+| **Personal (dev)** | `274487662938` | Greg's personal AWS account — EAGLE infrastructure lives here (ECS, VPC, Cognito, ECR) | **Yes** — local CDK/AWS CLI credentials point here |
+| **Client (NCI replica)** | `695681773636` | Client environment being replicated — `DEV_CONFIG` in `environments.ts`, ECR image URIs reference this ID | **No** — deploy only via GitHub Actions OIDC from CI/CD pipeline |
+
+> **Rule**: `cdk deploy`, `cdk destroy`, or any destructive AWS CLI command must NEVER target `695681773636` from a local machine. Local credentials are scoped to `274487662938`. All operations against the client account go through the GitHub Actions pipeline only.
+
 ```
 Provisioning: CDK-managed (5 stacks) + manually-created imported resources
 Region: us-east-1
-Account: 274487662938
+Account (personal/dev): 274487662938  ← local CDK + boto3 target
+Account (client replica): 695681773636  ← environments.ts DEV_CONFIG, CI/CD only
 CDK: infrastructure/cdk-eagle/ (TypeScript)
   - EagleCiCdStack:    GitHub Actions OIDC + deploy role
   - EagleCoreStack:    VPC, Cognito, IAM app role, imports S3/DDB
@@ -111,6 +121,7 @@ Example:
 **Used by**:
 - `server/app/agentic_service.py` — `_exec_s3_document_ops()` for read/write/list/delete
 - `server/app/agentic_service.py` — `_exec_create_document()` for saving generated docs
+- `server/app/eagle_tools_mcp.py` — MCP server adapter exposes `s3_document_ops` and `create_document` tools to SDK subagents via `execute_tool()` delegation
 - `server/tests/test_eagle_sdk_eval.py` — Tests 16 and 19 (with cleanup)
 
 ### DynamoDB Table: `eagle`
@@ -352,7 +363,7 @@ Resources:
 Outputs: eagle-backend-repo-uri-dev, eagle-frontend-repo-uri-dev, eagle-cluster-name-dev
 ```
 
-#### EagleStorageStack (independent — no cross-stack deps)
+#### EagleStorageStack (depends on Core for appRole)
 
 ```
 File: lib/storage-stack.ts
@@ -954,7 +965,7 @@ npm install
 # Verify templates compile
 npx cdk synth
 
-# Deploy all 5 stacks (CiCd, Storage, Eval are independent; Core before Compute)
+# Deploy all 5 stacks (CiCd+Eval are independent; Core before Storage+Compute; Storage before Compute)
 npx cdk deploy EagleCiCdStack --require-approval never
 npx cdk deploy EagleCoreStack --require-approval never
 npx cdk deploy EagleStorageStack --require-approval never
@@ -1050,7 +1061,7 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 | Step | Time |
 |------|------|
 | CDK bootstrap | ~2 min |
-| CDK deploy (all 4 stacks) | ~5-10 min |
+| CDK deploy (all 5 stacks) | ~5-10 min |
 | Docker build (backend) | ~30 sec (cached) |
 | Docker build (frontend) | ~60 sec (cached), ~5 min (cold) |
 | Docker push (both) | ~1-2 min |
@@ -1096,6 +1107,10 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - `build-frontend` recipe auto-fetches Cognito config from CDK stack outputs via boto3 — no hardcoded pool IDs (discovered: 2026-02-18, component: Justfile)
 - Internal just recipes prefixed with `_` stay hidden from `just --list` — clean separation of public and private commands (discovered: 2026-02-18, component: Justfile)
 
+- **`eagle_tools_mcp.py` copies inside `server/app/`**: `server/app/eagle_tools_mcp.py` (254 lines) is the EAGLE business tools MCP server — exposes 7 tools (`s3_document_ops`, `dynamodb_intake`, `cloudwatch_logs`, `create_document`, `get_intake_status`, `intake_workflow`, `search_far`) via `create_sdk_mcp_server`. Dockerfile.backend copies the entire `server/app/` directory so this file is automatically included — no separate `COPY` line needed (discovered: 2026-02-25, component: server/app/eagle_tools_mcp.py)
+- **`eagle_tools_mcp.py` delegates to `agentic_service.execute_tool()`**: The MCP server is a thin adapter — each tool handler calls `_execute_tool(tool_name, tool_input, session_id)` from `agentic_service.py`. `sdk_agentic_service.py` passes the MCP server via `ClaudeAgentOptions(mcp_servers={'eagle-tools': mcp_server})`. This preserves the canonical tool dispatch table in `agentic_service.py` while exposing it to SDK subagents (discovered: 2026-02-25, component: server/app/eagle_tools_mcp.py)
+- **`server/legacy/` directory for archiving superseded files**: When refactoring large files (e.g. `main.py` from 1098 lines down), move deprecated modules to `server/legacy/` rather than deleting. This preserves audit trail without cluttering `server/app/`. Docker builds `COPY server/app/` so legacy files are excluded from container images by default (discovered: 2026-02-25, component: server/legacy/)
+
 ### patterns_to_avoid
 - Don't put `try/except` logic in Justfile inline Python one-liners (`python -c "..."`). Python requires multi-line syntax for try/except — the one-liner will SyntaxError. Extract to a `scripts/*.py` file instead (discovered: 2026-02-20, component: Justfile/wait_for_backend)
 - Don't inline complex multi-step Python in Justfile recipes — two attempts with `||` fallback is unreadable and fragile. One well-named script file is always better (discovered: 2026-02-20, component: Justfile)
@@ -1115,6 +1130,8 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - Don't use `aws` CLI in Justfile shebang scripts on Windows/MSYS — exit code 1 even on success breaks `set -euo pipefail`. Use Python boto3 instead (discovered: 2026-02-18, component: Justfile)
 - Don't hardcode ALB URLs in task runners — they change on redeployment. Fetch dynamically from `describe_load_balancers()` (discovered: 2026-02-18, component: Justfile)
 
+- Don't add a separate `COPY server/app/eagle_tools_mcp.py` line in Dockerfile.backend — the existing `COPY server/app/ app/` already copies the full directory including any new modules. Redundant COPY lines cause build warnings (discovered: 2026-02-25, component: Dockerfile.backend)
+- Don't delete superseded backend modules outright — move them to `server/legacy/` so the audit trail is preserved. Docker excludes `server/legacy/` automatically since Dockerfile only copies `server/app/` (discovered: 2026-02-25, component: server/legacy/)
 ### common_issues
 - **`try/except` SyntaxError in `python -c` one-liner**: Python multi-line constructs can't be written with semicolons. Fix: move to `scripts/*.py` file, call as `python scripts/myscript.py` from Justfile (component: Justfile, 2026-02-20)
 - **Bedrock `ValidationException: on-demand throughput isn't supported`**: direct model ID `anthropic.claude-3-5-haiku-20241022-v1:0` given. Fix: use inference profile `us.anthropic.claude-3-5-haiku-20241022-v1:0` AND update IAM to include `inference-profile/us.anthropic.*` resource (component: Lambda extractor, 2026-02-20)
@@ -1130,6 +1147,8 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - ECS service shows 2 deployments with old tasks draining after force-new-deployment: this is normal, wait 2-5 min for the old tasks to drain (component: ECS)
 - Docker context transfer is ~800MB+ without .dockerignore: ensure `.dockerignore` excludes `node_modules`, `.next`, `.git`, `data/` (component: Dockerfile.frontend)
 
+- **`main.py` line count vs actual**: `server/app/main.py` grew significantly through hot-reload endpoint additions (Phase 4 Step 17 added 40+ endpoints). As of 2026-02-25 it is 1,855 lines. If a refactor moves routes out, verify count with `wc -l server/app/main.py` before assuming the file is "small" (component: server/app/main.py, 2026-02-25)
+- **`eagle_tools_mcp.py` import fails if `agentic_service.py` is missing**: The MCP server imports `execute_tool` from `agentic_service.py` — if that module is archived to `server/legacy/`, the import will fail at container startup. Keep `agentic_service.py` in `server/app/` or update the import in `eagle_tools_mcp.py` (component: server/app/eagle_tools_mcp.py, 2026-02-25)
 ### tips
 - **Developer onboarding README structure**: Checklist A (local, no cloud) → Checklist B (cloud deploy). Prereqs at top of each checklist, not in a single monolithic prerequisites block. Browser test at the end of each makes it feel real
 - **`just smoke-ui` / `just dev-smoke-ui`**: adding `--headed` is the zero-cost way to turn a CI Playwright test into a visible demo. Use for onboarding walkthroughs and new account verification
@@ -1144,7 +1163,7 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - Tag all CDK resources with Project=eagle and ManagedBy=cdk for cost tracking
 - Use OIDC for GitHub Actions instead of static IAM keys (more secure, no rotation needed)
 - Run `npx cdk synth` before `cdk deploy` to verify CloudFormation template generates correctly
-- All 4 CDK stacks deploy from `infrastructure/cdk-eagle/`: `npx cdk deploy --all`
+- All 5 CDK stacks deploy from `infrastructure/cdk-eagle/`: `npx cdk deploy --all`
 - Before first deploy, check if `/eagle/test-runs` log group exists: `aws logs describe-log-groups --log-group-name-prefix /eagle/test-runs`
 - `put_metric_data` supports up to 1000 metrics per call — our 38 metrics per eval run are well within limits
 - Use `aws ecs wait services-stable` after force-new-deployment to block until rollout completes
@@ -1159,3 +1178,7 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - `just dev-up` / `just dev-down` / `just dev-smoke` / `just dev-smoke-ui` for local stack lifecycle
 - `just smoke` / `just smoke-ui` for Playwright smoke tests (headless / headed)
 - `just test-e2e` / `just test-e2e-ui` for Playwright E2E against Fargate (headless / headed)
+- **`eagle_tools_mcp.py` in Docker builds**: `server/app/eagle_tools_mcp.py` is included automatically — no extra COPY line needed. After adding new `server/app/*.py` modules, verify they appear in `docker run ... ls /app/app/` before pushing to ECR
+- **Verify `server/legacy/` exclusion from Docker builds**: `COPY server/app/ app/` copies only `server/app/`, not `server/legacy/`. Confirm with `docker run --entrypoint ls <image> /app/` — legacy files should not appear
+- **`main.py` growth tracking**: `wc -l server/app/main.py` is the authoritative line count. The file grew from 1,098 → 1,855 lines across hot-reload endpoint additions (Phase 4). If a future refactor slims it, record the new count here
+- **`eagle_tools_mcp.create_eagle_mcp_server()`**: Create once per request with `tenant_id` and `session_id` from auth context. Pass via `ClaudeAgentOptions(mcp_servers={'eagle-tools': server})`. The factory closes over tenant/session so all tool calls are automatically scoped

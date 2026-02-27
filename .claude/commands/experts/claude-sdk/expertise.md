@@ -2,9 +2,9 @@
 type: expert-file
 file-type: expertise
 domain: claude-sdk
-last_updated: "2026-02-10"
+last_updated: "2026-02-25"
 sdk_version: "0.1.29+"
-tags: [claude-agent-sdk, query, sessions, subagents, mcp, hooks, telemetry, cost, bedrock, multi-tenant, skill-handoff, agent-definition]
+tags: [claude-agent-sdk, query, sessions, subagents, mcp, hooks, telemetry, cost, bedrock, multi-tenant, skill-handoff, agent-definition, eagle-tools-mcp]
 ---
 
 # Claude Agent SDK Expertise
@@ -144,6 +144,28 @@ options = ClaudeAgentOptions(
     env={"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "us-east-1"},
 )
 ```
+
+### Conditional Optional Fields — Dict Unpacking Pattern
+
+When `mcp_servers` or `resume` are optional (conditionally present), use dict unpacking
+to avoid passing `None` values that may cause SDK errors:
+
+```python
+options = ClaudeAgentOptions(
+    model=agent_model,
+    system_prompt=system_prompt,
+    allowed_tools=["Task"],
+    permission_mode="bypassPermissions",
+    max_turns=max_turns,
+    max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
+    agents=agents,
+    # Conditional fields — only included when non-empty/non-None:
+    **({"mcp_servers": mcp_servers} if mcp_servers else {}),
+    **({"resume": session_id} if session_id else {}),
+)
+```
+
+This pattern is used in `sdk_agentic_service.py:sdk_query()` for both `mcp_servers` and `resume`.
 
 ---
 
@@ -435,6 +457,112 @@ options = ClaudeAgentOptions(
     # ...
 )
 ```
+
+---
+
+## Part 6b: EAGLE Business Tools MCP Server
+
+### Overview
+
+`server/app/eagle_tools_mcp.py` wraps the EAGLE `execute_tool()` dispatcher as a local MCP
+server using `create_sdk_mcp_server`. This bridges the legacy `agentic_service.py` tool
+dispatch table into the SDK subagent architecture.
+
+**Server name**: `"eagle-tools"` (registered under this key in `mcp_servers`)
+
+### 7 Exposed Tools
+
+| Tool Name | Description |
+|-----------|-------------|
+| `s3_document_ops` | Read, write, or list acquisition documents in S3 |
+| `dynamodb_intake` | Create, read, update, or list intake records in DynamoDB |
+| `cloudwatch_logs` | Search or read CloudWatch log streams |
+| `create_document` | Generate SOW, IGCE, AP, J&A, etc. and optionally save to S3 |
+| `get_intake_status` | Check completeness and workflow status of an intake package |
+| `intake_workflow` | Advance an intake package through workflow stages |
+| `search_far` | Search FAR/DFARS regulation database for clauses and parts |
+
+### Factory Function
+
+```python
+from app.eagle_tools_mcp import create_eagle_mcp_server
+
+# Creates an MCP server scoped to a specific tenant and session
+mcp_server = create_eagle_mcp_server(
+    tenant_id="nci-oa",
+    session_id="nci-oa-premium-u1-s1",  # Optional — defaults to "{tenant_id}-sdk-session"
+)
+
+options = ClaudeAgentOptions(
+    # ...
+    mcp_servers={"eagle-tools": mcp_server},
+)
+```
+
+### Key Design: Closure-Scoped Tenant Context
+
+`create_eagle_mcp_server` uses Python closure variables (`_tenant_id`, `_session_id`) to
+inject tenant and session context into **every** tool call. Tool functions defined inside the
+factory capture these variables — no per-call parameter passing needed:
+
+```python
+def create_eagle_mcp_server(tenant_id, session_id=None):
+    _tenant_id = tenant_id
+    _session_id = session_id or f"{tenant_id}-sdk-session"
+
+    @tool("dynamodb_intake", "...", DynamoDBIntakeInput)
+    async def dynamodb_intake_tool(inp):
+        tool_input = {"action": inp.action, "tenant_id": _tenant_id, ...}
+        result_json = _execute_tool("dynamodb_intake", tool_input, _session_id)
+        return {"content": [{"type": "text", "text": result_json}]}
+
+    return create_sdk_mcp_server("eagle-tools", tools=[...])
+```
+
+### Integration in sdk_query() — Non-Fatal Pattern
+
+`sdk_query()` wires in the MCP server with a try/except so subagent orchestration continues
+even if the tool server is unavailable (e.g., missing boto3 credentials in test envs):
+
+```python
+mcp_servers: dict = {}
+try:
+    from .eagle_tools_mcp import create_eagle_mcp_server
+    _mcp_session_id = session_id or f"{tenant_id}-{tier}-sdk"
+    mcp_servers = {"eagle-tools": create_eagle_mcp_server(
+        tenant_id=tenant_id,
+        session_id=_mcp_session_id,
+    )}
+except Exception as _mcp_err:
+    logger.warning("eagle_tools_mcp unavailable — subagents will not have business tool access: %s", _mcp_err)
+
+options = ClaudeAgentOptions(
+    # ...
+    **({"mcp_servers": mcp_servers} if mcp_servers else {}),
+)
+```
+
+### TIER_TOOLS: Bare Names for Subagent Tools (EAGLE-Specific Pattern)
+
+In `sdk_agentic_service.py`, `TIER_TOOLS` uses **bare tool names** (not `mcp__eagle-tools__` prefixed).
+These are passed to `AgentDefinition.tools`, not the supervisor's `allowed_tools`.
+The SDK resolves them against the registered MCP server when subagents execute:
+
+```python
+# sdk_agentic_service.py — production TIER_TOOLS
+TIER_TOOLS = {
+    "basic":    [],
+    "advanced": ["Read", "Glob", "Grep", "s3_document_ops", "create_document"],
+    "premium":  ["Read", "Glob", "Grep", "Bash", "s3_document_ops",
+                 "dynamodb_intake", "cloudwatch_logs", "create_document",
+                 "get_intake_status", "intake_workflow", "search_far"],
+}
+```
+
+Note: The eval suite's `TIER_TOOLS` uses the full `mcp__inventory__lookup_product` prefix
+for its standalone test (test_8 custom tools). These are different contexts:
+- **Production subagent tools** (`AgentDefinition.tools`): bare names
+- **Supervisor `allowed_tools` with standalone MCP**: full `mcp__{server}__{tool}` prefix
 
 ---
 
@@ -797,6 +925,10 @@ finally:
 - **Skill→Subagent via AgentDefinition**: Load skill markdown from SKILL_CONSTANTS, pass as `AgentDefinition.prompt`, register in `ClaudeAgentOptions.agents`. Each skill gets own context window. Supervisor delegates via `Task` tool with `allowed_tools=["Task"]`. See `sdk_agentic_service.py`. (discovered: 2026-02-10)
 - **Dual-mode skill invocation**: `sdk_query()` for multi-skill orchestration (supervisor + subagents), `sdk_query_single_skill()` for focused single-skill queries (shared context injection). Choose based on query complexity. (discovered: 2026-02-10)
 - **Truncate long skill prompts**: Cap subagent prompts at ~4000 chars to avoid context overflow. Use `content[:4000]` + truncation marker. (discovered: 2026-02-10)
+- **create_eagle_mcp_server() factory**: Wrap legacy execute_tool() dispatcher as a local MCP server using closure-scoped tenant_id/session_id. Non-fatal import (try/except) allows SDK orchestration to proceed even when AWS credentials are unavailable. File: `server/app/eagle_tools_mcp.py`. (discovered: 2026-02-25)
+- **Bare tool names in AgentDefinition.tools**: When MCP tools are registered in `mcp_servers`, subagents reference them by bare name (e.g. `"s3_document_ops"`) in `AgentDefinition.tools`, not the full `mcp__eagle-tools__s3_document_ops` prefix. The full prefix is only needed in the supervisor's `allowed_tools` for direct MCP access. (discovered: 2026-02-25)
+- **Conditional ClaudeAgentOptions fields via dict unpacking**: Use `**({"mcp_servers": x} if x else {})` pattern to conditionally include optional SDK fields. Avoids passing empty dicts or None values. Used in `sdk_query()` for both `mcp_servers` and `resume`. (discovered: 2026-02-25)
+- **ExceptionGroup handling for MCP Windows teardown in Layer 3 tests**: All tests 34-38 wrap `sdk_query()` with `except ExceptionGroup as eg` and filter `CLIConnection` errors as non-fatal. The real error check is `[e for e in eg.exceptions if "CLIConnection" not in type(e).__name__]`. (discovered: 2026-02-25)
 
 ### patterns_to_avoid
 
@@ -807,13 +939,16 @@ finally:
 - **Hardcoding session_id extraction to only SystemMessage**: Also available on `ResultMessage.session_id`. Check both for reliability. (reason: not all SDK versions emit in same order)
 - **Confusing skill injection with subagent delegation**: Injecting skill content into `system_prompt` = shared context window (prompt switching). Using `AgentDefinition` with skill as `prompt` = separate context windows (true subagent delegation). They look similar but have very different context isolation properties. (reason: architectural confusion leads to wrong pattern choice)
 - **Passing full skill content to AgentDefinition without truncation**: Long skill markdown can overflow subagent context. Always truncate with `content[:4000]`. (reason: context budget exceeded silently)
+- **Using mcp__ prefix in AgentDefinition.tools for EAGLE business tools**: The production `TIER_TOOLS` in `sdk_agentic_service.py` uses bare names (`"s3_document_ops"`, not `"mcp__eagle-tools__s3_document_ops"`). The prefix is only needed when the tool is in the supervisor's `allowed_tools` or a standalone test with its own MCP server key. (reason: produces tool-not-found errors at subagent execution time)
+- **Passing mcp_servers or resume as None to ClaudeAgentOptions**: Use the conditional dict unpacking pattern instead. Passing `None` for these fields may cause SDK validation errors. (reason: SDK field validation)
 
 ### common_issues
 
-- **MCP server cleanup race on Windows**: `ExceptionGroup` with `CLIConnection` errors during teardown. Solution: catch `ExceptionGroup`, filter `CLIConnection` errors, re-raise others. (component: custom-tools)
+- **MCP server cleanup race on Windows**: `ExceptionGroup` with `CLIConnection` errors during teardown. Solution: catch `ExceptionGroup`, filter `CLIConnection` errors, re-raise others. (component: custom-tools, eagle-tools-mcp)
 - **usage dict values can be None**: Always use `or 0` when extracting: `usage.get("input_tokens", 0) or 0`. (component: cost-tracking)
 - **Block type detection**: Use `type(block).__name__` not `block.type`. SDK blocks are Python classes, not dicts. (component: telemetry)
 - **ThinkingBlock field name**: Can be `thinking` or `text` depending on SDK version. Use `getattr(block, "thinking", getattr(block, "text", ""))`. (component: telemetry)
+- **eagle_tools_mcp import fails outside package context**: Uses relative import `.agentic_service`. Falls back to sys.path insertion for test contexts. Always import via the try/except pattern used in sdk_query(). (component: eagle-tools-mcp)
 
 ### tips
 
@@ -829,3 +964,6 @@ finally:
 - `AgentDefinition.description` drives the supervisor's routing decision — make descriptions specific about WHEN to use each subagent
 - `build_skill_agents()` in `sdk_agentic_service.py` converts all skill constants to AgentDefinitions in one call
 - Production module: `server/app/sdk_agentic_service.py` — SDK-based service with skill→subagent orchestration
+- `create_eagle_mcp_server()` in `server/app/eagle_tools_mcp.py` — wraps 7 EAGLE business tools (S3, DynamoDB, CloudWatch, document generation, intake workflow, FAR search) for subagent access
+- Layer 3 eval tests (34-38) call `sdk_query()` directly — they test the full SDK→MCP→AWS tool path without mocking
+- `sdk_query()` auto-provisions the Default workspace via `workspace_store.get_or_create_default()` when no `workspace_id` is passed — workspace resolution is also non-fatal

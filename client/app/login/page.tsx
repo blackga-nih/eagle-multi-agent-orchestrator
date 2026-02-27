@@ -226,6 +226,31 @@ export default function LoginPage() {
             </form>
           </div>
 
+          {/* Demo credentials */}
+          <div className="border-t border-blue-100 bg-blue-50 px-8 py-5">
+            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-3">
+              Demo Credentials
+            </p>
+            <div className="space-y-2">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-medium text-gray-700">Standard User</p>
+                  <p className="text-xs text-gray-500">testuser@example.com</p>
+                  <p className="text-xs text-gray-500">EagleTest2024!</p>
+                </div>
+                <span className="text-xs bg-gray-200 text-gray-600 rounded px-1.5 py-0.5 whitespace-nowrap">basic tier</span>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-medium text-gray-700">Admin User</p>
+                  <p className="text-xs text-gray-500">admin@example.com</p>
+                  <p className="text-xs text-gray-500">EagleAdmin2024!</p>
+                </div>
+                <span className="text-xs bg-blue-200 text-blue-700 rounded px-1.5 py-0.5 whitespace-nowrap">premium tier</span>
+              </div>
+            </div>
+          </div>
+
           {/* Footer */}
           <div className="border-t border-gray-100 bg-gray-50 px-8 py-4">
             <p className="text-xs text-gray-400 text-center">
