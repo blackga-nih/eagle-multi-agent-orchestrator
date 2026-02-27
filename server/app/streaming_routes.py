@@ -33,6 +33,36 @@ logger = logging.getLogger(__name__)
 
 _KEEPALIVE_INTERVAL = 25  # seconds — well under the 60s ALB idle timeout
 
+# SDK text-chunking constants.
+# The Claude Agent SDK delivers AssistantMessage text as complete blocks,
+# not individual tokens.  We re-chunk those blocks into small SSE events
+# to give the frontend the same progressive streaming feel as the direct
+# Anthropic API path.
+_CHUNK_SIZE = 20    # characters per SSE event
+_CHUNK_DELAY = 0.015  # seconds between events → ~1300 chars/sec
+
+
+async def _emit_chunked(
+    writer: "MultiAgentStreamWriter",
+    queue: "asyncio.Queue[str]",
+    text: str,
+) -> None:
+    """Split a complete SDK text block into small SSE events.
+
+    Emits one event per _CHUNK_SIZE characters with _CHUNK_DELAY between
+    them.  Short texts (≤ _CHUNK_SIZE) are emitted as a single event so
+    there is no unnecessary latency for brief replies.
+    """
+    if not text:
+        return
+    if len(text) <= _CHUNK_SIZE:
+        await writer.write_text(queue, text)
+        return
+    for start in range(0, len(text), _CHUNK_SIZE):
+        chunk = text[start : start + _CHUNK_SIZE]
+        await writer.write_text(queue, chunk)
+        await asyncio.sleep(_CHUNK_DELAY)
+
 
 async def stream_generator(
     message: str,
@@ -95,7 +125,7 @@ async def stream_generator(
                         block_type = getattr(block, "type", None)
                         if block_type == "text":
                             text_emitted = True
-                            await writer.write_text(queue, block.text)
+                            await _emit_chunked(writer, queue, block.text)
                         elif block_type == "tool_use":
                             await writer.write_tool_use(queue, block.name, getattr(block, "input", {}))
                 elif msg_type == "ResultMessage":
