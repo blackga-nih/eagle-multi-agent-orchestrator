@@ -7,9 +7,9 @@
 name: Jira Commits Sync
 
 on:
-  schedule:
-    # 6:00 UTC daily (~1am EST)
-    - cron: "0 6 * * *"
+  # schedule disabled — set JIRA_BASE_URL and JIRA_API_TOKEN secrets to re-enable
+  # schedule:
+  #   - cron: "0 6 * * *"
   workflow_dispatch:
 
 permissions:

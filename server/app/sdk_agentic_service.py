@@ -40,6 +40,34 @@ from eagle_skill_constants import SKILL_CONSTANTS, AGENTS, SKILLS, PLUGIN_CONTEN
 
 logger = logging.getLogger("eagle.sdk_agent")
 
+
+def _get_bedrock_env() -> dict:
+    """Resolve AWS credentials via boto3 (handles SSO, IAM roles, env vars) and
+    return as a flat env dict for the Claude CLI subprocess.
+
+    The bundled Claude Code CLI is Node.js and cannot use botocore's SSO resolver,
+    so we bridge the gap: resolve here in Python and pass static creds to the CLI.
+    """
+    import boto3
+
+    env: dict = {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_REGION": os.getenv("AWS_REGION", "us-east-1"),
+        "HOME": os.getenv("HOME", "/home/appuser"),
+    }
+    try:
+        creds = boto3.Session().get_credentials()
+        if creds:
+            frozen = creds.get_frozen_credentials()
+            env["AWS_ACCESS_KEY_ID"] = frozen.access_key
+            env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
+            if frozen.token:
+                env["AWS_SESSION_TOKEN"] = frozen.token
+    except Exception as e:
+        logger.warning("Could not resolve AWS credentials for CLI subprocess: %s", e)
+    return env
+
+
 # ── Configuration ────────────────────────────────────────────────────
 
 MODEL = os.getenv("EAGLE_SDK_MODEL", "haiku")
@@ -69,17 +97,7 @@ _PLUGIN_JSON_PATH = os.path.join(
 )
 
 def _load_plugin_config() -> dict:
-    """Load plugin manifest — prefers DynamoDB PLUGIN#manifest, falls back to bundled file."""
-    # Try DynamoDB first (hot-reloadable authoritative source)
-    try:
-        from .plugin_store import get_plugin_manifest
-        manifest = get_plugin_manifest()
-        if manifest:
-            return manifest
-    except Exception:
-        pass  # DynamoDB unavailable — fall through to bundled file
-
-    # Fallback: bundled eagle-plugin/plugin.json
+    """Load plugin.json to determine active agents and skills."""
     try:
         with open(_PLUGIN_JSON_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -127,28 +145,6 @@ def _build_registry() -> dict:
 SKILL_AGENT_REGISTRY = _build_registry()
 
 
-def _build_sdk_env() -> dict:
-    """Build the subprocess env for ClaudeAgentOptions.
-
-    The SDK merges {**os.environ, **options.env}, so values we set here
-    override the parent process environment.
-
-    - Clears CLAUDECODE (empty string) so nested claude subprocesses are
-      allowed when running inside a Claude Code dev session.
-    - Conditionally enables Bedrock only when CLAUDE_CODE_USE_BEDROCK is
-      already set in the host environment — prevents overriding ANTHROPIC_API_KEY.
-    """
-    env: dict = {
-        # Override CLAUDECODE with empty string — the SDK merges our dict over
-        # os.environ, so this neutralises the parent session's CLAUDECODE value.
-        "CLAUDECODE": "",
-    }
-    if os.environ.get("CLAUDE_CODE_USE_BEDROCK"):
-        env["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        env["AWS_REGION"] = os.environ.get("AWS_REGION", "us-east-1")
-    return env
-
-
 def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> str:
     """Truncate skill content to fit within subagent context budget."""
     if len(content) <= max_chars:
@@ -160,25 +156,16 @@ def build_skill_agents(
     model: str = None,
     tier: str = "advanced",
     skill_names: list[str] | None = None,
-    tenant_id: str = "demo-tenant",
-    user_id: str = "demo-user",
-    workspace_id: str | None = None,
 ) -> dict[str, AgentDefinition]:
     """Build AgentDefinition dict from skill registry.
 
     Each skill becomes a subagent with its own fresh context window.
     The skill markdown content becomes the subagent's system prompt.
 
-    When workspace_id is provided, skill prompts are resolved via wspc_store
-    using the 4-layer chain (workspace override → PLUGIN# canonical).
-
     Args:
         model: Model for subagents (defaults to MODULE-level MODEL)
         tier: Subscription tier for tool gating
         skill_names: Specific skills to include (None = all available)
-        tenant_id: Tenant for workspace resolution
-        user_id: User for workspace resolution
-        workspace_id: Active workspace ID for per-user prompt overrides
 
     Returns:
         Dict of name -> AgentDefinition suitable for ClaudeAgentOptions.agents
@@ -187,58 +174,21 @@ def build_skill_agents(
     tier_tools = TIER_TOOLS.get(tier, TIER_TOOLS["basic"])
     agents = {}
 
-    # Build base registry from bundled PLUGIN_CONTENTS + workspace overrides
     for name, meta in SKILL_AGENT_REGISTRY.items():
         if skill_names and name not in skill_names:
             continue
 
-        # Resolve prompt through workspace chain when workspace_id is available
-        if workspace_id:
-            try:
-                from .wspc_store import resolve_skill
-                prompt_body, _source = resolve_skill(tenant_id, user_id, workspace_id, name)
-            except Exception as exc:
-                logger.warning("wspc_store.resolve_skill failed for %s: %s — using bundled", name, exc)
-                prompt_body = ""
-        else:
-            prompt_body = ""
-
-        # Fall back to bundled PLUGIN_CONTENTS when workspace resolution yields nothing
-        if not prompt_body:
-            entry = PLUGIN_CONTENTS.get(meta["skill_key"])
-            if not entry:
-                logger.warning("Plugin content not found for %s (key=%s)", name, meta["skill_key"])
-                continue
-            prompt_body = entry["body"]
+        entry = PLUGIN_CONTENTS.get(meta["skill_key"])
+        if not entry:
+            logger.warning("Plugin content not found for %s (key=%s)", name, meta["skill_key"])
+            continue
 
         agents[name] = AgentDefinition(
             description=meta["description"],
-            prompt=_truncate_skill(prompt_body),
+            prompt=_truncate_skill(entry["body"]),
             tools=meta["tools"] or tier_tools,
             model=meta.get("model") or agent_model,
         )
-
-    # Merge active user-created SKILL# items (tenant-defined skills override bundled when same name)
-    try:
-        from .skill_store import list_active_skills
-        user_skills = list_active_skills(tenant_id)
-        for skill in user_skills:
-            name = skill.get("name", "")
-            if not name:
-                continue
-            if skill_names and name not in skill_names:
-                continue
-            prompt_body = skill.get("prompt_body", "")
-            if not prompt_body:
-                continue
-            agents[name] = AgentDefinition(
-                description=skill.get("description", f"{name} specialist"),
-                prompt=_truncate_skill(prompt_body),
-                tools=skill.get("tools") or tier_tools,
-                model=skill.get("model") or agent_model,
-            )
-    except Exception as exc:
-        logger.warning("skill_store.list_active_skills failed for %s: %s — skipping user skills", tenant_id, exc)
 
     return agents
 
@@ -250,12 +200,11 @@ def build_supervisor_prompt(
     user_id: str = "demo-user",
     tier: str = "advanced",
     agent_names: list[str] | None = None,
-    workspace_id: str | None = None,
 ) -> str:
     """Build the supervisor system prompt with available subagent descriptions.
 
-    Loads the base supervisor prompt from the 4-layer resolution chain when
-    workspace_id is provided; otherwise falls back to AGENTS bundled content.
+    Loads the base prompt from agents/supervisor/agent.md and appends
+    the dynamic subagent list and tenant context.
     """
     names = agent_names or list(SKILL_AGENT_REGISTRY.keys())
     agent_list = "\n".join(
@@ -264,19 +213,12 @@ def build_supervisor_prompt(
         if name in SKILL_AGENT_REGISTRY
     )
 
-    # Resolve supervisor prompt via workspace chain
-    base_prompt = ""
-    if workspace_id:
-        try:
-            from .wspc_store import resolve_agent
-            base_prompt, _source = resolve_agent(tenant_id, user_id, workspace_id, "supervisor")
-        except Exception as exc:
-            logger.warning("wspc_store.resolve_agent failed for supervisor: %s — using bundled", exc)
-
-    # Fall back to bundled AGENTS content
-    if not base_prompt:
-        supervisor_entry = AGENTS.get("supervisor")
-        base_prompt = supervisor_entry["body"].strip() if supervisor_entry else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
+    # Load base supervisor prompt from agent.md
+    supervisor_entry = AGENTS.get("supervisor")
+    if supervisor_entry:
+        base_prompt = supervisor_entry["body"].strip()
+    else:
+        base_prompt = "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
 
     return (
         f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}\n\n"
@@ -299,7 +241,6 @@ async def sdk_query(
     model: str = None,
     skill_names: list[str] | None = None,
     session_id: str | None = None,
-    workspace_id: str | None = None,
     max_turns: int = 15,
 ) -> AsyncGenerator[Any, None]:
     """Run a supervisor query with skill subagents.
@@ -315,30 +256,16 @@ async def sdk_query(
         model: Model override (default: MODULE-level MODEL)
         skill_names: Subset of skills to make available
         session_id: Session ID for resume (if continuing conversation)
-        workspace_id: Active workspace for per-user prompt resolution
         max_turns: Max tool-use iterations
 
     Yields:
         SDK message objects (SystemMessage, AssistantMessage, UserMessage, ResultMessage)
     """
-    # Resolve active workspace when none provided (auto-provision Default workspace)
-    resolved_workspace_id = workspace_id
-    if not resolved_workspace_id:
-        try:
-            from .workspace_store import get_or_create_default
-            ws = get_or_create_default(tenant_id, user_id)
-            resolved_workspace_id = ws.get("workspace_id")
-        except Exception as exc:
-            logger.warning("workspace_store.get_or_create_default failed: %s — using bundled prompts", exc)
-
     agent_model = model or MODEL
     agents = build_skill_agents(
         model=agent_model,
         tier=tier,
         skill_names=skill_names,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        workspace_id=resolved_workspace_id,
     )
 
     system_prompt = build_supervisor_prompt(
@@ -346,18 +273,7 @@ async def sdk_query(
         user_id=user_id,
         tier=tier,
         agent_names=list(agents.keys()),
-        workspace_id=resolved_workspace_id,
     )
-
-    _stderr_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "claude_sdk_stderr.log")
-
-    def _log_stderr(line: str) -> None:
-        logger.error("claude subprocess stderr: %s", line.rstrip())
-        try:
-            with open(_stderr_log, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        except Exception:
-            pass
 
     options = ClaudeAgentOptions(
         model=agent_model,
@@ -367,8 +283,7 @@ async def sdk_query(
         max_turns=max_turns,
         max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
         cwd=os.path.dirname(os.path.abspath(__file__)),
-        env=_build_sdk_env(),
-        stderr=_log_stderr,
+        env=_get_bedrock_env(),
         agents=agents,
         **({"resume": session_id} if session_id else {}),
     )
@@ -423,7 +338,7 @@ async def sdk_query_single_skill(
         max_turns=max_turns,
         max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
         cwd=os.path.dirname(os.path.abspath(__file__)),
-        env=_build_sdk_env(),
+        env=_get_bedrock_env(),
     )
 
     async for message in query(prompt=prompt, options=options):

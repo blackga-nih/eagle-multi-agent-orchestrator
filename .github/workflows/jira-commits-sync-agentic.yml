@@ -14,8 +14,9 @@
 name: Jira Commits Sync (Agentic)
 
 on:
-  schedule:
-    - cron: "0 6 * * *"
+  # schedule disabled — set JIRA_BASE_URL, JIRA_API_TOKEN, ANTHROPIC_API_KEY secrets to re-enable
+  # schedule:
+  #   - cron: "0 6 * * *"
   workflow_dispatch:
   issue_comment:
     types: [created]

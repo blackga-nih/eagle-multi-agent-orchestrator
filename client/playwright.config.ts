@@ -14,9 +14,15 @@ export default defineConfig({
   workers: process.env.CI ? 1 : parseInt(process.env.WORKERS || '4'),
   reporter: 'html',
 
+  // Run global-setup.ts once before all tests to log in and save auth state
+  globalSetup: './tests/global-setup.ts',
+
   use: {
     // Base URL for the deployed application
     baseURL: process.env.BASE_URL || 'http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com',
+
+    // Reuse Cognito session saved by global-setup — all tests start authenticated
+    storageState: 'tests/.auth/user.json',
 
     // Collect trace when retrying the failed test
     trace: 'on-first-retry',
