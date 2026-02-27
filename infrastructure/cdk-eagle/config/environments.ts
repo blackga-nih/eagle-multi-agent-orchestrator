@@ -31,15 +31,18 @@ export interface EagleConfig {
   githubRepo: string;
 }
 
+const ACCOUNT = process.env.CDK_DEFAULT_ACCOUNT || process.env.AWS_ACCOUNT_ID || '';
+const REGION = process.env.CDK_DEFAULT_REGION || 'us-east-1';
+
 export const DEV_CONFIG: EagleConfig = {
   env: 'dev',
-  account: '695681773636',
-  region: 'us-east-1',
+  account: ACCOUNT,
+  region: REGION,
 
   eagleTableName: 'eagle',
-  evalBucketName: 'eagle-eval-artifacts-695681773636-dev',
+  evalBucketName: `eagle-eval-artifacts-${ACCOUNT}-dev`,
 
-  documentBucketName: 'eagle-documents-695681773636-dev',
+  documentBucketName: `eagle-documents-${ACCOUNT}-dev`,
   documentMetadataTableName: 'eagle-document-metadata-dev',
   bedrockMetadataModelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
   metadataLambdaMemory: 512,
