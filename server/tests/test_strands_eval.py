@@ -150,46 +150,76 @@ class StrandsResultCollector:
         print(msg)
         self.log_lines.append(msg)
 
-    def process_result(self, result, indent=0):
-        """Process a Strands Agent result object."""
+    def process_result(self, result, indent=0, agent=None):
+        """Process a Strands Agent result object.
+
+        Args:
+            result: AgentResult from agent() call
+            indent: indentation level for log output
+            agent: optional Agent instance to read conversation history from
+        """
         prefix = "  " * indent
         self.result_text = str(result)
         self._log(f"{prefix}  [Result] {self.result_text[:300]}")
 
-        # Extract tool use from result.messages (list of dicts)
+        # Extract tool use from result.metrics.tool_metrics (preferred)
         try:
-            messages = getattr(result, "messages", []) or []
-            self.messages_raw = messages
-            for msg in messages:
-                if isinstance(msg, dict) and msg.get("role") == "assistant":
-                    for block in msg.get("content", []):
-                        if isinstance(block, dict) and block.get("type") == "tool_use":
-                            tool_name = block.get("name", "")
-                            tool_input = block.get("input", {})
-                            self.tool_use_blocks.append({
-                                "tool": tool_name,
-                                "id": block.get("toolUseId", ""),
-                                "input": tool_input,
-                            })
-                            self._log(f"{prefix}  [ToolUse] {tool_name}")
+            metrics = getattr(result, "metrics", None)
+            if metrics and hasattr(metrics, "tool_metrics"):
+                for tool_name, tm in metrics.tool_metrics.items():
+                    tool_info = getattr(tm, "tool", {}) or {}
+                    self.tool_use_blocks.append({
+                        "tool": tool_name,
+                        "id": tool_info.get("toolUseId", ""),
+                        "input": tool_info.get("input", {}),
+                    })
+                    self._log(f"{prefix}  [ToolUse] {tool_name} (calls={tm.call_count})")
         except Exception:
             pass
 
-        # Extract usage metrics
+        # Fallback: extract from agent.messages conversation history (Bedrock camelCase format)
+        if not self.tool_use_blocks and agent is not None:
+            try:
+                messages = getattr(agent, "messages", []) or []
+                self.messages_raw = messages
+                for msg in messages:
+                    if isinstance(msg, dict) and msg.get("role") == "assistant":
+                        for block in msg.get("content", []):
+                            if isinstance(block, dict) and "toolUse" in block:
+                                tu = block["toolUse"]
+                                tool_name = tu.get("name", "")
+                                self.tool_use_blocks.append({
+                                    "tool": tool_name,
+                                    "id": tu.get("toolUseId", ""),
+                                    "input": tu.get("input", {}),
+                                })
+                                self._log(f"{prefix}  [ToolUse] {tool_name}")
+            except Exception:
+                pass
+
+        # Extract usage from EventLoopMetrics
         try:
-            metrics = getattr(result, "metrics", None) or {}
-            if isinstance(metrics, dict):
-                self.total_input_tokens = metrics.get("inputTokens", 0) or 0
-                self.total_output_tokens = metrics.get("outputTokens", 0) or 0
-            # Also accumulate usage from messages
-            for msg in (getattr(result, "messages", []) or []):
-                if isinstance(msg, dict) and "usage" in msg:
-                    usage = msg["usage"]
-                    if isinstance(usage, dict):
-                        self.total_input_tokens += usage.get("inputTokens", 0)
-                        self.total_output_tokens += usage.get("outputTokens", 0)
+            metrics = getattr(result, "metrics", None)
+            if metrics:
+                # EventLoopMetrics may have accumulated_usage or per-cycle usage
+                acc = getattr(metrics, "accumulated_usage", None)
+                if acc and isinstance(acc, dict):
+                    self.total_input_tokens = acc.get("inputTokens", 0) or 0
+                    self.total_output_tokens = acc.get("outputTokens", 0) or 0
         except Exception:
             pass
+
+        # Fallback: accumulate usage from agent conversation history
+        if self.total_input_tokens == 0 and agent is not None:
+            try:
+                for msg in (getattr(agent, "messages", []) or []):
+                    if isinstance(msg, dict) and "usage" in msg:
+                        usage = msg["usage"]
+                        if isinstance(usage, dict):
+                            self.total_input_tokens += usage.get("inputTokens", 0)
+                            self.total_output_tokens += usage.get("outputTokens", 0)
+            except Exception:
+                pass
 
         self._log(
             f"{prefix}  [Usage] {self.total_input_tokens} in "
@@ -423,7 +453,7 @@ async def test_3_trace_observation():
         f"How many Python files are in this directory? "
         f"Use the list_python_files tool on: {test_dir}"
     )
-    collector.process_result(result, indent=2)
+    collector.process_result(result, indent=2, agent=agent)
 
     print()
     summary = collector.summary()
@@ -514,7 +544,7 @@ async def test_4_subagent_orchestration():
         "2. Use the code_reader to summarize what config.py does\n"
         "Report both results."
     )
-    collector.process_result(result, indent=2)
+    collector.process_result(result, indent=2, agent=supervisor)
 
     print()
     summary = collector.summary()
@@ -635,7 +665,7 @@ async def test_6_tier_gated_tools():
 
     collector = StrandsResultCollector()
     result = agent("Look up the product called Widget Pro.")
-    collector.process_result(result, indent=2)
+    collector.process_result(result, indent=2, agent=agent)
 
     print()
     summary = collector.summary()
@@ -774,7 +804,7 @@ async def test_8_subagent_tool_tracking():
         "2. Use code_inspector to read config.py and tell me the port number\n"
         "Report both results."
     )
-    collector.process_result(result, indent=2)
+    collector.process_result(result, indent=2, agent=agent)
 
     print()
     summary = collector.summary()
@@ -1280,7 +1310,7 @@ async def test_15_supervisor_multi_skill_chain():
         "over 3 years. Includes cloud migration and agile development. "
         "Run the full skill chain to assess this acquisition."
     )
-    collector.process_result(result, indent=2)
+    collector.process_result(result, indent=2, agent=supervisor)
 
     print()
     summary = collector.summary()

@@ -398,15 +398,12 @@ async def sdk_query(
     result = supervisor(prompt)
     result_text = str(result)
 
-    # Extract tool names called during execution (if available)
+    # Extract tool names called during execution from metrics.tool_metrics
     tools_called = []
     try:
-        messages = getattr(result, "messages", []) or []
-        for msg in messages:
-            if isinstance(msg, dict) and msg.get("role") == "assistant":
-                for block in msg.get("content", []):
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        tools_called.append(block.get("name", ""))
+        metrics = getattr(result, "metrics", None)
+        if metrics and hasattr(metrics, "tool_metrics"):
+            tools_called = list(metrics.tool_metrics.keys())
     except Exception:
         pass
 
@@ -421,9 +418,17 @@ async def sdk_query(
     # Extract usage if available
     usage = {}
     try:
-        raw_usage = getattr(result, "metrics", None) or {}
-        if isinstance(raw_usage, dict):
-            usage = raw_usage
+        metrics = getattr(result, "metrics", None)
+        if metrics:
+            acc = getattr(metrics, "accumulated_usage", None)
+            if acc and isinstance(acc, dict):
+                usage = acc
+            else:
+                # Fallback: report cycle count and tool call count
+                usage = {
+                    "cycle_count": getattr(metrics, "cycle_count", 0),
+                    "tools_called": len(tools_called),
+                }
     except Exception:
         pass
 
@@ -480,9 +485,13 @@ async def sdk_query_single_skill(
 
     usage = {}
     try:
-        raw_usage = getattr(result, "metrics", None) or {}
-        if isinstance(raw_usage, dict):
-            usage = raw_usage
+        metrics = getattr(result, "metrics", None)
+        if metrics:
+            acc = getattr(metrics, "accumulated_usage", None)
+            if acc and isinstance(acc, dict):
+                usage = acc
+            else:
+                usage = {"cycle_count": getattr(metrics, "cycle_count", 0)}
     except Exception:
         pass
 
