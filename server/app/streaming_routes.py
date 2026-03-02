@@ -24,8 +24,7 @@ from .cognito_auth import extract_user_context, UserContext
 from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
-from .agentic_service import MODEL, EAGLE_TOOLS
-from .strands_agentic_service import sdk_query
+from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
 
 import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"

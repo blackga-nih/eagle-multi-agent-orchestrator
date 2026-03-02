@@ -106,6 +106,218 @@ TIER_BUDGETS = {
     "premium": 0.75,
 }
 
+# -- Tool Schemas (for health/status endpoints) -------------------------
+# These are the Anthropic tool_use format schemas used by main.py and
+# streaming_routes.py to report available tools. They do NOT drive the
+# Strands agent (which uses @tool functions).
+EAGLE_TOOLS = [
+    {
+        "name": "s3_document_ops",
+        "description": (
+            "Read, write, or list documents stored in S3. All documents are "
+            "scoped per-tenant. Use this to manage acquisition documents, "
+            "templates, and generated files."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["list", "read", "write"],
+                    "description": "Operation to perform: list files, read a file, or write a file",
+                },
+                "bucket": {
+                    "type": "string",
+                    "description": "S3 bucket name (uses S3_BUCKET env var if not specified)",
+                },
+                "key": {
+                    "type": "string",
+                    "description": "S3 key/path for read or write operations",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to write (for write operation)",
+                },
+            },
+            "required": ["operation"],
+        },
+    },
+    {
+        "name": "dynamodb_intake",
+        "description": (
+            "Create, read, update, list, or query intake records in DynamoDB. "
+            "All records are scoped per-tenant using PK/SK patterns. Use this "
+            "to track acquisition intake packages."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["create", "read", "update", "list", "query"],
+                    "description": "CRUD operation to perform",
+                },
+                "table": {
+                    "type": "string",
+                    "description": "DynamoDB table name (default: eagle)",
+                },
+                "item_id": {
+                    "type": "string",
+                    "description": "Unique item identifier for read/update",
+                },
+                "data": {
+                    "type": "object",
+                    "description": "Data fields for create/update operations",
+                },
+                "filter_expression": {
+                    "type": "string",
+                    "description": "Optional filter expression for queries",
+                },
+            },
+            "required": ["operation"],
+        },
+    },
+    {
+        "name": "cloudwatch_logs",
+        "description": (
+            "Read CloudWatch logs filtered by user/session. Use this to inspect "
+            "application logs, debug issues, or audit user activity."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["search", "recent", "get_stream"],
+                    "description": "Log operation: search with filter, get recent events, or get a specific stream",
+                },
+                "log_group": {
+                    "type": "string",
+                    "description": "CloudWatch log group name (default: /eagle/app)",
+                },
+                "filter_pattern": {
+                    "type": "string",
+                    "description": "CloudWatch filter pattern for searching logs",
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "Start time for log search (ISO format or relative like '-1h')",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "End time for log search (ISO format)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of log events to return (default: 50)",
+                },
+            },
+            "required": ["operation"],
+        },
+    },
+    {
+        "name": "search_far",
+        "description": (
+            "Search the Federal Acquisition Regulation (FAR) and Defense Federal "
+            "Acquisition Regulation Supplement (DFARS) for relevant clauses, "
+            "requirements, and guidance. Returns part numbers, sections, titles, "
+            "full text summaries, and applicability notes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query — topic, clause number, or keyword",
+                },
+                "parts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Specific FAR part numbers to search (e.g. ['13', '15'])",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "create_document",
+        "description": (
+            "Generate acquisition documents including SOW, IGCE, Market Research, "
+            "J&A, Acquisition Plan, Evaluation Criteria, Security Checklist, "
+            "Section 508 Statement, COR Certification, and Contract Type "
+            "Justification. Documents are saved to S3."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "doc_type": {
+                    "type": "string",
+                    "enum": [
+                        "sow", "igce", "market_research", "justification",
+                        "acquisition_plan", "eval_criteria", "security_checklist",
+                        "section_508", "cor_certification",
+                        "contract_type_justification"
+                    ],
+                    "description": "Type of acquisition document to generate",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Title of the acquisition/document",
+                },
+                "data": {
+                    "type": "object",
+                    "description": "Document-specific fields (description, line_items, vendors, etc.)",
+                },
+            },
+            "required": ["doc_type", "title"],
+        },
+    },
+    {
+        "name": "get_intake_status",
+        "description": (
+            "Get the current intake package status and completeness. Shows which "
+            "documents exist, which are missing, and next actions needed."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intake_id": {
+                    "type": "string",
+                    "description": "Intake package ID (defaults to active intake if not provided)",
+                },
+            },
+        },
+    },
+    {
+        "name": "intake_workflow",
+        "description": (
+            "Manage the acquisition intake workflow. Use 'start' to begin a new intake, "
+            "'advance' to move to the next stage, 'status' to see current stage and progress, "
+            "or 'complete' to finish the intake. The workflow guides through: "
+            "1) Requirements Gathering, 2) Compliance Check, 3) Document Generation, 4) Review & Submit."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "advance", "status", "complete", "reset"],
+                    "description": "Workflow action to perform",
+                },
+                "intake_id": {
+                    "type": "string",
+                    "description": "Intake ID (auto-generated on start, required for other actions)",
+                },
+                "data": {
+                    "type": "object",
+                    "description": "Stage-specific data to save (requirements, compliance results, etc.)",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+]
+
 # Max prompt size per subagent to avoid context overflow
 MAX_SKILL_PROMPT_CHARS = 4000
 

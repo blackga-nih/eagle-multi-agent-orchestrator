@@ -34,8 +34,7 @@ import uuid
 import io
 
 # EAGLE modules (new)
-from .agentic_service import get_client, MODEL, EAGLE_TOOLS
-from .strands_agentic_service import sdk_query
+from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
 from .document_export import export_document
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
@@ -515,7 +514,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
@@ -550,7 +549,7 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
 
     # Security: ensure key is within user's prefix
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
@@ -608,7 +607,7 @@ async def api_upload_document(
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
 
     # Sanitize filename
     safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
@@ -665,7 +664,7 @@ async def api_approve_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -732,7 +731,7 @@ async def api_reject_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
