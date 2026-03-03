@@ -21,10 +21,13 @@ Key differences from sdk_agentic_service.py:
   - query() async generator -> agent() sync call + adapter yield
 """
 
+import asyncio
 import json
 import logging
 import os
+import queue
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
@@ -74,6 +77,39 @@ class ResultMessage:
     """Adapter matching Claude SDK ResultMessage interface."""
     result: str = ""
     usage: dict = field(default_factory=dict)
+
+
+# -- Streaming Callback Handler ----------------------------------------
+
+_SENTINEL = object()  # Signals end of stream
+
+
+class QueueCallbackHandler:
+    """Strands callback handler that pushes text deltas into a thread-safe queue.
+
+    Used by sdk_query_streaming() to yield tokens as they arrive from Bedrock
+    ConverseStream, instead of waiting for the full agent response.
+    """
+
+    def __init__(self, chunk_queue: queue.Queue):
+        self._queue = chunk_queue
+        self.tool_count = 0
+
+    def __call__(self, **kwargs: Any) -> None:
+        data = kwargs.get("data", "")
+        complete = kwargs.get("complete", False)
+        tool_use = kwargs.get("event", {}).get("contentBlockStart", {}).get("start", {}).get("toolUse")
+
+        if data:
+            self._queue.put({"type": "text", "data": data})
+
+        if tool_use:
+            self.tool_count += 1
+            self._queue.put({"type": "tool_use", "name": tool_use.get("name", "")})
+
+        if complete and not data:
+            # Stream finished — don't send sentinel here, let the caller handle it
+            pass
 
 
 # -- Shared Model (module-level) -------------------------------------
@@ -669,6 +705,139 @@ async def sdk_query(
         pass
 
     yield ResultMessage(result=result_text, usage=usage)
+
+
+async def sdk_query_streaming(
+    prompt: str,
+    tenant_id: str = "demo-tenant",
+    user_id: str = "demo-user",
+    tier: str = "advanced",
+    skill_names: list[str] | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    max_turns: int = 15,
+    messages: list[dict] | None = None,
+) -> AsyncGenerator[dict, None]:
+    """Stream text deltas from the Strands supervisor agent.
+
+    Unlike sdk_query() which waits for the full response, this yields
+    {"type": "text", "data": "..."} chunks as they arrive from Bedrock
+    ConverseStream, plus a final {"type": "complete", ...} event.
+
+    Runs the synchronous Strands Agent in a background thread and bridges
+    to async via a queue.
+    """
+    # Resolve workspace
+    resolved_workspace_id = workspace_id
+    if not resolved_workspace_id:
+        try:
+            from .workspace_store import get_or_create_default
+            ws = get_or_create_default(tenant_id, user_id)
+            resolved_workspace_id = ws.get("workspace_id")
+        except Exception as exc:
+            logger.warning("workspace_store.get_or_create_default failed: %s", exc)
+
+    skill_tools = build_skill_tools(
+        tier=tier,
+        skill_names=skill_names,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        workspace_id=resolved_workspace_id,
+    )
+
+    system_prompt = build_supervisor_prompt(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=tier,
+        agent_names=[t.__name__ for t in skill_tools],
+        workspace_id=resolved_workspace_id,
+    )
+
+    strands_history = _to_strands_messages(messages) if messages else None
+    chunk_queue: queue.Queue = queue.Queue()
+
+    handler = QueueCallbackHandler(chunk_queue)
+
+    supervisor = Agent(
+        model=_model,
+        system_prompt=system_prompt,
+        tools=skill_tools,
+        callback_handler=handler,
+        messages=strands_history,
+    )
+
+    # Run synchronous Strands agent in a background thread
+    result_holder: list = []
+    error_holder: list = []
+
+    def _run_agent():
+        try:
+            result = supervisor(prompt)
+            result_holder.append(result)
+        except Exception as exc:
+            error_holder.append(exc)
+        finally:
+            chunk_queue.put(_SENTINEL)
+
+    thread = threading.Thread(target=_run_agent, daemon=True)
+    thread.start()
+
+    # Yield chunks as they arrive from the callback handler
+    full_text_parts: list[str] = []
+    tools_called: list[str] = []
+
+    while True:
+        try:
+            # Poll queue with short timeout to stay async-friendly
+            chunk = await asyncio.to_thread(chunk_queue.get, timeout=0.1)
+        except Exception:
+            # queue.Empty on timeout — check if thread is still alive
+            if not thread.is_alive():
+                break
+            continue
+
+        if chunk is _SENTINEL:
+            break
+
+        if chunk.get("type") == "text":
+            full_text_parts.append(chunk["data"])
+            yield chunk
+        elif chunk.get("type") == "tool_use":
+            tools_called.append(chunk.get("name", ""))
+            yield chunk
+
+    # Wait for thread to finish
+    thread.join(timeout=5)
+
+    # Extract usage from result
+    usage = {}
+    if result_holder:
+        result = result_holder[0]
+        try:
+            metrics = getattr(result, "metrics", None)
+            if metrics:
+                acc = getattr(metrics, "accumulated_usage", None)
+                if acc and isinstance(acc, dict):
+                    usage = acc
+                else:
+                    usage = {
+                        "cycle_count": getattr(metrics, "cycle_count", 0),
+                        "tools_called": len(tools_called),
+                    }
+                if hasattr(metrics, "tool_metrics"):
+                    tools_called = list(metrics.tool_metrics.keys())
+        except Exception:
+            pass
+
+    if error_holder:
+        yield {"type": "error", "error": str(error_holder[0])}
+    else:
+        yield {
+            "type": "complete",
+            "text": "".join(full_text_parts),
+            "tools_called": tools_called,
+            "usage": usage,
+        }
 
 
 async def sdk_query_single_skill(

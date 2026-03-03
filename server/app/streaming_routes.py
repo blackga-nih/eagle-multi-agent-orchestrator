@@ -24,7 +24,7 @@ from .cognito_auth import extract_user_context, UserContext
 from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
-from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
+from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGLE_TOOLS
 
 import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
@@ -41,70 +41,62 @@ async def stream_generator(
     session_id: str | None = None,
     messages: list[dict] | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Generate SSE events from sdk_query() subagent orchestration.
+    """Generate SSE events from sdk_query_streaming() with real-time token streaming.
 
     The flow is:
       1. Yield a metadata event (initial connection handshake).
-      2. Consume sdk_query() async generator.
-      3. AssistantMessage text blocks → TEXT SSE events.
-      4. AssistantMessage tool_use blocks → TOOL_USE SSE events.
-      5. ResultMessage → drain queue, emit COMPLETE.
-      6. On exception → emit ERROR event.
+      2. Consume sdk_query_streaming() async generator for real-time text deltas.
+      3. text chunks → TEXT SSE events (streamed as they arrive from Bedrock).
+      4. tool_use events → TOOL_USE SSE events.
+      5. complete/error → COMPLETE/ERROR SSE event.
     """
     writer = MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
-    queue: asyncio.Queue[str] = asyncio.Queue()
+    sse_queue: asyncio.Queue[str] = asyncio.Queue()
 
     # Send initial metadata event (connection acknowledgement)
-    await writer.write_text(queue, "")
-    yield await queue.get()
+    await writer.write_text(sse_queue, "")
+    yield await sse_queue.get()
 
     try:
-        sdk_messages = sdk_query(
+        async for chunk in sdk_query_streaming(
             prompt=message,
             tenant_id=tenant_id,
             user_id=user_id,
             tier=tier or "advanced",
             session_id=session_id,
             messages=messages,
-        )
+        ):
+            chunk_type = chunk.get("type", "")
 
-        async for sdk_msg in sdk_messages:
-            msg_type = type(sdk_msg).__name__
-            if msg_type == "AssistantMessage":
-                for block in sdk_msg.content:
-                    block_type = getattr(block, "type", None)
-                    if block_type == "text":
-                        await writer.write_text(queue, block.text)
-                    elif block_type == "tool_use":
-                        await writer.write_tool_use(queue, block.name, getattr(block, "input", {}))
-                    while not queue.empty():
-                        yield await queue.get()
-            elif msg_type == "ResultMessage":
-                while not queue.empty():
-                    yield await queue.get()
-                await writer.write_complete(queue)
-                yield await queue.get()
+            if chunk_type == "text":
+                await writer.write_text(sse_queue, chunk["data"])
+                yield await sse_queue.get()
+
+            elif chunk_type == "tool_use":
+                await writer.write_tool_use(sse_queue, chunk.get("name", ""), {})
+                yield await sse_queue.get()
+
+            elif chunk_type == "complete":
+                await writer.write_complete(sse_queue)
+                yield await sse_queue.get()
                 return
 
-        # Fallback COMPLETE if generator exhausts without a ResultMessage
-        while not queue.empty():
-            yield await queue.get()
-        await writer.write_complete(queue)
-        yield await queue.get()
+            elif chunk_type == "error":
+                await writer.write_error(sse_queue, chunk.get("error", "Unknown error"))
+                yield await sse_queue.get()
+                return
+
+        # Fallback COMPLETE if generator exhausts without a complete event
+        await writer.write_complete(sse_queue)
+        yield await sse_queue.get()
 
     except asyncio.CancelledError:
-        # Client disconnected mid-stream; treat as expected cancellation path.
         logger.info("Streaming client disconnected")
         return
     except Exception as e:
         logger.error("Streaming chat error: %s", str(e), exc_info=True)
-        await writer.write_error(queue, str(e))
-        yield await queue.get()
-    finally:
-        # Ensure SDK async generator is closed from this task.
-        if "sdk_messages" in locals():
-            with suppress(Exception):
-                await sdk_messages.aclose()
+        await writer.write_error(sse_queue, str(e))
+        yield await sse_queue.get()
 
 
 def create_streaming_router(
