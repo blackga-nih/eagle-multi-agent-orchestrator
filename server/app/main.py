@@ -17,7 +17,7 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -34,8 +34,7 @@ import uuid
 import io
 
 # EAGLE modules (new)
-from .agentic_service import get_client, MODEL, EAGLE_TOOLS
-from .sdk_agentic_service import sdk_query
+from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
 from .document_export import export_document
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
@@ -61,6 +60,52 @@ from .cost_attribution import CostAttributionService
 from .admin_cost_service import AdminCostService
 from .admin_auth import get_admin_user, verify_tenant_admin, AdminAuthService
 from .streaming_routes import create_streaming_router
+
+# Phase 4 — hot-reload stores
+from .plugin_store import (
+    get_plugin_item, put_plugin_item, list_plugin_entities,
+    get_plugin_manifest, ensure_plugin_seeded,
+    _entity_cache as _plugin_cache,
+)
+from .workspace_store import (
+    get_or_create_default, create_workspace, get_workspace,
+    list_workspaces, activate_workspace, delete_workspace,
+)
+from .wspc_store import (
+    put_override, get_override, list_overrides,
+    delete_override, delete_all_overrides,
+)
+from .prompt_store import (
+    put_prompt, get_prompt, delete_prompt, list_tenant_prompts,
+    _prompt_cache,
+)
+from .config_store import (
+    get_config, put_config, delete_config, list_config,
+    _config_cache,
+)
+from .template_store import (
+    put_template, get_template, delete_template,
+    list_tenant_templates, resolve_template,
+    _template_cache,
+)
+from .skill_store import (
+    create_skill, get_skill, update_skill, list_skills, list_active_skills,
+    submit_for_review, publish_skill, disable_skill, delete_skill,
+)
+from .package_store import (
+    create_package, get_package, update_package, list_packages,
+    get_package_checklist, submit_package, approve_package, close_package,
+)
+from .document_store import (
+    create_document as create_acq_document, get_document,
+    finalize_document, list_package_documents, get_document_history,
+)
+from .approval_store import (
+    create_approval_chain, list_approval_chain,
+    record_decision, get_chain_status,
+)
+from .pref_store import get_prefs, update_prefs, reset_prefs
+from .audit_store import write_audit
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -176,11 +221,14 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         _usage: dict = {}
         _tools_called: list[str] = []
         _final_text: str = ""
+        _final_text: str = ""
         async for _sdk_msg in sdk_query(
             prompt=req.message,
             tenant_id=tenant_id,
             user_id=user_id,
             tier=user.tier or "advanced",
+            session_id=session_id,
+            messages=messages[:-1],  # History excluding current user message
         ):
             _msg_type = type(_sdk_msg).__name__
             if _msg_type == "AssistantMessage":
@@ -195,6 +243,9 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
                     "input_tokens": getattr(_raw, "input_tokens", 0),
                     "output_tokens": getattr(_raw, "output_tokens", 0),
                 }
+                _final_text = str(getattr(_sdk_msg, "result", "") or "")
+        _response_text = "".join(_text_parts) or _final_text
+        result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": _tools_called}
                 _final_text = str(getattr(_sdk_msg, "result", "") or "")
         _response_text = "".join(_text_parts) or _final_text
         result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": _tools_called}
@@ -469,7 +520,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
@@ -504,7 +555,7 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
 
     # Security: ensure key is within user's prefix
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
@@ -526,6 +577,289 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
         if e.response["Error"]["Code"] == "NoSuchKey":
             raise HTTPException(status_code=404, detail="Document not found")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── User document upload ─────────────────────────────────────────────
+
+_ALLOWED_UPLOAD_MIME = {
+    "application/pdf", "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain", "text/markdown",
+}
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+
+
+@app.post("/api/documents/upload")
+async def api_upload_document(
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Upload a document to the user's S3 workspace and trigger metadata extraction."""
+    import boto3
+    from botocore.exceptions import ClientError
+    import re
+
+    # Validate content type
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in _ALLOWED_UPLOAD_MIME:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type: {content_type}. Accepted: PDF, Word, plain text, Markdown."
+        )
+
+    body = await file.read()
+    if len(body) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 25 MB limit.")
+
+    tenant_id = user.tenant_id
+    user_id = user.user_id
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+
+    # Sanitize filename
+    safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
+    key = f"eagle/{tenant_id}/{user_id}/uploads/{safe_name}"
+
+    try:
+        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+    except ClientError as e:
+        logger.error("S3 upload error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    logger.info("Uploaded %s → s3://%s/%s", safe_name, bucket, key)
+    return {"key": key, "filename": safe_name, "size_bytes": len(body), "content_type": content_type}
+
+
+# ── Admin KB review endpoints ─────────────────────────────────────────
+
+def _get_dynamo():
+    import boto3
+    return boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+
+@app.get("/api/admin/kb-reviews")
+async def api_list_kb_reviews(
+    status: Optional[str] = "pending",
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List KB review records from DynamoDB (admin only)."""
+    from boto3.dynamodb.conditions import Key, Attr
+    table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
+    try:
+        ddb = _get_dynamo()
+        table = ddb.Table(table_name)
+        resp = table.scan(
+            FilterExpression=Attr("PK").begins_with("KB_REVIEW#") & Attr("status").eq(status),
+        )
+        reviews = resp.get("Items", [])
+        reviews.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        return {"reviews": reviews, "count": len(reviews)}
+    except Exception as e:
+        logger.error("KB review list error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/kb-review/{review_id}/approve")
+async def api_approve_kb_review(
+    review_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Approve a KB review: apply diff to matrix.json, update HTML, move doc to approved/."""
+    import boto3
+    import json as _json
+    from botocore.exceptions import ClientError
+
+    table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    ddb = _get_dynamo()
+    table = ddb.Table(table_name)
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+    # Fetch the review record
+    pk = f"KB_REVIEW#{review_id}"
+    try:
+        item = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not item:
+        raise HTTPException(status_code=404, detail="KB review not found")
+    if item.get("status") != "pending":
+        raise HTTPException(status_code=409, detail=f"Review already {item.get('status')}")
+
+    proposed_diff = item.get("proposed_diff", [])
+
+    # Apply diff to matrix.json (file on disk relative to this server)
+    matrix_path = _Path(__file__).resolve().parent.parent.parent.parent / "eagle-plugin" / "data" / "matrix.json"
+    if matrix_path.exists():
+        try:
+            matrix = _json.loads(matrix_path.read_text(encoding="utf-8"))
+            matrix = _apply_json_patch(matrix, proposed_diff)
+            matrix["version"] = datetime.utcnow().strftime("%Y-%m-%d")
+            matrix_path.write_text(_json.dumps(matrix, indent=2, ensure_ascii=False), encoding="utf-8")
+            logger.info("matrix.json updated after KB review %s", review_id)
+
+            # Regenerate HTML THRESHOLDS/TYPES arrays
+            _regenerate_html_arrays(matrix)
+        except Exception as e:
+            logger.warning("matrix.json patch failed (non-fatal): %s", e)
+    else:
+        logger.warning("matrix.json not found at %s — skipping patch", matrix_path)
+
+    # Move S3 doc from pending/ to approved/
+    old_key = item.get("s3_key", "")
+    if old_key and old_key.startswith("eagle-knowledge-base/pending/"):
+        new_key = old_key.replace("eagle-knowledge-base/pending/", "eagle-knowledge-base/approved/")
+        try:
+            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": old_key}, Key=new_key)
+            s3.delete_object(Bucket=bucket, Key=old_key)
+        except ClientError as e:
+            logger.warning("S3 move failed: %s", e)
+
+    # Update DynamoDB record
+    now = datetime.utcnow().isoformat()
+    table.update_item(
+        Key={"PK": pk, "SK": "META"},
+        UpdateExpression="SET #st = :s, reviewed_by = :u, reviewed_at = :t",
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={":s": "approved", ":u": user.user_id, ":t": now},
+    )
+    return {"status": "approved", "review_id": review_id, "reviewed_at": now}
+
+
+@app.post("/api/admin/kb-review/{review_id}/reject")
+async def api_reject_kb_review(
+    review_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Reject a KB review: mark rejected, move doc to rejected/."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    ddb = _get_dynamo()
+    table = ddb.Table(table_name)
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+    pk = f"KB_REVIEW#{review_id}"
+    try:
+        item = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not item:
+        raise HTTPException(status_code=404, detail="KB review not found")
+    if item.get("status") != "pending":
+        raise HTTPException(status_code=409, detail=f"Review already {item.get('status')}")
+
+    # Move S3 doc from pending/ to rejected/
+    old_key = item.get("s3_key", "")
+    if old_key and old_key.startswith("eagle-knowledge-base/pending/"):
+        new_key = old_key.replace("eagle-knowledge-base/pending/", "eagle-knowledge-base/rejected/")
+        try:
+            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": old_key}, Key=new_key)
+            s3.delete_object(Bucket=bucket, Key=old_key)
+        except ClientError as e:
+            logger.warning("S3 move failed: %s", e)
+
+    now = datetime.utcnow().isoformat()
+    table.update_item(
+        Key={"PK": pk, "SK": "META"},
+        UpdateExpression="SET #st = :s, reviewed_by = :u, reviewed_at = :t",
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={":s": "rejected", ":u": user.user_id, ":t": now},
+    )
+    return {"status": "rejected", "review_id": review_id, "reviewed_at": now}
+
+
+def _apply_json_patch(obj: dict, patch: list) -> dict:
+    """Apply a simplified JSON Patch (RFC 6902) to a dict. Supports replace, add, remove."""
+    import copy
+    result = copy.deepcopy(obj)
+    for op in patch:
+        operation = op.get("op")
+        path = op.get("path", "")
+        parts = [p for p in path.split("/") if p]
+        try:
+            if operation == "replace":
+                target = result
+                for part in parts[:-1]:
+                    target = target[int(part)] if isinstance(target, list) else target[part]
+                last = parts[-1]
+                if isinstance(target, list):
+                    target[int(last)] = op["value"]
+                else:
+                    target[last] = op["value"]
+            elif operation == "add":
+                target = result
+                for part in parts[:-1]:
+                    target = target[int(part)] if isinstance(target, list) else target[part]
+                last = parts[-1]
+                if isinstance(target, list):
+                    target.append(op["value"])
+                else:
+                    target[last] = op["value"]
+            elif operation == "remove":
+                target = result
+                for part in parts[:-1]:
+                    target = target[int(part)] if isinstance(target, list) else target[part]
+                last = parts[-1]
+                if isinstance(target, list):
+                    del target[int(last)]
+                else:
+                    del target[last]
+        except (KeyError, IndexError, TypeError) as e:
+            logger.warning("JSON patch op failed (%s %s): %s", operation, path, e)
+    return result
+
+
+def _regenerate_html_arrays(matrix: dict) -> None:
+    """Replace THRESHOLDS and TYPES JS arrays in contract-requirements-matrix.html."""
+    import json as _json
+    import re as _re
+
+    html_path = _Path(__file__).resolve().parent.parent.parent.parent / "contract-requirements-matrix.html"
+    if not html_path.exists():
+        logger.warning("contract-requirements-matrix.html not found, skipping HTML regeneration")
+        return
+
+    html = html_path.read_text(encoding="utf-8")
+
+    # Build new THRESHOLDS array from matrix
+    thresholds_js = "const THRESHOLDS = [\n"
+    for t in matrix.get("thresholds", []):
+        thresholds_js += (
+            f"  {{ value: {t['value']:<12} label: {_json.dumps(t['label'])}, "
+            f"short: {_json.dumps(t['short'])} }},\n"
+        )
+    thresholds_js += "];"
+
+    # Build new TYPES array from contract_types
+    types_js = "const TYPES = [\n"
+    for ct in matrix.get("contract_types", []):
+        parts = [f"id: {_json.dumps(ct['id'])}", f"label: {_json.dumps(ct['label'])}",
+                 f"risk: {ct['risk']}", f"category: {_json.dumps(ct['category'])}"]
+        if ct.get("fee_cap"):
+            parts.append(f"feeCap: {_json.dumps(ct['fee_cap'])}")
+        if ct.get("prereqs"):
+            parts.append(f"prereqs: {_json.dumps(ct['prereqs'])}")
+        types_js += "  { " + ", ".join(parts) + " },\n"
+    types_js += "];"
+
+    # Replace blocks using regex
+    html = _re.sub(
+        r"const THRESHOLDS\s*=\s*\[[\s\S]*?\];",
+        thresholds_js,
+        html,
+    )
+    html = _re.sub(
+        r"const TYPES\s*=\s*\[[\s\S]*?\];",
+        types_js,
+        html,
+    )
+    html_path.write_text(html, encoding="utf-8")
+    logger.info("Regenerated THRESHOLDS/TYPES in contract-requirements-matrix.html")
 
 
 def _get_doc_type(name: str) -> str:
@@ -759,11 +1093,14 @@ async def websocket_chat(ws: WebSocket):
                 _text_parts: list[str] = []
                 _usage: dict = {}
                 _final_text: str = ""
+                _final_text: str = ""
                 async for _sdk_msg in sdk_query(
                     prompt=user_message,
                     tenant_id=tenant_id,
                     user_id=user_id,
                     tier=user.tier or "advanced",
+                    session_id=session_id,
+                    messages=messages[:-1],  # History excluding current user message
                 ):
                     _msg_type = type(_sdk_msg).__name__
                     if _msg_type == "AssistantMessage":
@@ -781,6 +1118,11 @@ async def websocket_chat(ws: WebSocket):
                             "input_tokens": getattr(_raw, "input_tokens", 0),
                             "output_tokens": getattr(_raw, "output_tokens", 0),
                         }
+                        _final_text = str(getattr(_sdk_msg, "result", "") or "")
+                _response_text = "".join(_text_parts) or _final_text
+                if _response_text and not _text_parts:
+                    await on_text(_response_text)
+                result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": tools_called}
                         _final_text = str(getattr(_sdk_msg, "result", "") or "")
                 _response_text = "".join(_text_parts) or _final_text
                 if _response_text and not _text_parts:
@@ -1095,6 +1437,717 @@ async def health_check():
         "version": "4.0.0",
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PHASE 4 — HOT-RELOAD ADMIN + USER ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════
+
+# ── Admin: Cache Flush ─────────────────────────────────────────────
+
+@app.post("/api/admin/reload")
+async def admin_reload_caches(user: UserContext = Depends(get_user_from_header)):
+    """Force-flush all in-process caches across plugin, prompt, config, template stores.
+
+    All ECS tasks flush independently on next request — visible within 60s without restart.
+    """
+    _plugin_cache.clear()
+    _prompt_cache.clear()
+    _config_cache.clear()
+    _template_cache.clear()
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="cache",
+        entity_name="all",
+        event_type="reload",
+        actor_user_id=user.user_id,
+    )
+    return {"status": "flushed", "caches": ["plugin", "prompt", "config", "template"]}
+
+
+@app.post("/api/admin/plugin/sync")
+async def admin_plugin_sync(user: UserContext = Depends(get_user_from_header)):
+    """Force reseed all PLUGIN# entities from bundled eagle-plugin/ files (factory reset).
+
+    Bumps the manifest version to trigger a fresh seed on next request.
+    """
+    from .plugin_store import BUNDLED_PLUGIN_VERSION
+    # Delete manifest so ensure_plugin_seeded() treats it as stale
+    try:
+        from .plugin_store import _get_table
+        _get_table().delete_item(Key={"PK": "PLUGIN#manifest", "SK": "PLUGIN#manifest"})
+    except Exception:
+        pass
+    _plugin_cache.clear()
+    ensure_plugin_seeded()
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="plugin",
+        entity_name="manifest",
+        event_type="sync",
+        actor_user_id=user.user_id,
+        after=f"reseeded from bundled v{BUNDLED_PLUGIN_VERSION}",
+    )
+    return {"status": "reseeded", "version": BUNDLED_PLUGIN_VERSION}
+
+
+# ── Admin: Plugin Entity CRUD ──────────────────────────────────────
+
+@app.get("/api/admin/plugin/status")
+async def admin_plugin_status(user: UserContext = Depends(get_user_from_header)):
+    """Return PLUGIN# manifest version, seed date, and entity counts."""
+    manifest = get_plugin_manifest()
+    agents = list_plugin_entities("agents")
+    skills = list_plugin_entities("skills")
+    templates = list_plugin_entities("templates")
+    return {
+        "manifest": manifest,
+        "counts": {"agents": len(agents), "skills": len(skills), "templates": len(templates)},
+    }
+
+
+@app.get("/api/admin/plugin/{entity_type}")
+async def admin_list_plugin_entities(
+    entity_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List all PLUGIN# items for the given entity type."""
+    return list_plugin_entities(entity_type)
+
+
+@app.get("/api/admin/plugin/{entity_type}/{name}")
+async def admin_get_plugin_entity(
+    entity_type: str,
+    name: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get a single PLUGIN# entity by type and name."""
+    item = get_plugin_item(entity_type, name)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Plugin entity not found: {entity_type}/{name}")
+    return item
+
+
+@app.put("/api/admin/plugin/{entity_type}/{name}")
+async def admin_put_plugin_entity(
+    entity_type: str,
+    name: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update a PLUGIN# entity content. Writes an AUDIT# entry."""
+    existing = get_plugin_item(entity_type, name)
+    item = put_plugin_item(
+        entity_type=entity_type,
+        name=name,
+        content=body.get("content", ""),
+        metadata=body.get("metadata"),
+        content_type=body.get("content_type", "markdown"),
+    )
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type=f"plugin_{entity_type}",
+        entity_name=name,
+        event_type="update",
+        actor_user_id=user.user_id,
+        before=existing.get("content") if existing else None,
+        after=item.get("content"),
+    )
+    _plugin_cache.pop(entity_type, None)
+    return item
+
+
+# ── Workspaces ─────────────────────────────────────────────────────
+
+@app.get("/api/workspace")
+async def list_user_workspaces(user: UserContext = Depends(get_user_from_header)):
+    """List all workspaces for the current user."""
+    return list_workspaces(user.tenant_id, user.user_id)
+
+
+@app.post("/api/workspace")
+async def create_user_workspace(
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Create a new workspace for the current user."""
+    ws = create_workspace(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        name=body.get("name", "New Workspace"),
+        description=body.get("description", ""),
+        visibility=body.get("visibility", "private"),
+        is_active=body.get("is_active", False),
+    )
+    return ws
+
+
+@app.get("/api/workspace/active")
+async def get_active_workspace_endpoint(user: UserContext = Depends(get_user_from_header)):
+    """Return the currently active workspace (auto-provisions Default if none exists)."""
+    return get_or_create_default(user.tenant_id, user.user_id)
+
+
+@app.get("/api/workspace/{workspace_id}")
+async def get_workspace_endpoint(
+    workspace_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get a workspace by ID."""
+    ws = get_workspace(user.tenant_id, user.user_id, workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return ws
+
+
+@app.put("/api/workspace/{workspace_id}/activate")
+async def activate_workspace_endpoint(
+    workspace_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Switch active workspace."""
+    ws = activate_workspace(user.tenant_id, user.user_id, workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return ws
+
+
+@app.delete("/api/workspace/{workspace_id}")
+async def delete_workspace_endpoint(
+    workspace_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete a non-default workspace and all its overrides."""
+    delete_all_overrides(user.tenant_id, user.user_id, workspace_id)
+    ok = delete_workspace(user.tenant_id, user.user_id, workspace_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Cannot delete default workspace or workspace not found")
+    return {"deleted": workspace_id}
+
+
+# ── Workspace Overrides (WSPC#) ────────────────────────────────────
+
+@app.get("/api/workspace/{workspace_id}/overrides")
+async def list_workspace_overrides(
+    workspace_id: str,
+    entity_type: Optional[str] = None,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List all overrides in a workspace."""
+    return list_overrides(user.tenant_id, user.user_id, workspace_id, entity_type)
+
+
+@app.put("/api/workspace/{workspace_id}/overrides/{entity_type}/{name}")
+async def set_workspace_override(
+    workspace_id: str,
+    entity_type: str,
+    name: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Set a workspace override for an agent, skill, template, or config."""
+    return put_override(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        workspace_id=workspace_id,
+        entity_type=entity_type,
+        name=name,
+        content=body.get("content", ""),
+        is_append=body.get("is_append", False),
+    )
+
+
+@app.delete("/api/workspace/{workspace_id}/overrides/{entity_type}/{name}")
+async def delete_workspace_override(
+    workspace_id: str,
+    entity_type: str,
+    name: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete a specific override (reset to default for this entity)."""
+    ok = delete_override(user.tenant_id, user.user_id, workspace_id, entity_type, name)
+    return {"deleted": ok}
+
+
+@app.delete("/api/workspace/{workspace_id}/overrides")
+async def reset_workspace_overrides(
+    workspace_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete all overrides in a workspace (reset entire workspace to defaults)."""
+    count = delete_all_overrides(user.tenant_id, user.user_id, workspace_id)
+    return {"deleted_count": count}
+
+
+# ── Admin Prompt Overrides (PROMPT#) ──────────────────────────────
+
+@app.get("/api/admin/prompts")
+async def list_admin_prompts(user: UserContext = Depends(get_user_from_header)):
+    """List all tenant-level prompt overrides."""
+    return list_tenant_prompts(user.tenant_id)
+
+
+@app.put("/api/admin/prompts/{agent_name}")
+async def set_admin_prompt(
+    agent_name: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Set a tenant-level prompt override for an agent."""
+    existing = get_prompt(user.tenant_id, agent_name)
+    item = put_prompt(
+        tenant_id=user.tenant_id,
+        agent_name=agent_name,
+        prompt_body=body.get("prompt_body", ""),
+        is_append=body.get("is_append", False),
+        updated_by=user.user_id,
+    )
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="prompt",
+        entity_name=agent_name,
+        event_type="update",
+        actor_user_id=user.user_id,
+        before=existing.get("prompt_body") if existing else None,
+        after=item.get("prompt_body"),
+    )
+    _prompt_cache.pop(f"{user.tenant_id}#{agent_name}", None)
+    return item
+
+
+@app.delete("/api/admin/prompts/{agent_name}")
+async def delete_admin_prompt(
+    agent_name: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete a tenant prompt override (reverts to PLUGIN# canonical)."""
+    ok = delete_prompt(user.tenant_id, agent_name)
+    _prompt_cache.pop(f"{user.tenant_id}#{agent_name}", None)
+    return {"deleted": ok}
+
+
+# ── Runtime Config (CONFIG#) ───────────────────────────────────────
+
+@app.get("/api/admin/config")
+async def get_all_config(user: UserContext = Depends(get_user_from_header)):
+    """Return all CONFIG# runtime feature flags."""
+    return list_config()
+
+
+@app.put("/api/admin/config/{key}")
+async def set_config_key(
+    key: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Set a CONFIG# runtime value."""
+    item = put_config(key=key, value=body.get("value"), updated_by=user.user_id)
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="config",
+        entity_name=key,
+        event_type="update",
+        actor_user_id=user.user_id,
+        after=str(body.get("value")),
+    )
+    return item
+
+
+@app.delete("/api/admin/config/{key}")
+async def delete_config_key(
+    key: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete a CONFIG# key (reverts to hardcoded default)."""
+    ok = delete_config(key)
+    return {"deleted": ok}
+
+
+# ── Templates ──────────────────────────────────────────────────────
+
+@app.get("/api/templates")
+async def list_templates_endpoint(
+    doc_type: Optional[str] = None,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List available templates for the current tenant."""
+    return list_tenant_templates(user.tenant_id, doc_type)
+
+
+@app.get("/api/templates/{doc_type}")
+async def get_active_template(
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return the resolved template for this user (4-layer fallback)."""
+    body, source = resolve_template(user.tenant_id, user.user_id, doc_type)
+    return {"doc_type": doc_type, "template_body": body, "source": source}
+
+
+@app.post("/api/templates/{doc_type}")
+async def create_template_endpoint(
+    doc_type: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Create or update a user/tenant template override."""
+    return put_template(
+        tenant_id=user.tenant_id,
+        doc_type=doc_type,
+        user_id=body.get("user_id", user.user_id),
+        template_body=body.get("template_body", ""),
+        display_name=body.get("display_name", ""),
+        is_default=body.get("is_default", False),
+    )
+
+
+@app.delete("/api/templates/{doc_type}")
+async def delete_template_endpoint(
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete the current user's template override for a doc type."""
+    ok = delete_template(user.tenant_id, doc_type, user.user_id)
+    return {"deleted": ok}
+
+
+# ── User-Created Skills (SKILL#) ───────────────────────────────────
+
+@app.get("/api/skills")
+async def list_skills_endpoint(
+    status: Optional[str] = None,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List user-created skills. Returns active bundled + tenant SKILL# items."""
+    return list_skills(user.tenant_id, status)
+
+
+@app.post("/api/skills")
+async def create_skill_endpoint(
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Create a new user skill (status=draft)."""
+    return create_skill(
+        tenant_id=user.tenant_id,
+        owner_user_id=user.user_id,
+        name=body["name"],
+        display_name=body.get("display_name", body["name"]),
+        description=body.get("description", ""),
+        prompt_body=body.get("prompt_body", ""),
+        triggers=body.get("triggers"),
+        tools=body.get("tools"),
+        model=body.get("model"),
+        visibility=body.get("visibility", "private"),
+    )
+
+
+@app.get("/api/skills/{skill_id}")
+async def get_skill_endpoint(
+    skill_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get a skill by ID."""
+    skill = get_skill(user.tenant_id, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return skill
+
+
+@app.put("/api/skills/{skill_id}")
+async def update_skill_endpoint(
+    skill_id: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update a draft skill."""
+    updated = update_skill(user.tenant_id, skill_id, body)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return updated
+
+
+@app.post("/api/skills/{skill_id}/submit")
+async def submit_skill_endpoint(
+    skill_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Submit a skill for review (draft → review)."""
+    skill = submit_for_review(user.tenant_id, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found or not in draft status")
+    return skill
+
+
+@app.post("/api/skills/{skill_id}/publish")
+async def publish_skill_endpoint(
+    skill_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Approve and activate a skill (review → active). Admin action."""
+    skill = publish_skill(user.tenant_id, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found or not in review status")
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="skill",
+        entity_name=skill_id,
+        event_type="publish",
+        actor_user_id=user.user_id,
+    )
+    return skill
+
+
+@app.delete("/api/skills/{skill_id}")
+async def delete_skill_endpoint(
+    skill_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete a skill (only draft or disabled)."""
+    ok = delete_skill(user.tenant_id, skill_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Skill not found or cannot be deleted (must be draft or disabled)")
+    return {"deleted": skill_id}
+
+
+# ── Acquisition Packages (PACKAGE#) ───────────────────────────────
+
+@app.get("/api/packages")
+async def list_packages_endpoint(
+    status: Optional[str] = None,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List acquisition packages for the current user's tenant."""
+    return list_packages(user.tenant_id, status=status, owner_user_id=user.user_id)
+
+
+@app.post("/api/packages")
+async def create_package_endpoint(
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Create a new acquisition package (auto-determines FAR pathway)."""
+    from decimal import Decimal as _Decimal
+    return create_package(
+        tenant_id=user.tenant_id,
+        owner_user_id=user.user_id,
+        title=body["title"],
+        requirement_type=body.get("requirement_type", "services"),
+        estimated_value=_Decimal(str(body.get("estimated_value", "0"))),
+        session_id=body.get("session_id"),
+        notes=body.get("notes", ""),
+        contract_vehicle=body.get("contract_vehicle"),
+    )
+
+
+@app.get("/api/packages/{package_id}")
+async def get_package_endpoint(
+    package_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get an acquisition package by ID."""
+    pkg = get_package(user.tenant_id, package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+    return pkg
+
+
+@app.put("/api/packages/{package_id}")
+async def update_package_endpoint(
+    package_id: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update an acquisition package."""
+    updated = update_package(user.tenant_id, package_id, body)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Package not found")
+    return updated
+
+
+@app.get("/api/packages/{package_id}/checklist")
+async def get_package_checklist_endpoint(
+    package_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return the document checklist for a package (required, completed, missing)."""
+    return get_package_checklist(user.tenant_id, package_id)
+
+
+@app.post("/api/packages/{package_id}/submit")
+async def submit_package_endpoint(
+    package_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Submit package for review (drafting → review)."""
+    pkg = submit_package(user.tenant_id, package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="package",
+        entity_name=package_id,
+        event_type="submit",
+        actor_user_id=user.user_id,
+    )
+    return pkg
+
+
+@app.post("/api/packages/{package_id}/approve")
+async def approve_package_endpoint(
+    package_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Approve a package (review → approved)."""
+    pkg = approve_package(user.tenant_id, package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="package",
+        entity_name=package_id,
+        event_type="approve",
+        actor_user_id=user.user_id,
+    )
+    return pkg
+
+
+# ── Acquisition Documents (DOCUMENT#) ─────────────────────────────
+
+@app.get("/api/packages/{package_id}/documents")
+async def list_documents_endpoint(
+    package_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List all generated documents for a package (latest version per doc type)."""
+    return list_package_documents(user.tenant_id, package_id)
+
+
+@app.post("/api/packages/{package_id}/documents")
+async def create_document_endpoint(
+    package_id: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Save a generated document for a package (auto-supersedes previous version)."""
+    doc = create_acq_document(
+        tenant_id=user.tenant_id,
+        package_id=package_id,
+        doc_type=body["doc_type"],
+        content=body["content"],
+        generated_by=user.user_id,
+        session_id=body.get("session_id"),
+        template_id=body.get("template_id"),
+    )
+    # Mark doc_type as completed on package
+    pkg = get_package(user.tenant_id, package_id)
+    if pkg:
+        completed = list(set(pkg.get("completed_documents", []) + [body["doc_type"]]))
+        update_package(user.tenant_id, package_id, {"completed_documents": completed})
+    return doc
+
+
+@app.get("/api/packages/{package_id}/documents/{doc_type}")
+async def get_document_endpoint(
+    package_id: str,
+    doc_type: str,
+    version: Optional[int] = None,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get a specific document (latest version by default)."""
+    doc = get_document(user.tenant_id, package_id, doc_type, version)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@app.post("/api/packages/{package_id}/documents/{doc_type}/finalize")
+async def finalize_document_endpoint(
+    package_id: str,
+    doc_type: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Mark a document as final."""
+    doc = finalize_document(user.tenant_id, package_id, doc_type, body.get("version", 1))
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+# ── Approval Chains (APPROVAL#) ────────────────────────────────────
+
+@app.get("/api/packages/{package_id}/approvals")
+async def get_approval_chain_endpoint(
+    package_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return the approval chain status for a package."""
+    return get_chain_status(user.tenant_id, package_id)
+
+
+@app.post("/api/packages/{package_id}/approvals")
+async def create_approval_chain_endpoint(
+    package_id: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Create the FAR-driven approval chain for a package."""
+    from decimal import Decimal as _Decimal
+    estimated_value = _Decimal(str(body.get("estimated_value", "0")))
+    return create_approval_chain(user.tenant_id, package_id, estimated_value)
+
+
+@app.post("/api/packages/{package_id}/approvals/{step}/decision")
+async def record_approval_decision(
+    package_id: str,
+    step: int,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Record an approval decision (approved/rejected/returned) for a step."""
+    result = record_decision(
+        tenant_id=user.tenant_id,
+        package_id=package_id,
+        step=step,
+        status=body["status"],
+        comments=body.get("comments", ""),
+        decided_by=user.user_id,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Approval step not found")
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="approval",
+        entity_name=f"{package_id}#{step}",
+        event_type=body["status"],
+        actor_user_id=user.user_id,
+        after=body.get("comments"),
+    )
+    return result
+
+
+# ── User Preferences (PREF#) ───────────────────────────────────────
+
+@app.get("/api/user/preferences")
+async def get_user_preferences(user: UserContext = Depends(get_user_from_header)):
+    """Return the current user's preferences (merges with defaults)."""
+    return get_prefs(user.tenant_id, user.user_id)
+
+
+@app.put("/api/user/preferences")
+async def update_user_preferences(
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update user preferences (partial update — only provided keys are changed)."""
+    return update_prefs(user.tenant_id, user.user_id, body)
+
+
+@app.delete("/api/user/preferences")
+async def reset_user_preferences(user: UserContext = Depends(get_user_from_header)):
+    """Reset all user preferences to system defaults."""
+    return reset_prefs(user.tenant_id, user.user_id)
 
 
 if __name__ == "__main__":

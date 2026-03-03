@@ -378,23 +378,36 @@ export default function ChatInterface() {
     // Handle document upload
     const handleDocumentUpload = async (file: File): Promise<{ success: boolean; error?: string }> => {
         try {
-            // In a full implementation, this would upload to S3 or backend
-            // For now, we'll simulate a successful upload
-            console.log('Uploading document:', file.name);
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const token = getToken ? await getToken() : null;
+            const headers: Record<string, string> = {};
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+
+            const resp = await fetch('/api/documents/upload', {
+                method: 'POST',
+                headers,
+                body: formData,
+            });
+
+            if (!resp.ok) {
+                const body = await resp.json().catch(() => ({}));
+                throw new Error(body.detail || `Upload failed (HTTP ${resp.status})`);
+            }
+
+            const result = await resp.json();
 
             // Store the document reference
-            setUploadedDocuments(prev => [...prev, file.name]);
+            setUploadedDocuments(prev => [...prev, result.filename ?? file.name]);
 
             // Log to agent logs
-            addFormSubmitLog('Document Upload', { fileName: file.name, size: file.size }, `Uploaded: ${file.name}`);
-
-            // Simulate upload delay
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            addFormSubmitLog('Document Upload', { fileName: result.filename, size: result.size_bytes, key: result.key }, `Uploaded: ${result.filename}`);
 
             return { success: true };
         } catch (error) {
             console.error('Upload error:', error);
-            return { success: false, error: 'Failed to upload document' };
+            return { success: false, error: error instanceof Error ? error.message : 'Failed to upload document' };
         }
     };
 

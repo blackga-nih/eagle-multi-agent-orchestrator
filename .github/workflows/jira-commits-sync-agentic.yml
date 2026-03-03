@@ -95,7 +95,7 @@ jobs:
             2. Run the sync. Commits with explicit EAGLE-XXX keys get posted to those issues.
 
             **Phase 2: Semantic matching (new)**
-            3. Run: python scripts/jira_scan_issues.py --project "$JIRA_PROJECT" --assignees "blackga,Greg Black" --since "$SYNC_SINCE"
+            3. Run: python scripts/jira_scan_issues.py --project "$JIRA_PROJECT" --assignees "Black, Gregory (NIH/NCI) [C]" --since "$SYNC_SINCE"
             4. Read the skill file: .claude/skills/jira-commit-matcher/SKILL.md
             5. Follow the skill instructions to semantically match unmatched commits to open issues.
             6. For each high-confidence match, post a comment to the issue using:

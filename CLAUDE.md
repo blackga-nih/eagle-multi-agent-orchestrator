@@ -1,12 +1,13 @@
 ## EAGLE
 
 Multi-tenant Bedrock Agent Core app. Government acquisition domain.
-Next.js + FastAPI + CDK + Claude SDK. Developed through TAC methodology.
+Next.js + FastAPI + CDK + Strands Agents SDK. Developed through TAC methodology.
 
 ---
 
 ## Constraints
 
+- **No Anthropic/Claude models in Bedrock** — client requirement. Use non-Claude models only (e.g. Llama, Nova, Mistral, DeepSeek). Strands SDK + BedrockModel is the orchestration layer.
 - Specs → `.claude/specs/` (all plans written here with validation commands)
 - Agent/skill source of truth → `eagle-plugin/` (not server code)
 - Subscription tiers gate features: basic / advanced / premium
@@ -68,6 +69,7 @@ See `.claude/commands/scribe.md` for the full spec.
 | Eval / testing | `/experts:eval:plan` | `.claude/commands/experts/eval/` |
 | Git workflow | `/experts:git:plan` | `.claude/commands/experts/git/` |
 | TAC methodology | `/experts:tac:plan` | `.claude/commands/experts/tac/` |
+| Jira / sprint planning | `/experts:jira:plan` | `.claude/commands/experts/jira/` |
 
 ### Composition Examples
 ```bash
@@ -83,6 +85,37 @@ See `.claude/commands/scribe.md` for the full spec.
 # → then: /experts:frontend:plan "Add signing UI to document viewer"
 # → then: /experts:aws:plan "Add KMS key for document signing"
 ```
+
+---
+
+## Agent Routing (MANDATORY)
+
+**Before using raw Bash/Grep/Glob for domain tasks, check this table.**
+If the user's request matches a domain keyword, invoke the **Agent tool** with that `subagent_type`.
+
+| Keywords | `subagent_type` | Expert path |
+|----------|-----------------|-------------|
+| frontend, client/, nextjs, UI, component, page, tailwind | `frontend-expert-agent` | `experts/frontend/` |
+| backend, server/, FastAPI, route, endpoint, tool handler | `backend-expert-agent` | `experts/backend/` |
+| CDK, aws, stack, IAM, S3, DynamoDB, Cognito, VPC | `aws-expert-agent` | `experts/aws/` |
+| strands, agent SDK, BedrockModel, multi-agent | `claude-sdk-expert-agent` | `experts/strands/` |
+| deploy, ECS, Fargate, docker, ECR, ALB | `deployment-expert-agent` | `experts/deployment/` |
+| cloudwatch, logs, telemetry, metrics, dashboard | `cloudwatch-expert-agent` | `experts/cloudwatch/` |
+| eval, test suite, test results, pytest | `eval-expert-agent` | `experts/eval/` |
+| git, branch, PR, workflow, actions, CI/CD | `git-expert-agent` | `experts/git/` |
+| hooks, pre/post tool use, lifecycle | `hooks-expert-agent` | `experts/hooks/` |
+| TAC, methodology, plan-build-improve | `tac-expert-agent` | `experts/tac/` |
+| diagram, architecture visual, excalidraw | `excalidraw-agent` | — |
+| browser, screenshot, UI test, smoke test | `claude-bowser-agent` | — |
+| format, standardize, report, slide deck | `scribe` | — |
+
+**Fallback to raw tools only when**: task is a single-file read/grep (< 3 ops), no domain matches, or user explicitly asks.
+
+### Post-Agent Self-Improve Rule (TAC #5 + ACT-LEARN-REUSE)
+
+After any expert agent completes a **plan**, **build**, or **plan_build_improve** task:
+1. Run `/experts:{domain}:self-improve` to update the expertise file
+2. This does **NOT** apply to `question` or `maintenance` tasks (read-only = no new learnings)
 
 ---
 
@@ -112,8 +145,8 @@ Zod for form validation, Tailwind for styling, Lucide for icons.
 | Concern | Key Files |
 |---------|-----------|
 | Entry point | `app/main.py` (FastAPI routes, CORS, middleware) |
-| Orchestration | `app/sdk_agentic_service.py` (Claude SDK — PRIMARY) |
-| Legacy orch | `app/agentic_service.py` (prompt injection — DEPRECATED) |
+| Orchestration | `app/strands_agentic_service.py` (Strands SDK — PRIMARY) |
+| Legacy orch | `app/sdk_agentic_service.py` (Claude SDK — ARCHIVED), `app/agentic_service.py` (prompt injection — DEPRECATED) |
 | Auth | `app/cognito_auth.py` (JWT → tenant context) |
 | Storage | `app/session_store.py` (DynamoDB single-table CRUD) |
 | Costs | `app/cost_attribution.py` + `app/admin_cost_service.py` |
@@ -121,7 +154,7 @@ Zod for form validation, Tailwind for styling, Lucide for icons.
 | Streaming | `app/stream_protocol.py` + `app/streaming_routes.py` |
 | Doc export | `app/document_export.py` (PDF/Word) |
 | Skill loader | `eagle_skill_constants.py` (auto-discovery) |
-| Tests | `tests/test_agent_sdk.py`, `tests/test_eagle_sdk_eval.py` |
+| Tests | `tests/test_strands_eval.py`, `tests/test_strands_service_integration.py`, `tests/test_strands_multi_agent.py` |
 
 **Patterns**: Pydantic models for all data, DynamoDB single-table with PK/SK prefixes,
 SSE streaming for agent responses, Cognito JWT for multi-tenant auth.
@@ -187,7 +220,7 @@ eagle-plugin/
 └── self-improve.md       ← Validate & update expertise (LEARN)
 ```
 
-**9 Active Domains**: frontend, backend, aws, claude-sdk, deployment, cloudwatch, eval, git, tac
+**10 Active Domains**: frontend, backend, aws, claude-sdk, deployment, cloudwatch, eval, git, tac, jira
 
 ### When to Create a New Expert
 - You've asked the same domain question 3+ times

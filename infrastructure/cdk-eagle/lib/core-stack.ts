@@ -31,6 +31,26 @@ export class EagleCoreStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
+    // GSI1: Tenant-level session and workspace listing
+    // PK=TENANT#{tenant_id}, SK=SESSION#{created_at}#{session_id}
+    // Eliminates table.scan() for list_tenant_sessions() and get_tenant_usage_overview()
+    eagleTable.addGlobalSecondaryIndex({
+      indexName: 'GSI1',
+      partitionKey: { name: 'GSI1PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'GSI1SK', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    // GSI2: Tier queries and skill listing by status
+    // PK=TIER#{tier} or SKILL#STATUS#{status}, SK varies by entity
+    // Eliminates table.scan() for get_tenants_by_tier() and future skill queries
+    eagleTable.addGlobalSecondaryIndex({
+      indexName: 'GSI2',
+      partitionKey: { name: 'GSI2PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'GSI2SK', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
     // ── VPC ──────────────────────────────────────────────────
     // Import the existing NCI EAGLE DEV VPC — SCP blocks ec2:CreateVpc directly;
     // VPCs are provisioned by the NCI networking team via Service Catalog.

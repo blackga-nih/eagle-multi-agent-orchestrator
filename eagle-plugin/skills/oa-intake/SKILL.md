@@ -10,6 +10,15 @@ triggers:
 
 # OA Intake Skill - Acquisition Request Workflow
 
+## Reference Data
+
+Load `eagle-plugin/data/matrix.json` for all threshold, document, and contract type
+determinations. Do not use memorized values — matrix.json is authoritative.
+Key fields: `thresholds`, `doc_rules.above_threshold`, `doc_rules.by_method`,
+`doc_rules.by_type`, `doc_rules.special_factors`, `approval_chains`.
+
+---
+
 Guide CORs and program staff through the acquisition intake process like a knowledgeable contract specialist colleague.
 
 ## Philosophy: Think Like Trish
@@ -46,9 +55,9 @@ Collect only essential information to start. Ask these conversationally, not as 
 ### Cost Range Options
 
 ```
-○ Under $10,000 (Micro-purchase)
-○ $10,000 - $250,000 (Simplified Acquisition)
-○ Over $250,000 (Negotiated Acquisition)
+○ Under $15,000 (Micro-purchase)
+○ $15,000 - $350,000 (Simplified Acquisition)
+○ Over $350,000 (Negotiated Acquisition)
 ○ I don't know yet
 ```
 
@@ -57,7 +66,7 @@ Collect only essential information to start. Ask these conversationally, not as 
 > "Hi! I'm here to help you with your acquisition request. Let's start with the basics:
 >
 > 1. **What do you need?** (Describe the product, service, or equipment)
-> 2. **What's the estimated cost?** (Under $10K, $10K-$250K, Over $250K, or unsure)
+> 2. **What's the estimated cost?** (Under $15K, $15K-$350K, Over $350K, or unsure)
 > 3. **When do you need it?**"
 
 ---
@@ -186,14 +195,14 @@ Q: "What type of funds?"
 ### Decision Tree: Acquisition Type
 
 ```
-COST < $10,000?
+COST < $15,000?
 ├── YES → MICRO-PURCHASE
 │         • Minimal documentation
 │         • Government purchase card preferred
 │         • Single quote acceptable
 │         • No competition required
 │
-└── NO → COST $10,000 - $250,000?
+└── NO → COST $15,000 - $350,000?
          ├── YES → SIMPLIFIED ACQUISITION (FAR Part 13)
          │         ├── Commercial item? → FAR Part 12 + Part 13
          │         └── Non-commercial? → Standard Part 13
@@ -245,7 +254,7 @@ Are there multiple capable sources?
 
 ### Set-Aside Analysis
 
-For acquisitions over SAT ($250K):
+For acquisitions over SAT ($350K):
 
 ```
 Suitable for small business?
@@ -269,19 +278,22 @@ Suitable for small business?
 
 ### By Acquisition Type
 
-| Document | Micro (<$10K) | Simplified ($10K-$250K) | Negotiated (>$250K) |
+| Document | Micro (<$15K) | Simplified ($15K-$350K) | Negotiated (>$350K) |
 |----------|:-------------:|:-----------------------:|:-------------------:|
 | Purchase Request | ✓ | ✓ | ✓ |
 | Statement of Work (SOW) | - | ✓ | ✓ |
 | IGCE | - | ✓ | ✓ |
 | Market Research | - | ✓ | ✓ |
-| Acquisition Plan | - | If > $7M | ✓ |
+| Acquisition Plan | - | If > $20M | ✓ if > $20M |
 | Sources Sought | - | Optional | ✓ |
-| J&A (if sole source) | - | If needed | If needed |
+| J&A (if sole source) | - | If needed (CO signs ≤$900K) | If needed (HCA signs >$900K) |
 | D&F | - | - | ✓ |
 | Technical Eval Plan | - | - | ✓ |
 | Past Performance Eval | - | - | ✓ |
 | Price/Cost Analysis | - | - | ✓ |
+| VETS 4212 Cert | - | If > $150K | ✓ |
+| Subcontracting Plan | - | - | If > $750K |
+| Certified Cost Data (TINA) | - | - | If > $2M |
 
 ### Document Generation Priority
 
@@ -340,17 +352,24 @@ Would you like me to help generate any of these documents?
 
 ## Key Thresholds Reference
 
+> **Authoritative source:** `eagle-plugin/data/matrix.json` — values below reflect FAC 2025-06 / HHS Class Deviation 2026-01 (eff. Nov 21 2025).
+
 | Threshold | Amount | Significance |
 |-----------|--------|--------------|
-| **Micro-Purchase (MPT)** | $10,000 | Minimal documentation, purchase card |
-| **Davis-Bacon (services)** | $2,000 | Wage requirements for construction |
+| **Micro-Purchase (MPT)** | $15,000 | Minimal documentation, purchase card (raised from $10K) |
+| **Davis-Bacon (construction)** | $2,000 | Wage requirements for construction |
 | **Service Contract Act** | $2,500 | Wage requirements for services |
 | **Publicize Requirement** | $25,000 | Synopsis on SAM.gov required |
-| **Simplified (SAT)** | $250,000 | Full competition required above |
+| **VETS 4212 Affirmative Action** | $150,000 | Veteran hiring affirmative action plan |
+| **Simplified (SAT)** | $350,000 | Full competition required above (raised from $250K) |
+| **Subcontracting Plan** | $750,000 | Large business must submit subK plan |
+| **J&A CO Authority** | $900,000 | Above this, HCA must approve sole source J&A |
+| **Cost/Pricing Data (TINA)** | $2,000,000 | Certified data required |
 | **Sole Source 8(a) Services** | $4,500,000 | Competition required above |
 | **Sole Source 8(a) Manufacturing** | $7,000,000 | Competition required above |
-| **Cost/Pricing Data (TINA)** | $2,000,000 | Certified data required |
-| **Written Acquisition Plan** | $7,000,000 | FAR 7.105 requirements |
+| **Written Acquisition Plan** | $20,000,000 | FAR 7.105 written AP required |
+| **HCA Approval** | $50,000,000 | HCA must approve acquisitions above |
+| **SPE J&A** | $90,000,000 | Senior Procurement Executive J&A |
 
 ---
 
@@ -366,7 +385,7 @@ Would you like me to help generate any of these documents?
 
 **User:** "It's about $85,000, we need it by March, and we're looking at Illumina equipment."
 
-**EAGLE:** "Got it - $85K puts this in the Simplified Acquisition range (FAR Part 13). A few more questions:
+**EAGLE:** "Got it - $85K puts this in the Simplified Acquisition range ($15K–$350K, FAR Part 13). A few more questions:
 
 - Is Illumina the only vendor that makes this equipment, or are there alternatives?
 - Is this a new purchase or related to an existing contract?

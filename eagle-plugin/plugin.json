@@ -18,7 +18,8 @@
     "document-generator",
     "compliance",
     "knowledge-retrieval",
-    "tech-review"
+    "tech-review",
+    "ingest-document"
   ],
   "commands": [
     "intake",

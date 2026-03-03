@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
 import boto3
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError, BotoCoreError
 
 logger = logging.getLogger("eagle.sessions")
@@ -97,15 +98,16 @@ def create_session(
 ) -> Dict[str, Any]:
     """
     Create a new session in DynamoDB.
-    
+
     Returns the session record.
     """
     if not session_id:
         session_id = generate_session_id(user_id)
-    
+
     now = datetime.utcnow()
     ttl = int((now + timedelta(days=SESSION_TTL_DAYS)).timestamp())
-    
+    created_at_iso = now.isoformat()
+
     session = {
         "PK": f"SESSION#{tenant_id}#{user_id}",
         "SK": f"SESSION#{session_id}",
@@ -113,18 +115,19 @@ def create_session(
         "tenant_id": tenant_id,
         "user_id": user_id,
         "title": title or "New Conversation",
-        "created_at": now.isoformat(),
-        "updated_at": now.isoformat(),
+        "created_at": created_at_iso,
+        "updated_at": created_at_iso,
         "message_count": 0,
         "total_tokens": 0,
         "status": "active",
         "metadata": metadata or {},
         "ttl": ttl,
-        # GSI for listing sessions by tenant
+        # GSI1: tenant-level session listing (eliminates scan for list_tenant_sessions)
+        # GSI1SK includes created_at + session_id for chronological sort + uniqueness
         "GSI1PK": f"TENANT#{tenant_id}",
-        "GSI1SK": f"SESSION#{now.isoformat()}",
+        "GSI1SK": f"SESSION#{created_at_iso}#{session_id}",
     }
-    
+
     try:
         table = _get_table()
         table.put_item(Item=session)
@@ -145,13 +148,13 @@ def get_session(
 ) -> Optional[Dict[str, Any]]:
     """
     Get a session by ID.
-    
+
     Checks cache first, then DynamoDB.
     """
     # Check cache
     if _is_cache_valid(session_id):
         return _serialize_item(_session_cache[session_id])
-    
+
     try:
         table = _get_table()
         response = table.get_item(
@@ -184,14 +187,14 @@ def update_session(
     """
     if not updates:
         return get_session(session_id, tenant_id, user_id)
-    
+
     now = datetime.utcnow().isoformat()
-    
+
     # Build update expression
     update_parts = ["#upd = :updval"]
     expr_names = {"#upd": "updated_at"}
     expr_values = {":updval": now}
-    
+
     for i, (k, v) in enumerate(updates.items()):
         if k in ("PK", "SK", "session_id", "tenant_id", "user_id"):
             continue
@@ -200,7 +203,7 @@ def update_session(
         update_parts.append(f"{alias} = {val_alias}")
         expr_names[alias] = k
         expr_values[val_alias] = v
-    
+
     try:
         table = _get_table()
         response = table.update_item(
@@ -231,7 +234,7 @@ def delete_session(
     """
     try:
         table = _get_table()
-        
+
         # Delete session record
         table.delete_item(
             Key={
@@ -239,7 +242,7 @@ def delete_session(
                 "SK": f"SESSION#{session_id}",
             }
         )
-        
+
         # Delete all messages (batch delete)
         response = table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
@@ -249,11 +252,11 @@ def delete_session(
             },
             ProjectionExpression="PK, SK"
         )
-        
+
         with table.batch_writer() as batch:
             for item in response.get("Items", []):
                 batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
-        
+
         _invalidate_cache(session_id)
         logger.info("Deleted session: %s", session_id)
         return True
@@ -270,23 +273,23 @@ def list_sessions(
 ) -> List[Dict[str, Any]]:
     """
     List sessions for a user.
-    
+
     Returns most recent sessions first.
     """
     try:
         table = _get_table()
-        
+
         key_condition = "PK = :pk AND begins_with(SK, :sk_prefix)"
         expr_values = {
             ":pk": f"SESSION#{tenant_id}#{user_id}",
             ":sk_prefix": "SESSION#",
         }
-        
+
         filter_expr = None
         if status:
             filter_expr = "#status = :status"
             expr_values[":status"] = status
-        
+
         response = table.query(
             KeyConditionExpression=key_condition,
             ExpressionAttributeValues=expr_values,
@@ -295,7 +298,7 @@ def list_sessions(
             ScanIndexForward=False,  # Descending order
             Limit=limit
         )
-        
+
         sessions = [_serialize_item(item) for item in response.get("Items", [])]
         return sessions
     except (ClientError, BotoCoreError) as e:
@@ -315,18 +318,18 @@ def add_message(
 ) -> Dict[str, Any]:
     """
     Add a message to a session.
-    
+
     Content can be a string or a list of content blocks (for tool use).
     """
     now = datetime.utcnow()
     message_id = f"{int(now.timestamp() * 1000)}-{hashlib.md5(str(content).encode()).hexdigest()[:8]}"
-    
+
     # Serialize content if it's a list
     if isinstance(content, list):
         content_str = json.dumps(content, default=str)
     else:
         content_str = str(content)
-    
+
     message = {
         "PK": f"SESSION#{tenant_id}#{user_id}",
         "SK": f"MSG#{session_id}#{message_id}",
@@ -338,11 +341,11 @@ def add_message(
         "created_at": now.isoformat(),
         "metadata": metadata or {},
     }
-    
+
     try:
         table = _get_table()
         table.put_item(Item=message)
-        
+
         # Update session message count and updated_at
         table.update_item(
             Key={
@@ -357,7 +360,7 @@ def add_message(
                 ":one": 1,
             }
         )
-        
+
         return _serialize_item(message)
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to add message: %s", e)
@@ -373,29 +376,29 @@ def get_messages(
 ) -> List[Dict[str, Any]]:
     """
     Get messages for a session.
-    
+
     Returns messages in chronological order.
     """
     try:
         table = _get_table()
-        
+
         key_condition = "PK = :pk AND begins_with(SK, :sk_prefix)"
         expr_values = {
             ":pk": f"SESSION#{tenant_id}#{user_id}",
             ":sk_prefix": f"MSG#{session_id}#",
         }
-        
+
         if before:
             key_condition = "PK = :pk AND SK < :before"
             expr_values[":before"] = f"MSG#{session_id}#{before}"
-        
+
         response = table.query(
             KeyConditionExpression=key_condition,
             ExpressionAttributeValues=expr_values,
             ScanIndexForward=True,  # Ascending order
             Limit=limit
         )
-        
+
         messages = []
         for item in response.get("Items", []):
             msg = _serialize_item(item)
@@ -406,7 +409,7 @@ def get_messages(
                 except json.JSONDecodeError:
                     pass
             messages.append(msg)
-        
+
         return messages
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to get messages: %s", e)
@@ -421,22 +424,22 @@ def get_messages_for_anthropic(
 ) -> List[Dict[str, Any]]:
     """
     Get messages in Anthropic API format.
-    
+
     Returns: [{"role": "user", "content": "..."}, ...]
     """
     messages = get_messages(session_id, tenant_id, user_id, limit)
-    
+
     anthropic_messages = []
     for msg in messages:
         content = msg.get("content", "")
         role = msg.get("role", "user")
-        
+
         # Handle list content (tool use)
         if isinstance(content, list):
             anthropic_messages.append({"role": role, "content": content})
         else:
             anthropic_messages.append({"role": role, "content": str(content)})
-    
+
     return anthropic_messages
 
 
@@ -455,7 +458,7 @@ def record_usage(
     Record token usage for a session.
     """
     now = datetime.utcnow()
-    
+
     usage = {
         "PK": f"USAGE#{tenant_id}",
         "SK": f"USAGE#{now.strftime('%Y-%m-%d')}#{session_id}#{int(now.timestamp() * 1000)}",
@@ -470,11 +473,11 @@ def record_usage(
         "created_at": now.isoformat(),
         "date": now.strftime("%Y-%m-%d"),
     }
-    
+
     try:
         table = _get_table()
         table.put_item(Item=usage)
-        
+
         # Also update session total_tokens
         table.update_item(
             Key={
@@ -500,10 +503,10 @@ def get_usage_summary(
     """
     try:
         table = _get_table()
-        
+
         # Query usage records for the past N days
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-        
+
         response = table.query(
             KeyConditionExpression="PK = :pk AND SK >= :start",
             ExpressionAttributeValues={
@@ -511,13 +514,13 @@ def get_usage_summary(
                 ":start": f"USAGE#{start_date}",
             }
         )
-        
+
         items = response.get("Items", [])
-        
+
         total_input = sum(int(i.get("input_tokens", 0)) for i in items)
         total_output = sum(int(i.get("output_tokens", 0)) for i in items)
         total_cost = sum(float(i.get("cost_usd", 0)) for i in items)
-        
+
         # Group by date
         by_date = {}
         for item in items:
@@ -528,7 +531,7 @@ def get_usage_summary(
             by_date[date]["output_tokens"] += int(item.get("output_tokens", 0))
             by_date[date]["cost_usd"] += float(item.get("cost_usd", 0))
             by_date[date]["requests"] += 1
-        
+
         return {
             "tenant_id": tenant_id,
             "period_days": days,
@@ -579,25 +582,33 @@ def get_usage_metrics(
 
 
 def get_all_tenants() -> List[Dict[str, str]]:
-    """Scan for unique tenant IDs across all SESSION# records."""
+    """Return unique tenant IDs by scanning GSI1 for items with GSI1PK present.
+
+    Sessions written by create_session() carry GSI1PK=TENANT#{tenant_id}.
+    DynamoDB GSI partition keys require equality conditions — begins_with is not
+    supported on GSI PKs.  Instead we scan the GSI1 index with an
+    attribute_exists filter so we only read items that have GSI1PK set.
+    This is far cheaper than a full base-table scan because:
+      - Only session items carry GSI1PK (not USAGE#, COST#, SUB# items)
+      - ProjectionExpression limits payload to two attributes
+    """
     try:
         table = _get_table()
         response = table.scan(
-            FilterExpression="begins_with(PK, :prefix) AND begins_with(SK, :sk_prefix)",
-            ExpressionAttributeValues={
-                ":prefix": "SESSION#",
-                ":sk_prefix": "SESSION#",
-            },
-            ProjectionExpression="PK, tenant_id"
+            IndexName="GSI1",
+            FilterExpression=Attr("GSI1PK").begins_with("TENANT#"),
+            ProjectionExpression="GSI1PK, tenant_id",
         )
-        tenant_ids = set()
+        tenant_ids: set = set()
         for item in response.get("Items", []):
             tid = item.get("tenant_id")
             if tid:
                 tenant_ids.add(tid)
             else:
-                parts = item.get("PK", "").split("#")
-                if len(parts) >= 2:
+                # Derive from GSI1PK = TENANT#{tenant_id}
+                gsi_pk = item.get("GSI1PK", "")
+                parts = gsi_pk.split("#", 1)
+                if len(parts) == 2:
                     tenant_ids.add(parts[1])
         return [{"tenant_id": tid} for tid in tenant_ids]
     except (ClientError, BotoCoreError) as e:
@@ -606,25 +617,28 @@ def get_all_tenants() -> List[Dict[str, str]]:
 
 
 def get_tenants_by_tier(tier: str) -> List[Dict[str, str]]:
-    """Scan sessions filtered by subscription tier metadata."""
+    """Return tenant IDs for sessions tagged with the given subscription tier.
+
+    Uses GSI2 with KeyConditionExpression GSI2PK = TIER#{tier}.
+    Items written with GSI2PK carry this attribute when the session
+    metadata includes a subscription_tier field.
+    """
     try:
         table = _get_table()
-        response = table.scan(
-            FilterExpression="begins_with(SK, :sk_prefix) AND metadata.subscription_tier = :tier",
-            ExpressionAttributeValues={
-                ":sk_prefix": "SESSION#",
-                ":tier": tier,
-            },
-            ProjectionExpression="PK, tenant_id"
+        response = table.query(
+            IndexName="GSI2",
+            KeyConditionExpression=Key("GSI2PK").eq(f"TIER#{tier}"),
+            ProjectionExpression="GSI2PK, GSI2SK, tenant_id",
         )
-        tenant_ids = set()
+        tenant_ids: set = set()
         for item in response.get("Items", []):
             tid = item.get("tenant_id")
             if tid:
                 tenant_ids.add(tid)
             else:
-                parts = item.get("PK", "").split("#")
-                if len(parts) >= 2:
+                gsi_pk = item.get("GSI1PK", "")
+                parts = gsi_pk.split("#", 1)
+                if len(parts) == 2:
                     tenant_ids.add(parts[1])
         return [{"tenant_id": tid} for tid in tenant_ids]
     except (ClientError, BotoCoreError) as e:
@@ -678,15 +692,12 @@ def get_tenant_usage_overview(tenant_id: str) -> Dict[str, Any]:
         )
         metrics = [_serialize_item(i) for i in usage_resp.get("Items", [])]
 
-        # Count sessions for this tenant (scan for PK prefix)
-        sessions_resp = table.scan(
-            FilterExpression="begins_with(PK, :prefix) AND begins_with(SK, :sk_prefix)",
-            ExpressionAttributeValues={
-                ":prefix": f"SESSION#{tenant_id}#",
-                ":sk_prefix": "SESSION#",
-            },
-            ProjectionExpression="PK",
-            Select="COUNT"
+        # Count sessions for this tenant using GSI1 (eliminates table.scan())
+        # GSI1PK = TENANT#{tenant_id} for all sessions created by create_session()
+        sessions_resp = table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=Key("GSI1PK").eq(f"TENANT#{tenant_id}"),
+            Select="COUNT",
         )
         session_count = sessions_resp.get("Count", 0)
 
@@ -708,15 +719,17 @@ def get_tenant_usage_overview(tenant_id: str) -> Dict[str, Any]:
 
 
 def list_tenant_sessions(tenant_id: str) -> List[Dict[str, Any]]:
-    """List all sessions for a tenant (replaces DynamoDBStore.get_tenant_sessions)."""
+    """List all sessions for a tenant using GSI1 (eliminates table.scan()).
+
+    GSI1PK = TENANT#{tenant_id}, GSI1SK = SESSION#{created_at}#{session_id}.
+    Returns sessions sorted by created_at descending (ScanIndexForward=False).
+    """
     try:
         table = _get_table()
-        response = table.scan(
-            FilterExpression="begins_with(PK, :prefix) AND begins_with(SK, :sk_prefix)",
-            ExpressionAttributeValues={
-                ":prefix": f"SESSION#{tenant_id}#",
-                ":sk_prefix": "SESSION#",
-            }
+        response = table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=Key("GSI1PK").eq(f"TENANT#{tenant_id}"),
+            ScanIndexForward=False,  # Most recent first
         )
         return [_serialize_item(i) for i in response.get("Items", [])]
     except (ClientError, BotoCoreError) as e:

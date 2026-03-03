@@ -22,6 +22,7 @@ wheels/
 
 # Environment
 .env
+.env.local
 .env.lightsail
 .venv
 env/
@@ -88,3 +89,24 @@ data/
 
 # Legacy directories (kept locally, not tracked)
 nextjs-frontend/
+
+# Personal / scratch files (not for repo)
+gb.txt
+testing.txt
+cursor-shortcuts.txt
+*.vtt
+contract-requirements-matrix.html
+*.zip
+
+# Separate plugin projects (own repos)
+tac-experts-plugin/
+
+# CloudFormation scratch / infra exploration (sensitive params)
+aws/
+
+# CDK bootstrap templates (generated, contain account-specific ARNs)
+infrastructure/cdk-eagle/bootstrap-*.yaml
+infrastructure/cdk-eagle/bootstrap-template*.yaml
+
+# Reference documents / binary design blobs (stored in S3 / SharePoint)
+docs/architecture/reference-documents/

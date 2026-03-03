@@ -10,8 +10,9 @@ cryptography==46.0.5
 requests==2.32.4
 python-dotenv==1.0.0
 # EAGLE additions
-anthropic>=0.40.0
-claude-agent-sdk>=0.1.19
+strands-agents>=1.0.0
+# anthropic>=0.40.0 — kept for legacy agentic_service.py (execute_tool, health check)
+# claude-agent-sdk>=0.1.19 — REMOVED: replaced by strands-agents (Phase 5 migration)
 mcp>=1.5.0
 python-docx>=1.1.0
 reportlab>=4.1.0

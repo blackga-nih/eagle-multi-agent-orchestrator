@@ -32,9 +32,9 @@ from dotenv import load_dotenv
 load_dotenv(repo_root / ".env")
 
 try:
-    from scripts.jira_connect import fetch_open_issues
+    from scripts.jira_connect import fetch_open_issues, fetch_board_issues
 except ImportError:
-    from jira_connect import fetch_open_issues
+    from jira_connect import fetch_open_issues, fetch_board_issues
 
 
 def issue_keys_in_message(project_key: str, message: str) -> list[str]:
@@ -100,10 +100,14 @@ def build_scan_payload(
     branch: str = "HEAD",
     commit_author: str | None = None,
     repo_url: str | None = None,
+    board_id: int | None = None,
 ) -> dict:
     """Build the JSON payload: open issues + unmatched commits."""
-    # Fetch open issues from Jira (read-only)
-    issues = fetch_open_issues(project_key, assignees=assignees)
+    # Fetch open issues — board API if board_id given, else assignee JQL
+    if board_id:
+        issues = fetch_board_issues(board_id)
+    else:
+        issues = fetch_open_issues(project_key, assignees=assignees)
 
     # Fetch recent commits
     all_commits = get_recent_commits(since, branch=branch, author=commit_author)
@@ -144,6 +148,7 @@ def main():
         description="Fetch open Jira issues + recent unmatched commits as JSON for Claude."
     )
     parser.add_argument("--project", default=os.getenv("JIRA_PROJECT", "EAGLE"), help="Jira project key")
+    parser.add_argument("--board-id", type=int, default=os.getenv("JIRA_BOARD_ID") and int(os.getenv("JIRA_BOARD_ID")), help="Jira Agile board ID — fetches all open board issues (overrides --assignees)")
     parser.add_argument("--assignees", default="blackga,Greg Black", help="Comma-separated Jira assignee names")
     parser.add_argument("--since", default="7 days ago", help="Git log --since value (e.g. '7 days ago', '24h', SHA)")
     parser.add_argument("--branch", default="HEAD", help="Git branch to read commits from")
@@ -161,13 +166,17 @@ def main():
     if args.dry_run:
         print("=== jira_scan_issues.py — Dry Run ===\n")
         print(f"  Project     : {args.project}")
+        print(f"  Board ID    : {args.board_id or '(none — using assignee filter)'}")
         print(f"  Assignees   : {assignees}")
         print(f"  Since       : {args.since}")
         print(f"  Branch      : {args.branch}")
         print(f"  Commit auth : {args.commit_author or '(all)'}")
 
         # --- Open Issues (candidates for matching) ---
-        issues = fetch_open_issues(args.project, assignees=assignees)
+        if args.board_id:
+            issues = fetch_board_issues(args.board_id)
+        else:
+            issues = fetch_open_issues(args.project, assignees=assignees)
         print(f"\n{'=' * 70}")
         print(f"  OPEN ISSUES — candidates for commit matching ({len(issues)})")
         print(f"{'=' * 70}")
@@ -257,6 +266,7 @@ def main():
         branch=args.branch,
         commit_author=args.commit_author,
         repo_url=args.repo_url,
+        board_id=args.board_id,
     )
     json.dump(payload, sys.stdout, indent=2)
     print()

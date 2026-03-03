@@ -132,6 +132,40 @@ def create_issue(
     return None
 
 
+def fetch_board_issues(board_id: int, max_results: int = 50) -> list[dict]:
+    """Fetch all open (non-Done) issues from an Agile board by board ID.
+
+    Uses the Agile REST API — returns issues regardless of assignee.
+    Returns list of dicts: {key, summary, labels, description, assignee, status}
+    """
+    url = f"{JIRA_BASE_URL}/rest/agile/1.0/board/{board_id}/issue"
+    params = {
+        "maxResults": max_results,
+        "fields": "summary,labels,description,assignee,status",
+    }
+    resp = requests.get(url, headers=get_headers(), params=params)
+    if resp.status_code != 200:
+        print(f"Failed to fetch board {board_id} issues: {resp.status_code} - {resp.text}")
+        return []
+    data = resp.json()
+    results = []
+    for issue in data.get("issues", []):
+        fields = issue["fields"]
+        status_cat = (fields.get("status", {}).get("statusCategory", {}) or {}).get("key", "")
+        if status_cat == "done":
+            continue  # skip completed items client-side
+        assignee_obj = fields.get("assignee") or {}
+        results.append({
+            "key": issue["key"],
+            "summary": fields.get("summary", ""),
+            "labels": fields.get("labels", []),
+            "description": (fields.get("description") or "")[:500],
+            "assignee": assignee_obj.get("displayName", "unassigned"),
+            "status": fields.get("status", {}).get("name", ""),
+        })
+    return results
+
+
 def fetch_open_issues(project_key, assignees=None, max_results=50):
     """Fetch open issues (not Done), optionally filtered to specific assignees only.
 
