@@ -12,6 +12,7 @@ python-dotenv==1.0.0
 # EAGLE additions
 anthropic>=0.40.0
 claude-agent-sdk>=0.1.19
+strands-agents>=0.1.0
 mcp>=1.5.0
 python-docx>=1.1.0
 reportlab>=4.1.0

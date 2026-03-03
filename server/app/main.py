@@ -34,8 +34,7 @@ import uuid
 import io
 
 # EAGLE modules (new)
-from .agentic_service import get_client, MODEL, EAGLE_TOOLS
-from .sdk_agentic_service import sdk_query
+from .strands_agentic_service import strands_query, get_active_model, get_tools_for_api
 from .document_export import export_document
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
@@ -176,28 +175,25 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         _usage: dict = {}
         _tools_called: list[str] = []
         _final_text: str = ""
-        async for _sdk_msg in sdk_query(
+        async for _event in strands_query(
             prompt=req.message,
             tenant_id=tenant_id,
             user_id=user_id,
             tier=user.tier or "advanced",
         ):
-            _msg_type = type(_sdk_msg).__name__
-            if _msg_type == "AssistantMessage":
-                for _block in _sdk_msg.content:
-                    if getattr(_block, "type", None) == "text":
-                        _text_parts.append(_block.text)
-                    elif getattr(_block, "type", None) == "tool_use":
-                        _tools_called.append(getattr(_block, "name", ""))
-            elif _msg_type == "ResultMessage":
-                _raw = getattr(_sdk_msg, "usage", {})
-                _usage = _raw if isinstance(_raw, dict) else {
-                    "input_tokens": getattr(_raw, "input_tokens", 0),
-                    "output_tokens": getattr(_raw, "output_tokens", 0),
-                }
-                _final_text = str(getattr(_sdk_msg, "result", "") or "")
+            _etype = _event.get("type")
+            if _etype == "text":
+                _text_parts.append(str(_event.get("content", "")))
+            elif _etype == "tool_use":
+                _tools_called.append(str(_event.get("name", "")))
+            elif _etype == "complete":
+                _raw = _event.get("usage", {})
+                _usage = _raw if isinstance(_raw, dict) else {}
+                _final_text = str(_event.get("result", "") or "")
+            elif _etype == "error":
+                raise RuntimeError(str(_event.get("message", "Unknown Strands error")))
         _response_text = "".join(_text_parts) or _final_text
-        result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": _tools_called}
+        result = {"text": _response_text, "usage": _usage, "model": get_active_model(), "tools_called": _tools_called}
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
@@ -216,7 +212,7 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         record_request_cost(
             tenant_id, user_id, session_id,
             input_tokens, output_tokens,
-            model=result.get("model", MODEL),
+            model=result.get("model", get_active_model()),
             tools_used=result.get("tools_called", []),
             response_time_ms=elapsed_ms
         )
@@ -658,7 +654,7 @@ async def api_telemetry(limit: int = 50):
 async def api_tools():
     """List available EAGLE tools."""
     tools = []
-    for tool in EAGLE_TOOLS:
+    for tool in get_tools_for_api(tier="advanced"):
         tools.append({
             "name": tool["name"],
             "description": tool["description"],
@@ -748,44 +744,34 @@ async def websocket_chat(ws: WebSocket):
                         "input": tool_input,
                     })
 
-                async def on_tool_result(tool_name: str, output: str):
-                    display_output = output[:2000] + "..." if len(output) > 2000 else output
-                    await ws.send_json({
-                        "type": "tool_result",
-                        "tool": tool_name,
-                        "output": display_output,
-                    })
-
                 _text_parts: list[str] = []
                 _usage: dict = {}
                 _final_text: str = ""
-                async for _sdk_msg in sdk_query(
+                async for _event in strands_query(
                     prompt=user_message,
                     tenant_id=tenant_id,
                     user_id=user_id,
                     tier=user.tier or "advanced",
                 ):
-                    _msg_type = type(_sdk_msg).__name__
-                    if _msg_type == "AssistantMessage":
-                        for _block in _sdk_msg.content:
-                            _bt = getattr(_block, "type", None)
-                            if _bt == "text":
-                                _text_parts.append(_block.text)
-                                await on_text(_block.text)
-                            elif _bt == "tool_use":
-                                tools_called.append(getattr(_block, "name", ""))
-                                await on_tool_use(getattr(_block, "name", ""), getattr(_block, "input", {}))
-                    elif _msg_type == "ResultMessage":
-                        _raw = getattr(_sdk_msg, "usage", {})
-                        _usage = _raw if isinstance(_raw, dict) else {
-                            "input_tokens": getattr(_raw, "input_tokens", 0),
-                            "output_tokens": getattr(_raw, "output_tokens", 0),
-                        }
-                        _final_text = str(getattr(_sdk_msg, "result", "") or "")
+                    _etype = _event.get("type")
+                    if _etype == "text":
+                        _delta = str(_event.get("content", ""))
+                        _text_parts.append(_delta)
+                        await on_text(_delta)
+                    elif _etype == "tool_use":
+                        _name = str(_event.get("name", ""))
+                        tools_called.append(_name)
+                        await on_tool_use(_name, _event.get("input", {}))
+                    elif _etype == "complete":
+                        _raw = _event.get("usage", {})
+                        _usage = _raw if isinstance(_raw, dict) else {}
+                        _final_text = str(_event.get("result", "") or "")
+                    elif _etype == "error":
+                        raise RuntimeError(str(_event.get("message", "Unknown Strands error")))
                 _response_text = "".join(_text_parts) or _final_text
                 if _response_text and not _text_parts:
                     await on_text(_response_text)
-                result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": tools_called}
+                result = {"text": _response_text, "usage": _usage, "model": get_active_model(), "tools_called": tools_called}
 
                 if USE_PERSISTENT_SESSIONS:
                     add_message(session_id, "assistant", result["text"], tenant_id, user_id)
@@ -802,7 +788,7 @@ async def websocket_chat(ws: WebSocket):
                 record_request_cost(
                     tenant_id, user_id, session_id,
                     input_tokens, output_tokens,
-                    model=result.get("model", MODEL),
+                    model=result.get("model", get_active_model()),
                     tools_used=result.get("tools_called", []),
                     response_time_ms=elapsed_ms
                 )

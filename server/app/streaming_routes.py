@@ -1,31 +1,21 @@
-"""
-Streaming Routes for EAGLE NCI Acquisition Assistant
+"""Streaming routes for EAGLE using Strands-only orchestration."""
 
-Provides SSE (Server-Sent Events) streaming chat and health check endpoints.
-Updated to use sdk_agentic_service.sdk_query() with Claude Agent SDK
-subagent delegation instead of the legacy stream_chat() prompt-injection path.
-
-# NOTE: main.py should include this router:
-#   from app.streaming_routes import create_streaming_router
-#   streaming_router = create_streaming_router(store, subscription_service)
-#   app.include_router(streaming_router)
-"""
-
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone
 import asyncio
-import json
 import logging
 from contextlib import suppress
 from typing import AsyncGenerator, Optional
+import time
+import uuid
 
-from .cognito_auth import extract_user_context, UserContext
-from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWriter
+from .cognito_auth import extract_user_context
+from .stream_protocol import MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
-from .agentic_service import MODEL, EAGLE_TOOLS
-from .sdk_agentic_service import sdk_query
+from .admin_service import record_request_cost
+from .strands_agentic_service import strands_query, get_active_model, get_tools_for_api
 
 import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
@@ -38,56 +28,78 @@ async def stream_generator(
     tenant_id: str,
     user_id: str,
     tier,
+    session_id: str,
     subscription_service: SubscriptionService,
 ) -> AsyncGenerator[str, None]:
-    """Generate SSE events from sdk_query() subagent orchestration.
-
-    The flow is:
-      1. Yield a metadata event (initial connection handshake).
-      2. Consume sdk_query() async generator.
-      3. AssistantMessage text blocks → TEXT SSE events.
-      4. AssistantMessage tool_use blocks → TOOL_USE SSE events.
-      5. ResultMessage → drain queue, emit COMPLETE.
-      6. On exception → emit ERROR event.
-    """
+    """Generate SSE events from strands_query() orchestration."""
     writer = MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
     queue: asyncio.Queue[str] = asyncio.Queue()
+    start = time.time()
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    tools_called: list[str] = []
 
     # Send initial metadata event (connection acknowledgement)
     await writer.write_text(queue, "")
     yield await queue.get()
 
     try:
-        sdk_messages = sdk_query(
+        strands_messages = strands_query(
             prompt=message,
             tenant_id=tenant_id,
             user_id=user_id,
             tier=tier or "advanced",
+            session_id=session_id,
         )
 
-        async for sdk_msg in sdk_messages:
-            msg_type = type(sdk_msg).__name__
-            if msg_type == "AssistantMessage":
-                for block in sdk_msg.content:
-                    block_type = getattr(block, "type", None)
-                    if block_type == "text":
-                        await writer.write_text(queue, block.text)
-                    elif block_type == "tool_use":
-                        await writer.write_tool_use(queue, block.name, getattr(block, "input", {}))
-                    while not queue.empty():
-                        yield await queue.get()
-            elif msg_type == "ResultMessage":
+        async for event in strands_messages:
+            event_type = event.get("type")
+            if event_type == "text":
+                await writer.write_text(queue, event.get("content", ""))
+            elif event_type == "tool_use":
+                tool_name = event.get("name", "")
+                tools_called.append(tool_name)
+                await writer.write_tool_use(queue, tool_name, event.get("input", {}))
+            elif event_type == "complete":
+                usage = event.get("usage", usage) or usage
                 while not queue.empty():
                     yield await queue.get()
                 await writer.write_complete(queue)
                 yield await queue.get()
+                elapsed_ms = int((time.time() - start) * 1000)
+                record_request_cost(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    input_tokens=int(usage.get("input_tokens", 0)),
+                    output_tokens=int(usage.get("output_tokens", 0)),
+                    model=get_active_model(),
+                    tools_used=tools_called,
+                    response_time_ms=elapsed_ms,
+                )
                 return
+            elif event_type == "error":
+                await writer.write_error(queue, str(event.get("message", "Unknown streaming error")))
+                yield await queue.get()
+                return
+            while not queue.empty():
+                yield await queue.get()
 
-        # Fallback COMPLETE if generator exhausts without a ResultMessage
+        # Fallback COMPLETE if generator exhausts without a complete event
         while not queue.empty():
             yield await queue.get()
         await writer.write_complete(queue)
         yield await queue.get()
+        elapsed_ms = int((time.time() - start) * 1000)
+        record_request_cost(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            input_tokens=int(usage.get("input_tokens", 0)),
+            output_tokens=int(usage.get("output_tokens", 0)),
+            model=get_active_model(),
+            tools_used=tools_called,
+            response_time_ms=elapsed_ms,
+        )
 
     except asyncio.CancelledError:
         # Client disconnected mid-stream; treat as expected cancellation path.
@@ -98,10 +110,9 @@ async def stream_generator(
         await writer.write_error(queue, str(e))
         yield await queue.get()
     finally:
-        # Ensure SDK async generator is closed from this task.
-        if "sdk_messages" in locals():
+        if "strands_messages" in locals():
             with suppress(Exception):
-                await sdk_messages.aclose()
+                await strands_messages.aclose()
 
 
 def create_streaming_router(
@@ -161,6 +172,7 @@ def create_streaming_router(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 tier=user.tier,
+                session_id=(message.tenant_context.session_id if message.tenant_context else str(uuid.uuid4())),
                 subscription_service=subscription_service,
             ),
             media_type="text/event-stream",
@@ -185,7 +197,7 @@ def create_streaming_router(
             "status": "healthy",
             "service": "EAGLE – NCI Acquisition Assistant",
             "version": "4.0.0",
-            "model": MODEL,
+            "model": get_active_model(),
             "services": {
                 "anthropic": True,
                 "dynamodb": True,
@@ -209,7 +221,7 @@ def create_streaming_router(
                     "status": "online",
                 },
             ],
-            "tools": [tool["name"] for tool in EAGLE_TOOLS],
+            "tools": [tool["name"] for tool in get_tools_for_api(tier="advanced")],
             "features": {
                 "persistent_sessions": os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true",
                 "auth_required": os.getenv("REQUIRE_AUTH", "false").lower() == "true",
