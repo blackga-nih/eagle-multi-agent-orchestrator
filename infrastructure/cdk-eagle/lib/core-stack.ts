@@ -161,7 +161,9 @@ export class EagleCoreStack extends cdk.Stack {
       ],
       resources: [
         'arn:aws:bedrock:*::foundation-model/anthropic.*',
+        'arn:aws:bedrock:*::foundation-model/minimax.*',
         `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.*`,
+        `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.minimax.*`,
         `arn:aws:bedrock:us-east-1:${this.account}:agent/*`,
       ],
     }));
