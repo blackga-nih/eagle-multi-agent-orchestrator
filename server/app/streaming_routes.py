@@ -37,8 +37,6 @@ async def stream_generator(
     message: str,
     tenant_id: str,
     user_id: str,
-    tenant_id: str,
-    user_id: str,
     tier,
     subscription_service: SubscriptionService,
     session_id: str | None = None,
@@ -165,8 +163,6 @@ def create_streaming_router(
         return StreamingResponse(
             stream_generator(
                 message=message.message,
-                tenant_id=tenant_id,
-                user_id=user_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 tier=user.tier,

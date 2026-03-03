@@ -246,9 +246,6 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
                 _final_text = str(getattr(_sdk_msg, "result", "") or "")
         _response_text = "".join(_text_parts) or _final_text
         result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": _tools_called}
-                _final_text = str(getattr(_sdk_msg, "result", "") or "")
-        _response_text = "".join(_text_parts) or _final_text
-        result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": _tools_called}
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
@@ -1118,11 +1115,6 @@ async def websocket_chat(ws: WebSocket):
                             "input_tokens": getattr(_raw, "input_tokens", 0),
                             "output_tokens": getattr(_raw, "output_tokens", 0),
                         }
-                        _final_text = str(getattr(_sdk_msg, "result", "") or "")
-                _response_text = "".join(_text_parts) or _final_text
-                if _response_text and not _text_parts:
-                    await on_text(_response_text)
-                result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": tools_called}
                         _final_text = str(getattr(_sdk_msg, "result", "") or "")
                 _response_text = "".join(_text_parts) or _final_text
                 if _response_text and not _text_parts:
