@@ -2,21 +2,21 @@ fastapi==0.115.0
 uvicorn==0.30.6
 boto3==1.34.0
 pydantic==2.11.3
-python-multipart==0.0.22
+python-multipart==0.0.18
 jinja2==3.1.6
 aiofiles==23.2.1
 PyJWT==2.9.0
-cryptography==46.0.5
+cryptography==46.0.1
 requests==2.32.4
 python-dotenv==1.0.0
 # EAGLE additions
-anthropic>=0.40.0
-claude-agent-sdk>=0.1.19
+strands-agents>=1.0.0
+# anthropic>=0.40.0 — kept for legacy agentic_service.py (execute_tool, health check)
+# claude-agent-sdk>=0.1.19 — REMOVED: replaced by strands-agents (Phase 5 migration)
 mcp>=1.5.0
 python-docx>=1.1.0
 reportlab>=4.1.0
 httpx==0.27.0
 websockets>=12.0
-strands-agents>=1.0.0
 # Eval video recording: install separately with `pip install playwright>=1.40.0`
 # Not included here — prevents unnecessary 46MB download in container builds

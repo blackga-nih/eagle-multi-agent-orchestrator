@@ -21,7 +21,7 @@ except ImportError:
 
 REGION = "us-east-1"
 ENDPOINT = f"https://bedrock-runtime.{REGION}.amazonaws.com"
-MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+MODEL_ID = "anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
 def get_api_key():

@@ -2,7 +2,7 @@
 
 Standalone module. Lazy-loads boto3 clients. All operations non-fatal
 (try/except wrappers). Uses EVAL_S3_BUCKET env var
-(default: eagle-eval-artifacts-695681773636-dev).
+(default: ).
 
 Public API:
     publish_eval_metrics(results, run_timestamp, total_cost_usd)
@@ -19,7 +19,7 @@ from typing import Optional
 _cw_client = None
 _s3_client = None
 
-_BUCKET = os.environ.get("EVAL_S3_BUCKET", "eagle-eval-artifacts-695681773636-dev")
+_BUCKET = os.environ.get("EVAL_S3_BUCKET", "")
 _NAMESPACE = "EAGLE/Eval"
 _REGION = os.environ.get("AWS_REGION", "us-east-1")
 

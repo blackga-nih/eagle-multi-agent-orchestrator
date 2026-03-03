@@ -2218,20 +2218,6 @@ def get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=api_key)
 
 
-def get_async_client():
-    """Create an async Anthropic client for real-time token streaming.
-
-    Used by stream_chat() so each token is dispatched via on_text() as it
-    arrives from the API, rather than after the full response is buffered.
-    """
-    if _USE_BEDROCK:
-        return anthropic.AsyncAnthropicBedrock(aws_region=_BEDROCK_REGION)
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set")
-    return anthropic.AsyncAnthropic(api_key=api_key)
-
-
 # DEPRECATED: use sdk_query() from sdk_agentic_service instead. Kept for reference only.
 async def stream_chat(
     messages: List[dict],
@@ -2265,46 +2251,52 @@ async def stream_chat(
     # Tool-use loop: keep going while the model wants to call tools (max 10 iterations)
     MAX_TOOL_ITERATIONS = 10
     iteration = 0
-    async_client = get_async_client()
-
     while iteration < MAX_TOOL_ITERATIONS:
         iteration += 1
         current_text = ""
         tool_uses = []
         stop_reason = None
+        text_deltas = []
 
-        # Stream tokens in real-time using the async client — each text_delta
-        # is dispatched via on_text() as it arrives so the frontend sees tokens
-        # progressively rather than the whole response popping in at once.
-        async with async_client.messages.stream(
-            model=MODEL,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            tools=EAGLE_TOOLS,
-            messages=messages,
-        ) as stream:
-            async for event in stream:
-                if event.type == "content_block_start":
-                    if hasattr(event, "content_block") and event.content_block.type == "tool_use":
-                        tool_uses.append({
-                            "id": event.content_block.id,
-                            "name": event.content_block.name,
-                            "input_json": "",
-                        })
-                elif event.type == "content_block_delta":
-                    if event.delta.type == "text_delta":
-                        current_text += event.delta.text
-                        if on_text:
-                            await on_text(event.delta.text)
-                    elif event.delta.type == "input_json_delta":
-                        if tool_uses:
-                            tool_uses[-1]["input_json"] += event.delta.partial_json
+        def _stream_with_deltas():
+            nonlocal current_text, tool_uses, stop_reason
+            nonlocal total_input_tokens, total_output_tokens, model_used
 
-            final = await stream.get_final_message()
-            stop_reason = final.stop_reason
-            total_input_tokens += final.usage.input_tokens
-            total_output_tokens += final.usage.output_tokens
-            model_used = final.model
+            with client.messages.stream(
+                model=MODEL,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                tools=EAGLE_TOOLS,
+                messages=messages,
+            ) as stream:
+                for event in stream:
+                    if event.type == "content_block_start":
+                        if event.content_block.type == "tool_use":
+                            tool_uses.append({
+                                "id": event.content_block.id,
+                                "name": event.content_block.name,
+                                "input_json": "",
+                            })
+                    elif event.type == "content_block_delta":
+                        if event.delta.type == "text_delta":
+                            current_text += event.delta.text
+                            text_deltas.append(event.delta.text)
+                        elif event.delta.type == "input_json_delta":
+                            if tool_uses:
+                                tool_uses[-1]["input_json"] += event.delta.partial_json
+
+                final = stream.get_final_message()
+                stop_reason = final.stop_reason
+                total_input_tokens += final.usage.input_tokens
+                total_output_tokens += final.usage.output_tokens
+                model_used = final.model
+
+        await asyncio.to_thread(_stream_with_deltas)
+
+        # Dispatch text deltas
+        if on_text and text_deltas:
+            for delta in text_deltas:
+                await on_text(delta)
 
         full_text += current_text
 

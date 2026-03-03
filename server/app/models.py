@@ -58,3 +58,22 @@ class SubscriptionUsage(BaseModel):
     monthly_usage: int = 0
     active_sessions: int = 0
     last_reset_date: datetime
+
+
+class UploadResponse(BaseModel):
+    key: str
+    filename: str
+    size_bytes: int
+    content_type: str
+
+
+class KBReviewRecord(BaseModel):
+    review_id: str
+    filename: str
+    s3_key: str
+    status: str  # "pending" | "approved" | "rejected"
+    analysis_summary: str
+    proposed_diff: List[Dict[str, Any]]
+    created_at: str
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[str] = None

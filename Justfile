@@ -265,7 +265,7 @@ cdk-deploy-storage:
 
 # Refresh AWS SSO session — run this when credentials expire
 # Usage: just aws-login                          (uses default profile)
-#        just aws-login 695681773636_NCIAWSPowerUserAccess
+#        just aws-login YOUR_ACCOUNT_PowerUserAccess
 aws-login PROFILE="eagle":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -282,24 +282,18 @@ aws-login PROFILE="eagle":
     echo "  export AWS_PROFILE={{PROFILE}}"
 
 
-# Stop the EC2 dev box to avoid idle charges (~$0.04/hr)
-# Looks up instance from CloudFormation stack eagle-ec2-dev
-devbox-stop:
-    python scripts/devbox.py stop
+# Stop the dev box to avoid idle charges (~$0.04/hr)
+# Usage: just devbox-stop <instance-id>
+devbox-stop INSTANCE_ID:
+    aws ec2 stop-instances --instance-ids {{INSTANCE_ID}}
+    echo "Dev box stopped. Start again with: just devbox-start {{INSTANCE_ID}}"
 
-# Start the EC2 dev box and wait until running
-devbox-start:
-    python scripts/devbox.py start
-
-# Connect to dev box via SSM Session Manager (no SSH key or inbound port needed)
-# Requires: AWS Session Manager plugin installed
-# Install: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
-devbox-ssm:
-    python scripts/devbox.py ssm
-
-# Show dev box status and connection info
-devbox-status:
-    python scripts/devbox.py status
+# Start the dev box back up
+devbox-start INSTANCE_ID:
+    aws ec2 start-instances --instance-ids {{INSTANCE_ID}}
+    aws ec2 wait instance-running --instance-ids {{INSTANCE_ID}}
+    echo "Dev box running. Get IP with:"
+    echo "  aws ec2 describe-instances --instance-ids {{INSTANCE_ID}} --query 'Reservations[].Instances[].PublicIpAddress' --output text"
 
 # ── Operations ──────────────────────────────────────────────
 
@@ -364,7 +358,7 @@ check-sso:
     echo "✅ Bedrock access verified"
     echo ""
     echo "3. Testing S3 access..."
-    aws s3 ls s3://eagle-documents-695681773636-dev --region us-east-1 &>/dev/null || echo "⚠️  S3 bucket 'eagle-documents-695681773636-dev' not accessible (may not exist)"
+    aws s3 ls s3://eagle-documents-ACCOUNT-dev --region us-east-1 &>/dev/null || echo "⚠️  S3 bucket 'eagle-documents-ACCOUNT-dev' not accessible (may not exist)"
     echo ""
     echo "=== All checks passed ==="
 

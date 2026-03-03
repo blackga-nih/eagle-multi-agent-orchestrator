@@ -40,6 +40,34 @@ from eagle_skill_constants import SKILL_CONSTANTS, AGENTS, SKILLS, PLUGIN_CONTEN
 
 logger = logging.getLogger("eagle.sdk_agent")
 
+
+def _get_bedrock_env() -> dict:
+    """Resolve AWS credentials via boto3 (handles SSO, IAM roles, env vars) and
+    return as a flat env dict for the Claude CLI subprocess.
+
+    The bundled Claude Code CLI is Node.js and cannot use botocore's SSO resolver,
+    so we bridge the gap: resolve here in Python and pass static creds to the CLI.
+    """
+    import boto3
+
+    env: dict = {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_REGION": os.getenv("AWS_REGION", "us-east-1"),
+        "HOME": os.getenv("HOME", "/home/appuser"),
+    }
+    try:
+        creds = boto3.Session().get_credentials()
+        if creds:
+            frozen = creds.get_frozen_credentials()
+            env["AWS_ACCESS_KEY_ID"] = frozen.access_key
+            env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
+            if frozen.token:
+                env["AWS_SESSION_TOKEN"] = frozen.token
+    except Exception as e:
+        logger.warning("Could not resolve AWS credentials for CLI subprocess: %s", e)
+    return env
+
+
 # ── Configuration ────────────────────────────────────────────────────
 
 MODEL = os.getenv("EAGLE_SDK_MODEL", "haiku")
@@ -125,28 +153,6 @@ def _build_registry() -> dict:
     return registry
 
 SKILL_AGENT_REGISTRY = _build_registry()
-
-
-def _build_sdk_env() -> dict:
-    """Build the subprocess env for ClaudeAgentOptions.
-
-    The SDK merges {**os.environ, **options.env}, so values we set here
-    override the parent process environment.
-
-    - Clears CLAUDECODE (empty string) so nested claude subprocesses are
-      allowed when running inside a Claude Code dev session.
-    - Conditionally enables Bedrock only when CLAUDE_CODE_USE_BEDROCK is
-      already set in the host environment — prevents overriding ANTHROPIC_API_KEY.
-    """
-    env: dict = {
-        # Override CLAUDECODE with empty string — the SDK merges our dict over
-        # os.environ, so this neutralises the parent session's CLAUDECODE value.
-        "CLAUDECODE": "",
-    }
-    if os.environ.get("CLAUDE_CODE_USE_BEDROCK"):
-        env["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        env["AWS_REGION"] = os.environ.get("AWS_REGION", "us-east-1")
-    return env
 
 
 def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> str:
@@ -299,7 +305,6 @@ async def sdk_query(
     model: str = None,
     skill_names: list[str] | None = None,
     session_id: str | None = None,
-    sdk_resume_id: str | None = None,
     workspace_id: str | None = None,
     max_turns: int = 15,
 ) -> AsyncGenerator[Any, None]:
@@ -315,8 +320,7 @@ async def sdk_query(
         tier: Subscription tier (basic/advanced/premium)
         model: Model override (default: MODULE-level MODEL)
         skill_names: Subset of skills to make available
-        session_id: Our application session ID (used for DynamoDB storage)
-        sdk_resume_id: Claude SDK native session ID for resuming a prior turn
+        session_id: Session ID for resume (if continuing conversation)
         workspace_id: Active workspace for per-user prompt resolution
         max_turns: Max tool-use iterations
 
@@ -351,16 +355,6 @@ async def sdk_query(
         workspace_id=resolved_workspace_id,
     )
 
-    _stderr_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "claude_sdk_stderr.log")
-
-    def _log_stderr(line: str) -> None:
-        logger.error("claude subprocess stderr: %s", line.rstrip())
-        try:
-            with open(_stderr_log, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        except Exception:
-            pass
-
     options = ClaudeAgentOptions(
         model=agent_model,
         system_prompt=system_prompt,
@@ -369,10 +363,9 @@ async def sdk_query(
         max_turns=max_turns,
         max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
         cwd=os.path.dirname(os.path.abspath(__file__)),
-        env=_build_sdk_env(),
-        stderr=_log_stderr,
+        env=_get_bedrock_env(),
         agents=agents,
-        **({"resume": sdk_resume_id} if sdk_resume_id else {}),
+        **({"resume": session_id} if session_id else {}),
     )
 
     async for message in query(prompt=prompt, options=options):
@@ -425,7 +418,7 @@ async def sdk_query_single_skill(
         max_turns=max_turns,
         max_budget_usd=TIER_BUDGETS.get(tier, 0.25),
         cwd=os.path.dirname(os.path.abspath(__file__)),
-        env=_build_sdk_env(),
+        env=_get_bedrock_env(),
     )
 
     async for message in query(prompt=prompt, options=options):
