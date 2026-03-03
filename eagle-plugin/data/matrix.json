@@ -1,0 +1,181 @@
+{
+  "version": "2026-02-25",
+  "rfo_notes": "FAC 2025-06 / HHS Class Deviation 2026-01 eff. Nov 21 2025: MPT raised $10K→$15K, SAT raised $250K→$350K, VETS 4212 threshold $150K added. Use this file as authoritative source; do not rely on memorized values.",
+
+  "thresholds": [
+    { "value": 15000,     "label": "$15K MPT",      "short": "$15K",   "triggers": ["micro_purchase_threshold", "competition_not_required"] },
+    { "value": 25000,     "label": "$25K Synopsis",  "short": "$25K",   "triggers": ["sam_gov_synopsis_required"] },
+    { "value": 150000,    "label": "$150K VETS 4212","short": "$150K",  "triggers": ["vets_4212_affirmative_action_plan"] },
+    { "value": 350000,    "label": "$350K SAT",      "short": "$350K",  "triggers": ["simplified_acquisition_threshold", "full_competition_required_above"] },
+    { "value": 750000,    "label": "$750K SubK",     "short": "$750K",  "triggers": ["subcontracting_plan_required"] },
+    { "value": 900000,    "label": "$900K J&A",      "short": "$900K",  "triggers": ["ja_hca_approval_required"] },
+    { "value": 2000000,   "label": "$2M TINA",       "short": "$2M",    "triggers": ["certified_cost_pricing_data_required"] },
+    { "value": 4500000,   "label": "$4.5M 8a SS",    "short": "$4.5M",  "triggers": ["8a_sole_source_services_ceiling"] },
+    { "value": 7000000,   "label": "$7M 8a Mfg",     "short": "$7M",    "triggers": ["8a_sole_source_manufacturing_ceiling"] },
+    { "value": 7500000,   "label": "$7.5M IDIQ Enh", "short": "$7.5M",  "triggers": ["idiq_enhanced_competition"] },
+    { "value": 20000000,  "label": "$20M AP",        "short": "$20M",   "triggers": ["written_acquisition_plan_required"] },
+    { "value": 50000000,  "label": "$50M HCA",       "short": "$50M",   "triggers": ["hca_approval_required"] },
+    { "value": 90000000,  "label": "$90M SPE J&A",   "short": "$90M",   "triggers": ["spe_ja_approval_required"] },
+    { "value": 150000000, "label": "$150M OAP",      "short": "$150M",  "triggers": ["oap_approval_required"] }
+  ],
+
+  "contract_types": [
+    { "id": "ffp",    "label": "Firm-Fixed-Price (FFP)",        "risk": 95, "category": "fp",     "prereqs": [] },
+    { "id": "fp-epa", "label": "FP w/ Economic Price Adj",      "risk": 80, "category": "fp",     "prereqs": [] },
+    { "id": "fpi",    "label": "Fixed-Price Incentive (FPIF)",   "risk": 65, "category": "fp",     "prereqs": [] },
+    { "id": "fp-af",  "label": "FP w/ Award Fee (FP/AF)",        "risk": 60, "category": "fp",     "fee_cap": "Award fee variable", "prereqs": [] },
+    { "id": "cpff",   "label": "Cost-Plus-Fixed-Fee (CPFF)",     "risk": 25, "category": "cr",     "fee_cap": "10% est. cost (R&D: 15%)", "prereqs": ["Adequate cost accounting system"] },
+    { "id": "cpif",   "label": "Cost-Plus-Incentive-Fee (CPIF)", "risk": 35, "category": "cr",     "fee_cap": "Sharing ratio applies", "prereqs": ["Adequate cost accounting system"] },
+    { "id": "cpaf",   "label": "Cost-Plus-Award-Fee (CPAF)",     "risk": 20, "category": "cr",     "fee_cap": "No rollover allowed", "prereqs": ["Adequate cost accounting system", "Award fee plan"] },
+    { "id": "tm",     "label": "Time & Materials (T&M)",         "risk": 15, "category": "loe",    "prereqs": ["D&F required", "Ceiling price established"] },
+    { "id": "lh",     "label": "Labor-Hour (LH)",                "risk": 15, "category": "loe",    "prereqs": ["D&F required"] },
+    { "id": "letter", "label": "Letter Contract (Emergency)",    "risk": 5,  "category": "letter", "fee_cap": "Definitize ≤180 days/40%", "prereqs": ["HCA determination required", "Definitization schedule"] }
+  ],
+
+  "doc_rules": {
+    "always": [
+      "Purchase Request"
+    ],
+    "above_threshold": [
+      {
+        "above": 0,
+        "docs": ["Purchase Request"]
+      },
+      {
+        "above": 15000,
+        "label": "Simplified Acquisition ($15K–$350K)",
+        "far": "Part 13",
+        "docs": ["Statement of Work (SOW)", "Independent Government Cost Estimate (IGCE)", "Market Research Report"]
+      },
+      {
+        "above": 25000,
+        "label": "SAM.gov synopsis required",
+        "docs": ["SAM.gov Synopsis"]
+      },
+      {
+        "above": 150000,
+        "label": "VETS 4212 affirmative action",
+        "docs": ["VETS 4212 Compliance Certification"]
+      },
+      {
+        "above": 350000,
+        "label": "Negotiated Acquisition (>$350K)",
+        "far": "Part 15",
+        "docs": ["Technical Evaluation Plan", "Past Performance Evaluation Plan", "Price/Cost Analysis", "D&F (if applicable)", "Sources Sought Notice"]
+      },
+      {
+        "above": 750000,
+        "label": "Subcontracting plan required",
+        "docs": ["Subcontracting Plan"]
+      },
+      {
+        "above": 2000000,
+        "label": "TINA — certified cost data",
+        "docs": ["Certified Cost or Pricing Data (SF 1411 or equivalent)"]
+      },
+      {
+        "above": 20000000,
+        "label": "Written Acquisition Plan required",
+        "far": "FAR 7.105",
+        "docs": ["Written Acquisition Plan"]
+      }
+    ],
+    "by_method": {
+      "sole": [
+        "Justification & Approval (J&A)",
+        "Market Research Report (documenting why sole source)",
+        "Statement of Need"
+      ],
+      "negotiated": [
+        "Solicitation (RFP/RFQ)",
+        "Technical Evaluation Plan",
+        "Source Selection Plan",
+        "Price/Cost Analysis"
+      ],
+      "idiq": [
+        "IDIQ Ordering Agreement",
+        "Task/Delivery Order",
+        "Competition documentation for orders >$3K"
+      ]
+    },
+    "by_type": {
+      "tm": [
+        "Determination & Findings (D&F) for T&M — one level above CO",
+        "Labor rate documentation",
+        "Ceiling price with adequate controls"
+      ],
+      "letter": [
+        "HCA Determination for Letter Contract",
+        "Definitization schedule (≤180 days or 40% of estimated cost)",
+        "Limitation of government obligation clause"
+      ],
+      "cpaf": [
+        "Award Fee Plan",
+        "Award Fee Board composition",
+        "Performance evaluation periods and criteria"
+      ]
+    },
+    "special_factors": {
+      "isIT": [
+        "Section 508 Compliance Documentation",
+        "IT Security Assessment (FISMA)",
+        "Authority to Operate (ATO) or waiver"
+      ],
+      "isSB": [
+        "Small Business Set-Aside Determination",
+        "SBA Size Standard Verification",
+        "Set-aside rationale (Rule of Two analysis)"
+      ],
+      "isRD": [
+        "Statement of Work with research objectives",
+        "Data rights and IP clauses (FAR 27.4)",
+        "Human subjects / animal welfare compliance (if applicable)"
+      ],
+      "isHS": [
+        "HIPAA Business Associate Agreement (if applicable)",
+        "Health data handling protocol",
+        "Security clearance requirements (if any)"
+      ],
+      "isAnimalWelfare": [
+        "IACUC Approval / Protocol Number",
+        "Animal Welfare Act compliance certification",
+        "USDA reporting requirements"
+      ],
+      "isForeign": [
+        "Foreign Acquisition certification (FAR 25)",
+        "Trade Agreements Act compliance",
+        "Buy American Act waiver (if required)"
+      ],
+      "isConference": [
+        "Conference Approval (HHS prior approval ≥$100K)",
+        "Conference Report",
+        "Food/alcohol restrictions documentation"
+      ],
+      "isServices": [
+        "Service Contract Act wage determination",
+        "Inherently Governmental / closely associated function analysis",
+        "Personal services prohibition determination"
+      ]
+    }
+  },
+
+  "approval_chains": {
+    "ja": [
+      { "ceiling": 900000,    "authority": "Contracting Officer (CO)",                "note": "CO signs J&A for sole source ≤$900K" },
+      { "ceiling": 50000000,  "authority": "Head of Contracting Activity (HCA)",       "note": "HCA approval required $900K–$50M" },
+      { "ceiling": 90000000,  "authority": "Senior Procurement Executive (SPE)",       "note": "SPE approval required $50M–$90M" },
+      { "ceiling": null,      "authority": "SPE + Agency Head notification",           "note": "Above $90M — SPE signs, Agency Head notified" }
+    ],
+    "ap": [
+      { "ceiling": 20000000,  "authority": "Contracting Officer",                      "note": "Simplified or no written AP required below $20M" },
+      { "ceiling": 50000000,  "authority": "HCA or designee",                          "note": "Written AP reviewed by HCA $20M–$50M" },
+      { "ceiling": null,      "authority": "Senior Procurement Executive (SPE)",       "note": "SPE review required above $50M" }
+    ]
+  },
+
+  "warnings": {
+    "letter":       "Letter contracts must be definitized within 180 days or 40% of estimated contract cost, whichever comes first. Failure to definitize triggers FAR 16.603-2 remedies.",
+    "idiq_protest": "IDIQ task orders over $10M are protestable at GAO under the Fair Acquisition through Interagency Contracting Act. Ensure competitive procedures among awardees.",
+    "tm":           "T&M contracts provide no positive incentive for cost control. Use only when no other type is suitable and the CO executes a D&F approved one level above. Establish a firm ceiling price."
+  }
+}
