@@ -1,0 +1,90 @@
+• The Compliance Strategist Agent Risk Triggers:
+	1. Sole source determination without clear FAR 6.302 authority match
+	2. Small business set-aside bypass in competitive acquisition >$250K
+	3. Total small business program exclusion (no set-aside, no subcontracting plan)
+	4. Section 508 waiver or exception request required
+	5. Foreign contractor involvement requiring security review
+	6. Procurement method deviation from agency standard practices
+	7. Multiple regulatory waivers or exceptions in single acquisition
+	8. Executive Order compliance issues (Buy American, domestic preferences)
+	9. Consolidation of previously separate contracts >$2M threshold
+	10. Use of emergency acquisition authorities outside genuine emergency
+	11. Contract terms conflicting with mandatory FAR clauses
+	12. Acquisition crossing multiple fiscal years without proper authority
+	
+• The Legal Counselor Agent Risk Triggers:
+	1. Sole source >$10M without FAR 6.302(c)(1) "only one source" justification OR incumbent advantage with >3 years continuous performance + limited competition OR technical requirements cite specific brand names/proprietary solutions
+	2. Intellectual property rights requiring government purpose licenses
+	3. Data rights negotiations involving contractor proprietary information
+	4. Contract disputes history with incumbent or proposed contractors
+	5. Organizational conflict of interest (OCI) potential requiring mitigation
+	6. International agreements or treaties affecting acquisition approach
+	7. Environmental compliance requirements with legal liability exposure
+	8. Labor law issues (Service Contract Act, Davis-Bacon) applicability questions
+	9. Export control or technology transfer restrictions (ITAR, EAR)
+	10. Subcontractor flow-down requirements with compliance verification challenges
+	11. Termination for cause risk assessment indicating contractor performance concerns
+	12. Contract modification authority limits requiring senior approval
+	13. Government-furnished property/equipment with liability allocation issues
+	
+• The Market Intelligence & Small Business Advocate Agent Risk Triggers:
+	1. Zero commercial sources identified for government-unique requirement
+	2. Market research indicates only 1-2 potential sources available
+	3. Market research identifies <3 small businesses with relevant past performance OR no small businesses with >$5M similar contract awards in past 3 years
+	4. Industry consolidation creating limited competition concerns
+	5. Set-aside determination bypassing small business opportunities without justification
+	6. RFI recommendation to determine market capabilities
+	7. Sources sought notice required due to uncertain market response
+	8. Market research results contradicting assumed acquisition strategy
+	9. Technology <3 years since commercial introduction OR >30% change in vendor market share within past 18 months OR industry standards updated within past 12 months
+	10. Total small business program exclusion (no set-aside, no subcontracting plan)
+	11. Potential bundling of dissimilar requirements affecting small business participation
+	12. Industry feedback suggesting competition restrictions too narrow
+	13. Small business subcontracting plan waiver requests
+	14. Market pricing volatility indicating need for economic price adjustments
+	15. New market entrants disrupting established vendor relationships
+	16. Vendor capacity constraints potentially affecting delivery schedules
+	17. HUBZone, SDVOSB, or WOSB set-aside opportunities not properly evaluated
+	18. Market research age exceeding recommended update periods for dynamic markets
+	
+• The CO-COR Liaison & Technical Translator Agent Risk Triggers:
+		1. 5 technical evaluation factors/subfactors OR evaluation requires security clearances not held by 80% of available evaluators OR technical demonstration/live testing required
+	2. COR delegation authority questions for proposed contract administration tasks
+	3. Performance measurement standards requiring government surveillance capabilities
+	4. Quality Assurance Surveillance Plan (QASP) development needs specialist input
+	5. Contractor performance history indicating intensive oversight requirements
+	6. Multiple COR appointment needs across different technical disciplines
+	7. Government-furnished information/property coordination across multiple organizations
+	8. Deliverable acceptance criteria requiring specialized government expertise
+	9. Contract administration workload exceeding typical COR capacity
+	10. Technical specification disputes requiring CO-level arbitration
+	11. Performance-based contracting metrics needing government validation capabilities
+	12. Contractor access requirements (facilities, systems, personnel) requiring security coordination
+	
+• The Financial Advisor Agent Risk Triggers:
+	1. IGCE analysis shows <15% cost difference between FFP vs T&M approaches OR requirements include both defined deliverables and level-of-effort tasks OR performance period >12 months with uncertain scope evolution
+	2. Cost analysis indicating >25% variance from historical pricing
+	3. IGCE total exceeding approved budget by >10%
+	4. Contract value approaching CO delegation authority limits
+	5. Multi-year funding strategy requiring complex appropriation management
+	6. Economic price adjustment clauses needed due to market volatility
+	7. Fee/profit margins outside normal ranges for contract type
+	8. Payment terms deviating from standard government practices
+	9. Cost-reimbursement contract without adequate cost accounting system
+	10. Incentive contracting opportunities with significant performance risk
+	11. Option pricing uncertainty due to market volatility
+	12. Life-cycle cost analysis showing unfavorable total ownership costs
+	
+• The Public Interest Guardian Agent Risk Triggers:
+	1. Overall acquisition risk score exceeding agency threshold levels
+	2. Schedule risk indicating >50% probability of delivery delays
+	3. Contractor CPARS shows >1 "marginal" rating in past 3 years OR contractor has >2 cure notices in similar contracts within 24 months OR key personnel turnover >40% on similar contracts
+	4. Technical risk involving unproven or developmental technologies
+	5. Financial risk from contractor business stability concerns
+	6. Security risk requiring enhanced background investigation procedures
+	7. Reputational risk to agency from high-visibility acquisition failure
+	8. Regulatory compliance risk in evolving policy environment
+	9. Supply chain risk from sole-source components or foreign dependencies
+	10. Integration risk when multiple contractors must work together
+	11. Political risk from Congressional or stakeholder attention potential
+	12. Operational risk if acquisition failure disrupts critical agency missions

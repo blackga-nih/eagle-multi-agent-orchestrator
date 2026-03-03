@@ -221,12 +221,12 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         _text_parts: list[str] = []
         _usage: dict = {}
         _tools_called: list[str] = []
+        _final_text: str = ""
         async for _sdk_msg in sdk_query(
             prompt=req.message,
             tenant_id=tenant_id,
             user_id=user_id,
             tier=user.tier or "advanced",
-            session_id=session_id,
         ):
             _msg_type = type(_sdk_msg).__name__
             if _msg_type == "AssistantMessage":
@@ -241,7 +241,9 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
                     "input_tokens": getattr(_raw, "input_tokens", 0),
                     "output_tokens": getattr(_raw, "output_tokens", 0),
                 }
-        result = {"text": "".join(_text_parts), "usage": _usage, "model": MODEL, "tools_called": _tools_called}
+                _final_text = str(getattr(_sdk_msg, "result", "") or "")
+        _response_text = "".join(_text_parts) or _final_text
+        result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": _tools_called}
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
@@ -513,7 +515,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = os.getenv("S3_BUCKET", "nci-documents")
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
@@ -548,7 +550,7 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = os.getenv("S3_BUCKET", "nci-documents")
 
     # Security: ensure key is within user's prefix
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
@@ -1085,12 +1087,12 @@ async def websocket_chat(ws: WebSocket):
 
                 _text_parts: list[str] = []
                 _usage: dict = {}
+                _final_text: str = ""
                 async for _sdk_msg in sdk_query(
                     prompt=user_message,
                     tenant_id=tenant_id,
                     user_id=user_id,
                     tier=user.tier or "advanced",
-                    session_id=session_id,
                 ):
                     _msg_type = type(_sdk_msg).__name__
                     if _msg_type == "AssistantMessage":
@@ -1108,7 +1110,11 @@ async def websocket_chat(ws: WebSocket):
                             "input_tokens": getattr(_raw, "input_tokens", 0),
                             "output_tokens": getattr(_raw, "output_tokens", 0),
                         }
-                result = {"text": "".join(_text_parts), "usage": _usage, "model": MODEL, "tools_called": tools_called}
+                        _final_text = str(getattr(_sdk_msg, "result", "") or "")
+                _response_text = "".join(_text_parts) or _final_text
+                if _response_text and not _text_parts:
+                    await on_text(_response_text)
+                result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": tools_called}
 
                 if USE_PERSISTENT_SESSIONS:
                     add_message(session_id, "assistant", result["text"], tenant_id, user_id)
