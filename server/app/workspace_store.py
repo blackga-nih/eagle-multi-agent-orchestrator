@@ -13,6 +13,7 @@ GSI1 projection:
     GSI1SK: WORKSPACE#{user_id}#{workspace_id}
 """
 import os
+import time
 import uuid
 import logging
 from datetime import datetime
@@ -43,6 +44,31 @@ def _get_table():
     return _get_dynamodb().Table(TABLE_NAME)
 
 
+# ── Workspace Cache (60s TTL) ────────────────────────────────────────
+_workspace_cache: Dict[str, Dict[str, Any]] = {}
+CACHE_TTL_SECONDS = 60
+
+
+def _ws_cache_key(tenant_id: str, user_id: str) -> str:
+    return f"{tenant_id}#{user_id}"
+
+
+def _ws_cache_get(tenant_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    key = _ws_cache_key(tenant_id, user_id)
+    entry = _workspace_cache.get(key)
+    if entry and time.time() < entry["ts"] + CACHE_TTL_SECONDS:
+        return entry["item"]
+    return None
+
+
+def _ws_cache_set(tenant_id: str, user_id: str, item: Dict[str, Any]) -> None:
+    _workspace_cache[_ws_cache_key(tenant_id, user_id)] = {"ts": time.time(), "item": item}
+
+
+def _ws_cache_invalidate(tenant_id: str, user_id: str) -> None:
+    _workspace_cache.pop(_ws_cache_key(tenant_id, user_id), None)
+
+
 # ── CRUD ─────────────────────────────────────────────────────────────
 
 def create_workspace(
@@ -66,6 +92,7 @@ def create_workspace(
 
     if is_active:
         _deactivate_all(tenant_id, user_id)
+        _ws_cache_invalidate(tenant_id, user_id)
 
     item: Dict[str, Any] = {
         "PK": f"WORKSPACE#{tenant_id}#{user_id}",
@@ -147,6 +174,7 @@ def activate_workspace(
 ) -> Optional[Dict[str, Any]]:
     """Switch active workspace.  Deactivates all others first."""
     _deactivate_all(tenant_id, user_id)
+    _ws_cache_invalidate(tenant_id, user_id)
     now = datetime.utcnow().isoformat()
     try:
         _get_table().update_item(
@@ -235,10 +263,16 @@ def get_or_create_default(tenant_id: str, user_id: str) -> Dict[str, Any]:
     """Return the active workspace for the user, creating a Default if none exists.
 
     This is the primary entry point for per-request workspace resolution.
-    It is safe to call on every request — returns cached data after first creation.
+    Uses a 60s TTL in-process cache to avoid repeated DynamoDB queries.
     """
+    # Check cache first
+    cached = _ws_cache_get(tenant_id, user_id)
+    if cached:
+        return cached
+
     existing = get_active_workspace(tenant_id, user_id)
     if existing:
+        _ws_cache_set(tenant_id, user_id, existing)
         return existing
 
     # Check if any workspaces exist but none is active (shouldn't happen, but guard)
@@ -247,11 +281,13 @@ def get_or_create_default(tenant_id: str, user_id: str) -> Dict[str, Any]:
         # Activate the default one (or first if no default)
         default = next((w for w in all_ws if w.get("is_default")), all_ws[0])
         activated = activate_workspace(tenant_id, user_id, default["workspace_id"])
-        return activated or default
+        result = activated or default
+        _ws_cache_set(tenant_id, user_id, result)
+        return result
 
     # No workspaces at all — provision the Default workspace
     logger.info("workspace_store: auto-provisioning Default workspace for [%s/%s]", tenant_id, user_id)
-    return create_workspace(
+    result = create_workspace(
         tenant_id=tenant_id,
         user_id=user_id,
         name="Default",
@@ -259,6 +295,8 @@ def get_or_create_default(tenant_id: str, user_id: str) -> Dict[str, Any]:
         is_default=True,
         is_active=True,
     )
+    _ws_cache_set(tenant_id, user_id, result)
+    return result
 
 
 # ── Internal Helpers ─────────────────────────────────────────────────

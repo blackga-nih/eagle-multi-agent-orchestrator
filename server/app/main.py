@@ -27,14 +27,16 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import asyncio
 import json
+import re as _re
 import time
 import logging
 import os
 import uuid
 import io
+import boto3 as _boto3
 
 # EAGLE modules (new)
-from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
+from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS, _skill_tools_cache, build_supervisor_prompt
 from .document_export import export_document
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
@@ -70,6 +72,7 @@ from .plugin_store import (
 from .workspace_store import (
     get_or_create_default, create_workspace, get_workspace,
     list_workspaces, activate_workspace, delete_workspace,
+    _workspace_cache,
 )
 from .wspc_store import (
     put_override, get_override, list_overrides,
@@ -187,34 +190,136 @@ class EagleChatResponse(BaseModel):
     cost_usd: Optional[float] = None
 
 
+# ── Fast-path for trivial messages (bypasses Strands Agent overhead) ──
+
+@app.get("/api/perf-test")
+async def perf_test():
+    """Bare Bedrock call — no auth, no DDB, no Strands. Pure model latency."""
+    t0 = time.time()
+    client = _get_bedrock_client()
+    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
+    resp = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: client.converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": "hi"}]}],
+            system=[{"text": "Reply with just: Hello!"}],
+        ),
+    )
+    elapsed = int((time.time() - t0) * 1000)
+    text = resp["output"]["message"]["content"][0]["text"]
+    return {"text": text, "ms": elapsed}
+
+
+_TRIVIAL_RE = _re.compile(
+    r"^(hi|hello|hey|good\s*(morning|afternoon|evening)|thanks|thank\s*you|"
+    r"ok|okay|yes|no|sure|bye|goodbye|howdy|sup|yo|hola|greetings|"
+    r"what's up|whats up|how are you|how's it going)\s*[?!.,]*$",
+    _re.IGNORECASE,
+)
+
+_bedrock_client = None
+
+
+def _get_bedrock_client():
+    global _bedrock_client
+    if _bedrock_client is None:
+        _bedrock_client = _boto3.client(
+            "bedrock-runtime",
+            region_name=os.getenv("AWS_REGION", "us-east-1"),
+        )
+    return _bedrock_client
+
+
+_FAST_SYSTEM_PROMPT = (
+    "You are EAGLE, the Enhanced Acquisition Guidance and Learning Engine "
+    "for the NIH/NCI Office of Acquisitions. Respond briefly and warmly to "
+    "the user's greeting. Mention that you can help with acquisitions, FAR "
+    "regulations, document generation, and compliance guidance. Keep it to "
+    "2-3 sentences."
+)
+
+
+async def _fast_trivial_response(message: str) -> dict | None:
+    """If message is trivial, call Bedrock directly (no Strands overhead).
+
+    Returns response dict on hit, None if message is not trivial.
+    """
+    if not _TRIVIAL_RE.match(message.strip()):
+        return None
+
+    client = _get_bedrock_client()
+    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
+
+    resp = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: client.converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": message}]}],
+            system=[{"text": _FAST_SYSTEM_PROMPT}],
+        ),
+    )
+
+    output_text = resp["output"]["message"]["content"][0]["text"]
+    usage = resp.get("usage", {})
+    return {
+        "text": output_text,
+        "usage": usage,
+        "model": MODEL,
+        "tools_called": [],
+    }
+
+
 @app.post("/api/chat", response_model=EagleChatResponse)
 async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_from_header)):
     """REST chat endpoint using EAGLE Anthropic SDK with cost tracking."""
     start = time.time()
     tenant_id, user_id, session_id = get_session_context(user, req.session_id)
+    loop = asyncio.get_event_loop()
 
-    # Check rate limits
-    rate_check = check_rate_limit(tenant_id, user_id, user.tier)
-    if not rate_check["allowed"]:
-        raise HTTPException(status_code=429, detail=rate_check["reason"])
+    # Fast path: trivial messages bypass Strands Agent entirely
+    fast_result = await _fast_trivial_response(req.message)
+    if fast_result is not None:
+        elapsed_ms = int((time.time() - start) * 1000)
+        usage = fast_result.get("usage", {})
+        return EagleChatResponse(
+            response=fast_result["text"],
+            session_id=session_id,
+            usage=usage,
+            model=fast_result.get("model", MODEL),
+            tools_called=[],
+            response_time_ms=elapsed_ms,
+            cost_usd=0.0,
+        )
 
-    # Get or create session
+    # Run rate-limit check and session setup concurrently (both are DynamoDB reads)
     if USE_PERSISTENT_SESSIONS:
-        session = eagle_get_session(session_id, tenant_id, user_id)
+        rate_fut, session_fut, messages_fut = await asyncio.gather(
+            loop.run_in_executor(None, check_rate_limit, tenant_id, user_id, user.tier),
+            loop.run_in_executor(None, eagle_get_session, session_id, tenant_id, user_id),
+            loop.run_in_executor(None, get_messages_for_anthropic, session_id, tenant_id, user_id),
+        )
+        rate_check, session, messages = rate_fut, session_fut, messages_fut
         if not session:
-            session = eagle_create_session(tenant_id, user_id, session_id)
-        messages = get_messages_for_anthropic(session_id, tenant_id, user_id)
+            loop.run_in_executor(None, eagle_create_session, tenant_id, user_id, session_id)
     else:
+        rate_check = await loop.run_in_executor(None, check_rate_limit, tenant_id, user_id, user.tier)
         if session_id not in SESSIONS:
             SESSIONS[session_id] = []
         messages = SESSIONS[session_id]
+
+    if not rate_check["allowed"]:
+        raise HTTPException(status_code=429, detail=rate_check["reason"])
 
     # Add user message
     user_msg = {"role": "user", "content": req.message}
     messages.append(user_msg)
 
     if USE_PERSISTENT_SESSIONS:
-        add_message(session_id, "user", req.message, tenant_id, user_id)
+        # Fire-and-forget: DynamoDB write doesn't block the model call
+        loop.run_in_executor(
+            None, add_message, session_id, "user", req.message, tenant_id, user_id
+        )
 
     try:
         _text_parts: list[str] = []
@@ -248,7 +353,10 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
-            add_message(session_id, "assistant", result["text"], tenant_id, user_id)
+            # Fire-and-forget: don't block the response
+            loop.run_in_executor(
+                None, add_message, session_id, "assistant", result["text"], tenant_id, user_id
+            )
         else:
             messages.append({"role": "assistant", "content": result["text"]})
 
@@ -260,12 +368,16 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         output_tokens = usage.get("output_tokens", 0)
         cost = calculate_cost(input_tokens, output_tokens)
 
-        record_request_cost(
-            tenant_id, user_id, session_id,
-            input_tokens, output_tokens,
-            model=result.get("model", MODEL),
-            tools_used=result.get("tools_called", []),
-            response_time_ms=elapsed_ms
+        # Fire-and-forget: cost recording doesn't block response
+        _cost_model = result.get("model", MODEL)
+        _cost_tools = result.get("tools_called", [])
+        loop.run_in_executor(
+            None, lambda: record_request_cost(
+                tenant_id, user_id, session_id,
+                input_tokens, output_tokens,
+                model=_cost_model, tools_used=_cost_tools,
+                response_time_ms=elapsed_ms,
+            )
         )
 
         _log_telemetry({
@@ -1445,6 +1557,8 @@ async def admin_reload_caches(user: UserContext = Depends(get_user_from_header))
     _prompt_cache.clear()
     _config_cache.clear()
     _template_cache.clear()
+    _workspace_cache.clear()
+    _skill_tools_cache.clear()
     write_audit(
         tenant_id=user.tenant_id,
         entity_type="cache",
@@ -1452,7 +1566,7 @@ async def admin_reload_caches(user: UserContext = Depends(get_user_from_header))
         event_type="reload",
         actor_user_id=user.user_id,
     )
-    return {"status": "flushed", "caches": ["plugin", "prompt", "config", "template"]}
+    return {"status": "flushed", "caches": ["plugin", "prompt", "config", "template", "workspace", "skill_tools"]}
 
 
 @app.post("/api/admin/plugin/sync")

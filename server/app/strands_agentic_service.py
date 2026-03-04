@@ -28,6 +28,7 @@ import os
 import queue
 import sys
 import threading
+import time as _time
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
@@ -352,6 +353,28 @@ EAGLE_TOOLS = [
             "required": ["action"],
         },
     },
+    {
+        "name": "query_compliance_matrix",
+        "description": (
+            "Query NCI/NIH contract requirements decision tree. "
+            "Pass a JSON params string with operation (query/list_methods/list_types/"
+            "list_thresholds/search_far/suggest_vehicle) and operation-specific fields."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "params": {
+                    "type": "string",
+                    "description": (
+                        'JSON string. For query: {"operation":"query","contract_value":85000,'
+                        '"acquisition_method":"sap","contract_type":"ffp","is_services":true}. '
+                        'For search: {"operation":"search_far","keyword":"sole source"}.'
+                    ),
+                },
+            },
+            "required": ["params"],
+        },
+    },
 ]
 
 # Max prompt size per subagent to avoid context overflow
@@ -421,6 +444,28 @@ def _build_registry() -> dict:
 
 SKILL_AGENT_REGISTRY = _build_registry()
 
+# -- Skill Tools Cache (60s TTL) ------------------------------------
+_skill_tools_cache: dict[str, dict] = {}
+_SKILL_TOOLS_CACHE_TTL = 60
+
+
+def _tools_cache_key(tenant_id: str, tier: str, workspace_id: str | None) -> str:
+    return f"{tenant_id}#{tier}#{workspace_id or 'none'}"
+
+
+def _tools_cache_get(tenant_id: str, tier: str, workspace_id: str | None) -> list | None:
+    key = _tools_cache_key(tenant_id, tier, workspace_id)
+    entry = _skill_tools_cache.get(key)
+    if entry and _time.time() < entry["ts"] + _SKILL_TOOLS_CACHE_TTL:
+        return entry["tools"]
+    return None
+
+
+def _tools_cache_set(tenant_id: str, tier: str, workspace_id: str | None, tools: list) -> None:
+    _skill_tools_cache[_tools_cache_key(tenant_id, tier, workspace_id)] = {
+        "ts": _time.time(), "tools": tools,
+    }
+
 
 def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> str:
     """Truncate skill content to fit within subagent context budget."""
@@ -458,6 +503,22 @@ def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
     return subagent_tool
 
 
+# -- Compliance Matrix @tool (available to all agents) ----------------
+
+@tool(name="query_compliance_matrix")
+def _compliance_matrix_tool(params: str) -> str:
+    """Query NCI/NIH contract requirements decision tree. Pass a JSON string with keys: operation (required), contract_value, acquisition_method, contract_type, is_it, is_small_business, is_rd, is_human_subjects, is_services, keyword. Operations: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle.
+
+    Args:
+        params: JSON string, e.g. {"operation":"query","contract_value":85000,"acquisition_method":"sap","contract_type":"ffp","is_services":true}
+    """
+    from .compliance_matrix import execute_operation
+
+    parsed = json.loads(params) if isinstance(params, str) else params
+    result = execute_operation(parsed)
+    return json.dumps(result, indent=2, default=str)
+
+
 # -- build_skill_tools() ---------------------------------------------
 
 def build_skill_tools(
@@ -478,6 +539,12 @@ def build_skill_tools(
     Returns:
         List of @tool-decorated functions suitable for Agent(tools=[...])
     """
+    # Cache hit for normal path (no skill_names filter)
+    if skill_names is None:
+        cached = _tools_cache_get(tenant_id, tier, workspace_id)
+        if cached is not None:
+            return cached
+
     tools = []
 
     for name, meta in SKILL_AGENT_REGISTRY.items():
@@ -529,6 +596,13 @@ def build_skill_tools(
     except Exception as exc:
         logger.warning("skill_store.list_active_skills failed for %s: %s -- skipping user skills", tenant_id, exc)
 
+    # Always include the compliance matrix tool (read-only, no tenant scoping)
+    tools.append(_compliance_matrix_tool)
+
+    # Cache for normal path
+    if skill_names is None:
+        _tools_cache_set(tenant_id, tier, workspace_id, tools)
+
     return tools
 
 
@@ -569,11 +643,18 @@ def build_supervisor_prompt(
     return (
         f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}\n\n"
         f"{base_prompt}\n\n"
-        f"--- ACTIVE SPECIALISTS ---\n"
+        f"--- DIRECT HANDLING (NO DELEGATION) ---\n"
+        f"For the following types of messages, respond directly WITHOUT using any tools:\n"
+        f"- Greetings and pleasantries (hi, hello, good morning, thanks, etc.)\n"
+        f"- Simple yes/no or acknowledgment responses\n"
+        f"- Requests to repeat or clarify your last response\n"
+        f"- General conversational messages not related to acquisition\n"
+        f"For these, provide a brief, friendly response. Do NOT delegate to any specialist.\n\n"
+        f"--- SPECIALIST DELEGATION ---\n"
         f"Available specialists for delegation:\n{agent_list}\n\n"
-        f"IMPORTANT: Use the available tool functions to delegate to specialists. "
-        f"Include relevant context in the query you pass to each specialist. "
-        f"Do not try to answer specialized questions yourself -- delegate to the expert."
+        f"For acquisition-related questions, regulatory queries, document generation, "
+        f"and other substantive work: use the available tool functions to delegate to specialists. "
+        f"Include relevant context in the query you pass to each specialist."
     )
 
 
@@ -666,8 +747,9 @@ async def sdk_query(
         messages=strands_history,
     )
 
-    # Synchronous call -- Strands handles the agentic loop internally
-    result = supervisor(prompt)
+    # Call invoke_async directly — avoids Strands' run_async() which creates
+    # a new ThreadPoolExecutor + asyncio.run() event loop on every call
+    result = await supervisor.invoke_async(prompt)
     result_text = str(result)
 
     # Extract tool names called during execution from metrics.tool_metrics
