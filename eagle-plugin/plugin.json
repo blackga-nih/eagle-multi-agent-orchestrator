@@ -19,7 +19,8 @@
     "compliance",
     "knowledge-retrieval",
     "tech-review",
-    "ingest-document"
+    "ingest-document",
+    "admin-manager"
   ],
   "commands": [
     "intake",
