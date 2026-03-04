@@ -54,7 +54,7 @@ def test_bearer_auth():
         print("  3. Run: export AWS_BEARER_TOKEN_BEDROCK='bedrock-api-key-...'")
         return False
 
-    print(f"  API Key: {api_key[:30]}...{api_key[-10:]}")
+    print(f"  API Key: [set, {len(api_key)} chars]")
     print(f"  Endpoint: {ENDPOINT}")
     print(f"  Model: {MODEL_ID}")
 

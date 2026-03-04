@@ -3,6 +3,9 @@ name: Build
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   s3-smoke-test:
     runs-on: [self-hosted, eagle-github-runner]
