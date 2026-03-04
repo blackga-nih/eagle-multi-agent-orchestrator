@@ -28,6 +28,14 @@ export type StreamEventType =
 export interface ToolUse {
   name: string;
   input: Record<string, any>;
+  /** Unique ID for this tool invocation (from Bedrock ConverseStream). */
+  tool_use_id?: string;
+  /**
+   * Where this tool executes.
+   * 'client' — runs in the browser via client-tools.ts (think, code, editor).
+   * 'server' — runs on the backend (default for all other tools).
+   */
+  execution_target?: 'client' | 'server';
 }
 
 export interface ToolResult {
@@ -55,7 +63,7 @@ export interface HandoffInfo {
 
 /**
  * A single event in the multi-agent stream.
- * 
+ *
  * The `agent_id` field is critical for the frontend to:
  * - Apply the correct color scheme
  * - Group messages by agent
@@ -66,7 +74,7 @@ export interface StreamEvent {
   agent_id: string;
   agent_name: string;
   timestamp: string;
-  
+
   // Content fields (one will be populated based on type)
   content?: string;
   reasoning?: string;
@@ -99,7 +107,7 @@ export function parseStreamEvent(data: string): StreamEvent | null {
  */
 export function streamEventToMessage(event: StreamEvent, messageId: string): Message | null {
   if (event.type !== 'text') return null;
-  
+
   return {
     id: messageId,
     role: 'assistant',
@@ -110,5 +118,3 @@ export function streamEventToMessage(event: StreamEvent, messageId: string): Mes
     agent_name: event.agent_name,
   };
 }
-
-

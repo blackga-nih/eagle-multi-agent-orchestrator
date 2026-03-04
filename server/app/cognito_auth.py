@@ -3,12 +3,10 @@ Cognito JWT Authentication
 Validates AWS Cognito JWTs and extracts user/tenant context.
 """
 import os
-import json
 import time
 import logging
 import httpx
 from typing import Optional, Dict, Any, Tuple
-from functools import lru_cache
 
 logger = logging.getLogger("eagle.auth")
 

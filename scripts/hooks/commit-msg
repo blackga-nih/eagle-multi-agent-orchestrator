@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# scripts/hooks/commit-msg
+# Strips Claude Code attribution signatures from commit messages.
+# Preserves legitimate mentions of Claude as a provider/tool/SDK.
+# Install via: bash scripts/setup-hooks.sh
+#
+# Patterns removed:
+#   Co-Authored-By: Claude ... <...@anthropic.com>
+#   🤖 Generated with [Claude Code](...)
+#   Any line containing @anthropic.com (catches email variants)
+
+COMMIT_MSG_FILE="$1"
+
+if [ -z "$COMMIT_MSG_FILE" ] || [ ! -f "$COMMIT_MSG_FILE" ]; then
+  echo "commit-msg hook: missing commit message file" >&2
+  exit 1
+fi
+
+# Remove Co-Authored-By lines that reference Anthropic/Claude attribution.
+sed -i -E '/^Co-Authored-By:.*@anthropic\.com/Id' "$COMMIT_MSG_FILE"
+
+# Remove the "Generated with [Claude Code]" footer line.
+sed -i -E '/Generated with \[Claude Code\]/d' "$COMMIT_MSG_FILE"
+
+# Remove trailing blank lines left after stripping.
+perl -i -0pe 's/\n+$/\n/' "$COMMIT_MSG_FILE" 2>/dev/null || true
+
+exit 0

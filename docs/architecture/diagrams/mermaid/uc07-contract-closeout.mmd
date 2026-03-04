@@ -1,0 +1,55 @@
+sequenceDiagram
+    actor CO as Contracting Officer
+    participant UI as Eagle UI
+    participant Agent as Supervisor Agent
+    participant Comp as Compliance Skill
+    participant DocGen as Document Generator Skill
+    participant S3 as S3 Document Store
+
+    Note over CO,S3: UC-07: Contract Close-Out
+
+    CO->>UI: "I need to close out contract HHSN261200900045C"
+    UI->>Agent: New session (close-out mode)
+
+    Agent->>UI: "Upload the contract file and any final deliverables"
+    CO->>UI: Uploads contract, final invoice, deliverable log
+    UI->>Agent: Documents received
+
+    rect rgb(240, 248, 255)
+        Note over Agent: Contract Analysis
+        Agent->>Agent: Parse contract terms
+        Agent->>Agent: Identify close-out type:<br/>firm-fixed-price, all options exercised
+        Agent->>Agent: Check: final payment made?<br/>All deliverables accepted?<br/>GFP returned?
+    end
+
+    Agent->>Comp: Invoke Compliance skill (close-out checklist)
+
+    rect rgb(255, 245, 255)
+        Note over Comp: Close-Out Requirements
+        Comp->>Comp: Generate FAR 4.804 checklist
+        Comp->>Comp: Identify required actions:<br/>1. Release of claims letter<br/>2. Final patent report<br/>3. Final property report<br/>4. Settlement of subcontracts<br/>5. Disposition of classified material
+        Comp-->>Agent: Close-out action list (12 items)
+    end
+
+    Agent->>UI: Close-out checklist
+    UI->>CO: Action items with owners:
+
+    Note over UI: ✓ Final invoice paid<br/>✓ All deliverables accepted<br/>⚠️ Release of claims - needs contractor<br/>⚠️ Final patent report - needs contractor<br/>❌ Property disposition - pending<br/>❌ COR final assessment - needed
+
+    CO->>UI: "Draft the COR final assessment and release of claims letter"
+    UI->>Agent: Document requests
+
+    Agent->>DocGen: Invoke Document Generator (close-out docs)
+
+    par Generate Close-Out Documents
+        DocGen->>DocGen: COR Final Assessment
+        DocGen->>DocGen: Release of Claims Letter<br/>(contractor signature needed)
+        DocGen->>DocGen: Contract Completion Statement
+    end
+
+    DocGen->>S3: Store close-out package
+    S3-->>DocGen: Download URLs
+    DocGen-->>Agent: Documents ready
+
+    Agent->>UI: Close-out documents ready
+    UI->>CO: ✓ COR Final Assessment<br/>✓ Release of Claims Letter<br/>✓ Contract Completion Statement<br/>→ Send claims letter to contractor

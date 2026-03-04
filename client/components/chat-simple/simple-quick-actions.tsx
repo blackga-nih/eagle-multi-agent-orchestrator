@@ -14,12 +14,12 @@ interface SimpleQuickActionsProps {
 
 export default function SimpleQuickActions({ onAction }: SimpleQuickActionsProps) {
     return (
-        <div className="flex items-center gap-2 px-6 py-2.5 bg-white border-b border-[#E8ECF1] flex-wrap shrink-0">
+        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
             {quickActions.map((action) => (
                 <button
                     key={action.label}
                     onClick={() => onAction(action.command)}
-                    className="px-3.5 py-1.5 text-xs font-medium text-[#003366] bg-[#EEF2F7] border border-[#D8DEE6] rounded-full whitespace-nowrap transition-all hover:bg-[#003366] hover:text-white hover:border-[#003366]"
+                    className="px-3 py-1 text-[11px] font-medium text-[#003366] bg-[#EEF2F7] border border-[#D8DEE6] rounded-full whitespace-nowrap transition-all hover:bg-[#003366] hover:text-white hover:border-[#003366]"
                 >
                     {action.emoji} {action.label}
                 </button>

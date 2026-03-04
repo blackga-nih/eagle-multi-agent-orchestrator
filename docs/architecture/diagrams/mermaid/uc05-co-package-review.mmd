@@ -1,0 +1,53 @@
+sequenceDiagram
+    actor CO as Contracting Officer
+    participant UI as Eagle UI
+    participant Agent as Supervisor Agent
+    participant Comp as Compliance Skill
+    participant Tech as Tech Review Skill
+    participant DocGen as Document Generator Skill
+
+    Note over CO,DocGen: UC-05: CO Package Review & Findings Generation
+
+    CO->>UI: "Review this acquisition package"
+    UI->>Agent: New session (CO role)
+    CO->>UI: Uploads package (AP, SOW, IGCE, Market Research)
+    UI->>Agent: Package uploaded
+
+    Agent->>Agent: Parse all documents,<br/>identify document types
+
+    rect rgb(240, 248, 255)
+        Note over Agent,Comp: Compliance Review
+        Agent->>Comp: Invoke Compliance skill (package review)
+        Comp->>Comp: Check FAR compliance per section
+        Comp->>Comp: Validate contract type selection
+        Comp->>Comp: Verify set-aside determination
+        Comp->>Comp: Check required clauses present
+        Comp->>Comp: Cross-reference AP ↔ SOW ↔ IGCE consistency
+        Comp-->>Agent: Findings (5 items):<br/>1. Missing FAR 52.219 clause<br/>2. AP cost ≠ IGCE total<br/>3. Set-aside not justified<br/>4. PoP mismatch AP vs SOW<br/>5. Market research outdated (>12mo)
+    end
+
+    rect rgb(245, 255, 245)
+        Note over Agent,Tech: Technical Review
+        Agent->>Tech: Invoke Tech Review skill (SOW review)
+        Tech->>Tech: Check SOW specificity
+        Tech->>Tech: Evaluate deliverables clarity
+        Tech->>Tech: Review evaluation criteria alignment
+        Tech-->>Agent: Findings (3 items):<br/>1. Task 3 deliverable undefined<br/>2. No acceptance criteria for reports<br/>3. Security requirements incomplete
+    end
+
+    Agent->>DocGen: Invoke Document Generator (findings report)
+
+    DocGen->>DocGen: Generate Findings Report
+    Note right of DocGen: Organized by severity:<br/>🔴 Critical (2)<br/>🟡 Moderate (4)<br/>🟢 Minor (2)
+    DocGen-->>Agent: Findings report ready
+
+    Agent->>UI: Package review complete
+    UI->>CO: Findings Report:<br/>🔴 IGCE/AP cost mismatch<br/>🔴 Missing required clause<br/>🟡 PoP inconsistency<br/>🟡 Set-aside justification<br/>🟡 Outdated market research<br/>🟡 Task 3 deliverable undefined<br/>🟢 Acceptance criteria<br/>🟢 Security requirements
+
+    CO->>UI: "Fix the cost mismatch for me"
+    UI->>Agent: Remediation request
+    Agent->>DocGen: Invoke Document Generator (update IGCE)
+    DocGen->>DocGen: Reconcile IGCE total with AP
+    DocGen-->>Agent: Updated IGCE v2
+    Agent->>UI: "IGCE updated. AP and IGCE now show $487,500."
+    UI->>CO: Updated IGCE + download link

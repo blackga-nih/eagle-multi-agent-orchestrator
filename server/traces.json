@@ -1,0 +1,310 @@
+[
+  {
+    "trace_id": "t-1771794040482",
+    "tenant_id": "dev-tenant",
+    "user_id": "dev-user",
+    "session_id": "0eaa80c5-2ae6-4a48-9be1-4f97b55707ab",
+    "created_at": "2026-02-22T21:00:41.575110",
+    "date": "2026-02-22",
+    "duration_ms": 1091,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_usd": 0.0,
+    "tools_called": [],
+    "agents_delegated": [],
+    "span_count": 0,
+    "spans": [],
+    "status": "success",
+    "trace_json": [
+      {
+        "type": "SystemMessage",
+        "session_id": "0eaa80c5-2ae6-4a48-9be1-4f97b55707ab"
+      },
+      {
+        "type": "ResultMessage",
+        "result": "Unknown skill: document",
+        "session_id": "0eaa80c5-2ae6-4a48-9be1-4f97b55707ab",
+        "cost_usd": 0,
+        "usage": {
+          "input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 0,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard"
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "t-1771793899871",
+    "tenant_id": "dev-tenant",
+    "user_id": "dev-user",
+    "session_id": "ae5e96ae-aa41-44e3-94d5-5d4d88024308",
+    "created_at": "2026-02-22T20:58:20.990719",
+    "date": "2026-02-22",
+    "duration_ms": 1118,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_usd": 0.0,
+    "tools_called": [],
+    "agents_delegated": [],
+    "span_count": 0,
+    "spans": [],
+    "status": "success",
+    "trace_json": [
+      {
+        "type": "SystemMessage",
+        "session_id": "ae5e96ae-aa41-44e3-94d5-5d4d88024308"
+      },
+      {
+        "type": "ResultMessage",
+        "result": "Unknown skill: document",
+        "session_id": "ae5e96ae-aa41-44e3-94d5-5d4d88024308",
+        "cost_usd": 0,
+        "usage": {
+          "input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 0,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard"
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "t-1771793820021",
+    "tenant_id": "dev-tenant",
+    "user_id": "dev-user",
+    "session_id": "a65e7dea-d3ef-483f-bd2b-a58c11f0ea8a",
+    "created_at": "2026-02-22T20:57:01.144468",
+    "date": "2026-02-22",
+    "duration_ms": 1122,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_usd": 0.0,
+    "tools_called": [],
+    "agents_delegated": [],
+    "span_count": 0,
+    "spans": [],
+    "status": "success",
+    "trace_json": [
+      {
+        "type": "SystemMessage",
+        "session_id": "a65e7dea-d3ef-483f-bd2b-a58c11f0ea8a"
+      },
+      {
+        "type": "ResultMessage",
+        "result": "Unknown skill: document",
+        "session_id": "a65e7dea-d3ef-483f-bd2b-a58c11f0ea8a",
+        "cost_usd": 0,
+        "usage": {
+          "input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 0,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard"
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "t-1771793794916",
+    "tenant_id": "dev-tenant",
+    "user_id": "dev-user",
+    "session_id": "ca2dfa69-5852-4ce0-84ec-301f30722ba5",
+    "created_at": "2026-02-22T20:56:35.481832",
+    "date": "2026-02-22",
+    "duration_ms": 565,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_usd": 0.0,
+    "tools_called": [],
+    "agents_delegated": [],
+    "span_count": 0,
+    "spans": [],
+    "status": "success",
+    "trace_json": [
+      {
+        "type": "SystemMessage",
+        "session_id": "ca2dfa69-5852-4ce0-84ec-301f30722ba5"
+      },
+      {
+        "type": "ResultMessage",
+        "result": "Unknown skill: document",
+        "session_id": "ca2dfa69-5852-4ce0-84ec-301f30722ba5",
+        "cost_usd": 0,
+        "usage": {
+          "input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 0,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard"
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "t-1771793775665",
+    "tenant_id": "dev-tenant",
+    "user_id": "dev-user",
+    "session_id": "a7cd322b-9549-4a9d-bb53-f03f00636fe0",
+    "created_at": "2026-02-22T20:56:16.559831",
+    "date": "2026-02-22",
+    "duration_ms": 893,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_usd": 0.0,
+    "tools_called": [],
+    "agents_delegated": [],
+    "span_count": 0,
+    "spans": [],
+    "status": "success",
+    "trace_json": [
+      {
+        "type": "SystemMessage",
+        "session_id": "a7cd322b-9549-4a9d-bb53-f03f00636fe0"
+      },
+      {
+        "type": "ResultMessage",
+        "result": "Unknown skill: document",
+        "session_id": "a7cd322b-9549-4a9d-bb53-f03f00636fe0",
+        "cost_usd": 0,
+        "usage": {
+          "input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 0,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard"
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "t-1771793531386",
+    "tenant_id": "demo-tenant",
+    "user_id": "demo-user",
+    "session_id": "14e63011-a763-4d33-9cbf-64b83e90f4ce",
+    "created_at": "2026-02-22T20:52:13.272743",
+    "date": "2026-02-22",
+    "duration_ms": 1884,
+    "total_input_tokens": 18944,
+    "total_output_tokens": 5,
+    "total_cost_usd": 0.02370425,
+    "tools_called": [],
+    "agents_delegated": [],
+    "span_count": 0,
+    "spans": [],
+    "status": "success",
+    "trace_json": [
+      {
+        "type": "SystemMessage",
+        "session_id": "14e63011-a763-4d33-9cbf-64b83e90f4ce"
+      },
+      {
+        "type": "AssistantMessage",
+        "content": [
+          {
+            "type": "text",
+            "text": "Hello!"
+          }
+        ]
+      },
+      {
+        "type": "ResultMessage",
+        "result": "Hello!",
+        "session_id": "14e63011-a763-4d33-9cbf-64b83e90f4ce",
+        "cost_usd": 0.02370425,
+        "usage": {
+          "input_tokens": 3,
+          "cache_creation_input_tokens": 18941,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 5,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 18941
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard"
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "t-1771787294744",
+    "tenant_id": "dev-tenant",
+    "user_id": "dev-user",
+    "session_id": "97a107fe-1c37-46a2-b594-429340a65bb8",
+    "created_at": "2026-02-22T19:08:19.649989",
+    "date": "2026-02-22",
+    "duration_ms": 4905,
+    "total_input_tokens": 3053,
+    "total_output_tokens": 409,
+    "total_cost_usd": 0.005098,
+    "tools_called": [],
+    "agents_delegated": [],
+    "span_count": 0,
+    "spans": [],
+    "status": "success"
+  }
+]

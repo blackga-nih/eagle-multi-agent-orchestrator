@@ -36,3 +36,17 @@ services:
       - ../client/contexts:/app/contexts
       - ../client/lib:/app/lib
       - ../client/types:/app/types
+
+  # Excalidraw MCP App server — standalone Node.js service
+  # Exposes the MCP Apps protocol endpoint (POST /mcp) so Claude.ai
+  # or any MCP Apps-compatible host can use it via custom connector.
+  # The EAGLE admin diagrams page connects to this for full MCP Apps support.
+  excalidraw-mcp:
+    build:
+      context: ../client/mcp-apps/excalidraw
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - NODE_ENV=production

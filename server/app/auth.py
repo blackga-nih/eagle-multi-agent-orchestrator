@@ -1,4 +1,3 @@
-import jwt
 import boto3
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials

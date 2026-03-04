@@ -1,0 +1,65 @@
+sequenceDiagram
+    actor User as COR / Program Staff
+    participant UI as Eagle UI
+    participant Sup as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant DocGen as Document Generator Skill
+    participant S3 as S3 Document Store
+
+    Note over User,S3: UC-01: New Acquisition Package - Happy Path
+
+    User->>UI: "I need to buy lab equipment"
+    UI->>Sup: New session created
+    Sup->>Sup: Detect intent: acquisition request
+    Sup->>Intake: Delegate to OA Intake
+
+    rect rgb(240, 248, 255)
+        Note over Intake: Phase 1: Minimal Intake
+        Intake->>UI: Ask basics (what, cost range, timeline)
+        UI->>User: Display intake form
+        User->>UI: "$85K Illumina sequencer, need by March"
+        UI->>Intake: Form submission
+    end
+
+    rect rgb(245, 255, 245)
+        Note over Intake: Phase 2: Clarifying Questions
+        Intake->>UI: "Product or Service? Sole source?"
+        User->>UI: "Product, only Illumina makes it"
+        UI->>Intake: Answers
+        Intake->>UI: "Funding available? Existing contract?"
+        User->>UI: "Grant funding, new purchase"
+        UI->>Intake: Answers
+    end
+
+    rect rgb(255, 248, 240)
+        Note over Intake: Phase 3: Determination
+        Intake->>Intake: Apply decision tree
+        Note right of Intake: $85K → Simplified (Part 13)<br/>Sole vendor → J&A needed<br/>Product → Fixed Price
+        Intake->>UI: Display Acquisition Summary
+        Intake->>UI: Display Document Checklist<br/>(SOW, IGCE, J&A, Market Research)
+    end
+
+    User->>UI: "Help me draft the SOW"
+    UI->>Sup: Document generation request
+    Sup->>DocGen: Generate SOW with intake data
+
+    rect rgb(255, 245, 255)
+        Note over DocGen: Phase 4: Document Generation
+        DocGen->>DocGen: Apply SOW template
+        DocGen->>DocGen: Fill from intake context
+        DocGen->>S3: Store SOW v1 (.docx)
+        S3-->>DocGen: Pre-signed download URL
+        DocGen->>UI: SOW ready for download
+    end
+
+    UI->>User: Display SOW + download link
+    Note over UI: Checklist updates: SOW ✓
+
+    User->>UI: "Now the IGCE"
+    UI->>Sup: Next document request
+    Sup->>DocGen: Generate IGCE
+    DocGen->>DocGen: Apply IGCE template + cost data
+    DocGen->>S3: Store IGCE v1
+    DocGen->>UI: IGCE ready
+    UI->>User: Display IGCE + download link
+    Note over UI: Checklist updates: IGCE ✓

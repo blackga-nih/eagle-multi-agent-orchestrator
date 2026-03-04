@@ -97,11 +97,36 @@ class MultiAgentStreamWriter:
         event = self._create_event(StreamEventType.REASONING, reasoning=reasoning)
         await queue.put(event.to_sse())
 
-    async def write_tool_use(self, queue, tool_name: str, tool_input: Dict[str, Any]):
-        """Emit a TOOL_USE event when the agent invokes a tool."""
+    async def write_tool_use(
+        self,
+        queue,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        tool_use_id: str = "",
+    ):
+        """Emit a TOOL_USE event when the agent invokes a tool.
+
+        Parameters
+        ----------
+        queue : asyncio.Queue
+            The SSE queue to push the event into.
+        tool_name : str
+            Name of the tool being invoked.
+        tool_input : Dict[str, Any]
+            Actual input data passed to the tool (not empty ``{}``).
+        tool_use_id : str, optional
+            Unique ID for this tool invocation (from Bedrock ConverseStream).
+        """
+        tool_use_payload: Dict[str, Any] = {
+            "name": tool_name,
+            "input": tool_input,
+        }
+        if tool_use_id:
+            tool_use_payload["tool_use_id"] = tool_use_id
+
         event = self._create_event(
             StreamEventType.TOOL_USE,
-            tool_use={"name": tool_name, "input": tool_input},
+            tool_use=tool_use_payload,
         )
         await queue.put(event.to_sse())
 

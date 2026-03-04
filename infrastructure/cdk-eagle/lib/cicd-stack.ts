@@ -123,6 +123,72 @@ export class EagleCiCdStack extends cdk.Stack {
       ],
     }));
 
+    // ALB: Read target group health (post-deploy verify job)
+    this.deployRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'ALBInspect',
+      actions: [
+        'elasticloadbalancing:DescribeTargetHealth',
+        'elasticloadbalancingv2:DescribeTargetHealth',
+        'elasticloadbalancingv2:DescribeTargetGroups',
+      ],
+      resources: ['*'],
+    }));
+
+    // Bedrock: Invoke Claude + MiniMax models for post-deploy eval suite
+    this.deployRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'EvalRunnerBedrock',
+      actions: [
+        'bedrock:InvokeModel',
+        'bedrock:InvokeModelWithResponseStream',
+      ],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/anthropic.*',
+        'arn:aws:bedrock:*::foundation-model/minimax.*',
+        `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.*`,
+        `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.minimax.*`,
+      ],
+    }));
+
+    // DynamoDB + S3 + CloudWatch: post-deploy eval suite data access
+    this.deployRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'EvalRunnerData',
+      actions: [
+        'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan',
+        'dynamodb:BatchWriteItem',
+      ],
+      resources: [
+        `arn:aws:dynamodb:${config.region}:${this.account}:table/${config.eagleTableName}`,
+        `arn:aws:dynamodb:${config.region}:${this.account}:table/${config.eagleTableName}/index/*`,
+      ],
+    }));
+
+    this.deployRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'EvalRunnerStorage',
+      actions: [
+        's3:PutObject', 's3:GetObject', 's3:DeleteObject', 's3:ListBucket',
+      ],
+      resources: [
+        `arn:aws:s3:::${config.documentBucketName}`,
+        `arn:aws:s3:::${config.documentBucketName}/*`,
+        `arn:aws:s3:::${config.evalBucketName}`,
+        `arn:aws:s3:::${config.evalBucketName}/*`,
+      ],
+    }));
+
+    this.deployRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'EvalRunnerLogs',
+      actions: [
+        'logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents',
+        'logs:DescribeLogStreams', 'logs:FilterLogEvents', 'logs:GetLogEvents',
+        'logs:DescribeLogGroups',
+      ],
+      resources: [
+        `arn:aws:logs:${config.region}:${this.account}:log-group:/eagle/*`,
+        `arn:aws:logs:${config.region}:${this.account}:log-group:/eagle/*:*`,
+      ],
+    }));
+
     // ── Outputs ──────────────────────────────────────────────
     new cdk.CfnOutput(this, 'DeployRoleArn', {
       value: this.deployRole.roleArn,

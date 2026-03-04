@@ -1,0 +1,42 @@
+sequenceDiagram
+    actor User as COR / CO / Policy Staff
+    participant Sup as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant Comp as Compliance Skill
+    participant Legal as Legal Counsel Skill
+    participant Tech as Tech Review Skill
+    participant Market as Market Intelligence Skill
+    participant Public as Public Interest Skill
+    participant DocGen as Document Generator Skill
+
+    Note over User,DocGen: EAGLE Skill Architecture - Single Agent + 8 Skills
+
+    rect rgb(240, 248, 255)
+        Note over Sup: Supervisor Agent is the ONLY agent.<br/>All others are skills (tools) it invokes.
+    end
+
+    Note over Intake: OA Intake Skill<br/>Guided acquisition intake<br/>Decision tree routing<br/>Document checklist
+
+    Note over Comp: Compliance Skill<br/>FAR/HHSAR validation<br/>Clause identification<br/>Vehicle search
+
+    Note over Legal: Legal Counsel Skill<br/>GAO protest risk<br/>Appropriations law<br/>Case precedent
+
+    Note over Tech: Tech Review Skill<br/>SOW quality review<br/>Requirements translation<br/>Eval criteria development
+
+    Note over Market: Market Intelligence Skill<br/>Vendor identification<br/>Price benchmarking<br/>Small business advocacy
+
+    Note over Public: Public Interest Skill<br/>Ethics review<br/>Fairness assessment<br/>Transparency check
+
+    Note over DocGen: Document Generator Skill<br/>AP, SOW, IGCE, J&A<br/>Word/PDF export<br/>Version control
+
+    rect rgb(245, 255, 245)
+        Note over Sup,DocGen: MVP1 Skills: Intake, Compliance, Legal, Tech, Market, DocGen
+    end
+
+    rect rgb(255, 248, 240)
+        Note over Sup,DocGen: MVP2 Skills: + Public Interest
+    end
+
+    rect rgb(255, 240, 240)
+        Note over Sup,DocGen: Phase 2 Skills: + Policy Librarian, Policy Analyst
+    end

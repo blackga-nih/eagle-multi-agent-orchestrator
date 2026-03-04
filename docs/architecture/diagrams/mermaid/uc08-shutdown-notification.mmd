@@ -1,0 +1,51 @@
+sequenceDiagram
+    actor CO as Contracting Officer
+    participant UI as Eagle UI
+    participant Agent as Supervisor Agent
+    participant Comp as Compliance Skill
+    participant DocGen as Document Generator Skill
+
+    Note over CO,DocGen: UC-08: Government Shutdown Notification (Time-Critical)
+
+    CO->>UI: "Government shutdown in 4 hours. I need contractor notifications."
+    UI->>Agent: New session (shutdown mode)
+
+    Agent->>UI: "Upload your active contract list or paste contract numbers"
+    CO->>UI: Uploads active contract spreadsheet (200+ contracts)
+    UI->>Agent: Contract list received
+
+    rect rgb(255, 240, 240)
+        Note over Agent,Comp: Classify Each Contract
+        Agent->>Comp: Invoke Compliance skill (shutdown classification)
+
+        Comp->>Comp: For each contract, determine status:
+        Note right of Comp: Category A: Fully funded FFP<br/>→ CONTINUE work<br/><br/>Category B: Incrementally funded<br/>→ STOP at funding limit<br/><br/>Category C: Cost-reimbursement<br/>→ STOP WORK immediately<br/><br/>Category D: Excepted activities<br/>→ CONTINUE (life/safety)
+
+        Comp->>Comp: Classify 200+ contracts:<br/>78 Continue, 45 Stop at limit,<br/>62 Stop work, 15 Excepted
+        Comp-->>Agent: Classification complete
+    end
+
+    Agent->>UI: "200 contracts classified. Ready to generate emails."
+    UI->>CO: Summary: 78 continue | 45 partial | 62 stop | 15 excepted
+
+    CO->>UI: "Generate all notification emails"
+    UI->>Agent: Batch generation request
+
+    rect rgb(245, 255, 245)
+        Note over Agent,DocGen: Batch Email Generation
+        Agent->>DocGen: Invoke Document Generator (batch notifications)
+
+        DocGen->>DocGen: Template A: Continue Performance<br/>"Your FFP contract remains active..."
+        DocGen->>DocGen: Template B: Stop at Funding Limit<br/>"Cease work when current funding exhausted..."
+        DocGen->>DocGen: Template C: Stop Work Order<br/>"Immediately cease all work under..."
+        DocGen->>DocGen: Template D: Excepted Activities<br/>"Your contract supports excepted activities..."
+
+        DocGen->>DocGen: Generate 200 personalized emails<br/>(contract #, vendor name, CO name,<br/>specific instructions per category)
+
+        DocGen-->>Agent: 200 emails generated
+    end
+
+    Agent->>UI: All notifications ready for review
+    UI->>CO: 200 draft emails organized by category<br/>→ Review & send via email system
+
+    Note over CO,DocGen: Compressed from hours of manual work<br/>to minutes of review

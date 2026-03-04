@@ -1,15 +1,20 @@
 /**
  * FastAPI Chat API Route
  *
- * Proxies requests to the FastAPI backend and emits SSE-formatted
- * events back to the frontend for compatibility.
+ * Proxies requests to the FastAPI backend's SSE streaming endpoint
+ * and pipes the real per-token stream directly to the frontend.
  *
- * Backend: FastAPI POST /api/chat (JSON)
+ * Backend: FastAPI POST /api/chat/stream (SSE)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
+// Use 127.0.0.1 (not localhost) because uvicorn binds IPv4 only and
+// Node.js may resolve "localhost" to [::1] (IPv6), causing fetch to hang.
+const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 
 function normalizeSlashCommand(input: string): string {
   const message = input.trim();
@@ -73,7 +78,7 @@ export async function POST(request: NextRequest) {
       session_id: sessionId,
     };
 
-    const response = await fetch(`${FASTAPI_URL}/api/chat`, {
+    const response = await fetch(`${FASTAPI_URL}/api/chat/stream`, {
       method: 'POST',
       headers,
       body: JSON.stringify(fastApiBody),
@@ -88,43 +93,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Convert REST response to SSE format for consistent frontend handling
-    const data = await response.json();
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      start(controller) {
-        const event = {
-          type: 'text',
-          agent_id: 'eagle-assistant',
-          agent_name: 'EAGLE Assistant',
-          content: data.response,
-          timestamp: new Date().toISOString(),
-        };
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    // Pipe the real SSE stream directly from FastAPI to the browser.
+    // Use TransformStream passthrough — ensures chunks flush immediately
+    // in the Next.js Node.js runtime (direct body passthrough can buffer).
+    const { readable, writable } = new TransformStream();
+    const upstream = response.body;
+    if (upstream) {
+      upstream.pipeTo(writable).catch(() => {});
+    } else {
+      writable.close();
+    }
 
-        const complete = {
-          type: 'complete',
-          agent_id: 'eagle-assistant',
-          agent_name: 'EAGLE Assistant',
-          metadata: {
-            session_id: data.session_id,
-            usage: data.usage,
-            model: data.model,
-            tools_called: data.tools_called,
-            cost_usd: data.cost_usd,
-          },
-          timestamp: new Date().toISOString(),
-        };
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(complete)}\n\n`));
-        controller.close();
-      },
-    });
-
-    return new Response(stream, {
+    return new Response(readable, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
       },
     });
   } catch (error) {

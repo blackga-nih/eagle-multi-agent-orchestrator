@@ -69,21 +69,34 @@ jobs:
     - name: CDK Deploy
       run: |
         cd ${{ env.CDK_DIR }}
-        npx cdk deploy --all --require-approval never --outputs-file outputs.json
+        # EagleCoreStack: skip — DynamoDB table exists outside CloudFormation, managed manually.
+        # EagleComputeStack: skip — ECS service logical IDs changed, avoid rollback. ECS
+        #   updates happen in deploy-backend/deploy-frontend via force-new-deployment instead.
+        # --exclusively: prevent CDK from following addDependency() chains to skipped stacks.
+        npx cdk deploy EagleCiCdStack EagleStorageStack EagleEvalStack \
+          --exclusively --require-approval never --outputs-file outputs.json
 
-    - name: Extract CDK Outputs
+    - name: Resolve deployment outputs
       id: outputs
       run: |
-        cd ${{ env.CDK_DIR }}
-        echo "user-pool-id=$(jq -r '.EagleCoreStack.UserPoolId' outputs.json)" >> $GITHUB_OUTPUT
-        echo "user-pool-client-id=$(jq -r '.EagleCoreStack.UserPoolClientId' outputs.json)" >> $GITHUB_OUTPUT
-        echo "backend-repo-uri=$(jq -r '.EagleComputeStack.BackendRepoUri' outputs.json)" >> $GITHUB_OUTPUT
-        echo "frontend-repo-uri=$(jq -r '.EagleComputeStack.FrontendRepoUri' outputs.json)" >> $GITHUB_OUTPUT
-        echo "backend-url=$(jq -r '.EagleComputeStack.BackendUrl' outputs.json)" >> $GITHUB_OUTPUT
-        echo "frontend-url=$(jq -r '.EagleComputeStack.FrontendUrl' outputs.json)" >> $GITHUB_OUTPUT
+        # Stable compute values — read from existing deployed stacks via AWS API
+        CORE=$(aws cloudformation describe-stacks --stack-name EagleCoreStack \
+          --query "Stacks[0].Outputs" --output json)
+        COMPUTE=$(aws cloudformation describe-stacks --stack-name EagleComputeStack \
+          --query "Stacks[0].Outputs" --output json)
 
-        echo "--- CDK Outputs ---"
-        cat outputs.json | jq .
+        echo "user-pool-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolId") | .OutputValue')" >> $GITHUB_OUTPUT
+        echo "user-pool-client-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue')" >> $GITHUB_OUTPUT
+        echo "backend-url=$(echo $COMPUTE | jq -r '.[] | select(.OutputKey=="BackendUrl") | .OutputValue')" >> $GITHUB_OUTPUT
+        echo "frontend-url=$(echo $COMPUTE | jq -r '.[] | select(.OutputKey=="FrontendUrl") | .OutputValue')" >> $GITHUB_OUTPUT
+
+        # ECR URIs — stable, derived from account ID
+        ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        echo "backend-repo-uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-backend-dev" >> $GITHUB_OUTPUT
+        echo "frontend-repo-uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-frontend-dev" >> $GITHUB_OUTPUT
+
+        echo "--- CDK outputs (EagleCiCdStack, EagleStorageStack, EagleEvalStack) ---"
+        cat outputs.json | jq . 2>/dev/null || echo "(no outputs.json)"
 
   # ── Build & Push Backend Container ──────────────────────────
   deploy-backend:
@@ -190,7 +203,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Health check
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      with:
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: HTTP health check
       run: |
         BACKEND_URL="${{ needs.deploy-infra.outputs.backend-url }}"
         FRONTEND_URL="${{ needs.deploy-infra.outputs.frontend-url }}"
@@ -205,3 +224,89 @@ jobs:
         echo "=== Deployment Complete ==="
         echo "Frontend: ${FRONTEND_URL}"
         echo "Backend:  ${BACKEND_URL}"
+
+    - name: ECS service and ALB target health
+      run: |
+        echo "=== ECS Service Health ==="
+        for SVC in ${{ env.BACKEND_SERVICE }} ${{ env.FRONTEND_SERVICE }}; do
+          echo "--- $SVC ---"
+          aws ecs describe-services \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --services "$SVC" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].{status:status,desired:desiredCount,running:runningCount,pending:pendingCount,rolloutState:deployments[0].rolloutState}' \
+            --output table || echo "Could not describe $SVC"
+
+          TG_ARN=$(aws ecs describe-services \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --services "$SVC" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].loadBalancers[0].targetGroupArn' \
+            --output text 2>/dev/null || echo "None")
+
+          if [ "$TG_ARN" != "None" ] && [ "$TG_ARN" != "null" ] && [ -n "$TG_ARN" ]; then
+            echo "  ALB target group: $TG_ARN"
+            aws elbv2 describe-target-health \
+              --target-group-arn "$TG_ARN" \
+              --region ${{ env.AWS_REGION }} \
+              --query 'TargetHealthDescriptions[*].{id:Target.Id,port:Target.Port,state:TargetHealth.State,reason:TargetHealth.Reason}' \
+              --output table || echo "Could not describe target health for $SVC"
+          fi
+        done
+
+  # ── Post-Deploy Eval Suite ───────────────────────────────────
+  post-deploy-eval:
+    needs: [deploy-infra, deploy-backend, deploy-frontend]
+    runs-on: ubuntu-latest
+    continue-on-error: true   # eval failures are non-blocking for the deploy
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      with:
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Python 3.11
+      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        cache-dependency-path: server/requirements.txt
+
+    - name: Install server dependencies
+      run: pip install -r server/requirements.txt pytest pytest-asyncio
+
+    - name: Derive S3 bucket name from account
+      id: s3
+      run: |
+        ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+        echo "document-bucket=eagle-documents-${ACCOUNT_ID}-dev" >> $GITHUB_OUTPUT
+        echo "eval-bucket=eagle-eval-artifacts-${ACCOUNT_ID}-dev" >> $GITHUB_OUTPUT
+
+    - name: Run EAGLE SDK eval suite
+      env:
+        USE_BEDROCK: 'true'
+        CLAUDE_CODE_USE_BEDROCK: '1'
+        AWS_REGION: ${{ env.AWS_REGION }}
+        EAGLE_SESSIONS_TABLE: eagle
+        S3_BUCKET: ${{ steps.s3.outputs.document-bucket }}
+        EVAL_BUCKET: ${{ steps.s3.outputs.eval-bucket }}
+      run: |
+        cd server
+        python -m pytest tests/test_eagle_sdk_eval.py -v --tb=short 2>&1 | tee eval-results.txt
+        echo "Eval exit code: ${PIPESTATUS[0]}"
+
+    - name: Upload eval results artifact
+      if: always()
+      uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
+      with:
+        name: eval-results-${{ github.sha }}
+        path: |
+          server/eval-results.txt
+          data/eval/results/latest.json
+        retention-days: 30
+        if-no-files-found: warn

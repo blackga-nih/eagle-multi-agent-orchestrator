@@ -88,7 +88,7 @@ _parser.add_argument(
     "--auth-password", default=None,
     help="Login password for video recording (or set EAGLE_TEST_PASSWORD env var).",
 )
-_args = _parser.parse_args()
+_args, _ = _parser.parse_known_args([])
 
 # Global model override — every test reads from here
 MODEL: str = _args.model
@@ -2437,7 +2437,7 @@ async def test_16_s3_document_ops():
     session_id = "test-session-001"
     test_key = f"test_doc_{uuid.uuid4().hex[:8]}.md"
     test_content = f"# Test Document\nGenerated at {datetime.now(timezone.utc).isoformat()}\nThis is test content for S3 verification."
-    bucket = os.environ.get("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = os.environ.get("S3_BUCKET", "")
 
     steps_passed = []
 
@@ -2497,7 +2497,7 @@ async def test_16_s3_document_ops():
 
     # Summary
     passed = all(ok for _, ok in steps_passed)
-    print(f"\n  Steps: {', '.join(f'{name}={'PASS' if ok else 'FAIL'}' for name, ok in steps_passed)}")
+    print(f"\n  Steps: {', '.join(name + '=' + ('PASS' if ok else 'FAIL') for name, ok in steps_passed)}")
     print(f"  {'PASS' if passed else 'FAIL'} - S3 Document Operations (direct tool + boto3)")
     return passed
 
@@ -2597,7 +2597,7 @@ async def test_17_dynamodb_intake_ops():
 
     # Summary
     passed = all(ok for _, ok in steps_passed)
-    print(f"\n  Steps: {', '.join(f'{name}={'PASS' if ok else 'FAIL'}' for name, ok in steps_passed)}")
+    print(f"\n  Steps: {', '.join(name + '=' + ('PASS' if ok else 'FAIL') for name, ok in steps_passed)}")
     print(f"  {'PASS' if passed else 'FAIL'} - DynamoDB Intake Operations (direct tool + boto3)")
     return passed
 
@@ -2672,7 +2672,7 @@ async def test_18_cloudwatch_logs_ops():
 
     # Summary
     passed = all(ok for _, ok in steps_passed)
-    print(f"\n  Steps: {', '.join(f'{name}={'PASS' if ok else 'FAIL'}' for name, ok in steps_passed)}")
+    print(f"\n  Steps: {', '.join(name + '=' + ('PASS' if ok else 'FAIL') for name, ok in steps_passed)}")
     print(f"  {'PASS' if passed else 'FAIL'} - CloudWatch Logs Operations (direct tool + boto3)")
     return passed
 
@@ -2690,7 +2690,7 @@ async def test_19_document_generation():
     import boto3 as _boto3
 
     session_id = "test-session-001"
-    bucket = os.environ.get("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = os.environ.get("S3_BUCKET", "")
 
     doc_tests = [
         {
@@ -2787,7 +2787,7 @@ async def test_19_document_generation():
 
     # Summary
     passed = all(ok for _, ok in steps_passed)
-    print(f"\n  Steps: {', '.join(f'{name}={'PASS' if ok else 'FAIL'}' for name, ok in steps_passed)}")
+    print(f"\n  Steps: {', '.join(name + '=' + ('PASS' if ok else 'FAIL') for name, ok in steps_passed)}")
     print(f"  {'PASS' if passed else 'FAIL'} - Document Generation (3 doc types + boto3)")
     return passed
 
@@ -2889,7 +2889,7 @@ async def test_20_cloudwatch_e2e_verification():
 
     # Summary
     passed = all(ok for _, ok in steps_passed)
-    print(f"\n  Steps: {', '.join(f'{name}={'PASS' if ok else 'FAIL'}' for name, ok in steps_passed)}")
+    print(f"\n  Steps: {', '.join(name + '=' + ('PASS' if ok else 'FAIL') for name, ok in steps_passed)}")
     print(f"  {'PASS' if passed else 'FAIL'} - CloudWatch End-to-End Verification")
     return passed
 

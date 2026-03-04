@@ -1,0 +1,115 @@
+# PR Diagram Linker — auto-links relevant Excalidraw diagrams to PRs.
+# Pure bash: fast (~5s), $0 cost, deterministic.
+# Reads .github/diagram-registry.yml, matches changed files against
+# trigger globs, and appends a collapsible table to the PR body.
+
+name: PR Diagram Linker
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  link-diagrams:
+    name: Link Diagrams
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Match diagrams to changed files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Get changed files
+          CHANGED=$(gh pr diff "$PR_NUMBER" --name-only)
+          FILE_COUNT=$(echo "$CHANGED" | wc -l)
+
+          # Parse registry and match
+          MATCHES=""
+          MATCH_COUNT=0
+
+          # Read registry line by line (simple YAML parser)
+          current_id=""
+          current_path=""
+          current_desc=""
+          in_triggers=false
+
+          while IFS= read -r line; do
+            # Skip comments and blank lines
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "${line// }" ]] && continue
+
+            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*id:[[:space:]]*(.+) ]]; then
+              current_id="${BASH_REMATCH[1]}"
+              current_path=""
+              current_desc=""
+              in_triggers=false
+            elif [[ "$line" =~ ^[[:space:]]*path:[[:space:]]*(.+) ]]; then
+              current_path="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*description:[[:space:]]*\"(.+)\" ]]; then
+              current_desc="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*triggers: ]]; then
+              in_triggers=true
+            elif $in_triggers && [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\"(.+)\" ]]; then
+              pattern="${BASH_REMATCH[1]}"
+
+              # Special case: ** only matches when 10+ files change
+              if [[ "$pattern" == "**" && "$FILE_COUNT" -lt 10 ]]; then
+                continue
+              fi
+
+              # Convert glob to grep regex
+              regex=$(echo "$pattern" | sed 's/\*\*/.*/' | sed 's/\*/[^\/]*/')
+
+              if echo "$CHANGED" | grep -qE "^${regex}$"; then
+                # Only add if not already matched
+                if [[ ! "$MATCHES" =~ "$current_id" ]]; then
+                  MATCHES="${MATCHES}| ${current_desc} | [\`${current_id}\`](${current_path}) |\n"
+                  MATCH_COUNT=$((MATCH_COUNT + 1))
+                fi
+              fi
+            elif [[ ! "$line" =~ ^[[:space:]]+-[[:space:]] ]] && $in_triggers; then
+              in_triggers=false
+            fi
+          done < .github/diagram-registry.yml
+
+          # Get current PR body
+          BODY=$(gh pr view "$PR_NUMBER" --json body -q '.body')
+
+          # Remove any existing diagram section
+          CLEAN_BODY=$(echo "$BODY" | sed '/<!-- DIAGRAM-LINKER-START -->/,/<!-- DIAGRAM-LINKER-END -->/d')
+
+          if [[ "$MATCH_COUNT" -gt 0 ]]; then
+            # Build diagram section
+            SECTION="<!-- DIAGRAM-LINKER-START -->
+          <details>
+          <summary>Architecture Diagrams (${MATCH_COUNT} affected)</summary>
+
+          | Diagram | File |
+          |---------|------|
+          $(echo -e "$MATCHES")
+          > Open \`.excalidraw\` files in [Excalidraw](https://excalidraw.com) or Obsidian.
+
+          </details>
+          <!-- DIAGRAM-LINKER-END -->"
+
+            # Append to PR body
+            NEW_BODY="${CLEAN_BODY}
+
+          ${SECTION}"
+          else
+            NEW_BODY="$CLEAN_BODY"
+          fi
+
+          # Update PR body
+          gh pr edit "$PR_NUMBER" --body "$NEW_BODY"
+
+          echo "Linked $MATCH_COUNT diagrams to PR #$PR_NUMBER"

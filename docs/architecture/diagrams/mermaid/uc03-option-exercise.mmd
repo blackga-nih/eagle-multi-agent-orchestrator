@@ -1,0 +1,56 @@
+sequenceDiagram
+    actor User as COR / CO
+    participant UI as Eagle UI
+    participant Agent as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant Comp as Compliance Skill
+    participant DocGen as Document Generator Skill
+    participant S3 as S3 Document Store
+
+    Note over User,S3: UC-03: Option Exercise Package Preparation
+
+    User->>UI: "I need to exercise Option Year 3 on contract HHSN261..."
+    UI->>Agent: New session
+    Agent->>Intake: Invoke OA Intake skill (option exercise mode)
+
+    rect rgb(240, 248, 255)
+        Note over Intake: Previous Package Ingestion
+        Intake->>UI: "Upload your previous option package"
+        User->>UI: Uploads previous AP, SOW, IGCE (Year 2)
+        UI->>Intake: Parse uploaded documents
+        Intake->>Intake: Extract: scope, costs, personnel,<br/>period of performance, vendor info
+        Intake-->>Agent: Previous package context loaded
+    end
+
+    rect rgb(245, 255, 245)
+        Note over Agent: Tuning Questions
+        Agent->>UI: "I've reviewed your Year 2 package. A few questions:"
+        Note right of Agent: 1. Any scope changes?<br/>2. Personnel changes?<br/>3. Cost escalation rate?<br/>4. Performance issues to address?
+        User->>UI: "Same scope, new COR, 3% escalation, no issues"
+        UI->>Agent: Answers
+    end
+
+    Agent->>Comp: Invoke Compliance skill (option validation)
+    rect rgb(255, 245, 255)
+        Note over Comp: Option Validation
+        Comp->>Comp: Verify option clause exists<br/>in base contract
+        Comp->>Comp: Check: within option ceiling?<br/>Option period dates correct?
+        Comp-->>Agent: Valid: Option 3 exercisable<br/>Ceiling: OK, Dates: 10/1/28-9/30/29
+    end
+
+    Agent->>DocGen: Invoke Document Generator (option package)
+
+    par Generate Updated Package
+        DocGen->>DocGen: Updated AP (Option Year 3)
+        DocGen->>DocGen: Updated SOW (same scope, new COR)
+        DocGen->>DocGen: Updated IGCE (3% escalation applied)
+        DocGen->>DocGen: Option Exercise Letter
+        DocGen->>DocGen: COR Nomination (new COR)
+    end
+
+    DocGen->>S3: Store option package
+    S3-->>DocGen: Download URLs
+    DocGen-->>Agent: Package ready
+
+    Agent->>UI: Option exercise package complete
+    UI->>User: Option Year 3 package:<br/>✓ Updated AP<br/>✓ Updated SOW<br/>✓ Updated IGCE ($X + 3%)<br/>✓ Option Exercise Letter<br/>✓ New COR Nomination

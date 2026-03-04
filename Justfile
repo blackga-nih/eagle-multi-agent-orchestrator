@@ -265,7 +265,7 @@ cdk-deploy-storage:
 
 # Refresh AWS SSO session — run this when credentials expire
 # Usage: just aws-login                          (uses default profile)
-#        just aws-login 695681773636_NCIAWSPowerUserAccess
+#        just aws-login YOUR_ACCOUNT_PowerUserAccess
 aws-login PROFILE="eagle":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -294,6 +294,75 @@ devbox-start INSTANCE_ID:
     aws ec2 wait instance-running --instance-ids {{INSTANCE_ID}}
     echo "Dev box running. Get IP with:"
     echo "  aws ec2 describe-instances --instance-ids {{INSTANCE_ID}} --query 'Reservations[].Instances[].PublicIpAddress' --output text"
+
+# ── Devbox Deploy ──────────────────────────────────────────
+
+# Deploy code to EC2 devbox: git sync → docker compose up → health check
+# Usage: just devbox-deploy [branch] [remote]
+devbox-deploy BRANCH="main" REPO="origin":
+    python scripts/devbox_deploy.py deploy --branch {{BRANCH}} --repo {{REPO}}
+
+# Open SSM port forwards: localhost:3000 (frontend) + localhost:8000 (backend)
+# Keep this running in a terminal while testing. Ctrl+C to close.
+devbox-tunnel:
+    python scripts/devbox_deploy.py tunnel
+
+# Check container status and endpoint health on devbox
+devbox-health:
+    python scripts/devbox_deploy.py health
+
+# Tail container logs on devbox (default: backend)
+devbox-logs SERVICE="backend":
+    python scripts/devbox_deploy.py logs {{SERVICE}}
+
+# Stop containers on devbox (instance keeps running)
+devbox-teardown:
+    python scripts/devbox_deploy.py teardown
+
+# Full devbox pipeline: deploy → open tunnel → run smoke tests
+# Runs deploy + health check, then opens tunnel and smoke tests in parallel.
+# Usage: just devbox-ship [branch]
+devbox-ship BRANCH="main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Step 1: Deploy to devbox ==="
+    python scripts/devbox_deploy.py deploy --branch {{BRANCH}}
+    echo ""
+    echo "=== Step 2: Open tunnel (background) ==="
+    python scripts/devbox_deploy.py tunnel &
+    TUNNEL_PID=$!
+    echo "Tunnel PID: $TUNNEL_PID"
+    echo "Waiting 5s for tunnels to establish..."
+    sleep 5
+    echo ""
+    echo "=== Step 3: Smoke tests ==="
+    # Quick health check through tunnel
+    curl -sf http://localhost:8000/api/health && echo " Backend OK" || echo " Backend not reachable"
+    curl -so /dev/null -w "Frontend: HTTP %{http_code}\n" http://localhost:3000/ || echo " Frontend not reachable"
+    echo ""
+    echo "=== Step 4: Playwright smoke tests ==="
+    cd client && npx playwright test --grep @smoke 2>/dev/null || echo "No @smoke tests found or Playwright not configured — skipping"
+    cd ..
+    echo ""
+    echo "=== Done ==="
+    echo "Tunnel still running (PID: $TUNNEL_PID). Press Ctrl+C to close."
+    echo "Run more tests:  just devbox-smoke"
+    echo "View logs:       just devbox-logs backend"
+    echo "Teardown:        just devbox-teardown"
+    wait $TUNNEL_PID 2>/dev/null || true
+
+# Run smoke tests against localhost (requires tunnel running)
+devbox-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Smoke Tests (via tunnel) ==="
+    echo ""
+    echo "--- Health endpoints ---"
+    curl -sf http://localhost:8000/api/health | python3 -m json.tool 2>/dev/null || echo "Backend: not reachable (is tunnel running?)"
+    curl -so /dev/null -w "Frontend: HTTP %{http_code}\n" http://localhost:3000/ || echo "Frontend: not reachable (is tunnel running?)"
+    echo ""
+    echo "--- Playwright E2E ---"
+    cd client && npx playwright test 2>/dev/null || echo "Playwright tests not configured or failed"
 
 # ── Operations ──────────────────────────────────────────────
 
@@ -358,7 +427,7 @@ check-sso:
     echo "✅ Bedrock access verified"
     echo ""
     echo "3. Testing S3 access..."
-    aws s3 ls s3://eagle-documents-695681773636-dev --region us-east-1 &>/dev/null || echo "⚠️  S3 bucket 'eagle-documents-695681773636-dev' not accessible (may not exist)"
+    aws s3 ls s3://eagle-documents-ACCOUNT-dev --region us-east-1 &>/dev/null || echo "⚠️  S3 bucket 'eagle-documents-ACCOUNT-dev' not accessible (may not exist)"
     echo ""
     echo "=== All checks passed ==="
 

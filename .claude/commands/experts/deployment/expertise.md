@@ -4,7 +4,7 @@ parent: "[[deployment/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, deployment, aws, cdk]
-last_updated: 2026-02-24T23:15:00
+last_updated: 2026-02-25T12:00:00
 ---
 
 # Deployment Expertise (Complete Mental Model)
@@ -17,52 +17,45 @@ last_updated: 2026-02-24T23:15:00
 
 ### Provisioning Model
 
-Infrastructure is managed by **5 CDK stacks** in `infrastructure/cdk-eagle/` (TypeScript). The DynamoDB `eagle` table is created by EagleCoreStack; the document bucket `eagle-documents-695681773636-dev` is created by EagleStorageStack. No resources are manually provisioned in the NCI account — all CDK-managed.
+Infrastructure is managed by **5 CDK stacks** in `infrastructure/cdk-eagle/` (TypeScript). Some resources (S3 `nci-documents`, DynamoDB `eagle`, Bedrock access) were manually provisioned and are imported by CDK.
+
+### Account Architecture (Two-Account Model)
+
+| Account | ID | Role | Deploy from local? |
+|---------|----|------|--------------------|
+| **Personal (dev)** | `274487662938` | Greg's personal AWS account — EAGLE infrastructure lives here (ECS, VPC, Cognito, ECR) | **Yes** — local CDK/AWS CLI credentials point here |
+| **Client (NCI replica)** | `695681773636` | Client environment being replicated — `DEV_CONFIG` in `environments.ts`, ECR image URIs reference this ID | **No** — deploy only via GitHub Actions OIDC from CI/CD pipeline |
+
+> **Rule**: `cdk deploy`, `cdk destroy`, or any destructive AWS CLI command must NEVER target `695681773636` from a local machine. Local credentials are scoped to `274487662938`. All operations against the client account go through the GitHub Actions pipeline only.
 
 ```
-Provisioning: CDK-managed (5 stacks) — all resources owned by CDK
+Provisioning: CDK-managed (5 stacks) + manually-created imported resources
 Region: us-east-1
-Account: 695681773636 (NCI)  ← PowerUserAccess, SCP-restricted
+Account (personal/dev): 274487662938  ← local CDK + boto3 target
+Account (client replica): 695681773636  ← environments.ts DEV_CONFIG, CI/CD only
 CDK: infrastructure/cdk-eagle/ (TypeScript)
   - EagleCiCdStack:    GitHub Actions OIDC + deploy role
-  - EagleCoreStack:    VPC (imported), Cognito, IAM app role, DynamoDB eagle
-  - EagleStorageStack: S3 eagle-documents-695681773636-dev, metadata DDB, Lambda extractor
-  - EagleComputeStack: ECR repos, ECS Fargate, ALB (desiredCount=0 until images pushed)
+  - EagleCoreStack:    VPC, Cognito, IAM app role, imports S3/DDB
+  - EagleStorageStack: Document S3 bucket, metadata DynamoDB, Lambda extractor  ← NEW
+  - EagleComputeStack: ECR repos, ECS Fargate, ALB, auto-scaling
   - EagleEvalStack:    S3 eval artifacts, CloudWatch dashboard, SNS alerts
 CI/CD: GitHub Actions (OIDC → ECR push → ECS deploy)
 Docker: Dockerfile.backend + Dockerfile.frontend in deployment/docker/
-EC2 runner: i-0390c06d166d18926 (eagle-runner-dev, 10.209.140.197) — eval + Docker builds
 ```
 
 ### Credential Configuration
 
-**NCI Account (695681773636) — AWS SSO**:
 ```
-~/.aws/config
-  |-- [profile eagle]
-  |-- sso_session = my-sso-session
-  |-- sso_account_id = 695681773636
-  |-- sso_role_name = NCIAWSPowerUserAccess
+~/.aws/credentials
+  |-- [default] or named profile
+  |-- aws_access_key_id = AKIA...
+  |-- aws_secret_access_key = ...
   |-- region = us-east-1
-  |-- [sso-session my-sso-session]
-  |-- sso_start_url = https://d-90679324dc.awsapps.com/start/#
-  |-- sso_region = us-east-1
-```
 
-SSO login flow:
-```bash
-aws sso login --profile eagle
-export AWS_PROFILE=eagle   # or prefix every command with AWS_PROFILE=eagle
-aws sts get-caller-identity  # verify
-```
-
-Static credentials in `[default]` profile expire — SSO profile `eagle` is the correct path for NCI.
-
-**EC2 Runner (eagle-runner-dev)**:
-```
-Role: power-user-eagle-ec2Role-dev (instance profile)
-Access: IAM role auto-rotates credentials via IMDS (IMDSv2 required)
-No credential config needed — boto3/aws-cli pick up role automatically
+~/.aws/config
+  |-- [default]
+  |-- region = us-east-1
+  |-- output = json
 ```
 
 **Access pattern**: All code (eval suite, agentic_service, boto3 checks) uses `boto3.client('service', region_name='us-east-1')` — hardcoded region, default credential chain.
@@ -107,7 +100,7 @@ No credential config needed — boto3/aws-cli pick up role automatically
 
 ## Part 2: AWS Resources Inventory
 
-### S3 Bucket: `eagle-documents-695681773636-dev` (CDK-managed, EagleStorageStack)
+### S3 Bucket: `nci-documents`
 
 ```
 Bucket: nci-documents
@@ -128,6 +121,7 @@ Example:
 **Used by**:
 - `server/app/agentic_service.py` — `_exec_s3_document_ops()` for read/write/list/delete
 - `server/app/agentic_service.py` — `_exec_create_document()` for saving generated docs
+- `server/app/eagle_tools_mcp.py` — MCP server adapter exposes `s3_document_ops` and `create_document` tools to SDK subagents via `execute_tool()` delegation
 - `server/tests/test_eagle_sdk_eval.py` — Tests 16 and 19 (with cleanup)
 
 ### DynamoDB Table: `eagle`
@@ -369,7 +363,7 @@ Resources:
 Outputs: eagle-backend-repo-uri-dev, eagle-frontend-repo-uri-dev, eagle-cluster-name-dev
 ```
 
-#### EagleStorageStack (independent — no cross-stack deps)
+#### EagleStorageStack (depends on Core for appRole)
 
 ```
 File: lib/storage-stack.ts
@@ -831,100 +825,17 @@ const distribution = new cloudfront.Distribution(this, 'Dist', {
 });
 ```
 
-### NCI SCP Restrictions (Account 695681773636)
-
-**Issue**: Numerous AWS actions are SCP-blocked in the NCI account.
-
-**Blocked actions and workarounds**:
-- `iam:CreateOpenIDConnectProvider` → import existing OIDC provider: `iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn()`
-- `ec2:CreateVpc` → import existing VPC: `ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-...' })`
-- `iam:CreateRole` for `*` → only allowed on `power-user*` resources WITH `PermissionBoundary_PowerUser`
-- CDK bootstrap → must use patched synthesizer with `power-user-cdk-*` role names
-
-**CDK Synthesizer for NCI**:
-```typescript
-const synthesizer = new cdk.DefaultStackSynthesizer({
-  deployRoleArn: `arn:aws:iam::${ACCOUNT}:role/power-user-cdk-deploy-${ACCOUNT}`,
-  fileAssetPublishingRoleArn: `arn:aws:iam::${ACCOUNT}:role/power-user-cdk-file-pub-${ACCOUNT}`,
-  imageAssetPublishingRoleArn: `arn:aws:iam::${ACCOUNT}:role/power-user-cdk-img-pub-${ACCOUNT}`,
-  cloudFormationExecutionRole: `arn:aws:iam::${ACCOUNT}:role/power-user-cdk-cfn-exec-${ACCOUNT}`,
-  lookupRoleArn: `arn:aws:iam::${ACCOUNT}:role/power-user-cdk-lookup-${ACCOUNT}`,
-  bootstrapStackVersionSsmParameter: '/cdk-bootstrap/hnb659fds/version',
-  generateBootstrapVersionRule: false,
-});
-```
-
-### NCI VPC Multi-Subnet ALB Error
-
-**Issue**: `A load balancer cannot be attached to multiple subnets in the same Availability Zone` — NCI VPC has 2 subnets per AZ (PrivateSubnet + EdgeSubnet) and CDK picks all 4.
-
-**Fix**: Tag subnets with CDK subnet-type tags so CDK knows which to use:
-```bash
-aws ec2 create-tags --resources subnet-0acfc5795a31620c4 subnet-06c0f502dc9c178ae \
-  --tags Key=aws-cdk:subnet-type,Value=Private
-aws ec2 create-tags --resources subnet-0b13e7a760e1606f3 subnet-0a1bbbd502dc187e0 \
-  --tags Key=aws-cdk:subnet-type,Value=Isolated
-# Then reset CDK VPC cache:
-npx cdk context --reset "vpc-provider:..." --profile eagle
-```
-
-### CDK PolicyStatement Duplicate SID Error
-
-**Issue**: `Statement IDs (SID) must be unique` in CloudFormation when CDK consolidates multiple `addToPolicy()` calls.
-
-**Fix**: Never add explicit `sid:` fields to `addToPolicy()` PolicyStatements. CDK auto-generates unique SIDs when merging:
-```typescript
-// BAD — causes duplicate SID errors if CDK consolidates
-this.appRole.addToPolicy(new iam.PolicyStatement({ sid: 'S3Access', ... }));
-
-// GOOD — let CDK manage SIDs
-this.appRole.addToPolicy(new iam.PolicyStatement({ actions: [...], resources: [...] }));
-```
-
-### ECS desiredCount=0 Infrastructure-Only Deploy
-
-**Issue**: `ecs_patterns.ApplicationLoadBalancedFargateService` enforces `desiredCount > 0` and throws `ValidationError` if you try to set 0.
-
-**Fix**: Use low-level constructs:
-```typescript
-// Use FargateService (not ApplicationLoadBalancedFargateService)
-const service = new ecs.FargateService(this, 'BackendService', {
-  cluster, taskDefinition, desiredCount: 0, ...
-});
-// Wire ALB manually
-service.attachToApplicationTargetGroup(targetGroup);
-```
-This deploys cleanly with empty ECR repos — 0/0 = stable. CI/CD sets count to 1 after image push.
-
-### Orphaned RETAIN Resources Block Redeployment
-
-**Issue**: After a stack rollback, resources with `RemovalPolicy.RETAIN` survive. Next deploy finds them "already exists" and fails.
-
-**Fix**: Identify and manually delete the orphaned resources before redeploying:
-```bash
-# DynamoDB table
-aws dynamodb delete-table --table-name eagle
-# CloudWatch log group
-MSYS_NO_PATHCONV=1 aws logs delete-log-group --log-group-name /eagle/app
-# ECR repos (when empty)
-aws ecr delete-repository --repository-name eagle-backend-dev --force
-```
-
-### S3 Global Namespace Collision
-
-**Issue**: `eagle-documents-dev` bucket is 403/owned by another account in the global S3 namespace.
-
-**Fix**: Always include account ID in S3 bucket names: `eagle-documents-{account_id}-{env}` pattern. Update `config/environments.ts` and all dependent code.
-
 ### Existing Resource Conflict
 
-**Issue**: CDK tries to create a resource that already exists.
+**Issue**: CDK tries to create a resource that already exists (e.g., S3 bucket `nci-documents`, DynamoDB table `eagle`).
 
 **Fix**: Import existing resources instead of creating new ones:
 ```typescript
 // Reference only (CDK does not manage lifecycle)
-const table = dynamodb.Table.fromTableName(this, 'Eagle', 'eagle');
-const vpc = ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-...' });
+const bucket = s3.Bucket.fromBucketName(this, 'Bucket', 'nci-documents');
+
+// Full import (CDK manages lifecycle going forward)
+// Run: cdk import EagleStorageStack/Bucket
 ```
 
 ### CloudWatch Log Group Already Exists
@@ -1054,7 +965,7 @@ npm install
 # Verify templates compile
 npx cdk synth
 
-# Deploy all 5 stacks (CiCd, Storage, Eval are independent; Core before Compute)
+# Deploy all 5 stacks (CiCd+Eval are independent; Core before Storage+Compute; Storage before Compute)
 npx cdk deploy EagleCiCdStack --require-approval never
 npx cdk deploy EagleCoreStack --require-approval never
 npx cdk deploy EagleStorageStack --require-approval never
@@ -1150,7 +1061,7 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 | Step | Time |
 |------|------|
 | CDK bootstrap | ~2 min |
-| CDK deploy (all 4 stacks) | ~5-10 min |
+| CDK deploy (all 5 stacks) | ~5-10 min |
 | Docker build (backend) | ~30 sec (cached) |
 | Docker build (frontend) | ~60 sec (cached), ~5 min (cold) |
 | Docker push (both) | ~1-2 min |
@@ -1162,14 +1073,12 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 ## Learnings
 
 ### patterns_that_work
-- **NCI CDK self-service bootstrap**: patch CDK bootstrap template to rename roles `power-user-cdk-{deploy,file-pub,img-pub,cfn-exec,lookup}-{account}` + attach `PermissionBoundary_PowerUser`. Then use `DefaultStackSynthesizer` in `bin/eagle.ts` with explicit role ARNs. Allows NCIAWSPowerUserAccess to bootstrap without admin help (discovered: 2026-02-24, component: CDK bootstrap/NCI)
-- **desiredCount=0 for infra-only ECS deploy**: `ecs.FargateService` + `elbv2.ApplicationLoadBalancer` (low-level) allows `desiredCount: 0`. Deploys cleanly with empty ECR repos. CI/CD sets count after image push. Avoids CFN timeout waiting for stability (discovered: 2026-02-24, component: EagleComputeStack)
-- **VPC subnet tagging for CDK**: tag NCI subnets `aws-cdk:subnet-type=Private` (egress subnets) and `aws-cdk:subnet-type=Isolated` (edge/transit subnets) so CDK `Vpc.fromLookup` correctly classifies them, preventing the "multiple subnets in same AZ" ALB error (discovered: 2026-02-24, component: NCI VPC / EagleComputeStack)
-- **SSM send-command for EC2 automation**: `aws ssm send-command --document-name AWS-RunShellScript` drives EC2 without SSH/public IP. Upload complex scripts to S3, then download+run on EC2 — avoids SSM command array quoting limits (discovered: 2026-02-24, component: EC2 runner)
-- **git bundle → S3 → EC2 for private-subnet deployment**: `git bundle create /tmp/bundle.bundle dev/greg` + `aws s3 cp` transfers the repo to a private-subnet EC2 without GitHub credentials or public IP. EC2 restores with `git clone /tmp/bundle.bundle /dest --branch dev/greg` (discovered: 2026-02-24, component: EC2 runner deployment)
-- **Non-root user for claude CLI on EC2**: create `eagle` user (`useradd -m eagle`), run `su -s /bin/bash eagle -c ./run_tests.sh` — claude CLI blocks `--dangerously-skip-permissions` for root but works for non-root. Python 3.12 system-wide packages are still accessible (discovered: 2026-02-24, component: EC2 eval runner)
-- **Eval output → S3 for Windows-safe display**: redirect eval output to a file, `aws s3 cp` to eval bucket, then `aws s3 cp ... -` + Python UTF-8 reader with arrow char replacement. Avoids Windows cp1252 `→` encode error when reading SSM command output (discovered: 2026-02-24, component: EC2 eval runner)
-- **Static ARN strings for NCI cross-stack IAM**: using `arn:aws:s3:::${config.documentBucketName}` (string interpolation, not CDK token) in the role's own stack eliminates cross-stack exports and cyclic deps entirely. Works even for resources created in other stacks (discovered: 2026-02-24, component: EagleCoreStack IAM)
+- **CloudFormation for EC2 dev boxes (non-CDK resources)**: Use `aws/cloud_formation/` CF templates for stand-alone resources (EC2, S3) that don't need CDK cross-stack integration. Keep CDK for ECS/VPC/Cognito; use CF for dev-ops tooling. Deploy with `aws cloudformation deploy --capabilities CAPABILITY_NAMED_IAM` (discovered: 2026-02-23, component: aws/cloud_formation/ec2.yml)
+- **`PermissionBoundary_PowerUser` is NIH/CBIIT-only**: This IAM policy only exists in CBIIT org accounts. Remove `PermissionsBoundary` line from CF IAM roles before deploying to account 274487662938 (discovered: 2026-02-23, component: aws/cloud_formation/ec2.yml)
+- **CF params files for account-specific values**: Store VPC ID + subnet IDs in `aws/cloud_formation/params/dev/ec2.json` per-account. Account 274487662938: VPC `vpc-0ede565d9119f98aa`, public subnet `subnet-0dafab85c993a5dd8` (discovered: 2026-02-23, component: aws/cloud_formation/params)
+- **Auto-lookup CF stack outputs in scripts**: `scripts/devbox.py` resolves instance ID from CF stack `eagle-ec2-dev` outputs automatically — no instance ID arg needed in Justfile targets. Pattern: `cf.describe_stacks(StackName=STACK_NAME)['Stacks'][0]['Outputs']` (discovered: 2026-02-23, component: scripts/devbox.py)
+- **SSM Session Manager over SSH for Windows dev boxes**: No inbound port 22 needed, no key file management. `aws ssm start-session --target <instance-id>` works from Windows Git Bash. Requires Session Manager plugin installed once. Better than SSH for org-managed Windows machines (discovered: 2026-02-23, component: EC2 dev box)
+- **EC2 dev box bootstrap with `just` + Node 20 + Docker Compose**: AL2023 UserData: `curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin` for just; `curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && dnf install -y nodejs` for Node 20; Docker Compose v2 plugin via curl to `/usr/local/lib/docker/cli-plugins/` (discovered: 2026-02-23, component: aws/cloud_formation/ec2.yml UserData)
 - **Two-checklist README structure** for new developers: Checklist A (local dev: Docker + .env + just dev-up + smoke-ui) vs Checklist B (cloud: AWS creds + CDK + containers + verify). Separates concerns and prevents cloud-first confusion for devs who just want to run locally (discovered: 2026-02-20, component: README/onboarding)
 - **`just dev-up` + `wait_for_backend.py` pattern**: `docker compose up --detach` then poll `localhost:8000/health` every 2s for up to 60s — reliably gates downstream commands without blocking the terminal (discovered: 2026-02-20, component: local smoke workflow)
 - **`--headed` flag for Playwright smoke tests**: adding `--headed` to Playwright commands gives a visible browser window with zero extra configuration — perfect for "show the new dev it works" moment without extra tooling (discovered: 2026-02-20, component: smoke-ui / test-e2e-ui)
@@ -1197,24 +1106,12 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - Justfile with Python boto3 for AWS operations — `aws` CLI returns exit code 1 on MSYS/Git Bash even when succeeding; boto3 is reliable cross-platform (discovered: 2026-02-18, component: Justfile)
 - `build-frontend` recipe auto-fetches Cognito config from CDK stack outputs via boto3 — no hardcoded pool IDs (discovered: 2026-02-18, component: Justfile)
 - Internal just recipes prefixed with `_` stay hidden from `just --list` — clean separation of public and private commands (discovered: 2026-02-18, component: Justfile)
-- **EC2 dev-smoke workflow (git bundle → S3 → EC2 via SSM)**: `git bundle create /tmp/bundle.bundle dev/greg` transfers the repo to a private-subnet EC2 without GitHub creds. Scripts uploaded to S3, downloaded+run on EC2 via SSM send-command. Capture all output to S3 (SSM truncates large stdout + has encoding issues on Windows) (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- **docker-compose-plugin on AL2023 via GitHub release binary**: `docker-compose-plugin` is not in AL2023 default dnf repos. Install binary from GitHub releases to `/usr/local/lib/docker/cli-plugins/docker-compose` (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- **Playwright on AL2023 — dnf deps then install without `--with-deps`**: `npx playwright install --with-deps` calls apt-get (not available on AL2023). Instead: install chromium system deps via `dnf install chromium nss atk ...` manually, then `npx playwright install chromium` (without `--with-deps`) as the non-root `eagle` user so browsers land in `/home/eagle/.cache/ms-playwright` (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- **`su -s /bin/bash eagle -c script.sh` directly in SSM**: `sg docker` fails in non-interactive SSM sessions. `usermod -aG docker eagle` + `su -s /bin/bash eagle -c script.sh` picks up docker group membership correctly (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- **EC2 AWS credential injection via IMDS for docker-compose**: pass EC2 IAM role credentials to docker-compose via env vars. Fetch `AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY/SESSION_TOKEN` from IMDS token endpoint, export, then pass into `docker-compose.dev.yml` environment (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- **3-script pattern for complex EC2 ops (setup.sh + run.sh + orchestrate.sh)**: upload all three to S3 eval bucket, have EC2 download+run them. Avoids SSM command array quoting limits and makes each step independently debuggable (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- **just 1.46.0 installs cleanly from just.systems/install.sh on AL2023** — `curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin` (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- **Backend Docker layer caching on EC2**: requirements.txt rarely changes so second backend build is fast (layer cache hit). Frontend next build takes ~110s first time, subsequent builds use cache (discovered: 2026-02-24, component: ec2-local-dev-smoke)
+
+- **`eagle_tools_mcp.py` copies inside `server/app/`**: `server/app/eagle_tools_mcp.py` (254 lines) is the EAGLE business tools MCP server — exposes 7 tools (`s3_document_ops`, `dynamodb_intake`, `cloudwatch_logs`, `create_document`, `get_intake_status`, `intake_workflow`, `search_far`) via `create_sdk_mcp_server`. Dockerfile.backend copies the entire `server/app/` directory so this file is automatically included — no separate `COPY` line needed (discovered: 2026-02-25, component: server/app/eagle_tools_mcp.py)
+- **`eagle_tools_mcp.py` delegates to `agentic_service.execute_tool()`**: The MCP server is a thin adapter — each tool handler calls `_execute_tool(tool_name, tool_input, session_id)` from `agentic_service.py`. `sdk_agentic_service.py` passes the MCP server via `ClaudeAgentOptions(mcp_servers={'eagle-tools': mcp_server})`. This preserves the canonical tool dispatch table in `agentic_service.py` while exposing it to SDK subagents (discovered: 2026-02-25, component: server/app/eagle_tools_mcp.py)
+- **`server/legacy/` directory for archiving superseded files**: When refactoring large files (e.g. `main.py` from 1098 lines down), move deprecated modules to `server/legacy/` rather than deleting. This preserves audit trail without cluttering `server/app/`. Docker builds `COPY server/app/` so legacy files are excluded from container images by default (discovered: 2026-02-25, component: server/legacy/)
 
 ### patterns_to_avoid
-- Don't use explicit `sid:` in `addToPolicy()` PolicyStatements — CDK merges statements and the explicit SIDs clash, causing `Statement IDs must be unique` CloudFormation error. Let CDK auto-generate SIDs (discovered: 2026-02-24, component: EagleCoreStack)
-- Don't use `ApplicationLoadBalancedFargateService` when ECR repos are empty — it enforces `desiredCount > 0`, CFN then waits indefinitely for ECS stability (image pull fails → task exits → waits forever). Use low-level `FargateService` with `desiredCount: 0` (discovered: 2026-02-24, component: EagleComputeStack)
-- Don't use generic S3 bucket names (`eagle-documents-dev`) — S3 namespace is global, another account may own it (403 on all operations). Always scope with account ID: `eagle-documents-{account_id}-{env}` (discovered: 2026-02-24, component: EagleStorageStack)
-- Don't run `cdk context --reset` while a stack create/update is in progress — the VPC lookup is cached and the partial context causes the next synth to fail. Wait for the deploy to finish or cancel first (discovered: 2026-02-24, component: CDK context management)
-- Don't run eval tests as root on EC2 — claude CLI refuses `--dangerously-skip-permissions` for root, causing `ProcessError: Command failed with exit code 1`. Create a non-root user and `su -s /bin/bash user -c ./script.sh` (discovered: 2026-02-24, component: EC2 eval runner)
-- Don't use Python 3.9 or 3.11 for the eval tests — `test_eagle_sdk_eval.py` uses Python 3.12 f-string nested quote syntax (`f'{name}={'PASS'}'`) that raises `SyntaxError` on 3.11. Install python3.12 via `dnf install python3.12 python3.12-pip` (discovered: 2026-02-24, component: EC2 eval runner)
-- Don't pipe SSM `get-command-invocation` output directly to Windows console when tests print `→` (U+2192) — cp1252 codec fails. Save output to S3 first, download to file, read with `encoding='utf-8', errors='replace'` + replace arrow chars (discovered: 2026-02-24, component: EC2 eval runner / Windows)
-- Don't use complex shell quoting in SSM `send-command` array parameters — heredocs, nested quotes, and Python one-liners all fail. Upload a script to S3 and `aws s3 cp` + `chmod +x` + run it (discovered: 2026-02-24, component: SSM send-command)
 - Don't put `try/except` logic in Justfile inline Python one-liners (`python -c "..."`). Python requires multi-line syntax for try/except — the one-liner will SyntaxError. Extract to a `scripts/*.py` file instead (discovered: 2026-02-20, component: Justfile/wait_for_backend)
 - Don't inline complex multi-step Python in Justfile recipes — two attempts with `||` fallback is unreadable and fragile. One well-named script file is always better (discovered: 2026-02-20, component: Justfile)
 - Don't use the complex `claude-merge-analysis.yml` pattern (401 lines, two jobs, JSON structured outputs) — it's overkill and fragile. `anthropics/claude-code-action@v1` with a simple prompt is the correct approach (discovered: 2026-02-20, component: GitHub Actions)
@@ -1232,21 +1129,10 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - Don't keep eval observability in a standalone CDK project — it gets forgotten and never deployed. Merge into the main CDK app (discovered: 2026-02-17, component: infrastructure/eval → cdk-eagle)
 - Don't use `aws` CLI in Justfile shebang scripts on Windows/MSYS — exit code 1 even on success breaks `set -euo pipefail`. Use Python boto3 instead (discovered: 2026-02-18, component: Justfile)
 - Don't hardcode ALB URLs in task runners — they change on redeployment. Fetch dynamically from `describe_load_balancers()` (discovered: 2026-02-18, component: Justfile)
-- Don't use `sg docker -c "su -s /bin/bash eagle -c ..."` in SSM — `sg` requires an interactive shell, fails in non-interactive SSM sessions. Use `su -s /bin/bash eagle -c script.sh` directly after `usermod -aG docker eagle` (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- Don't run `npx playwright install --with-deps` on AL2023 — it tries to invoke `apt-get` which exits 127. Manually install chromium dnf deps, then run `npx playwright install chromium` without `--with-deps` (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- Don't install Playwright browsers as root then run tests as `eagle` — browsers land in `/root/.cache` which the `eagle` user cannot read. Always run `npx playwright install chromium` as the non-root user (discovered: 2026-02-24, component: ec2-local-dev-smoke)
-- Don't try to install `docker-compose-plugin` via dnf on AL2023 — package not in repos. Install binary from GitHub releases to `/usr/local/lib/docker/cli-plugins/docker-compose` (discovered: 2026-02-24, component: ec2-local-dev-smoke)
 
+- Don't add a separate `COPY server/app/eagle_tools_mcp.py` line in Dockerfile.backend — the existing `COPY server/app/ app/` already copies the full directory including any new modules. Redundant COPY lines cause build warnings (discovered: 2026-02-25, component: Dockerfile.backend)
+- Don't delete superseded backend modules outright — move them to `server/legacy/` so the audit trail is preserved. Docker excludes `server/legacy/` automatically since Dockerfile only copies `server/app/` (discovered: 2026-02-25, component: server/legacy/)
 ### common_issues
-- **`Statement IDs (SID) must be unique`** in CloudFormation: caused by explicit `sid:` on `addToPolicy()` PolicyStatements that CDK consolidates. Fix: remove all `sid:` fields from every `addToPolicy()` call (component: EagleCoreStack, 2026-02-24)
-- **ALB `multiple subnets in same Availability Zone`**: NCI VPC has 4 subnets (2 per AZ). CDK picks all 4 as private. Fix: tag subnets with `aws-cdk:subnet-type=Private/Isolated` + reset CDK VPC context cache (component: EagleComputeStack, 2026-02-24)
-- **ECS service waits indefinitely for stability with empty ECR repo**: `ApplicationLoadBalancedFargateService` + `desiredCount=1` + empty ECR = CFN hangs. Fix: use `FargateService` with `desiredCount: 0`. Alternatively: push a placeholder image first (component: EagleComputeStack, 2026-02-24)
-- **`403 Access Denied` on S3 HeadBucket for `eagle-documents-dev`**: bucket owned by another account. Fix: rename with account ID suffix `eagle-documents-695681773636-dev` (component: EagleStorageStack, 2026-02-24)
-- **Orphaned RETAIN resources block redeployment**: after rollback, `eagle` DDB table and `/eagle/app` log group survived. Fix: `aws dynamodb delete-table --table-name eagle` + `MSYS_NO_PATHCONV=1 aws logs delete-log-group --log-group-name /eagle/app` (component: EagleCoreStack, 2026-02-24)
-- **`--dangerously-skip-permissions cannot be used with root/sudo privileges`**: claude CLI blocks when process uid=0. Fix: create non-root user, `su -s /bin/bash eagle -c ./run_tests.sh` (component: EC2 eval runner, 2026-02-24)
-- **`SyntaxError: f-string: expecting '}'` on Python 3.11**: eval tests use 3.12 nested-quote f-strings. Fix: `dnf install python3.12 python3.12-pip` and always run with `python3.12` (component: EC2 eval runner, 2026-02-24)
-- **`UnicodeEncodeError: 'charmap' codec can't encode '\u2192'`**: test output contains `→` which cp1252 (Windows) can't encode. Fix: save output to S3 file, download locally, read with `encoding='utf-8'` and replace arrows before printing (component: Windows eval workflow, 2026-02-24)
-- **SSO profile `eagle` vs. static `[default]` credentials**: static keys in `[default]` expire; all calls fail with XML parse error. Fix: `aws sso login --profile eagle && export AWS_PROFILE=eagle` (component: NCI credentials, 2026-02-24)
 - **`try/except` SyntaxError in `python -c` one-liner**: Python multi-line constructs can't be written with semicolons. Fix: move to `scripts/*.py` file, call as `python scripts/myscript.py` from Justfile (component: Justfile, 2026-02-20)
 - **Bedrock `ValidationException: on-demand throughput isn't supported`**: direct model ID `anthropic.claude-3-5-haiku-20241022-v1:0` given. Fix: use inference profile `us.anthropic.claude-3-5-haiku-20241022-v1:0` AND update IAM to include `inference-profile/us.anthropic.*` resource (component: Lambda extractor, 2026-02-20)
 - CDK circular dependency `Stack A depends on Stack B, Stack B depends on Stack A`: caused by cross-stack `grantRead(role)` where the role is in the other stack. Fix: use `addToPolicy` with static ARN strings in the role's own stack (component: EagleCoreStack/EagleStorageStack, 2026-02-20)
@@ -1260,10 +1146,9 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - ECS frontend health check fails with `curl: not found`: Alpine-based node images don't include curl. Fix: `RUN apk add --no-cache curl` in Dockerfile runner stage (component: Dockerfile.frontend)
 - ECS service shows 2 deployments with old tasks draining after force-new-deployment: this is normal, wait 2-5 min for the old tasks to drain (component: ECS)
 - Docker context transfer is ~800MB+ without .dockerignore: ensure `.dockerignore` excludes `node_modules`, `.next`, `.git`, `data/` (component: Dockerfile.frontend)
-- **`docker compose` command not found on AL2023**: `docker-compose-plugin` not in dnf repos. Fix: install binary from GitHub releases to `/usr/local/lib/docker/cli-plugins/docker-compose` (component: ec2-local-dev-smoke, 2026-02-24)
-- **SSM stdout truncation / encoding failures**: SSM `get-command-invocation` truncates large output and mangles non-ASCII on Windows. Fix: redirect all EC2 output to a file, upload to S3, download locally (component: ec2-local-dev-smoke / Windows, 2026-02-24)
-- **Playwright `--with-deps` exit 127 on AL2023**: apt-get not found. Fix: install chromium system deps via `dnf install chromium nss atk at-spi2-atk cups-libs libdrm mesa-libgbm pango` then `npx playwright install chromium` without `--with-deps` (component: ec2-local-dev-smoke, 2026-02-24)
 
+- **`main.py` line count vs actual**: `server/app/main.py` grew significantly through hot-reload endpoint additions (Phase 4 Step 17 added 40+ endpoints). As of 2026-02-25 it is 1,855 lines. If a refactor moves routes out, verify count with `wc -l server/app/main.py` before assuming the file is "small" (component: server/app/main.py, 2026-02-25)
+- **`eagle_tools_mcp.py` import fails if `agentic_service.py` is missing**: The MCP server imports `execute_tool` from `agentic_service.py` — if that module is archived to `server/legacy/`, the import will fail at container startup. Keep `agentic_service.py` in `server/app/` or update the import in `eagle_tools_mcp.py` (component: server/app/eagle_tools_mcp.py, 2026-02-25)
 ### tips
 - **Developer onboarding README structure**: Checklist A (local, no cloud) → Checklist B (cloud deploy). Prereqs at top of each checklist, not in a single monolithic prerequisites block. Browser test at the end of each makes it feel real
 - **`just smoke-ui` / `just dev-smoke-ui`**: adding `--headed` is the zero-cost way to turn a CI Playwright test into a visible demo. Use for onboarding walkthroughs and new account verification
@@ -1278,7 +1163,7 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - Tag all CDK resources with Project=eagle and ManagedBy=cdk for cost tracking
 - Use OIDC for GitHub Actions instead of static IAM keys (more secure, no rotation needed)
 - Run `npx cdk synth` before `cdk deploy` to verify CloudFormation template generates correctly
-- All 4 CDK stacks deploy from `infrastructure/cdk-eagle/`: `npx cdk deploy --all`
+- All 5 CDK stacks deploy from `infrastructure/cdk-eagle/`: `npx cdk deploy --all`
 - Before first deploy, check if `/eagle/test-runs` log group exists: `aws logs describe-log-groups --log-group-name-prefix /eagle/test-runs`
 - `put_metric_data` supports up to 1000 metrics per call — our 38 metrics per eval run are well within limits
 - Use `aws ecs wait services-stable` after force-new-deployment to block until rollout completes
@@ -1293,6 +1178,7 @@ python -u server/tests/test_eagle_sdk_eval.py --tests 1
 - `just dev-up` / `just dev-down` / `just dev-smoke` / `just dev-smoke-ui` for local stack lifecycle
 - `just smoke` / `just smoke-ui` for Playwright smoke tests (headless / headed)
 - `just test-e2e` / `just test-e2e-ui` for Playwright E2E against Fargate (headless / headed)
-- **EC2 dev-smoke cycle time**: ~8 min total (setup + docker build + smoke + teardown). Backend second build is fast (layer cache). Frontend first build ~110s, subsequent cached
-- **EC2 smoke test results baseline**: 10/10 base smoke tests PASS (navigation + intake + uc-intake). Backend health at /api/health responds within 2 retries. Frontend build: 35 routes, all static pages generated
-- **SSM output strategy for Windows**: always redirect EC2 command stdout/stderr to `/tmp/output.txt`, `aws s3 cp` to eval bucket, `aws s3 cp ... -` locally read with `encoding='utf-8'` — avoids cp1252 / SSM truncation issues
+- **`eagle_tools_mcp.py` in Docker builds**: `server/app/eagle_tools_mcp.py` is included automatically — no extra COPY line needed. After adding new `server/app/*.py` modules, verify they appear in `docker run ... ls /app/app/` before pushing to ECR
+- **Verify `server/legacy/` exclusion from Docker builds**: `COPY server/app/ app/` copies only `server/app/`, not `server/legacy/`. Confirm with `docker run --entrypoint ls <image> /app/` — legacy files should not appear
+- **`main.py` growth tracking**: `wc -l server/app/main.py` is the authoritative line count. The file grew from 1,098 → 1,855 lines across hot-reload endpoint additions (Phase 4). If a future refactor slims it, record the new count here
+- **`eagle_tools_mcp.create_eagle_mcp_server()`**: Create once per request with `tenant_id` and `session_id` from auth context. Pass via `ClaudeAgentOptions(mcp_servers={'eagle-tools': server})`. The factory closes over tenant/session so all tool calls are automatically scoped

@@ -52,6 +52,10 @@ interface SubmittedForm {
 
 export default function ChatInterface() {
     const [messages, setMessages] = useState<Message[]>([]);
+    // Streaming message is kept separate to avoid React batching/upsert issues.
+    // During streaming it's appended to the display list; on complete it's committed.
+    const [streamingMsg, setStreamingMsg] = useState<Message | null>(null);
+    const streamingMsgRef = useRef<Message | null>(null);
     const [input, setInput] = useState('');
     const [acquisitionData, setAcquisitionData] = useState<AcquisitionData>({});
     const [activeForm, setActiveForm] = useState<'initial' | 'equipment' | 'funding' | null>(null);
@@ -134,7 +138,8 @@ export default function ChatInterface() {
     const { sendQuery, isStreaming, logs, lastMessage, clearLogs, error, addUserInputLog, addFormSubmitLog } = useAgentStream({
         getToken,
         onMessage: (msg) => {
-            // Add assistant message to chat
+            // Keep the in-flight message in a ref + state — no upsert needed.
+            // React replaces setStreamingMsg on each chunk (last-write-wins).
             const newMessage: Message = {
                 id: msg.id,
                 role: 'assistant',
@@ -144,16 +149,22 @@ export default function ChatInterface() {
                 agent_id: msg.agent_id,
                 agent_name: msg.agent_name,
             };
-            setMessages(prev => [...prev, newMessage]);
-
-            // Parse acquisition data from the response
+            streamingMsgRef.current = newMessage;
+            setStreamingMsg(newMessage);
             parseAcquisitionData(msg.content);
         },
         onComplete: () => {
-            // Stream complete
+            // Commit the final streaming message to the persistent list.
+            if (streamingMsgRef.current) {
+                setMessages(prev => [...prev, streamingMsgRef.current!]);
+            }
+            streamingMsgRef.current = null;
+            setStreamingMsg(null);
         },
         onError: (err) => {
             console.error('Stream error:', err);
+            streamingMsgRef.current = null;
+            setStreamingMsg(null);
         },
     });
 
@@ -489,15 +500,16 @@ export default function ChatInterface() {
 
                 <div className="flex-1 overflow-hidden relative">
                     <MessageList
-                        messages={messages}
+                        messages={streamingMsg ? [...messages, streamingMsg] : messages}
                         isTyping={isStreaming}
+                        streamingMessageId={streamingMsg?.id}
                         activeForm={activeForm}
                         onInitialIntakeSubmit={handleInitialIntakeSubmit}
                         onEquipmentSubmit={handleEquipmentSubmit}
                         onFundingSubmit={handleFundingSubmit}
                         onFormDismiss={() => setActiveForm(null)}
                         onSuggestedPromptSelect={handleSuggestedPromptSelect}
-                        showWelcome={messages.length === 0}
+                        showWelcome={messages.length === 0 && !streamingMsg}
                     />
                     <div ref={messagesEndRef} />
                 </div>

@@ -18,7 +18,7 @@ import logging
 import os
 import time
 from uuid import uuid4
-from typing import AsyncGenerator, Dict, Any, Tuple
+from typing import AsyncGenerator, Dict, Any
 
 import websockets
 

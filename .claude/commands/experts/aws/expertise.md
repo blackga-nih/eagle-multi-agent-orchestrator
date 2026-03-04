@@ -4,12 +4,12 @@ parent: "[[aws/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, aws, cdk, dynamodb, iam, s3]
-last_updated: 2026-02-24T00:00:00
+last_updated: 2026-02-25T00:00:00
 ---
 
 # AWS Expertise (Complete Mental Model)
 
-> **Sources**: infrastructure/cdk-eagle/ (5 stacks — all in one project), deployment/docker/ Dockerfiles, .github/workflows/ (deploy + merge analysis), server/app/session_store.py, AWS CDK documentation, Next.js documentation. Verified: 2026-02-24.
+> **Sources**: AWS Console (manual resources), infrastructure/cdk-eagle/ (5 TypeScript CDK stacks), infrastructure/eval/ CDK stack, deployment/docker/ Dockerfiles, .github/workflows/, server/app/session_store.py + all *_store.py modules, CDK documentation, environments.ts
 
 ---
 
@@ -17,41 +17,36 @@ last_updated: 2026-02-24T00:00:00
 
 ### Provisioning Model
 
-S3 (`nci-documents`) is **NCI-managed** (manually provisioned, imported read-only). The `eagle` DynamoDB table is now **CDK-managed** (EagleCoreStack). All platform infrastructure lives in `infrastructure/cdk-eagle/` as **5 TypeScript CDK stacks** in a single project. The VPC is NCI-provisioned via Service Catalog (SCP blocks `ec2:CreateVpc`) and imported via lookup. The GitHub OIDC provider is pre-deployed by an NCI StackSet and imported via ARN (SCP blocks `iam:CreateOpenIDConnectProvider`).
+Core AWS resources (S3, DynamoDB, Bedrock) are **manually provisioned**. Platform infrastructure (`infrastructure/cdk-eagle/`) provides VPC, Cognito, ECS, ECR, and OIDC via **5 TypeScript CDK stacks** (EagleCoreStack, EagleComputeStack, EagleCiCdStack, EagleStorageStack, EagleEvalStack). The eval observability stack (`infrastructure/eval/`) is also CDK-managed (standalone EvalObservabilityStack).
+
+### Account Architecture (Two-Account Model)
+
+| Account | ID | Role | Deploy from local? |
+|---------|----|------|--------------------|
+| **Personal (dev)** | `274487662938` | Greg's personal AWS account — EAGLE infrastructure actually deployed here (ECS, Cognito, VPC, ECR) | **Yes** — local CDK/boto3 credentials point here |
+| **Client (NCI replica)** | `695681773636` | Client environment being replicated — `DEV_CONFIG` in `environments.ts`, ECR URLs reference this ID | **No** — deploy only via GitHub Actions OIDC from CI/CD |
+
+> **Rule**: Never run `cdk deploy` or AWS CLI destructive operations targeting `695681773636` from a local machine. Local credentials are scoped to `274487662938`. The client account is accessed exclusively through the GitHub Actions pipeline.
 
 ```
-Provisioning: Hybrid (NCI-provisioned + CDK-managed)
+Provisioning: Hybrid (NCI-provisioned VPC + CDK for compute/platform)
 Region: us-east-1
-Account: 695681773636 (NCI dev account)
-IAM: NCIAWSPowerUserAccess policy (restricted -- see NCI SCP Constraints below)
-CDK: infrastructure/cdk-eagle/ (TypeScript, 5 stacks: EagleCiCdStack, EagleCoreStack, EagleStorageStack, EagleComputeStack, EagleEvalStack)
-CDK Entry: bin/eagle.ts (custom DefaultStackSynthesizer with power-user-cdk-* roles)
-CDK Synthesizer Roles: power-user-cdk-deploy-{ACCOUNT}, power-user-cdk-file-pub-{ACCOUNT},
-                       power-user-cdk-img-pub-{ACCOUNT}, power-user-cdk-cfn-exec-{ACCOUNT},
-                       power-user-cdk-lookup-{ACCOUNT}
-CDK Bootstrap SSM: /cdk-bootstrap/hnb659fds/version (generateBootstrapVersionRule: false)
+Account (personal/dev): 274487662938  ← local CDK + boto3 target
+Account (client replica): 695681773636  ← environments.ts DEV_CONFIG, CI/CD only
+IAM: NCIAWSPowerUserAccess (restricted -- iam:CreateRole limited to power-user* prefix)
+CDK: infrastructure/cdk-eagle/ (TypeScript, 5 stacks: EagleCoreStack, EagleComputeStack, EagleCiCdStack, EagleStorageStack, EagleEvalStack)
+CDK: infrastructure/eval/ (TypeScript, standalone EvalObservabilityStack)
 CDK: infrastructure/cdk/ (Python, reference only -- not deployed)
 CI/CD: GitHub Actions (deploy.yml: 4-job pipeline, claude-merge-analysis.yml: AI code review)
 Docker: deployment/docker/Dockerfile.backend (python:3.11-slim, single-stage)
 Docker: deployment/docker/Dockerfile.frontend (node:20-alpine, 3-stage: deps->builder->runner)
 CDK lib: aws-cdk-lib ^2.196.0
+Synthesizer: DefaultStackSynthesizer with NCI-compliant power-user-cdk-* role names
+  power-user-cdk-deploy-695681773636, power-user-cdk-file-pub-695681773636,
+  power-user-cdk-img-pub-695681773636, power-user-cdk-cfn-exec-695681773636,
+  power-user-cdk-lookup-695681773636
+  generateBootstrapVersionRule: false
 ```
-
-### NCI SCP (Service Control Policy) Constraints
-
-The NCI AWS account has SCPs that block certain IAM and networking actions:
-
-| Blocked Action | Impact | Workaround |
-|----------------|--------|------------|
-| `ec2:CreateVpc` | Cannot create VPC via CDK | Import NCI-provisioned VPC via `Vpc.fromLookup({vpcId: '...'})` |
-| `iam:CreateOpenIDConnectProvider` | Cannot create OIDC provider | Import pre-deployed provider via `fromOpenIdConnectProviderArn()` |
-| `iam:PassRole` on EC2 | Cannot attach IAM roles to EC2 instances | EagleDevboxStack reverted (commit 911f4ef) |
-| `iam:CreateRole` on arbitrary names | CDK bootstrap role naming restricted | Use `power-user-cdk-*` role names in DefaultStackSynthesizer |
-
-NCI VPC: `C1-CWEB-EAGLE-DEV-VPC` (`vpc-09def43fcabfa4df6`), CIDR `10.209.140.192/26`
-4 private subnets across 2 AZs; egress via Transit Gateway. **No public subnets.** All ALBs are internal.
-
-GitHub OIDC Provider: Pre-deployed by `StackSet-StackSet-Github-OIDC-*`, imported via ARN in EagleCiCdStack.
 
 ### Credential Configuration
 
@@ -74,50 +69,46 @@ GitHub OIDC Provider: Pre-deployed by `StackSet-StackSet-Github-OIDC-*`, importe
 
 | Component | Exists | Notes |
 |-----------|--------|-------|
-| S3 bucket `nci-documents` | Yes | NCI-managed, imported read-only via `Bucket.fromBucketName` |
-| S3 bucket `eagle-documents-695681773636-dev` | Yes | CDK-managed (EagleStorageStack), versioned |
-| S3 bucket `eagle-eval-artifacts-695681773636-dev` | Yes | CDK-managed (EagleEvalStack) |
-| DynamoDB table `eagle` | Yes | CDK-managed (EagleCoreStack), PK+SK, PAY_PER_REQUEST, TTL |
-| DynamoDB table `eagle-document-metadata-dev` | Yes | CDK-managed (EagleStorageStack), 3 GSIs |
-| CloudWatch log group `/eagle/test-runs` | Yes | Imported (auto-created by eval suite); EagleEvalStack |
-| CloudWatch log group `/eagle/app` | Yes | CDK-managed (EagleCoreStack), 90-day retention |
-| CloudWatch log group `/eagle/ecs/backend-dev` | Yes | CDK-managed (EagleComputeStack), 30-day, DESTROY |
-| CloudWatch log group `/eagle/ecs/frontend-dev` | Yes | CDK-managed (EagleComputeStack), 30-day, DESTROY |
-| CloudWatch log group `/eagle/lambda/metadata-extraction-dev` | Yes | CDK-managed (EagleStorageStack), 30-day, DESTROY |
-| CloudWatch dashboard `EAGLE-Eval-Dashboard-dev` | Yes | CDK-managed (EagleEvalStack) -- 28 tests |
-| SNS topic `eagle-eval-alerts-dev` | Yes | CDK-managed (EagleEvalStack) |
-| Bedrock model access | Yes | Anthropic models (Claude) enabled in NCI account |
-| CDK project (platform + eval) | Yes | `infrastructure/cdk-eagle/` -- all 5 stacks unified |
-| CDK project (reference) | Yes | `infrastructure/cdk/` -- Python, not deployed |
+| S3 bucket (documents) | Yes | `nci-documents`, manually created |
+| S3 bucket (eval) | Yes | `eagle-eval-artifacts`, CDK-managed |
+| DynamoDB table | Yes | `eagle`, manually created |
+| CloudWatch log group | Yes | `/eagle/test-runs`, CDK-managed |
+| CloudWatch dashboard | Yes | `EAGLE-Eval-Dashboard`, CDK-managed |
+| SNS topic | Yes | `eagle-eval-alerts`, CDK-managed |
+| Bedrock model access | Yes | Anthropic models enabled in Console |
+| CDK project (platform) | Yes | `infrastructure/cdk-eagle/` — EagleCoreStack, EagleComputeStack, EagleCiCdStack |
+| CDK project (eval) | Yes | `infrastructure/eval/` — EvalObservabilityStack |
+| CDK project (reference) | Yes | `infrastructure/cdk/` — Python, not deployed |
 | GitHub Actions | Yes | `deploy.yml`, `claude-merge-analysis.yml` |
-| VPC `vpc-09def43fcabfa4df6` | Yes | NCI-provisioned C1-CWEB-EAGLE-DEV-VPC, imported |
-| Cognito User Pool `eagle-users-dev` | Yes | CDK-managed (EagleCoreStack) |
-| ECS Cluster `eagle-dev` | Yes | CDK-managed (EagleComputeStack), Container Insights V2 |
-| ECR Repository `eagle-backend-dev` | Yes | CDK-managed (EagleComputeStack), RETAIN |
-| ECR Repository `eagle-frontend-dev` | Yes | CDK-managed (EagleComputeStack), RETAIN |
-| IAM OIDC Provider | Yes | NCI-pre-deployed, imported via ARN (EagleCiCdStack) |
-| IAM Role `eagle-app-role-dev` | Yes | CDK-managed (EagleCoreStack), ECS task role |
-| IAM Role `eagle-github-actions-dev` | Yes | CDK-managed (EagleCiCdStack), GitHub Actions deploy role |
-| Lambda `eagle-metadata-extractor-dev` | Yes | CDK-managed (EagleStorageStack), Python 3.12, X-Ray |
-| CloudFront distribution | No | Not used -- internal-only NCI VPC, no public subnets |
-| Public ALB | No | All ALBs are internal (`publicLoadBalancer: false`) |
+| VPC | Yes | `eagle-vpc-dev`, CDK-managed (EagleCoreStack) |
+| Cognito User Pool | Yes | `eagle-users-dev`, CDK-managed (EagleCoreStack) |
+| ECS Cluster | Yes | `eagle-dev`, CDK-managed (EagleComputeStack) |
+| ECR Repository (backend) | Yes | `eagle-backend-dev`, CDK-managed (EagleComputeStack) |
+| ECR Repository (frontend) | Yes | `eagle-frontend-dev`, CDK-managed (EagleComputeStack) |
+| IAM OIDC Provider | Yes | GitHub Actions federation, CDK-managed (EagleCiCdStack) |
+| CloudFront distribution | No | Frontend served via public ALB |
+| S3 bucket (documents CDK) | Yes | `eagle-documents-dev`, CDK-managed (EagleStorageStack) |
+| DynamoDB table (doc metadata) | Yes | `eagle-document-metadata-dev`, CDK-managed (EagleStorageStack) |
+| Lambda (metadata extractor) | Yes | `eagle-metadata-extractor-dev`, CDK-managed (EagleStorageStack) |
 
-### Deployed Resource IDs (Account 695681773636, us-east-1, verified 2026-02-24)
+### Deployed Resource IDs (Account 274487662938, us-east-1, 2026-02-17)
 
 | Resource | ID/ARN |
 |----------|--------|
-| VPC (NCI-provisioned) | `vpc-09def43fcabfa4df6` |
-| VPC CIDR | `10.209.140.192/26` |
-| Subnets | 4 private subnets across 2 AZs (NCI-managed) |
-| App Role | `arn:aws:iam::695681773636:role/eagle-app-role-dev` |
-| Deploy Role (GH Actions) | `arn:aws:iam::695681773636:role/eagle-github-actions-dev` |
+| VPC | `vpc-0ede565d9119f98aa` |
+| Private Subnet 1 | `subnet-00aae795ef7384f48` |
+| Private Subnet 2 | `subnet-000e29a573905817b` |
+| Public Subnet 1 | `subnet-0dafab85c993a5dd8` |
+| Public Subnet 2 | `subnet-07e67841820650b5d` |
+| Cognito User Pool | `us-east-1_fyy3Ko0tX` |
+| Cognito App Client | `7jlpjkiov7888kcbu57jcn68no` |
+| App Role | `arn:aws:iam::274487662938:role/eagle-app-role-dev` |
+| Deploy Role (GH Actions) | `arn:aws:iam::274487662938:role/eagle-github-actions-dev` |
 | ECS Cluster | `eagle-dev` |
+| Frontend ALB | `EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com` |
+| Backend ALB (internal) | `internal-EagleC-Backe-6OVxEGWRMzba-362151769.us-east-1.elb.amazonaws.com` |
 | Backend ECR | `695681773636.dkr.ecr.us-east-1.amazonaws.com/eagle-backend-dev` |
 | Frontend ECR | `695681773636.dkr.ecr.us-east-1.amazonaws.com/eagle-frontend-dev` |
-| CDK Deploy Role | `arn:aws:iam::695681773636:role/power-user-cdk-deploy-695681773636` |
-| CDK CFN Exec Role | `arn:aws:iam::695681773636:role/power-user-cdk-cfn-exec-695681773636` |
-
-Note: Cognito User Pool ID, ALB DNS names, and exact subnet IDs are CloudFormation outputs -- query via `aws cloudformation describe-stacks`.
 
 ---
 
@@ -142,7 +133,7 @@ Key Structure:
 - `server/app/agentic_service.py` — `_exec_s3_document_ops()` for read/write/list/delete
 - `server/tests/test_eagle_sdk_eval.py` — Tests 16 and 19 (with cleanup)
 
-### S3 Bucket: `eagle-documents-695681773636-dev` (CDK-managed, EagleStorageStack)
+### S3 Bucket: `eagle-documents-dev` (CDK-managed, EagleStorageStack)
 
 ```
 Bucket: eagle-documents-695681773636-dev
@@ -191,7 +182,7 @@ Item Schema (from models.py — stdlib dataclasses, no pydantic):
   confidence_score (stored as String in DDB), upload_date, last_updated, extraction_model
 ```
 
-### S3 Bucket: `eagle-eval-artifacts-695681773636-dev` (CDK-managed)
+### S3 Bucket: `eagle-eval-artifacts` (CDK-managed)
 
 ```
 Bucket: eagle-eval-artifacts-695681773636-dev
@@ -200,7 +191,7 @@ Encryption: SSE-S3
 Public Access: Blocked
 Lifecycle: 365-day expiration
 Removal Policy: RETAIN
-CDK Stack: EagleEvalStack (in infrastructure/cdk-eagle/)
+CDK Stack: EagleEvalStack (lib/eval-stack.ts in cdk-eagle)
 
 Key Structure:
   eval/results/run-{ISO8601_timestamp}.json
@@ -242,19 +233,11 @@ TTL: ttl field (epoch seconds, 30-day default)
 ### CloudWatch Resources (CDK-managed)
 
 ```
-Log Group: /eagle/app             (EagleCoreStack, 90-day retention, RETAIN)
-Log Group: /eagle/ecs/backend-dev (EagleComputeStack, 30-day retention, DESTROY)
-Log Group: /eagle/ecs/frontend-dev (EagleComputeStack, 30-day retention, DESTROY)
-Log Group: /eagle/lambda/metadata-extraction-dev (EagleStorageStack, 30-day, DESTROY)
-Log Group: /eagle/test-runs       (EagleEvalStack, IMPORTED — not managed by CDK)
-
-Dashboard: EAGLE-Eval-Dashboard-dev (EagleEvalStack, 28 tests)
-Alarm: eagle-eval-pass-rate-dev (< 80% -> SNS, EagleEvalStack)
-Alarm: eagle-metadata-extractor-errors-dev (>= 3 errors in 5min, EagleStorageStack)
-Alarm: eagle-metadata-extractor-duration-dev (p99 >= 80% of timeout, EagleStorageStack)
-Alarm: eagle-metadata-extractor-throttles-dev (>= 1 throttle in 5min, EagleStorageStack)
+Log Group: /eagle/test-runs (90-day retention)
+Dashboard: EAGLE-Eval-Dashboard
+Alarm: EvalPassRate (< 80% -> SNS)
 Namespace: EAGLE/Eval
-SNS Topic: eagle-eval-alerts-dev (EagleEvalStack)
+SNS Topic: eagle-eval-alerts
 ```
 
 ### Bedrock: Anthropic Models
@@ -290,7 +273,7 @@ Used by:
 
 ```
 infrastructure/cdk-eagle/
-  |-- bin/eagle.ts                    # CDK app entry point (5 stacks)
+  |-- bin/eagle.ts                    # CDK app entry point (5 stacks + NCI synthesizer)
   |-- lib/core-stack.ts              # EagleCoreStack
   |-- lib/compute-stack.ts           # EagleComputeStack
   |-- lib/cicd-stack.ts              # EagleCiCdStack
@@ -300,46 +283,38 @@ infrastructure/cdk-eagle/
   |-- cdk.json                       # app: npx ts-node bin/eagle.ts
   |-- tsconfig.json
   |-- package.json
-
-Stack dependency order: EagleCiCdStack (independent) → EagleCoreStack → EagleStorageStack
-                        → EagleComputeStack; EagleEvalStack (independent)
+  |-- scripts/bundle-lambda.py       # Linux-compatible Lambda bundler for Windows devs
 
 EagleCoreStack:
-  - VPC: vpc-09def43fcabfa4df6 (NCI C1-CWEB-EAGLE-DEV-VPC, IMPORTED via Vpc.fromLookup)
-    - 4 private subnets across 2 AZs, CIDR 10.209.140.192/26, egress via Transit Gateway
-    - NO public subnets — SCP blocks ec2:CreateVpc, VPC provisioned by NCI Service Catalog
-  - DynamoDB Table: eagle (CDK-MANAGED, PK+SK, PAY_PER_REQUEST, TTL=ttl, RETAIN)
+  - VPC: IMPORTED via ec2.Vpc.fromLookup({ vpcId: 'vpc-09def43fcabfa4df6' })
+    NCI-provisioned, 4 private subnets, Transit Gateway egress, no public subnets
   - Cognito User Pool: eagle-users-dev (email sign-in, tenant_id + subscription_tier custom attrs)
   - Cognito App Client: eagle-app-client-dev (userPassword + SRP + adminUserPassword flows)
   - Token validity: access/id 1hr, refresh 30d
   - IAM Role: eagle-app-role-dev (assumed by ecs-tasks.amazonaws.com)
-    - S3: GetObject, PutObject, DeleteObject, ListBucket on nci-documents/eagle/*
-    - S3: GetObject, GetBucketLocation, ListBucket on eagle-documents-695681773636-dev (read-only)
+    - S3: GetObject, ListBucket on eagle-documents-695681773636-dev and nci-documents (legacy)
     - DynamoDB: GetItem, PutItem, UpdateItem, DeleteItem, Query, Scan, BatchWriteItem on eagle + /index/*
-    - DynamoDB: GetItem, Query, Scan, BatchGetItem on eagle-document-metadata-dev + /index/*
     - Bedrock: InvokeModel, InvokeModelWithResponseStream, InvokeAgent (anthropic.* + agents)
-      - Resources: inference-profile/us.anthropic.* + foundation-model/anthropic.* + agent/*
-    - CW: CreateLogStream, PutLogEvents, GetLogEvents, DescribeLogStreams, FilterLogEvents on /eagle/*
+    - CW: CreateLogStream, PutLogEvents, GetLogEvents, DescribeLogStreams, FilterLogEvents
     - Cognito: GetUser, AdminGetUser, CreateGroup, AdminAddUserToGroup, ListUsers
   - CW Log Group: /eagle/app (90-day retention, RETAIN)
-  - Imports (read-only refs): nci-documents (S3 via fromBucketName)
-  - Outputs: VpcId, UserPoolId, UserPoolClientId, AppRoleArn, AppLogGroupName, EagleTableName
+  - DynamoDB Table eagle: new dynamodb.Table() with GSI1+GSI2 (NOT fromTableName)
+  - Imports: nci-documents (S3 legacy) -- read-only ref
+  - Outputs: VpcId, UserPoolId, UserPoolClientId, AppRoleArn, AppLogGroupName
 
-EagleComputeStack (depends on EagleCoreStack + EagleStorageStack):
+EagleComputeStack (depends on EagleCoreStack):
   - ECS Cluster: eagle-dev (Fargate, Container Insights V2)
   - ECR: eagle-backend-dev, eagle-frontend-dev (10-image lifecycle, RETAIN)
   - Backend Fargate Service:
-    - Internal ALB (publicLoadBalancer: false), port 8000, 512 CPU / 1024 MiB, auto-scale 1-4 (70% CPU)
+    - Internal ALB, port 8000, 512 CPU / 1024 MiB, auto-scale 1-4 (70% CPU)
     - Health check: /api/health (curl), 30s interval, 3 retries, 60s start period
-    - Env: EAGLE_SESSIONS_TABLE, S3_BUCKET, USE_BEDROCK=true, REQUIRE_AUTH=true,
-           COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID, DOCUMENT_BUCKET, METADATA_TABLE
+    - Env: EAGLE_SESSIONS_TABLE, S3_BUCKET, USE_BEDROCK=true, REQUIRE_AUTH=true
   - Frontend Fargate Service:
-    - Internal ALB (publicLoadBalancer: false), port 3000, 256 CPU / 512 MiB, auto-scale 1-4 (70% CPU)
+    - Public ALB, port 3000, 256 CPU / 512 MiB, auto-scale 1-4 (70% CPU)
     - Health check: / (curl), HOSTNAME=0.0.0.0
     - Env: FASTAPI_URL=http://{backend-alb-dns}, NEXT_PUBLIC_COGNITO_*
   - CW Log Groups: /eagle/ecs/backend-dev, /eagle/ecs/frontend-dev (30-day, DESTROY)
   - Outputs: BackendRepoUri, FrontendRepoUri, ClusterName, FrontendUrl, BackendUrl
-  NOTE: Both ALBs are INTERNAL (NCI VPC has no public subnets). Access via VPN/bastion only.
 
 EagleCiCdStack (independent):
   - IAM OIDC Provider: token.actions.githubusercontent.com
@@ -372,15 +347,12 @@ Resources:
     - CORS: GET + PUT allowed from * (for presigned URL uploads)
     - S3 event notifications → Lambda on .txt, .md, .pdf, .doc, .docx uploads
   - DynamoDB Table: eagle-document-metadata-dev (PAY_PER_REQUEST, PITR, RETAIN)
-    - PK: document_id (String) — S3 key used as document ID
-    - GSI: primary_topic-index (PK=primary_topic, SK=last_updated)
-    - GSI: primary_agent-index (PK=primary_agent, SK=last_updated)
-    - GSI: document_type-index (PK=document_type, SK=last_updated)
-  - Lambda: eagle-metadata-extractor-dev (Python 3.12, 512 MiB, 120s timeout, X-Ray active tracing)
+    - PK: document_id (String)
+    - GSI: primary_topic-index, primary_agent-index, document_type-index (all sort by last_updated)
+  - Lambda: eagle-metadata-extractor-dev (Python 3.12, 512 MiB, 120s timeout)
     - Reads S3 object → extracts text → Claude via Bedrock → writes DynamoDB + S3 catalog
     - Model: us.anthropic.claude-3-5-haiku-20241022-v1:0 (cross-region inference profile)
-    - Env: DOCUMENT_BUCKET, METADATA_TABLE, BEDROCK_MODEL_ID, CATALOG_KEY=metadata/metadata-catalog.json
-    - IAM: S3 read/put on eagle-documents-695681773636-dev, DynamoDB write on metadata table,
+    - IAM: S3 read/put on eagle-documents-dev, DynamoDB write on metadata table,
            Bedrock InvokeModel on inference-profile/us.anthropic.* + foundation-model/anthropic.*
     - Bundler: infrastructure/cdk-eagle/scripts/bundle-lambda.py (manylinux2014_x86_64 on Windows)
     - Log Group: /eagle/lambda/metadata-extraction-dev (30-day retention)
@@ -392,31 +364,32 @@ Lambda bundler script: infrastructure/cdk-eagle/scripts/bundle-lambda.py
 
 ---
 
-#### EagleEvalStack (in `infrastructure/cdk-eagle/lib/eval-stack.ts`)
+#### `infrastructure/eval/` — EvalObservabilityStack (Eval Observability)
 
 ```
-Part of the unified infrastructure/cdk-eagle/ project (NOT a separate CDK app).
-Independent stack — no cross-stack dependencies. Deployed alongside other stacks.
+infrastructure/eval/
+  |-- bin/eval.ts                    # CDK app entry point
+  |-- lib/eval-stack.ts              # EvalObservabilityStack (class name, not EagleEvalStack)
+  |-- cdk.json                       # app: npx ts-node --prefer-ts-exts bin/eval.ts
+  |-- tsconfig.json                  # ES2022, commonjs, moduleResolution: node
+  |-- package.json                   # aws-cdk-lib 2.196.0, aws-cdk 2.1016.1
 
 Resources:
   - S3 Bucket: eagle-eval-artifacts-695681773636-dev (365-day lifecycle, SSE-S3, BLOCK_ALL, RETAIN)
-  - CW Log Group: /eagle/test-runs (IMPORTED — auto-created by eval suite on first run)
-  - SNS Topic: eagle-eval-alerts-dev (display: "EAGLE Eval Alerts")
-  - CW Alarm: eagle-eval-pass-rate-dev (< 80% -> SNS, TREAT_MISSING_DATA: NOT_BREACHING)
-  - CW Dashboard: EAGLE-Eval-Dashboard-dev
+  - CW Log Group: /eagle/test-runs (90-day retention, RETAIN)
+  - SNS Topic: eagle-eval-alerts (display: "EAGLE Eval Alerts")
+  - CW Alarm: EvalPassRate (< 80% -> SNS, TREAT_MISSING_DATA: NOT_BREACHING)
+  - CW Dashboard: EAGLE-Eval-Dashboard
     - Row 1: PassRate (%) graph + Test Counts (stacked: Passed/Failed/Skipped)
-    - Rows 2-6: 28 per-test SingleValueWidgets (TestStatus, 24hr max, 6 per row)
+    - Rows 2-6: 27 per-test SingleValueWidgets (TestStatus, 24hr max, 6 per row)
     - Row 7: Total Cost (USD) graph
   - Namespace: EAGLE/Eval
   - Metrics: PassRate(Avg), TestsPassed(Sum), TestsFailed(Sum), TestsSkipped(Sum), TotalCost(Avg), TestStatus(Max per test)
 
-Dashboard tracks 28 tests (1_session_creation through 28_sdk_skill_subagent_orchestration)
-  Tests 21-28 are use-case tests: uc02_micro_purchase, uc03_option_exercise, uc04_contract_modification,
-  uc05_co_package_review, uc07_contract_closeout, uc08_shutdown_notification,
-  uc09_score_consolidation, sdk_skill_subagent_orchestration
+Dashboard tracks 27 tests (1_session_creation through 27_uc09_score_consolidation)
 
-Deploy: cd infrastructure/cdk-eagle && npx cdk deploy EagleEvalStack
-Synth:  cd infrastructure/cdk-eagle && npx cdk synth EagleEvalStack
+Deploy: cd infrastructure/eval && npx cdk deploy
+Synth:  cd infrastructure/eval && npx cdk synth
 ```
 
 #### `infrastructure/cdk/` — MultiTenantBedrockStack (Reference, Python)
@@ -516,6 +489,108 @@ table.addGlobalSecondaryIndex({
 | Get intake by ID | `INTAKE#{tenant}` | `INTAKE#{id}` | Table |
 | List intakes for tenant | `INTAKE#{tenant}` | begins_with `INTAKE#` | Table |
 | List sessions by tenant | `TENANT#{tenant}` | `SESSION#{timestamp}` | GSI1 |
+| Get workspace | `WORKSPACE#{tenant}#{user}` | `WORKSPACE#{workspace_id}` | Table |
+| List tenant workspaces | `TENANT#{tenant}` | begins_with `WORKSPACE#{user}#` | GSI1 |
+| Get workspace override | `WSPC#{tenant}#{user}#{wid}` | `{entity_type}#{name}` | Table |
+| Load all workspace overrides | `WSPC#{tenant}#{user}#{wid}` | begins_with (all types) | Table |
+| Get plugin canonical | `PLUGIN#{entity_type}` | `PLUGIN#{name}` | Table |
+| Get tenant prompt override | `PROMPT#{tenant}` | `PROMPT#{agent_name}` | Table |
+| Get global prompt override | `PROMPT#global` | `PROMPT#{agent_name}` | Table |
+| Get config key | `CONFIG#global` | `CONFIG#{key}` | Table |
+| Get user prefs | `PREF#{tenant}` | `PREF#{user_id}` | Table |
+| Get skill | `SKILL#{tenant}` | `SKILL#{skill_id}` | Table |
+| List skills by status | `SKILL_STATUS#{status}` | begins_with `TENANT#{tenant}#` | GSI2 |
+| Get package | `PACKAGE#{tenant}` | `PACKAGE#{package_id}` | Table |
+| List tenant packages | `TENANT#{tenant}` | begins_with `PACKAGE#{status}#` | GSI1 |
+| Get document version | `DOCUMENT#{tenant}` | `DOCUMENT#{pkg}#{type}#{ver}` | Table |
+| List document versions | `TENANT#{tenant}` | begins_with `DOCUMENT#{pkg}#{type}#` | GSI1 |
+| Get approval step | `APPROVAL#{tenant}` | `APPROVAL#{package_id}#{step:02d}` | Table |
+| List approval chain | `APPROVAL#{tenant}` | begins_with `APPROVAL#{package_id}#` | Table |
+| Get user template | `TEMPLATE#{tenant}` | `TEMPLATE#{doc_type}#{user_id}` | Table |
+| List tenant templates | `TENANT#{tenant}` | begins_with `TEMPLATE#{doc_type}#` | GSI1 |
+| Write audit event | `AUDIT#{tenant}` | `AUDIT#{ISO_ts}#{entity_type}#{name}` | Table |
+| Query audit log | `AUDIT#{tenant}` | begins_with `AUDIT#{date}` | Table |
+
+### Entity Type Prefix Registry (Complete)
+
+All store modules (server/app/*_store.py) share the  table:
+
+    SESSION#    - User conversation sessions (session_store.py)
+    MSG#        - Messages within sessions (session_store.py)
+    USAGE#      - Token usage records per tenant (session_store.py)
+    COST#       - Cost metrics per tenant (session_store.py)
+    SUB#        - Subscription usage counters per tenant+tier (session_store.py)
+    INTAKE#     - OA intake records (agentic_service.py)
+    WORKSPACE#  - User prompt workspaces, one active at a time (workspace_store.py)
+    WSPC#       - Per-workspace entity overrides AGENT/SKILL/TEMPLATE/CONFIG (wspc_store.py)
+    PLUGIN#     - Agent/skill canonical definitions seeded from eagle-plugin/ (plugin_store.py)
+    PROMPT#     - Tenant/global prompt overrides; layers 2+3 of resolution chain (prompt_store.py)
+    SKILL#      - User-created custom skills with draft->review->active lifecycle (skill_store.py)
+    PACKAGE#    - Acquisition packages with FAR pathway logic (package_store.py)
+    DOCUMENT#   - Versioned acquisition docs with supersession (document_store.py)
+    APPROVAL#   - FAR-mandated multi-step approval chains (approval_store.py)
+    TEMPLATE#   - Document template overrides with variable extraction (template_store.py)
+    CONFIG#     - Runtime feature flags; PK always CONFIG#global (config_store.py)
+    PREF#       - User preferences, no TTL, no cache (pref_store.py)
+    AUDIT#      - Immutable audit events, 7-year TTL (audit_store.py)
+
+    GSI1PK virtual prefixes: TENANT#{tenant_id}
+      Used by: session_store, workspace_store, package_store, document_store, template_store
+    GSI2PK virtual prefixes:
+      TIER#{tier}           - tier-based tenant queries (session_store.py)
+      SKILL_STATUS#{status} - skill lifecycle queries (skill_store.py)
+
+### WSPC Resolution Chain (4 Layers, wspc_store.py)
+
+    Priority 1: WSPC#{tenant}#{user}#{workspace} / {entity_type}#{name}  -- user workspace override
+    Priority 2: PROMPT#{tenant_id} / PROMPT#{agent_name}                 -- tenant admin override
+    Priority 3: PROMPT#global / PROMPT#{agent_name}                       -- platform admin override
+    Priority 4: PLUGIN#{entity_type} / PLUGIN#{name}                      -- canonical DynamoDB
+    Bulk load: wspc_store.load_workspace_overrides() -- single DynamoDB query at session start
+
+### Template Resolution Chain (4 Layers, template_store.py)
+
+    Priority 1: TEMPLATE#{tenant} / {doc_type}#{user_id}   -- user personal
+    Priority 2: TEMPLATE#{tenant} / {doc_type}#shared      -- tenant-wide
+    Priority 3: TEMPLATE#global   / {doc_type}#shared      -- system global
+    Priority 4: PLUGIN#templates  / {doc_type}              -- canonical plugin
+
+### Plugin Store Seeding (plugin_store.py)
+
+    ensure_plugin_seeded() called at startup -- idempotent, safe every hot restart
+    Checks PLUGIN#manifest version == BUNDLED_PLUGIN_VERSION (1)
+    If stale: seeds all agents + skills from eagle-plugin/ via eagle_skill_constants
+    BUNDLED_PLUGIN_VERSION = 1 -- increment when eagle-plugin/ content changes
+
+### Skill Lifecycle (skill_store.py)
+
+    States: draft -> review -> active -> disabled -> deleted (from draft/disabled only)
+    GSI2PK: SKILL_STATUS#{status}, GSI2SK: TENANT#{tenant_id}#{skill_id}
+    Active query: GSI2PK=SKILL_STATUS#active, GSI2SK begins_with TENANT#{tenant}#
+
+### Package Lifecycle (package_store.py)
+
+    Status: intake -> drafting -> review -> approved -> awarded -> closed
+    FAR thresholds: <$10k micro_purchase, <$250k simplified, >=$250k full_competition
+    sole_source: must be set explicitly; requires sow, igce, justification
+    Package IDs: PKG-{YYYY}-{NNNN}, auto-incrementing per tenant
+
+### Approval Chain (approval_store.py)
+
+    < $250k: [contracting_officer]
+    < $750k: [contracting_officer, competition_advocate]
+    >= $750k: [contracting_officer, competition_advocate, head_procuring_activity]
+    SK: APPROVAL#{package_id}#{step:02d}
+
+### TTL Policy by Entity
+
+| Entity | TTL | Notes |
+|--------|-----|-------|
+| SESSION# | 30 days | Configurable via SESSION_TTL_DAYS env var |
+| AUDIT# | 7 years | Compliance requirement |
+| PROMPT# | Optional | Caller supplies ttl_epoch |
+| TEMPLATE# | Optional | Caller supplies ttl |
+| All others | None | Persistent until deleted |
 
 ### Capacity Modes
 
@@ -536,10 +611,11 @@ table.addGlobalSecondaryIndex({
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "S3DocumentAccess",
+      "Sid": "S3DocumentReadAccess",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
-      "Resource": ["arn:aws:s3:::nci-documents", "arn:aws:s3:::nci-documents/eagle/*"]
+      "Action": ["s3:GetObject", "s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::eagle-documents-695681773636-dev",
+                   "arn:aws:s3:::eagle-documents-695681773636-dev/*"]
     },
     {
       "Sid": "DynamoDBAccess",
@@ -547,7 +623,8 @@ table.addGlobalSecondaryIndex({
       "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
                  "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:BatchWriteItem"],
       "Resource": ["arn:aws:dynamodb:us-east-1:*:table/eagle",
-                   "arn:aws:dynamodb:us-east-1:*:table/eagle/index/*"]
+                   "arn:aws:dynamodb:us-east-1:*:table/eagle/index/*"
+      Note: eagle table is CDK-managed by EagleCoreStack -- all GSI access auto-granted]
     },
     {
       "Sid": "BedrockInvoke",
@@ -854,6 +931,11 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - `LogType='Tail'` in Lambda invoke returns base64-encoded log tail inline — far faster than polling CloudWatch for debugging (discovered: 2026-02-20)
 - Cross-region inference profiles (`us.anthropic.claude-3-5-haiku-20241022-v1:0`) enable on-demand Claude 3.5+ invocation in Bedrock — direct model IDs only work with provisioned throughput (discovered: 2026-02-20)
 - Bedrock inference profile IAM: need both `inference-profile/us.anthropic.*` AND `foundation-model/anthropic.*` resources (discovered: 2026-02-20)
+- NCI-compliant CDK synthesizer (power-user-cdk-* roles) with generateBootstrapVersionRule=false enables CDK deploy under SCP-restricted IAM without requiring iam:CreateRole on default CDK role names (discovered: 2026-02-25, component: cdk-eagle)
+- GSI1+GSI2 on the eagle table eliminates all cross-partition Scan operations: GSI1 for tenant-level listing, GSI2 for global status queries (tier/skill lifecycle) (discovered: 2026-02-25, component: core-stack)
+- 60-second in-process cache in all *_store.py modules reduces DynamoDB read costs on hot code paths without requiring ElastiCache (discovered: 2026-02-25, component: store-modules)
+- wspc_store bulk-load pattern (single query per session) avoids N+1 DynamoDB calls for agent resolution (discovered: 2026-02-25, component: wspc_store)
+- ensure_plugin_seeded() idempotent startup seeding prevents duplicate plugin data across hot restarts (discovered: 2026-02-25, component: plugin_store)
 
 ### patterns_to_avoid
 - Don't create new CDK resources that conflict with existing manual resources
@@ -873,6 +955,11 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - Don't delete a CloudFormation stack with RETAIN ECR repos then re-create without `--import-existing-resources` — will fail on repo name conflict (discovered: 2026-02-17)
 - Don't rely on ECS pulling updated `latest` tag from ECR for already-running tasks — Fargate caches images per task launch, use `--force-new-deployment` (discovered: 2026-02-17)
 - Don't use `CMD-SHELL curl` in container health checks without installing curl in the image — ALB health checks may pass while container health checks fail, causing infinite task cycling (discovered: 2026-02-17)
+- Don't use fromTableName() for the main `eagle` DynamoDB table -- it's CDK-created by EagleCoreStack; importing it would cause drift and lose GSI management (discovered: 2026-02-25, component: core-stack)
+- Don't change the NCI CDK synthesizer role names (power-user-cdk-*) -- constrained by NCI SCP; using default cdk-hnb659fds-* names causes bootstrap and deploy failures (discovered: 2026-02-25, component: cdk-eagle)
+- Don't call wspc_store.load_workspace_overrides() per agent -- call once at session start and pass the result through; N+1 DynamoDB queries per turn will hit throughput limits (discovered: 2026-02-25, component: wspc_store)
+- Don't set EAGLE_SESSIONS_TABLE only -- audit_store reads TABLE_NAME; always set both env vars to 'eagle' in ECS task definitions (discovered: 2026-02-25, component: audit_store)
+- Don't create new ec2.Vpc() in CDK -- NCI SCP blocks ec2:CreateVpc; always use ec2.Vpc.fromLookup() with NCI-provisioned VPC ID vpc-09def43fcabfa4df6 (discovered: 2026-02-25, component: core-stack)
 
 ### common_issues
 - AWS credentials expire or are not configured -> all services fail
@@ -888,6 +975,10 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - ECS tasks use cached image digest even after pushing new `latest` tag to ECR. Fix: `aws ecs update-service --force-new-deployment` (discovered: 2026-02-17)
 - Container health check (`CMD-SHELL curl`) fails silently if curl not in image, while ALB health check passes — causes infinite task cycling with no obvious error (discovered: 2026-02-17)
 - Windows Git Bash converts `/eagle/ecs/...` paths to `C:/Program Files/Git/eagle/ecs/...` — use `MSYS_NO_PATHCONV=1` prefix (discovered: 2026-02-17)
+- audit_store reads TABLE_NAME env var, not EAGLE_SESSIONS_TABLE like other stores -- if only EAGLE_SESSIONS_TABLE is set, audit_store defaults to 'eagle' (env var default is correct but inconsistent) (discovered: 2026-02-25)
+- NCI SCP blocks ec2:CreateVpc -- any CDK stack that does `new ec2.Vpc()` will fail with Access Denied; always use fromLookup (discovered: 2026-02-25)
+- NCI SCP restricts iam:CreateRole to power-user* prefix only -- CDK bootstrap with default role names (cdk-hnb659fds-*) will fail; must use NCI synthesizer with power-user-cdk-* names (discovered: 2026-02-25)
+- DynamoDB eagle table CDK drift: if GSI1 or GSI2 are removed from core-stack.ts, CDK will attempt to delete them -- this will break all store modules that use GSI1/GSI2 queries (discovered: 2026-02-25)
 
 ### tips
 - Run `/experts:aws:maintenance` before any deployment to verify connectivity
@@ -900,9 +991,7 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - Environment configs (DEV/STAGING/PROD) in `config/environments.ts` use spread to inherit defaults — override only what changes (discovered: 2026-02-16)
 - Frontend NEXT_PUBLIC_* env vars must be set as Docker build-args (baked at build time), not runtime env vars (discovered: 2026-02-16)
 - The CiCd stack OIDC trust uses wildcard branch (`repo:gblack686/sample-multi-tenant-agent-core-app:*`) — allows deploys from any branch (discovered: 2026-02-16)
-- EagleEvalStack is part of `infrastructure/cdk-eagle/` (NOT a separate project) — deploy with `cd infrastructure/cdk-eagle && npx cdk deploy EagleEvalStack` (verified: 2026-02-24)
-- Eval dashboard now tracks 28 tests — test_28 (28_sdk_skill_subagent_orchestration) IS in eval-stack.ts TEST_NAMES (verified: 2026-02-24)
-- Both frontend and backend ALBs are INTERNAL (publicLoadBalancer: false) — NCI VPC has no public subnets; access only via VPN/bastion (verified: 2026-02-24)
+- Eval dashboard tracks 27 tests but test suite may have 28 — check if test_28 (subagent orchestration) is missing from eval-stack.ts TEST_NAMES array (discovered: 2026-02-16)
 - **ECS First Deploy Checklist**: (1) Push placeholder images to ECR, (2) `cdk deploy --all`, (3) Verify health checks pass, (4) Push real images, (5) `aws ecs update-service --force-new-deployment` (discovered: 2026-02-17)
 - Placeholder images only need to pass health checks: backend → FastAPI with `GET /api/health` + curl installed; frontend → Express with `GET /` + curl installed (discovered: 2026-02-17)
 - When redeploying after deleting a stack with RETAIN ECR repos, always use `npx cdk deploy --import-existing-resources` (discovered: 2026-02-17)
@@ -910,8 +999,11 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - When adding new Lambda to CDK, always wire local bundler to `bundle-lambda.py` — never use raw `pip install` in tryBundle on Windows dev machines (discovered: 2026-02-20)
 - Use `LogType='Tail'` in `lambda.invoke()` to get execution logs inline — no CloudWatch polling needed for debugging (discovered: 2026-02-20)
 - Before using a Bedrock model ID, verify with `bedrock.list_foundation_models()` or in the Bedrock Console — avoid assuming model IDs from other cloud providers translate to Bedrock (discovered: 2026-02-20)
-- EagleEvalStack is unified into `infrastructure/cdk-eagle/` (not a separate project) — all 5 stacks deploy from one `npx cdk deploy --all` (verified: 2026-02-24, component: eval-stack)
-- S3 bucket names include account ID: `eagle-documents-695681773636-dev`, `eagle-eval-artifacts-695681773636-dev` — config uses full names with account ID suffix (verified: 2026-02-24, component: environments.ts)
-- VPC is fully NCI-managed and IMPORTED — CDK does not create any VPC; no public subnets exist; all ALBs are internal (verified: 2026-02-24, component: core-stack)
-- Both ECS ALBs (frontend + backend) are internal (`publicLoadBalancer: false`) — NCI VPC is private-only; access requires VPN/bastion (verified: 2026-02-24, component: compute-stack)
-- Eval dashboard now has 28 tests including test_28 (28_sdk_skill_subagent_orchestration) — confirmed in eval-stack.ts TEST_NAMES (verified: 2026-02-24)
+- All 12 *_store.py modules share the `eagle` DynamoDB single-table -- use the Entity Prefix Registry in Part 4 to understand which PK/SK to query for each domain (discovered: 2026-02-25, component: dynamodb)
+- GSI1 (GSI1PK=TENANT#{tenant}) supports cross-tenant listing for session, workspace, package, document, and template stores -- use it instead of Scan (discovered: 2026-02-25, component: dynamodb)
+- GSI2 has two distinct roles: TIER#{tier} for tenant-tier queries (session_store) and SKILL_STATUS#{status} for skill lifecycle (skill_store) -- never mix these query patterns (discovered: 2026-02-25, component: dynamodb)
+- wspc_store.load_workspace_overrides() bulk-loads all agent/skill/template overrides in one DynamoDB query at session start -- call once per session, not once per agent invocation (discovered: 2026-02-25, component: wspc_store)
+- plugin_store.ensure_plugin_seeded() is idempotent and safe on every hot restart -- increment BUNDLED_PLUGIN_VERSION (currently 1) when eagle-plugin/ definitions change (discovered: 2026-02-25, component: plugin_store)
+- audit_store uses TABLE_NAME env var while most other stores use EAGLE_SESSIONS_TABLE -- always set both env vars to 'eagle' in ECS task definitions (discovered: 2026-02-25, component: audit_store)
+- DynamoDB table `eagle` is CDK-created by EagleCoreStack -- never use fromTableName() for this table; GSI1+GSI2 are managed by CDK and will drift if removed from core-stack.ts (discovered: 2026-02-25, component: core-stack)
+- NCI CDK bootstrap requires power-user* role names -- the DefaultStackSynthesizer in eagle.ts is pre-configured with all 5 NCI-compliant role names; do not change them (discovered: 2026-02-25, component: cdk-eagle)

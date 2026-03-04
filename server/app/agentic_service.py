@@ -8,8 +8,8 @@ import json
 import time
 import logging
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, AsyncGenerator
+from datetime import datetime
+from typing import Any, List
 
 import anthropic
 import boto3
@@ -142,23 +142,33 @@ def _get_logs():
 
 
 def _extract_tenant_id(session_id: str | None = None) -> str:
-    """Extract tenant_id from session context. Defaults to 'demo-tenant'."""
+    """Extract tenant_id from session context.
+
+    Composite session format: ``{tenant_id}#{tier}#{user_id}#{session}``
+    (set by strands_agentic_service when building service tools).
+    Falls back to 'demo-tenant' for legacy/unrecognised formats.
+    """
     if not session_id:
         return "demo-tenant"
-    # session_id format: "ws-1-XXXXX" or UUID
-    # For now, use a default tenant
-    # In production, this would look up the authenticated user
+    if "#" in session_id:
+        return session_id.split("#", 3)[0]
     return "demo-tenant"
 
 
 def _extract_user_id(session_id: str | None = None) -> str:
-    """Extract user_id from session context. Defaults to 'demo-user'."""
+    """Extract user_id from session context.
+
+    Composite session format: ``{tenant_id}#{tier}#{user_id}#{session}``
+    Falls back to 'demo-user' for legacy/unrecognised formats.
+    """
     if not session_id:
         return "demo-user"
-    # In production, this would come from the authenticated user context
-    # For now, use session_id as a simple user scope for isolation
+    if "#" in session_id:
+        parts = session_id.split("#", 3)
+        if len(parts) >= 3:
+            return parts[2]
     if session_id.startswith("ws-"):
-        return session_id  # Use WebSocket session as user identifier
+        return session_id
     return "demo-user"
 
 
@@ -374,6 +384,28 @@ EAGLE_TOOLS = [
                 },
             },
             "required": ["action"],
+        },
+    },
+    {
+        "name": "query_compliance_matrix",
+        "description": (
+            "Query NCI/NIH contract requirements decision tree. "
+            "Pass a JSON params string with operation (query/list_methods/list_types/"
+            "list_thresholds/search_far/suggest_vehicle) and operation-specific fields."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "params": {
+                    "type": "string",
+                    "description": (
+                        'JSON string. For query: {"operation":"query","contract_value":85000,'
+                        '"acquisition_method":"sap","contract_type":"ffp","is_services":true}. '
+                        'For search: {"operation":"search_far","keyword":"sole source"}.'
+                    ),
+                },
+            },
+            "required": ["params"],
         },
     },
 ]
@@ -2160,6 +2192,19 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
         }
 
 
+# ── Compliance Matrix Handler ────────────────────────────────────────
+
+def _exec_query_compliance_matrix(params: dict, tenant_id: str) -> dict:
+    """Execute a compliance matrix operation (read-only, no tenant scoping)."""
+    from .compliance_matrix import execute_operation
+
+    # Support both direct dict and single-string-param wrapper
+    raw = params.get("params", params)
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    return execute_operation(raw)
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -2172,6 +2217,7 @@ TOOL_DISPATCH = {
     "create_document": _exec_create_document,
     "get_intake_status": _exec_get_intake_status,
     "intake_workflow": _exec_intake_workflow,
+    "query_compliance_matrix": _exec_query_compliance_matrix,
 }
 
 # Tools that need session_id for per-user scoping

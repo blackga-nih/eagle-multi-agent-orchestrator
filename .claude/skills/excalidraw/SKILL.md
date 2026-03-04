@@ -224,22 +224,47 @@ Each element includes:
 
 ## File Storage Convention
 
-All excalidraw files should be saved in:
+All diagrams live under the canonical directory:
 
 ```
-{workspace_root}/docs/excalidraw-diagrams/{context}/*.excalidraw.md
+docs/architecture/diagrams/
+├── excalidraw/          ← Claude-generated .excalidraw.md files (primary)
+│   └── obsidian/        ← Obsidian-native .excalidraw files (imported from vault)
+├── mermaid/             ← .mmd source files + rendered .png exports
+└── exports/             ← PNG/SVG exports of excalidraw diagrams
 ```
 
-Where `{context}` represents the context-specific subdirectory based on:
-- Current project/workspace name
-- Expert domain (e.g., `backend`, `frontend`, `deployment`)
-- Feature or component being visualized
+**Plugin-specific diagrams** (use-case flows) remain in `eagle-plugin/diagrams/` since they ship with the plugin.
 
-### Examples
-- `docs/excalidraw-diagrams/backend/agentic-service-architecture.excalidraw.md`
-- `docs/excalidraw-diagrams/frontend/component-hierarchy.excalidraw.md`
-- `docs/excalidraw-diagrams/deployment/ci-cd-pipeline.excalidraw.md`
-- `docs/excalidraw-diagrams/claude-sdk/session-flow.excalidraw.md`
+### Naming Convention
+
+Follow the project artifact naming pattern:
+```
+{YYYYMMDD}-{HHMMSS}-arch-{slug}-v{N}.excalidraw.md
+```
+
+Examples:
+- `20260226-161925-arch-cdk-stack-architecture-v1.excalidraw.md`
+- `20260220-175116-arch-aws-architecture-v1.excalidraw.md`
+
+### Where to Save New Diagrams
+
+| Diagram type | Save to |
+|-------------|---------|
+| Architecture / infra | `docs/architecture/diagrams/excalidraw/` |
+| Sequence / workflow | `docs/architecture/diagrams/excalidraw/` |
+| Mermaid flowcharts | `docs/architecture/diagrams/mermaid/` |
+| PNG exports | `docs/architecture/diagrams/exports/` |
+| Plugin use-case flows | `eagle-plugin/diagrams/excalidraw/` |
+| Obsidian vault imports | `docs/architecture/diagrams/excalidraw/obsidian/` |
+
+### Current Inventory (36 excalidraw files)
+
+- `docs/architecture/diagrams/excalidraw/` — 7 `.excalidraw.md` (Claude-generated architecture)
+- `docs/architecture/diagrams/excalidraw/obsidian/` — 18 `.excalidraw` (Obsidian-native, imported)
+- `docs/architecture/diagrams/exports/` — 2 `.excalidraw` + 3 `.png`
+- `eagle-plugin/diagrams/excalidraw/` — 9 `.excalidraw` (UC01-UC09 use cases)
+- `docs/architecture/diagrams/mermaid/` — 15 `.mmd` + 15 `.png` (mermaid renders)
 
 ## PNG Export (Required After Every Diagram)
 
@@ -435,25 +460,25 @@ This skill is designed to work seamlessly with any expert in `.claude/commands/e
 ### 1. Backend Service Architecture
 ```bash
 Input: @server/app/agentic_service.py
-Output: docs/excalidraw-diagrams/backend/agentic-service-architecture.excalidraw.md
+Output: docs/architecture/diagrams/excalidraw/20260303-143000-arch-agentic-service-v1.excalidraw.md
 ```
 
 ### 2. Frontend Component Hierarchy
 ```bash
 Input: Create component tree for React app
-Output: docs/excalidraw-diagrams/frontend/component-hierarchy.excalidraw.md
+Output: docs/architecture/diagrams/excalidraw/20260303-143000-arch-component-hierarchy-v1.excalidraw.md
 ```
 
 ### 3. Deployment Pipeline
 ```bash
 Input: Show CI/CD workflow from commit to production
-Output: docs/excalidraw-diagrams/deployment/ci-cd-pipeline.excalidraw.md
+Output: docs/architecture/diagrams/excalidraw/20260303-143000-arch-ci-cd-pipeline-v1.excalidraw.md
 ```
 
 ### 4. Claude SDK Session Flow
 ```bash
 Input: Visualize session lifecycle with subagents and hooks
-Output: docs/excalidraw-diagrams/claude-sdk/session-flow.excalidraw.md
+Output: docs/architecture/diagrams/excalidraw/20260303-143000-arch-session-flow-v1.excalidraw.md
 ```
 
 ## Quality Standards

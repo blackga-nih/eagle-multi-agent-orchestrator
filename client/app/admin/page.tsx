@@ -17,6 +17,7 @@ import {
   Zap,
   FlaskConical,
   GitBranch,
+  PenTool,
 } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
@@ -70,6 +71,7 @@ const stats = [
 const quickActions = [
   { label: 'Test Results', href: '/admin/tests', icon: <FlaskConical className="w-5 h-5" />, count: 15 },
   { label: 'Eval Viewer', href: '/admin/eval', icon: <GitBranch className="w-5 h-5" />, count: 3 },
+  { label: 'AI Diagram Studio', href: '/admin/diagrams', icon: <PenTool className="w-5 h-5" />, count: null },
   { label: 'Manage Users', href: '/admin/users', icon: <Users className="w-5 h-5" />, count: MOCK_USERS.length },
   { label: 'Document Templates', href: '/admin/templates', icon: <FileStack className="w-5 h-5" />, count: MOCK_DOCUMENT_TEMPLATES.length },
   { label: 'Agent Skills', href: '/admin/skills', icon: <Bot className="w-5 h-5" />, count: MOCK_AGENT_SKILLS.filter(s => s.is_active).length },

@@ -1,0 +1,258 @@
+# Diagram Registry — maps code paths to Excalidraw architecture diagrams.
+# Used by .github/workflows/pr-diagram-linker.yml and /diagram-linker command.
+#
+# Format:
+#   id:          unique slug
+#   path:        relative path to the .excalidraw or .excalidraw.md file
+#   description: short label shown in PR table
+#   triggers:    list of glob patterns — if any changed file matches, the diagram is linked
+#
+# Special: system-overview uses "**" but only matches when 10+ files change.
+
+diagrams:
+  # ── System-wide ──
+  - id: system-overview
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-system-overview-v1.excalidraw
+    description: "Full system overview — all layers"
+    triggers:
+      - "**"
+
+  - id: eagle-platform
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260217-195858-arch-eagle-platform-v1.excalidraw
+    description: "EAGLE platform architecture"
+    triggers:
+      - "server/**"
+      - "client/**"
+      - "eagle-plugin/**"
+
+  - id: nci-oa-agent-comparison
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-nci-oa-agent-comparison-v1.excalidraw
+    description: "NCI OA agent architecture comparison"
+    triggers:
+      - "eagle-plugin/agents/**"
+      - "server/app/sdk_agentic_service.py"
+
+  # ── Backend ──
+  - id: backend-services
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-backend-services-v1.excalidraw
+    description: "FastAPI routes, services, tool dispatch"
+    triggers:
+      - "server/app/**"
+
+  - id: tool-execution
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-tool-execution-v1.excalidraw
+    description: "Tool execution pipeline"
+    triggers:
+      - "server/app/tool_*.py"
+      - "server/app/sdk_agentic_service.py"
+      - "eagle-plugin/skills/**"
+
+  - id: chat-message-flow
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-chat-message-flow-v1.excalidraw
+    description: "SSE streaming pipeline"
+    triggers:
+      - "server/app/streaming_routes.py"
+      - "server/app/stream_protocol.py"
+      - "client/hooks/use-agent-stream.ts"
+
+  # ── Frontend ──
+  - id: frontend-components
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-frontend-components-v1.excalidraw
+    description: "Next.js component tree"
+    triggers:
+      - "client/app/**"
+      - "client/components/**"
+
+  # ── Database ──
+  - id: database-schema
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-database-schema-v1.excalidraw
+    description: "DynamoDB single-table design"
+    triggers:
+      - "server/app/session_store.py"
+      - "server/app/dynamodb_*.py"
+      - "infrastructure/cdk-eagle/lib/*storage*"
+
+  # ── AI Provider ──
+  - id: ai-provider-abstraction
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-ai-provider-abstraction-v1.excalidraw
+    description: "AI provider abstraction layer"
+    triggers:
+      - "server/app/sdk_agentic_service.py"
+      - "server/app/bedrock_*.py"
+      - "server/app/anthropic_*.py"
+
+  - id: chat-v2-multi-agent
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-chat-v2-multi-agent-v1.excalidraw
+    description: "Chat v2 multi-agent architecture"
+    triggers:
+      - "server/app/sdk_agentic_service.py"
+      - "eagle-plugin/agents/**"
+      - "client/app/chat*/**"
+
+  # ── Auth ──
+  - id: auth-flow
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-auth-flow-v1.excalidraw
+    description: "Cognito auth flow"
+    triggers:
+      - "server/app/auth*.py"
+      - "client/lib/auth*"
+      - "infrastructure/cdk-eagle/lib/*core*"
+
+  # ── AWS Infrastructure ──
+  - id: aws-infrastructure
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-aws-infrastructure-v1.excalidraw
+    description: "AWS infrastructure overview"
+    triggers:
+      - "infrastructure/**"
+      - ".github/workflows/deploy.yml"
+
+  - id: aws-architecture-dark
+    path: docs/excalidraw-diagrams/aws/20260220-175116-arch-aws-architecture-v1.excalidraw.md
+    description: "AWS architecture (dark theme)"
+    triggers:
+      - "infrastructure/cdk-eagle/**"
+
+  - id: aws-architecture-light
+    path: docs/excalidraw-diagrams/aws/20260220-175116-arch-aws-architecture-light-v1.excalidraw.md
+    description: "AWS architecture (light theme)"
+    triggers:
+      - "infrastructure/cdk-eagle/**"
+
+  # ── Testing ──
+  - id: testing-architecture
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-testing-architecture-v1.excalidraw
+    description: "Testing architecture"
+    triggers:
+      - "server/tests/**"
+      - "client/tests/**"
+      - "infrastructure/eval/**"
+
+  # ── Bedrock Flows ──
+  - id: bedrock-simple-chat
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-bedrock-simple-chat-v1.excalidraw
+    description: "Bedrock simple chat flow"
+    triggers:
+      - "server/app/bedrock_*.py"
+
+  - id: bedrock-streaming-tool-use
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-bedrock-streaming-tool-use-v1.excalidraw
+    description: "Bedrock streaming + tool use flow"
+    triggers:
+      - "server/app/bedrock_*.py"
+      - "server/app/stream_protocol.py"
+
+  - id: bedrock-conversation-context
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-bedrock-conversation-context-v1.excalidraw
+    description: "Bedrock conversation context flow"
+    triggers:
+      - "server/app/bedrock_*.py"
+      - "server/app/session_store.py"
+
+  - id: bedrock-extended-thinking
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-bedrock-extended-thinking-v1.excalidraw
+    description: "Bedrock extended thinking flow"
+    triggers:
+      - "server/app/bedrock_*.py"
+
+  - id: bedrock-file-attachment
+    path: docs/architecture/diagrams/excalidraw/obsidian/20260216-212852-arch-bedrock-file-attachment-v1.excalidraw
+    description: "Bedrock file attachment flow"
+    triggers:
+      - "server/app/bedrock_*.py"
+      - "server/app/s3_*.py"
+
+  # ── Use Cases (eagle-plugin) ──
+  - id: uc01-new-acquisition
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc01-new-acquisition-happy-path-v1.excalidraw
+    description: "UC01: New acquisition happy path"
+    triggers:
+      - "eagle-plugin/agents/intake*/**"
+      - "eagle-plugin/agents/supervisor/**"
+      - "eagle-plugin/skills/oa-intake/**"
+
+  - id: uc01-complex-subrouting
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc01-complex-agent-subrouting-v1.excalidraw
+    description: "UC01: Complex agent subrouting"
+    triggers:
+      - "eagle-plugin/agents/**"
+      - "server/app/sdk_agentic_service.py"
+
+  - id: uc02-micro-purchase
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc02-micro-purchase-v1.excalidraw
+    description: "UC02: Micro-purchase workflow"
+    triggers:
+      - "eagle-plugin/agents/procurement*/**"
+      - "eagle-plugin/skills/document*/**"
+
+  - id: uc03-option-exercise
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc03-option-exercise-v1.excalidraw
+    description: "UC03: Option exercise workflow"
+    triggers:
+      - "eagle-plugin/agents/contract*/**"
+
+  - id: uc04-contract-modification
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc04-contract-modification-v1.excalidraw
+    description: "UC04: Contract modification flow"
+    triggers:
+      - "eagle-plugin/agents/contract*/**"
+
+  - id: uc05-co-package-review
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc05-co-package-review-v1.excalidraw
+    description: "UC05: CO package review"
+    triggers:
+      - "eagle-plugin/agents/review*/**"
+      - "eagle-plugin/agents/compliance*/**"
+
+  - id: uc07-contract-closeout
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc07-contract-closeout-v1.excalidraw
+    description: "UC07: Contract closeout"
+    triggers:
+      - "eagle-plugin/agents/contract*/**"
+
+  - id: uc08-shutdown-notification
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc08-shutdown-notification-v1.excalidraw
+    description: "UC08: Shutdown notification"
+    triggers:
+      - "eagle-plugin/agents/notification*/**"
+
+  - id: uc09-score-consolidation
+    path: eagle-plugin/diagrams/excalidraw/20260208-220845-arch-uc09-score-consolidation-v1.excalidraw
+    description: "UC09: Score consolidation"
+    triggers:
+      - "eagle-plugin/agents/eval*/**"
+      - "eagle-plugin/skills/scoring*/**"
+
+  # ── CDK Architecture (already named correctly) ──
+  - id: cdk-stack-architecture
+    path: docs/architecture/20260226-161925-arch-cdk-stack-architecture-v1.excalidraw.md
+    description: "CDK stack architecture"
+    triggers:
+      - "infrastructure/cdk-eagle/**"
+
+  - id: devbox-deploy
+    path: docs/architecture/20260226-161925-arch-devbox-deploy-v1.excalidraw.md
+    description: "EC2 devbox deploy flow"
+    triggers:
+      - "infrastructure/cdk-eagle/**"
+      - "scripts/deploy*"
+
+  - id: eagle-application
+    path: docs/architecture/20260226-161925-arch-eagle-application-v1.excalidraw.md
+    description: "EAGLE application architecture"
+    triggers:
+      - "server/app/**"
+      - "client/app/**"
+
+  - id: github-actions-deploy
+    path: docs/architecture/20260226-161925-arch-github-actions-deploy-v1.excalidraw.md
+    description: "GitHub Actions deploy pipeline"
+    triggers:
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/build.yml"
+
+  - id: validation-workflow
+    path: docs/architecture/20260226-161925-arch-validation-just-workflow-v1.excalidraw.md
+    description: "Validation workflow"
+    triggers:
+      - "server/tests/**"
+      - ".github/workflows/build.yml"

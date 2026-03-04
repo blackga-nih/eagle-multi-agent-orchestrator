@@ -19,7 +19,10 @@ export default defineConfig({
 
   use: {
     // Base URL for the deployed application
-    baseURL: process.env.BASE_URL || 'http://nci-ea-front-o7mgyip4dvih-1328022277.us-east-1.elb.amazonaws.com',
+    baseURL: process.env.BASE_URL || 'http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com',
+
+    // Reuse Cognito session saved by global-setup — all tests start authenticated
+    storageState: 'tests/.auth/user.json',
 
     // Reuse Cognito session saved by global-setup — all tests start authenticated
     storageState: 'tests/.auth/user.json',
@@ -35,22 +38,33 @@ export default defineConfig({
   },
 
   projects: [
+    // Auth setup runs once — saves session to tests/.auth/user.json
+    {
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+      use: { storageState: undefined }, // setup project must NOT use saved state
+    },
+
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], storageState: 'tests/.auth/user.json' },
+      dependencies: ['setup'],
     },
     {
       name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
+      use: { ...devices['Desktop Firefox'], storageState: 'tests/.auth/user.json' },
+      dependencies: ['setup'],
     },
     {
       name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
+      use: { ...devices['Desktop Safari'], storageState: 'tests/.auth/user.json' },
+      dependencies: ['setup'],
     },
     // Mobile viewports
     {
       name: 'Mobile Chrome',
-      use: { ...devices['Pixel 5'] },
+      use: { ...devices['Pixel 5'], storageState: 'tests/.auth/user.json' },
+      dependencies: ['setup'],
     },
   ],
 });

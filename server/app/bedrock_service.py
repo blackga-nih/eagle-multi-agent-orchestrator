@@ -1,10 +1,9 @@
 import boto3
 import json
 import os
-import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional
-from .models import TenantContext, UsageMetric
+from typing import Dict, Any
+from .models import TenantContext
 
 class BedrockAgentService:
     def __init__(self, agent_id: str, agent_alias_id: str = "TSTALIASID"):

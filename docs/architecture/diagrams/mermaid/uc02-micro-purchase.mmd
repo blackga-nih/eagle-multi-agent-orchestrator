@@ -1,0 +1,44 @@
+sequenceDiagram
+    actor User as COR / Program Staff
+    participant UI as Eagle UI
+    participant Agent as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant DocGen as Document Generator Skill
+    participant S3 as S3 Document Store
+
+    Note over User,S3: UC-02: Micro-Purchase (<$15K) - Fast Path
+
+    User->>UI: "I have a $14K quote for lab supplies"
+    UI->>Agent: New session
+    Agent->>Intake: Invoke OA Intake skill
+
+    rect rgb(240, 248, 255)
+        Note over Intake: Streamlined Intake
+        Intake->>UI: "Can you share the quote details?"
+        User->>UI: Uploads quote PDF / provides details
+        UI->>Intake: Quote: $13,800 from Fisher Scientific
+    end
+
+    Intake->>Intake: $13,800 < $15K → Micro-purchase
+    Intake-->>Agent: Determination: micro-purchase
+
+    rect rgb(245, 255, 245)
+        Note over Agent: Minimal Questions
+        Agent->>UI: "Just a few quick items:"
+        Note right of Agent: 1. Funding source?<br/>2. Delivery location?<br/>3. Purchase card or PO?
+        User->>UI: "Grant funds, Building 37, purchase card"
+        UI->>Agent: Answers
+    end
+
+    Agent->>DocGen: Invoke Document Generator (purchase request)
+
+    DocGen->>DocGen: Generate purchase request form
+    DocGen->>S3: Store purchase request
+    S3-->>DocGen: Download URL
+    DocGen-->>Agent: Document ready
+
+    Agent->>UI: Purchase request ready
+    UI->>User: "All set! Here's your purchase request."
+    Note over UI: ✓ Purchase Request<br/>✓ Quote attached<br/>→ Ready for card holder
+
+    Note over User,S3: Total interaction: ~2 minutes

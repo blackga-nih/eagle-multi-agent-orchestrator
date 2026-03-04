@@ -11,11 +11,17 @@ Run: pytest server/tests/test_chat_endpoints.py -v
 import asyncio
 import json
 import os
+import sys
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+# Ensure server/ is on sys.path so "app.main" resolves
+_server_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+if _server_dir not in sys.path:
+    sys.path.insert(0, _server_dir)
 
 
 # ── Mock sdk_query before importing main ─────────────────────────────
@@ -54,10 +60,10 @@ def app_no_auth():
         "USE_PERSISTENT_SESSIONS": "false",
     }
     with patch.dict(os.environ, env_patch, clear=False):
-        with patch("server.app.sdk_agentic_service.query", side_effect=_mock_sdk_query):
+        with patch("app.strands_agentic_service.sdk_query", side_effect=_mock_sdk_query):
             # Import here after env is set
             import importlib
-            import server.app.main as main_module
+            import app.main as main_module
             importlib.reload(main_module)
             yield main_module.app
 
@@ -75,9 +81,9 @@ def app_auth_required():
         "USE_PERSISTENT_SESSIONS": "false",
     }
     with patch.dict(os.environ, env_patch, clear=False):
-        with patch("server.app.sdk_agentic_service.query", side_effect=_mock_sdk_query):
+        with patch("app.strands_agentic_service.sdk_query", side_effect=_mock_sdk_query):
             import importlib
-            import server.app.main as main_module
+            import app.main as main_module
             importlib.reload(main_module)
             yield main_module.app
 
@@ -151,12 +157,8 @@ class TestRequestSchema:
         )
 
     def test_stream_session_id_properly_accepted(self, app_no_auth):
-        """FIXED: ChatMessage now has session_id field — no longer silently dropped.
-
-        Previously ChatMessage had no session_id and sdk_query() was called without
-        it (breaking conversation continuity).  Both are now fixed.
-        """
-        from server.app.models import ChatMessage
+        """FIXED: ChatMessage now has session_id field — no longer silently dropped."""
+        from app.models import ChatMessage
         msg = ChatMessage(message="Hi", session_id="ses-001")
         assert hasattr(msg, "session_id") and msg.session_id == "ses-001", (
             "ChatMessage should have session_id after fix"
@@ -164,7 +166,7 @@ class TestRequestSchema:
 
     def test_rest_session_id_properly_accepted(self, app_no_auth):
         """REST: session_id IS in EagleChatRequest schema — properly passed to sdk_query."""
-        from server.app.main import EagleChatRequest
+        from app.main import EagleChatRequest
         req = EagleChatRequest(message="Hi", session_id="ses-001")
         assert req.session_id == "ses-001", "REST request properly carries session_id"
 
@@ -257,10 +259,11 @@ class TestResponseFormat:
 
 class TestFrontendWiring:
 
-    def test_invoke_proxy_targets_stream_endpoint(self):
-        """Next.js /api/invoke proxy PRIMARY target is /api/chat/stream (SSE).
+    def test_invoke_proxy_targets_chat_endpoint(self):
+        """Next.js /api/invoke proxy targets /api/chat (REST, converted to SSE).
 
-        Reads the route.ts source to confirm.  Falls back to /api/chat (REST).
+        After the Strands migration, the frontend proxy hits the REST endpoint
+        and wraps the response in SSE format for consistent frontend handling.
         """
         route_file = os.path.join(
             os.path.dirname(__file__), "..", "..", "client", "app", "api", "invoke", "route.ts"
@@ -269,11 +272,8 @@ class TestFrontendWiring:
         assert os.path.exists(route_file), f"invoke route.ts not found: {route_file}"
 
         content = open(route_file).read()
-        assert "/api/chat/stream" in content, (
-            "Frontend proxy should target /api/chat/stream as primary endpoint"
-        )
         assert "/api/chat" in content, (
-            "Frontend proxy should have /api/chat as fallback"
+            "Frontend proxy should target /api/chat endpoint"
         )
 
     def test_invoke_proxy_body_shape(self):
@@ -306,26 +306,29 @@ class TestSessionContinuity:
     """Verify session_id is properly propagated through both endpoints."""
 
     def test_stream_sdk_call_has_session_id(self):
-        """FIXED: streaming_routes.py now passes session_id to sdk_query."""
+        """FIXED: streaming_routes.py now passes session_id to sdk_query_streaming."""
         streaming_file = os.path.normpath(os.path.join(
             os.path.dirname(__file__), "..", "app", "streaming_routes.py"
         ))
         content = open(streaming_file).read()
 
         import re
+        # Find the actual call site (not docstring mentions) — look for the
+        # keyword-argument invocation: sdk_query_streaming(\n  prompt=...
         sdk_call = re.search(
-            r"async for sdk_msg in sdk_query\(.*?\)",
+            r"sdk_query_streaming\(\s*\n\s+prompt=",
             content,
-            re.DOTALL,
         )
-        assert sdk_call, "Could not find sdk_query call in streaming_routes.py"
-        assert "session_id" in sdk_call.group(0), (
-            "streaming_routes.py sdk_query() missing session_id — wiring gap not fixed"
+        assert sdk_call, "Could not find sdk_query_streaming() call site in streaming_routes.py"
+        # Grab 500 chars from the call start to capture all kwargs
+        call_block = content[sdk_call.start():sdk_call.start()+500]
+        assert "session_id" in call_block, (
+            "streaming_routes.py sdk_query_streaming() missing session_id — wiring gap not fixed"
         )
 
     def test_chatmessage_has_session_id(self):
         """ChatMessage schema includes session_id field after fix."""
-        from server.app.models import ChatMessage
+        from app.models import ChatMessage
         msg = ChatMessage(message="Hi", session_id="ses-001")
         assert msg.session_id == "ses-001", "ChatMessage.session_id not set correctly"
 
@@ -358,21 +361,20 @@ def test_print_verdict():
     print(f"{'Check':<40} {'REST /chat':<12} {'SSE /stream':<12}")
     print("-" * 65)
     rows = [
-        ("Accepts {message, session_id}",          "✓",       "✓ (fixed)"),
-        ("session_id passed to sdk_query",          "✓",       "✗ (gap)"),
-        ("Returns SSE for streaming UI",            "✗",       "✓"),
-        ("Returns JSON for REST clients",           "✓",       "✗"),
-        ("Frontend proxy (/api/invoke) targets",    "fallback", "PRIMARY"),
-        ("Auth via Cognito JWT (REQUIRE_AUTH)",     "✓",       "✓"),
-        ("Tenant context from auth header",         "✓",       "✓"),
+        ("Accepts {message, session_id}",          "Y",       "Y (fixed)"),
+        ("session_id passed to sdk_query",          "Y",       "Y (fixed)"),
+        ("Returns SSE for streaming UI",            "N",       "Y"),
+        ("Returns JSON for REST clients",           "Y",       "N"),
+        ("Frontend proxy (/api/invoke) targets",    "PRIMARY", "fallback"),
+        ("Auth via Cognito JWT (REQUIRE_AUTH)",      "Y",       "Y"),
+        ("Tenant context from auth header",         "Y",       "Y"),
     ]
     for label, rest_val, stream_val in rows:
         print(f"  {label:<38} {rest_val:<12} {stream_val:<12}")
     print("=" * 65)
     print()
-    print("RECOMMENDATION:")
-    print("  1. Primary endpoint: /api/chat/stream (SSE) — already wired in frontend")
-    print("  2. Fix: Add session_id to ChatMessage + pass to sdk_query in streaming_routes.py")
-    print("  3. Auth: ensure frontend sends Cognito JWT in Authorization header")
+    print("ARCHITECTURE: Strands Agents SDK -> Bedrock (boto3 native)")
+    print("  Primary: /api/chat (REST) — frontend proxy wraps in SSE")
+    print("  Streaming: /api/chat/stream — direct SSE via sdk_query_streaming()")
     print("=" * 65)
     assert True

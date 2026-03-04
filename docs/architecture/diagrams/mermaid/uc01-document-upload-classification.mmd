@@ -1,0 +1,59 @@
+sequenceDiagram
+    actor User as COR / Program Staff
+    participant UI as Eagle UI
+    participant Sup as Supervisor Agent
+    participant Intake as OA Intake Skill
+    participant Market as Market Intelligence Skill
+    participant DocGen as Document Generator Skill
+    participant S3 as S3 Package Store
+
+    Note over User,S3: UC-01: Document Upload & Classification Flow (MVP1)
+
+    User->>UI: Active intake session (CT scanner, $600K)
+    Note over UI: Checklist: SOW ❌ | IGCE ❌ | AP ❌<br/>Market Research ❌ | Quotes ❌
+
+    User->>UI: Uploads "Siemens_CT_Quote_2026.pdf"
+    UI->>Sup: File uploaded
+
+    rect rgb(240, 248, 255)
+        Note over Sup: Upload Classification
+        Sup->>Sup: Analyze uploaded file
+        Sup->>Sup: OCR/text extraction
+        Sup->>Sup: Pattern match:<br/>• Contains $ amounts → pricing data<br/>• "Quote" in filename → vendor quote<br/>• Vendor name: Siemens Healthineers<br/>• Equipment model: SOMATOM X.ceed<br/>• Price: $587,000
+        Sup->>Sup: Classification: VENDOR QUOTE<br/>Confidence: 98%
+    end
+
+    Sup->>UI: "I identified this as a vendor quote from Siemens<br/>for $587,000 (SOMATOM X.ceed).<br/>Adding to your Market Research file."
+    UI->>User: Quote classified and filed
+
+    rect rgb(245, 255, 245)
+        Note over Sup,Market: Update Market Intelligence
+        Sup->>Market: Invoke Market Intelligence skill
+        Market->>Market: Add to pricing database:<br/>Siemens SOMATOM X.ceed = $587K<br/>Cross-reference with GSA pricing<br/>Compare to GE, Philips, Canon
+        Market-->>Sup: Price analysis:<br/>$587K within market range ($500-$700K)<br/>Fair and reasonable: YES
+    end
+
+    Note over UI: Checklist updated: Quotes ✓ (1 of 3 recommended)
+
+    User->>UI: Uploads "GE_CT_Pricing_Email.png"
+    UI->>Sup: Screenshot uploaded
+
+    Sup->>Sup: OCR extraction from screenshot
+    Sup->>Sup: Pattern match:<br/>• Email headers detected (From, To, Date)<br/>• Contains pricing: $612,000<br/>• Vendor: GE Healthcare<br/>• Model: Revolution Apex
+
+    Sup->>UI: "Found a GE Healthcare email with pricing at $612,000.<br/>Adding as second vendor quote."
+
+    Note over UI: Checklist updated: Quotes ✓ (2 of 3)
+
+    User->>UI: "I think that's enough quotes. Generate the IGCE."
+    Sup->>DocGen: Invoke Document Generator (IGCE)
+
+    DocGen->>DocGen: Generate IGCE using extracted pricing:<br/>• Siemens: $587,000<br/>• GE: $612,000<br/>• Average: $599,500<br/>• Installation estimate: $45,000<br/>• Training: $15,000<br/>• Total IGCE: $659,500
+
+    DocGen->>S3: Store IGCE + supporting quotes
+    S3-->>DocGen: Download URLs
+    DocGen-->>Sup: IGCE ready
+
+    Sup->>UI: IGCE generated from your quotes
+    UI->>User: ✓ IGCE ($659,500) with vendor quotes attached
+    Note over UI: Checklist: IGCE ✓ | Quotes ✓

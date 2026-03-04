@@ -1,8 +1,7 @@
-from typing import Dict, Optional
-from datetime import datetime, timedelta
+from typing import Dict
+from datetime import datetime
 from app.models import SubscriptionTier, TierLimits, SubscriptionUsage
 from app import session_store
-from decimal import Decimal
 
 class SubscriptionService:
     def __init__(self):

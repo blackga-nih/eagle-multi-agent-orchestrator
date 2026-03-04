@@ -4,8 +4,25 @@ import { useState, useCallback, useRef } from 'react';
 import { StreamEvent, AuditLogEntry, parseStreamEvent, streamEventToMessage } from '@/types/stream';
 import { Message, DocumentInfo } from '@/types/chat';
 import { generateUUID } from '@/lib/uuid';
+import {
+  CLIENT_SIDE_TOOLS,
+  executeClientTool,
+  ClientToolResult,
+} from '@/lib/client-tools';
 
 const API_URL = '/api/invoke';
+
+/** Payload emitted to onToolUse for every tool invocation detected in the stream. */
+export interface ToolUseEvent {
+  toolName: string;
+  input: Record<string, unknown>;
+  toolUseId: string;
+  isClientSide: boolean;
+  /** Undefined while running; populated once execution completes (client-side only). */
+  result?: ClientToolResult;
+  /** Execution target tag. */
+  executionTarget: 'client' | 'server';
+}
 
 export interface UseAgentStreamOptions {
   onMessage?: (message: Message) => void;
@@ -13,7 +30,15 @@ export interface UseAgentStreamOptions {
   onComplete?: () => void;
   onError?: (error: string) => void;
   onDocumentGenerated?: (doc: DocumentInfo) => void;
+  /**
+   * Called for every tool_use event.
+   * Fired first with result=undefined (tool is starting), then again once
+   * a client-side tool finishes (result is populated).
+   */
+  onToolUse?: (event: ToolUseEvent) => void;
   getToken?: () => Promise<string>;
+  /** Active session ID — forwarded to client tools for localStorage namespacing. */
+  sessionId?: string;
 }
 
 export interface UseAgentStreamReturn {
@@ -42,10 +67,16 @@ function parseDocumentToolResult(event: StreamEvent): DocumentInfo | null {
     const data = typeof tr.result === 'string' ? JSON.parse(tr.result) : tr.result;
     if (!data || typeof data !== 'object') return null;
 
+    // Reject error responses (e.g. "Unknown document type")
+    if (data.error) return null;
+
+    // Require at least a real title or document_type — reject empty/stub results
+    if (!data.title && !data.document_type && !data.s3_key) return null;
+
     return {
       document_id: data.document_id ?? data.s3_key ?? undefined,
       document_type: data.document_type ?? 'unknown',
-      title: data.title ?? 'Untitled Document',
+      title: data.title ?? data.document_type ?? 'Document',
       content: data.content ?? undefined,
       status: data.status ?? undefined,
       word_count: data.word_count ?? undefined,
@@ -147,6 +178,7 @@ function detectDocumentTypesFromText(text: string): DocumentInfo[] {
  * - SSE streaming via /api/invoke proxy route
  * - Parsing events into typed StreamEvent objects
  * - Converting text events to Message objects
+ * - Client-side tool execution (think, code, editor) via executeClientTool()
  * - Detecting create_document tool results and emitting DocumentInfo
  * - JWT authentication via getToken callback
  * - Collecting all events for audit logging
@@ -181,8 +213,16 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     const finalSessionId = sessionId || generateUUID();
     const queryStartTime = new Date();
     let accumulatedText = '';
+    // Stable ID used for the single streaming assistant message.
+    // All text chunks for one response share this ID so the UI upserts
+    // rather than appending a new bubble per chunk.
+    const streamingMsgId = `stream-${Date.now()}`;
     let shouldFetchDocs = false;
     const emittedDocKeys = new Set<string>();
+
+    // The session to use for client tool localStorage namespacing.
+    // Prefer the sessionId passed to sendQuery; fall back to options.sessionId.
+    const activeSessionId = finalSessionId || options.sessionId;
 
     try {
       // Build headers with JWT if available
@@ -233,7 +273,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
             if (line.startsWith('data: ')) {
               const data = line.slice(6).trim();
               if (data) {
-                processEventData(data);
+                await processEventData(data, activeSessionId);
               }
             }
           }
@@ -247,10 +287,10 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
           if (trimmed.startsWith('data: ')) {
             const data = trimmed.slice(6);
             if (data) {
-              processEventData(data);
+              await processEventData(data, activeSessionId);
             }
           } else if (trimmed.startsWith('{')) {
-            processEventData(trimmed);
+            await processEventData(trimmed, activeSessionId);
           }
         }
       }
@@ -275,7 +315,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
       setIsStreaming(false);
     }
 
-    function processEventData(data: string) {
+    async function processEventData(data: string, sid: string | undefined) {
       const event = parseStreamEvent(data);
       if (!event) return;
 
@@ -287,13 +327,54 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
       setLogs(prev => [...prev, logEntry]);
       options.onEvent?.(event);
 
-      // Handle text messages
+      // Handle text messages — accumulate into a single streaming bubble.
+      // The backend sends one event per text chunk (and an empty one as a
+      // connection handshake). We use a stable streamingMsgId so the UI can
+      // upsert the same message rather than appending a new one each chunk.
       if (event.type === 'text') {
         accumulatedText += event.content || '';
-        const message = streamEventToMessage(event, logEntry.id);
-        if (message) {
-          setLastMessage(message);
-          options.onMessage?.(message);
+        if (!accumulatedText) return; // skip empty handshake event
+        const message: Message = {
+          id: streamingMsgId,
+          role: 'assistant',
+          content: accumulatedText,
+          timestamp: new Date(event.timestamp),
+          reasoning: event.reasoning,
+          agent_id: event.agent_id,
+          agent_name: event.agent_name,
+        };
+        setLastMessage(message);
+        options.onMessage?.(message);
+      }
+
+      // Handle tool_use events — dispatch client-side tools or emit server notification.
+      if (event.type === 'tool_use' && event.tool_use) {
+        const toolName = event.tool_use.name;
+        const toolInput = (event.tool_use.input ?? {}) as Record<string, unknown>;
+        const toolUseId = event.tool_use.tool_use_id ?? `tool-${Date.now()}`;
+        const isClientSide = CLIENT_SIDE_TOOLS.has(toolName);
+
+        // Notify UI that the tool is starting
+        options.onToolUse?.({
+          toolName,
+          input: toolInput,
+          toolUseId,
+          isClientSide,
+          executionTarget: isClientSide ? 'client' : 'server',
+          result: undefined,
+        });
+
+        if (isClientSide) {
+          // Execute the tool in the browser and then notify UI with the result
+          const result = await executeClientTool(toolName, toolInput, sid);
+          options.onToolUse?.({
+            toolName,
+            input: toolInput,
+            toolUseId,
+            isClientSide: true,
+            executionTarget: 'client',
+            result,
+          });
         }
       }
 
@@ -308,25 +389,32 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         }
       }
 
-      // Handle complete event — REST fallback path
-      // When streaming fails and the REST endpoint is used, tool_result events
-      // are not sent. Instead the complete event carries tools_called metadata.
+      // Handle complete event — REST/fallback path
+      // When tool_result events were already received (streaming path), skip
+      // text-based parsing to avoid duplicate document cards.
       if (event.type === 'complete') {
         const toolsCalled = event.metadata?.tools_called;
         if (Array.isArray(toolsCalled) && toolsCalled.includes('create_document')) {
           const expectedCount = toolsCalled.filter((t: string) => t === 'create_document').length;
 
-          // Try immediate text-based parsing first (S3 filename patterns)
-          const docs = parseDocumentsFromText(accumulatedText);
-          for (const doc of docs) {
-            if (doc.s3_key) emittedDocKeys.add(doc.s3_key);
-            setLastDocument(doc);
-            options.onDocumentGenerated?.(doc);
-          }
+          // Skip text parsing if tool_result events already provided the docs
+          if (emittedDocKeys.size < expectedCount) {
+            const docs = parseDocumentsFromText(accumulatedText);
+            for (const doc of docs) {
+              // Skip if this filename matches an already-emitted key
+              const name = doc.s3_key || '';
+              const alreadyEmitted = [...emittedDocKeys].some(k => k.endsWith(name));
+              if (alreadyEmitted) continue;
 
-          // If text parsing found fewer docs than expected, flag for API + template fallback
-          if (docs.length < expectedCount) {
-            shouldFetchDocs = true;
+              if (doc.s3_key) emittedDocKeys.add(doc.s3_key);
+              setLastDocument(doc);
+              options.onDocumentGenerated?.(doc);
+            }
+
+            // If still fewer docs than expected, flag for API fallback
+            if (emittedDocKeys.size < expectedCount) {
+              shouldFetchDocs = true;
+            }
           }
         }
       }
@@ -380,9 +468,13 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
             const prefix = prefixMatch?.[1]?.toLowerCase() || '';
             const typeInfo = DOC_TYPE_MAP[prefix];
 
+            // Skip documents without a recognizable type — avoids "unknown / Untitled" cards
+            const docType = typeInfo?.type || doc.type;
+            if (!docType) continue;
+
             const docInfo: DocumentInfo = {
               document_id: name || key,
-              document_type: typeInfo?.type || doc.type || 'unknown',
+              document_type: docType,
               title: typeInfo?.label || name || 'Document',
               s3_key: key,
               status: 'saved',
