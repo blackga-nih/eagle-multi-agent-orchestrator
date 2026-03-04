@@ -1,55 +1,280 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, Search, Bot, Edit2, Trash2, Play, Pause, Zap, Settings, Terminal, Brain } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Plus, Search, Bot, Trash2, Zap, Brain, Loader2, AlertCircle, RefreshCw,
+  Play, Pause, Package, Send, CheckCircle2, Eye, Edit2, XCircle, Save, History,
+} from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
 import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
 import { Tabs, TabPanel } from '@/components/ui/tabs';
-import {
-  MOCK_AGENT_SKILLS,
-  MOCK_SYSTEM_PROMPTS,
-  getSkillTypeColor,
-  formatDate,
-} from '@/lib/mock-data';
-import { AgentSkill, SystemPrompt, SkillType, AgentRole } from '@/types/schema';
+import { useAuth } from '@/contexts/auth-context';
+import { pluginApi, promptApi, skillApi } from '@/lib/admin-api';
+import type { PluginEntity, PromptOverride, CustomSkill, SkillStatus } from '@/types/admin';
 
-const skillTypeLabels: Record<SkillType, string> = {
-  document_gen: 'Document Generation',
-  data_extraction: 'Data Extraction',
-  validation: 'Validation',
-  search: 'Search',
+// ---------------------------------------------------------------------------
+// Status helpers
+// ---------------------------------------------------------------------------
+
+const statusConfig: Record<SkillStatus, { label: string; color: string; icon: React.ReactNode }> = {
+  draft: { label: 'Draft', color: 'bg-amber-100 text-amber-700', icon: <Edit2 className="w-3 h-3" /> },
+  review: { label: 'In Review', color: 'bg-blue-100 text-blue-700', icon: <Eye className="w-3 h-3" /> },
+  active: { label: 'Active', color: 'bg-green-100 text-green-700', icon: <Play className="w-3 h-3" /> },
+  disabled: { label: 'Disabled', color: 'bg-gray-100 text-gray-500', icon: <Pause className="w-3 h-3" /> },
 };
 
-const agentRoleLabels: Record<AgentRole, string> = {
-  intake_agent: 'Intake Agent',
-  document_agent: 'Document Agent',
-  review_agent: 'Review Agent',
-  orchestrator: 'Orchestrator',
-};
+function formatDate(d: string): string {
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
-const tabs = [
-  { id: 'skills', label: 'Agent Skills', icon: <Zap className="w-4 h-4" />, badge: MOCK_AGENT_SKILLS.length },
-  { id: 'prompts', label: 'System Prompts', icon: <Brain className="w-4 h-4" />, badge: MOCK_SYSTEM_PROMPTS.length },
-];
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export default function SkillsPage() {
+  const { getToken } = useAuth();
+
+  // Data state
+  const [pluginAgents, setPluginAgents] = useState<PluginEntity[]>([]);
+  const [promptOverrides, setPromptOverrides] = useState<PromptOverride[]>([]);
+  const [pluginSkills, setPluginSkills] = useState<PluginEntity[]>([]);
+  const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
+
+  // UI state
   const [activeTab, setActiveTab] = useState('skills');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSkill, setSelectedSkill] = useState<AgentSkill | null>(null);
-  const [selectedPrompt, setSelectedPrompt] = useState<SystemPrompt | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Notifications
+  const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Auto-dismiss notifications
+  useEffect(() => {
+    if (!notification) return;
+    const t = setTimeout(() => setNotification(null), 5000);
+    return () => clearTimeout(t);
+  }, [notification]);
+
+  // Modals
+  const [selectedPluginSkill, setSelectedPluginSkill] = useState<PluginEntity | null>(null);
+  const [selectedCustomSkill, setSelectedCustomSkill] = useState<CustomSkill | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<PluginEntity | null>(null);
   const [showNewSkillModal, setShowNewSkillModal] = useState(false);
 
-  const filteredSkills = MOCK_AGENT_SKILLS.filter(s =>
-    s.skill_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  // Prompt editing — single unified editor
+  const [promptBody, setPromptBody] = useState('');
+  const [promptDirty, setPromptDirty] = useState(false);
+
+  // New skill form
+  const [newSkill, setNewSkill] = useState({
+    name: '', display_name: '', description: '', prompt_body: '',
+    triggers: '', tools: '', model: '', visibility: 'private',
+  });
+
+  // -----------------------------------------------------------------------
+  // Data fetching
+  // -----------------------------------------------------------------------
+
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [agents, skills, overrides, custom] = await Promise.all([
+        pluginApi.list(getToken, 'agents'),
+        pluginApi.list(getToken, 'skills'),
+        promptApi.list(getToken),
+        skillApi.list(getToken),
+      ]);
+      setPluginAgents(agents);
+      setPluginSkills(skills);
+      setPromptOverrides(overrides);
+      setCustomSkills(custom);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // -----------------------------------------------------------------------
+  // Tab counts
+  // -----------------------------------------------------------------------
+
+  const tabs = [
+    { id: 'skills', label: 'Skills', icon: <Zap className="w-4 h-4" />, badge: pluginSkills.length + customSkills.length },
+    { id: 'prompts', label: 'Agent Prompts', icon: <Brain className="w-4 h-4" />, badge: pluginAgents.length },
+  ];
+
+  // -----------------------------------------------------------------------
+  // Filtering
+  // -----------------------------------------------------------------------
+
+  const q = searchQuery.toLowerCase();
+  const filteredPluginSkills = pluginSkills.filter(s =>
+    s.name.toLowerCase().includes(q) || (s.metadata?.description as string || '').toLowerCase().includes(q),
+  );
+  const filteredCustomSkills = customSkills.filter(s =>
+    s.name.toLowerCase().includes(q) || s.display_name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+  );
+  const filteredAgents = pluginAgents.filter(a =>
+    a.name.toLowerCase().includes(q) || (a.metadata?.description as string || '').toLowerCase().includes(q),
   );
 
-  const filteredPrompts = MOCK_SYSTEM_PROMPTS.filter(p =>
-    p.prompt_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // -----------------------------------------------------------------------
+  // Prompt helpers
+  // -----------------------------------------------------------------------
+
+  function getOverrideForAgent(agentName: string): PromptOverride | undefined {
+    return promptOverrides.find(o => o.agent_name === agentName);
+  }
+
+  /** Get the effective prompt content: override body if exists, otherwise base content. */
+  function getEffectivePrompt(agent: PluginEntity): string {
+    const override = getOverrideForAgent(agent.name);
+    return override ? override.prompt_body : agent.content;
+  }
+
+  /** Get the effective version number for display. */
+  function getEffectiveVersion(agent: PluginEntity): number {
+    const override = getOverrideForAgent(agent.name);
+    return override ? override.version : agent.version;
+  }
+
+  /** Format version label: "v1 2026-01-15 (base)" or "v3 2026-03-04" */
+  function formatVersionLabel(agent: PluginEntity): string {
+    const override = getOverrideForAgent(agent.name);
+    if (!override) {
+      return `v${agent.version} ${formatDate(agent.updated_at)} (base prompt)`;
+    }
+    return `v${override.version} ${formatDate(override.updated_at)}`;
+  }
+
+  /** Build the version timeline string. */
+  function getVersionTimeline(agent: PluginEntity): string {
+    const override = getOverrideForAgent(agent.name);
+    const basePart = `v${agent.version} ${formatDate(agent.created_at)} (base)`;
+    if (!override) return basePart;
+    return `${basePart} → v${override.version} ${formatDate(override.updated_at)}`;
+  }
+
+  function openAgentModal(agent: PluginEntity) {
+    setSelectedAgent(agent);
+    setPromptBody(getEffectivePrompt(agent));
+    setPromptDirty(false);
+  }
+
+  async function savePrompt() {
+    if (!selectedAgent || !promptBody.trim()) return;
+    setSaving(true);
+    try {
+      // Save as a full replacement (is_append=false) since it's a single unified editor
+      await promptApi.set(getToken, selectedAgent.name, { prompt_body: promptBody, is_append: false });
+      const override = getOverrideForAgent(selectedAgent.name);
+      const newVersion = (override?.version || selectedAgent.version) + 1;
+      setNotification({
+        type: 'success',
+        message: `Prompt for "${selectedAgent.name}" saved as v${newVersion} (${new Date().toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })})`,
+      });
+      setSelectedAgent(null);
+      await fetchData();
+    } catch (err) {
+      setNotification({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Failed to save prompt',
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetToBase() {
+    if (!selectedAgent) return;
+    const override = getOverrideForAgent(selectedAgent.name);
+    if (!override) return;
+    setSaving(true);
+    try {
+      await promptApi.delete(getToken, selectedAgent.name);
+      setNotification({
+        type: 'success',
+        message: `Prompt for "${selectedAgent.name}" reset to base prompt (v${selectedAgent.version})`,
+      });
+      setSelectedAgent(null);
+      await fetchData();
+    } catch (err) {
+      setNotification({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Failed to reset prompt',
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Custom skill actions
+  // -----------------------------------------------------------------------
+
+  async function handleCreateSkill() {
+    setSaving(true);
+    try {
+      await skillApi.create(getToken, {
+        name: newSkill.name,
+        display_name: newSkill.display_name,
+        description: newSkill.description,
+        prompt_body: newSkill.prompt_body,
+        triggers: newSkill.triggers ? newSkill.triggers.split(',').map(t => t.trim()) : [],
+        tools: newSkill.tools ? newSkill.tools.split(',').map(t => t.trim()) : [],
+        model: newSkill.model || undefined,
+        visibility: newSkill.visibility,
+      });
+      setShowNewSkillModal(false);
+      setNewSkill({ name: '', display_name: '', description: '', prompt_body: '', triggers: '', tools: '', model: '', visibility: 'private' });
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create skill');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSubmitSkill(id: string) {
+    try {
+      await skillApi.submit(getToken, id);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit skill');
+    }
+  }
+
+  async function handlePublishSkill(id: string) {
+    try {
+      await skillApi.publish(getToken, id);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to publish skill');
+    }
+  }
+
+  async function handleDeleteSkill(id: string) {
+    try {
+      await skillApi.delete(getToken, id);
+      setSelectedCustomSkill(null);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete skill');
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------------
 
   return (
     <AuthGuard>
@@ -66,13 +291,23 @@ export default function SkillsPage() {
               { label: 'Agent Skills' },
             ]}
             actions={
-              <button
-                onClick={() => setShowNewSkillModal(true)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors shadow-md shadow-blue-200"
-              >
-                <Plus className="w-4 h-4" />
-                New Skill
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => fetchData()}
+                  disabled={isLoading}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button
+                  onClick={() => setShowNewSkillModal(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors shadow-md shadow-blue-200"
+                >
+                  <Plus className="w-4 h-4" />
+                  New Skill
+                </button>
+              </div>
             }
           />
 
@@ -87,7 +322,7 @@ export default function SkillsPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
-                placeholder={activeTab === 'skills' ? 'Search skills...' : 'Search prompts...'}
+                placeholder={activeTab === 'skills' ? 'Search skills...' : 'Search agent prompts...'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
@@ -95,347 +330,513 @@ export default function SkillsPage() {
             </div>
           </div>
 
-          {/* Skills Tab */}
-          <TabPanel isActive={activeTab === 'skills'}>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredSkills.map((skill) => (
-                <div
-                  key={skill.id}
-                  className="bg-white rounded-2xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-lg transition-all cursor-pointer group"
-                  onClick={() => setSelectedSkill(skill)}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className={`p-3 rounded-xl ${skill.is_active ? 'bg-purple-100' : 'bg-gray-100'}`}>
-                      <Bot className={`w-6 h-6 ${skill.is_active ? 'text-purple-600' : 'text-gray-400'}`} />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {skill.is_active ? (
-                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-full bg-green-100 text-green-700">
-                          <Play className="w-3 h-3" />
-                          Active
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-full bg-gray-100 text-gray-500">
-                          <Pause className="w-3 h-3" />
-                          Inactive
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <h3 className="font-semibold text-gray-900 mb-1 group-hover:text-blue-600 transition-colors">
-                    {skill.skill_name}
-                  </h3>
-                  <p className="text-sm text-gray-500 mb-3 line-clamp-2">{skill.description}</p>
-
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${getSkillTypeColor(skill.skill_type)}`}>
-                      {skillTypeLabels[skill.skill_type]}
-                    </span>
-                  </div>
-
-                  <div className="pt-3 border-t border-gray-100">
-                    <div className="flex items-center justify-between text-xs text-gray-500">
-                      <span>Model: {skill.config.model || 'default'}</span>
-                      <span>Temp: {skill.config.temperature ?? 'default'}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {filteredSkills.length === 0 && (
-              <div className="text-center py-12">
-                <Bot className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">No skills found.</p>
+          {/* Error */}
+          {error && (
+            <div className="mb-6 flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-medium">Error</p>
+                <p className="text-sm text-red-600">{error}</p>
               </div>
-            )}
-          </TabPanel>
+              <button onClick={() => setError(null)} className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200">
+                Dismiss
+              </button>
+            </div>
+          )}
 
-          {/* Prompts Tab */}
-          <TabPanel isActive={activeTab === 'prompts'}>
-            <div className="space-y-4">
-              {filteredPrompts.map((prompt) => (
-                <div
-                  key={prompt.id}
-                  className="bg-white rounded-xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
-                  onClick={() => setSelectedPrompt(prompt)}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-4">
-                      <div className="p-3 bg-purple-100 rounded-xl">
-                        <Brain className="w-6 h-6 text-purple-600" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                          {prompt.prompt_name}
+          {/* Notification */}
+          {notification && (
+            <div className={`mb-6 flex items-center gap-3 p-4 rounded-xl border ${
+              notification.type === 'success'
+                ? 'bg-green-50 border-green-200 text-green-700'
+                : 'bg-red-50 border-red-200 text-red-700'
+            }`}>
+              {notification.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+              ) : (
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              )}
+              <p className="flex-1 text-sm font-medium">{notification.message}</p>
+              <button onClick={() => setNotification(null)} className="text-xs opacity-60 hover:opacity-100">
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Loading */}
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 text-[#003149] animate-spin mb-4" />
+              <p className="text-gray-500 text-sm">Loading data...</p>
+            </div>
+          )}
+
+          {/* ─── Skills Tab ─── */}
+          {!isLoading && (
+            <TabPanel isActive={activeTab === 'skills'}>
+              {/* Bundled Skills Section */}
+              {filteredPluginSkills.length > 0 && (
+                <>
+                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Bundled Skills</h3>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mb-8">
+                    {filteredPluginSkills.map((skill) => (
+                      <div
+                        key={skill.name}
+                        className="bg-white rounded-2xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-lg transition-all cursor-pointer group"
+                        onClick={() => setSelectedPluginSkill(skill)}
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="p-3 rounded-xl bg-gray-100">
+                            <Package className="w-6 h-6 text-gray-600" />
+                          </div>
+                          <span className="text-[10px] font-bold uppercase px-2 py-1 rounded-full bg-gray-100 text-gray-500">
+                            Bundled
+                          </span>
+                        </div>
+                        <h3 className="font-semibold text-gray-900 mb-1 group-hover:text-blue-600 transition-colors">
+                          {skill.name}
                         </h3>
-                        <div className="flex items-center gap-3 mt-1">
-                          <span className="text-xs text-gray-500">{agentRoleLabels[prompt.agent_role]}</span>
-                          <span className="text-xs text-gray-400">v{prompt.version}</span>
-                          <span className="text-xs text-gray-400">Updated {formatDate(prompt.updated_at)}</span>
+                        <p className="text-sm text-gray-500 mb-3 line-clamp-2">
+                          {(skill.metadata?.description as string) || skill.content.slice(0, 120) + '...'}
+                        </p>
+                        <div className="pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                          <span>v{skill.version}</span>
+                          <span>{formatDate(skill.updated_at)}</span>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {prompt.is_active ? (
-                        <Badge variant="success" size="sm">Active</Badge>
-                      ) : (
-                        <Badge variant="default" size="sm">Inactive</Badge>
-                      )}
-                    </div>
+                    ))}
                   </div>
-                  <div className="mt-3 ml-16">
-                    <p className="text-sm text-gray-600 line-clamp-2">{prompt.content}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                </>
+              )}
 
-            {filteredPrompts.length === 0 && (
-              <div className="text-center py-12">
-                <Brain className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">No prompts found.</p>
+              {/* Custom Skills Section */}
+              {filteredCustomSkills.length > 0 && (
+                <>
+                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Custom Skills</h3>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mb-8">
+                    {filteredCustomSkills.map((skill) => {
+                      const cfg = statusConfig[skill.status];
+                      return (
+                        <div
+                          key={skill.skill_id}
+                          className="bg-white rounded-2xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-lg transition-all cursor-pointer group"
+                          onClick={() => setSelectedCustomSkill(skill)}
+                        >
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="p-3 rounded-xl bg-purple-100">
+                              <Bot className="w-6 h-6 text-purple-600" />
+                            </div>
+                            <span className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-full ${cfg.color}`}>
+                              {cfg.icon}
+                              {cfg.label}
+                            </span>
+                          </div>
+                          <h3 className="font-semibold text-gray-900 mb-1 group-hover:text-blue-600 transition-colors">
+                            {skill.display_name || skill.name}
+                          </h3>
+                          <p className="text-sm text-gray-500 mb-3 line-clamp-2">{skill.description}</p>
+                          {skill.triggers.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-3">
+                              {skill.triggers.slice(0, 3).map((t) => (
+                                <span key={t} className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">{t}</span>
+                              ))}
+                              {skill.triggers.length > 3 && (
+                                <span className="text-[10px] text-gray-400">+{skill.triggers.length - 3}</span>
+                              )}
+                            </div>
+                          )}
+                          <div className="pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                            <span>v{skill.version}</span>
+                            <div className="flex gap-2">
+                              {skill.status === 'draft' && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleSubmitSkill(skill.skill_id); }}
+                                  className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                >
+                                  <Send className="w-3 h-3" /> Submit
+                                </button>
+                              )}
+                              {skill.status === 'review' && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handlePublishSkill(skill.skill_id); }}
+                                  className="text-green-600 hover:text-green-800 font-medium flex items-center gap-1"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" /> Publish
+                                </button>
+                              )}
+                              {(skill.status === 'draft' || skill.status === 'disabled') && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteSkill(skill.skill_id); }}
+                                  className="text-red-500 hover:text-red-700 font-medium flex items-center gap-1"
+                                >
+                                  <Trash2 className="w-3 h-3" /> Delete
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {filteredPluginSkills.length === 0 && filteredCustomSkills.length === 0 && (
+                <div className="text-center py-12">
+                  <Bot className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">No skills found.</p>
+                </div>
+              )}
+            </TabPanel>
+          )}
+
+          {/* ─── Prompts Tab ─── */}
+          {!isLoading && (
+            <TabPanel isActive={activeTab === 'prompts'}>
+              <div className="space-y-4">
+                {filteredAgents.map((agent) => {
+                  const override = getOverrideForAgent(agent.name);
+                  const effectiveVersion = getEffectiveVersion(agent);
+                  return (
+                    <div
+                      key={agent.name}
+                      className="bg-white rounded-xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
+                      onClick={() => openAgentModal(agent)}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-4">
+                          <div className="p-3 bg-purple-100 rounded-xl">
+                            <Brain className="w-6 h-6 text-purple-600" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                              {agent.name}
+                            </h3>
+                            <div className="flex items-center gap-3 mt-1">
+                              <span className="text-xs text-gray-500">{(agent.metadata?.description as string) || agent.entity_type}</span>
+                            </div>
+                            {/* Version timeline */}
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              <History className="w-3 h-3 text-gray-400" />
+                              <span className="text-[11px] text-gray-400 font-mono">
+                                {getVersionTimeline(agent)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1.5">
+                          {override ? (
+                            <Badge variant="warning" size="sm">Edited v{override.version}</Badge>
+                          ) : (
+                            <Badge variant="default" size="sm">Base v{agent.version}</Badge>
+                          )}
+                          <span className="text-[10px] text-gray-400">
+                            {formatDate(override ? override.updated_at : agent.updated_at)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-3 ml-16">
+                        <p className="text-sm text-gray-600 line-clamp-2 font-mono">
+                          {getEffectivePrompt(agent).slice(0, 200)}...
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
-          </TabPanel>
+
+              {filteredAgents.length === 0 && (
+                <div className="text-center py-12">
+                  <Brain className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">No agent prompts found.</p>
+                </div>
+              )}
+            </TabPanel>
+          )}
         </div>
       </main>
 
-      {/* Skill Edit Modal */}
+      {/* ─── Bundled Skill View Modal ─── */}
       <Modal
-        isOpen={!!selectedSkill}
-        onClose={() => setSelectedSkill(null)}
-        title={selectedSkill ? `Edit: ${selectedSkill.skill_name}` : 'Skill Details'}
+        isOpen={!!selectedPluginSkill}
+        onClose={() => setSelectedPluginSkill(null)}
+        title={selectedPluginSkill ? `Bundled Skill: ${selectedPluginSkill.name}` : ''}
         size="lg"
-        footer={
+      >
+        {selectedPluginSkill && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Badge variant="default" size="sm">Bundled (Read-Only)</Badge>
+              <span className="text-xs text-gray-400">v{selectedPluginSkill.version}</span>
+            </div>
+            {typeof selectedPluginSkill.metadata?.description === 'string' && (
+              <p className="text-sm text-gray-600">{selectedPluginSkill.metadata.description}</p>
+            )}
+            <div>
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Content</h4>
+              <div className="bg-gray-900 rounded-xl p-4 overflow-x-auto max-h-96 overflow-y-auto">
+                <pre className="text-sm text-gray-100 whitespace-pre-wrap font-mono">
+                  {selectedPluginSkill.content}
+                </pre>
+              </div>
+            </div>
+            {Object.keys(selectedPluginSkill.metadata || {}).length > 0 && (
+              <div>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Metadata</h4>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(selectedPluginSkill.metadata).map(([k, v]) => (
+                    k !== 'description' && (
+                      <span key={k} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-lg">
+                        {k}: {typeof v === 'string' ? v : JSON.stringify(v)}
+                      </span>
+                    )
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* ─── Custom Skill Detail Modal ─── */}
+      <Modal
+        isOpen={!!selectedCustomSkill}
+        onClose={() => setSelectedCustomSkill(null)}
+        title={selectedCustomSkill ? `Custom Skill: ${selectedCustomSkill.display_name || selectedCustomSkill.name}` : ''}
+        size="lg"
+        footer={selectedCustomSkill && (
           <div className="flex justify-between">
-            <button className="flex items-center gap-2 px-4 py-2 text-red-600 hover:text-red-700">
-              <Trash2 className="w-4 h-4" />
-              Delete
-            </button>
-            <div className="flex gap-3">
+            {(selectedCustomSkill.status === 'draft' || selectedCustomSkill.status === 'disabled') && (
               <button
-                onClick={() => setSelectedSkill(null)}
-                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                onClick={() => handleDeleteSkill(selectedCustomSkill.skill_id)}
+                className="flex items-center gap-2 px-4 py-2 text-red-600 hover:text-red-700"
               >
-                Cancel
+                <Trash2 className="w-4 h-4" />
+                Delete
               </button>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                Save Changes
+            )}
+            <div className="flex gap-3 ml-auto">
+              <button onClick={() => setSelectedCustomSkill(null)} className="px-4 py-2 text-gray-600 hover:text-gray-800">
+                Close
               </button>
+              {selectedCustomSkill.status === 'draft' && (
+                <button
+                  onClick={() => handleSubmitSkill(selectedCustomSkill.skill_id)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Submit for Review
+                </button>
+              )}
+              {selectedCustomSkill.status === 'review' && (
+                <button
+                  onClick={() => handlePublishSkill(selectedCustomSkill.skill_id)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                >
+                  Publish
+                </button>
+              )}
             </div>
           </div>
-        }
+        )}
       >
-        {selectedSkill && (
-          <form className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+        {selectedCustomSkill && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              {(() => {
+                const cfg = statusConfig[selectedCustomSkill.status];
+                return (
+                  <span className={`flex items-center gap-1 text-xs font-bold uppercase px-2 py-1 rounded-full ${cfg.color}`}>
+                    {cfg.icon} {cfg.label}
+                  </span>
+                );
+              })()}
+              <span className="text-xs text-gray-400">v{selectedCustomSkill.version}</span>
+              <span className="text-xs text-gray-400">{selectedCustomSkill.visibility}</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Skill Name</label>
-                <input
-                  type="text"
-                  defaultValue={selectedSkill.skill_name}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
+                <span className="text-gray-500">Name:</span>{' '}
+                <span className="font-medium">{selectedCustomSkill.name}</span>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Skill Type</label>
-                <select
-                  defaultValue={selectedSkill.skill_type}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                >
-                  {Object.entries(skillTypeLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
+                <span className="text-gray-500">Display Name:</span>{' '}
+                <span className="font-medium">{selectedCustomSkill.display_name}</span>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea
-                defaultValue={selectedSkill.description}
-                rows={2}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
-              />
+              <p className="text-sm text-gray-600">{selectedCustomSkill.description}</p>
             </div>
 
-            <div className="p-4 bg-gray-50 rounded-xl space-y-4">
-              <h4 className="font-medium text-gray-900 flex items-center gap-2">
-                <Settings className="w-4 h-4" />
-                Configuration
-              </h4>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                  <select
-                    defaultValue={selectedSkill.config.model}
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                  >
-                    <option value="claude-3-opus">Claude 3 Opus</option>
-                    <option value="claude-3-sonnet">Claude 3 Sonnet</option>
-                    <option value="claude-3-haiku">Claude 3 Haiku</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="1"
-                    defaultValue={selectedSkill.config.temperature}
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
+            {selectedCustomSkill.triggers.length > 0 && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Enabled Tools</label>
-                <div className="flex flex-wrap gap-2">
-                  {selectedSkill.config.tools_enabled?.map((tool) => (
-                    <span key={tool} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-lg flex items-center gap-1">
-                      <Terminal className="w-3 h-3" />
-                      {tool}
-                    </span>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Triggers</h4>
+                <div className="flex flex-wrap gap-1">
+                  {selectedCustomSkill.triggers.map((t) => (
+                    <span key={t} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">{t}</span>
                   ))}
                 </div>
-              </div>
-            </div>
-
-            {selectedSkill.prompt_template && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Prompt Template</label>
-                <textarea
-                  defaultValue={selectedSkill.prompt_template}
-                  rows={4}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-sm resize-none"
-                />
               </div>
             )}
 
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  defaultChecked={selectedSkill.is_active}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700">Active (skill can be used by agents)</span>
-              </label>
-            </div>
-          </form>
-        )}
-      </Modal>
-
-      {/* Prompt Edit Modal */}
-      <Modal
-        isOpen={!!selectedPrompt}
-        onClose={() => setSelectedPrompt(null)}
-        title={selectedPrompt ? `Edit: ${selectedPrompt.prompt_name}` : 'Prompt Details'}
-        size="lg"
-        footer={
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={() => setSelectedPrompt(null)}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800"
-            >
-              Cancel
-            </button>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              Save Changes
-            </button>
-          </div>
-        }
-      >
-        {selectedPrompt && (
-          <form className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            {selectedCustomSkill.tools.length > 0 && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Prompt Name</label>
-                <input
-                  type="text"
-                  defaultValue={selectedPrompt.prompt_name}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Agent Role</label>
-                <select
-                  defaultValue={selectedPrompt.agent_role}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                >
-                  {Object.entries(agentRoleLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Tools</h4>
+                <div className="flex flex-wrap gap-1">
+                  {selectedCustomSkill.tools.map((t) => (
+                    <span key={t} className="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded-lg">{t}</span>
                   ))}
-                </select>
+                </div>
               </div>
-            </div>
+            )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">System Prompt Content</label>
-              <textarea
-                defaultValue={selectedPrompt.content}
-                rows={12}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-sm resize-none"
-              />
+              <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Prompt Body</h4>
+              <div className="bg-gray-900 rounded-xl p-4 overflow-x-auto max-h-64 overflow-y-auto">
+                <pre className="text-sm text-gray-100 whitespace-pre-wrap font-mono">
+                  {selectedCustomSkill.prompt_body}
+                </pre>
+              </div>
             </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-500">Version {selectedPrompt.version}</span>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  defaultChecked={selectedPrompt.is_active}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700">Active</span>
-              </label>
-            </div>
-          </form>
+          </div>
         )}
       </Modal>
 
-      {/* New Skill Modal */}
+      {/* ─── Agent Prompt Editor Modal ─── */}
+      <Modal
+        isOpen={!!selectedAgent}
+        onClose={() => setSelectedAgent(null)}
+        title={selectedAgent ? `Edit Prompt: ${selectedAgent.name}` : ''}
+        size="xl"
+        footer={selectedAgent && (
+          <div className="flex justify-between">
+            {getOverrideForAgent(selectedAgent.name) && (
+              <button
+                onClick={resetToBase}
+                disabled={saving}
+                className="flex items-center gap-2 px-4 py-2 text-amber-600 hover:text-amber-700 disabled:opacity-50"
+              >
+                <History className="w-4 h-4" />
+                Reset to Base
+              </button>
+            )}
+            <div className="flex gap-3 ml-auto">
+              <button onClick={() => setSelectedAgent(null)} className="px-4 py-2 text-gray-600 hover:text-gray-800">
+                Cancel
+              </button>
+              <button
+                onClick={savePrompt}
+                disabled={saving || !promptBody.trim() || !promptDirty}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                {saving ? 'Saving...' : 'Save Prompt'}
+              </button>
+            </div>
+          </div>
+        )}
+      >
+        {selectedAgent && (() => {
+          const override = getOverrideForAgent(selectedAgent.name);
+          const currentVersion = override ? override.version : selectedAgent.version;
+          return (
+            <div className="space-y-4">
+              {/* Version info bar */}
+              <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
+                <div className="flex items-center gap-3">
+                  <History className="w-4 h-4 text-gray-400" />
+                  <div>
+                    <span className="text-sm font-medium text-gray-700">
+                      {formatVersionLabel(selectedAgent)}
+                    </span>
+                    {override && (
+                      <span className="text-xs text-gray-400 ml-2">
+                        (base: v{selectedAgent.version} {formatDate(selectedAgent.created_at)})
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {override ? (
+                    <Badge variant="warning" size="sm">Edited</Badge>
+                  ) : (
+                    <Badge variant="default" size="sm">Base Prompt</Badge>
+                  )}
+                  {promptDirty && (
+                    <Badge variant="info" size="sm">Unsaved Changes</Badge>
+                  )}
+                </div>
+              </div>
+
+              {/* Version timeline */}
+              <div className="flex items-center gap-2 text-xs text-gray-400 px-1">
+                <span className="font-mono">{getVersionTimeline(selectedAgent)}</span>
+                {promptDirty && (
+                  <span className="font-mono text-blue-500">→ v{currentVersion + 1} (pending save)</span>
+                )}
+              </div>
+
+              {/* Single unified editor */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">System Prompt</label>
+                <textarea
+                  value={promptBody}
+                  onChange={(e) => {
+                    setPromptBody(e.target.value);
+                    setPromptDirty(true);
+                  }}
+                  rows={20}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-sm resize-y min-h-[300px]"
+                />
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* ─── New Custom Skill Modal ─── */}
       <Modal
         isOpen={showNewSkillModal}
         onClose={() => setShowNewSkillModal(false)}
-        title="Create New Skill"
+        title="Create Custom Skill"
         size="lg"
         footer={
           <div className="flex justify-end gap-3">
-            <button
-              onClick={() => setShowNewSkillModal(false)}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800"
-            >
+            <button onClick={() => setShowNewSkillModal(false)} className="px-4 py-2 text-gray-600 hover:text-gray-800">
               Cancel
             </button>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              Create Skill
+            <button
+              onClick={handleCreateSkill}
+              disabled={saving || !newSkill.name || !newSkill.display_name || !newSkill.prompt_body}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? 'Creating...' : 'Create Skill'}
             </button>
           </div>
         }
       >
-        <form className="space-y-4">
+        <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Skill Name *</label>
               <input
                 type="text"
-                placeholder="e.g., Document Summarizer"
+                placeholder="e.g., document-summarizer"
+                value={newSkill.name}
+                onChange={(e) => setNewSkill(p => ({ ...p, name: e.target.value }))}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Skill Type *</label>
-              <select className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white">
-                <option value="">Select type...</option>
-                {Object.entries(skillTypeLabels).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Display Name *</label>
+              <input
+                type="text"
+                placeholder="e.g., Document Summarizer"
+                value={newSkill.display_name}
+                onChange={(e) => setNewSkill(p => ({ ...p, display_name: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
             </div>
           </div>
 
@@ -444,56 +845,69 @@ export default function SkillsPage() {
             <textarea
               rows={2}
               placeholder="Describe what this skill does..."
+              value={newSkill.description}
+              onChange={(e) => setNewSkill(p => ({ ...p, description: e.target.value }))}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
             />
           </div>
 
-          <div className="p-4 bg-gray-50 rounded-xl space-y-4">
-            <h4 className="font-medium text-gray-900 flex items-center gap-2">
-              <Settings className="w-4 h-4" />
-              Configuration
-            </h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                <select className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white">
-                  <option value="claude-3-opus">Claude 3 Opus</option>
-                  <option value="claude-3-sonnet">Claude 3 Sonnet</option>
-                  <option value="claude-3-haiku">Claude 3 Haiku</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="1"
-                  defaultValue="0.3"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-            </div>
-          </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Prompt Template</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Prompt Body *</label>
             <textarea
-              rows={4}
+              rows={6}
               placeholder="Enter the prompt template for this skill..."
+              value={newSkill.prompt_body}
+              onChange={(e) => setNewSkill(p => ({ ...p, prompt_body: e.target.value }))}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-sm resize-none"
             />
           </div>
 
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 cursor-pointer">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Triggers (comma-separated)</label>
               <input
-                type="checkbox"
-                defaultChecked={true}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                type="text"
+                placeholder="summarize, tldr, digest"
+                value={newSkill.triggers}
+                onChange={(e) => setNewSkill(p => ({ ...p, triggers: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
               />
-              <span className="text-sm text-gray-700">Make active immediately</span>
-            </label>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tools (comma-separated)</label>
+              <input
+                type="text"
+                placeholder="search_documents, create_document"
+                value={newSkill.tools}
+                onChange={(e) => setNewSkill(p => ({ ...p, tools: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Model (optional)</label>
+              <input
+                type="text"
+                placeholder="e.g., us.anthropic.claude-sonnet-4-20250514"
+                value={newSkill.model}
+                onChange={(e) => setNewSkill(p => ({ ...p, model: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Visibility</label>
+              <select
+                value={newSkill.visibility}
+                onChange={(e) => setNewSkill(p => ({ ...p, visibility: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+              >
+                <option value="private">Private</option>
+                <option value="tenant">Tenant</option>
+                <option value="public">Public</option>
+              </select>
+            </div>
           </div>
         </form>
       </Modal>
