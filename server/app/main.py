@@ -412,8 +412,8 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
             cost_usd=cost,
         )
     except Exception as e:
-        logger.error("REST chat error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("REST chat error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error processing chat request")
 
 
 # ── Session management endpoints (EAGLE enhanced) ────────────────────
@@ -636,10 +636,11 @@ async def api_export_document(req: ExportRequest, user: UserContext = Depends(ge
             }
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("Export validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid export parameters")
     except Exception as e:
-        logger.error("Export error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Export error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during export")
 
 
 @app.get("/api/documents/export/{session_id}")
@@ -678,8 +679,8 @@ async def api_export_session(
             }
         )
     except Exception as e:
-        logger.error("Session export error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Session export error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during session export")
 
 
 # ── S3 Document Browser ──────────────────────────────────────────────
@@ -715,8 +716,8 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
         return {"documents": documents, "bucket": bucket, "prefix": prefix}
     except ClientError as e:
-        logger.error("S3 list error: %s", e)
-        return {"documents": [], "error": str(e)}
+        logger.error("S3 list error: %s", e, exc_info=True)
+        return {"documents": [], "error": "Failed to list documents"}
 
 
 @app.get("/api/documents/{doc_key:path}")
@@ -748,7 +749,8 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchKey":
             raise HTTPException(status_code=404, detail="Document not found")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("S3 get document error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve document")
 
 
 # ── S3 Presigned URL ─────────────────────────────────────────────────
@@ -827,8 +829,8 @@ async def api_upload_document(
         s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
         s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
     except ClientError as e:
-        logger.error("S3 upload error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("S3 upload error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to upload document")
 
     logger.info("Uploaded %s → s3://%s/%s", safe_name, bucket, key)
     return {"key": key, "filename": safe_name, "size_bytes": len(body), "content_type": content_type}
@@ -859,8 +861,8 @@ async def api_list_kb_reviews(
         reviews.sort(key=lambda r: r.get("created_at", ""), reverse=True)
         return {"reviews": reviews, "count": len(reviews)}
     except Exception as e:
-        logger.error("KB review list error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("KB review list error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to list KB reviews")
 
 
 @app.post("/api/admin/kb-review/{review_id}/approve")
@@ -884,12 +886,13 @@ async def api_approve_kb_review(
     try:
         item = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("KB review fetch error (approve): %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch KB review")
 
     if not item:
         raise HTTPException(status_code=404, detail="KB review not found")
     if item.get("status") != "pending":
-        raise HTTPException(status_code=409, detail=f"Review already {item.get('status')}")
+        raise HTTPException(status_code=409, detail="Review already processed")
 
     proposed_diff = item.get("proposed_diff", [])
 
@@ -950,12 +953,13 @@ async def api_reject_kb_review(
     try:
         item = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("KB review fetch error (reject): %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch KB review")
 
     if not item:
         raise HTTPException(status_code=404, detail="KB review not found")
     if item.get("status") != "pending":
-        raise HTTPException(status_code=409, detail=f"Review already {item.get('status')}")
+        raise HTTPException(status_code=409, detail="Review already processed")
 
     # Move S3 doc from pending/ to rejected/
     old_key = item.get("s3_key", "")
@@ -1427,14 +1431,14 @@ async def websocket_chat(ws: WebSocket):
 
             except Exception as e:
                 logger.error("Stream error: %s", e, exc_info=True)
-                await ws.send_json({"type": "error", "message": str(e)})
+                await ws.send_json({"type": "error", "message": "Internal error processing stream"})
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: %s", default_session_id)
     except Exception as e:
-        logger.error("WebSocket error: %s", e)
+        logger.error("WebSocket error: %s", e, exc_info=True)
         try:
-            await ws.send_json({"type": "error", "message": str(e)})
+            await ws.send_json({"type": "error", "message": "WebSocket connection error"})
         except Exception:
             pass
 
@@ -1663,7 +1667,8 @@ async def add_user_to_admin_group(request: dict):
         )
         return {"success": True, "message": f"Added {email} to {tenant_id}-admins group"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add user to admin group: {str(e)}")
+        logger.error("Failed to add user to admin group: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to add user to admin group")
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -255,8 +255,7 @@ def dry_run():
     if not JIRA_API_TOKEN:
         errors.append("JIRA_API_TOKEN is not set")
     else:
-        masked = JIRA_API_TOKEN[:4] + "..." + JIRA_API_TOKEN[-4:]
-        print(f"  JIRA_API_TOKEN: {masked} ({len(JIRA_API_TOKEN)} chars)")
+        print(f"  JIRA_API_TOKEN: [set, {len(JIRA_API_TOKEN)} chars]")
 
     print(f"\n  Auth method   : Bearer PAT (self-hosted Jira)")
     print(f"  API version   : REST API v2")

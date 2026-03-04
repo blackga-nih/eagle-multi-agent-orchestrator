@@ -1,8 +1,10 @@
 /**
- * Generate a UUID v4 that works in both secure (HTTPS) and insecure (HTTP) contexts.
+ * Generate a UUID v4 using cryptographically secure random values.
  *
  * crypto.randomUUID() only works in secure contexts (HTTPS or localhost).
  * This fallback uses crypto.getRandomValues() which works everywhere.
+ *
+ * No Math.random() fallback — all modern browsers support crypto.getRandomValues().
  */
 export function generateUUID(): string {
   // Use crypto.randomUUID if available (secure context)
@@ -24,10 +26,6 @@ export function generateUUID(): string {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
-  // Last resort fallback using Math.random (not cryptographically secure)
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
+  // crypto API unavailable — throw rather than fall back to insecure Math.random()
+  throw new Error('Crypto API unavailable: cannot generate secure UUID');
 }
