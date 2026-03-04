@@ -11,20 +11,18 @@ Agents SDK for real-time token streaming via QueueCallbackHandler.
 #   app.include_router(streaming_router)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone
 import asyncio
-import json
 import logging
-from contextlib import suppress
 from typing import AsyncGenerator, Optional
 
-from .cognito_auth import extract_user_context, UserContext
-from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWriter
+from .cognito_auth import extract_user_context
+from .stream_protocol import MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
-from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGLE_TOOLS
+from .strands_agentic_service import sdk_query_streaming, MODEL, EAGLE_TOOLS
 from .session_store import add_message
 
 import os

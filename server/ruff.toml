@@ -1,0 +1,7 @@
+[lint.per-file-ignores]
+# E402: sys.path manipulation before imports (required for eagle_skill_constants)
+"app/main.py" = ["E402"]
+"app/strands_agentic_service.py" = ["E402"]
+"app/sdk_agentic_service.py" = ["E402"]
+# F401: try/except availability probes for optional dependencies
+"app/document_export.py" = ["F401"]

@@ -133,7 +133,6 @@ def _add_table_to_doc(doc, table_data: list):
     if not table_data:
         return
     
-    from docx.shared import Pt
     
     rows = len(table_data)
     cols = len(table_data[0]) if table_data else 0
@@ -280,7 +279,7 @@ def markdown_to_pdf(content: str, title: str = "Document") -> bytes:
         if stripped.startswith('```'):
             if in_code_block:
                 if code_lines:
-                    code_text = '<br/>'.join(_escape_html(l) for l in code_lines)
+                    code_text = '<br/>'.join(_escape_html(line) for line in code_lines)
                     story.append(Paragraph(code_text, styles['CustomCode']))
                     story.append(Spacer(1, 6))
                 code_lines = []

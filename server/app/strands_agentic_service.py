@@ -25,7 +25,6 @@ import asyncio
 import json
 import logging
 import os
-import queue
 import re
 import sys
 import threading
@@ -41,7 +40,7 @@ _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
-from eagle_skill_constants import SKILL_CONSTANTS, AGENTS, SKILLS, PLUGIN_CONTENTS
+from eagle_skill_constants import AGENTS, SKILLS, PLUGIN_CONTENTS
 
 logger = logging.getLogger("eagle.strands_agent")
 
@@ -87,7 +86,7 @@ _SENTINEL = object()  # Signals end of stream
 
 
 class QueueCallbackHandler:
-    """Strands callback handler that pushes text deltas and tool_use events into a thread-safe queue.
+    """Strands callback handler that pushes text deltas and tool_use events into an async queue.
 
     Bedrock ConverseStream sends tool input across multiple events:
       - contentBlockStart  → toolUse.name + toolUse.toolUseId  (block begins)
@@ -96,13 +95,21 @@ class QueueCallbackHandler:
 
     Text deltas arrive via the ``data`` kwarg and are emitted immediately.
     Tool input is accumulated in ``_pending_tool`` and flushed at contentBlockStop.
+
+    Uses ``loop.call_soon_threadsafe`` to put items onto an ``asyncio.Queue``
+    from the background Strands thread — instant delivery, no polling.
     """
 
-    def __init__(self, chunk_queue: queue.Queue):
-        self._queue = chunk_queue
+    def __init__(self, async_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+        self._queue = async_queue
+        self._loop = loop
         self.tool_count = 0
         # Accumulator for in-flight tool block
         self._pending_tool: dict | None = None   # {"name": str, "id": str, "input_parts": list[str]}
+
+    def _put(self, item: dict) -> None:
+        """Thread-safe put into asyncio.Queue."""
+        self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
 
     def __call__(self, **kwargs: Any) -> None:
         event = kwargs.get("event", {})
@@ -110,7 +117,7 @@ class QueueCallbackHandler:
 
         # Text delta — emit immediately
         if data:
-            self._queue.put({"type": "text", "data": data})
+            self._put({"type": "text", "data": data})
 
         # contentBlockStart — a new content block (tool or text) is opening
         content_block_start = event.get("contentBlockStart", {})
@@ -145,7 +152,7 @@ class QueueCallbackHandler:
                     parsed_input = {"_raw": raw_input}
 
             self.tool_count += 1
-            self._queue.put({
+            self._put({
                 "type": "tool_use",
                 "name": tool_name,
                 "tool_use_id": tool_id,
@@ -607,6 +614,89 @@ def _compliance_matrix_tool(params: str) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
+# -- AWS Service @tools (S3, DynamoDB, CloudWatch, Documents) ----------
+# These call the handlers in agentic_service.py directly with the real
+# tenant_id and session_id from the authenticated context — bypassing
+# execute_tool() which has stub _extract_tenant_id/_extract_user_id.
+
+def _make_service_tool(
+    tool_name: str,
+    description: str,
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+):
+    """Create a Strands @tool that calls agentic_service handlers directly.
+
+    The handler receives the real tenant_id (from Cognito auth) and a
+    composite session_id (tenant-tier-user-session) for per-user S3 scoping.
+    """
+    from .agentic_service import TOOL_DISPATCH, TOOLS_NEEDING_SESSION
+
+    handler = TOOL_DISPATCH.get(tool_name)
+    if not handler:
+        raise ValueError(f"No handler for tool: {tool_name}")
+
+    @tool(name=tool_name)
+    def service_tool(params: str) -> str:
+        """Placeholder docstring replaced below."""
+        parsed = json.loads(params) if isinstance(params, str) else params
+        try:
+            if tool_name in TOOLS_NEEDING_SESSION:
+                result = handler(parsed, tenant_id, session_id)
+            else:
+                result = handler(parsed, tenant_id)
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            logger.error("Service tool %s failed: %s", tool_name, exc, exc_info=True)
+            return json.dumps({"error": str(exc), "tool": tool_name})
+
+    service_tool.__doc__ = (
+        f"{description}\n\n"
+        f"Args:\n"
+        f"    params: JSON string with operation and operation-specific fields"
+    )
+    return service_tool
+
+
+# Tool definitions: name -> description (schemas are in EAGLE_TOOLS above)
+_SERVICE_TOOL_DEFS = {
+    "s3_document_ops": (
+        "Read, write, or list documents in S3 scoped per-tenant. "
+        "Operations: list, read, write. Pass JSON with 'operation' and optional 'key', 'content'."
+    ),
+    "dynamodb_intake": (
+        "Create, read, update, list, or query intake records in DynamoDB. "
+        "Operations: create, read, update, list, query. Pass JSON with 'operation' and optional 'item_id', 'data'."
+    ),
+    "create_document": (
+        "Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, "
+        "Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification). "
+        "Documents are saved to S3. Pass JSON with 'doc_type', 'title', and optional 'data'."
+    ),
+    "get_intake_status": (
+        "Get the current intake package status and completeness — shows which documents exist, "
+        "which are missing, and next actions. Pass JSON with optional 'intake_id'."
+    ),
+    "intake_workflow": (
+        "Manage the acquisition intake workflow: start, advance, status, complete, reset. "
+        "Pass JSON with 'action' and optional 'intake_id', 'data'."
+    ),
+    "search_far": (
+        "Search the FAR and DFARS for clauses, requirements, and guidance. "
+        "Pass JSON with 'query' and optional 'parts' array."
+    ),
+}
+
+
+def _build_service_tools(tenant_id: str, user_id: str, session_id: str | None) -> list:
+    """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session."""
+    tools = []
+    for name, desc in _SERVICE_TOOL_DEFS.items():
+        tools.append(_make_service_tool(name, desc, tenant_id, user_id, session_id))
+    return tools
+
+
 # -- build_skill_tools() ---------------------------------------------
 
 def build_skill_tools(
@@ -710,7 +800,7 @@ def build_supervisor_prompt(
     Results are cached for 60s to avoid repeated DynamoDB calls.
     """
     names = agent_names or list(SKILL_AGENT_REGISTRY.keys())
-    agent_key = ",".join(sorted(n for n in names if n in SKILL_AGENT_REGISTRY))
+    agent_key = ",".join(sorted(names))
 
     # Check cache first
     cached = _sup_cache_get(tenant_id, user_id, tier, workspace_id, agent_key)
@@ -722,6 +812,13 @@ def build_supervisor_prompt(
         for name in names
         if name in SKILL_AGENT_REGISTRY
     )
+
+    # List service tools the supervisor has direct access to
+    service_tool_names = [n for n in names if n in _SERVICE_TOOL_DEFS]
+    service_list = "\n".join(
+        f"- {name}: {_SERVICE_TOOL_DEFS[name]}"
+        for name in service_tool_names
+    ) if service_tool_names else ""
 
     # Resolve supervisor prompt via workspace chain
     base_prompt = ""
@@ -750,7 +847,16 @@ def build_supervisor_prompt(
         f"Available specialists for delegation:\n{agent_list}\n\n"
         f"For acquisition-related questions, regulatory queries, document generation, "
         f"and other substantive work: use the available tool functions to delegate to specialists. "
-        f"Include relevant context in the query you pass to each specialist."
+        f"Include relevant context in the query you pass to each specialist.\n\n"
+        + (
+            f"--- DIRECT SERVICE TOOLS ---\n"
+            f"You also have direct access to these AWS service tools (call them directly, do NOT delegate):\n"
+            f"{service_list}\n\n"
+            f"When using service tools, pass a JSON string as the 'params' argument.\n"
+            f"For document generation (create_document), always confirm with the user what was created "
+            f"and provide the document type, title, and S3 location in your response."
+            if service_list else ""
+        )
     )
 
     _sup_cache_set(tenant_id, user_id, tier, workspace_id, agent_key, result)
@@ -827,11 +933,16 @@ async def sdk_query(
         workspace_id=resolved_workspace_id,
     )
 
+    # Add AWS service tools (S3, DynamoDB, doc generation, FAR search, intake)
+    composite_session = f"{tenant_id}#{tier}#{user_id}#{session_id or 'none'}"
+    service_tools = _build_service_tools(tenant_id, user_id, composite_session)
+    all_tools = skill_tools + service_tools
+
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,
         user_id=user_id,
         tier=tier,
-        agent_names=[t.__name__ for t in skill_tools],
+        agent_names=[getattr(t, 'tool_spec', {}).get('name', t.__name__) for t in all_tools],
         workspace_id=resolved_workspace_id,
     )
 
@@ -841,7 +952,7 @@ async def sdk_query(
     supervisor = Agent(
         model=_model,
         system_prompt=system_prompt,
-        tools=skill_tools,
+        tools=all_tools,
         callback_handler=None,
         messages=strands_history,
     )
@@ -917,8 +1028,9 @@ async def sdk_query_streaming(
     t0 = _time.time()
     use_fast_path = _is_trivial_message(prompt) and not skill_names
 
-    chunk_queue: queue.Queue = queue.Queue()
-    handler = QueueCallbackHandler(chunk_queue)
+    loop = asyncio.get_running_loop()
+    chunk_queue: asyncio.Queue = asyncio.Queue()
+    handler = QueueCallbackHandler(chunk_queue, loop)
     strands_history = _to_strands_messages(messages) if messages else None
 
     if use_fast_path:
@@ -951,26 +1063,33 @@ async def sdk_query_streaming(
             workspace_id=resolved_workspace_id,
         )
 
+        # Add AWS service tools (S3, DynamoDB, doc generation, FAR search, intake)
+        composite_session = f"{tenant_id}#{tier}#{user_id}#{session_id or 'none'}"
+        service_tools = _build_service_tools(tenant_id, user_id, composite_session)
+        all_tools = skill_tools + service_tools
+
         system_prompt = build_supervisor_prompt(
             tenant_id=tenant_id,
             user_id=user_id,
             tier=tier,
-            agent_names=[t.__name__ for t in skill_tools],
+            agent_names=[getattr(t, 'tool_spec', {}).get('name', t.__name__) for t in all_tools],
             workspace_id=resolved_workspace_id,
         )
 
         supervisor = Agent(
             model=_model,
             system_prompt=system_prompt,
-            tools=skill_tools,
+            tools=all_tools,
             callback_handler=handler,
             messages=strands_history,
         )
 
     t_setup = _time.time() - t0
-    logger.info("agent setup took %.3fs (fast_path=%s, tools=%d)", t_setup, use_fast_path, len(skill_tools))
+    logger.info("agent setup took %.3fs (fast_path=%s, tools=%d)", t_setup, use_fast_path, len(all_tools) if not use_fast_path else 0)
 
-    # Run synchronous Strands agent in a background thread
+    # Run synchronous Strands agent in a background thread.
+    # The callback handler puts chunks into the asyncio.Queue via
+    # loop.call_soon_threadsafe — instant delivery, no polling.
     result_holder: list = []
     error_holder: list = []
 
@@ -981,37 +1100,33 @@ async def sdk_query_streaming(
         except Exception as exc:
             error_holder.append(exc)
         finally:
-            chunk_queue.put(_SENTINEL)
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
 
     thread = threading.Thread(target=_run_agent, daemon=True)
     thread.start()
 
-    # Yield chunks as they arrive from the callback handler
+    # Yield chunks as they arrive — await is instant (no polling)
     full_text_parts: list[str] = []
     tools_called: list[str] = []
+    ttft_logged = False
 
     while True:
-        try:
-            # Poll queue with short timeout to stay async-friendly
-            chunk = await asyncio.to_thread(chunk_queue.get, timeout=0.1)
-        except Exception:
-            # queue.Empty on timeout — check if thread is still alive
-            if not thread.is_alive():
-                break
-            continue
+        chunk = await chunk_queue.get()
 
         if chunk is _SENTINEL:
             break
 
         if chunk.get("type") == "text":
+            if not ttft_logged:
+                ttft = _time.time() - t0
+                logger.info("TTFT: %.3fs (fast_path=%s)", ttft, use_fast_path)
+                ttft_logged = True
             full_text_parts.append(chunk["data"])
             yield chunk
         elif chunk.get("type") == "tool_use":
             tools_called.append(chunk.get("name", ""))
-            # Yield the full chunk including tool_use_id and input
             yield chunk
 
-    # Wait for thread to finish
     thread.join(timeout=5)
 
     # Extract usage from result
@@ -1033,6 +1148,10 @@ async def sdk_query_streaming(
                     tools_called = list(metrics.tool_metrics.keys())
         except Exception:
             pass
+
+    total_time = _time.time() - t0
+    logger.info("stream complete: %.3fs total, %d tools, %d chars (fast_path=%s)",
+                total_time, len(tools_called), len("".join(full_text_parts)), use_fast_path)
 
     if error_holder:
         yield {"type": "error", "error": str(error_holder[0])}

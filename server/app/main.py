@@ -17,14 +17,13 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response, UploadFile, File
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 from collections import deque
 from datetime import datetime, timedelta
-from decimal import Decimal
 import asyncio
 import json
 import re as _re
@@ -36,18 +35,18 @@ import io
 import boto3 as _boto3
 
 # EAGLE modules (new)
-from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS, _skill_tools_cache, _supervisor_prompt_cache, build_supervisor_prompt
+from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS, _skill_tools_cache, _supervisor_prompt_cache
 from .document_export import export_document
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
     update_session as eagle_update_session, delete_session as eagle_delete_session,
     list_sessions as eagle_list_sessions,
-    add_message, get_messages, get_messages_for_anthropic, record_usage, get_usage_summary,
+    add_message, get_messages, get_messages_for_anthropic, get_usage_summary,
     get_tenant_usage_overview, list_tenant_sessions,
 )
 from .cognito_auth import (
     UserContext, extract_user_context,
-    DEV_MODE, DEV_USER_ID, DEV_TENANT_ID
+    DEV_MODE
 )
 from .admin_service import (
     get_dashboard_stats, get_user_stats, get_top_users, get_tool_usage,
@@ -55,12 +54,12 @@ from .admin_service import (
 )
 
 # Existing multi-tenant modules (preserved)
-from .models import ChatMessage, ChatResponse, TenantContext, UsageMetric, SubscriptionTier
+from .models import SubscriptionTier
 from .auth import get_current_user
 from .subscription_service import SubscriptionService
 from .cost_attribution import CostAttributionService
 from .admin_cost_service import AdminCostService
-from .admin_auth import get_admin_user, verify_tenant_admin, AdminAuthService
+from .admin_auth import get_admin_user, verify_tenant_admin
 from .streaming_routes import create_streaming_router
 
 # Phase 4 — hot-reload stores
@@ -75,7 +74,7 @@ from .workspace_store import (
     _workspace_cache,
 )
 from .wspc_store import (
-    put_override, get_override, list_overrides,
+    put_override, list_overrides,
     delete_override, delete_all_overrides,
 )
 from .prompt_store import (
@@ -83,29 +82,27 @@ from .prompt_store import (
     _prompt_cache,
 )
 from .config_store import (
-    get_config, put_config, delete_config, list_config,
+    put_config, delete_config, list_config,
     _config_cache,
 )
 from .template_store import (
-    put_template, get_template, delete_template,
+    put_template, delete_template,
     list_tenant_templates, resolve_template,
     _template_cache,
 )
 from .skill_store import (
-    create_skill, get_skill, update_skill, list_skills, list_active_skills,
-    submit_for_review, publish_skill, disable_skill, delete_skill,
+    create_skill, get_skill, update_skill, list_skills, submit_for_review, publish_skill, delete_skill,
 )
 from .package_store import (
     create_package, get_package, update_package, list_packages,
-    get_package_checklist, submit_package, approve_package, close_package,
+    get_package_checklist, submit_package, approve_package,
 )
 from .document_store import (
     create_document as create_acq_document, get_document,
-    finalize_document, list_package_documents, get_document_history,
+    finalize_document, list_package_documents,
 )
 from .approval_store import (
-    create_approval_chain, list_approval_chain,
-    record_decision, get_chain_status,
+    create_approval_chain, record_decision, get_chain_status,
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
@@ -756,7 +753,7 @@ async def api_list_kb_reviews(
     user: UserContext = Depends(get_user_from_header),
 ):
     """List KB review records from DynamoDB (admin only)."""
-    from boto3.dynamodb.conditions import Key, Attr
+    from boto3.dynamodb.conditions import Attr
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
     try:
         ddb = _get_dynamo()

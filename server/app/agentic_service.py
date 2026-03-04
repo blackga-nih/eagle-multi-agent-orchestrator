@@ -8,8 +8,8 @@ import json
 import time
 import logging
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, AsyncGenerator
+from datetime import datetime
+from typing import Any, List
 
 import anthropic
 import boto3
@@ -142,23 +142,33 @@ def _get_logs():
 
 
 def _extract_tenant_id(session_id: str | None = None) -> str:
-    """Extract tenant_id from session context. Defaults to 'demo-tenant'."""
+    """Extract tenant_id from session context.
+
+    Composite session format: ``{tenant_id}#{tier}#{user_id}#{session}``
+    (set by strands_agentic_service when building service tools).
+    Falls back to 'demo-tenant' for legacy/unrecognised formats.
+    """
     if not session_id:
         return "demo-tenant"
-    # session_id format: "ws-1-XXXXX" or UUID
-    # For now, use a default tenant
-    # In production, this would look up the authenticated user
+    if "#" in session_id:
+        return session_id.split("#", 3)[0]
     return "demo-tenant"
 
 
 def _extract_user_id(session_id: str | None = None) -> str:
-    """Extract user_id from session context. Defaults to 'demo-user'."""
+    """Extract user_id from session context.
+
+    Composite session format: ``{tenant_id}#{tier}#{user_id}#{session}``
+    Falls back to 'demo-user' for legacy/unrecognised formats.
+    """
     if not session_id:
         return "demo-user"
-    # In production, this would come from the authenticated user context
-    # For now, use session_id as a simple user scope for isolation
+    if "#" in session_id:
+        parts = session_id.split("#", 3)
+        if len(parts) >= 3:
+            return parts[2]
     if session_id.startswith("ws-"):
-        return session_id  # Use WebSocket session as user identifier
+        return session_id
     return "demo-user"
 
 

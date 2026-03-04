@@ -4,7 +4,7 @@ Integrates Model Context Protocol with AWS Bedrock Agent Core runtime capabiliti
 """
 import json
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 from app.models import TenantContext, SubscriptionTier
 from app.weather_mcp_service import WeatherMCPClient
 from app.agentic_service import AgenticService
@@ -25,7 +25,7 @@ class MCPAgentCoreIntegration:
         weather_tools = await self.weather_client.get_available_weather_tools(subscription_tier)
         
         # Build enhanced session attributes with MCP context
-        session_attributes = RuntimeContextManager.build_session_attributes(
+        RuntimeContextManager.build_session_attributes(
             tenant_context.tenant_id,
             tenant_context.user_id,
             tenant_context.session_id,
@@ -37,7 +37,7 @@ class MCPAgentCoreIntegration:
         )
         
         # Build prompt attributes with MCP tool context
-        prompt_attributes = RuntimeContextManager.build_prompt_session_attributes(
+        RuntimeContextManager.build_prompt_session_attributes(
             tenant_context.tenant_id,
             tenant_context.user_id,
             message_context={
@@ -150,7 +150,6 @@ Make it natural and informative, highlighting key details like temperature, cond
     
     def _parse_weather_request(self, message: str) -> Dict[str, Any]:
         """Parse weather request to extract location and parameters with improved accuracy"""
-        import re
         
         args = {"location": "New York"}  # Default location
         message_lower = message.lower()

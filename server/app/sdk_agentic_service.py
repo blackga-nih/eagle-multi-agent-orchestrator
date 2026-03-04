@@ -36,7 +36,7 @@ _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
-from eagle_skill_constants import SKILL_CONSTANTS, AGENTS, SKILLS, PLUGIN_CONTENTS
+from eagle_skill_constants import AGENTS, SKILLS, PLUGIN_CONTENTS
 
 logger = logging.getLogger("eagle.sdk_agent")
 
