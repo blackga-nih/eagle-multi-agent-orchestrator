@@ -11,15 +11,16 @@ const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const authHeader = request.headers.get('authorization');
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 
     const response = await fetch(
-      `${FASTAPI_URL}/api/admin/kb-review/${encodeURIComponent(params.id)}/reject`,
+      `${FASTAPI_URL}/api/admin/kb-review/${encodeURIComponent(id)}/reject`,
       { method: 'POST', headers }
     );
 

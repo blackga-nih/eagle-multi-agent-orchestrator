@@ -24,11 +24,17 @@ export default defineConfig({
     // Reuse Cognito session saved by global-setup — all tests start authenticated
     storageState: 'tests/.auth/user.json',
 
+    // Reuse Cognito session saved by global-setup — all tests start authenticated
+    storageState: 'tests/.auth/user.json',
+
     // Collect trace when retrying the failed test
     trace: 'on-first-retry',
 
     // Screenshot on failure
     screenshot: 'only-on-failure',
+
+    // Record video for every test — uploaded to S3 by scripts/run-smoke.sh
+    video: 'on',
   },
 
   projects: [

@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Eagle Common Resources
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Application Configuration
+        Parameters:
+          - appName
+    ParameterLabels:
+      appName:
+        default: Application Name
+
+Parameters:
+  appName:
+    Type: String
+    Description: Application Name
+    Default: eagle
+    MinLength: 1
+    MaxLength: 32
+
+Resources:
+  ecr:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref appName
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      Tags:
+        - Key: Application
+          Value: !Ref appName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ecsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: power-user-ecsTaskExecutionRole
+      PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/PermissionBoundary_PowerUser'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Allows ECS tasks to call AWS services on your behalf.
+      MaxSessionDuration: 3600
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: Application
+          Value: !Ref appName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ecsSecretsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: power-user-secrets-policy
+      Path: /
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSecretsManagerAccess
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*'
+      Roles:
+        - !Ref ecsTaskExecutionRole
+
+Outputs:
+  ECRRepositoryUri:
+    Description: URI of the ECR Repository
+    Value: !GetAtt ecr.RepositoryUri
+    Export:
+      Name: !Sub '${appName}-ECRRepositoryUri'
+
+  ECRRepositoryName:
+    Description: Name of the ECR Repository
+    Value: !Ref ecr
+    Export:
+      Name: !Sub '${appName}-ECRRepositoryName'
+
+  EcsTaskExecutionRoleArn:
+    Description: ARN of the ECS Task Execution Role
+    Value: !GetAtt ecsTaskExecutionRole.Arn
+    Export:
+      Name: !Sub '${appName}-EcsTaskExecutionRoleArn'
+
+  EcsTaskExecutionRoleName:
+    Description: Name of the ECS Task Execution Role
+    Value: !Ref ecsTaskExecutionRole
+    Export:
+      Name: !Sub '${appName}-EcsTaskExecutionRoleName'

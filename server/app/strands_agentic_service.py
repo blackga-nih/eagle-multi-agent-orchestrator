@@ -25,10 +25,9 @@ import asyncio
 import json
 import logging
 import os
-import re
+import queue
 import sys
 import threading
-import time as _time
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
@@ -40,7 +39,7 @@ _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
-from eagle_skill_constants import AGENTS, SKILLS, PLUGIN_CONTENTS
+from eagle_skill_constants import SKILL_CONSTANTS, AGENTS, SKILLS, PLUGIN_CONTENTS
 
 logger = logging.getLogger("eagle.strands_agent")
 
@@ -86,79 +85,31 @@ _SENTINEL = object()  # Signals end of stream
 
 
 class QueueCallbackHandler:
-    """Strands callback handler that pushes text deltas and tool_use events into an async queue.
+    """Strands callback handler that pushes text deltas into a thread-safe queue.
 
-    Bedrock ConverseStream sends tool input across multiple events:
-      - contentBlockStart  → toolUse.name + toolUse.toolUseId  (block begins)
-      - contentBlockDelta  → toolUse.input  (JSON string fragments, streamed)
-      - contentBlockStop   → (block ends — we emit the assembled tool_use event here)
-
-    Text deltas arrive via the ``data`` kwarg and are emitted immediately.
-    Tool input is accumulated in ``_pending_tool`` and flushed at contentBlockStop.
-
-    Uses ``loop.call_soon_threadsafe`` to put items onto an ``asyncio.Queue``
-    from the background Strands thread — instant delivery, no polling.
+    Used by sdk_query_streaming() to yield tokens as they arrive from Bedrock
+    ConverseStream, instead of waiting for the full agent response.
     """
 
-    def __init__(self, async_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
-        self._queue = async_queue
-        self._loop = loop
+    def __init__(self, chunk_queue: queue.Queue):
+        self._queue = chunk_queue
         self.tool_count = 0
-        # Accumulator for in-flight tool block
-        self._pending_tool: dict | None = None   # {"name": str, "id": str, "input_parts": list[str]}
-
-    def _put(self, item: dict) -> None:
-        """Thread-safe put into asyncio.Queue."""
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
 
     def __call__(self, **kwargs: Any) -> None:
-        event = kwargs.get("event", {})
         data = kwargs.get("data", "")
+        complete = kwargs.get("complete", False)
+        tool_use = kwargs.get("event", {}).get("contentBlockStart", {}).get("start", {}).get("toolUse")
 
-        # Text delta — emit immediately
         if data:
-            self._put({"type": "text", "data": data})
+            self._queue.put({"type": "text", "data": data})
 
-        # contentBlockStart — a new content block (tool or text) is opening
-        content_block_start = event.get("contentBlockStart", {})
-        if content_block_start:
-            tool_use_start = content_block_start.get("start", {}).get("toolUse")
-            if tool_use_start:
-                self._pending_tool = {
-                    "name": tool_use_start.get("name", ""),
-                    "id": tool_use_start.get("toolUseId", ""),
-                    "input_parts": [],
-                }
-
-        # contentBlockDelta — JSON input fragment for the current tool block
-        content_block_delta = event.get("contentBlockDelta", {})
-        if content_block_delta and self._pending_tool is not None:
-            delta_tool_use = content_block_delta.get("delta", {}).get("toolUse", {})
-            fragment = delta_tool_use.get("input", "")
-            if fragment:
-                self._pending_tool["input_parts"].append(fragment)
-
-        # contentBlockStop — tool block is complete; assemble and emit
-        if "contentBlockStop" in event and self._pending_tool is not None:
-            tool_name = self._pending_tool["name"]
-            tool_id = self._pending_tool["id"]
-            raw_input = "".join(self._pending_tool["input_parts"])
-
-            parsed_input: dict = {}
-            if raw_input:
-                try:
-                    parsed_input = json.loads(raw_input)
-                except json.JSONDecodeError:
-                    parsed_input = {"_raw": raw_input}
-
+        if tool_use:
             self.tool_count += 1
-            self._put({
-                "type": "tool_use",
-                "name": tool_name,
-                "tool_use_id": tool_id,
-                "input": parsed_input,
-            })
-            self._pending_tool = None
+            self._queue.put({"type": "tool_use", "name": tool_use.get("name", "")})
+
+        if complete and not data:
+            # Stream finished — don't send sentinel here, let the caller handle it
+            pass
 
 
 # -- Shared Model (module-level) -------------------------------------
@@ -190,53 +141,6 @@ TIER_BUDGETS = {
     "advanced": 0.25,
     "premium": 0.75,
 }
-
-# -- Trivial Message Fast-Path ------------------------------------------
-# Regex matches greetings, acknowledgments, and simple conversational
-# messages that don't need the full supervisor+tools pipeline.
-_TRIVIAL_RE = re.compile(
-    r"^(hi|hello|hey|howdy|good\s+(morning|afternoon|evening|day)|"
-    r"thanks?|thank\s+you|thx|ok|okay|yes|no|sure|bye|goodbye|"
-    r"what('?s)?\s+up|how\s+are\s+you|nice|great|cool|got\s+it|"
-    r"sounds?\s+good|will\s+do|roger|acknowledged?|understood|yo|sup)[\s!?.]*$",
-    re.IGNORECASE,
-)
-
-_TRIVIAL_SYSTEM_PROMPT = (
-    "You are the EAGLE Acquisition Assistant for the NCI Office of Acquisitions. "
-    "Respond to this greeting or conversational message with a brief, friendly reply. "
-    "Keep it to 1-2 sentences. Be warm and professional. "
-    "If the user seems to need help, mention you can assist with acquisition documents, "
-    "FAR/DFARS guidance, and procurement workflows."
-)
-
-
-def _is_trivial_message(prompt: str) -> bool:
-    """Return True if the message is a simple greeting/acknowledgment."""
-    return bool(_TRIVIAL_RE.match(prompt.strip()))
-
-
-# -- Supervisor Prompt Cache (60s TTL) ----------------------------------
-_supervisor_prompt_cache: dict[str, dict] = {}
-_SUPERVISOR_PROMPT_CACHE_TTL = 60
-
-
-def _sup_cache_key(tenant_id: str, user_id: str, tier: str, workspace_id: str | None, agent_key: str) -> str:
-    return f"{tenant_id}#{user_id}#{tier}#{workspace_id or 'none'}#{agent_key}"
-
-
-def _sup_cache_get(tenant_id: str, user_id: str, tier: str, workspace_id: str | None, agent_key: str) -> str | None:
-    key = _sup_cache_key(tenant_id, user_id, tier, workspace_id, agent_key)
-    entry = _supervisor_prompt_cache.get(key)
-    if entry and _time.time() < entry["ts"] + _SUPERVISOR_PROMPT_CACHE_TTL:
-        return entry["prompt"]
-    return None
-
-
-def _sup_cache_set(tenant_id: str, user_id: str, tier: str, workspace_id: str | None, agent_key: str, prompt: str) -> None:
-    key = _sup_cache_key(tenant_id, user_id, tier, workspace_id, agent_key)
-    _supervisor_prompt_cache[key] = {"ts": _time.time(), "prompt": prompt}
-
 
 # -- Tool Schemas (for health/status endpoints) -------------------------
 # These are the Anthropic tool_use format schemas used by main.py and
@@ -448,28 +352,6 @@ EAGLE_TOOLS = [
             "required": ["action"],
         },
     },
-    {
-        "name": "query_compliance_matrix",
-        "description": (
-            "Query NCI/NIH contract requirements decision tree. "
-            "Pass a JSON params string with operation (query/list_methods/list_types/"
-            "list_thresholds/search_far/suggest_vehicle) and operation-specific fields."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "params": {
-                    "type": "string",
-                    "description": (
-                        'JSON string. For query: {"operation":"query","contract_value":85000,'
-                        '"acquisition_method":"sap","contract_type":"ffp","is_services":true}. '
-                        'For search: {"operation":"search_far","keyword":"sole source"}.'
-                    ),
-                },
-            },
-            "required": ["params"],
-        },
-    },
 ]
 
 # Max prompt size per subagent to avoid context overflow
@@ -539,28 +421,6 @@ def _build_registry() -> dict:
 
 SKILL_AGENT_REGISTRY = _build_registry()
 
-# -- Skill Tools Cache (60s TTL) ------------------------------------
-_skill_tools_cache: dict[str, dict] = {}
-_SKILL_TOOLS_CACHE_TTL = 60
-
-
-def _tools_cache_key(tenant_id: str, tier: str, workspace_id: str | None) -> str:
-    return f"{tenant_id}#{tier}#{workspace_id or 'none'}"
-
-
-def _tools_cache_get(tenant_id: str, tier: str, workspace_id: str | None) -> list | None:
-    key = _tools_cache_key(tenant_id, tier, workspace_id)
-    entry = _skill_tools_cache.get(key)
-    if entry and _time.time() < entry["ts"] + _SKILL_TOOLS_CACHE_TTL:
-        return entry["tools"]
-    return None
-
-
-def _tools_cache_set(tenant_id: str, tier: str, workspace_id: str | None, tools: list) -> None:
-    _skill_tools_cache[_tools_cache_key(tenant_id, tier, workspace_id)] = {
-        "ts": _time.time(), "tools": tools,
-    }
-
 
 def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> str:
     """Truncate skill content to fit within subagent context budget."""
@@ -598,125 +458,6 @@ def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
     return subagent_tool
 
 
-# -- Compliance Matrix @tool (available to all agents) ----------------
-
-@tool(name="query_compliance_matrix")
-def _compliance_matrix_tool(params: str) -> str:
-    """Query NCI/NIH contract requirements decision tree. Pass a JSON string with keys: operation (required), contract_value, acquisition_method, contract_type, is_it, is_small_business, is_rd, is_human_subjects, is_services, keyword. Operations: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle.
-
-    Args:
-        params: JSON string, e.g. {"operation":"query","contract_value":85000,"acquisition_method":"sap","contract_type":"ffp","is_services":true}
-    """
-    from .compliance_matrix import execute_operation
-
-    parsed = json.loads(params) if isinstance(params, str) else params
-    result = execute_operation(parsed)
-    return json.dumps(result, indent=2, default=str)
-
-
-# -- AWS Service @tools (S3, DynamoDB, CloudWatch, Documents) ----------
-# These call the handlers in agentic_service.py directly with the real
-# tenant_id and session_id from the authenticated context — bypassing
-# execute_tool() which has stub _extract_tenant_id/_extract_user_id.
-
-def _make_service_tool(
-    tool_name: str,
-    description: str,
-    tenant_id: str,
-    user_id: str,
-    session_id: str | None,
-    result_queue: asyncio.Queue | None = None,
-    loop: asyncio.AbstractEventLoop | None = None,
-):
-    """Create a Strands @tool that calls agentic_service handlers directly.
-
-    The handler receives the real tenant_id (from Cognito auth) and a
-    composite session_id (tenant-tier-user-session) for per-user S3 scoping.
-
-    If result_queue and loop are provided, tool results for create_document
-    are emitted as tool_result chunks so the frontend can render document cards.
-    """
-    from .agentic_service import TOOL_DISPATCH, TOOLS_NEEDING_SESSION
-
-    handler = TOOL_DISPATCH.get(tool_name)
-    if not handler:
-        raise ValueError(f"No handler for tool: {tool_name}")
-
-    @tool(name=tool_name)
-    def service_tool(params: str) -> str:
-        """Placeholder docstring replaced below."""
-        parsed = json.loads(params) if isinstance(params, str) else params
-        try:
-            if tool_name in TOOLS_NEEDING_SESSION:
-                result = handler(parsed, tenant_id, session_id)
-            else:
-                result = handler(parsed, tenant_id)
-
-            # Emit tool_result for create_document so frontend renders DocumentCard
-            # Only emit for successful results (not error responses)
-            if tool_name == "create_document" and result_queue and loop and "error" not in result:
-                loop.call_soon_threadsafe(
-                    result_queue.put_nowait,
-                    {"type": "tool_result", "name": tool_name, "result": result},
-                )
-
-            return json.dumps(result, indent=2, default=str)
-        except Exception as exc:
-            logger.error("Service tool %s failed: %s", tool_name, exc, exc_info=True)
-            return json.dumps({"error": str(exc), "tool": tool_name})
-
-    service_tool.__doc__ = (
-        f"{description}\n\n"
-        f"Args:\n"
-        f"    params: JSON string with operation and operation-specific fields"
-    )
-    return service_tool
-
-
-# Tool definitions: name -> description (schemas are in EAGLE_TOOLS above)
-_SERVICE_TOOL_DEFS = {
-    "s3_document_ops": (
-        "Read, write, or list documents in S3 scoped per-tenant. "
-        "Operations: list, read, write. Pass JSON with 'operation' and optional 'key', 'content'."
-    ),
-    "dynamodb_intake": (
-        "Create, read, update, list, or query intake records in DynamoDB. "
-        "Operations: create, read, update, list, query. Pass JSON with 'operation' and optional 'item_id', 'data'."
-    ),
-    "create_document": (
-        "Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, "
-        "Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification). "
-        "Documents are saved to S3. Pass JSON with 'doc_type', 'title', and optional 'data'."
-    ),
-    "get_intake_status": (
-        "Get the current intake package status and completeness — shows which documents exist, "
-        "which are missing, and next actions. Pass JSON with optional 'intake_id'."
-    ),
-    "intake_workflow": (
-        "Manage the acquisition intake workflow: start, advance, status, complete, reset. "
-        "Pass JSON with 'action' and optional 'intake_id', 'data'."
-    ),
-    "search_far": (
-        "Search the FAR and DFARS for clauses, requirements, and guidance. "
-        "Pass JSON with 'query' and optional 'parts' array."
-    ),
-}
-
-
-def _build_service_tools(
-    tenant_id: str,
-    user_id: str,
-    session_id: str | None,
-    result_queue: asyncio.Queue | None = None,
-    loop: asyncio.AbstractEventLoop | None = None,
-) -> list:
-    """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session."""
-    tools = []
-    for name, desc in _SERVICE_TOOL_DEFS.items():
-        tools.append(_make_service_tool(name, desc, tenant_id, user_id, session_id, result_queue, loop))
-    return tools
-
-
 # -- build_skill_tools() ---------------------------------------------
 
 def build_skill_tools(
@@ -737,12 +478,6 @@ def build_skill_tools(
     Returns:
         List of @tool-decorated functions suitable for Agent(tools=[...])
     """
-    # Cache hit for normal path (no skill_names filter)
-    if skill_names is None:
-        cached = _tools_cache_get(tenant_id, tier, workspace_id)
-        if cached is not None:
-            return cached
-
     tools = []
 
     for name, meta in SKILL_AGENT_REGISTRY.items():
@@ -794,13 +529,6 @@ def build_skill_tools(
     except Exception as exc:
         logger.warning("skill_store.list_active_skills failed for %s: %s -- skipping user skills", tenant_id, exc)
 
-    # Always include the compliance matrix tool (read-only, no tenant scoping)
-    tools.append(_compliance_matrix_tool)
-
-    # Cache for normal path
-    if skill_names is None:
-        _tools_cache_set(tenant_id, tier, workspace_id, tools)
-
     return tools
 
 
@@ -817,28 +545,13 @@ def build_supervisor_prompt(
 
     Loads the base supervisor prompt from the 4-layer resolution chain when
     workspace_id is provided; otherwise falls back to AGENTS bundled content.
-    Results are cached for 60s to avoid repeated DynamoDB calls.
     """
     names = agent_names or list(SKILL_AGENT_REGISTRY.keys())
-    agent_key = ",".join(sorted(names))
-
-    # Check cache first
-    cached = _sup_cache_get(tenant_id, user_id, tier, workspace_id, agent_key)
-    if cached is not None:
-        return cached
-
     agent_list = "\n".join(
         f"- {name}: {SKILL_AGENT_REGISTRY[name]['description']}"
         for name in names
         if name in SKILL_AGENT_REGISTRY
     )
-
-    # List service tools the supervisor has direct access to
-    service_tool_names = [n for n in names if n in _SERVICE_TOOL_DEFS]
-    service_list = "\n".join(
-        f"- {name}: {_SERVICE_TOOL_DEFS[name]}"
-        for name in service_tool_names
-    ) if service_tool_names else ""
 
     # Resolve supervisor prompt via workspace chain
     base_prompt = ""
@@ -853,34 +566,15 @@ def build_supervisor_prompt(
         supervisor_entry = AGENTS.get("supervisor")
         base_prompt = supervisor_entry["body"].strip() if supervisor_entry else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
 
-    result = (
+    return (
         f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}\n\n"
         f"{base_prompt}\n\n"
-        f"--- DIRECT HANDLING (NO DELEGATION) ---\n"
-        f"For the following types of messages, respond directly WITHOUT using any tools:\n"
-        f"- Greetings and pleasantries (hi, hello, good morning, thanks, etc.)\n"
-        f"- Simple yes/no or acknowledgment responses\n"
-        f"- Requests to repeat or clarify your last response\n"
-        f"- General conversational messages not related to acquisition\n"
-        f"For these, provide a brief, friendly response. Do NOT delegate to any specialist.\n\n"
-        f"--- SPECIALIST DELEGATION ---\n"
+        f"--- ACTIVE SPECIALISTS ---\n"
         f"Available specialists for delegation:\n{agent_list}\n\n"
-        f"For acquisition-related questions, regulatory queries, document generation, "
-        f"and other substantive work: use the available tool functions to delegate to specialists. "
-        f"Include relevant context in the query you pass to each specialist.\n\n"
-        + (
-            f"--- DIRECT SERVICE TOOLS ---\n"
-            f"You also have direct access to these AWS service tools (call them directly, do NOT delegate):\n"
-            f"{service_list}\n\n"
-            f"When using service tools, pass a JSON string as the 'params' argument.\n"
-            f"For document generation (create_document), always confirm with the user what was created "
-            f"and provide the document type, title, and S3 location in your response."
-            if service_list else ""
-        )
+        f"IMPORTANT: Use the available tool functions to delegate to specialists. "
+        f"Include relevant context in the query you pass to each specialist. "
+        f"Do not try to answer specialized questions yourself -- delegate to the expert."
     )
-
-    _sup_cache_set(tenant_id, user_id, tier, workspace_id, agent_key, result)
-    return result
 
 
 # -- SDK Query Wrappers (same signatures as sdk_agentic_service.py) --
@@ -953,16 +647,11 @@ async def sdk_query(
         workspace_id=resolved_workspace_id,
     )
 
-    # Add AWS service tools (S3, DynamoDB, doc generation, FAR search, intake)
-    composite_session = f"{tenant_id}#{tier}#{user_id}#{session_id or 'none'}"
-    service_tools = _build_service_tools(tenant_id, user_id, composite_session)
-    all_tools = skill_tools + service_tools
-
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,
         user_id=user_id,
         tier=tier,
-        agent_names=[getattr(t, 'tool_spec', {}).get('name', t.__name__) for t in all_tools],
+        agent_names=[t.__name__ for t in skill_tools],
         workspace_id=resolved_workspace_id,
     )
 
@@ -972,14 +661,13 @@ async def sdk_query(
     supervisor = Agent(
         model=_model,
         system_prompt=system_prompt,
-        tools=all_tools,
+        tools=skill_tools,
         callback_handler=None,
         messages=strands_history,
     )
 
-    # Call invoke_async directly — avoids Strands' run_async() which creates
-    # a new ThreadPoolExecutor + asyncio.run() event loop on every call
-    result = await supervisor.invoke_async(prompt)
+    # Synchronous call -- Strands handles the agentic loop internally
+    result = supervisor(prompt)
     result_text = str(result)
 
     # Extract tool names called during execution from metrics.tool_metrics
@@ -1034,82 +722,51 @@ async def sdk_query_streaming(
 
     Unlike sdk_query() which waits for the full response, this yields
     {"type": "text", "data": "..."} chunks as they arrive from Bedrock
-    ConverseStream, plus tool_use events with actual input data, and a
-    final {"type": "complete", ...} event.
+    ConverseStream, plus a final {"type": "complete", ...} event.
 
     Runs the synchronous Strands Agent in a background thread and bridges
     to async via a queue.
-
-    Fast-path: trivial messages (greetings, acknowledgments) skip workspace
-    resolution, tool building, and supervisor prompt construction. They use
-    a lightweight no-tools Agent with a short system prompt for ~2-4x faster
-    time-to-first-token.
     """
-    t0 = _time.time()
-    use_fast_path = _is_trivial_message(prompt) and not skill_names
+    # Resolve workspace
+    resolved_workspace_id = workspace_id
+    if not resolved_workspace_id:
+        try:
+            from .workspace_store import get_or_create_default
+            ws = get_or_create_default(tenant_id, user_id)
+            resolved_workspace_id = ws.get("workspace_id")
+        except Exception as exc:
+            logger.warning("workspace_store.get_or_create_default failed: %s", exc)
 
-    loop = asyncio.get_running_loop()
-    chunk_queue: asyncio.Queue = asyncio.Queue()
-    handler = QueueCallbackHandler(chunk_queue, loop)
+    skill_tools = build_skill_tools(
+        tier=tier,
+        skill_names=skill_names,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        workspace_id=resolved_workspace_id,
+    )
+
+    system_prompt = build_supervisor_prompt(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=tier,
+        agent_names=[t.__name__ for t in skill_tools],
+        workspace_id=resolved_workspace_id,
+    )
+
     strands_history = _to_strands_messages(messages) if messages else None
+    chunk_queue: queue.Queue = queue.Queue()
 
-    if use_fast_path:
-        # Fast path: no workspace, no tools, short prompt
-        logger.info("fast-path: trivial message detected (%r), skipping full pipeline", prompt[:40])
-        supervisor = Agent(
-            model=_model,
-            system_prompt=_TRIVIAL_SYSTEM_PROMPT,
-            tools=[],
-            callback_handler=handler,
-            messages=strands_history,
-        )
-        skill_tools = []
-    else:
-        # Full path: resolve workspace, build tools, build prompt
-        resolved_workspace_id = workspace_id
-        if not resolved_workspace_id:
-            try:
-                from .workspace_store import get_or_create_default
-                ws = get_or_create_default(tenant_id, user_id)
-                resolved_workspace_id = ws.get("workspace_id")
-            except Exception as exc:
-                logger.warning("workspace_store.get_or_create_default failed: %s", exc)
+    handler = QueueCallbackHandler(chunk_queue)
 
-        skill_tools = build_skill_tools(
-            tier=tier,
-            skill_names=skill_names,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            workspace_id=resolved_workspace_id,
-        )
+    supervisor = Agent(
+        model=_model,
+        system_prompt=system_prompt,
+        tools=skill_tools,
+        callback_handler=handler,
+        messages=strands_history,
+    )
 
-        # Add AWS service tools (S3, DynamoDB, doc generation, FAR search, intake)
-        composite_session = f"{tenant_id}#{tier}#{user_id}#{session_id or 'none'}"
-        service_tools = _build_service_tools(tenant_id, user_id, composite_session, chunk_queue, loop)
-        all_tools = skill_tools + service_tools
-
-        system_prompt = build_supervisor_prompt(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            tier=tier,
-            agent_names=[getattr(t, 'tool_spec', {}).get('name', t.__name__) for t in all_tools],
-            workspace_id=resolved_workspace_id,
-        )
-
-        supervisor = Agent(
-            model=_model,
-            system_prompt=system_prompt,
-            tools=all_tools,
-            callback_handler=handler,
-            messages=strands_history,
-        )
-
-    t_setup = _time.time() - t0
-    logger.info("agent setup took %.3fs (fast_path=%s, tools=%d)", t_setup, use_fast_path, len(all_tools) if not use_fast_path else 0)
-
-    # Run synchronous Strands agent in a background thread.
-    # The callback handler puts chunks into the asyncio.Queue via
-    # loop.call_soon_threadsafe — instant delivery, no polling.
+    # Run synchronous Strands agent in a background thread
     result_holder: list = []
     error_holder: list = []
 
@@ -1120,35 +777,36 @@ async def sdk_query_streaming(
         except Exception as exc:
             error_holder.append(exc)
         finally:
-            loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
+            chunk_queue.put(_SENTINEL)
 
     thread = threading.Thread(target=_run_agent, daemon=True)
     thread.start()
 
-    # Yield chunks as they arrive — await is instant (no polling)
+    # Yield chunks as they arrive from the callback handler
     full_text_parts: list[str] = []
     tools_called: list[str] = []
-    ttft_logged = False
 
     while True:
-        chunk = await chunk_queue.get()
+        try:
+            # Poll queue with short timeout to stay async-friendly
+            chunk = await asyncio.to_thread(chunk_queue.get, timeout=0.1)
+        except Exception:
+            # queue.Empty on timeout — check if thread is still alive
+            if not thread.is_alive():
+                break
+            continue
 
         if chunk is _SENTINEL:
             break
 
         if chunk.get("type") == "text":
-            if not ttft_logged:
-                ttft = _time.time() - t0
-                logger.info("TTFT: %.3fs (fast_path=%s)", ttft, use_fast_path)
-                ttft_logged = True
             full_text_parts.append(chunk["data"])
             yield chunk
         elif chunk.get("type") == "tool_use":
             tools_called.append(chunk.get("name", ""))
             yield chunk
-        elif chunk.get("type") == "tool_result":
-            yield chunk
 
+    # Wait for thread to finish
     thread.join(timeout=5)
 
     # Extract usage from result
@@ -1170,10 +828,6 @@ async def sdk_query_streaming(
                     tools_called = list(metrics.tool_metrics.keys())
         except Exception:
             pass
-
-    total_time = _time.time() - t0
-    logger.info("stream complete: %.3fs total, %d tools, %d chars (fast_path=%s)",
-                total_time, len(tools_called), len("".join(full_text_parts)), use_fast_path)
 
     if error_holder:
         yield {"type": "error", "error": str(error_holder[0])}

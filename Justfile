@@ -28,7 +28,7 @@ setup: cdk-install _cdk-bootstrap cdk-deploy deploy create-users check-aws
 
 # Create test + admin Cognito users with required tenant attributes
 create-users:
-    python scripts/create_users.py
+    python3 scripts/create_users.py
 
 # ── Development ─────────────────────────────────────────────
 
@@ -60,7 +60,7 @@ dev-sso PROFILE="":
 # For AWS SSO: run 'just dev-up-sso' instead
 dev-up:
     docker compose -f {{COMPOSE_FILE}} up --build --detach
-    python scripts/wait_for_backend.py
+    python3 scripts/wait_for_backend.py
 
 # Start stack detached with AWS SSO credentials
 dev-up-sso PROFILE="":
@@ -74,7 +74,7 @@ dev-up-sso PROFILE="":
         exit 1
     fi
     docker compose -f {{COMPOSE_FILE}} up --build --detach
-    python scripts/wait_for_backend.py
+    python3 scripts/wait_for_backend.py
 
 # Tear down local docker compose stack
 dev-down:
@@ -121,7 +121,7 @@ dev-smoke-ui: dev-up smoke-ui
 
 # Start FastAPI backend only (local)
 dev-backend:
-    cd server && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # Start Next.js frontend only (local)
 dev-frontend:
@@ -134,7 +134,7 @@ lint: lint-py lint-ts
 
 # Lint Python with ruff
 lint-py:
-    cd server && python -m ruff check app/
+    cd server && python3 -m ruff check app/
 
 # Type-check TypeScript
 lint-ts:
@@ -144,15 +144,15 @@ lint-ts:
 
 # Run backend unit tests
 test *ARGS:
-    cd server && python -m pytest tests/ -v {{ARGS}}
+    cd server && python3 -m pytest tests/ -v {{ARGS}}
 
 # Run Playwright E2E tests against Fargate (headless)
 test-e2e *ARGS:
-    python -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); dns=[lb['DNSName'] for lb in c.describe_load_balancers()['LoadBalancers'] if 'Front' in lb['LoadBalancerName']]; print(f'Testing against: http://{dns[0]}')" && cd client && npx playwright test {{ARGS}}
+    python3 -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); dns=[lb['DNSName'] for lb in c.describe_load_balancers()['LoadBalancers'] if 'Front' in lb['LoadBalancerName']]; print(f'Testing against: http://{dns[0]}')" && cd client && npx playwright test {{ARGS}}
 
 # Run Playwright E2E tests against Fargate with a visible browser window
 test-e2e-ui *ARGS:
-    python -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); dns=[lb['DNSName'] for lb in c.describe_load_balancers()['LoadBalancers'] if 'Front' in lb['LoadBalancerName']]; print(f'Testing against: http://{dns[0]}')" && cd client && npx playwright test {{ARGS}} --headed
+    python3 -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); dns=[lb['DNSName'] for lb in c.describe_load_balancers()['LoadBalancers'] if 'Front' in lb['LoadBalancerName']]; print(f'Testing against: http://{dns[0]}')" && cd client && npx playwright test {{ARGS}} --headed
 
 # E2E use case tests — complete acquisition workflows through the UI
 # Headed + sequential so you can watch each scenario play out.
@@ -191,15 +191,15 @@ e2e WORKFLOW="full":
 
 # Run full eval suite (28 tests) with haiku and publish results
 eval:
-    cd server && python -u tests/test_eagle_sdk_eval.py --model haiku
+    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku
 
 # Run specific eval tests (e.g., just eval-quick 1,2,3)
 eval-quick TESTS:
-    cd server && python -u tests/test_eagle_sdk_eval.py --model haiku --tests {{TESTS}}
+    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests {{TESTS}}
 
 # Run AWS tool eval tests only (16-20)
 eval-aws:
-    cd server && python -u tests/test_eagle_sdk_eval.py --model haiku --tests 16,17,18,19,20
+    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests 16,17,18,19,20
 
 # ── Docker Build ────────────────────────────────────────────
 
@@ -207,13 +207,13 @@ eval-aws:
 build:
     docker compose -f {{COMPOSE_FILE}} build
 
-# Build backend image
+# Build backend image (linux/amd64 for ECS Fargate)
 build-backend:
-    docker build -f deployment/docker/Dockerfile.backend -t {{BACKEND_REPO}}:latest .
+    docker build --platform linux/amd64 -f deployment/docker/Dockerfile.backend -t {{BACKEND_REPO}}:latest .
 
-# Build frontend image (fetches Cognito config from CDK outputs)
+# Build frontend image (fetches Cognito config from CDK outputs, linux/amd64 for ECS Fargate)
 build-frontend:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     cf = boto3.client('cloudformation', region_name='us-east-1'); \
     stacks = cf.describe_stacks(StackName='EagleCoreStack')['Stacks'][0]['Outputs']; \
@@ -222,7 +222,7 @@ build-frontend:
     client_id = [v for k,v in outputs.items() if 'ClientId' in k][0]; \
     print(f'Building frontend: POOL_ID={pool_id} CLIENT_ID={client_id}'); \
     sys.exit(subprocess.call([ \
-      'docker', 'build', '-f', 'deployment/docker/Dockerfile.frontend', \
+      'docker', 'build', '--platform', 'linux/amd64', '-f', 'deployment/docker/Dockerfile.frontend', \
       '--build-arg', f'NEXT_PUBLIC_COGNITO_USER_POOL_ID={pool_id}', \
       '--build-arg', f'NEXT_PUBLIC_COGNITO_CLIENT_ID={client_id}', \
       '--build-arg', 'NEXT_PUBLIC_COGNITO_REGION=us-east-1', \
@@ -368,7 +368,7 @@ devbox-smoke:
 
 # Show ECS service health and running task counts
 status:
-    python -c "\
+    python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     elb = boto3.client('elbv2', region_name='us-east-1'); \
@@ -387,7 +387,7 @@ status:
 
 # Tail ECS logs for a service (default: backend)
 logs SERVICE="backend":
-    python -c "\
+    python3 -c "\
     import boto3, sys, time; \
     svc = '{{SERVICE}}'; \
     lg = f'/eagle/ecs/{svc}-dev'; \
@@ -399,7 +399,7 @@ logs SERVICE="backend":
 
 # Print live URLs from ALBs
 urls:
-    python -c "\
+    python3 -c "\
     import boto3; \
     elb = boto3.client('elbv2', region_name='us-east-1'); \
     lbs = elb.describe_load_balancers()['LoadBalancers']; \
@@ -410,7 +410,7 @@ urls:
 
 # Verify AWS credentials and service connectivity (all EAGLE resources)
 check-aws:
-    python scripts/check_aws.py
+    python3 scripts/check_aws.py
 
 # Verify AWS SSO credentials are valid and can access Bedrock
 check-sso:
@@ -438,7 +438,7 @@ check-sso:
 smoke-prod LEVEL="mid":
     #!/usr/bin/env bash
     set -euo pipefail
-    ALB=$(python -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); lbs=c.describe_load_balancers()['LoadBalancers']; front=next(lb['DNSName'] for lb in lbs if 'Front' in lb['LoadBalancerName']); print(f'http://{front}')")
+    ALB=$(python3 -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); lbs=c.describe_load_balancers()['LoadBalancers']; front=next(lb['DNSName'] for lb in lbs if 'Front' in lb['LoadBalancerName']); print(f'http://{front}')")
     echo "Smoke testing against: $ALB"
     case "{{LEVEL}}" in
       base)
@@ -504,14 +504,14 @@ ship: lint cdk-synth deploy smoke-prod
 # ── Internal Helpers (prefixed with _) ──────────────────────
 
 _cdk-bootstrap:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     account = boto3.client('sts', region_name='us-east-1').get_caller_identity()['Account']; \
     print(f'Bootstrapping CDK for account {account}...'); \
     sys.exit(subprocess.call(['npx', 'cdk', 'bootstrap', f'aws://{account}/us-east-1'], cwd='infrastructure/cdk-eagle'))"
 
 _ecr-login:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     sts = boto3.client('sts', region_name='us-east-1'); \
     account = sts.get_caller_identity()['Account']; \
@@ -525,7 +525,7 @@ _ecr-login:
     sys.exit(result.returncode)"
 
 _push-backend:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     account = boto3.client('sts', region_name='us-east-1').get_caller_identity()['Account']; \
     reg = f'{account}.dkr.ecr.us-east-1.amazonaws.com'; \
@@ -533,7 +533,7 @@ _push-backend:
     subprocess.check_call(['docker', 'push', f'{reg}/{{BACKEND_REPO}}:latest'])"
 
 _push-frontend:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     account = boto3.client('sts', region_name='us-east-1').get_caller_identity()['Account']; \
     reg = f'{account}.dkr.ecr.us-east-1.amazonaws.com'; \
@@ -541,7 +541,7 @@ _push-frontend:
     subprocess.check_call(['docker', 'push', f'{reg}/{{FRONTEND_REPO}}:latest'])"
 
 _ecs-update-all:
-    python -c "\
+    python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     ecs.update_service(cluster='eagle-dev', service='eagle-backend-dev', forceNewDeployment=True); \
@@ -550,21 +550,21 @@ _ecs-update-all:
     print('Frontend: force new deployment')"
 
 _ecs-update-backend:
-    python -c "\
+    python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     ecs.update_service(cluster='eagle-dev', service='eagle-backend-dev', forceNewDeployment=True); \
     print('Backend: force new deployment')"
 
 _ecs-update-frontend:
-    python -c "\
+    python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     ecs.update_service(cluster='eagle-dev', service='eagle-frontend-dev', forceNewDeployment=True); \
     print('Frontend: force new deployment')"
 
 _ecs-wait-all:
-    python -c "\
+    python3 -c "\
     import boto3; \
     print('Waiting for services to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
@@ -573,7 +573,7 @@ _ecs-wait-all:
     print('All services stable.')"
 
 _ecs-wait-backend:
-    python -c "\
+    python3 -c "\
     import boto3; \
     print('Waiting for backend to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
@@ -582,7 +582,7 @@ _ecs-wait-backend:
     print('Backend stable.')"
 
 _ecs-wait-frontend:
-    python -c "\
+    python3 -c "\
     import boto3; \
     print('Waiting for frontend to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \

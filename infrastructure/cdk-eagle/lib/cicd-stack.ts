@@ -23,9 +23,11 @@ export class EagleCiCdStack extends cdk.Stack {
     );
 
     // ── Deploy Role ──────────────────────────────────────────
-    // Trusted by GitHub Actions from the specific repo/branch
-    this.deployRole = new iam.Role(this, 'GitHubActionsRole', {
-      roleName: `eagle-github-actions-${config.env}`,
+    // New logical ID (DeployRole) and name (eagle-deploy-role-*) to avoid
+    // iam:UpdateAssumeRolePolicy which is blocked by NCI poweruser-deny-policy.
+    // The old GitHubActionsRole (eagle-github-actions-dev) remains but is unused.
+    this.deployRole = new iam.Role(this, 'DeployRole', {
+      roleName: `eagle-deploy-role-${config.env}`,
       maxSessionDuration: cdk.Duration.hours(1),
       assumedBy: new iam.OpenIdConnectPrincipal(githubProvider, {
         StringEquals: {

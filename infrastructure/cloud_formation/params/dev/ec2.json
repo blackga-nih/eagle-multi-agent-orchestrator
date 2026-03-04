@@ -1,0 +1,26 @@
+[
+  {
+    "ParameterKey": "appName",
+    "ParameterValue": "eagle"
+  },
+  {
+    "ParameterKey": "environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "instanceType",
+    "ParameterValue": "t3.medium"
+  },
+  {
+    "ParameterKey": "vpcId",
+    "ParameterValue": "vpc-09def43fcabfa4df6"
+  },
+  {
+    "ParameterKey": "subnetId",
+    "ParameterValue": "subnet-0acfc5795a31620c4"
+  },
+  {
+    "ParameterKey": "allowedSshCidr",
+    "ParameterValue": "10.0.0.0/8"
+  }
+]

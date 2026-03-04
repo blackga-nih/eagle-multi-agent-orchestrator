@@ -62,8 +62,8 @@ export const DEV_CONFIG: EagleConfig = {
   desiredCount: 1,
   maxCount: 4,
 
-  githubOwner: 'gblack686',
-  githubRepo: 'sample-multi-tenant-agent-core-app',
+  githubOwner: 'CBIIT',
+  githubRepo: 'sm_eagle',
 
 };
 

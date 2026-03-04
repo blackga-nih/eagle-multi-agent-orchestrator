@@ -17,36 +17,35 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response, UploadFile, File
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 from collections import deque
 from datetime import datetime, timedelta
+from decimal import Decimal
 import asyncio
 import json
-import re as _re
 import time
 import logging
 import os
 import uuid
 import io
-import boto3 as _boto3
 
 # EAGLE modules (new)
-from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS, _skill_tools_cache, _supervisor_prompt_cache
+from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
 from .document_export import export_document
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
     update_session as eagle_update_session, delete_session as eagle_delete_session,
     list_sessions as eagle_list_sessions,
-    add_message, get_messages, get_messages_for_anthropic, get_usage_summary,
+    add_message, get_messages, get_messages_for_anthropic, record_usage, get_usage_summary,
     get_tenant_usage_overview, list_tenant_sessions,
 )
 from .cognito_auth import (
     UserContext, extract_user_context,
-    DEV_MODE
+    DEV_MODE, DEV_USER_ID, DEV_TENANT_ID
 )
 from .admin_service import (
     get_dashboard_stats, get_user_stats, get_top_users, get_tool_usage,
@@ -54,12 +53,12 @@ from .admin_service import (
 )
 
 # Existing multi-tenant modules (preserved)
-from .models import SubscriptionTier
+from .models import ChatMessage, ChatResponse, TenantContext, UsageMetric, SubscriptionTier
 from .auth import get_current_user
 from .subscription_service import SubscriptionService
 from .cost_attribution import CostAttributionService
 from .admin_cost_service import AdminCostService
-from .admin_auth import get_admin_user, verify_tenant_admin
+from .admin_auth import get_admin_user, verify_tenant_admin, AdminAuthService
 from .streaming_routes import create_streaming_router
 
 # Phase 4 — hot-reload stores
@@ -71,10 +70,9 @@ from .plugin_store import (
 from .workspace_store import (
     get_or_create_default, create_workspace, get_workspace,
     list_workspaces, activate_workspace, delete_workspace,
-    _workspace_cache,
 )
 from .wspc_store import (
-    put_override, list_overrides,
+    put_override, get_override, list_overrides,
     delete_override, delete_all_overrides,
 )
 from .prompt_store import (
@@ -82,27 +80,29 @@ from .prompt_store import (
     _prompt_cache,
 )
 from .config_store import (
-    put_config, delete_config, list_config,
+    get_config, put_config, delete_config, list_config,
     _config_cache,
 )
 from .template_store import (
-    put_template, delete_template,
+    put_template, get_template, delete_template,
     list_tenant_templates, resolve_template,
     _template_cache,
 )
 from .skill_store import (
-    create_skill, get_skill, update_skill, list_skills, submit_for_review, publish_skill, delete_skill,
+    create_skill, get_skill, update_skill, list_skills, list_active_skills,
+    submit_for_review, publish_skill, disable_skill, delete_skill,
 )
 from .package_store import (
     create_package, get_package, update_package, list_packages,
-    get_package_checklist, submit_package, approve_package,
+    get_package_checklist, submit_package, approve_package, close_package,
 )
 from .document_store import (
     create_document as create_acq_document, get_document,
-    finalize_document, list_package_documents,
+    finalize_document, list_package_documents, get_document_history,
 )
 from .approval_store import (
-    create_approval_chain, record_decision, get_chain_status,
+    create_approval_chain, list_approval_chain,
+    record_decision, get_chain_status,
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
@@ -187,146 +187,40 @@ class EagleChatResponse(BaseModel):
     cost_usd: Optional[float] = None
 
 
-# ── Fast-path for trivial messages (bypasses Strands Agent overhead) ──
-
-@app.get("/api/perf-test")
-async def perf_test():
-    """Bare Bedrock call — no auth, no DDB, no Strands. Pure model latency."""
-    t0 = time.time()
-    client = _get_bedrock_client()
-    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
-    resp = await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: client.converse(
-            modelId=model_id,
-            messages=[{"role": "user", "content": [{"text": "hi"}]}],
-            system=[{"text": "Reply with just: Hello!"}],
-        ),
-    )
-    elapsed = int((time.time() - t0) * 1000)
-    text = resp["output"]["message"]["content"][0]["text"]
-    return {"text": text, "ms": elapsed}
-
-
-_TRIVIAL_RE = _re.compile(
-    r"^(hi|hello|hey|good\s*(morning|afternoon|evening)|thanks|thank\s*you|"
-    r"ok|okay|yes|no|sure|bye|goodbye|howdy|sup|yo|hola|greetings|"
-    r"what's up|whats up|how are you|how's it going)\s*[?!.,]*$",
-    _re.IGNORECASE,
-)
-
-_bedrock_client = None
-
-
-def _get_bedrock_client():
-    global _bedrock_client
-    if _bedrock_client is None:
-        _bedrock_client = _boto3.client(
-            "bedrock-runtime",
-            region_name=os.getenv("AWS_REGION", "us-east-1"),
-        )
-    return _bedrock_client
-
-
-_FAST_SYSTEM_PROMPT = (
-    "You are EAGLE, the Enhanced Acquisition Guidance and Learning Engine "
-    "for the NIH/NCI Office of Acquisitions. Respond briefly and warmly to "
-    "the user's greeting. Mention that you can help with acquisitions, FAR "
-    "regulations, document generation, and compliance guidance. Keep it to "
-    "2-3 sentences."
-)
-
-
-async def _fast_trivial_response(message: str) -> dict | None:
-    """If message is trivial, call Bedrock directly (no Strands overhead).
-
-    Returns response dict on hit, None if message is not trivial.
-    """
-    if not _TRIVIAL_RE.match(message.strip()):
-        return None
-
-    client = _get_bedrock_client()
-    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
-
-    resp = await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: client.converse(
-            modelId=model_id,
-            messages=[{"role": "user", "content": [{"text": message}]}],
-            system=[{"text": _FAST_SYSTEM_PROMPT}],
-        ),
-    )
-
-    # Some models (e.g. MiniMax) return reasoningContent blocks before text
-    content_blocks = resp["output"]["message"]["content"]
-    output_text = next(
-        (b["text"] for b in content_blocks if "text" in b),
-        str(content_blocks),
-    )
-    usage = resp.get("usage", {})
-    return {
-        "text": output_text,
-        "usage": usage,
-        "model": MODEL,
-        "tools_called": [],
-    }
-
-
 @app.post("/api/chat", response_model=EagleChatResponse)
 async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_from_header)):
     """REST chat endpoint using EAGLE Anthropic SDK with cost tracking."""
     start = time.time()
     tenant_id, user_id, session_id = get_session_context(user, req.session_id)
-    loop = asyncio.get_event_loop()
 
-    # Fast path: trivial messages bypass Strands Agent entirely
-    fast_result = await _fast_trivial_response(req.message)
-    if fast_result is not None:
-        elapsed_ms = int((time.time() - start) * 1000)
-        usage = fast_result.get("usage", {})
-        return EagleChatResponse(
-            response=fast_result["text"],
-            session_id=session_id,
-            usage=usage,
-            model=fast_result.get("model", MODEL),
-            tools_called=[],
-            response_time_ms=elapsed_ms,
-            cost_usd=0.0,
-        )
+    # Check rate limits
+    rate_check = check_rate_limit(tenant_id, user_id, user.tier)
+    if not rate_check["allowed"]:
+        raise HTTPException(status_code=429, detail=rate_check["reason"])
 
-    # Run rate-limit check and session setup concurrently (both are DynamoDB reads)
+    # Get or create session
     if USE_PERSISTENT_SESSIONS:
-        rate_fut, session_fut, messages_fut = await asyncio.gather(
-            loop.run_in_executor(None, check_rate_limit, tenant_id, user_id, user.tier),
-            loop.run_in_executor(None, eagle_get_session, session_id, tenant_id, user_id),
-            loop.run_in_executor(None, get_messages_for_anthropic, session_id, tenant_id, user_id),
-        )
-        rate_check, session, messages = rate_fut, session_fut, messages_fut
+        session = eagle_get_session(session_id, tenant_id, user_id)
         if not session:
-            loop.run_in_executor(None, eagle_create_session, tenant_id, user_id, session_id)
+            session = eagle_create_session(tenant_id, user_id, session_id)
+        messages = get_messages_for_anthropic(session_id, tenant_id, user_id)
     else:
-        rate_check = await loop.run_in_executor(None, check_rate_limit, tenant_id, user_id, user.tier)
         if session_id not in SESSIONS:
             SESSIONS[session_id] = []
         messages = SESSIONS[session_id]
-
-    if not rate_check["allowed"]:
-        raise HTTPException(status_code=429, detail=rate_check["reason"])
 
     # Add user message
     user_msg = {"role": "user", "content": req.message}
     messages.append(user_msg)
 
     if USE_PERSISTENT_SESSIONS:
-        # Fire-and-forget: DynamoDB write doesn't block the model call
-        loop.run_in_executor(
-            None, add_message, session_id, "user", req.message, tenant_id, user_id
-        )
+        add_message(session_id, "user", req.message, tenant_id, user_id)
 
     try:
         _text_parts: list[str] = []
         _usage: dict = {}
         _tools_called: list[str] = []
+        _final_text: str = ""
         _final_text: str = ""
         async for _sdk_msg in sdk_query(
             prompt=req.message,
@@ -355,10 +249,7 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
-            # Fire-and-forget: don't block the response
-            loop.run_in_executor(
-                None, add_message, session_id, "assistant", result["text"], tenant_id, user_id
-            )
+            add_message(session_id, "assistant", result["text"], tenant_id, user_id)
         else:
             messages.append({"role": "assistant", "content": result["text"]})
 
@@ -370,16 +261,12 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         output_tokens = usage.get("output_tokens", 0)
         cost = calculate_cost(input_tokens, output_tokens)
 
-        # Fire-and-forget: cost recording doesn't block response
-        _cost_model = result.get("model", MODEL)
-        _cost_tools = result.get("tools_called", [])
-        loop.run_in_executor(
-            None, lambda: record_request_cost(
-                tenant_id, user_id, session_id,
-                input_tokens, output_tokens,
-                model=_cost_model, tools_used=_cost_tools,
-                response_time_ms=elapsed_ms,
-            )
+        record_request_cost(
+            tenant_id, user_id, session_id,
+            input_tokens, output_tokens,
+            model=result.get("model", MODEL),
+            tools_used=result.get("tools_called", []),
+            response_time_ms=elapsed_ms
         )
 
         _log_telemetry({
@@ -452,61 +339,6 @@ async def api_create_session(
         session = {"session_id": session_id, "title": title or "New Conversation"}
 
     return session
-
-
-# ── AI session title generation (must be before {session_id} routes) ──
-
-class GenerateTitleRequest(BaseModel):
-    message: str
-    response_snippet: Optional[str] = None
-
-
-_TITLE_SYSTEM_PROMPT = (
-    "Generate a short, descriptive title (3-6 words) for a chat session based on "
-    "the user's message. The title should capture the main topic or intent. "
-    "Do NOT include quotes, periods, or punctuation. Just output the title text. "
-    "Examples: 'SOW for Cloud Migration', 'FAR Part 15 Guidance', "
-    "'IGCE Cost Estimate Review', 'New IT Services Acquisition'."
-)
-
-
-@app.post("/api/generate-title")
-async def api_generate_session_title(
-    req: GenerateTitleRequest,
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Use Bedrock to generate a short session title from the user's first message."""
-    user_text = req.message.strip()[:500]
-    if not user_text:
-        return {"title": "New Session"}
-
-    prompt = f"User message: {user_text}"
-    if req.response_snippet:
-        prompt += f"\n\nAssistant response preview: {req.response_snippet[:300]}"
-
-    try:
-        client = _get_bedrock_client()
-        model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
-        resp = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: client.converse(
-                modelId=model_id,
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                system=[{"text": _TITLE_SYSTEM_PROMPT}],
-                inferenceConfig={"maxTokens": 30, "temperature": 0.3},
-            ),
-        )
-        content_blocks = resp["output"]["message"]["content"]
-        title = next(
-            (b["text"] for b in content_blocks if "text" in b),
-            "New Session",
-        ).strip().strip('"\'.')
-        if len(title) > 60:
-            title = title[:57] + "..."
-        return {"title": title}
-    except Exception as e:
-        logger.warning("Failed to generate session title: %s", e)
-        return {"title": "New Session"}
 
 
 @app.get("/api/sessions/{session_id}")
@@ -606,7 +438,6 @@ async def api_get_messages(
     return {"session_id": session_id, "messages": messages}
 
 
-
 # ── Document export endpoints ────────────────────────────────────────
 
 class ExportRequest(BaseModel):
@@ -686,7 +517,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
@@ -721,7 +552,7 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
 
     # Security: ensure key is within user's prefix
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
@@ -742,38 +573,6 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchKey":
             raise HTTPException(status_code=404, detail="Document not found")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ── S3 Presigned URL ─────────────────────────────────────────────────
-
-@app.get("/api/documents/presign")
-async def api_presign_document(
-    key: str,
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Generate a time-limited presigned URL for an S3 document."""
-    import boto3
-    from botocore.exceptions import ClientError
-
-    tenant_id = user.tenant_id
-    user_id = user.user_id
-
-    # Security: ensure key is within user's prefix
-    if not key.startswith(f"eagle/{tenant_id}/{user_id}/"):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
-    try:
-        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
-        url = s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": bucket, "Key": key},
-            ExpiresIn=3600,  # 1 hour
-        )
-        return {"url": url, "key": key, "expires_in": 3600}
-    except ClientError as e:
-        logger.error("Presign error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -811,7 +610,7 @@ async def api_upload_document(
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
 
     # Sanitize filename
     safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
@@ -841,7 +640,7 @@ async def api_list_kb_reviews(
     user: UserContext = Depends(get_user_from_header),
 ):
     """List KB review records from DynamoDB (admin only)."""
-    from boto3.dynamodb.conditions import Attr
+    from boto3.dynamodb.conditions import Key, Attr
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
     try:
         ddb = _get_dynamo()
@@ -868,7 +667,7 @@ async def api_approve_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -935,7 +734,7 @@ async def api_reject_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -1290,6 +1089,7 @@ async def websocket_chat(ws: WebSocket):
 
                 _text_parts: list[str] = []
                 _usage: dict = {}
+                _final_text: str = ""
                 _final_text: str = ""
                 async for _sdk_msg in sdk_query(
                     prompt=user_message,
@@ -1647,9 +1447,6 @@ async def admin_reload_caches(user: UserContext = Depends(get_user_from_header))
     _prompt_cache.clear()
     _config_cache.clear()
     _template_cache.clear()
-    _workspace_cache.clear()
-    _skill_tools_cache.clear()
-    _supervisor_prompt_cache.clear()
     write_audit(
         tenant_id=user.tenant_id,
         entity_type="cache",
@@ -1657,7 +1454,7 @@ async def admin_reload_caches(user: UserContext = Depends(get_user_from_header))
         event_type="reload",
         actor_user_id=user.user_id,
     )
-    return {"status": "flushed", "caches": ["plugin", "prompt", "config", "template", "workspace", "skill_tools", "supervisor_prompt"]}
+    return {"status": "flushed", "caches": ["plugin", "prompt", "config", "template"]}
 
 
 @app.post("/api/admin/plugin/sync")
@@ -2343,24 +2140,6 @@ async def update_user_preferences(
 async def reset_user_preferences(user: UserContext = Depends(get_user_from_header)):
     """Reset all user preferences to system defaults."""
     return reset_prefs(user.tenant_id, user.user_id)
-
-
-# ── Test Run Viewer Endpoints ─────────────────────────────────────
-
-@app.get("/api/admin/test-runs")
-async def list_test_runs_endpoint(limit: int = 20):
-    """List recent test runs from DynamoDB."""
-    from .test_result_store import list_test_runs
-    runs = list_test_runs(limit=limit)
-    return {"runs": runs, "count": len(runs)}
-
-
-@app.get("/api/admin/test-runs/{run_id}")
-async def get_test_run_detail(run_id: str):
-    """Get individual test results for a specific run."""
-    from .test_result_store import get_test_run_results
-    results = get_test_run_results(run_id)
-    return {"run_id": run_id, "results": results, "count": len(results)}
 
 
 if __name__ == "__main__":

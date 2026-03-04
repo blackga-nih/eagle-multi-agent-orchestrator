@@ -1,9 +1,16 @@
 # EAGLE Jira Issues
 
-> Source: NCI tracker.nci.nih.gov · Project: EAGLE · 31 issues · Fetched: 2026-02-27 08:23 UTC
+> Source: NCI tracker.nci.nih.gov · Project: EAGLE · 41 issues · Updated: 2026-02-27
 
 > Issues marked UC-N in Epic names are the core Use Cases driving the EAGLE acquisition assistant.
 
+## Team Assignment Key
+
+| Label | Team member | Primary domains |
+|-------|-------------|-----------------|
+| `assignee:greg` | Greg Black (lead dev) | claude-sdk, eval, cloudwatch, hooks |
+| `assignee:fullstack` | Full-stack developer | frontend, backend, document-export |
+| `assignee:aws-dev` | Backend Java/AWS dev (knows client systems) | aws, deployment, git, infrastructure |
 
 ## Epics (3)
 
@@ -13,7 +20,9 @@
 | [EAGLE-20] | Acquisition Package by Type | To Do | Unassigned |
 | [EAGLE-22] | Technical Configuration | To Do | Unassigned |
 
-## Stories (22)
+## Stories (32)
+
+### Original Stories
 
 | Key | Summary | Status | Assignee |
 |-----|---------|--------|----------|
@@ -30,15 +39,35 @@
 | [EAGLE-12] | Handle CO Return for Revision | To Do | Unassigned |
 | [EAGLE-13] | Audit Trail and Status Tracking | To Do | Unassigned |
 | [EAGLE-14] | Submit Acquisition Package hyperlink to CO through Teams | To Do | Unassigned |
-| [EAGLE-15] | Rapid GSA Schedule Purchase – Micro Purchase scenario  | To Do | Unassigned |
+| [EAGLE-15] | Rapid GSA Schedule Purchase – Micro Purchase scenario | To Do | Unassigned |
 | [EAGLE-16] | New IT Services Acquisition — Full Package Generation | To Do | Unassigned |
-| [EAGLE-17] | Contract Modification Request with updated budget, Time, or Scope and Generate acquisition package | To Do | Unassigned |
-| [EAGLE-18] | Rapid GSA Schedule Purchase – under SAT but great than micro purchase | To Do | Unassigned |
+| [EAGLE-17] | Contract Modification Request with updated budget, Time, or Scope | To Do | Unassigned |
+| [EAGLE-18] | Rapid GSA Schedule Purchase – under SAT but greater than micro purchase | To Do | Unassigned |
 | [EAGLE-19] | Configure Dedicated System Domain | To Do | Unassigned |
 | [EAGLE-21] | Implement Session Persistence for User Conversations | To Do | Unassigned |
 | [EAGLE-27] | Sole Source Justification < SAT | To Do | Unassigned |
 | [EAGLE-28] | Data Rights Determination - a $1.2M AI/ML software acquisition | To Do | Unassigned |
 | [EAGLE-29] | IGCE Development for Complex Services - a multi-year, labor-based services contract | To Do | Unassigned |
+
+### Dev Stories — CO Workflow & Agent Architecture (added 2026-02-27)
+
+| Key | Summary | Expert Domain | Assignee |
+|-----|---------|---------------|----------|
+| [EAGLE-32] | Risk-Trigger-Based Specialist Agent Routing | `claude-sdk` | `assignee:greg` |
+| [EAGLE-33] | Acquisition Package Lifecycle Status Tracking | `backend` | `assignee:fullstack` |
+| [EAGLE-34] | Acquisition List UI with Status Indicators | `frontend` | `assignee:fullstack` |
+| [EAGLE-35] | Template-Faithful Document Export (Word, Excel, PDF) | `backend`, `frontend` | `assignee:fullstack` |
+| [EAGLE-36] | CO Session Handoff -- Fork or Transfer Acquisition Chat | `claude-sdk`, `backend` | `assignee:greg` |
+| [EAGLE-37] | Per-Acquisition Token Cost Tracking and Budget Guardrails | `cloudwatch`, `backend` | `assignee:greg` |
+
+### Dev Stories — Git, Structure, and DX (added 2026-02-27)
+
+| Key | Summary | Expert Domain | Assignee |
+|-----|---------|---------------|----------|
+| [EAGLE-38] | Define Git Branching Strategy and PR Workflow | `git` | `assignee:aws-dev` |
+| [EAGLE-39] | Audit and Standardize Repository Folder Structure | `git`, `deployment` | `assignee:aws-dev` |
+| [EAGLE-40] | Review and Harden .gitignore for Multi-Tenant Repo | `git`, `security` | `assignee:aws-dev` |
+| [EAGLE-41] | Implement Git Hooks for Code Quality Gates | `hooks`, `git` | `assignee:greg` |
 
 ## Tasks (6)
 
@@ -46,7 +75,7 @@
 |-----|---------|--------|----------|
 | [EAGLE-23] | Request AWS Account (including basic network configuration) | Ready For Approval | Pineda, Rene (NIH/NCI) [C] |
 | [EAGLE-24] | Website/Web Application Clearance request | Testing | Pineda, Rene (NIH/NCI) [C] |
-| [EAGLE-25] | Website/Web Application Clearance request  | To Do | Unassigned |
+| [EAGLE-25] | Website/Web Application Clearance request | To Do | Unassigned |
 | [EAGLE-26] | Create AWS Stack | Testing | Pineda, Rene (NIH/NCI) [C] |
 | [EAGLE-30] | Greg Dev 202608 | To Do | Unassigned |
 | [EAGLE-31] | Greg Dev 202609 | To Do | Unassigned |

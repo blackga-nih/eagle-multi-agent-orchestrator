@@ -365,7 +365,6 @@ async def sdk_query(
         cwd=os.path.dirname(os.path.abspath(__file__)),
         env=_get_bedrock_env(),
         agents=agents,
-        **({"resume": session_id} if session_id else {}),
     )
 
     async for message in query(prompt=prompt, options=options):
