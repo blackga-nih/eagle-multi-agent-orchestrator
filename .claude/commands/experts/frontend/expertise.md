@@ -4,7 +4,7 @@ parent: "[[frontend/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, frontend, nextjs, tailwind, chat, dashboard, test-results]
-last_updated: 2026-03-04T04:30:00
+last_updated: 2026-03-04T05:30:00
 ---
 
 # Frontend Expertise (Complete Mental Model)
@@ -23,6 +23,7 @@ last_updated: 2026-03-04T04:30:00
 - **lucide-react** for icons
 - **react-markdown** for message rendering
 - **amazon-cognito-identity-js** for auth
+- **idb** for IndexedDB access (required dep — install with `npm install idb --save` if missing from node_modules)
 
 ### Page Routes
 
@@ -56,6 +57,7 @@ last_updated: 2026-03-04T04:30:00
 | `/api/cloudwatch` | `?runs=1` lists CW streams; `?stream=<name>&group=test-runs` loads events |
 | `/api/prompts` | Loads skill prompt files from eagle-plugin/ |
 | `/api/invoke` | Agent invocation endpoint |
+| `/api/feedback` | Proxies feedback payload to FastAPI `/api/feedback`; persists to DynamoDB |
 | `/api/conversations` | Conversation CRUD |
 | `/api/conversations/[agentId]` | Agent-specific conversation history |
 | `/api/conversations/context` | Conversation context endpoint |
@@ -70,6 +72,10 @@ last_updated: 2026-03-04T04:30:00
 | `/api/admin/users` | User management |
 | `/api/admin/costs` | Cost data |
 | `/api/admin/telemetry` | Telemetry data |
+
+**Note on `trailingSlash: true` in `next.config.mjs`**: Next.js issues a 308 redirect from `/api/feedback` to `/api/feedback/`. Browser `fetch()` follows the redirect automatically and is transparent. Raw `curl` requires the `-L` flag. This applies to all `/api/*` routes.
+
+**Note on new `route.ts` files on Windows**: The Next.js dev server does NOT hot-reload new `app/api/*/route.ts` files on Windows. After creating a new route file, restart the dev server (`Ctrl+C`, `npm run dev`) before testing.
 
 ### Component Tree
 
@@ -216,6 +222,117 @@ interface AcquisitionData {
 - `document-card.tsx`: Renders document results from agent (links to `/documents/[id]`)
 
 **Layout**: `SimpleHeader` + `SidebarNav` + `SimpleChatInterface` (no form-heavy sidebar)
+
+### AI-Bypass Slash Command Pattern
+
+Some slash commands intercept `handleSend()` before calling `sendQuery()`, performing a side-effect action and returning early so the AI is never invoked. The `/feedback` command is the canonical example.
+
+**Pattern** (in `simple-chat-interface.tsx` `handleSend()`):
+
+```typescript
+// 1. Check for bypass command BEFORE sendQuery()
+if (input.startsWith('/feedback')) {
+    const text = input.replace(/^\/feedback\s*/, '').trim();
+    setFeedbackStatus('sending');
+    try {
+        const res = await fetch('/api/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+                type: 'feedback',
+                content: text,
+                conversation_snapshot: messages.map(m => ({
+                    role: m.role,
+                    content: m.content,
+                    timestamp: m.timestamp,
+                })),
+            }),
+        });
+        setFeedbackStatus(res.ok ? 'done' : 'error');
+    } catch {
+        setFeedbackStatus('error');
+    }
+    setTimeout(() => setFeedbackStatus('idle'), 4000);
+    return;   // <-- bypass sendQuery(); AI is NOT called
+}
+// 2. Normal path
+await sendQuery(input, sessionId);
+```
+
+**Status Banner Pattern** (`feedbackStatus` state machine):
+
+```typescript
+// State: 'idle' | 'sending' | 'done' | 'error'
+const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+
+// Rendered above the error banner in the footer:
+{feedbackStatus === 'sending' && (
+    <div className="text-sm text-blue-600 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+        Sending feedback...
+    </div>
+)}
+{feedbackStatus === 'done' && (
+    <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
+        Feedback received. Thank you.
+    </div>
+)}
+{feedbackStatus === 'error' && (
+    <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+        Failed to send feedback. Please try again.
+    </div>
+)}
+```
+
+Transitions: `idle` → `sending` (on submit) → `done` or `error` (on response) → `idle` (4 s setTimeout auto-reset).
+
+### Slash Command Registration (`client/lib/slash-commands.ts`)
+
+Commands must be registered in two places:
+
+1. The commands array entry:
+```typescript
+{
+    id: 'feedback',
+    name: '/feedback',
+    description: 'Send feedback — bug, suggestion, praise, or correction',
+    icon: MessageSquare,   // lucide-react import
+    color: 'red',
+    category: 'info',
+}
+```
+
+2. The `commandColorClasses` map (if using a new color):
+```typescript
+red: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
+```
+
+### Adding a New AI-Bypass API Route
+
+Follow the pattern of `client/app/api/health/route.ts` and `client/app/api/invoke/route.ts`:
+
+```typescript
+// client/app/api/feedback/route.ts
+export const dynamic = 'force-dynamic';
+
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(req: NextRequest) {
+    const body = await req.json();
+    const fastapiUrl = process.env.FASTAPI_URL ?? 'http://localhost:8000';
+    const res = await fetch(`${fastapiUrl}/api/feedback`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: req.headers.get('Authorization') ?? '',
+        },
+        body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+}
+```
+
+**Windows dev server caveat**: New `route.ts` files are not picked up by hot-reload on Windows. Restart `npm run dev` after creating any new `app/api/*/route.ts` file.
 
 ### Home Page (`/`)
 
@@ -736,6 +853,9 @@ CloudWatch /eagle/test-runs
 - Debounced session saves (500ms timeout)
 - Backend health check via `/api/health` proxy route (30-second polling interval)
 - Full plugin slugs as SKILL_TEST_MAP keys (e.g., `'oa-intake'`, `'document-generator'`) matching eagle-plugin/ directory names
+- AI-bypass slash commands: intercept in `handleSend()` before `sendQuery()`, show status banner, `return` early — AI is never invoked (discovered: 2026-03-04, `/feedback` is canonical example)
+- `feedbackStatus` state machine (`idle` → `sending` → `done`/`error` → `idle` via 4 s setTimeout) for non-blocking status banners (discovered: 2026-03-04)
+- Forward `Authorization` header from Next.js proxy route to FastAPI when user token is needed (discovered: 2026-03-04)
 
 ### Patterns To Avoid
 
@@ -744,6 +864,8 @@ CloudWatch /eagle/test-runs
 - Don't forget to update both frontends when adding tests (HTML + Next.js)
 - Don't hardcode test counts in descriptions/labels (derive from data)
 - Don't use short diagram actor aliases (`intake`, `docgen`) as SKILL_TEST_MAP keys — use the full plugin slug
+- Don't test new `app/api/*/route.ts` files without restarting the dev server on Windows (hot-reload does not pick them up)
+- Don't test API routes with raw `curl` without `-L` when `trailingSlash: true` is set in `next.config.mjs` — browser fetch follows 308 automatically, curl does not
 
 ### Common Issues
 
@@ -753,6 +875,8 @@ CloudWatch /eagle/test-runs
 - **API routes fail**: Eval page shows empty run selector, traces tab says "No test traces"
 - **SKILL_TEST_MAP missing key**: Eval modal "Test Traces" tab shows no results for that skill
 - **TEST_NAMES/TEST_DEFS out of sync**: New tests show raw IDs on Next.js page or are missing from HTML dashboard
+- **`idb` module not found (500 on compile)**: Run `npm install idb --save` in `client/` — the package is used for IndexedDB caching but may not be present in node_modules after a fresh clone or after dev server restart
+- **New API route returns 404 after creation**: Dev server must be restarted on Windows to pick up new `route.ts` files — hot-reload does not apply to new route file creation
 
 ### Tips
 
@@ -762,6 +886,7 @@ CloudWatch /eagle/test-runs
 - The eval page's run selector prefers CloudWatch runs first, then local files
 - Dev mode auth (no Cognito) gives premium tier with admin role
 - `/api/health` proxies to FastAPI and returns 502 if backend is unreachable — useful for health indicator polling
+- When testing a new AI-bypass slash command, verify the AI is NOT called by confirming no request reaches `/api/invoke` or the streaming endpoint
 
 ---
 
@@ -777,12 +902,16 @@ CloudWatch /eagle/test-runs
 - DynamoDB-backed test results page (`/admin/tests`) with run list → detail drill-down (discovered: 2026-03-04)
 - `encodeURIComponent(runId)` for URL-safe run_id in API calls (discovered: 2026-03-04)
 - Grouping test results by `test_file` in detail view improves readability (discovered: 2026-03-04)
+- AI-bypass slash commands (`/feedback`) short-circuit `handleSend()` before `sendQuery()` — clean separation of "send to AI" vs "send to API" (discovered: 2026-03-04)
+- `feedbackStatus` 4-state machine with setTimeout auto-reset keeps status banners self-cleaning (discovered: 2026-03-04)
 
 ### patterns_to_avoid
 - Don't rely on embedded data in HTML dashboard for production (use API)
 - Don't mix dark and light themes within a single page component
 - Don't use short diagram aliases (intake, docgen) as SKILL_TEST_MAP keys — they differ from plugin slugs
 - Don't forget `errors` field in TestRun interface — DynamoDB returns it alongside `failed`/`skipped` (discovered: 2026-03-04)
+- Don't create new `app/api/*/route.ts` files and test without restarting dev server on Windows (discovered: 2026-03-04)
+- Don't use raw `curl` to test API routes when `trailingSlash: true` without `-L` flag (discovered: 2026-03-04)
 
 ### common_issues
 - trace_logs.json must exist for /admin/tests to show data (legacy — new tests page uses DynamoDB)
@@ -791,6 +920,7 @@ CloudWatch /eagle/test-runs
 - HTML dashboard TEST_DEFS lags behind TEST_NAMES when new UC tests are added — check both before reporting test count
 - `kb-review/[id]/approve` and `kb-review/[id]/reject` routes have TS errors: `params` should be `Promise<{ id: string }>` in Next.js 15+ (pre-existing)
 - `@excalidraw/excalidraw` module not found — optional dependency, not installed (pre-existing)
+- `idb` package missing from node_modules causes "Module not found" 500 on first compile — install with `npm install idb --save` (discovered: 2026-03-04)
 
 ### tips
 - Use /admin/eval to demonstrate EAGLE workflow to stakeholders (10 use cases as of 2026-02-25)
@@ -799,3 +929,4 @@ CloudWatch /eagle/test-runs
 - SKILL_TEST_MAP line numbers shift as USE_CASES array grows — always verify line numbers with grep before editing
 - Tests page now uses DynamoDB persistence — no more trace_logs.json dependency for pytest results
 - Run `pytest tests/ -v` to auto-persist results to DDB (controlled by `EAGLE_PERSIST_TEST_RESULTS` env var)
+- After creating any new `app/api/*/route.ts` file on Windows, restart `npm run dev` before testing

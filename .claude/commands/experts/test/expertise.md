@@ -4,7 +4,7 @@ parent: "[[test/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, test, pytest, playwright, smoke, performance, cache]
-last_updated: 2026-03-04T04:15:00
+last_updated: 2026-03-04T18:00:00
 ---
 
 # Test Expertise (Complete Mental Model)
@@ -22,6 +22,7 @@ last_updated: 2026-03-04T04:15:00
 | `test_perf_simple_message.py` | 10 | Unit (mocked) | No | Full — mock DDB, Bedrock |
 | `test_chat_endpoints.py` | ~15 | Unit + integration | No | Partial — mock auth |
 | `test_test_result_persistence.py` | 18 | Unit (mocked) | No | Full — mock DDB, FastAPI TestClient |
+| `test_feedback_store.py` | — | Not yet written | No | Full — mock DDB (gap) |
 | `test_document_pipeline.py` | ~12 | Unit + integration | No | Partial — mock S3 |
 | `test_strands_eval.py` | 38 | Integration + eval | Yes | None — real AWS |
 | `test_strands_poc.py` | 1 | Integration | Yes | None — real Bedrock |
@@ -205,6 +206,16 @@ def test_endpoint():
 | Naming convention compliance | Inconsistent artifact names | MEDIUM |
 | Export returns latest version | Wrong version downloaded | MEDIUM |
 
+### Feedback Store (NEW — 2026-03-04)
+
+| Gap | Risk | Priority |
+|-----|------|----------|
+| `write_feedback()` DDB put_item failure handling | Unhandled ClientError crashes endpoint | HIGH |
+| `_detect_feedback_type()` keyword ordering (first match wins) | Wrong type if multiple keyword sets match | MEDIUM |
+| `POST /api/feedback` with empty `feedback_text` → 400 | Validated manually, not in pytest | MEDIUM |
+| Conversation snapshot serialisation (non-serialisable types) | `json.dumps(default=str)` silently truncates data | LOW |
+| CloudWatch log fetch timeout | `filter_log_events` hangs → slow feedback submit | LOW |
+
 ---
 
 ## Part 4: Running Tests
@@ -262,6 +273,9 @@ cd client && npx tsc --noEmit
 - `_re.IGNORECASE` with anchored regex (`^...$`) for message classification
 - `mock.patch()` context managers for clean test isolation
 - Import inside test methods to avoid module-level AWS client initialization
+- **Bowser QA agent for slash-command intercept testing**: send `/feedback <text>`, assert no AI response rendered, assert confirmation banner present — reliable for "bypass AI" flow validation (discovered: 2026-03-04, component: feedback-slash-command)
+- **DynamoDB smoke test via AWS CLI**: `aws dynamodb query --key-condition-expression "PK = :pk"` with dev-tenant PK to verify real writes end-to-end without a pytest fixture (discovered: 2026-03-04)
+- **Next.js proxy route pattern** (`client/app/api/<name>/route.ts`): POST handler forwards headers + body to `FASTAPI_URL`, returns `NextResponse.json(data, { status })` — consistent with health/invoke routes
 
 ### patterns_to_avoid
 
@@ -277,6 +291,10 @@ cd client && npx tsc --noEmit
 - `.pyc` cache staleness: clear with `python -c "import shutil, pathlib; [shutil.rmtree(p) for p in pathlib.Path('.').rglob('__pycache__')]"`
 - Port 8000 still bound after kill on Windows: use alternate port or `taskkill //PID N //F`
 - Strands `modelStreamErrorException`: transient Bedrock error, not a test bug
+- **Next.js dev server hangs after force-kill on Windows**: `.next/trace` file stays locked; solution is to kill all node processes, wait for lock release, then restart — `npm run dev` via PowerShell `Start-Process` is more reliable than MINGW64 background `&`
+- **`idb` package missing from node_modules**: was gitignored or never installed; `npm install idb --save` + server restart resolves the "Module not found" 500 error
+- **DynamoDB tenant_id mismatch in dev mode**: dev mode uses `DEV_TENANT_ID=dev-tenant` (not `nci`); query with `PK = "FEEDBACK#dev-tenant"` to find records
+- **AWS SSO token expiry mid-session**: `botocore.exceptions.TokenRetrievalError` → `aws sso login --profile eagle` to refresh; non-fatal for frontend but fails DDB writes
 
 ### tips
 
@@ -288,3 +306,7 @@ cd client && npx tsc --noEmit
 - Disable persistence with `EAGLE_PERSIST_TEST_RESULTS=false` for CI or local-only runs
 - API endpoints: `GET /api/admin/test-runs` (list) and `GET /api/admin/test-runs/{run_id}` (detail)
 - Admin test viewer at `/admin/tests` — run history with drill-down into individual results
+- **Slash-command intercept testing**: use bowser QA agent, not pytest — browser-level assertion of "no AI response rendered + banner visible" is the right layer for UI-intercept verification
+- **Feedback store unit test template**: mock `_get_table()` → `put_item`, call `write_feedback(...)`, assert `put_item.call_args` contains correct PK/SK/feedback_type; test `_detect_feedback_type` directly with keyword strings
+- **DynamoDB write verification without a test**: `aws dynamodb query --key-condition-expression "PK = :pk" --expression-attribute-values '{":pk":{"S":"FEEDBACK#dev-tenant"}}'` is the fastest smoke check
+- **`trailingSlash: true` + Next.js API routes**: POST to `/api/foo` gets 308-redirected to `/api/foo/`; browser `fetch` follows automatically, but `curl` requires `-L`; Next.js App Router route files handle both with/without slash at runtime

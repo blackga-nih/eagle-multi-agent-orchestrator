@@ -4,7 +4,7 @@ parent: "[[backend/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, backend, agentic-service, eagle, aws, s3, dynamodb, cloudwatch]
-last_updated: 2026-02-25T00:00:00
+last_updated: 2026-03-04T00:00:00
 ---
 
 # Backend Expertise (Complete Mental Model)
@@ -19,7 +19,7 @@ last_updated: 2026-02-25T00:00:00
 
 ```
 server/app/
-├── main.py                  # FastAPI app (v4.0.0), CORS, ~80+ endpoints, 1855 lines
+├── main.py                  # FastAPI app (v4.0.0), CORS, ~80+ endpoints, 1855+ lines
 ├── agentic_service.py       # 2358 lines — tool dispatch, handlers, stream_chat (LEGACY orchestrator)
 ├── sdk_agentic_service.py   # SDK-based service — SKILL_AGENT_REGISTRY, sdk_query() (PRIMARY orchestrator)
 ├── eagle_tools_mcp.py       # NEW — wraps execute_tool() as local MCP server (7 EAGLE business tools)
@@ -52,6 +52,7 @@ server/app/
 ├── approval_store.py        # Approval chain + decision recording
 ├── pref_store.py            # User preferences
 ├── audit_store.py           # Audit event writer
+├── feedback_store.py        # Feedback submissions (FEEDBACK# entity, 7-year TTL, auto-type detection)
 server/
 ├── eagle_skill_constants.py # Auto-discovery: walks eagle-plugin/, exports AGENTS, SKILLS, PLUGIN_CONTENTS
 ├── config.py                # App configuration
@@ -89,6 +90,7 @@ server/
 | `api_list_sessions()` | main.py:298 | Session CRUD endpoints |
 | `api_export_document()` | main.py:445 | Document export (DOCX/PDF/MD) |
 | `api_list_documents()` | main.py:508 | S3 document browser |
+| `api_submit_feedback()` | main.py:~1182 | POST /api/feedback — system action, no AI, direct DDB write |
 
 ### Configuration
 
@@ -132,6 +134,7 @@ Environment Variables (from CDK):
   EAGLE_SDK_MODEL    → model alias for sdk_agentic_service (e.g. "haiku")
   USE_PERSISTENT_SESSIONS → "true"
   REQUIRE_AUTH       → "false" (dev) / "true" (prod)
+  EAGLE_TELEMETRY_LOG_GROUP → "/eagle/telemetry" (used by feedback CW log fetch)
 ```
 
 ---
@@ -478,6 +481,10 @@ Note: The SDK path (`sdk_agentic_service.py`) uses `build_supervisor_prompt()` i
 - `eagle_tools_mcp.py` factory pattern lets `sdk_query()` inject tenant/session into all MCP tools via closure
 - `TIER_TOOLS` gating in sdk_agentic_service lets different subscription tiers get different tool access without code branching
 - Workspace 4-layer resolution (workspace override → PLUGIN# → bundled file) allows hot-reload without redeploy
+- Non-fatal helper pattern: wrap AWS calls in `try/except Exception` returning a safe default (`[]`, `{}`, `""`) so the primary operation never fails due to supplementary data fetch (e.g. `_fetch_cloudwatch_logs_for_session` in main.py)
+- `json.dumps(obj, default=str)` on conversation snapshots/CW log events silently handles non-serialisable types (Decimal, datetime) before storing to DynamoDB
+- Lazy DDB singleton in store modules (`_dynamodb = None` / `_get_dynamodb()`) follows `audit_store.py` pattern — safe for both cold start and long-running processes
+- `_TYPE_KEYWORDS` dict + `_detect_feedback_type()` gives zero-shot classification of free-text feedback into `bug`, `suggestion`, `praise`, `incorrect_info`, `general` without calling the LLM
 
 ### Patterns to Avoid
 
@@ -487,6 +494,7 @@ Note: The SDK path (`sdk_agentic_service.py`) uses `build_supervisor_prompt()` i
 - Don't add new tools without updating both `TOOL_DISPATCH` and `EAGLE_TOOLS` (legacy path) AND `TIER_TOOLS` (SDK path)
 - Don't assume `admin_auth.py` uses `cognito_auth.py` — it still imports from `auth.py` (legacy `get_current_user`)
 - Don't create a `server/legacy/` directory expecting archived files there — `auth.py`, `gateway_client.py`, `mcp_agent_integration.py`, `weather_mcp_service.py` are still in `server/app/` and some are still imported
+- Don't omit `Request` from the fastapi import when using it as an endpoint parameter — `Request` is not imported by default with the other fastapi symbols; it must be explicitly listed: `from fastapi import FastAPI, Request, ...`
 
 ### Common Issues
 
@@ -497,6 +505,7 @@ Note: The SDK path (`sdk_agentic_service.py`) uses `build_supervisor_prompt()` i
 - **DynamoDB Decimal**: `json.dumps()` without `default=str` raises `TypeError` on Decimal values
 - **S3 prefix trailing slash**: `_get_user_prefix()` always ends with `/` — don't add another
 - **admin_auth.py import error**: If `auth.py` is ever removed, `admin_auth.py` will break — it imports `get_current_user` from `app.auth`
+- **`Request` import missing**: Using `request: Request` in an endpoint signature without adding `Request` to the `from fastapi import ...` line raises `NameError` at startup
 
 ### Adding a New Tool Handler
 
@@ -510,6 +519,88 @@ Checklist for adding a new tool:
 6. **Add to TIER_TOOLS** in sdk_agentic_service.py for appropriate tiers
 7. **Update SYSTEM_PROMPT** if the tool needs usage guidance (legacy path) or supervisor prompt (SDK path)
 8. **Validate**: `python -c "import py_compile; py_compile.compile('server/app/agentic_service.py', doraise=True)"`
+
+### Adding a New Store Module
+
+Follow the `audit_store.py` / `feedback_store.py` pattern:
+
+```python
+# Lazy DDB singletons — never initialize at module level
+_dynamodb = None
+_table = None
+
+def _get_dynamodb():
+    global _dynamodb
+    if _dynamodb is None:
+        region = os.environ.get("AWS_REGION", "us-east-1")
+        _dynamodb = boto3.resource("dynamodb", region_name=region)
+    return _dynamodb
+
+def _get_table():
+    global _table
+    if _table is None:
+        table_name = os.environ.get("TABLE_NAME", "eagle")
+        _table = _get_dynamodb().Table(table_name)
+    return _table
+```
+
+Then import in `main.py` as `from . import my_store` and call `my_store.write_*()` or `my_store.list_*()` from endpoints.
+
+### Adding a "System Action" Endpoint (No AI, Direct DDB Write)
+
+Pattern for endpoints like `POST /api/feedback` that validate input and write directly to DynamoDB without calling the LLM:
+
+```python
+@app.post("/api/feedback")
+async def api_submit_feedback(
+    request: Request,                            # requires Request in fastapi import
+    user: UserContext = Depends(get_user_from_header),
+):
+    body = await request.json()
+    field = body.get("field", "").strip()
+
+    if not field:
+        raise HTTPException(status_code=400, detail="field is required")
+
+    # Optional: fetch supplementary AWS data non-fatally
+    extra_data = _fetch_something_nonfatal(body.get("session_id", ""))
+
+    my_store.write_record(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        ...
+        extra=json.dumps(extra_data, default=str),   # default=str handles Decimal/datetime
+    )
+    return {"status": "ok", "message": "Recorded. Thank you!"}
+```
+
+### Non-Fatal AWS Helper Pattern
+
+Use this pattern for supplementary data fetches (e.g. CloudWatch logs attached to feedback) where failure must not block the primary operation:
+
+```python
+def _fetch_something_nonfatal(identifier: str) -> list:
+    """Return data for identifier, or [] on any error (non-fatal)."""
+    if not identifier:
+        return []
+    try:
+        client = boto3.client("logs", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        response = client.filter_log_events(
+            logGroupName=os.environ.get("MY_LOG_GROUP", "/eagle/telemetry"),
+            filterPattern=identifier,
+            limit=50,
+        )
+        return response.get("events", [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch failed (non-fatal): %s", exc)
+        return []
+```
+
+Key points:
+- Catch bare `Exception` (not just `ClientError`) — covers network timeouts, missing log groups, etc.
+- Use `# noqa: BLE001` to suppress ruff's "blind exception" lint warning when broad catch is intentional
+- Log at `WARNING` level, not `ERROR` — it is expected to fail in dev/offline environments
+- Return a typed empty collection (`[]`, `{}`) so callers don't need None checks
 
 ### stream_chat() Tool-Use Loop (Legacy Path)
 
@@ -546,6 +637,21 @@ All DynamoDB operations go through `session_store.py`, which implements the unif
 | `add_message()` | `SESSION#{tenant}#{user}` | `MSG#{session_id}#{msg_id}` | msg_id is auto-incremented |
 | `get_messages()` | `SESSION#{tenant}#{user}` | `begins_with(MSG#{session_id}#)` | Sorted by SK |
 | `record_usage()` | `USAGE#{tenant}` | `USAGE#{date}#{session}#{ts}` | Token counts, cost, model |
+
+### Feedback Store (feedback_store.py) — DDB Entity Layout
+
+| Attribute | Value | Notes |
+|-----------|-------|-------|
+| `PK` | `FEEDBACK#{tenant_id}` | Partition by tenant |
+| `SK` | `FEEDBACK#{ISO_timestamp}#{feedback_id}` | Sortable by time; UUID suffix ensures uniqueness |
+| `GSI1PK` | `TENANT#{tenant_id}` | Cross-entity GSI for tenant queries |
+| `GSI1SK` | `FEEDBACK#{created_at}` | Time-sorted within GSI |
+| `feedback_type` | `bug` / `suggestion` / `praise` / `incorrect_info` / `general` | Auto-detected via `_TYPE_KEYWORDS` |
+| `ttl` | Unix epoch 7 years from write | DynamoDB TTL attribute |
+
+Public API:
+- `write_feedback(tenant_id, user_id, tier, session_id, feedback_text, conversation_snapshot, cloudwatch_logs) -> dict`
+- `list_feedback(tenant_id, limit=50) -> list[dict]`  — newest first, query on PK with `ScanIndexForward=False`
 
 ### Caching
 
@@ -606,7 +712,7 @@ from app.auth import get_current_user  # NOT from cognito_auth
 
 ---
 
-## Part 11: main.py Route Groups (~80+ endpoints, 1855 lines)
+## Part 11: main.py Route Groups (~80+ endpoints, 1855+ lines)
 
 | Group | Prefix | Count | Key Files Used |
 |-------|--------|-------|----------------|
@@ -627,6 +733,7 @@ from app.auth import get_current_user  # NOT from cognito_auth
 | Skills | `/api/skills` | 8 | skill_store.py |
 | Packages | `/api/packages` | 12 | package_store.py, document_store.py, approval_store.py |
 | Preferences | `/api/user/preferences` | 3 | pref_store.py |
+| Feedback | `/api/feedback` | 1 | feedback_store.py — system action, no AI |
 | Streaming (SSE) | `/stream/...` | mounted via include_router | streaming_routes.py |
 
 The streaming router is wired at main.py:1121: `streaming_router = create_streaming_router(subscription_service); app.include_router(streaming_router)`
@@ -680,6 +787,10 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 - `TIER_TOOLS` in sdk_agentic_service.py uses the same tool names as TOOL_DISPATCH keys — MCP tool names must match exactly (discovered: 2026-02-25, component: sdk_agentic_service)
 - `sdk_query()` wraps `create_eagle_mcp_server()` in try/except — MCP unavailability is non-fatal, subagents degrade gracefully without business tools (discovered: 2026-02-25, component: sdk_agentic_service)
 - Workspace 4-layer prompt resolution enables hot-reloadable agent prompts without ECS redeploy (discovered: 2026-02-25, component: wspc_store)
+- Non-fatal supplementary fetch pattern (`try/except Exception` returning `[]`) lets feedback submission succeed even when CloudWatch is unreachable (discovered: 2026-03-04, component: main.py)
+- `_TYPE_KEYWORDS` keyword-match classification avoids LLM call for feedback type tagging — deterministic, zero-latency (discovered: 2026-03-04, component: feedback_store)
+- `feedback_store.py` lazy DDB singleton matches `audit_store.py` pattern exactly — easy to replicate for any new store module (discovered: 2026-03-04, component: feedback_store)
+- `json.dumps(obj, default=str)` on conversation_snapshot before DDB write silently handles mixed types (Decimal, datetime, UUID) that boto3 cannot marshal directly (discovered: 2026-03-04, component: main.py)
 
 ### patterns_to_avoid
 - Don't test document generation with empty `data` dicts — generators produce minimal stubs
@@ -691,6 +802,7 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 - Don't expect `server/legacy/` to exist — `auth.py`, `gateway_client.py`, `mcp_agent_integration.py`, `weather_mcp_service.py` remain in `server/app/` (verified 2026-02-25)
 - Don't assume `admin_auth.py` was migrated to `cognito_auth` — it still imports `get_current_user` from `app.auth` (verified 2026-02-25)
 - Don't add a new MCP tool only to `eagle_tools_mcp.py` without also adding to TOOL_DISPATCH — the MCP layer delegates to `execute_tool()` which uses TOOL_DISPATCH
+- Don't omit `Request` from the `from fastapi import ...` line — it is not auto-imported with `FastAPI`, `HTTPException`, etc.; missing it causes `NameError` at startup (discovered: 2026-03-04, component: main.py)
 
 ### common_issues
 - AWS credentials not configured → all tool handlers fail with ClientError
@@ -702,6 +814,8 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 - Cognito pools with custom domains require `delete-user-pool-domain` before `delete-user-pool` (discovered: 2026-02-16, component: cognito)
 - Versioned S3 buckets can't be deleted with `aws s3 rb --force` on MINGW — use Python boto3 with `bucket.object_versions.delete()` instead (discovered: 2026-02-16, component: s3)
 - `claude_agent_sdk` import error at startup → `eagle_tools_mcp.py` import fails → `sdk_query()` catches this and runs without MCP (non-fatal) (discovered: 2026-02-25, component: eagle_tools_mcp)
+- `feedback_store.py` DDB query uses `FEEDBACK#{tenant_id}` PK — in dev mode `DEV_TENANT_ID=dev-tenant` so the PK is `FEEDBACK#dev-tenant`, not `FEEDBACK#nci` (discovered: 2026-03-04, component: feedback_store)
+- CloudWatch `filter_log_events` on `/eagle/telemetry` will raise `ResourceNotFoundException` if the log group hasn't been created yet — this is handled by the non-fatal pattern (returns `[]`) (discovered: 2026-03-04, component: main.py)
 
 ### tips
 - Use `execute_tool()` for testing — it's synchronous and returns JSON strings
@@ -717,3 +831,5 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 - Frontend auth-context.tsx auto-detects dev mode when `NEXT_PUBLIC_COGNITO_USER_POOL_ID` is empty — provides mock `dev-user` / `dev-tenant` without real Cognito (discovered: 2026-02-17, component: auth)
 - Two separate MODEL env vars: `ANTHROPIC_MODEL` (agentic_service.py legacy) vs `EAGLE_SDK_MODEL` (sdk_agentic_service.py) — set both when changing models (discovered: 2026-02-25)
 - `api_chat()` REST endpoint now uses `sdk_query()`, not the legacy `stream_chat()` — tool calls go through MCP layer, not directly through TOOL_DISPATCH (discovered: 2026-02-25)
+- `feedback_store.list_feedback()` uses `ScanIndexForward=False` on the PK query — newest records come first without a secondary sort step (discovered: 2026-03-04, component: feedback_store)
+- `_fetch_cloudwatch_logs_for_session` reads `EAGLE_TELEMETRY_LOG_GROUP` env var (default `/eagle/telemetry`), not `/eagle/app` — set this env var in CDK task definition if telemetry goes to a different log group (discovered: 2026-03-04, component: main.py)

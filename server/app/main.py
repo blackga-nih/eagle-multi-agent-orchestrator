@@ -17,7 +17,7 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -52,6 +52,7 @@ from .admin_service import (
     get_dashboard_stats, get_user_stats, get_top_users, get_tool_usage,
     record_request_cost, check_rate_limit, calculate_cost
 )
+from . import feedback_store
 
 # Existing multi-tenant modules (preserved)
 from .models import SubscriptionTier
@@ -110,6 +111,9 @@ from .audit_store import write_audit
 # ── Logging ──────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("eagle")
+
+# ── S3 bucket (single source of truth) ───────────────────────────────
+_S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
 
 app = FastAPI(
     title="EAGLE – NCI Acquisition Assistant",
@@ -686,7 +690,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = _S3_BUCKET
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
@@ -721,7 +725,7 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = _S3_BUCKET
 
     # Security: ensure key is within user's prefix
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
@@ -763,7 +767,7 @@ async def api_presign_document(
     if not key.startswith(f"eagle/{tenant_id}/{user_id}/"):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = _S3_BUCKET
     try:
         s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
         url = s3.generate_presigned_url(
@@ -811,7 +815,7 @@ async def api_upload_document(
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = _S3_BUCKET
 
     # Sanitize filename
     safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
@@ -868,7 +872,7 @@ async def api_approve_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = _S3_BUCKET
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -935,7 +939,7 @@ async def api_reject_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = _S3_BUCKET
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -1148,6 +1152,59 @@ async def api_user_usage(
     """Get usage summary for current user."""
     tenant_id = user.tenant_id
     return get_usage_summary(tenant_id, days)
+
+
+# ── Feedback endpoint ────────────────────────────────────────────────
+
+def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
+    """Return up to 50 recent CloudWatch log events matching session_id (non-fatal)."""
+    if not session_id:
+        return []
+    try:
+        log_group = os.environ.get("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
+        region = os.environ.get("AWS_REGION", "us-east-1")
+        client = _boto3.client("logs", region_name=region)
+        now_ms = int(time.time() * 1000)
+        day_ms = 24 * 60 * 60 * 1000
+        response = client.filter_log_events(
+            logGroupName=log_group,
+            startTime=now_ms - day_ms,
+            endTime=now_ms,
+            filterPattern=session_id,
+            limit=50,
+        )
+        return response.get("events", [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("feedback: cloudwatch fetch failed (non-fatal): %s", exc)
+        return []
+
+
+@app.post("/api/feedback")
+async def api_submit_feedback(
+    request: Request,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Record user feedback with conversation snapshot and recent CloudWatch logs."""
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    feedback_text = body.get("feedback_text", "").strip()
+    conversation_snapshot = body.get("conversation_snapshot", [])
+
+    if not feedback_text:
+        raise HTTPException(status_code=400, detail="feedback_text is required")
+
+    cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
+
+    feedback_store.write_feedback(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        tier=user.tier,
+        session_id=session_id,
+        feedback_text=feedback_text,
+        conversation_snapshot=json.dumps(conversation_snapshot, default=str),
+        cloudwatch_logs=json.dumps(cloudwatch_logs, default=str),
+    )
+    return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 
 
 # ── Telemetry endpoint ───────────────────────────────────────────────

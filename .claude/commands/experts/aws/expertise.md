@@ -4,7 +4,7 @@ parent: "[[aws/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, aws, cdk, dynamodb, iam, s3]
-last_updated: 2026-02-25T00:00:00
+last_updated: 2026-03-04T00:00:00
 ---
 
 # AWS Expertise (Complete Mental Model)
@@ -510,6 +510,9 @@ table.addGlobalSecondaryIndex({
 | List tenant templates | `TENANT#{tenant}` | begins_with `TEMPLATE#{doc_type}#` | GSI1 |
 | Write audit event | `AUDIT#{tenant}` | `AUDIT#{ISO_ts}#{entity_type}#{name}` | Table |
 | Query audit log | `AUDIT#{tenant}` | begins_with `AUDIT#{date}` | Table |
+| Write feedback | `FEEDBACK#{tenant_id}` | `FEEDBACK#{ISO_ts}#{feedback_id}` | Table |
+| List feedback for tenant | `FEEDBACK#{tenant_id}` | begins_with `FEEDBACK#` | Table |
+| List feedback via GSI1 | `TENANT#{tenant_id}` | begins_with `FEEDBACK#{created_at}` | GSI1 |
 
 ### Entity Type Prefix Registry (Complete)
 
@@ -533,6 +536,7 @@ All store modules (server/app/*_store.py) share the  table:
     CONFIG#     - Runtime feature flags; PK always CONFIG#global (config_store.py)
     PREF#       - User preferences, no TTL, no cache (pref_store.py)
     AUDIT#      - Immutable audit events, 7-year TTL (audit_store.py)
+    FEEDBACK#   - User-submitted feedback with conversation snapshot + CW logs (feedback_store.py)
 
     GSI1PK virtual prefixes: TENANT#{tenant_id}
       Used by: session_store, workspace_store, package_store, document_store, template_store
@@ -588,6 +592,7 @@ All store modules (server/app/*_store.py) share the  table:
 |--------|-----|-------|
 | SESSION# | 30 days | Configurable via SESSION_TTL_DAYS env var |
 | AUDIT# | 7 years | Compliance requirement |
+| FEEDBACK# | 7 years | Long-term UX + audit trail; ttl epoch ~2033 |
 | PROMPT# | Optional | Caller supplies ttl_epoch |
 | TEMPLATE# | Optional | Caller supplies ttl |
 | All others | None | Persistent until deleted |
@@ -797,6 +802,43 @@ steps:
 
 ---
 
+## Part 8b: CloudWatch Supplemental Query Pattern
+
+### Non-Fatal CloudWatch Log Fetch (`_fetch_cloudwatch_logs_for_session()`)
+
+Used by `server/app/feedback_store.py` to attach relevant ECS logs to a feedback record.
+
+```python
+import boto3, json
+
+def _fetch_cloudwatch_logs_for_session(session_id: str) -> list[dict]:
+    """
+    Query /eagle/telemetry for logs matching session_id.
+    Returns [] on any error — CloudWatch is supplemental, never blocks feedback submit.
+    """
+    try:
+        cw = boto3.client("logs", region_name="us-east-1")
+        resp = cw.filter_log_events(
+            logGroupName="/eagle/telemetry",
+            filterPattern=session_id,
+            limit=50,
+            startTime=int((time.time() - 86400) * 1000),  # 24h window (ms)
+            endTime=int(time.time() * 1000),
+        )
+        return resp.get("events", [])
+    except Exception:
+        return []  # non-fatal — feedback still writes without logs
+```
+
+Key rules:
+- Always wrap CW calls in `try/except Exception: return []` — CW is supplemental data only
+- `filterPattern=session_id` scans all log streams; can be slow on high-volume log groups
+- 24h window covers most active sessions; increase for long-running sessions
+- Log group `/eagle/telemetry` is separate from `/eagle/ecs/backend-dev` — verify the group exists before relying on it
+- Limit 50 events prevents payload bloat in DynamoDB (stored as JSON string in `cloudwatch_logs` field)
+
+---
+
 ## Part 9: Known Issues and Troubleshooting
 
 ### CDK Bootstrap Required
@@ -963,6 +1005,7 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 
 ### common_issues
 - AWS credentials expire or are not configured -> all services fail
+- **SSO TokenRetrievalError mid-session**: `botocore.exceptions.TokenRetrievalError: Error when retrieving token from sso` appears mid-session when SSO token expires. Fix: `aws sso login --profile eagle` then retry. SSO tokens typically last 8–12h. Does not affect CI/CD (OIDC-based).
 - S3 bucket name globally unique constraint -> can't reuse names across accounts
 - CDK bootstrap missing -> deploy fails with cryptic asset error
 - `Cannot find module '../lib/eval-stack.js'`: use commonjs module, remove .js extension
@@ -1007,3 +1050,6 @@ MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name "/eagle/ecs/ba
 - audit_store uses TABLE_NAME env var while most other stores use EAGLE_SESSIONS_TABLE -- always set both env vars to 'eagle' in ECS task definitions (discovered: 2026-02-25, component: audit_store)
 - DynamoDB table `eagle` is CDK-created by EagleCoreStack -- never use fromTableName() for this table; GSI1+GSI2 are managed by CDK and will drift if removed from core-stack.ts (discovered: 2026-02-25, component: core-stack)
 - NCI CDK bootstrap requires power-user* role names -- the DefaultStackSynthesizer in eagle.ts is pre-configured with all 5 NCI-compliant role names; do not change them (discovered: 2026-02-25, component: cdk-eagle)
+- `DEV_TENANT_ID=dev-tenant` in local `.env` means all DDB writes use `FEEDBACK#dev-tenant`, `SESSION#dev-tenant#...`, etc. as PK. When querying DDB locally always filter on the `dev-tenant` prefix, not `nci` or production tenant IDs (discovered: 2026-03-04, component: feedback_store)
+- `aws sso login --profile eagle` is the fix for mid-session `botocore.exceptions.TokenRetrievalError` -- SSO tokens expire after 8-12h; re-authenticate then retry the failed operation (discovered: 2026-03-04, component: credentials)
+- FEEDBACK# records include `conversation_snapshot` (JSON string of messages) and `cloudwatch_logs` (JSON string of CW events) — both stored as String in DDB; parse with json.loads() when reading back (discovered: 2026-03-04, component: feedback_store)

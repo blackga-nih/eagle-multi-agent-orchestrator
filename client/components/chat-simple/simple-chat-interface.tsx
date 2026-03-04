@@ -44,6 +44,7 @@ export default function SimpleChatInterface() {
 
     // Tool calls grouped by message ID — populated as SSE tool_use events arrive.
     const [toolCallsByMsg, setToolCallsByMsg] = useState<ToolCallsByMessageId>({});
+    const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
     // Stable ID for the current streaming message — reset on each sendQuery call.
     const streamingMsgIdRef = useRef<string>(`stream-${Date.now()}`);
 
@@ -287,6 +288,38 @@ export default function SimpleChatInterface() {
     const handleSend = async () => {
         if (!input.trim() || isStreaming) return;
 
+        // Intercept /feedback command — bypass AI entirely
+        if (input.trim().toLowerCase().startsWith('/feedback')) {
+            const feedbackText = input.replace(/^\/feedback\s*/i, '').trim();
+            if (!feedbackText) return;
+            setInput('');
+            setFeedbackStatus('sending');
+            const token = await getToken();
+            try {
+                await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        feedback_text: feedbackText,
+                        conversation_snapshot: messages.map((m) => ({
+                            role: m.role,
+                            content: m.content,
+                            timestamp: m.timestamp,
+                        })),
+                    }),
+                });
+                setFeedbackStatus('done');
+            } catch {
+                setFeedbackStatus('error');
+            }
+            setTimeout(() => setFeedbackStatus('idle'), 4000);
+            return;
+        }
+
         const userMessage: ChatMessage = {
             id: Date.now().toString(),
             role: 'user',
@@ -350,6 +383,21 @@ export default function SimpleChatInterface() {
                     {error && (
                         <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
                             {error}
+                        </div>
+                    )}
+                    {feedbackStatus === 'sending' && (
+                        <div className="mb-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-xs">
+                            Submitting feedback…
+                        </div>
+                    )}
+                    {feedbackStatus === 'done' && (
+                        <div className="mb-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-green-700 text-xs">
+                            ✓ Feedback received. Thank you!
+                        </div>
+                    )}
+                    {feedbackStatus === 'error' && (
+                        <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                            Failed to submit feedback. Please try again.
                         </div>
                     )}
 

@@ -1,4 +1,4 @@
-import { Package, Search, FileText, HelpCircle, BarChart3, type LucideIcon } from 'lucide-react';
+import { Package, Search, FileText, HelpCircle, BarChart3, MessageSquare, type LucideIcon } from 'lucide-react';
 
 export interface SlashCommand {
     id: string;
@@ -48,6 +48,14 @@ export const slashCommands: SlashCommand[] = [
         description: 'Show available commands and capabilities',
         icon: HelpCircle,
         color: 'gray',
+        category: 'info',
+    },
+    {
+        id: 'feedback',
+        name: '/feedback',
+        description: 'Send feedback — bug, suggestion, praise, or correction',
+        icon: MessageSquare,
+        color: 'red',
         category: 'info',
     },
 ];
@@ -101,5 +109,10 @@ export const commandColorClasses: Record<string, { bg: string; text: string; bor
         bg: 'bg-gray-50',
         text: 'text-gray-600',
         border: 'border-gray-200',
+    },
+    red: {
+        bg: 'bg-red-50',
+        text: 'text-red-600',
+        border: 'border-red-200',
     },
 };
