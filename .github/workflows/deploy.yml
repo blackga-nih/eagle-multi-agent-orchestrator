@@ -130,11 +130,52 @@ jobs:
         docker push $REPO_URI:${{ github.sha }}
         docker push $REPO_URI:latest
 
+    - name: Register backend task definition with DEV_MODE=true
+      id: register-td
+      run: |
+        CURRENT_TD=$(aws ecs describe-task-definition \
+          --task-definition eagle-backend-dev \
+          --region ${{ env.AWS_REGION }} \
+          --query "taskDefinition" --output json)
+
+        NEW_TD=$(echo "$CURRENT_TD" | python3 -c "
+import json, sys
+td = json.load(sys.stdin)
+container = td['containerDefinitions'][0]
+env_list = container.get('environment', [])
+for e in env_list:
+    if e['name'] == 'DEV_MODE':
+        e['value'] = 'true'
+        break
+else:
+    env_list.append({'name': 'DEV_MODE', 'value': 'true'})
+container['environment'] = env_list
+print(json.dumps({
+    'family': td['family'],
+    'taskRoleArn': td['taskRoleArn'],
+    'executionRoleArn': td['executionRoleArn'],
+    'networkMode': td['networkMode'],
+    'containerDefinitions': td['containerDefinitions'],
+    'volumes': td.get('volumes', []),
+    'requiresCompatibilities': td['requiresCompatibilities'],
+    'cpu': td['cpu'],
+    'memory': td['memory'],
+}))
+")
+
+        NEW_REV=$(aws ecs register-task-definition \
+          --cli-input-json "$NEW_TD" \
+          --region ${{ env.AWS_REGION }} \
+          --query 'taskDefinition.revision' --output text)
+        echo "Registered eagle-backend-dev:${NEW_REV} with DEV_MODE=true"
+        echo "task_revision=${NEW_REV}" >> $GITHUB_OUTPUT
+
     - name: Update ECS backend service
       run: |
         aws ecs update-service \
           --cluster ${{ env.CLUSTER_NAME }} \
           --service ${{ env.BACKEND_SERVICE }} \
+          --task-definition eagle-backend-dev:${{ steps.register-td.outputs.task_revision }} \
           --force-new-deployment \
           --region ${{ env.AWS_REGION }}
 
