@@ -101,7 +101,7 @@ export default function SimpleMessageList({
                     return (
                         <div key={message.id} className="group flex flex-col gap-1.5">
                             <span className="text-[10px] font-semibold text-[#003366] uppercase tracking-wider">
-                                Eagle
+                                🦅 Eagle
                             </span>
 
                             {/* Tool call indicators rendered above the text response */}
@@ -166,9 +166,7 @@ export default function SimpleMessageList({
                                         ),
                                     }}
                                 >
-                                    {/* Append block cursor character inline with content while streaming.
-                                        This naturally lands at the end of the last rendered line. */}
-                                    {isStreamingThis ? message.content + '▌' : message.content}
+                                    {isStreamingThis ? message.content + ' ...' : message.content}
                                 </ReactMarkdown>
                             </div>
 
@@ -197,10 +195,12 @@ export default function SimpleMessageList({
                 {isWaitingForFirstToken && (
                     <div className="flex flex-col gap-1.5">
                         <span className="text-[10px] font-semibold text-[#003366] uppercase tracking-wider">
-                            Eagle
+                            🦅 Eagle
                         </span>
-                        <div className="flex items-center h-5">
-                            <span className="inline-block w-[2px] h-4 bg-[#003366] rounded-sm animate-pulse" />
+                        <div className="flex items-center gap-1 h-5">
+                            <div className="typing-dot" />
+                            <div className="typing-dot" />
+                            <div className="typing-dot" />
                         </div>
                     </div>
                 )}

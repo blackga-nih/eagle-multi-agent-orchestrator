@@ -152,17 +152,23 @@ export default function SimpleChatInterface() {
                 lastAssistantIdRef.current = completedMsg.id;
                 setMessages((prev) => [...prev, completedMsg]);
 
-                // Migrate tool calls from the streaming ID to the committed message ID.
+                // Migrate tool calls from the streaming ID to the committed message ID,
+                // and mark any server-side tools still "pending" as "done" (subagent
+                // delegations don't emit a result event — the text just streams in).
                 const streamId = streamingMsgIdRef.current;
-                if (streamId !== completedMsg.id) {
-                    setToolCallsByMsg((prev) => {
-                        if (!prev[streamId]) return prev;
-                        const next = { ...prev };
-                        next[completedMsg.id] = prev[streamId];
-                        delete next[streamId];
-                        return next;
-                    });
-                }
+                setToolCallsByMsg((prev) => {
+                    const calls = prev[streamId] ?? prev[completedMsg.id] ?? [];
+                    if (calls.length === 0) return prev;
+                    const finalized = calls.map((tc) =>
+                        !tc.isClientSide && (tc.status === 'pending' || tc.status === 'running')
+                            ? { ...tc, status: 'done' as const }
+                            : tc
+                    );
+                    const next = { ...prev };
+                    delete next[streamId];
+                    next[completedMsg.id] = finalized;
+                    return next;
+                });
             }
             streamingMsgRef.current = null;
             setStreamingMsg(null);
