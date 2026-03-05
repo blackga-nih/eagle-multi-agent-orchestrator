@@ -75,17 +75,20 @@ jobs:
           INPUT_IDENTIFIER="${{ inputs.issue_identifier }}"
 
           if [ -n "$INPUT_IDENTIFIER" ]; then
-            # Fetch a specific issue by identifier
+            # Fetch a specific issue by identifier (Linear accepts "AI-315" as id)
             RESPONSE=$(linear_query "{
-              \"query\": \"query { issueSearch(filter: { identifier: { eq: \\\"$INPUT_IDENTIFIER\\\" } }, first: 1) { nodes { id identifier title description } } }\"
+              \"query\": \"query { issue(id: \\\"$INPUT_IDENTIFIER\\\") { id identifier title description } }\"
             }")
+            echo "Linear response: $RESPONSE"
 
-            ISSUES=$(echo "$RESPONSE" | jq -c '[.data.issueSearch.nodes[] | {id: .id, identifier: .identifier, title: .title, description: (.description // "No description provided.")}]')
+            ISSUES=$(echo "$RESPONSE" | jq -c '[.data.issue | select(. != null) | {id: .id, identifier: .identifier, title: .title, description: (.description // "No description provided.")}]')
           else
             # Poll for unstarted issues with claude-ready label (max 3)
             RESPONSE=$(linear_query "{
               \"query\": \"query { issues(first: 3, filter: { state: { type: { eq: \\\"unstarted\\\" } }, labels: { some: { name: { eq: \\\"claude-ready\\\" } } } }) { nodes { id identifier title description } } }\"
             }")
+
+            echo "Linear response: $RESPONSE"
 
             ISSUES=$(echo "$RESPONSE" | jq -c '[.data.issues.nodes[] | {id: .id, identifier: .identifier, title: .title, description: (.description // "No description provided.")}]')
           fi
