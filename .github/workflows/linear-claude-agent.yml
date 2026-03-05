@@ -152,25 +152,36 @@ jobs:
 
           echo "Moved ${{ matrix.issue.identifier }} → In Progress"
 
-      # ── Run Claude Code ────────────────────────────────────
+      # ── Run Claude Code CLI ─────────────────────────────────
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Run Claude Code
         id: claude
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            You are working on Linear issue ${{ matrix.issue.identifier }}: ${{ matrix.issue.title }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          PROMPT=$(cat <<'PROMPT_EOF'
+          You are working on Linear issue ${{ matrix.issue.identifier }}: ${{ matrix.issue.title }}
 
-            ## Description
-            ${{ matrix.issue.description }}
+          ## Description
+          ${{ matrix.issue.description }}
 
-            ## Instructions
-            - Implement the requested change in this repository
-            - Follow existing patterns in the codebase (see CLAUDE.md)
-            - Run lint/type checks before finishing: `ruff check app/` for Python, `npx tsc --noEmit` for TypeScript
-            - Commit your changes with a descriptive message referencing ${{ matrix.issue.identifier }}
-            - If this is an analysis-only task with no code changes needed, explain your findings
-          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 10"
+          ## Instructions
+          - Implement the requested change in this repository
+          - Follow existing patterns in the codebase (see CLAUDE.md)
+          - Run lint/type checks before finishing
+          - Commit your changes with a descriptive message referencing ${{ matrix.issue.identifier }}
+          - If this is an analysis-only task with no code changes needed, explain your findings
+          PROMPT_EOF
+          )
+
+          claude -p \
+            --model claude-haiku-4-5-20251001 \
+            --max-turns 10 \
+            --dangerously-skip-permissions \
+            "$PROMPT" \
+            2>&1 | tee /tmp/claude-output.txt
 
       # ── Check for changes ──────────────────────────────────
       - name: Check for changes
