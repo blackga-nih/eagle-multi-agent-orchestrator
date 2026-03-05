@@ -49,7 +49,7 @@ export const DEV_CONFIG: EagleConfig = {
 
   documentBucketName: `eagle-documents-${ACCOUNT}-dev`,
   documentMetadataTableName: 'eagle-document-metadata-dev',
-  bedrockMetadataModelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
+  bedrockMetadataModelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
   metadataLambdaMemory: 512,
   metadataLambdaTimeout: 120,
 

@@ -2,7 +2,8 @@
 
 **ID**: 20260304-132745-plan-metadata-schema-migration-v1
 **Created**: 2026-03-04
-**Status**: Draft
+**Updated**: 2026-03-04
+**Status**: Draft (Ready for Review)
 **Owner**: TBD
 
 ---
@@ -19,15 +20,16 @@ Migrate the 195 knowledge base documents from `rh-eagle-files` S3 bucket to `eag
 |-----------|--------|----------|
 | Knowledge base documents | 195 files | `s3://rh-eagle-files/` |
 | Document bucket (CDK) | Empty | `s3://eagle-documents-695681773636-dev/` |
-| Metadata table | Empty (0 items) | `eagle-document-metadata-dev` |
+| Metadata table | Empty (0 items) | `eagle-document-metadata-dev` (DynamoDB) |
 | Lambda extractor | Partial schema | `infrastructure/cdk-eagle/lambda/metadata-extraction/` |
 | Full schema spec | Documented | `/Users/hoquemi/Downloads/metadata-schema.md` |
+| Bedrock model | ✅ Updated | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
 
 ### Schema Gap Analysis
 
-The Lambda currently extracts 13 fields. The full schema defines 28+ fields.
+The Lambda currently extracts 9 fields. The full schema defines 28+ fields.
 
-**Missing fields (15)**:
+**Missing fields (15+)**:
 - `effective_date`, `expiration_date`, `fiscal_year` (temporal)
 - `key_requirements`, `section_summaries` (content)
 - `related_topics`, `relevant_agents` (routing)
@@ -42,14 +44,14 @@ The Lambda currently extracts 13 fields. The full schema defines 28+ fields.
 
 1. **Lambda extracts full schema** — all 28 fields from `metadata-schema.md`
 2. **DynamoDB populated** — 195+ documents with complete metadata
-3. **Agents can query** — by topic, agent, authority level, complexity
+3. **Agents can retrieve** — `knowledge_search` and `knowledge_fetch` tools enable document discovery
 4. **Catalog synced** — `metadata-catalog.json` in S3 for bulk reads
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: Update Lambda Schema (Day 1)
+### Phase 1: Update Lambda Schema
 
 #### Task 1.1: Update `models.py`
 
@@ -142,33 +144,11 @@ metadata = DocumentMetadata(
 
 **File**: `infrastructure/cdk-eagle/lambda/metadata-extraction/handler.py`
 
-#### Task 1.4: Add DynamoDB GSIs for New Fields
-
-Update `storage-stack.ts` to add GSIs for queryable fields:
-
-```typescript
-// Add GSI for authority_level queries
-this.metadataTable.addGlobalSecondaryIndex({
-  indexName: 'authority_level-index',
-  partitionKey: { name: 'authority_level', type: dynamodb.AttributeType.STRING },
-  sortKey: { name: 'last_updated', type: dynamodb.AttributeType.STRING },
-  projectionType: dynamodb.ProjectionType.ALL,
-});
-
-// Add GSI for complexity_level queries
-this.metadataTable.addGlobalSecondaryIndex({
-  indexName: 'complexity_level-index',
-  partitionKey: { name: 'complexity_level', type: dynamodb.AttributeType.STRING },
-  sortKey: { name: 'last_updated', type: dynamodb.AttributeType.STRING },
-  projectionType: dynamodb.ProjectionType.ALL,
-});
-```
-
-**File**: `infrastructure/cdk-eagle/lib/storage-stack.ts`
+> **Note**: DynamoDB GSIs skipped — unnecessary for ~195 documents. Use `Scan` with `FilterExpression` instead. Add GSIs later if query performance becomes an issue at scale.
 
 ---
 
-### Phase 2: Create Migration Script (Day 2)
+### Phase 2: Create Migration Scripts
 
 #### Task 2.1: Write Migration Script
 
@@ -269,43 +249,45 @@ if __name__ == "__main__":
 
 ---
 
-### Phase 3: Add Knowledge Retrieval Tool (Day 3)
+### Phase 3: Add Agent Tools
 
-#### Task 3.1: Create DynamoDB Query Tool
+#### Task 3.1: Create `knowledge_search` Tool
 
-Add a tool for agents to query the metadata table:
+Add a tool for agents to search the metadata table:
 
 ```python
 def _exec_knowledge_search(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Search knowledge base metadata in DynamoDB."""
-    table = _get_dynamodb().Table("eagle-document-metadata-dev")
+    table = _get_dynamodb().Table(os.environ.get("METADATA_TABLE", "eagle-document-metadata-dev"))
 
     # Query parameters
     topic = params.get("topic")
     agent = params.get("agent")
-    authority = params.get("authority_level")
-    complexity = params.get("complexity")
+    document_type = params.get("document_type")
     keywords = params.get("keywords", [])
     limit = params.get("limit", 10)
 
-    # Build query based on available indexes
+    # Build filter expression
+    filter_parts = []
+    expr_values = {}
+
     if topic:
-        response = table.query(
-            IndexName="primary_topic-index",
-            KeyConditionExpression="primary_topic = :topic",
-            ExpressionAttributeValues={":topic": topic},
-            Limit=limit,
-        )
-    elif agent:
-        response = table.query(
-            IndexName="primary_agent-index",
-            KeyConditionExpression="primary_agent = :agent",
-            ExpressionAttributeValues={":agent": agent},
-            Limit=limit,
-        )
-    else:
-        # Scan with filters (less efficient)
-        response = table.scan(Limit=limit)
+        filter_parts.append("primary_topic = :topic")
+        expr_values[":topic"] = topic
+    if agent:
+        filter_parts.append("primary_agent = :agent")
+        expr_values[":agent"] = agent
+    if document_type:
+        filter_parts.append("document_type = :doc_type")
+        expr_values[":doc_type"] = document_type
+
+    # Scan with filters (efficient for ~200 docs)
+    scan_kwargs = {"Limit": limit}
+    if filter_parts:
+        scan_kwargs["FilterExpression"] = " AND ".join(filter_parts)
+        scan_kwargs["ExpressionAttributeValues"] = expr_values
+
+    response = table.scan(**scan_kwargs)
 
     # Return summaries for agent to evaluate
     results = []
@@ -314,45 +296,40 @@ def _exec_knowledge_search(params: dict, tenant_id: str, session_id: str = None)
             "document_id": item["document_id"],
             "title": item.get("title", ""),
             "summary": item.get("summary", ""),
+            "document_type": item.get("document_type", ""),
+            "primary_topic": item.get("primary_topic", ""),
             "key_requirements": item.get("key_requirements", []),
-            "authority_level": item.get("authority_level", ""),
-            "complexity_level": item.get("complexity_level", ""),
             "s3_key": item.get("s3_key", ""),
         })
 
     return {"results": results, "count": len(results)}
 ```
 
-**File**: `server/app/agentic_service.py` (add to TOOL_REGISTRY)
-
-#### Task 3.2: Add Tool Definition
+**Tool Definition**:
 
 ```python
 {
     "name": "knowledge_search",
     "description": (
-        "Search the acquisition knowledge base for relevant documents. "
-        "Returns summaries and metadata to help decide which documents to read in full. "
-        "Query by topic, agent, authority level, or keywords."
+        "Search the acquisition knowledge base for relevant documents, templates, and guidance. "
+        "Returns summaries and metadata to help decide which documents to retrieve in full. "
+        "Use this to find SOW templates, FAR guidance, policy documents, etc."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "topic": {
                 "type": "string",
-                "description": "Primary topic: funding, legal, compliance, market_research, etc.",
+                "description": "Primary topic: funding, compliance, market_research, contract_types, etc.",
             },
             "agent": {
                 "type": "string",
-                "description": "Primary agent: legal-counselor, financial-advisor, etc.",
+                "description": "Filter by primary agent: legal-counselor, financial-advisor, etc.",
             },
-            "authority_level": {
+            "document_type": {
                 "type": "string",
-                "enum": ["statute", "regulation", "policy", "guidance", "internal"],
-            },
-            "complexity": {
-                "type": "string",
-                "enum": ["basic", "intermediate", "advanced"],
+                "enum": ["regulation", "guidance", "policy", "template", "memo", "checklist", "reference"],
+                "description": "Type of document to search for",
             },
             "keywords": {
                 "type": "array",
@@ -368,14 +345,21 @@ def _exec_knowledge_search(params: dict, tenant_id: str, session_id: str = None)
 }
 ```
 
-#### Task 3.3: Add Document Fetch Tool
+**File**: `server/app/tools/knowledge_tools.py` (new file)
+
+#### Task 3.2: Create `knowledge_fetch` Tool
+
+Add a tool to fetch full document content:
 
 ```python
 def _exec_knowledge_fetch(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Fetch full document content from S3 given a document_id or s3_key."""
-    s3 = _get_s3()
-    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    s3 = boto3.client("s3")
+    bucket = os.environ.get("DOCUMENT_BUCKET", "eagle-documents-695681773636-dev")
     key = params.get("s3_key") or params.get("document_id")
+
+    if not key:
+        return {"error": "s3_key or document_id required"}
 
     try:
         response = s3.get_object(Bucket=bucket, Key=key)
@@ -384,14 +368,57 @@ def _exec_knowledge_fetch(params: dict, tenant_id: str, session_id: str = None) 
             "document_id": key,
             "content": content[:50000],  # Limit to 50KB
             "truncated": len(content) > 50000,
+            "content_length": len(content),
         }
+    except s3.exceptions.NoSuchKey:
+        return {"error": f"Document not found: {key}"}
     except Exception as e:
         return {"error": str(e)}
 ```
 
+**Tool Definition**:
+
+```python
+{
+    "name": "knowledge_fetch",
+    "description": (
+        "Fetch full document content from the knowledge base. "
+        "Use after knowledge_search to retrieve a specific document, template, or guidance. "
+        "Pass the s3_key from search results."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "s3_key": {
+                "type": "string",
+                "description": "S3 key from knowledge_search results",
+            },
+        },
+        "required": ["s3_key"],
+    },
+}
+```
+
+**File**: `server/app/tools/knowledge_tools.py`
+
+#### Task 3.3: Register Tools
+
+Add tools to the agent's tool registry:
+
+```python
+# In server/app/strands_agentic_service.py or tool registration
+from app.tools.knowledge_tools import _exec_knowledge_search, _exec_knowledge_fetch
+
+TOOL_REGISTRY = {
+    # ... existing tools ...
+    "knowledge_search": _exec_knowledge_search,
+    "knowledge_fetch": _exec_knowledge_fetch,
+}
+```
+
 ---
 
-### Phase 4: Deploy & Validate (Day 4)
+### Phase 4: Deploy & Validate
 
 #### Task 4.1: Deploy Lambda Changes
 
@@ -417,25 +444,23 @@ python scripts/backfill-metadata.py
 # Check item count
 aws dynamodb scan --table-name eagle-document-metadata-dev --select COUNT
 
-# Sample items
-aws dynamodb scan --table-name eagle-document-metadata-dev --limit 5
+# Sample items (verify new fields present)
+aws dynamodb scan --table-name eagle-document-metadata-dev --limit 3
 ```
 
-#### Task 4.4: Test Agent Queries
+#### Task 4.4: Test Agent Tools
 
 ```python
-# Test knowledge_search tool
-result = execute_tool("knowledge_search", {
-    "topic": "funding",
-    "limit": 5,
-})
+# Test knowledge_search
+from app.tools.knowledge_tools import _exec_knowledge_search, _exec_knowledge_fetch
+
+result = _exec_knowledge_search({"document_type": "template", "limit": 5}, "test-tenant")
 print(result)
 
-# Test knowledge_fetch tool
-result = execute_tool("knowledge_fetch", {
-    "s3_key": "eagle-knowledge-base/approved/financial-advisor/appropriations-law/appropriations_law_IDIQ_funding.txt",
-})
-print(result["content"][:500])
+# Test knowledge_fetch (use s3_key from search results)
+if result["results"]:
+    doc = _exec_knowledge_fetch({"s3_key": result["results"][0]["s3_key"]}, "test-tenant")
+    print(doc["content"][:500])
 ```
 
 ---
@@ -454,11 +479,6 @@ aws s3 ls s3://eagle-documents-695681773636-dev/eagle-knowledge-base/approved/ -
 # Phase 3: DynamoDB
 aws dynamodb scan --table-name eagle-document-metadata-dev --select COUNT
 # Expected: {"Count": 195, ...}
-
-# Phase 4: Agent tool
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Search the knowledge base for IDIQ funding guidance"}'
 ```
 
 ---
@@ -478,9 +498,10 @@ curl -X POST http://localhost:8000/api/chat \
 | Documents in `eagle-documents-*` | 195 |
 | Metadata items in DynamoDB | 195 |
 | Fields per item | 28+ |
-| Agent can query by topic | Yes |
-| Agent can query by authority_level | Yes |
-| Full document fetch works | Yes |
+| New fields populated | authority_level, complexity_level, key_requirements, etc. |
+| `knowledge_search` returns results | Yes |
+| `knowledge_fetch` retrieves document content | Yes |
+| Agent can find SOW template via tools | Yes |
 
 ---
 
@@ -488,11 +509,11 @@ curl -X POST http://localhost:8000/api/chat \
 
 | Phase | Duration | Dependencies |
 |-------|----------|--------------|
-| Phase 1: Lambda schema | 4 hours | None |
-| Phase 2: Migration scripts | 2 hours | Phase 1 |
-| Phase 3: Agent tools | 3 hours | Phase 1 |
-| Phase 4: Deploy & validate | 2 hours | Phases 1-3 |
-| **Total** | **~2 days** | |
+| Phase 1: Lambda schema | 2-3 hours | None |
+| Phase 2: Migration scripts | 1 hour | Phase 1 |
+| Phase 3: Agent tools | 2 hours | None (can parallelize with Phase 1-2) |
+| Phase 4: Deploy & validate | 1 hour | Phases 1-3 |
+| **Total** | **~1 day** | |
 
 ---
 
@@ -502,20 +523,28 @@ curl -X POST http://localhost:8000/api/chat \
 |------|---------|
 | `infrastructure/cdk-eagle/lambda/metadata-extraction/models.py` | Add 15 new fields |
 | `infrastructure/cdk-eagle/lambda/metadata-extraction/extractor.py` | Update Bedrock prompt |
-| `infrastructure/cdk-eagle/lambda/metadata-extraction/handler.py` | Compute word_count, page_count |
-| `infrastructure/cdk-eagle/lib/storage-stack.ts` | Add 2 new GSIs |
-| `server/app/agentic_service.py` | Add knowledge_search, knowledge_fetch tools |
+| `infrastructure/cdk-eagle/lambda/metadata-extraction/handler.py` | Compute word_count, page_count, pass new fields |
+| `infrastructure/cdk-eagle/config/environments.ts` | ✅ Already updated — Claude 4.5 Haiku |
+| `server/app/tools/knowledge_tools.py` | New file — `knowledge_search`, `knowledge_fetch` |
+| `server/app/strands_agentic_service.py` | Register new tools |
 | `scripts/migrate-knowledge-base.py` | New file |
 | `scripts/backfill-metadata.py` | New file |
 
 ---
 
+## Decisions Made
+
+| Question | Decision |
+|----------|----------|
+| Bedrock model | ✅ Claude 4.5 Haiku (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) — cost-effective for structured extraction |
+| DynamoDB GSIs | ⏸️ Skipped — unnecessary at 195 docs, use Scan + FilterExpression |
+| Agent tools | ✅ Included — `knowledge_search` + `knowledge_fetch` for agent document retrieval |
+
 ## Open Questions
 
 1. **Authority on schema**: Is `metadata-schema.md` the canonical schema, or should we extend it?
-2. **Bedrock model**: Use Haiku for cost savings or Sonnet for accuracy?
-3. **HITL review**: Should migrated docs go through `pending/` or direct to `approved/`?
-4. **Cleanup**: Delete `rh-eagle-files` after migration, or keep as backup?
+2. **HITL review**: Should migrated docs go through `pending/` or direct to `approved/`?
+3. **Cleanup**: Delete `rh-eagle-files` after migration, or keep as backup?
 
 ---
 
@@ -524,4 +553,92 @@ curl -X POST http://localhost:8000/api/chat \
 - Schema spec: `/Users/hoquemi/Downloads/metadata-schema.md`
 - Lambda code: `infrastructure/cdk-eagle/lambda/metadata-extraction/`
 - Storage stack: `infrastructure/cdk-eagle/lib/storage-stack.ts`
-- Agent service: `server/app/agentic_service.py`
+- CDK config: `infrastructure/cdk-eagle/config/environments.ts`
+
+---
+
+## Conversation Summary (2026-03-04)
+
+### What the Lambda Does
+
+The metadata extraction Lambda (`eagle-metadata-extractor-dev`) performs:
+1. **Triggers** on S3 uploads to `eagle-documents-*` bucket
+2. **Reads** document content from S3
+3. **Calls Bedrock LLM** (Claude) with a structured prompt to extract metadata
+4. **Computes** file-level metrics (word_count, page_count, file_size_kb)
+5. **Writes** extracted metadata to DynamoDB (`eagle-document-metadata-dev`)
+
+### Model Configuration
+
+| Context | Env Var | Model |
+|---------|---------|-------|
+| Backend (FastAPI/Strands) | `ANTHROPIC_MODEL` | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Lambda (metadata extraction) | `BEDROCK_MODEL_ID` | Updated to `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
+
+**Decision**: Use Claude 4.5 Haiku for metadata extraction — cost-effective for structured JSON extraction from documents.
+
+### Why Haiku over Sonnet?
+
+| Factor | Haiku | Sonnet |
+|--------|-------|--------|
+| Cost | ~$0.25/1M input | ~$3/1M input (12x more) |
+| Speed | Faster | Slower |
+| Structured extraction | Excellent | Overkill |
+| 195 docs batch | ~$0.50 | ~$6+ |
+
+Sonnet's strengths (nuance, reasoning, creativity) aren't needed for extracting titles, FAR references, and keywords from well-structured government docs.
+
+### Why Skip DynamoDB GSIs?
+
+For ~195 documents, a `Scan` with `FilterExpression` is fast and cheap. GSIs make sense when:
+- Table has 100K+ items
+- You need efficient queries on non-key attributes at scale
+
+**Decision**: Skip GSIs now. Add later only if query performance becomes an issue.
+
+### Why We Need Agent Tools
+
+**Current state when user asks "I need an SOW":**
+
+| Step | What Happens | Source |
+|------|--------------|--------|
+| 1 | Agent recognizes document intent | Skill triggers |
+| 2 | Uses **hardcoded template** | Embedded in skill markdown |
+| 3 | Generates document | `create_document` tool |
+| 4 | Saves to user's S3 folder | `s3_document_ops` tool |
+
+**The Gap:**
+- No `knowledge_search` → Agent can't discover templates/guidance in knowledge base
+- No `knowledge_fetch` → Agent can't retrieve documents from S3 knowledge base
+- Templates are **static** in skill markdown — same template every time
+
+**After this plan:**
+- Agent can **dynamically search** metadata table by topic, document_type, agent
+- Agent can **fetch** templates/guidance from S3 knowledge base
+- Enables intelligent document discovery without vector embeddings
+
+### Deployment Note
+
+Changes to CDK config (`environments.ts`) only take effect after deployment. The Lambda reads `BEDROCK_MODEL_ID` from environment variables baked in at deploy time. Since this plan includes Lambda code changes, we'll deploy everything once at the end — no need for multiple deploys.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `infrastructure/cdk-eagle/lambda/metadata-extraction/extractor.py` | Bedrock prompt + extraction logic |
+| `infrastructure/cdk-eagle/lambda/metadata-extraction/models.py` | `DocumentMetadata` dataclass |
+| `infrastructure/cdk-eagle/lambda/metadata-extraction/handler.py` | Lambda entry point |
+| `infrastructure/cdk-eagle/config/environments.ts` | `bedrockMetadataModelId` config |
+| `server/app/agentic_service.py` | Current tools: `TOOL_DISPATCH`, `EAGLE_TOOLS` |
+| `server/app/template_store.py` | Template resolution chain (user → tenant → global → plugin) |
+| `eagle-plugin/skills/document-generator/SKILL.md` | Hardcoded SOW/IGCE/AP templates |
+| `eagle-plugin/skills/knowledge-retrieval/SKILL.md` | Aspirational knowledge search (not implemented) |
+
+### Storage Architecture
+
+| Data | Location |
+|------|----------|
+| Documents (PDFs, templates) | S3: `eagle-documents-*-dev` |
+| Document metadata (summaries, topics) | DynamoDB: `eagle-document-metadata-dev` |
+| User templates (overrides) | DynamoDB: `eagle` table, `TEMPLATE#` entities |
+| User documents (generated) | S3: `eagle/{tenant}/{user}/` |
