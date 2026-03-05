@@ -107,7 +107,7 @@ from .approval_store import (
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
-from .feedback_store import create_feedback as create_feedback_item, list_feedback
+from .feedback_store import list_feedback
 
 # ── Logging ──────────────────────────────────────────────────────────
 from .telemetry.log_context import configure_logging
@@ -2425,34 +2425,6 @@ async def get_test_run_detail(run_id: str):
     from .test_result_store import get_test_run_results
     results = get_test_run_results(run_id)
     return {"run_id": run_id, "results": results, "count": len(results)}
-
-
-# ── Feedback Endpoints ────────────────────────────────────────────
-
-
-class FeedbackBody(BaseModel):
-    rating: int = 0
-    page: str
-    feedback_type: Optional[str] = None
-    comment: Optional[str] = None
-    session_id: Optional[str] = None
-
-
-@app.post("/api/feedback")
-async def submit_feedback(body: FeedbackBody, user: UserContext = Depends(get_user_from_header)):
-    """Submit user feedback (comment + optional type)."""
-    if body.rating and not 1 <= body.rating <= 5:
-        raise HTTPException(status_code=400, detail="Rating must be 1-5")
-    item = create_feedback_item(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        rating=body.rating,
-        page=body.page,
-        feedback_type=body.feedback_type,
-        comment=body.comment,
-        session_id=body.session_id,
-    )
-    return {"status": "ok", "feedback_id": item["feedback_id"]}
 
 
 @app.get("/api/feedback")
