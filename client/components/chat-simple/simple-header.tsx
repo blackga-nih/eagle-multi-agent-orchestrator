@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { MessageSquare, FolderKanban, FileText, Layers, LayoutDashboard } from 'lucide-react';
@@ -39,7 +40,16 @@ export default function SimpleHeader() {
         >
             {/* Row 1: Branding centered, status on the right */}
             <div className="grid grid-cols-3 items-center px-6" style={{ height: 56 }}>
-                <div /> {/* empty left column */}
+                <div className="flex items-center">
+                    <Image
+                        src="/nci-logo-full.svg"
+                        alt="National Cancer Institute"
+                        width={120}
+                        height={36}
+                        style={{ filter: 'brightness(0) invert(1)' }}
+                        priority
+                    />
+                </div>
                 <div className="flex items-center justify-center gap-3">
                     <span className="text-[28px] leading-none" style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}>
                         🦅

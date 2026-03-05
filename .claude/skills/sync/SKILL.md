@@ -75,4 +75,69 @@ git log sm_eagle/main --stat | head -50
 ```
 and inspect for account numbers, VPC IDs, and bucket names. Add to this SKILL.md.
 
+**CBIIT's `claude-code-assistant.yml` workflow has been manually disabled** (no ANTHROPIC_API_KEY secret). Disable via API before pushing:
+```bash
+gh api -X PUT repos/CBIIT/sm_eagle/actions/workflows/238385374/disable
+```
+
 Full command spec: `.claude/commands/sync.md`
+
+---
+
+## Learned Patterns (from sync sessions)
+
+### filter-branch: always use `-f` when re-running on the same branch
+
+Running `git filter-branch --msg-filter` a second time on the same branch fails with:
+
+> Cannot create a new backup. A previous backup already exists in refs/original/
+
+Always include the `-f` flag:
+```bash
+git filter-branch -f --msg-filter '...' {base}..HEAD
+```
+
+### Strip Co-Authored-By before pushing to spokes
+
+Remove `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` from commits being synced using filter-branch before force-pushing:
+```bash
+git filter-branch -f --msg-filter 'sed "/Co-Authored-By: Claude Sonnet 4\.6 <noreply@anthropic\.com>/d"' {base}..HEAD
+```
+
+### Disable GitHub workflow via API (no code commit required)
+
+To disable a workflow on a remote repo without making a code commit:
+```bash
+gh api -X PUT repos/{owner}/{repo}/actions/workflows/{workflow_id}/disable
+```
+Get workflow IDs:
+```bash
+gh api repos/{owner}/{repo}/actions/workflows --jq '.workflows[] | "\(.id) \(.name)"'
+```
+
+### Cherry-pick: skip merge commits with `--skip`
+
+When cherry-picking a range and hitting a merge commit, use `git cherry-pick --skip` (not `--continue`) to skip it — all individual commits from that merge are already applied.
+
+### Python scripts: always use `encoding="utf-8"` for file opens
+
+Any Python script that processes git output (commit messages, diffs) must open files with `encoding="utf-8"` to avoid `UnicodeDecodeError` on Windows:
+```python
+open(path, "r", encoding="utf-8")
+```
+
+### Windows: use `git cat-file -p` instead of `git show` for remote file content
+
+On Windows (MINGW64), `git show remote/branch:path/to/file` may fail with "ambiguous argument". Use:
+```bash
+git cat-file -p remote/branch:path/to/file
+```
+Or confirm existence first with `git ls-tree remote/branch path/to/file`.
+
+### Untracked large files block branch checkout
+
+Move untracked large files (docx, images) to `/tmp` before switching branches to avoid "would be overwritten by checkout" errors.
+
+### Protected scan: account-specific S3 bucket names
+
+Always grep outbound commits for the pattern `eagle-documents-{account_id}-dev` (e.g. `eagle-documents-695681773636-dev`). Sanitize to `eagle-documents-dev` before pushing to any spoke. This is a HARD BLOCK pattern.
