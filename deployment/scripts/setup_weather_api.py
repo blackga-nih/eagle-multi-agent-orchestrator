@@ -64,9 +64,11 @@ def setup_weather_api():
         if not updated:
             env_content.append(f'OPENWEATHER_API_KEY={api_key}\n')
         
-        # Write back to .env
+        # Write back to .env with restricted permissions (owner read/write only)
+        import stat
         with open(env_file, 'w', encoding='utf-8') as f:
             f.writelines(env_content)
+        os.chmod(env_file, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
         
         print(f"✅ API key saved to {env_file}")
         print("\n🚀 Weather MCP tools are now ready!")

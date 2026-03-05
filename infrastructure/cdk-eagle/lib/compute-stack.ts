@@ -73,7 +73,7 @@ export class EagleComputeStack extends cdk.Stack {
         USE_BEDROCK: 'true',
         REQUIRE_AUTH: 'true',
         USE_PERSISTENT_SESSIONS: 'true',
-        DEV_MODE: 'false',
+        DEV_MODE: 'true',
         COGNITO_USER_POOL_ID: props.userPoolId,
         COGNITO_CLIENT_ID: props.userPoolClientId,
         DOCUMENT_BUCKET: props.documentBucketName,
