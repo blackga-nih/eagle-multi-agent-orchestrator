@@ -1,0 +1,72 @@
+# Master Dashboard Base Template
+# A "base of bases" that aggregates all entity types
+
+filters:
+  - file.inFolder("AI-Agent-KB")
+
+properties:
+  - file.name
+  - type
+  - status
+  - updated
+
+views:
+  - type: table
+    name: "All Items"
+    order:
+      - type
+      - file.name
+
+  - type: table
+    name: "ADWs"
+    filters:
+      - file.hasTag("adw")
+    order:
+      - file.name
+
+  - type: table
+    name: "Agents"
+    filters:
+      - file.hasTag("agent")
+    order:
+      - file.name
+
+  - type: table
+    name: "Skills"
+    filters:
+      - file.hasTag("skill")
+    order:
+      - file.name
+
+  - type: table
+    name: "MCP Servers"
+    filters:
+      - file.hasTag("mcp")
+    order:
+      - file.name
+
+  - type: table
+    name: "Prompts"
+    filters:
+      - file.hasTag("prompt")
+    order:
+      - file.name
+
+  - type: table
+    name: "Scripts"
+    filters:
+      - file.hasTag("script")
+    order:
+      - file.name
+
+  - type: table
+    name: "Experts"
+    filters:
+      - file.hasTag("expert")
+    order:
+      - file.name
+
+  - type: table
+    name: "Recently Updated"
+    order:
+      - updated

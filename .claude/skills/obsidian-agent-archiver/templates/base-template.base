@@ -1,0 +1,38 @@
+# Base Template
+# Replace {{TYPE}} with: adw, agent, skill, mcp, prompt, script, expert
+# Replace {{FOLDER}} with: 01-ADWs, 02-Agents, 03-Skills, etc.
+
+filters:
+  and:
+    - file.hasTag("{{TYPE}}")
+    - file.inFolder("AI-Agent-KB/{{FOLDER}}")
+
+properties:
+  - name
+  - status
+  - category
+  - updated
+
+views:
+  - type: table
+    name: "All Items"
+    order:
+      - name
+
+  - type: table
+    name: "Active"
+    filters:
+      - status == "active"
+    order:
+      - name
+
+  - type: table
+    name: "By Category"
+    order:
+      - category
+      - name
+
+  - type: table
+    name: "Recently Updated"
+    order:
+      - updated

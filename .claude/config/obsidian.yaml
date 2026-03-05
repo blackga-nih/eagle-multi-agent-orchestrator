@@ -1,0 +1,107 @@
+# Obsidian Vault Export Configuration
+
+vault:
+  # Path to Obsidian vault (relative to project root)
+  # Can be overridden with OBSIDIAN_VAULT_PATH environment variable
+  path: "./observability/notes"
+
+  # Date format for daily notes
+  daily_notes_format: "YYYY-MM-DD"
+
+  # Subdirectory structure
+  directories:
+    sessions: "sessions"     # Individual session notes
+    daily: "daily"           # Daily summaries
+    entities: "entities"     # Entity reference notes (future)
+    templates: "templates"   # Note templates (future)
+
+# Export settings
+export:
+  # When to export notes
+  frequency: "per-session"  # per-session, hourly, daily
+
+  # What to include in notes
+  include:
+    metrics: true           # Include performance metrics
+    entities: true          # Include discovered entities
+    timeline: true          # Include tool execution timeline
+    relationships: true     # Include parent/child sessions
+    tool_details: false     # Include detailed tool I/O (can be large)
+
+  # Limits to prevent huge notes
+  limits:
+    max_tools_in_timeline: 100
+    max_entities_per_type: 15
+    max_tool_output_chars: 500
+
+  # Frontmatter configuration
+  frontmatter:
+    # Always include these tags
+    default_tags:
+      - agent-session
+
+    # Include these properties
+    properties:
+      - session_id
+      - source_app
+      - model
+      - date
+      - status
+      - performance
+      - entities
+
+# Daily summary settings
+daily_summary:
+  enabled: true
+
+  # Include aggregate statistics
+  include_stats: true
+
+  # Group sessions by source app
+  group_by_source_app: true
+
+  # Sort order for sessions
+  sort_by: "timestamp"  # timestamp, performance, tool_count
+
+# Backlinks and tags
+backlinks:
+  # Create entity reference notes
+  create_entity_notes: false  # Future feature
+
+  # Link to parent/child sessions
+  link_related_sessions: true
+
+  # Create tags from entity types
+  tag_entity_types: true
+
+# Note templates (future feature)
+templates:
+  session_note: null
+  daily_summary: null
+  entity_reference: null
+
+# Auto-refresh settings
+auto_refresh:
+  enabled: false
+  interval_seconds: 60
+
+# Formatting
+formatting:
+  # Markdown flavor
+  flavor: "obsidian"  # obsidian, github, commonmark
+
+  # Code block language for tool I/O
+  code_block_language: "json"
+
+  # Timestamp format in timeline
+  timestamp_format: "HH:MM:SS"
+
+  # Use emoji in notes
+  use_emoji: true
+  emoji_map:
+    fast: "⚡"
+    medium: "🔄"
+    slow: "🐌"
+    completed: "✅"
+    active: "🔵"
+    error: "❌"
