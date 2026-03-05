@@ -6,6 +6,7 @@ import { EagleComputeStack } from '../lib/compute-stack';
 import { EagleStorageStack } from '../lib/storage-stack';
 import { EagleCiCdStack } from '../lib/cicd-stack';
 import { EagleEvalStack } from '../lib/eval-stack';
+import { EagleBackupStack } from '../lib/backup-stack';
 import { DEV_CONFIG } from '../config/environments';
 
 const app = new cdk.App();
@@ -76,8 +77,16 @@ const evalStack = new EagleEvalStack(app, 'EagleEvalStack', {
   description: 'EAGLE Eval — S3 artifacts, CloudWatch dashboard, SNS alerts',
 });
 
+// Backup stack is independent — targets resources by ARN from config
+const backup = new EagleBackupStack(app, 'EagleBackupStack', {
+  env,
+  synthesizer,
+  config: DEV_CONFIG,
+  description: 'EAGLE Backup — hourly DynamoDB snapshots + daily S3, 7/30-day retention',
+});
+
 // Tag all stacks
-for (const stack of [cicd, core, storage, compute, evalStack]) {
+for (const stack of [cicd, core, storage, compute, evalStack, backup]) {
   cdk.Tags.of(stack).add('Project', 'eagle');
   cdk.Tags.of(stack).add('ManagedBy', 'cdk');
   cdk.Tags.of(stack).add('Environment', DEV_CONFIG.env);
