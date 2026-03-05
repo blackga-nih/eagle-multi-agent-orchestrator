@@ -28,18 +28,10 @@ import type { ChatMessage } from '@/types/chat';
 
 // Re-export shared types so existing imports from this file keep working.
 export type { ChatMessage, DocumentInfo } from '@/types/chat';
+export type { AcquisitionData } from '@/types/schema';
 export type Message = ChatMessage;
 
-export interface AcquisitionData {
-    requirement?: string;
-    estimatedValue?: string;
-    estimatedCost?: string;
-    timeline?: string;
-    urgency?: string;
-    funding?: string;
-    equipmentType?: string;
-    acquisitionType?: string;
-}
+import type { AcquisitionData } from '@/types/schema';
 
 type TabType = 'current' | 'history' | 'logs';
 

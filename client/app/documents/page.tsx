@@ -17,24 +17,22 @@ import {
   formatDate,
 } from '@/lib/mock-data';
 import { getGeneratedDocuments, StoredDocument } from '@/lib/document-store';
-import { Document, DocumentTemplate, DocumentType, DocumentStatus } from '@/types/schema';
+import { Document, DocumentTemplate, DocumentType, DocumentStatus, DOCUMENT_TYPE_LABELS } from '@/types/schema';
 
-const documentTypeLabels: Record<DocumentType, string> = {
-  sow: 'Statement of Work',
-  igce: 'Cost Estimate (IGCE)',
-  market_research: 'Market Research',
-  acquisition_plan: 'Acquisition Plan',
-  justification: 'Justification',
-  funding_doc: 'Funding Document',
-};
+const documentTypeLabels = DOCUMENT_TYPE_LABELS as Record<string, string>;
 
-const documentTypeIcons: Record<DocumentType, string> = {
+const documentTypeIcons: Record<string, string> = {
   sow: 'S',
   igce: 'I',
   market_research: 'M',
   acquisition_plan: 'A',
   justification: 'J',
   funding_doc: 'F',
+  eval_criteria: 'E',
+  security_checklist: 'X',
+  section_508: '5',
+  cor_certification: 'C',
+  contract_type_justification: 'T',
 };
 
 /** Convert a StoredDocument from localStorage into the Document shape used by the UI. */
