@@ -107,9 +107,11 @@ from .approval_store import (
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
+from .feedback_store import write_feedback, list_feedback
 
 # ── Logging ──────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+from .telemetry.log_context import configure_logging
+configure_logging(level=logging.INFO)
 logger = logging.getLogger("eagle")
 
 # ── S3 bucket (single source of truth) ───────────────────────────────
@@ -2234,6 +2236,33 @@ async def update_user_preferences(
 async def reset_user_preferences(user: UserContext = Depends(get_user_from_header)):
     """Reset all user preferences to system defaults."""
     return reset_prefs(user.tenant_id, user.user_id)
+
+
+
+# ── Test Run Viewer Endpoints ─────────────────────────────────────
+
+@app.get("/api/admin/test-runs")
+async def list_test_runs_endpoint(limit: int = 20):
+    """List recent test runs from DynamoDB."""
+    from .test_result_store import list_test_runs
+    runs = list_test_runs(limit=limit)
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/api/admin/test-runs/{run_id}")
+async def get_test_run_detail(run_id: str):
+    """Get individual test results for a specific run."""
+    from .test_result_store import get_test_run_results
+    results = get_test_run_results(run_id)
+    return {"run_id": run_id, "results": results, "count": len(results)}
+
+
+@app.get("/api/feedback")
+async def get_feedback(limit: int = 50, user: UserContext = Depends(get_user_from_header)):
+    """List feedback for the current tenant (admin use)."""
+    items = list_feedback(user.tenant_id, limit=limit)
+    return {"feedback": items, "count": len(items)}
+
 
 
 if __name__ == "__main__":
