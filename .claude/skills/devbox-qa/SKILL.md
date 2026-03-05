@@ -459,3 +459,237 @@ On failure, print the full report to stdout so results are not lost.
   fall back to screenshots-only and omit the video line from the message.
 - The QA branch commit uses `[skip ci]` to avoid triggering GitHub Actions
   on a test snapshot. Remove if CI validation on QA snapshots is desired.
+
+---
+
+## Use Case Registry
+
+Maps every EAGLE feature area to its QA test coverage across all 4 suites.
+Status: **COVERED** = all 4 suites | **PARTIAL** = 1–3 suites | **GAP** = none.
+
+When running `/devbox-qa email`, append the relevant UC IDs to the SNS message
+so recipients know which scenarios were exercised.
+
+### UC-01 — Auth / Login
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-login-test | `/mcp-browser:eagle-login-test` |
+| Playwright | navigation.spec.ts | `npx playwright test navigation.spec.ts` |
+| Pytest | test_chat_endpoints.py | `pytest tests/test_chat_endpoints.py -k auth` |
+| Eval | — | GAP |
+
+**Status:** PARTIAL — eval gap
+**Covers:** valid credentials, invalid credentials, dev-mode bypass, post-login redirect
+
+---
+
+### UC-02 — Chat Send / Receive
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-chat-test | `/mcp-browser:eagle-chat-test` |
+| Playwright | chat.spec.ts | `npx playwright test chat.spec.ts` |
+| Pytest | test_chat_endpoints.py | `pytest tests/test_chat_endpoints.py` |
+| Eval | test_strands_eval.py (tests 1–5) | `python tests/test_strands_eval.py --tests 1,2,3,4,5` |
+
+**Status:** COVERED
+**Covers:** message send, SSE streaming, response render, session_id consistency
+
+---
+
+### UC-03 — Session Memory / Persistence
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-session-memory-test | `/mcp-browser:eagle-session-memory-test` |
+| MCP Browser | eagle-session-test | `/mcp-browser:eagle-session-test` |
+| Playwright | session-memory.spec.ts | `npx playwright test session-memory.spec.ts` |
+| Pytest | test_perf_simple_message.py | `pytest tests/test_perf_simple_message.py` |
+| Eval | test_strands_eval.py (tests 6–8) | `python tests/test_strands_eval.py --tests 6,7,8` |
+
+**Status:** COVERED
+**Covers:** multi-turn memory, session isolation, sidebar switch, reload persistence
+
+---
+
+### UC-04 — OA Intake
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-intake-test | `/mcp-browser:eagle-intake-test` |
+| Playwright | intake.spec.ts, uc-intake.spec.ts | `npx playwright test intake.spec.ts uc-intake.spec.ts` |
+| Pytest | test_chat_endpoints.py | `pytest tests/test_chat_endpoints.py -k intake` |
+| Eval | test_strands_eval.py (tests 9–12) | `python tests/test_strands_eval.py --tests 9,10,11,12` |
+
+**Status:** COVERED
+**Covers:** quick action buttons, chat-driven intake, acquisition type routing
+
+---
+
+### UC-05 — Document Generation
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-document-test | `/mcp-browser:eagle-document-test` |
+| Playwright | documents.spec.ts, document-pipeline.spec.ts, uc-document.spec.ts | `npx playwright test documents.spec.ts document-pipeline.spec.ts` |
+| Pytest | test_document_pipeline.py | `pytest tests/test_document_pipeline.py` |
+| Eval | test_strands_eval.py (tests 13–16) | `python tests/test_strands_eval.py --tests 13,14,15,16` |
+
+**Status:** COVERED
+**Covers:** SOW/IGCE/AP generation, document viewer, Word download, template browsing
+
+---
+
+### UC-06 — Admin Dashboard
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-admin-test | `/mcp-browser:eagle-admin-test` |
+| MCP Browser | eagle-admin-skills-test | `/mcp-browser:eagle-admin-skills-test` |
+| MCP Browser | eagle-admin-templates-test | `/mcp-browser:eagle-admin-templates-test` |
+| MCP Browser | eagle-admin-workspaces-test | `/mcp-browser:eagle-admin-workspaces-test` |
+| Playwright | admin-dashboard.spec.ts | `npx playwright test admin-dashboard.spec.ts` |
+| Pytest | test_test_result_persistence.py | `pytest tests/test_test_result_persistence.py` |
+| Eval | — | GAP |
+
+**Status:** PARTIAL — eval gap
+**Covers:** stat cards, system health, user management, skills/templates/workspaces CRUD
+
+---
+
+### UC-07 — Feedback Modal
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-feedback-test | `/mcp-browser:eagle-feedback-test` |
+| Playwright | — | GAP |
+| Pytest | test_feedback_store.py | GAP (not yet written — see expertise.md) |
+| Eval | — | GAP |
+
+**Status:** PARTIAL — MCP browser only
+**Covers:** Ctrl+J open, type pills, comment, submit, auto-close, reset after cancel
+**Next:** add `client/tests/feedback.spec.ts` + `server/tests/test_feedback_store.py`
+
+---
+
+### UC-08 — Specialist Skills (Legal / Market / Tech / Public Interest)
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-specialist-skills-test | `/mcp-browser:eagle-specialist-skills-test` |
+| Playwright | — | GAP |
+| Pytest | — | GAP |
+| Eval | test_strands_eval.py (tests 17–20) | `python tests/test_strands_eval.py --tests 17,18,19,20` |
+
+**Status:** PARTIAL — MCP browser + eval only
+**Covers:** J&A legal counsel, vendor research, SOW translation, fairness review
+
+---
+
+### UC-09 — Unified Contracting Workflows (UC lifecycle)
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-uc-workflows-test | `/mcp-browser:eagle-uc-workflows-test` |
+| Playwright | uc-intake.spec.ts, uc-document.spec.ts, uc-far-search.spec.ts | `npx playwright test uc-*.spec.ts` |
+| Pytest | — | GAP |
+| Eval | test_strands_eval.py (tests 21–27) | `python tests/test_strands_eval.py --tests 21,22,23,24,25,26,27` |
+
+**Status:** PARTIAL — pytest gap
+**Covers:** micro-purchase, option exercise, contract mod, CO review, closeout, shutdown, score consolidation
+
+---
+
+### UC-10 — Edge Cases / Streaming Guards
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-edge-cases-test | `/mcp-browser:eagle-edge-cases-test` |
+| Playwright | chat.spec.ts | `npx playwright test chat.spec.ts` |
+| Pytest | test_perf_simple_message.py | `pytest tests/test_perf_simple_message.py` |
+| Eval | — | GAP |
+
+**Status:** PARTIAL — eval gap
+**Covers:** empty send blocked, whitespace guard, streaming lock, Shift+Enter newline, 2000-char message
+
+---
+
+### UC-11 — Subscription Tier Gating
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-tier-gating-test | `/mcp-browser:eagle-tier-gating-test` |
+| Playwright | — | GAP |
+| Pytest | — | GAP |
+| Eval | — | GAP |
+
+**Status:** PARTIAL — MCP browser only
+**Covers:** basic vs premium labels, mcp_server_access flag, tier endpoint validation
+
+---
+
+### UC-12 — MCP Tool Integration
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-mcp-tools-test | `/mcp-browser:eagle-mcp-tools-test` |
+| Playwright | — | GAP |
+| Pytest | — | GAP |
+| Eval | — | GAP |
+
+**Status:** PARTIAL — MCP browser only (requires premium user)
+**Covers:** OpenWeatherMap via MCP layer, tool result in chat, WebSocket/MCP no errors
+
+---
+
+### UC-13 — Command Palette (Ctrl+K)
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-command-palette-test | `/mcp-browser:eagle-command-palette-test` |
+| Playwright | navigation.spec.ts | `npx playwright test navigation.spec.ts` |
+| Pytest | — | GAP |
+| Eval | — | GAP |
+
+**Status:** PARTIAL
+**Covers:** open, search, select commands, Escape close
+
+---
+
+### UC-14 — Activity Panel
+
+| Suite | Asset | Command / File |
+|-------|-------|----------------|
+| MCP Browser | eagle-activity-panel-test | `/mcp-browser:eagle-activity-panel-test` |
+| Playwright | — | GAP |
+| Pytest | — | GAP |
+| Eval | — | GAP |
+
+**Status:** PARTIAL — MCP browser only
+**Covers:** tabs, collapse/expand, agent logs, tool use cards during streaming
+
+---
+
+### Coverage Summary
+
+| UC | Feature | MCP Browser | Playwright | Pytest | Eval | Status |
+|----|---------|:-----------:|:----------:|:------:|:----:|--------|
+| 01 | Auth/Login | ✅ | ✅ | ✅ | ❌ | PARTIAL |
+| 02 | Chat Send/Receive | ✅ | ✅ | ✅ | ✅ | **COVERED** |
+| 03 | Session Memory | ✅ | ✅ | ✅ | ✅ | **COVERED** |
+| 04 | OA Intake | ✅ | ✅ | ✅ | ✅ | **COVERED** |
+| 05 | Document Generation | ✅ | ✅ | ✅ | ✅ | **COVERED** |
+| 06 | Admin Dashboard | ✅ | ✅ | ✅ | ❌ | PARTIAL |
+| 07 | Feedback Modal | ✅ | ❌ | ❌ | ❌ | PARTIAL |
+| 08 | Specialist Skills | ✅ | ❌ | ❌ | ✅ | PARTIAL |
+| 09 | UC Workflows | ✅ | ✅ | ❌ | ✅ | PARTIAL |
+| 10 | Edge Cases | ✅ | ✅ | ✅ | ❌ | PARTIAL |
+| 11 | Tier Gating | ✅ | ❌ | ❌ | ❌ | PARTIAL |
+| 12 | MCP Tools | ✅ | ❌ | ❌ | ❌ | PARTIAL |
+| 13 | Command Palette | ✅ | ✅ | ❌ | ❌ | PARTIAL |
+| 14 | Activity Panel | ✅ | ❌ | ❌ | ❌ | PARTIAL |
+
+**COVERED: 4 / 14** — biggest gaps: Playwright for UCs 07/08/11/12/14, Pytest for UCs 07/08/09/11/12/13, Eval for UCs 01/06/10/11/12/13/14
+
+To fill a gap: `/experts:test:use-case-builder UC-{N}`
