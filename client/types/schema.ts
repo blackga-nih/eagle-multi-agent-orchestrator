@@ -449,6 +449,8 @@ export interface AIFeedback {
   rating: 1 | 2 | 3 | 4 | 5;
   feedback_type?: FeedbackType;
   comment?: string;
+  page?: string;
+  session_id?: string;
   created_at: string;
 }
 
