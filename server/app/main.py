@@ -17,7 +17,7 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response, UploadFile, File
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -51,6 +51,7 @@ from .admin_service import (
     get_dashboard_stats, get_user_stats, get_top_users, get_tool_usage,
     record_request_cost, check_rate_limit, calculate_cost
 )
+from . import feedback_store
 
 # Existing multi-tenant modules (preserved)
 from .models import ChatMessage, ChatResponse, TenantContext, UsageMetric, SubscriptionTier
@@ -106,10 +107,15 @@ from .approval_store import (
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
+from .feedback_store import write_feedback, list_feedback
 
 # ── Logging ──────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+from .telemetry.log_context import configure_logging
+configure_logging(level=logging.INFO)
 logger = logging.getLogger("eagle")
+
+# ── S3 bucket (single source of truth) ───────────────────────────────
+_S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
 
 app = FastAPI(
     title="EAGLE – NCI Acquisition Assistant",
@@ -518,7 +524,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = _S3_BUCKET
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
@@ -553,7 +559,7 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = _S3_BUCKET
 
     # Security: ensure key is within user's prefix
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
@@ -576,6 +582,38 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
             raise HTTPException(status_code=404, detail="Document not found")
         logger.error("S3 get document error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve document")
+
+
+# ── S3 Presigned URL ─────────────────────────────────────────────────
+
+@app.get("/api/documents/presign")
+async def api_presign_document(
+    key: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Generate a time-limited presigned URL for an S3 document."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    tenant_id = user.tenant_id
+    user_id = user.user_id
+
+    # Security: ensure key is within user's prefix
+    if not key.startswith(f"eagle/{tenant_id}/{user_id}/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    bucket = _S3_BUCKET
+    try:
+        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=3600,  # 1 hour
+        )
+        return {"url": url, "key": key, "expires_in": 3600}
+    except ClientError as e:
+        logger.error("Presign error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── User document upload ─────────────────────────────────────────────
@@ -612,7 +650,7 @@ async def api_upload_document(
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = _S3_BUCKET
 
     # Sanitize filename
     safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
@@ -669,7 +707,7 @@ async def api_approve_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = _S3_BUCKET
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -737,7 +775,7 @@ async def api_reject_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = _S3_BUCKET
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -951,6 +989,59 @@ async def api_user_usage(
     """Get usage summary for current user."""
     tenant_id = user.tenant_id
     return get_usage_summary(tenant_id, days)
+
+
+# ── Feedback endpoint ────────────────────────────────────────────────
+
+def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
+    """Return up to 50 recent CloudWatch log events matching session_id (non-fatal)."""
+    if not session_id:
+        return []
+    try:
+        log_group = os.environ.get("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
+        region = os.environ.get("AWS_REGION", "us-east-1")
+        client = _boto3.client("logs", region_name=region)
+        now_ms = int(time.time() * 1000)
+        day_ms = 24 * 60 * 60 * 1000
+        response = client.filter_log_events(
+            logGroupName=log_group,
+            startTime=now_ms - day_ms,
+            endTime=now_ms,
+            filterPattern=session_id,
+            limit=50,
+        )
+        return response.get("events", [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("feedback: cloudwatch fetch failed (non-fatal): %s", exc)
+        return []
+
+
+@app.post("/api/feedback")
+async def api_submit_feedback(
+    request: Request,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Record user feedback with conversation snapshot and recent CloudWatch logs."""
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    feedback_text = body.get("feedback_text", "").strip()
+    conversation_snapshot = body.get("conversation_snapshot", [])
+
+    if not feedback_text:
+        raise HTTPException(status_code=400, detail="feedback_text is required")
+
+    cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
+
+    feedback_store.write_feedback(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        tier=user.tier,
+        session_id=session_id,
+        feedback_text=feedback_text,
+        conversation_snapshot=json.dumps(conversation_snapshot, default=str),
+        cloudwatch_logs=json.dumps(cloudwatch_logs, default=str),
+    )
+    return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 
 
 # ── Telemetry endpoint ───────────────────────────────────────────────
@@ -2145,6 +2236,35 @@ async def update_user_preferences(
 async def reset_user_preferences(user: UserContext = Depends(get_user_from_header)):
     """Reset all user preferences to system defaults."""
     return reset_prefs(user.tenant_id, user.user_id)
+
+
+
+# ── Test Run Viewer Endpoints ─────────────────────────────────────
+
+@app.get("/api/admin/test-runs")
+async def list_test_runs_endpoint(limit: int = 20):
+    """List recent test runs from DynamoDB."""
+    from .test_result_store import list_test_runs
+    runs = list_test_runs(limit=limit)
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/api/admin/test-runs/{run_id}")
+async def get_test_run_detail(run_id: str):
+    """Get individual test results for a specific run."""
+    from .test_result_store import get_test_run_results
+    results = get_test_run_results(run_id)
+    return {"run_id": run_id, "results": results, "count": len(results)}
+
+
+
+
+@app.get("/api/feedback")
+async def get_feedback(limit: int = 50, user: UserContext = Depends(get_user_from_header)):
+    """List feedback for the current tenant (admin use)."""
+    items = list_feedback(user.tenant_id, limit=limit)
+    return {"feedback": items, "count": len(items)}
+
 
 
 if __name__ == "__main__":

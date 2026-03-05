@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, MessageSquare, FolderKanban, FileText, LayoutDashboard } from 'lucide-react';
+import { LogOut, MessageSquare, FolderKanban, FileText, LayoutDashboard, Layers } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
-import { checkBackendHealth } from '@/hooks/use-agent-stream';
+import { useBackendStatus } from '@/contexts/backend-status-context';
 
 const navLinks = [
   { href: '/chat', label: 'Chat', icon: <MessageSquare className="w-4 h-4" /> },
   { href: '/workflows', label: 'Packages', icon: <FolderKanban className="w-4 h-4" /> },
   { href: '/documents', label: 'Documents', icon: <FileText className="w-4 h-4" /> },
+  { href: '/admin/workspaces', label: 'Workspaces', icon: <Layers className="w-4 h-4" /> },
   { href: '/admin', label: 'Admin', icon: <LayoutDashboard className="w-4 h-4" /> },
 ];
 
@@ -18,18 +18,11 @@ export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
-  const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    checkBackendHealth().then(setBackendConnected);
-    const interval = setInterval(() => {
-      checkBackendHealth().then(setBackendConnected);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  const { backendConnected } = useBackendStatus();
 
   const isActive = (href: string) => {
     if (href === '/chat') return pathname === '/chat';
+    if (href === '/admin') return pathname === '/admin' || (pathname.startsWith('/admin/') && !pathname.startsWith('/admin/workspaces'));
     return pathname.startsWith(href);
   };
 

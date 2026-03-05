@@ -7,17 +7,19 @@
 import {
   User,
   Workflow,
-  WorkflowChecklist,
   Document,
   RequirementSubmission,
-  ConversationTurn,
-  AuditLog,
   WorkflowStatus,
   AcquisitionType,
   DocumentStatus,
   SubmissionSource,
   ReviewStatus,
 } from '@/types/schema';
+import {
+  WorkflowChecklist,
+  ConversationTurn,
+  AuditLog,
+} from '@/types/schema-archive';
 
 // =============================================================================
 // USERS
@@ -399,7 +401,7 @@ Based on this analysis, we recommend:
 // REQUIREMENTS
 // =============================================================================
 
-export const MOCK_REQUIREMENTS: import('@/types/schema').Requirement[] = [
+export const MOCK_REQUIREMENTS: import('@/types/schema-archive').Requirement[] = [
   {
     id: 'req-001',
     document_id: 'doc-001',
@@ -817,7 +819,7 @@ export const MOCK_DOCUMENT_TEMPLATES: import('@/types/schema').DocumentTemplate[
 // AGENT SKILLS
 // =============================================================================
 
-export const MOCK_AGENT_SKILLS: import('@/types/schema').AgentSkill[] = [
+export const MOCK_AGENT_SKILLS: import('@/types/schema-archive').AgentSkill[] = [
   {
     id: 'skill-001',
     skill_name: 'Document Generation',
@@ -900,7 +902,7 @@ export const MOCK_AGENT_SKILLS: import('@/types/schema').AgentSkill[] = [
 // SYSTEM PROMPTS
 // =============================================================================
 
-export const MOCK_SYSTEM_PROMPTS: import('@/types/schema').SystemPrompt[] = [
+export const MOCK_SYSTEM_PROMPTS: import('@/types/schema-archive').SystemPrompt[] = [
   {
     id: 'prompt-001',
     prompt_name: 'OA Intake Agent',
@@ -951,7 +953,7 @@ export const MOCK_SYSTEM_PROMPTS: import('@/types/schema').SystemPrompt[] = [
 // USER GROUPS
 // =============================================================================
 
-export const MOCK_USER_GROUPS: import('@/types/schema').UserGroup[] = [
+export const MOCK_USER_GROUPS: import('@/types/schema-archive').UserGroup[] = [
   {
     id: 'group-001',
     name: 'Contracting Officers',

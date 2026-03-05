@@ -26,6 +26,8 @@ from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWrite
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
 from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGLE_TOOLS
+from .session_store import add_message
+from .telemetry.log_context import set_log_context
 
 import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
@@ -53,6 +55,14 @@ async def stream_generator(
     """
     writer = MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
     sse_queue: asyncio.Queue[str] = asyncio.Queue()
+    full_response_parts: list[str] = []
+
+    # Persist user message to DynamoDB so conversation history works on next turn
+    if session_id:
+        try:
+            await asyncio.to_thread(add_message, session_id, "user", message, tenant_id, user_id)
+        except Exception:
+            logger.warning("Failed to persist user message for session=%s user=%s", session_id, user_id)
 
     # Send initial metadata event (connection acknowledgement)
     await writer.write_text(sse_queue, "")
@@ -70,6 +80,7 @@ async def stream_generator(
             chunk_type = chunk.get("type", "")
 
             if chunk_type == "text":
+                full_response_parts.append(chunk["data"])
                 await writer.write_text(sse_queue, chunk["data"])
                 yield await sse_queue.get()
 
@@ -78,6 +89,13 @@ async def stream_generator(
                 yield await sse_queue.get()
 
             elif chunk_type == "complete":
+                # Persist assistant response to DynamoDB
+                if session_id and full_response_parts:
+                    try:
+                        full_text = "".join(full_response_parts)
+                        await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
+                    except Exception:
+                        logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
                 await writer.write_complete(sse_queue)
                 yield await sse_queue.get()
                 return
@@ -88,14 +106,20 @@ async def stream_generator(
                 return
 
         # Fallback COMPLETE if generator exhausts without a complete event
+        if session_id and full_response_parts:
+            try:
+                full_text = "".join(full_response_parts)
+                await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
+            except Exception:
+                logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
         await writer.write_complete(sse_queue)
         yield await sse_queue.get()
 
     except asyncio.CancelledError:
-        logger.info("Streaming client disconnected")
+        logger.info("Streaming client disconnected user=%s session=%s", user_id, session_id)
         return
     except Exception as e:
-        logger.error("Streaming chat error: %s", str(e), exc_info=True)
+        logger.error("Streaming chat error user=%s session=%s: %s", user_id, session_id, str(e), exc_info=True)
         await writer.write_error(sse_queue, str(e))
         yield await sse_queue.get()
 
@@ -149,6 +173,9 @@ def create_streaming_router(
         if message.tenant_context:
             tenant_id = message.tenant_context.tenant_id or tenant_id
             user_id = message.tenant_context.user_id or user_id
+
+        # Set structured logging context so all downstream logs include user/tenant
+        set_log_context(tenant_id=tenant_id, user_id=user_id, session_id=message.session_id or "")
 
         # Load conversation history for multi-turn context
         history = []

@@ -16,6 +16,40 @@ export const fetchCache = 'force-no-store';
 // Node.js may resolve "localhost" to [::1] (IPv6), causing fetch to hang.
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 
+const COMMAND_PROMPTS: Record<string, string> = {
+  // Documents
+  '/document:sow':    'Draft a Statement of Work (SOW)',
+  '/document:igce':   'Draft an Independent Government Cost Estimate (IGCE)',
+  '/document:ap':     'Draft an Acquisition Plan',
+  '/document:j&a':    'Draft a Justification & Approval (J&A)',
+  '/document:mrr':    'Draft a Market Research Report',
+  // Compliance
+  '/compliance:far':     'Search FAR clauses and regulations for',
+  '/compliance:dfars':   'Search DFARS clauses for',
+  '/compliance:clauses': 'Identify the required FAR/DFARS clauses for',
+  // Research
+  '/research:policy':     'Search NIH/HHS policies about',
+  '/research:regulation': 'Look up federal acquisition regulations about',
+  '/research:precedent':  'Find similar past acquisitions for',
+  // Workflow
+  '/intake':             'Start a new acquisition intake and ask me for details',
+  '/tech-review:specs':  'Review the technical specifications for',
+  '/tech-review:508':    'Check Section 508 accessibility compliance for',
+  '/ingest':             'Upload and process this document',
+  // Admin
+  '/admin:skills':    'List all custom skills and their current status. I can create, edit, publish, or delete skills.',
+  '/admin:prompts':   'List all agent prompt overrides. I can view, set, or reset prompt overrides for any agent.',
+  '/admin:templates': 'List all document templates. I can view, edit, or reset templates for any document type.',
+  // Info
+  '/status': 'Show the current acquisition package status, completed artifacts, and next steps.',
+  '/help':   'List your capabilities and available commands.',
+  // Legacy (bare parent commands)
+  '/document':   'Create the requested acquisition document(s)',
+  '/research':   'Research this acquisition/regulatory question',
+  '/compliance': 'Check FAR/DFARS compliance',
+  '/acquisition-package': 'Start a new acquisition package and ask me for the minimum required intake details',
+};
+
 function normalizeSlashCommand(input: string): string {
   const message = input.trim();
   if (!message.startsWith('/')) return message;
@@ -24,27 +58,13 @@ function normalizeSlashCommand(input: string): string {
   const command = rawCommand.toLowerCase();
   const rest = restParts.join(' ').trim();
 
-  switch (command) {
-    case '/document':
-      return rest
-        ? `Create the requested acquisition document(s): ${rest}`
-        : 'Create the requested acquisition document(s).';
-    case '/research':
-      return rest
-        ? `Research this acquisition/regulatory question and provide guidance: ${rest}`
-        : 'Research acquisition/regulatory guidance for me.';
-    case '/status':
-      return 'Show the current acquisition package status, completed artifacts, and next steps.';
-    case '/help':
-      return 'List your capabilities and the best commands/prompts to generate acquisition artifacts.';
-    case '/acquisition-package':
-      return rest
-        ? `Start a new acquisition package using this information: ${rest}`
-        : 'Start a new acquisition package and ask me for the minimum required intake details.';
-    default:
-      // Unknown slash command: remove the leading command token and keep user intent text.
-      return rest || message.replace(/^\//, '');
+  const prompt = COMMAND_PROMPTS[command];
+  if (prompt) {
+    return rest ? `${prompt}: ${rest}` : `${prompt}.`;
   }
+
+  // Unknown slash command — strip "/" and pass through
+  return rest || message.replace(/^\//, '');
 }
 
 export async function POST(request: NextRequest) {

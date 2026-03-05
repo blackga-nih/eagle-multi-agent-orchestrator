@@ -217,7 +217,8 @@ EAGLE_TOOLS = [
         "name": "cloudwatch_logs",
         "description": (
             "Read CloudWatch logs filtered by user/session. Use this to inspect "
-            "application logs, debug issues, or audit user activity."
+            "application logs, debug issues, or audit user activity. "
+            "Pass user_id to scope results to a specific user."
         ),
         "input_schema": {
             "type": "object",
@@ -234,6 +235,10 @@ EAGLE_TOOLS = [
                 "filter_pattern": {
                     "type": "string",
                     "description": "CloudWatch filter pattern for searching logs",
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "Filter logs to this specific user ID",
                 },
                 "start_time": {
                     "type": "string",
@@ -456,6 +461,141 @@ def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
         f"    query: The question or task for this specialist"
     )
     return subagent_tool
+
+
+
+# -- Compliance Matrix @tool (available to all agents) ----------------
+
+@tool(name="query_compliance_matrix")
+def _compliance_matrix_tool(params: str) -> str:
+    """Query NCI/NIH contract requirements decision tree. Pass a JSON string with keys: operation (required), contract_value, acquisition_method, contract_type, is_it, is_small_business, is_rd, is_human_subjects, is_services, keyword. Operations: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle.
+
+    Args:
+        params: JSON string, e.g. {"operation":"query","contract_value":85000,"acquisition_method":"sap","contract_type":"ffp","is_services":true}
+    """
+    from .compliance_matrix import execute_operation
+
+    parsed = json.loads(params) if isinstance(params, str) else params
+    result = execute_operation(parsed)
+    return json.dumps(result, indent=2, default=str)
+
+
+# -- AWS Service @tools (S3, DynamoDB, CloudWatch, Documents) ----------
+# These call the handlers in agentic_service.py directly with the real
+# tenant_id and session_id from the authenticated context — bypassing
+# execute_tool() which has stub _extract_tenant_id/_extract_user_id.
+
+def _make_service_tool(
+    tool_name: str,
+    description: str,
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    """Create a Strands @tool that calls agentic_service handlers directly.
+
+    The handler receives the real tenant_id (from Cognito auth) and a
+    composite session_id (tenant-tier-user-session) for per-user S3 scoping.
+
+    If result_queue and loop are provided, tool results for create_document
+    are emitted as tool_result chunks so the frontend can render document cards.
+    """
+    from .agentic_service import TOOL_DISPATCH, TOOLS_NEEDING_SESSION
+
+    handler = TOOL_DISPATCH.get(tool_name)
+    if not handler:
+        raise ValueError(f"No handler for tool: {tool_name}")
+
+    @tool(name=tool_name)
+    def service_tool(params: str) -> str:
+        """Placeholder docstring replaced below."""
+        parsed = json.loads(params) if isinstance(params, str) else params
+        try:
+            if tool_name in TOOLS_NEEDING_SESSION:
+                result = handler(parsed, tenant_id, session_id)
+            else:
+                result = handler(parsed, tenant_id)
+
+            # Emit tool_result for create_document so frontend renders DocumentCard
+            # Only emit for successful results (not error responses)
+            if tool_name == "create_document" and result_queue and loop and "error" not in result:
+                loop.call_soon_threadsafe(
+                    result_queue.put_nowait,
+                    {"type": "tool_result", "name": tool_name, "result": result},
+                )
+
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            logger.error("Service tool %s failed: %s", tool_name, exc, exc_info=True)
+            return json.dumps({"error": str(exc), "tool": tool_name})
+
+    service_tool.__doc__ = (
+        f"{description}\n\n"
+        f"Args:\n"
+        f"    params: JSON string with operation and operation-specific fields"
+    )
+    return service_tool
+
+
+# Tool definitions: name -> description (schemas are in EAGLE_TOOLS above)
+_SERVICE_TOOL_DEFS = {
+    "s3_document_ops": (
+        "Read, write, or list documents in S3 scoped per-tenant. "
+        "Operations: list, read, write. Pass JSON with 'operation' and optional 'key', 'content'."
+    ),
+    "dynamodb_intake": (
+        "Create, read, update, list, or query intake records in DynamoDB. "
+        "Operations: create, read, update, list, query. Pass JSON with 'operation' and optional 'item_id', 'data'."
+    ),
+    "create_document": (
+        "Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, "
+        "Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification). "
+        "Documents are saved to S3. Pass JSON with 'doc_type', 'title', and optional 'data'."
+    ),
+    "get_intake_status": (
+        "Get the current intake package status and completeness — shows which documents exist, "
+        "which are missing, and next actions. Pass JSON with optional 'intake_id'."
+    ),
+    "intake_workflow": (
+        "Manage the acquisition intake workflow: start, advance, status, complete, reset. "
+        "Pass JSON with 'action' and optional 'intake_id', 'data'."
+    ),
+    "search_far": (
+        "Search the FAR and DFARS for clauses, requirements, and guidance. "
+        "Pass JSON with 'query' and optional 'parts' array."
+    ),
+    "manage_skills": (
+        "Create, list, update, delete, or publish custom skills. "
+        "Pass JSON: {action, skill_id?, name?, display_name?, description?, prompt_body?, triggers?, tools?, model?, visibility?}. "
+        "Actions: list, get, create, update, delete, submit, publish, disable."
+    ),
+    "manage_prompts": (
+        "List, view, set, or delete agent prompt overrides. "
+        "Pass JSON: {action, agent_name?, prompt_body?, is_append?}. "
+        "Actions: list, get, set, delete, resolve."
+    ),
+    "manage_templates": (
+        "List, view, set, or delete document templates. "
+        "Pass JSON: {action, doc_type?, template_body?, display_name?, user_id?}. "
+        "Actions: list, get, set, delete, resolve."
+    ),
+}
+
+
+def _build_service_tools(
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> list:
+    """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session."""
+    tools = []
+    for name, desc in _SERVICE_TOOL_DEFS.items():
+        tools.append(_make_service_tool(name, desc, tenant_id, user_id, session_id, result_queue, loop))
+    return tools
 
 
 # -- build_skill_tools() ---------------------------------------------

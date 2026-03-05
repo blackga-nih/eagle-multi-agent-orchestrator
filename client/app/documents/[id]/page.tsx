@@ -30,6 +30,7 @@ import {
     extractBackgroundFromMessages,
 } from '@/lib/template-hydration';
 import { getGeneratedDocument } from '@/lib/document-store';
+import { DOCUMENT_TYPE_LABELS } from '@/types/schema';
 
 interface PageProps {
     params: Promise<{ id: string }>;
@@ -47,18 +48,8 @@ const TEMPLATE_MAP: Record<string, string> = {
 
 const TEMPLATE_PREFIXES = Object.keys(TEMPLATE_MAP).sort((a, b) => b.length - a.length);
 
-const DOC_TYPE_LABELS: Record<string, string> = {
-    sow: 'Statement of Work',
-    igce: 'Cost Estimate (IGCE)',
-    market_research: 'Market Research',
-    acquisition_plan: 'Acquisition Plan',
-    justification: 'Justification & Approval',
-    eval_criteria: 'Evaluation Criteria',
-    security_checklist: 'Security Checklist',
-    section_508: 'Section 508 Compliance',
-    cor_certification: 'COR Certification',
-    contract_type_justification: 'Contract Type Justification',
-};
+// Alias for local usage (backward compat with existing references in this file)
+const DOC_TYPE_LABELS = DOCUMENT_TYPE_LABELS as Record<string, string>;
 
 export default function DocumentViewerPage({ params }: PageProps) {
     const { id } = use(params);

@@ -629,13 +629,14 @@ def _serialize_ddb_item(item: dict) -> dict:
 
 
 def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
-    """Real CloudWatch Logs operations."""
+    """Real CloudWatch Logs operations with optional user_id scoping."""
     operation = params.get("operation", "recent")
     log_group = params.get("log_group", "/eagle/app")
     filter_pattern = params.get("filter_pattern", "")
     limit = params.get("limit", 50)
     start_time_str = params.get("start_time", "")
     end_time_str = params.get("end_time", "")
+    user_id = params.get("user_id", "")
 
     try:
         logs = _get_logs()
@@ -668,10 +669,12 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
                 pass
 
         if operation == "search":
-            # Include tenant_id in filter pattern for scoping
+            # Include tenant_id and user_id in filter pattern for scoping
             scoped_pattern = filter_pattern
             if tenant_id and tenant_id not in (filter_pattern or ""):
-                scoped_pattern = f'"{tenant_id}" {filter_pattern}'.strip() if filter_pattern else f'"{tenant_id}"'
+                scoped_pattern = f'"{tenant_id}" {scoped_pattern}'.strip()
+            if user_id and user_id not in (scoped_pattern or ""):
+                scoped_pattern = f'"{user_id}" {scoped_pattern}'.strip()
 
             resp = logs.filter_log_events(
                 logGroupName=log_group,
@@ -693,22 +696,34 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
             }
 
         elif operation == "recent":
-            resp = logs.filter_log_events(
-                logGroupName=log_group,
-                startTime=start_time,
-                endTime=end_time,
-                limit=min(limit, 100),
-            )
+            # Build optional filter pattern from user_id for scoped recent queries
+            recent_pattern = ""
+            if user_id:
+                recent_pattern = f'"{user_id}"'
+
+            kwargs = {
+                "logGroupName": log_group,
+                "startTime": start_time,
+                "endTime": end_time,
+                "limit": min(limit, 100),
+            }
+            if recent_pattern:
+                kwargs["filterPattern"] = recent_pattern
+
+            resp = logs.filter_log_events(**kwargs)
             events = [
                 {"timestamp": e["timestamp"], "message": e["message"][:500], "logStreamName": e.get("logStreamName", "")}
                 for e in resp.get("events", [])
             ]
-            return {
+            result = {
                 "operation": "recent",
                 "log_group": log_group,
                 "event_count": len(events),
                 "events": events,
             }
+            if user_id:
+                result["user_id_filter"] = user_id
+            return result
 
         elif operation == "get_stream":
             resp = logs.describe_log_streams(
@@ -2215,6 +2230,182 @@ def _exec_query_compliance_matrix(params: dict, tenant_id: str) -> dict:
     return execute_operation(raw)
 
 
+# ── Admin CRUD Tool Handlers ─────────────────────────────────────────
+
+def _exec_manage_skills(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for custom skills — wraps skill_store functions."""
+    from app.skill_store import (
+        create_skill, get_skill, update_skill, list_skills,
+        delete_skill, publish_skill, submit_for_review, disable_skill,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_skills(tenant_id, status=params.get("status"))
+        return {"action": "list", "count": len(items), "skills": items}
+
+    if action == "get":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for get"}
+        item = get_skill(tenant_id, skill_id)
+        return {"action": "get", "skill": item} if item else {"error": f"Skill {skill_id} not found"}
+
+    if action == "create":
+        required = ["name", "display_name", "description", "prompt_body"]
+        missing = [f for f in required if not params.get(f)]
+        if missing:
+            return {"error": f"Missing required fields: {', '.join(missing)}"}
+        item = create_skill(
+            tenant_id=tenant_id,
+            owner_user_id=params.get("owner_user_id", "admin"),
+            name=params["name"],
+            display_name=params["display_name"],
+            description=params["description"],
+            prompt_body=params["prompt_body"],
+            triggers=params.get("triggers"),
+            tools=params.get("tools"),
+            model=params.get("model"),
+            visibility=params.get("visibility", "private"),
+        )
+        return {"action": "create", "skill": item}
+
+    if action == "update":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for update"}
+        updates = {k: v for k, v in params.items() if k not in ("action", "skill_id")}
+        item = update_skill(tenant_id, skill_id, updates)
+        return {"action": "update", "skill": item} if item else {"error": f"Skill {skill_id} not found or no updatable fields"}
+
+    if action == "delete":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for delete"}
+        ok = delete_skill(tenant_id, skill_id)
+        return {"action": "delete", "deleted": ok, "skill_id": skill_id}
+
+    if action == "submit":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for submit"}
+        item = submit_for_review(tenant_id, skill_id)
+        return {"action": "submit", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in draft status"}
+
+    if action == "publish":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for publish"}
+        item = publish_skill(tenant_id, skill_id)
+        return {"action": "publish", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in review status"}
+
+    if action == "disable":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for disable"}
+        item = disable_skill(tenant_id, skill_id)
+        return {"action": "disable", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in active status"}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, create, update, delete, submit, publish, disable"}
+
+
+def _exec_manage_prompts(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for agent prompt overrides — wraps prompt_store functions."""
+    from app.prompt_store import (
+        put_prompt, get_prompt, delete_prompt, list_tenant_prompts, resolve_prompt,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_tenant_prompts(tenant_id)
+        return {"action": "list", "count": len(items), "prompts": items}
+
+    if action == "get":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for get"}
+        item = get_prompt(tenant_id, agent_name)
+        return {"action": "get", "prompt": item} if item else {"error": f"No prompt override for agent '{agent_name}'"}
+
+    if action == "set":
+        agent_name = params.get("agent_name")
+        prompt_body = params.get("prompt_body")
+        if not agent_name or not prompt_body:
+            return {"error": "agent_name and prompt_body are required for set"}
+        item = put_prompt(
+            tenant_id=tenant_id,
+            agent_name=agent_name,
+            prompt_body=prompt_body,
+            is_append=params.get("is_append", False),
+        )
+        return {"action": "set", "prompt": item}
+
+    if action == "delete":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for delete"}
+        ok = delete_prompt(tenant_id, agent_name)
+        return {"action": "delete", "deleted": ok, "agent_name": agent_name}
+
+    if action == "resolve":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for resolve"}
+        body = resolve_prompt(tenant_id, agent_name)
+        return {"action": "resolve", "agent_name": agent_name, "resolved_body": body}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
+
+
+def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for document templates — wraps template_store functions."""
+    from app.template_store import (
+        put_template, get_template, delete_template, list_tenant_templates, resolve_template,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_tenant_templates(tenant_id, doc_type=params.get("doc_type"))
+        return {"action": "list", "count": len(items), "templates": items}
+
+    if action == "get":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for get"}
+        item = get_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "get", "template": item} if item else {"error": f"No template for doc_type '{doc_type}'"}
+
+    if action == "set":
+        doc_type = params.get("doc_type")
+        template_body = params.get("template_body")
+        if not doc_type or not template_body:
+            return {"error": "doc_type and template_body are required for set"}
+        item = put_template(
+            tenant_id=tenant_id,
+            doc_type=doc_type,
+            user_id=params.get("user_id", "shared"),
+            template_body=template_body,
+            display_name=params.get("display_name", ""),
+        )
+        return {"action": "set", "template": item}
+
+    if action == "delete":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for delete"}
+        ok = delete_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "delete", "deleted": ok, "doc_type": doc_type}
+
+    if action == "resolve":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for resolve"}
+        body = resolve_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "resolve", "doc_type": doc_type, "resolved_body": body}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -2231,6 +2422,9 @@ TOOL_DISPATCH = {
     # Knowledge base tools
     "knowledge_search": exec_knowledge_search,
     "knowledge_fetch": exec_knowledge_fetch,
+    "manage_skills": _exec_manage_skills,
+    "manage_prompts": _exec_manage_prompts,
+    "manage_templates": _exec_manage_templates,
 }
 
 # Tools that need session_id for per-user scoping

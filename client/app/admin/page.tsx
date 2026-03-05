@@ -18,6 +18,7 @@ import {
   FlaskConical,
   GitBranch,
   PenTool,
+  Layers,
 } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
@@ -69,6 +70,7 @@ const stats = [
 ];
 
 const quickActions = [
+  { label: 'Workspaces', href: '/admin/workspaces', icon: <Layers className="w-5 h-5" />, count: null },
   { label: 'Test Results', href: '/admin/tests', icon: <FlaskConical className="w-5 h-5" />, count: 15 },
   { label: 'Eval Viewer', href: '/admin/eval', icon: <GitBranch className="w-5 h-5" />, count: 3 },
   { label: 'AI Diagram Studio', href: '/admin/diagrams', icon: <PenTool className="w-5 h-5" />, count: null },

@@ -73,7 +73,7 @@ jobs:
         # EagleComputeStack: skip — ECS service logical IDs changed, avoid rollback. ECS
         #   updates happen in deploy-backend/deploy-frontend via force-new-deployment instead.
         # --exclusively: prevent CDK from following addDependency() chains to skipped stacks.
-        npx cdk deploy EagleCiCdStack EagleStorageStack EagleEvalStack \
+        npx cdk deploy EagleCiCdStack EagleStorageStack EagleEvalStack EagleBackupStack \
           --exclusively --require-approval never --outputs-file outputs.json
 
     - name: Resolve deployment outputs

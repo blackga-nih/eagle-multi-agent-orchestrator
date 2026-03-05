@@ -4,8 +4,6 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  FileText,
-  FolderKanban,
   ChevronRight,
   LogOut,
   MessageSquare,
@@ -24,11 +22,6 @@ interface NavItem {
   icon: React.ReactNode;
   badge?: number;
 }
-
-const resourceNavItems: NavItem[] = [
-  { href: '/workflows', label: 'Acquisition Packages', icon: <FolderKanban className="w-5 h-5" /> },
-  { href: '/documents', label: 'Documents', icon: <FileText className="w-5 h-5" /> },
-];
 
 const toolNavItems: NavItem[] = [
   { href: '/admin', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
@@ -216,16 +209,6 @@ export default function SidebarNav() {
                 ))}
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Resources section — pinned below conversations */}
-        <div className="shrink-0 border-t border-gray-100 pt-3">
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 px-3">Resources</p>
-          <div className="space-y-1">
-            {resourceNavItems.map((item) => (
-              <NavLink key={item.href} item={item} />
-            ))}
           </div>
         </div>
 

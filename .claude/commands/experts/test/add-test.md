@@ -43,12 +43,15 @@ Automate the full workflow for adding new tests to the EAGLE test suite. Handles
    | Feature area | Target file | Pattern |
    |-------------|-------------|---------|
    | Cache behavior | `test_perf_simple_message.py` | Pattern 2 |
-   | Fast-path / regex | `test_fast_path.py` (new) | Pattern 5 |
+   | Fast-path / regex | `test_new_endpoints.py` | Pattern 5 |
    | Fire-and-forget | `test_fire_and_forget.py` (new) | Pattern 6 |
    | Endpoint schema | `test_chat_endpoints.py` | Pattern 7 |
    | Prompt behavior | `test_prompt_behavioral.py` (new) | Pattern 3 |
    | Document pipeline | `test_document_pipeline.py` | Existing |
    | Strands integration | `test_strands_*.py` | Existing |
+   | Compliance / FAR | `test_compliance_matrix.py` | Pattern 9 (pure Python) |
+   | DynamoDB stores | `test_feedback_store.py` | Pattern 1 (mocked DDB) |
+   | Eval suite (LLM) | `test_strands_eval.py` | Pattern 8 (standalone CLI) |
 
 3. If creating a new file, use this template:
 
@@ -176,6 +179,21 @@ Tests Added
 
 ---
 
+### Phase 5: Update UC Registry (if applicable)
+
+If the test covers a use case, update `.claude/specs/uc-test-registry.md`:
+
+1. Read the registry to find the relevant UC section
+2. Add the new test under the correct suite (Pytest / Eval / Playwright / MCP Browser)
+3. Update the status (GAP → PARTIAL → COVERED)
+
+```bash
+# Check which UC this test maps to
+grep -n "UC-" .claude/specs/uc-test-registry.md | head -20
+```
+
+---
+
 ## Important Notes
 
 - **Import inside test methods** — avoids module-level AWS client initialization
@@ -184,3 +202,6 @@ Tests Added
 - **Account for _compliance_matrix_tool** — `build_skill_tools()` always appends it
 - **Use `time.perf_counter()`** for latency assertions, not `time.time()`
 - **Keep tests independent** — no test should depend on another test's state
+- **Results auto-persist** — `conftest.py` saves pytest results to DynamoDB; eval script now does too (trigger: "eval")
+- **Admin viewer** — all test results visible at `/admin/tests` with Analytics tab for trends
+- **Direct imports for eval** — use `from app.compliance_matrix import X` not `execute_tool()` to avoid relative import failures in standalone mode

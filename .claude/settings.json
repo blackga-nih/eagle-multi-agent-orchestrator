@@ -1,0 +1,15 @@
+{
+  "permissions": {},
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{"type": "command", "command": "python .claude/hooks/pre_tool_use.py"}]
+    }]
+  },
+  "mcpServers": {
+    "atlassian": {
+      "type": "http",
+      "url": "https://mcp.atlassian.com/v1/mcp"
+    }
+  }
+}

@@ -29,6 +29,8 @@ This expert covers:
 | `/experts:test:self-improve` | Update expertise after test runs |
 | `/experts:test:plan_build_improve` | Full ACT-LEARN-REUSE workflow |
 | `/experts:test:maintenance` | Run test suites and report results |
+| `/experts:test:use-case-builder` | Build tests across all 4 suites for a UC |
+| `/experts:test:status` | Quick test inventory count (no execution) |
 
 ## Key Files
 
@@ -41,6 +43,7 @@ This expert covers:
 | `self-improve.md` | Expertise update command |
 | `plan_build_improve.md` | Full workflow command |
 | `maintenance.md` | Run tests and report results |
+| `use-case-builder.md` | Build tests across all 4 suites for a UC |
 
 ## Architecture
 
