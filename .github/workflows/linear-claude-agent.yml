@@ -158,7 +158,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          direct_prompt: |
+          prompt: |
             You are working on Linear issue ${{ matrix.issue.identifier }}: ${{ matrix.issue.title }}
 
             ## Description
