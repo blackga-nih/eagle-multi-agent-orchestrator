@@ -68,18 +68,38 @@ async def stream_generator(
     await writer.write_text(sse_queue, "")
     yield await sse_queue.get()
 
-    try:
-        async for chunk in sdk_query_streaming(
+    # Wrap the SDK generator so we inject ": keepalive\n\n" SSE comments every
+    # KEEPALIVE_INTERVAL seconds while waiting for the next chunk.  ALB idle
+    # timeout is 300 s (raised from 60 s); keepalive every 20 s keeps it alive.
+    KEEPALIVE_INTERVAL = 20.0
+
+    async def _sdk_with_keepalive():
+        gen = sdk_query_streaming(
             prompt=message,
             tenant_id=tenant_id,
             user_id=user_id,
             tier=tier or "advanced",
             session_id=session_id,
             messages=messages,
-        ):
+        )
+        aiter = gen.__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(aiter.__anext__(), timeout=KEEPALIVE_INTERVAL)
+                yield chunk
+            except asyncio.TimeoutError:
+                yield {"type": "_keepalive"}
+            except StopAsyncIteration:
+                break
+
+    try:
+        async for chunk in _sdk_with_keepalive():
             chunk_type = chunk.get("type", "")
 
-            if chunk_type == "text":
+            if chunk_type == "_keepalive":
+                yield ": keepalive\n\n"
+
+            elif chunk_type == "text":
                 full_response_parts.append(chunk["data"])
                 await writer.write_text(sse_queue, chunk["data"])
                 yield await sse_queue.get()
