@@ -117,14 +117,14 @@ class QueueCallbackHandler:
 # boto3 handles SSO/IAM natively — no credential bridging needed.
 
 _model = BedrockModel(
-    model_id=os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0"),
+    model_id=os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
     region_name=os.getenv("AWS_REGION", "us-east-1"),
 )
 
 
 # -- Configuration ---------------------------------------------------
 
-MODEL = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
+MODEL = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
 # Note: Strands subagents don't use CLI tools like Read/Glob/Grep.
