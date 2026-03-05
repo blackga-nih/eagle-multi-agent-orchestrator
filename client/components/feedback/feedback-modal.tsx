@@ -74,15 +74,20 @@ export default function FeedbackModal() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
+      // Backend expects `feedback_text`; build it from comment + type tag
+      const feedbackText = [
+        comment.trim(),
+        feedbackType ? `[${feedbackType}]` : '',
+      ].filter(Boolean).join(' ');
+
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          rating: 0,
-          page: pathname,
+          feedback_text: feedbackText,
           feedback_type: feedbackType,
-          comment: comment.trim() || undefined,
           session_id: currentSessionId || undefined,
+          page: pathname,
         }),
       });
 
