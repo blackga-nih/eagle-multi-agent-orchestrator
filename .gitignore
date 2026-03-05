@@ -77,6 +77,7 @@ htmlcov/
 # Node / Next.js
 node_modules/
 .next/
+.next-old/
 next-env.d.ts
 
 # Playwright test artifacts
