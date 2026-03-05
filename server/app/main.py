@@ -2426,7 +2426,7 @@ async def get_test_run_detail(run_id: str):
 
 
 class FeedbackBody(BaseModel):
-    rating: int
+    rating: int = 0
     page: str
     feedback_type: Optional[str] = None
     comment: Optional[str] = None
@@ -2435,8 +2435,8 @@ class FeedbackBody(BaseModel):
 
 @app.post("/api/feedback")
 async def submit_feedback(body: FeedbackBody, user: UserContext = Depends(get_user_from_header)):
-    """Submit user feedback with star rating."""
-    if not 1 <= body.rating <= 5:
+    """Submit user feedback (comment + optional type)."""
+    if body.rating and not 1 <= body.rating <= 5:
         raise HTTPException(status_code=400, detail="Rating must be 1-5")
     item = create_feedback_item(
         tenant_id=user.tenant_id,

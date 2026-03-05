@@ -10,6 +10,7 @@ Tests the core patterns for the EAGLE multi-tenant architecture:
 21-27. UC workflow validation: micro-purchase, option exercise, contract modification,
        CO package review, contract close-out, shutdown notification, score consolidation
 28.    Strands architecture: skill->tool orchestration via build_skill_tools()
+32-34. Admin & store validation: admin-manager registration, workspace defaults, store CRUD API
 
 SDK: strands-agents
 Backend: AWS Bedrock (boto3 native)
@@ -2429,6 +2430,379 @@ async def test_28_strands_skill_tool_orchestration():
 
 
 # ============================================================
+# Test 29: Compliance Matrix — Query Requirements
+# ============================================================
+
+async def test_29_compliance_matrix_query_requirements():
+    """Deterministic: query compliance matrix for $500K negotiated FFP contract."""
+    print("\n" + "=" * 70)
+    print("TEST 29: Compliance Matrix — Query Requirements ($500K negotiated FFP)")
+    print("=" * 70)
+
+    # Import directly to avoid relative-import issues when running standalone
+    from app.compliance_matrix import execute_operation
+    result = execute_operation({
+        "operation": "query",
+        "contract_value": 500000,
+        "acquisition_method": "negotiated",
+        "contract_type": "ffp",
+        "is_services": True,
+    })
+
+    steps_passed = []
+
+    # Step 1: no errors
+    errors = result.get("errors", [])
+    no_errors = len(errors) == 0
+    steps_passed.append(("no_errors", no_errors))
+    print(f"  Step 1: errors={errors} {'PASS' if no_errors else 'FAIL'}")
+
+    # Step 2: documents_required is a non-empty list
+    docs = result.get("documents_required", [])
+    has_docs = isinstance(docs, list) and len(docs) > 0
+    steps_passed.append(("has_documents", has_docs))
+    print(f"  Step 2: documents_required count={len(docs)} {'PASS' if has_docs else 'FAIL'}")
+
+    # Step 3: thresholds_triggered includes SAT ($350K)
+    triggered = result.get("thresholds_triggered", [])
+    triggered_labels = [t.get("short", "") for t in triggered]
+    sat_triggered = any("$350K" in lbl for lbl in triggered_labels)
+    steps_passed.append(("sat_triggered", sat_triggered))
+    print(f"  Step 3: thresholds_triggered={triggered_labels} SAT={'found' if sat_triggered else 'missing'} {'PASS' if sat_triggered else 'FAIL'}")
+
+    # Step 4: competition_rules is non-empty
+    competition = result.get("competition_rules", "")
+    has_competition = isinstance(competition, str) and len(competition) > 0
+    steps_passed.append(("has_competition_rules", has_competition))
+    print(f"  Step 4: competition_rules length={len(competition)} {'PASS' if has_competition else 'FAIL'}")
+
+    passed = all(ok for _, ok in steps_passed)
+    print(f"  {'PASS' if passed else 'FAIL'} - Compliance Matrix Query Requirements")
+    return passed
+
+
+# ============================================================
+# Test 30: Compliance Matrix — Search FAR
+# ============================================================
+
+async def test_30_compliance_matrix_search_far():
+    """Deterministic: search FAR database for 'competition'."""
+    print("\n" + "=" * 70)
+    print("TEST 30: Compliance Matrix — Search FAR ('competition')")
+    print("=" * 70)
+
+    from app.compliance_matrix import execute_operation
+    result = execute_operation({
+        "operation": "search_far",
+        "keyword": "competition",
+    })
+
+    steps_passed = []
+
+    # Step 1: no error key
+    has_error = "error" in result
+    no_error = not has_error
+    steps_passed.append(("no_error", no_error))
+    print(f"  Step 1: error={'present' if has_error else 'absent'} {'PASS' if no_error else 'FAIL'}")
+
+    # Step 2: results is a non-empty list
+    results_list = result.get("results", [])
+    has_results = isinstance(results_list, list) and len(results_list) > 0
+    steps_passed.append(("has_results", has_results))
+    print(f"  Step 2: results count={len(results_list)} {'PASS' if has_results else 'FAIL'}")
+
+    # Step 3: each result has required fields (title, section)
+    required_fields = ["title", "section"]
+    fields_ok = True
+    for i, entry in enumerate(results_list[:5]):  # check first 5
+        for field in required_fields:
+            if field not in entry:
+                print(f"    result[{i}] missing field '{field}'")
+                fields_ok = False
+    steps_passed.append(("required_fields", fields_ok))
+    print(f"  Step 3: required_fields (title, section) present={'yes' if fields_ok else 'no'} {'PASS' if fields_ok else 'FAIL'}")
+
+    passed = all(ok for _, ok in steps_passed)
+    print(f"  {'PASS' if passed else 'FAIL'} - Compliance Matrix Search FAR")
+    return passed
+
+
+# ============================================================
+# Test 31: Compliance Matrix — Vehicle Suggestion
+# ============================================================
+
+async def test_31_compliance_matrix_vehicle_suggestion():
+    """Deterministic: suggest vehicle for IT services requirement."""
+    print("\n" + "=" * 70)
+    print("TEST 31: Compliance Matrix — Vehicle Suggestion (IT + Services)")
+    print("=" * 70)
+
+    from app.compliance_matrix import execute_operation
+    result = execute_operation({
+        "operation": "suggest_vehicle",
+        "is_it": True,
+        "is_services": True,
+    })
+
+    steps_passed = []
+
+    # Step 1: suggested_vehicles is a non-empty list
+    vehicles = result.get("suggested_vehicles", [])
+    has_vehicles = isinstance(vehicles, list) and len(vehicles) > 0
+    steps_passed.append(("has_vehicles", has_vehicles))
+    print(f"  Step 1: suggested_vehicles count={len(vehicles)} {'PASS' if has_vehicles else 'FAIL'}")
+
+    # Step 2: NITAAC recommendation present
+    nitaac_found = any(
+        v.get("vehicle", "") == "nitaac" or "nitaac" in str(v.get("detail", {})).lower()
+        for v in vehicles
+    )
+    steps_passed.append(("nitaac_recommended", nitaac_found))
+    print(f"  Step 2: NITAAC recommendation={'found' if nitaac_found else 'missing'} {'PASS' if nitaac_found else 'FAIL'}")
+
+    # Step 3: decision_factors is non-empty
+    factors = result.get("decision_factors", [])
+    has_factors = isinstance(factors, list) and len(factors) > 0
+    steps_passed.append(("has_decision_factors", has_factors))
+    print(f"  Step 3: decision_factors count={len(factors)} {'PASS' if has_factors else 'FAIL'}")
+
+    passed = all(ok for _, ok in steps_passed)
+    print(f"  {'PASS' if passed else 'FAIL'} - Compliance Matrix Vehicle Suggestion")
+    return passed
+
+
+# ============================================================
+# Test 32: Admin-Manager Skill Registration
+# ============================================================
+
+async def test_32_admin_manager_skill_registered():
+    """Validate admin-manager is wired in plugin.json and SKILL_AGENT_REGISTRY."""
+    print("\n" + "=" * 70)
+    print("TEST 32: Admin-Manager Skill Registration")
+    print("=" * 70)
+
+    # Step 1: Verify admin-manager appears in plugin.json skills list
+    import json as _json
+    plugin_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "eagle-plugin", "plugin.json"
+    )
+    try:
+        with open(plugin_path, "r") as f:
+            plugin_manifest = _json.load(f)
+    except Exception as e:
+        print(f"  FAIL - Cannot read plugin.json: {e}")
+        return False
+
+    skills_list = plugin_manifest.get("skills", [])
+    in_manifest = "admin-manager" in skills_list
+    print(f"  plugin.json skills: {skills_list}")
+    print(f"  admin-manager in manifest: {in_manifest}")
+
+    # Step 2: Verify SKILL_AGENT_REGISTRY includes admin-manager (or admin_manager)
+    try:
+        from strands_agentic_service import SKILL_AGENT_REGISTRY
+    except ImportError as e:
+        print(f"  SKIP - strands_agentic_service import failed: {e}")
+        return None
+
+    registry_keys = list(SKILL_AGENT_REGISTRY.keys())
+    in_registry = "admin-manager" in registry_keys or "admin_manager" in registry_keys
+    print(f"  SKILL_AGENT_REGISTRY keys: {registry_keys}")
+    print(f"  admin-manager in registry: {in_registry}")
+
+    # Step 3: Verify SKILL.md was loaded via eagle_skill_constants
+    from eagle_skill_constants import PLUGIN_CONTENTS
+    skill_key = "admin-manager"
+    in_plugin_contents = skill_key in PLUGIN_CONTENTS
+    if in_plugin_contents:
+        entry = PLUGIN_CONTENTS[skill_key]
+        print(f"  PLUGIN_CONTENTS['{skill_key}']: {len(entry.get('content', ''))} chars")
+    else:
+        print(f"  PLUGIN_CONTENTS missing '{skill_key}'")
+
+    indicators = {
+        "in_manifest": in_manifest,
+        "in_registry": in_registry,
+        "in_plugin_contents": in_plugin_contents,
+    }
+
+    print("\n  Indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 2
+    print(f"  Indicators: {indicators_found}/3")
+    print(f"  {'PASS' if passed else 'FAIL'} - Admin-Manager Skill Registration")
+    return passed
+
+
+# ============================================================
+# Test 33: Workspace Store Default Creation
+# ============================================================
+
+async def test_33_workspace_store_default_creation():
+    """Test workspace_store.get_or_create_default() returns a valid workspace.
+
+    Uses a mock DynamoDB table (via moto or import-level validation) to avoid
+    requiring live AWS credentials. Falls back to import-level checks if moto
+    is unavailable.
+    """
+    print("\n" + "=" * 70)
+    print("TEST 33: Workspace Store Default Creation")
+    print("=" * 70)
+
+    try:
+        from workspace_store import (
+            get_or_create_default,
+            create_workspace,
+            get_workspace,
+            list_workspaces,
+            get_active_workspace,
+        )
+    except ImportError as e:
+        print(f"  SKIP - workspace_store import failed: {e}")
+        return None
+
+    # Try with moto mock for DynamoDB
+    use_moto = False
+    try:
+        import moto
+        use_moto = True
+    except ImportError:
+        pass
+
+    if use_moto:
+        import moto
+        import workspace_store as ws_mod
+
+        with moto.mock_aws():
+            # Create mock eagle table
+            import boto3 as _boto3
+            ddb = _boto3.resource("dynamodb", region_name="us-east-1")
+            ddb.create_table(
+                TableName="eagle",
+                KeySchema=[
+                    {"AttributeName": "PK", "KeyType": "HASH"},
+                    {"AttributeName": "SK", "KeyType": "RANGE"},
+                ],
+                AttributeDefinitions=[
+                    {"AttributeName": "PK", "AttributeType": "S"},
+                    {"AttributeName": "SK", "AttributeType": "S"},
+                ],
+                BillingMode="PAY_PER_REQUEST",
+            )
+            # Reset singleton so it picks up the mock
+            ws_mod._dynamodb = None
+
+            ws = get_or_create_default("test-tenant", "test-user")
+            print(f"  Workspace returned: {ws is not None}")
+            print(f"  workspace_id: {ws.get('workspace_id', 'MISSING')}")
+            print(f"  name: {ws.get('name', 'MISSING')}")
+            print(f"  is_active: {ws.get('is_active', 'MISSING')}")
+
+            has_id = bool(ws.get("workspace_id"))
+            has_name = bool(ws.get("name"))
+            is_active = ws.get("is_active") is True or ws.get("is_active") == "true"
+
+            indicators = {
+                "workspace_returned": ws is not None,
+                "has_workspace_id": has_id,
+                "has_name": has_name,
+                "is_active": is_active,
+            }
+
+            # Reset singleton
+            ws_mod._dynamodb = None
+    else:
+        # No moto -- validate module structure only
+        print("  moto not available -- validating module exports only")
+        indicators = {
+            "get_or_create_default_callable": callable(get_or_create_default),
+            "create_workspace_callable": callable(create_workspace),
+            "get_workspace_callable": callable(get_workspace),
+            "list_workspaces_callable": callable(list_workspaces),
+            "get_active_workspace_callable": callable(get_active_workspace),
+        }
+
+    print("\n  Indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    total = len(indicators)
+    passed = indicators_found >= (total - 1)
+    print(f"  Indicators: {indicators_found}/{total}")
+    print(f"  {'PASS' if passed else 'FAIL'} - Workspace Store Default Creation")
+    return passed
+
+
+# ============================================================
+# Test 34: Store CRUD Functions Exist (smoke test)
+# ============================================================
+
+async def test_34_store_crud_functions_exist():
+    """Validate all store modules export the expected public API functions.
+
+    This is a deterministic smoke test — no LLM calls, no AWS calls.
+    """
+    print("\n" + "=" * 70)
+    print("TEST 34: Store CRUD Functions Exist (smoke test)")
+    print("=" * 70)
+
+    expected = {
+        "skill_store": [
+            "create_skill", "get_skill", "update_skill", "list_skills",
+            "submit_for_review", "publish_skill", "delete_skill",
+        ],
+        "prompt_store": [
+            "put_prompt", "get_prompt", "delete_prompt", "list_tenant_prompts",
+        ],
+        "template_store": [
+            "put_template", "delete_template", "list_tenant_templates", "resolve_template",
+        ],
+        "workspace_store": [
+            "create_workspace", "get_workspace", "list_workspaces",
+            "get_or_create_default", "activate_workspace", "delete_workspace",
+        ],
+    }
+
+    all_ok = True
+    details = {}
+
+    for module_name, func_names in expected.items():
+        print(f"\n  {module_name}:")
+        try:
+            mod = __import__(module_name)
+        except ImportError as e:
+            print(f"    SKIP - import failed: {e}")
+            details[module_name] = False
+            all_ok = False
+            continue
+
+        module_ok = True
+        for fn_name in func_names:
+            exists = hasattr(mod, fn_name) and callable(getattr(mod, fn_name))
+            print(f"    {fn_name}: {exists}")
+            if not exists:
+                module_ok = False
+                all_ok = False
+
+        details[module_name] = module_ok
+
+    print("\n  Module summary:")
+    for mod_name, ok in details.items():
+        print(f"    {mod_name}: {'OK' if ok else 'MISSING EXPORTS'}")
+
+    modules_ok = sum(1 for v in details.values() if v)
+    total = len(details)
+    passed = modules_ok == total
+    print(f"  Modules: {modules_ok}/{total}")
+    print(f"  {'PASS' if passed else 'FAIL'} - Store CRUD Functions Exist")
+    return passed
+
+
+# ============================================================
 # Main infrastructure
 # ============================================================
 
@@ -2486,6 +2860,12 @@ test_names = {
     26: "26_uc08_shutdown_notification",
     27: "27_uc09_score_consolidation",
     28: "28_strands_skill_tool_orchestration",
+    29: "29_compliance_matrix_query_requirements",
+    30: "30_compliance_matrix_search_far",
+    31: "31_compliance_matrix_vehicle_suggestion",
+    32: "32_admin_manager_skill_registered",
+    33: "33_workspace_store_default_creation",
+    34: "34_store_crud_functions_exist",
 }
 
 
@@ -2655,6 +3035,12 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         26: ("26_uc08_shutdown_notification", test_26_uc08_shutdown_notification),
         27: ("27_uc09_score_consolidation", test_27_uc09_score_consolidation),
         28: ("28_strands_skill_tool_orchestration", test_28_strands_skill_tool_orchestration),
+        29: ("29_compliance_matrix_query_requirements", test_29_compliance_matrix_query_requirements),
+        30: ("30_compliance_matrix_search_far", test_30_compliance_matrix_search_far),
+        31: ("31_compliance_matrix_vehicle_suggestion", test_31_compliance_matrix_vehicle_suggestion),
+        32: ("32_admin_manager_skill_registered", test_32_admin_manager_skill_registered),
+        33: ("33_workspace_store_default_creation", test_33_workspace_store_default_creation),
+        34: ("34_store_crud_functions_exist", test_34_store_crud_functions_exist),
     }
 
     result_key, test_fn = TEST_REGISTRY[test_id]
@@ -2697,7 +3083,7 @@ async def main():
     if _args.tests:
         selected_tests = sorted(set(int(t.strip()) for t in _args.tests.split(",")))
     else:
-        selected_tests = list(range(1, 29))
+        selected_tests = list(range(1, 32)) + [32, 33, 34]
 
     # Video recorder (if --record-video)
     recorder = None
@@ -2825,6 +3211,10 @@ async def main():
     print(f"    UC-09 Score Consolidation: {'Ready' if results.get('27_uc09_score_consolidation') else 'Needs work'}")
     print("\n  Strands Architecture:")
     print(f"    Skill->Tool Orchestration: {'Ready' if results.get('28_strands_skill_tool_orchestration') else 'Needs work'}")
+    print("\n  Admin & Store Validation:")
+    print(f"    Admin-Manager Registration: {'Ready' if results.get('32_admin_manager_skill_registered') else 'Needs work'}")
+    print(f"    Workspace Store Defaults: {'Ready' if results.get('33_workspace_store_default_creation') else 'Needs work'}")
+    print(f"    Store CRUD API Surface: {'Ready' if results.get('34_store_crud_functions_exist') else 'Needs work'}")
 
     # Restore stdout
     sys.stdout = capture.original

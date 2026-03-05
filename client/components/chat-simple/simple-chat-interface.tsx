@@ -15,6 +15,7 @@ import { ChatMessage, DocumentInfo } from '@/types/chat';
 import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
+import ActivityPanel from './activity-panel';
 
 // -----------------------------------------------------------------------
 // Types for per-message tool call tracking
@@ -151,8 +152,11 @@ export default function SimpleChatInterface() {
         });
     }, []);
 
+    /** Right panel state. */
+    const [isPanelOpen, setIsPanelOpen] = useState(true);
+
     // Agent stream
-    const { sendQuery, isStreaming, error } = useAgentStream({
+    const { sendQuery, isStreaming, error, logs, clearLogs, addUserInputLog } = useAgentStream({
         getToken,
         sessionId: currentSessionId ?? undefined,
 
@@ -334,6 +338,8 @@ export default function SimpleChatInterface() {
         // Reset streaming message ID for the new turn
         streamingMsgIdRef.current = `stream-${Date.now()}`;
         setMessages((prev) => [...prev, userMessage]);
+        // Log user input to agent logs panel
+        addUserInputLog(input);
         // Optimistic write to IndexedDB — fire-and-forget, never blocks send
         writeMessageOptimistic(currentSessionId, userMessage);
         const query = input;
@@ -356,100 +362,113 @@ export default function SimpleChatInterface() {
     };
 
     return (
-        <div className="h-full flex flex-col bg-[#F5F7FA]">
-            {/* Ctrl+K command palette */}
-            <CommandPalette
-                isOpen={isCommandPaletteOpen}
-                onClose={() => setIsCommandPaletteOpen(false)}
-                onSelect={handlePaletteSelect}
-            />
-
-            {/* Main content area */}
-            {!hasMessages && !isLoadingSession ? (
-                <SimpleWelcome onAction={insertText} />
-            ) : (
-                <SimpleMessageList
-                    messages={displayMessages}
-                    isTyping={isStreaming}
-                    documents={documents}
-                    sessionId={currentSessionId}
-                    toolCallsByMsg={toolCallsByMsg}
+        <div className="h-full flex bg-[#F5F7FA]">
+            {/* Left: main chat area */}
+            <div className="flex-1 flex flex-col min-w-0">
+                {/* Ctrl+K command palette */}
+                <CommandPalette
+                    isOpen={isCommandPaletteOpen}
+                    onClose={() => setIsCommandPaletteOpen(false)}
+                    onSelect={handlePaletteSelect}
                 />
-            )}
 
-            {/* Input footer */}
-            <footer className="bg-white border-t border-[#D8DEE6] px-6 py-3 shrink-0">
-                <div className="max-w-3xl mx-auto">
-                    {error && (
-                        <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
-                            {error}
-                        </div>
-                    )}
-                    {feedbackStatus === 'sending' && (
-                        <div className="mb-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-xs">
-                            Submitting feedback…
-                        </div>
-                    )}
-                    {feedbackStatus === 'done' && (
-                        <div className="mb-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-green-700 text-xs">
-                            ✓ Feedback received. Thank you!
-                        </div>
-                    )}
-                    {feedbackStatus === 'error' && (
-                        <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
-                            Failed to submit feedback. Please try again.
-                        </div>
-                    )}
+                {/* Main content area */}
+                {!hasMessages && !isLoadingSession ? (
+                    <SimpleWelcome onAction={insertText} />
+                ) : (
+                    <SimpleMessageList
+                        messages={displayMessages}
+                        isTyping={isStreaming}
+                        documents={documents}
+                        sessionId={currentSessionId}
+                        toolCallsByMsg={toolCallsByMsg}
+                    />
+                )}
 
-                    {/* Quick action pills — above the input */}
-                    <SimpleQuickActions onAction={insertText} />
-
-                    <div className="relative flex items-end gap-3">
-                        {/* Slash command picker */}
-                        {isCommandPickerOpen && (
-                            <SlashCommandPicker
-                                commands={filteredCommands}
-                                selectedIndex={selectedIndex}
-                                onSelect={selectCommand}
-                                onClose={closeCommandPicker}
-                            />
+                {/* Input footer */}
+                <footer className="bg-white border-t border-[#D8DEE6] px-6 py-3 shrink-0">
+                    <div className="max-w-3xl mx-auto">
+                        {error && (
+                            <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                                {error}
+                            </div>
                         )}
-                        <textarea
-                            ref={textareaRef}
-                            value={input}
-                            onChange={(e) => {
-                                setInput(e.target.value);
-                                handleSlashInputChange(e.target.value, e.target.selectionStart || 0);
-                            }}
-                            onKeyDown={(e) => {
-                                if (isCommandPickerOpen) {
-                                    handleSlashKeyDown(e);
-                                    if (['ArrowUp', 'ArrowDown', 'Enter', 'Escape', 'Tab'].includes(e.key)) return;
-                                }
-                                if (e.key === 'Enter' && !e.shiftKey && !isStreaming && !isCommandPickerOpen) {
-                                    e.preventDefault();
-                                    handleSend();
-                                }
-                            }}
-                            placeholder={isStreaming ? 'Waiting for response\u2026' : 'Ask EAGLE about acquisitions, type / or press Ctrl+K for commands\u2026'}
-                            disabled={isStreaming}
-                            rows={1}
-                            className={`flex-1 resize-none overflow-hidden px-4 py-3 bg-white border border-[#D8DEE6] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2196F3]/30 focus:border-[#2196F3] transition-all text-sm leading-relaxed ${isStreaming ? 'opacity-50' : ''}`}
-                            style={{ maxHeight: 160 }}
-                        />
-                        <button
-                            onClick={handleSend}
-                            disabled={!input.trim() || isStreaming}
-                            className="p-3 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-all shadow-md shrink-0"
-                        >
-                            <span className="text-base">&#10148;</span>
-                        </button>
+                        {feedbackStatus === 'sending' && (
+                            <div className="mb-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-xs">
+                                Submitting feedback…
+                            </div>
+                        )}
+                        {feedbackStatus === 'done' && (
+                            <div className="mb-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-green-700 text-xs">
+                                ✓ Feedback received. Thank you!
+                            </div>
+                        )}
+                        {feedbackStatus === 'error' && (
+                            <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                                Failed to submit feedback. Please try again.
+                            </div>
+                        )}
+
+                        {/* Quick action pills — above the input */}
+                        <SimpleQuickActions onAction={insertText} />
+
+                        <div className="relative flex items-end gap-3">
+                            {/* Slash command picker */}
+                            {isCommandPickerOpen && (
+                                <SlashCommandPicker
+                                    commands={filteredCommands}
+                                    selectedIndex={selectedIndex}
+                                    onSelect={selectCommand}
+                                    onClose={closeCommandPicker}
+                                />
+                            )}
+                            <textarea
+                                ref={textareaRef}
+                                value={input}
+                                onChange={(e) => {
+                                    setInput(e.target.value);
+                                    handleSlashInputChange(e.target.value, e.target.selectionStart || 0);
+                                }}
+                                onKeyDown={(e) => {
+                                    if (isCommandPickerOpen) {
+                                        handleSlashKeyDown(e);
+                                        if (['ArrowUp', 'ArrowDown', 'Enter', 'Escape', 'Tab'].includes(e.key)) return;
+                                    }
+                                    if (e.key === 'Enter' && !e.shiftKey && !isStreaming && !isCommandPickerOpen) {
+                                        e.preventDefault();
+                                        handleSend();
+                                    }
+                                }}
+                                placeholder={isStreaming ? 'Waiting for response\u2026' : 'Ask EAGLE about acquisitions, type / or press Ctrl+K for commands\u2026'}
+                                disabled={isStreaming}
+                                rows={1}
+                                className={`flex-1 resize-none overflow-hidden px-4 py-3 bg-white border border-[#D8DEE6] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2196F3]/30 focus:border-[#2196F3] transition-all text-sm leading-relaxed ${isStreaming ? 'opacity-50' : ''}`}
+                                style={{ maxHeight: 160 }}
+                            />
+                            <button
+                                onClick={handleSend}
+                                disabled={!input.trim() || isStreaming}
+                                className="p-3 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-all shadow-md shrink-0"
+                            >
+                                <span className="text-base">&#10148;</span>
+                            </button>
+                        </div>
+                        <p className="text-center text-[10px] text-[#8896A6] mt-2">
+                            EAGLE &middot; National Cancer Institute
+                        </p>
                     </div>
-                    <p className="text-center text-[10px] text-[#8896A6] mt-2">
-                        EAGLE &middot; National Cancer Institute
-                    </p>
-                </div>
-            </footer>
+                </footer>
+            </div>
+
+            {/* Right: activity panel */}
+            <ActivityPanel
+                logs={logs}
+                clearLogs={clearLogs}
+                documents={documents}
+                isStreaming={isStreaming}
+                isOpen={isPanelOpen}
+                onToggle={() => setIsPanelOpen(v => !v)}
+            />
         </div>
     );
 }

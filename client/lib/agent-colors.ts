@@ -85,6 +85,74 @@ export const AGENT_COLORS: Record<string, AgentColorScheme> = {
     gradient: 'from-purple-500 to-purple-600',
   },
   
+  // EAGLE Root Agent - Blue (primary)
+  'eagle': {
+    bg: 'bg-blue-50',
+    text: 'text-blue-700',
+    border: 'border-blue-200',
+    badge: 'bg-blue-100 text-blue-700',
+    icon: 'bg-blue-600',
+    gradient: 'from-blue-500 to-blue-600',
+  },
+
+  // Strands Specialist Agents
+  'legal-counsel': {
+    bg: 'bg-rose-50',
+    text: 'text-rose-700',
+    border: 'border-rose-200',
+    badge: 'bg-rose-100 text-rose-700',
+    icon: 'bg-rose-600',
+    gradient: 'from-rose-500 to-rose-600',
+  },
+  'market-intelligence': {
+    bg: 'bg-teal-50',
+    text: 'text-teal-700',
+    border: 'border-teal-200',
+    badge: 'bg-teal-100 text-teal-700',
+    icon: 'bg-teal-600',
+    gradient: 'from-teal-500 to-teal-600',
+  },
+  'tech-translator': {
+    bg: 'bg-cyan-50',
+    text: 'text-cyan-700',
+    border: 'border-cyan-200',
+    badge: 'bg-cyan-100 text-cyan-700',
+    icon: 'bg-cyan-600',
+    gradient: 'from-cyan-500 to-cyan-600',
+  },
+  'policy-supervisor': {
+    bg: 'bg-indigo-50',
+    text: 'text-indigo-700',
+    border: 'border-indigo-200',
+    badge: 'bg-indigo-100 text-indigo-700',
+    icon: 'bg-indigo-600',
+    gradient: 'from-indigo-500 to-indigo-600',
+  },
+  'policy-librarian': {
+    bg: 'bg-emerald-50',
+    text: 'text-emerald-700',
+    border: 'border-emerald-200',
+    badge: 'bg-emerald-100 text-emerald-700',
+    icon: 'bg-emerald-600',
+    gradient: 'from-emerald-500 to-emerald-600',
+  },
+  'policy-analyst': {
+    bg: 'bg-violet-50',
+    text: 'text-violet-700',
+    border: 'border-violet-200',
+    badge: 'bg-violet-100 text-violet-700',
+    icon: 'bg-violet-600',
+    gradient: 'from-violet-500 to-violet-600',
+  },
+  'public-interest': {
+    bg: 'bg-orange-50',
+    text: 'text-orange-700',
+    border: 'border-orange-200',
+    badge: 'bg-orange-100 text-orange-700',
+    icon: 'bg-orange-600',
+    gradient: 'from-orange-500 to-orange-600',
+  },
+
   // Default/Unknown - Amber (fallback)
   'default': {
     bg: 'bg-amber-50',
@@ -101,6 +169,14 @@ export const AGENT_NAMES: Record<string, string> = {
   'oa-intake': 'OA Intake Agent',
   'knowledge-retrieval': 'Knowledge Retrieval',
   'document-generator': 'Document Generator',
+  'eagle': 'EAGLE',
+  'legal-counsel': 'Legal Counsel',
+  'market-intelligence': 'Market Intelligence',
+  'tech-translator': 'Tech Translator',
+  'policy-supervisor': 'Policy Supervisor',
+  'policy-librarian': 'Policy Librarian',
+  'policy-analyst': 'Policy Analyst',
+  'public-interest': 'Public Interest',
 };
 
 export const AGENT_ICONS: Record<string, string> = {
@@ -108,6 +184,14 @@ export const AGENT_ICONS: Record<string, string> = {
   'oa-intake': 'E',  // EAGLE
   'knowledge-retrieval': 'K',
   'document-generator': 'D',
+  'eagle': 'E',
+  'legal-counsel': 'L',
+  'market-intelligence': 'M',
+  'tech-translator': 'T',
+  'policy-supervisor': 'P',
+  'policy-librarian': 'B',
+  'policy-analyst': 'A',
+  'public-interest': 'I',
 };
 
 export function getAgentColors(agentId: string): AgentColorScheme {

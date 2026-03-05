@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
-import { Star, Check } from 'lucide-react';
+import { Check } from 'lucide-react';
 import Modal from '@/components/ui/modal';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
@@ -17,21 +17,18 @@ const FEEDBACK_TYPES: { value: FeedbackType; label: string }[] = [
 
 export default function FeedbackModal() {
   const [isOpen, setIsOpen] = useState(false);
-  const [rating, setRating] = useState(0);
-  const [hoveredStar, setHoveredStar] = useState(0);
   const [feedbackType, setFeedbackType] = useState<FeedbackType | null>(null);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const pathname = usePathname();
   const { user, getToken } = useAuth();
   const { currentSessionId } = useSession();
 
   const resetForm = useCallback(() => {
-    setRating(0);
-    setHoveredStar(0);
     setFeedbackType(null);
     setComment('');
     setError(null);
@@ -53,13 +50,22 @@ export default function FeedbackModal() {
     return () => window.removeEventListener('keydown', handler);
   }, [resetForm]);
 
+  // Auto-focus textarea when modal opens
+  useEffect(() => {
+    if (isOpen && !success) {
+      // Short delay to let the modal animate in
+      const t = setTimeout(() => textareaRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [isOpen, success]);
+
   const handleClose = useCallback(() => {
     setIsOpen(false);
     resetForm();
   }, [resetForm]);
 
   const handleSubmit = async () => {
-    if (!rating) return;
+    if (!comment.trim() && !feedbackType) return;
     setSubmitting(true);
     setError(null);
 
@@ -72,7 +78,7 @@ export default function FeedbackModal() {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          rating,
+          rating: 0,
           page: pathname,
           feedback_type: feedbackType,
           comment: comment.trim() || undefined,
@@ -113,7 +119,7 @@ export default function FeedbackModal() {
             </button>
             <button
               onClick={handleSubmit}
-              disabled={!rating || submitting}
+              disabled={(!comment.trim() && !feedbackType) || submitting}
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? 'Submitting...' : 'Submit'}
@@ -131,29 +137,16 @@ export default function FeedbackModal() {
         </div>
       ) : (
         <div className="space-y-5">
-          {/* Star rating */}
+          {/* Comment */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Rating</label>
-            <div className="flex gap-1">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setRating(n)}
-                  onMouseEnter={() => setHoveredStar(n)}
-                  onMouseLeave={() => setHoveredStar(0)}
-                  className="p-1 transition-transform hover:scale-110"
-                >
-                  <Star
-                    className={`w-7 h-7 ${
-                      n <= (hoveredStar || rating)
-                        ? 'fill-yellow-400 text-yellow-400'
-                        : 'fill-none text-gray-300'
-                    } transition-colors`}
-                  />
-                </button>
-              ))}
-            </div>
+            <textarea
+              ref={textareaRef}
+              rows={3}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Tell us more..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            />
           </div>
 
           {/* Type pills */}
@@ -175,18 +168,6 @@ export default function FeedbackModal() {
                 </button>
               ))}
             </div>
-          </div>
-
-          {/* Comment */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Comment</label>
-            <textarea
-              rows={3}
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="Tell us more..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            />
           </div>
 
           {/* Page badge */}

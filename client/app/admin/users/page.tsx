@@ -264,7 +264,7 @@ export default function UsersPage() {
                 </button>
               </div>
               <div className="flex flex-wrap gap-1 mt-3">
-                {group.permissions.map((perm, i) => (
+                {group.permissions.map((perm: string, i: number) => (
                   <span key={i} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
                     {perm.replace('_', ' ')}
                   </span>
