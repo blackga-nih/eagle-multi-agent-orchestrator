@@ -619,13 +619,14 @@ def _serialize_ddb_item(item: dict) -> dict:
 
 
 def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
-    """Real CloudWatch Logs operations."""
+    """Real CloudWatch Logs operations with optional user_id scoping."""
     operation = params.get("operation", "recent")
     log_group = params.get("log_group", "/eagle/app")
     filter_pattern = params.get("filter_pattern", "")
     limit = params.get("limit", 50)
     start_time_str = params.get("start_time", "")
     end_time_str = params.get("end_time", "")
+    user_id = params.get("user_id", "")
 
     try:
         logs = _get_logs()
@@ -658,10 +659,12 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
                 pass
 
         if operation == "search":
-            # Include tenant_id in filter pattern for scoping
+            # Include tenant_id and user_id in filter pattern for scoping
             scoped_pattern = filter_pattern
             if tenant_id and tenant_id not in (filter_pattern or ""):
-                scoped_pattern = f'"{tenant_id}" {filter_pattern}'.strip() if filter_pattern else f'"{tenant_id}"'
+                scoped_pattern = f'"{tenant_id}" {scoped_pattern}'.strip()
+            if user_id and user_id not in (scoped_pattern or ""):
+                scoped_pattern = f'"{user_id}" {scoped_pattern}'.strip()
 
             resp = logs.filter_log_events(
                 logGroupName=log_group,
@@ -683,22 +686,34 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
             }
 
         elif operation == "recent":
-            resp = logs.filter_log_events(
-                logGroupName=log_group,
-                startTime=start_time,
-                endTime=end_time,
-                limit=min(limit, 100),
-            )
+            # Build optional filter pattern from user_id for scoped recent queries
+            recent_pattern = ""
+            if user_id:
+                recent_pattern = f'"{user_id}"'
+
+            kwargs = {
+                "logGroupName": log_group,
+                "startTime": start_time,
+                "endTime": end_time,
+                "limit": min(limit, 100),
+            }
+            if recent_pattern:
+                kwargs["filterPattern"] = recent_pattern
+
+            resp = logs.filter_log_events(**kwargs)
             events = [
                 {"timestamp": e["timestamp"], "message": e["message"][:500], "logStreamName": e.get("logStreamName", "")}
                 for e in resp.get("events", [])
             ]
-            return {
+            result = {
                 "operation": "recent",
                 "log_group": log_group,
                 "event_count": len(events),
                 "events": events,
             }
+            if user_id:
+                result["user_id_filter"] = user_id
+            return result
 
         elif operation == "get_stream":
             resp = logs.describe_log_streams(

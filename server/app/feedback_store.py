@@ -38,8 +38,8 @@ def _get_table():
 def create_feedback(
     tenant_id: str,
     user_id: str,
-    rating: int,
-    page: str,
+    rating: int = 0,
+    page: str = "",
     feedback_type: Optional[str] = None,
     comment: Optional[str] = None,
     session_id: Optional[str] = None,
@@ -56,11 +56,12 @@ def create_feedback(
         "feedback_id": feedback_id,
         "tenant_id": tenant_id,
         "user_id": user_id,
-        "rating": rating,
         "page": page,
         "created_at": iso_ts,
         "ttl": ttl,
     }
+    if rating:
+        item["rating"] = rating
     if feedback_type:
         item["feedback_type"] = feedback_type
     if comment:

@@ -29,6 +29,7 @@ This expert covers:
 | `/experts:test:self-improve` | Update expertise after test runs |
 | `/experts:test:plan_build_improve` | Full ACT-LEARN-REUSE workflow |
 | `/experts:test:maintenance` | Run test suites and report results |
+| `/experts:test:status` | Quick test inventory count (no execution) |
 
 ## Key Files
 
