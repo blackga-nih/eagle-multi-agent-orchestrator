@@ -80,24 +80,55 @@ def lambda_handler(event, context):
             # Call Claude via Bedrock for metadata extraction
             extracted = extract_metadata(text, file_name) if text.strip() else {}
 
+            # Compute file metrics
+            word_count = len(text.split()) if text else 0
+            page_count = text.count('\f') + 1 if text else 1  # form feed = page break
+            file_size_kb = round(size / 1024)
+
             # Build metadata model
             now = datetime.now(timezone.utc).isoformat()
             metadata = DocumentMetadata(
+                # Core identifiers
                 document_id=key,
                 file_name=file_name,
                 file_type=file_ext,
                 file_size_bytes=size,
                 s3_bucket=bucket,
                 s3_key=key,
+                # LLM-extracted: core classification
                 title=extracted.get("title", file_name),
                 summary=extracted.get("summary", ""),
                 document_type=extracted.get("document_type", "unknown"),
+                source_agency=extracted.get("source_agency", ""),
+                # LLM-extracted: topic & routing
                 primary_topic=extracted.get("primary_topic", "general"),
-                primary_agent=extracted.get("primary_agent", "supervisor"),
+                related_topics=extracted.get("related_topics", []),
+                primary_agent=extracted.get("primary_agent", "supervisor-core"),
+                relevant_agents=extracted.get("relevant_agents", []),
+                # LLM-extracted: content analysis
+                key_requirements=extracted.get("key_requirements", []),
+                section_summaries=extracted.get("section_summaries", {}),
                 keywords=extracted.get("keywords", []),
-                agencies=extracted.get("agencies", []),
+                # LLM-extracted: regulatory references
                 far_references=extracted.get("far_references", []),
+                statute_references=extracted.get("statute_references", []),
+                agency_references=extracted.get("agency_references", []),
+                agencies=extracted.get("agencies", []),
+                authority_level=extracted.get("authority_level", "guidance"),
+                # LLM-extracted: discovery & audience
+                complexity_level=extracted.get("complexity_level", "intermediate"),
+                audience=extracted.get("audience", []),
+                # LLM-extracted: temporal
+                effective_date=extracted.get("effective_date", ""),
+                expiration_date=extracted.get("expiration_date", ""),
+                fiscal_year=int(extracted.get("fiscal_year", 0)),
+                # Computed metrics
+                word_count=word_count,
+                page_count=page_count,
+                file_size_kb=file_size_kb,
+                # Confidence
                 confidence_score=float(extracted.get("confidence_score", 0.0)),
+                # Timestamps
                 upload_date=now,
                 last_updated=now,
                 extraction_model=os.environ.get("BEDROCK_MODEL_ID", ""),

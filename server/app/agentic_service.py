@@ -15,6 +15,13 @@ import anthropic
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
+from app.tools.knowledge_tools import (
+    KNOWLEDGE_SEARCH_TOOL,
+    KNOWLEDGE_FETCH_TOOL,
+    exec_knowledge_search,
+    exec_knowledge_fetch,
+)
+
 logger = logging.getLogger("eagle.agent")
 
 # ── Configuration ────────────────────────────────────────────────────
@@ -408,6 +415,9 @@ EAGLE_TOOLS = [
             "required": ["params"],
         },
     },
+    # Knowledge base tools
+    KNOWLEDGE_SEARCH_TOOL,
+    KNOWLEDGE_FETCH_TOOL,
 ]
 
 
@@ -2218,6 +2228,9 @@ TOOL_DISPATCH = {
     "get_intake_status": _exec_get_intake_status,
     "intake_workflow": _exec_intake_workflow,
     "query_compliance_matrix": _exec_query_compliance_matrix,
+    # Knowledge base tools
+    "knowledge_search": exec_knowledge_search,
+    "knowledge_fetch": exec_knowledge_fetch,
 }
 
 # Tools that need session_id for per-user scoping
