@@ -29,7 +29,7 @@ from eagle_skill_constants import SKILL_CONSTANTS
 
 # ── Config ───────────────────────────────────────────────────────────
 
-MODEL_ID = os.environ.get("STRANDS_MODEL_ID", "us.amazon.nova-pro-v1:0")
+MODEL_ID = os.environ.get("STRANDS_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
 REGION = "us-east-1"
 
 # Shared model — created once, reused across all agents in this module
