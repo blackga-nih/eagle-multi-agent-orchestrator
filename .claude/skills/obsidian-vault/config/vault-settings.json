@@ -1,0 +1,56 @@
+{
+  "vaultPath": "/path/to/your/obsidian/vault",
+  "projectFolder": "Projects/consulting-co",
+  "folders": {
+    "dailyNotes": "Daily Notes",
+    "decisions": "Decisions",
+    "learnings": "Learnings",
+    "tasks": "Tasks",
+    "meetings": "Meetings",
+    "templates": "Templates"
+  },
+  "features": {
+    "autoSync": true,
+    "syncOnSessionStart": true,
+    "syncOnSessionEnd": true,
+    "createDailyNote": true,
+    "knowledgeGraphEnabled": true,
+    "backlinksEnabled": true
+  },
+  "search": {
+    "depth": 2,
+    "maxResults": 10,
+    "includeContent": true,
+    "fuzzyThreshold": 0.3
+  },
+  "tags": {
+    "prefix": "cc",
+    "autoTag": true,
+    "defaultTags": ["claude-code", "automation"]
+  },
+  "templates": {
+    "default": "daily-note",
+    "dateFormat": "YYYY-MM-DD",
+    "timeFormat": "HH:mm"
+  },
+  "permissions": {
+    "readOnly": false,
+    "allowedFolders": [
+      "Projects/consulting-co",
+      "Daily Notes",
+      "Decisions",
+      "Learnings",
+      "Tasks",
+      "Meetings"
+    ],
+    "deniedFolders": [
+      "Private",
+      "Archive"
+    ]
+  },
+  "logging": {
+    "enabled": true,
+    "logPath": ".claude/logs/obsidian-operations.log",
+    "verbosity": "info"
+  }
+}

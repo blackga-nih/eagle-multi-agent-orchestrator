@@ -1,0 +1,301 @@
+/* ================================================
+   GB Automation Theme - Obsidian AI Agent KB
+   ================================================ */
+
+/* Import Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,400&display=swap');
+
+/* CSS Custom Properties */
+:root {
+  --gb-bg-primary: #F3F1E7;
+  --gb-bg-panel: #E6E4D9;
+  --gb-text-main: #191919;
+  --gb-text-secondary: #5C5C5C;
+  --gb-text-muted: #8C8A84;
+  --gb-border: #D6D4C8;
+  --gb-accent: #D97757;
+  --gb-accent-deep: #C26D52;
+  --gb-white: #FFFFFF;
+}
+
+/* Rotating Border Animation */
+@property --gradient-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes border-spin {
+  from { --gradient-angle: 0deg; }
+  to { --gradient-angle: 360deg; }
+}
+
+/* ================================================
+   Banner Images
+   ================================================ */
+.internal-embed.image-embed[alt="banner"] {
+  max-height: 150px;
+  border-radius: 12px 12px 0 0;
+  margin-bottom: -10px;
+  object-fit: cover;
+  width: 100%;
+}
+
+/* ================================================
+   Category Tags - GB Automation Color Palette
+   ================================================ */
+
+/* ADWs - Terracotta (Primary Accent) */
+.tag[href="#adw"] {
+  background-color: var(--gb-accent) !important;
+  color: var(--gb-white) !important;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+/* Agents - Deep Terracotta */
+.tag[href="#agent"] {
+  background-color: var(--gb-accent-deep) !important;
+  color: var(--gb-white) !important;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+/* Skills - Dark Text (Primary) */
+.tag[href="#skill"] {
+  background-color: var(--gb-text-main) !important;
+  color: var(--gb-bg-primary) !important;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+/* MCP Servers - Secondary Gray */
+.tag[href="#mcp"] {
+  background-color: var(--gb-text-secondary) !important;
+  color: var(--gb-white) !important;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+/* Prompts - Muted with border */
+.tag[href="#prompt"] {
+  background-color: rgba(230, 228, 217, 0.6) !important;
+  color: var(--gb-text-main) !important;
+  border: 1px solid var(--gb-border) !important;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+/* Scripts - Warm Panel */
+.tag[href="#script"] {
+  background-color: var(--gb-bg-panel) !important;
+  color: var(--gb-text-main) !important;
+  border: 1px solid var(--gb-border) !important;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+/* Experts - Accent Border */
+.tag[href="#expert"] {
+  background-color: transparent !important;
+  color: var(--gb-accent) !important;
+  border: 1px solid var(--gb-accent) !important;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+/* ================================================
+   Status Tags
+   ================================================ */
+.tag[href="#active"] {
+  background-color: var(--gb-accent) !important;
+  color: var(--gb-white) !important;
+}
+
+.tag[href="#development"] {
+  background-color: var(--gb-bg-panel) !important;
+  color: var(--gb-text-main) !important;
+  border: 1px solid var(--gb-border) !important;
+}
+
+.tag[href="#deprecated"] {
+  background-color: var(--gb-text-muted) !important;
+  color: var(--gb-white) !important;
+}
+
+/* ================================================
+   Card Styling - Glass Panel Effect
+   ================================================ */
+
+/* Cards container */
+.cards .dataview.table-view-table {
+  background: rgba(230, 228, 217, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(214, 212, 200, 0.6);
+  border-radius: 24px;
+  padding: 1rem;
+}
+
+/* Card rows */
+.cards .dataview.table-view-table tbody tr {
+  background: var(--gb-white);
+  border: 1px solid var(--gb-border);
+  border-radius: 12px;
+  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --shiny-bg: var(--gb-white);
+}
+
+/* Hover Lift Effect */
+.cards .dataview.table-view-table tbody tr:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px -12px rgba(217, 119, 87, 0.15);
+}
+
+/* Signature Rotating Border on Hover */
+.cards .dataview.table-view-table tbody tr:hover {
+  background: linear-gradient(var(--shiny-bg), var(--shiny-bg)) padding-box,
+    conic-gradient(from var(--gradient-angle), transparent 20%, var(--gb-accent) 50%, transparent 80%) border-box !important;
+  border-color: transparent !important;
+  animation: border-spin 3s linear infinite;
+}
+
+/* ================================================
+   Typography - Headlines with Newsreader
+   ================================================ */
+
+/* H1-H4 use Newsreader serif */
+.markdown-preview-view h1,
+.markdown-preview-view h2,
+.markdown-preview-view h3,
+.markdown-preview-view h4 {
+  font-family: 'Newsreader', serif;
+  color: var(--gb-text-main);
+}
+
+/* Accent color for italics in headers */
+.markdown-preview-view h1 em,
+.markdown-preview-view h2 em,
+.markdown-preview-view h3 em {
+  color: var(--gb-accent);
+  font-style: italic;
+}
+
+/* Body text uses Inter */
+.markdown-preview-view p,
+.markdown-preview-view li,
+.markdown-preview-view td {
+  font-family: 'Inter', sans-serif;
+  color: var(--gb-text-secondary);
+}
+
+/* Labels - uppercase with letter-spacing */
+.markdown-preview-view strong {
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.85em;
+}
+
+/* ================================================
+   Links - Terracotta Accent
+   ================================================ */
+.markdown-preview-view a {
+  color: var(--gb-accent);
+  text-decoration: none;
+  transition: all 0.2s ease-out;
+}
+
+.markdown-preview-view a:hover {
+  color: var(--gb-accent-deep);
+  transform: translateY(-2px);
+}
+
+/* ================================================
+   Code Blocks - Dark Theme
+   ================================================ */
+.markdown-preview-view pre {
+  background: var(--gb-text-main);
+  color: var(--gb-bg-primary);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.markdown-preview-view code {
+  background: rgba(230, 228, 217, 0.6);
+  color: var(--gb-accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+/* ================================================
+   Tables - Glass Effect
+   ================================================ */
+.markdown-preview-view table {
+  background: rgba(230, 228, 217, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--gb-border);
+  border-radius: 12px;
+}
+
+.markdown-preview-view th {
+  background: var(--gb-bg-panel);
+  color: var(--gb-text-main);
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.75rem;
+}
+
+.markdown-preview-view td {
+  border-color: var(--gb-border);
+}
+
+/* ================================================
+   Blockquotes - Accent Border
+   ================================================ */
+.markdown-preview-view blockquote {
+  border-left: 3px solid var(--gb-accent);
+  background: rgba(217, 119, 87, 0.1);
+  padding: 1rem;
+  border-radius: 0 8px 8px 0;
+  font-style: italic;
+}
+
+/* ================================================
+   Selection Color
+   ================================================ */
+::selection {
+  background: var(--gb-accent);
+  color: var(--gb-white);
+}

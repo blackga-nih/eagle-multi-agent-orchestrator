@@ -69,10 +69,19 @@ Infra/config hits → HARD BLOCK.
 
 ## sm_eagle Profile
 
-CBIIT account values are TBD. Before first push to sm_eagle, run:
-```bash
-git log sm_eagle/main --stat | head -50
-```
-and inspect for account numbers, VPC IDs, and bucket names. Add to this SKILL.md.
+| Value | Detail |
+|-------|--------|
+| AWS Account | `695681773636` (NIH.NCI.CBIIT.EAGLE.NONPROD) |
+| Region | `us-east-1` |
+| VPC | `vpc-09def43fcabfa4df6` (`10.209.140.192/26`) — NIH Network Automation managed |
+| Cognito User Pool | `us-east-1_ChGLHtmmp` |
+| Cognito Client | `4c2k2efviegphkr8bea99382jr` |
+| DynamoDB Table | `eagle` |
+| S3 Bucket | `eagle-documents-695681773636-dev` |
+| ECR Backend | `695681773636.dkr.ecr.us-east-1.amazonaws.com/eagle-backend-dev` |
+| ECR Frontend | `695681773636.dkr.ecr.us-east-1.amazonaws.com/eagle-frontend-dev` |
+| ECS Cluster | `eagle-dev` |
+
+**Protected patterns for sm_eagle:** `695681773636`, `vpc-09def43fcabfa4df6`, `us-east-1_ChGLHtmmp`, `4c2k2efviegphkr8bea99382jr`, `10.209.140`, `CBIIT`, `NCI-RITM`
 
 Full command spec: `.claude/commands/sync.md`

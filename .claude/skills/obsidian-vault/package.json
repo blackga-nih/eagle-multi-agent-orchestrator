@@ -1,0 +1,37 @@
+{
+  "name": "obsidian-vault-integration",
+  "version": "1.0.0",
+  "description": "Obsidian vault integration for Claude Code - persistent knowledge management",
+  "main": "scripts/vault-operations.js",
+  "scripts": {
+    "init": "node scripts/init-vault.js",
+    "test": "node scripts/test-vault.js"
+  },
+  "keywords": [
+    "obsidian",
+    "knowledge-management",
+    "claude-code",
+    "notes",
+    "vault"
+  ],
+  "author": "Claude Code Integration Team",
+  "license": "MIT",
+  "dependencies": {
+    "glob": "^10.3.10",
+    "gray-matter": "^4.0.3",
+    "marked": "^11.1.0",
+    "fuse.js": "^7.0.0",
+    "date-fns": "^3.0.0",
+    "yaml": "^2.3.4"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "consulting-co/.claude/skills/obsidian-vault"
+  }
+}

@@ -4,7 +4,7 @@ parent: "[[frontend/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, frontend, nextjs, tailwind, chat, dashboard, test-results]
-last_updated: 2026-03-04T05:30:00
+last_updated: 2026-03-04T06:00:00
 ---
 
 # Frontend Expertise (Complete Mental Model)
@@ -23,7 +23,6 @@ last_updated: 2026-03-04T05:30:00
 - **lucide-react** for icons
 - **react-markdown** for message rendering
 - **amazon-cognito-identity-js** for auth
-- **idb** for IndexedDB access (required dep — install with `npm install idb --save` if missing from node_modules)
 
 ### Page Routes
 
@@ -57,13 +56,13 @@ last_updated: 2026-03-04T05:30:00
 | `/api/cloudwatch` | `?runs=1` lists CW streams; `?stream=<name>&group=test-runs` loads events |
 | `/api/prompts` | Loads skill prompt files from eagle-plugin/ |
 | `/api/invoke` | Agent invocation endpoint |
-| `/api/feedback` | Proxies feedback payload to FastAPI `/api/feedback`; persists to DynamoDB |
 | `/api/conversations` | Conversation CRUD |
 | `/api/conversations/[agentId]` | Agent-specific conversation history |
 | `/api/conversations/context` | Conversation context endpoint |
 | `/api/sessions` | Session management |
 | `/api/sessions/[sessionId]` | Single session CRUD |
 | `/api/sessions/[sessionId]/messages` | Session messages |
+| `/api/sessions/generate-title` | AI session naming — POST `{ message, response_snippet }` → `{ title }` |
 | `/api/documents` | Document CRUD |
 | `/api/documents/[id]` | Single document operations |
 | `/api/user` | Current user info |
@@ -72,10 +71,6 @@ last_updated: 2026-03-04T05:30:00
 | `/api/admin/users` | User management |
 | `/api/admin/costs` | Cost data |
 | `/api/admin/telemetry` | Telemetry data |
-
-**Note on `trailingSlash: true` in `next.config.mjs`**: Next.js issues a 308 redirect from `/api/feedback` to `/api/feedback/`. Browser `fetch()` follows the redirect automatically and is transparent. Raw `curl` requires the `-L` flag. This applies to all `/api/*` routes.
-
-**Note on new `route.ts` files on Windows**: The Next.js dev server does NOT hot-reload new `app/api/*/route.ts` files on Windows. After creating a new route file, restart the dev server (`Ctrl+C`, `npm run dev`) before testing.
 
 ### Component Tree
 
@@ -93,12 +88,16 @@ components/
   |   |-- agent-message.tsx          # Agent message bubble
   |
   |-- chat-simple/                   # Minimalist chat (used at /chat)
-  |   |-- simple-chat-interface.tsx  # Simple chat main
+  |   |-- simple-chat-interface.tsx  # Simple chat main — horizontal flex: chat-left + ActivityPanel-right
   |   |-- simple-message-list.tsx    # Simple message list
   |   |-- simple-welcome.tsx         # Simple welcome
   |   |-- simple-header.tsx          # Simple header
   |   |-- simple-quick-actions.tsx   # Quick action buttons
   |   |-- document-card.tsx          # Document result card (links to /documents/[id])
+  |   |-- activity-panel.tsx         # 3-tab right panel (Documents, Activity, Agent Logs)
+  |   |-- agent-logs.tsx             # Multi-agent stream timeline with click-to-expand modal
+  |   |-- command-palette.tsx        # Ctrl+K command palette
+  |   |-- tool-use-display.tsx       # Inline tool call status display
   |
   |-- layout/
   |   |-- top-nav.tsx                # Top navigation bar
@@ -214,125 +213,96 @@ interface AcquisitionData {
 ### Minimalist Chat (`/chat`)
 
 **Components**: `components/chat-simple/`
-- `simple-chat-interface.tsx`: Minimal layout, no sidebar
+- `simple-chat-interface.tsx`: Horizontal flex layout — left chat column + right ActivityPanel
 - `simple-message-list.tsx`: Clean message rendering
 - `simple-welcome.tsx`: Simple welcome card
 - `simple-header.tsx`: Minimal header
 - `simple-quick-actions.tsx`: Quick action buttons
 - `document-card.tsx`: Renders document results from agent (links to `/documents/[id]`)
+- `activity-panel.tsx`: 3-tab collapsible right panel (380px open / 32px closed strip)
+- `agent-logs.tsx`: Multi-agent stream timeline component with LogDetailModal
+- `command-palette.tsx`: Ctrl+K command palette overlay
+- `tool-use-display.tsx`: Inline tool call status badges
 
-**Layout**: `SimpleHeader` + `SidebarNav` + `SimpleChatInterface` (no form-heavy sidebar)
+**Layout**: `SimpleHeader` + `SidebarNav` + `SimpleChatInterface`
 
-### AI-Bypass Slash Command Pattern
-
-Some slash commands intercept `handleSend()` before calling `sendQuery()`, performing a side-effect action and returning early so the AI is never invoked. The `/feedback` command is the canonical example.
-
-**Pattern** (in `simple-chat-interface.tsx` `handleSend()`):
-
-```typescript
-// 1. Check for bypass command BEFORE sendQuery()
-if (input.startsWith('/feedback')) {
-    const text = input.replace(/^\/feedback\s*/, '').trim();
-    setFeedbackStatus('sending');
-    try {
-        const res = await fetch('/api/feedback', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-                type: 'feedback',
-                content: text,
-                conversation_snapshot: messages.map(m => ({
-                    role: m.role,
-                    content: m.content,
-                    timestamp: m.timestamp,
-                })),
-            }),
-        });
-        setFeedbackStatus(res.ok ? 'done' : 'error');
-    } catch {
-        setFeedbackStatus('error');
-    }
-    setTimeout(() => setFeedbackStatus('idle'), 4000);
-    return;   // <-- bypass sendQuery(); AI is NOT called
-}
-// 2. Normal path
-await sendQuery(input, sessionId);
+`SimpleChatInterface` internal layout (horizontal flex):
+```
+<div class="h-full flex bg-[#F5F7FA]">
+  <div class="flex-1 flex flex-col min-w-0">   ← left: chat + input footer
+    ...
+  </div>
+  <ActivityPanel ... />                         ← right: 380px or 32px strip
+</div>
 ```
 
-**Status Banner Pattern** (`feedbackStatus` state machine):
+**Key state in `SimpleChatInterface`**:
+- `isPanelOpen` (boolean, default `true`) — controls ActivityPanel open/closed
+- `logs`, `clearLogs`, `addUserInputLog` — destructured from `useAgentStream`
+- `addUserInputLog(input)` called in `handleSend()` before `sendQuery()` to echo user turns into the log stream
 
+### Activity Panel (`components/chat-simple/activity-panel.tsx`)
+
+**Props**:
 ```typescript
-// State: 'idle' | 'sending' | 'done' | 'error'
-const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
-
-// Rendered above the error banner in the footer:
-{feedbackStatus === 'sending' && (
-    <div className="text-sm text-blue-600 bg-blue-50 border border-blue-200 rounded px-3 py-2">
-        Sending feedback...
-    </div>
-)}
-{feedbackStatus === 'done' && (
-    <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
-        Feedback received. Thank you.
-    </div>
-)}
-{feedbackStatus === 'error' && (
-    <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-        Failed to send feedback. Please try again.
-    </div>
-)}
-```
-
-Transitions: `idle` → `sending` (on submit) → `done` or `error` (on response) → `idle` (4 s setTimeout auto-reset).
-
-### Slash Command Registration (`client/lib/slash-commands.ts`)
-
-Commands must be registered in two places:
-
-1. The commands array entry:
-```typescript
-{
-    id: 'feedback',
-    name: '/feedback',
-    description: 'Send feedback — bug, suggestion, praise, or correction',
-    icon: MessageSquare,   // lucide-react import
-    color: 'red',
-    category: 'info',
+interface ActivityPanelProps {
+  logs: AuditLogEntry[];
+  clearLogs: () => void;
+  documents: Record<string, DocumentInfo[]>;
+  messages: ChatMessage[];
+  sessionId: string | null;
+  isStreaming: boolean;
+  isOpen: boolean;
+  onToggle: () => void;
 }
 ```
 
-2. The `commandColorClasses` map (if using a new color):
-```typescript
-red: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
-```
+**Tabs**: `'documents' | 'activity' | 'logs'` (default: `'logs'`)
 
-### Adding a New AI-Bypass API Route
+**Closed state** (isOpen=false): 32px wide vertical strip with left-angle arrow and "Activity" spelled vertically. Click to open.
 
-Follow the pattern of `client/app/api/health/route.ts` and `client/app/api/invoke/route.ts`:
+**Open state** (isOpen=true): 380px wide panel with tab bar + content scroll area.
 
-```typescript
-// client/app/api/feedback/route.ts
-export const dynamic = 'force-dynamic';
+**Documents tab** (`DocumentsTab`):
+- Flattens `Record<string, DocumentInfo[]>` → array of all docs
+- Renders cards with type icon from `DOC_TYPE_ICONS` map (10 doc types: sow, igce, market_research, acquisition_plan, justification, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification)
+- Shows doc type, word count, status badge (saved=green, template=amber)
 
-import { NextRequest, NextResponse } from 'next/server';
+**Activity tab** (`ActivityTab`):
+- Session ID badge (monospace, truncated)
+- Stats row: user/assistant message counts + pulsing "Streaming" indicator
+- Message timeline: user=blue-50 border-blue-100 / assistant=gray-50 border-gray-100
 
-export async function POST(req: NextRequest) {
-    const body = await req.json();
-    const fastapiUrl = process.env.FASTAPI_URL ?? 'http://localhost:8000';
-    const res = await fetch(`${fastapiUrl}/api/feedback`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: req.headers.get('Authorization') ?? '',
-        },
-        body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
-}
-```
+**Agent Logs tab**: renders `<AgentLogs logs={logs} />` — event count badge on tab + clear button in sub-header
 
-**Windows dev server caveat**: New `route.ts` files are not picked up by hot-reload on Windows. Restart `npm run dev` after creating any new `app/api/*/route.ts` file.
+**EAGLE design tokens used**:
+- Background: `#F5F7FA`, `bg-white`
+- Border: `#D8DEE6`
+- Primary text: `#003366`
+- Accent: `#2196F3` (copy button links)
+
+### Agent Logs (`components/chat-simple/agent-logs.tsx`)
+
+**Purpose**: Multi-agent stream timeline. Consumes `AuditLogEntry[]`, renders one card per non-reasoning event.
+
+**Key functions**:
+- `groupLogs(logs)` — filters out `type === 'reasoning'` events before render
+- `getEventContent(log)` — extracts preview string: tool call signature for `tool_use`, result snippet for `tool_result`, handoff target for `handoff`, truncated content for text/error
+- `formatEventType(type)` — human label: `text` → "Report", `tool_use` → "Tool Use", etc.
+- `getEventTypeBadge(type)` — Tailwind class string for event type badge color
+
+**Cards**: Agent-colored border+bg from `getAgentColors(log.agent_id)`. Shows agent icon circle, agent name, event type badge, timestamp, content preview (2-line clamp).
+
+**Auto-scroll**: `useEffect` on `filtered.length` scrolls the container to bottom on each new entry.
+
+**Empty state**: Gear icon + "No agent events yet." message.
+
+**LogDetailModal**: Fixed overlay (z-50), click-outside to close, Escape key to close.
+- Header: agent icon + name + event type badge
+- Toggle: Formatted / Raw JSON (active = `bg-[#003366] text-white`)
+- Raw JSON mode: copy-to-clipboard button
+- Formatted mode: type-specific layout (tool name + input for tool_use, name + result for tool_result, content for text/error, target+reason for handoff, metadata for complete)
+- Footer: log entry id + formatted timestamp
 
 ### Home Page (`/`)
 
@@ -811,7 +781,141 @@ The eval page (`/admin/eval`) uses a dark theme:
 
 ---
 
-## Part 8: Known Issues and Patterns
+## Part 8: Agent Color System (`client/lib/agent-colors.ts`)
+
+### Purpose
+
+Centralized per-agent color scheme registry. Used by `agent-logs.tsx`, `activity-panel.tsx`, and any future components that need to render agent-specific colors.
+
+### `AgentColorScheme` Interface
+
+```typescript
+export interface AgentColorScheme {
+  bg: string;       // e.g. 'bg-blue-50'
+  text: string;     // e.g. 'text-blue-700'
+  border: string;   // e.g. 'border-blue-200'
+  badge: string;    // e.g. 'bg-blue-100 text-blue-700'
+  icon: string;     // e.g. 'bg-blue-600'  (background for icon circle)
+  gradient: string; // e.g. 'from-blue-500 to-blue-600'
+}
+```
+
+### `AGENT_COLORS` Map (all registered agents)
+
+| Agent ID | Color | Role |
+|----------|-------|------|
+| `supervisor` | gray | Orchestration layer |
+| `oa-intake` | blue | Primary interaction |
+| `knowledge-retrieval` | green | RAG/search |
+| `document-generator` | purple | Document creation |
+| `eagle` | blue | Root agent (same as oa-intake) |
+| `legal-counsel` | rose | Strands specialist |
+| `market-intelligence` | teal | Strands specialist |
+| `tech-translator` | cyan | Strands specialist |
+| `policy-supervisor` | indigo | Strands specialist |
+| `policy-librarian` | emerald | Strands specialist |
+| `policy-analyst` | violet | Strands specialist |
+| `public-interest` | orange | Strands specialist |
+| `default` | amber | Fallback for unknown agents |
+
+### `AGENT_NAMES` Map
+
+Human-readable display names keyed by agent ID. Unknown IDs fall back to the raw ID string.
+
+### `AGENT_ICONS` Map
+
+Single-character icon letter for each agent (rendered in a colored circle):
+- `supervisor` → `S`, `eagle`/`oa-intake` → `E`, `knowledge-retrieval` → `K`, `document-generator` → `D`
+- `legal-counsel` → `L`, `market-intelligence` → `M`, `tech-translator` → `T`
+- `policy-supervisor` → `P`, `policy-librarian` → `B`, `policy-analyst` → `A`, `public-interest` → `I`
+
+### Helper Functions
+
+```typescript
+getAgentColors(agentId: string): AgentColorScheme  // falls back to 'default'
+getAgentName(agentId: string): string              // falls back to agentId
+getAgentIcon(agentId: string): string              // falls back to agentId.charAt(0).toUpperCase()
+```
+
+### Adding a New Agent
+
+When a new agent is added to `eagle-plugin/`, add entries to all three maps in `client/lib/agent-colors.ts`:
+1. `AGENT_COLORS['new-agent-id']` — choose an unused Tailwind color family
+2. `AGENT_NAMES['new-agent-id']` — human-readable name
+3. `AGENT_ICONS['new-agent-id']` — single uppercase letter (check for conflicts)
+
+---
+
+## Part 9: useAgentStream Hook (`client/hooks/use-agent-stream.ts`)
+
+### Return Shape
+
+```typescript
+export interface UseAgentStreamReturn {
+  sendQuery: (query: string, sessionId?: string) => Promise<void>;
+  isStreaming: boolean;
+  logs: AuditLogEntry[];        // all SSE events collected during session
+  lastMessage: Message | null;
+  lastDocument: DocumentInfo | null;
+  clearLogs: () => void;        // clears logs + resets message/document state
+  error: string | null;
+  addUserInputLog: (content: string) => void;   // echo user turn to logs
+  addFormSubmitLog: (formType: string, data: Record<string, unknown>, summary?: string) => void;
+}
+```
+
+### Log Entry Sources
+
+`logs` accumulates `AuditLogEntry` objects from three origins:
+1. **SSE events** — every parsed `StreamEvent` from the backend gets an `id: 'log-N'` prefix and is appended
+2. **`addUserInputLog(content)`** — called by `SimpleChatInterface.handleSend()` before `sendQuery()` to add a `type:'text'` entry with `agent_id:'user'`
+3. **`addFormSubmitLog(formType, data, summary?)`** — adds a `type:'metadata'` entry with `agent_id:'user'` for form submission events
+
+### AuditLogEntry Type
+
+`AuditLogEntry` extends `StreamEvent` with a required `id: string`. `StreamEvent` fields:
+
+```typescript
+{
+  type: StreamEventType;   // text|reasoning|tool_use|tool_result|elicitation|metadata|complete|error|handoff|user_input|form_submit
+  agent_id: string;
+  agent_name: string;
+  timestamp: string;       // ISO string
+  content?: string;
+  reasoning?: string;
+  tool_use?: { name, input, tool_use_id?, execution_target? };
+  tool_result?: { name, result };
+  elicitation?: { question, fields? };
+  metadata?: Record<string, any>;
+}
+```
+
+### Consuming logs in a component
+
+```typescript
+const { logs, clearLogs, addUserInputLog } = useAgentStream({ ... });
+
+// To pass to ActivityPanel:
+<ActivityPanel logs={logs} clearLogs={clearLogs} ... />
+
+// To echo user input before sendQuery:
+addUserInputLog(input);
+await sendQuery(query, sessionId);
+```
+
+### groupLogs() filter pattern
+
+Before rendering, filter out `reasoning` events to keep the log panel clean:
+
+```typescript
+function groupLogs(logs: AuditLogEntry[]): AuditLogEntry[] {
+  return logs.filter(l => (l.type as string) !== 'reasoning');
+}
+```
+
+---
+
+## Part 10: Known Issues and Patterns
 
 ### Registration Consistency
 
@@ -853,9 +957,13 @@ CloudWatch /eagle/test-runs
 - Debounced session saves (500ms timeout)
 - Backend health check via `/api/health` proxy route (30-second polling interval)
 - Full plugin slugs as SKILL_TEST_MAP keys (e.g., `'oa-intake'`, `'document-generator'`) matching eagle-plugin/ directory names
-- AI-bypass slash commands: intercept in `handleSend()` before `sendQuery()`, show status banner, `return` early — AI is never invoked (discovered: 2026-03-04, `/feedback` is canonical example)
-- `feedbackStatus` state machine (`idle` → `sending` → `done`/`error` → `idle` via 4 s setTimeout) for non-blocking status banners (discovered: 2026-03-04)
-- Forward `Authorization` header from Next.js proxy route to FastAPI when user token is needed (discovered: 2026-03-04)
+- Collapsible right panel pattern: open=380px, closed=32px strip (vertical label + arrow)
+- Agent color system centralized in `client/lib/agent-colors.ts` — all 12 agents registered
+- `groupLogs()` to filter reasoning events before rendering the Agent Logs tab
+- `addUserInputLog(input)` called in `handleSend()` so user turns appear in the agent log timeline
+- Activity panel default tab is `'logs'` — most useful tab on first open
+- LogDetailModal: Formatted/Raw JSON toggle, Escape key to close, click-outside to close
+- `useEffect` on `filtered.length` for auto-scroll-to-bottom in log timeline
 
 ### Patterns To Avoid
 
@@ -864,8 +972,8 @@ CloudWatch /eagle/test-runs
 - Don't forget to update both frontends when adding tests (HTML + Next.js)
 - Don't hardcode test counts in descriptions/labels (derive from data)
 - Don't use short diagram actor aliases (`intake`, `docgen`) as SKILL_TEST_MAP keys — use the full plugin slug
-- Don't test new `app/api/*/route.ts` files without restarting the dev server on Windows (hot-reload does not pick them up)
-- Don't test API routes with raw `curl` without `-L` when `trailingSlash: true` is set in `next.config.mjs` — browser fetch follows 308 automatically, curl does not
+- Don't add a new agent to eagle-plugin/ without updating `AGENT_COLORS`, `AGENT_NAMES`, and `AGENT_ICONS` in `agent-colors.ts`
+- Don't use the horizontal flex layout inside a `flex-col` parent without `min-w-0` on the flex-1 child — this causes overflow
 
 ### Common Issues
 
@@ -875,8 +983,8 @@ CloudWatch /eagle/test-runs
 - **API routes fail**: Eval page shows empty run selector, traces tab says "No test traces"
 - **SKILL_TEST_MAP missing key**: Eval modal "Test Traces" tab shows no results for that skill
 - **TEST_NAMES/TEST_DEFS out of sync**: New tests show raw IDs on Next.js page or are missing from HTML dashboard
-- **`idb` module not found (500 on compile)**: Run `npm install idb --save` in `client/` — the package is used for IndexedDB caching but may not be present in node_modules after a fresh clone or after dev server restart
-- **New API route returns 404 after creation**: Dev server must be restarted on Windows to pick up new `route.ts` files — hot-reload does not apply to new route file creation
+- **Unknown agent_id in logs**: Agent Logs renders with amber "default" color scheme — add to `agent-colors.ts`
+- **ActivityPanel not visible**: Verify parent has `flex` (horizontal) not `flex flex-col`; SimpleChatInterface wraps in `<div class="h-full flex">`
 
 ### Tips
 
@@ -886,7 +994,9 @@ CloudWatch /eagle/test-runs
 - The eval page's run selector prefers CloudWatch runs first, then local files
 - Dev mode auth (no Cognito) gives premium tier with admin role
 - `/api/health` proxies to FastAPI and returns 502 if backend is unreachable — useful for health indicator polling
-- When testing a new AI-bypass slash command, verify the AI is NOT called by confirming no request reaches `/api/invoke` or the streaming endpoint
+- Agent Logs tab shows event count badge — useful for confirming the stream is running
+- Click any event card in Agent Logs to open the LogDetailModal with full event details
+- Use "Raw JSON" toggle in LogDetailModal to inspect the full AuditLogEntry for debugging
 
 ---
 
@@ -902,16 +1012,20 @@ CloudWatch /eagle/test-runs
 - DynamoDB-backed test results page (`/admin/tests`) with run list → detail drill-down (discovered: 2026-03-04)
 - `encodeURIComponent(runId)` for URL-safe run_id in API calls (discovered: 2026-03-04)
 - Grouping test results by `test_file` in detail view improves readability (discovered: 2026-03-04)
-- AI-bypass slash commands (`/feedback`) short-circuit `handleSend()` before `sendQuery()` — clean separation of "send to AI" vs "send to API" (discovered: 2026-03-04)
-- `feedbackStatus` 4-state machine with setTimeout auto-reset keeps status banners self-cleaning (discovered: 2026-03-04)
+- 3-tab right panel (Documents/Activity/Agent Logs) as sibling of chat column in horizontal flex (discovered: 2026-03-04)
+- Collapsible panel: open=380px / closed=32px toggle strip with vertical label (discovered: 2026-03-04)
+- `groupLogs()` filtering reasoning events keeps Agent Logs tab readable during long streams (discovered: 2026-03-04)
+- `addUserInputLog()` called before `sendQuery()` ensures user turns appear as first entry in each log sequence (discovered: 2026-03-04)
+- LogDetailModal Formatted/Raw JSON toggle covers both human review and developer debugging in one modal (discovered: 2026-03-04)
+- Centralizing agent colors in `agent-colors.ts` with `getAgentColors()`/`getAgentName()`/`getAgentIcon()` helpers makes new agent onboarding a 3-line change (discovered: 2026-03-04)
 
 ### patterns_to_avoid
 - Don't rely on embedded data in HTML dashboard for production (use API)
 - Don't mix dark and light themes within a single page component
 - Don't use short diagram aliases (intake, docgen) as SKILL_TEST_MAP keys — they differ from plugin slugs
 - Don't forget `errors` field in TestRun interface — DynamoDB returns it alongside `failed`/`skipped` (discovered: 2026-03-04)
-- Don't create new `app/api/*/route.ts` files and test without restarting dev server on Windows (discovered: 2026-03-04)
-- Don't use raw `curl` to test API routes when `trailingSlash: true` without `-L` flag (discovered: 2026-03-04)
+- Don't add a new Strands agent without updating all three maps in `agent-colors.ts` — unknown agents render amber fallback color
+- Don't put `useEffect` network calls (e.g. health checks) inside components that mount on every page — use a shared context provider instead (discovered: 2026-03-05)
 
 ### common_issues
 - trace_logs.json must exist for /admin/tests to show data (legacy — new tests page uses DynamoDB)
@@ -920,7 +1034,8 @@ CloudWatch /eagle/test-runs
 - HTML dashboard TEST_DEFS lags behind TEST_NAMES when new UC tests are added — check both before reporting test count
 - `kb-review/[id]/approve` and `kb-review/[id]/reject` routes have TS errors: `params` should be `Promise<{ id: string }>` in Next.js 15+ (pre-existing)
 - `@excalidraw/excalidraw` module not found — optional dependency, not installed (pre-existing)
-- `idb` package missing from node_modules causes "Module not found" 500 on first compile — install with `npm install idb --save` (discovered: 2026-03-04)
+- ActivityPanel internal default tab is 'logs' — if you want a different default, change `useState<TabId>('logs')` in `activity-panel.tsx`
+- Navigation between protected pages feels slow: TopNav was re-mounting on every page (not in shared layout), firing checkBackendHealth() on each nav — fixed by BackendStatusContext (2026-03-05)
 
 ### tips
 - Use /admin/eval to demonstrate EAGLE workflow to stakeholders (10 use cases as of 2026-02-25)
@@ -929,4 +1044,5 @@ CloudWatch /eagle/test-runs
 - SKILL_TEST_MAP line numbers shift as USE_CASES array grows — always verify line numbers with grep before editing
 - Tests page now uses DynamoDB persistence — no more trace_logs.json dependency for pytest results
 - Run `pytest tests/ -v` to auto-persist results to DDB (controlled by `EAGLE_PERSIST_TEST_RESULTS` env var)
-- After creating any new `app/api/*/route.ts` file on Windows, restart `npm run dev` before testing
+- Agent Logs "Clear" button only appears when `logs.length > 0` and `activeTab === 'logs'`
+- The `addFormSubmitLog()` hook export is available but not yet wired to any form — use it to log intake form submissions to the Agent Logs tab

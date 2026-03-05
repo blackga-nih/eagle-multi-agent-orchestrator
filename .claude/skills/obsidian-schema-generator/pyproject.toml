@@ -1,0 +1,11 @@
+[project]
+name = "obsidian-vault-schema-generator"
+version = "1.0.0"
+description = "Generate schemas from Obsidian vaults for visualization and analysis"
+requires-python = ">=3.7"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+obsidian-schema = "vault_parser:main"

@@ -4,7 +4,7 @@ parent: "[[test/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, test, pytest, playwright, smoke, performance, cache]
-last_updated: 2026-03-04T18:00:00
+last_updated: 2026-03-05T08:46:00
 ---
 
 # Test Expertise (Complete Mental Model)
@@ -22,14 +22,16 @@ last_updated: 2026-03-04T18:00:00
 | `test_perf_simple_message.py` | 10 | Unit (mocked) | No | Full — mock DDB, Bedrock |
 | `test_chat_endpoints.py` | ~15 | Unit + integration | No | Partial — mock auth |
 | `test_test_result_persistence.py` | 18 | Unit (mocked) | No | Full — mock DDB, FastAPI TestClient |
-| `test_feedback_store.py` | — | Not yet written | No | Full — mock DDB (gap) |
-| `test_document_pipeline.py` | ~12 | Unit + integration | No | Partial — mock S3 |
+| `test_document_pipeline.py` | 26 | Unit + integration | No | Partial — mock S3, TestClient |
 | `test_strands_eval.py` | 38 | Integration + eval | Yes | None — real AWS |
 | `test_strands_poc.py` | 1 | Integration | Yes | None — real Bedrock |
 | `test_strands_multi_agent.py` | 3 | Integration | Yes | None — real Bedrock |
 | `test_strands_service_integration.py` | 2 | Integration | Yes | None — real Bedrock |
 | `test_bedrock_hello.py` | 4 | Integration | Yes | None — real Bedrock |
 | `test_bedrock_tools.py` | 1 | Integration | Yes | None — real Bedrock |
+| `test_compliance_matrix.py` | 38 | Unit (pure Python) | No | None — deterministic |
+| `test_feedback_store.py` | 15 | Unit (mocked) | No | Full — mock DDB |
+| `test_new_endpoints.py` | 30 | Unit (mocked) | No | Full — mock Bedrock, DDB |
 
 ### Infrastructure
 
@@ -53,6 +55,14 @@ last_updated: 2026-03-04T18:00:00
 | `uc-intake.spec.ts` | 1 | 90s | Yes | Real |
 | `uc-document.spec.ts` | 1 | 90s | Yes | Real |
 | `uc-far-search.spec.ts` | 1 | 90s | Yes | Real |
+| `admin-workspaces.spec.ts` | 9 | 30s | Yes | Real |
+| `admin-skills.spec.ts` | 11 | 30s | Yes | Real |
+| `admin-templates.spec.ts` | 8 | 30s | Yes | Real |
+| `keyboard-shortcuts.spec.ts` | ~10 | 30s | Yes | Real |
+| `chat-features.spec.ts` | ~13 | 30s | Yes | Real |
+| `uc-micro-purchase.spec.ts` | 3 | 90s | Yes | Real |
+| `uc-option-exercise.spec.ts` | 3 | 90s | Yes | Real |
+| `uc-contract-modification.spec.ts` | 3 | 90s | Yes | Real |
 
 ---
 
@@ -160,9 +170,56 @@ def test_endpoint():
     assert resp.json()["status"] == "healthy"
 ```
 
+### Pattern 8: Eval DynamoDB Persistence
+
+Eval runs now auto-persist to DynamoDB alongside pytest results (trigger: "eval").
+
+```python
+# In test_strands_eval.py main(), after CloudWatch emit:
+from app.test_result_store import save_test_run, save_test_result
+
+save_test_run(run_id, {
+    "timestamp": iso_ts, "total": N, "passed": P, "failed": F,
+    "skipped": S, "errors": 0, "duration_s": 0,
+    "pass_rate": rate, "model": MODEL_ID,
+    "trigger": "eval",                     # <-- distinguishes from pytest
+    "hostname": socket.gethostname(),
+})
+
+# Per-test results use eval:: prefix for nodeids:
+save_test_result(run_id, f"eval::{test_name}", {
+    "test_file": "test_strands_eval.py",
+    "test_name": test_name,
+    "status": "passed" | "failed" | "skipped",
+    "duration_s": 0,
+    "error": error_text,
+})
+```
+
+### Pattern 9: Pure Python Unit Test (No Mocks Needed)
+
+Used for deterministic modules like `compliance_matrix.py`.
+
+```python
+class TestGetRequirements:
+    def test_threshold_logic(self):
+        from app.compliance_matrix import get_requirements
+        result = get_requirements(value=500_000, contract_type="FFP", method="sealed_bid")
+        assert result["threshold_category"] == "SAT"
+        assert "FAR 14" in str(result["applicable_far_parts"])
+```
+
+### Pattern 10: UC Test Registry Cross-Reference
+
+Tests tagged to use cases via `.claude/specs/uc-test-registry.md`. Each UC requires coverage across 4 suites:
+- **Pytest**: deterministic unit tests ($0, <60s)
+- **Eval**: LLM integration tests (~$0.50/test, standalone CLI)
+- **Playwright**: automated E2E browser tests ($0, 1-5min)
+- **MCP Browser**: Claude-driven QA tests ($0, manual trigger)
+
 ---
 
-## Part 3: Key Coverage Gaps (as of 2026-03-03)
+## Part 3: Key Coverage Gaps (as of 2026-03-04)
 
 ### Fast-Path (Trivial Message Detection)
 
@@ -198,23 +255,19 @@ def test_endpoint():
 | Workspace override changes supervisor prompt | Overrides silently ignored | MEDIUM |
 | Prompt injection via tenant_id/user_id | Security | LOW |
 
-### Document Versioning
+### Document Export
 
-| Gap | Risk | Priority |
-|-----|------|----------|
-| Version increment on re-generation | Overwritten documents | HIGH |
-| Naming convention compliance | Inconsistent artifact names | MEDIUM |
-| Export returns latest version | Wrong version downloaded | MEDIUM |
-
-### Feedback Store (NEW — 2026-03-04)
-
-| Gap | Risk | Priority |
-|-----|------|----------|
-| `write_feedback()` DDB put_item failure handling | Unhandled ClientError crashes endpoint | HIGH |
-| `_detect_feedback_type()` keyword ordering (first match wins) | Wrong type if multiple keyword sets match | MEDIUM |
-| `POST /api/feedback` with empty `feedback_text` → 400 | Validated manually, not in pytest | MEDIUM |
-| Conversation snapshot serialisation (non-serialisable types) | `json.dumps(default=str)` silently truncates data | LOW |
-| CloudWatch log fetch timeout | `filter_log_events` hangs → slow feedback submit | LOW |
+| Gap | Risk | Priority | Status |
+|-----|------|----------|--------|
+| ~~DOCX checkbox ordering bug~~ | Checkboxes render as bullets | HIGH | **FIXED 2026-03-05** |
+| ~~PDF numbered lists lose numbers~~ | List items render without numbering | HIGH | **FIXED 2026-03-05** |
+| ~~PDF missing checkbox handling~~ | Checkboxes fall through to bullets | MEDIUM | **FIXED 2026-03-05** |
+| ~~PDF missing blockquote handling~~ | Blockquotes render as plain text | MEDIUM | **FIXED 2026-03-05** |
+| Export format visual quality (DOCX+PDF) | No branding, plain headers/tables | MEDIUM | **FIXED 2026-03-05** — NCI branding added |
+| Version increment on re-generation | Overwritten documents | HIGH | Open |
+| Naming convention compliance | Inconsistent artifact names | MEDIUM | Open |
+| Export returns latest version | Wrong version downloaded | MEDIUM | Open |
+| Export unit test for checkbox/blockquote output | Bugs could regress without specific assertions | MEDIUM | Open |
 
 ---
 
@@ -273,9 +326,13 @@ cd client && npx tsc --noEmit
 - `_re.IGNORECASE` with anchored regex (`^...$`) for message classification
 - `mock.patch()` context managers for clean test isolation
 - Import inside test methods to avoid module-level AWS client initialization
-- **Bowser QA agent for slash-command intercept testing**: send `/feedback <text>`, assert no AI response rendered, assert confirmation banner present — reliable for "bypass AI" flow validation (discovered: 2026-03-04, component: feedback-slash-command)
-- **DynamoDB smoke test via AWS CLI**: `aws dynamodb query --key-condition-expression "PK = :pk"` with dev-tenant PK to verify real writes end-to-end without a pytest fixture (discovered: 2026-03-04)
-- **Next.js proxy route pattern** (`client/app/api/<name>/route.ts`): POST handler forwards headers + body to `FASTAPI_URL`, returns `NextResponse.json(data, { status })` — consistent with health/invoke routes
+- Pure Python tests (no mocks) for deterministic modules like `compliance_matrix.py` — 38 tests, zero AWS cost (discovered: 2026-03-04)
+- Eval DDB persistence via `save_test_run(trigger="eval")` — unified admin dashboard for both suites (discovered: 2026-03-04)
+- UC test registry (`.claude/specs/uc-test-registry.md`) maps use cases → tests across all 4 suites (discovered: 2026-03-04)
+- Direct import from `app.compliance_matrix` in eval tests avoids relative import failure in standalone mode (discovered: 2026-03-04)
+- Trigger badge pattern (eval=purple, pytest=blue) for visual suite differentiation in admin UI (discovered: 2026-03-04)
+- Markdown parser elif ordering matters: checkbox patterns (`- [ ] `) must come before bullet patterns (`- `) since checkbox strings start with `- ` (discovered: 2026-03-05, component: document_export)
+- Existing export tests pass after full rewrite because they assert on HTTP status/content-type/non-empty body, not on internal formatting — resilient test design (discovered: 2026-03-05)
 
 ### patterns_to_avoid
 
@@ -284,6 +341,7 @@ cd client && npx tsc --noEmit
 - Using `asyncio.to_thread` assertions when code was changed to `invoke_async`
 - Running full eval suite (`test_strands_eval.py`) during unit test passes — costs money
 - Using `import tests.conftest` — `tests/` is not a Python package; use `importlib.util.spec_from_file_location()` instead
+- Putting more-specific `startswith()` checks after less-specific ones in elif chains — e.g. `- [ ] ` must be checked before `- ` (discovered: 2026-03-05, component: document_export)
 
 ### common_issues
 
@@ -291,10 +349,6 @@ cd client && npx tsc --noEmit
 - `.pyc` cache staleness: clear with `python -c "import shutil, pathlib; [shutil.rmtree(p) for p in pathlib.Path('.').rglob('__pycache__')]"`
 - Port 8000 still bound after kill on Windows: use alternate port or `taskkill //PID N //F`
 - Strands `modelStreamErrorException`: transient Bedrock error, not a test bug
-- **Next.js dev server hangs after force-kill on Windows**: `.next/trace` file stays locked; solution is to kill all node processes, wait for lock release, then restart — `npm run dev` via PowerShell `Start-Process` is more reliable than MINGW64 background `&`
-- **`idb` package missing from node_modules**: was gitignored or never installed; `npm install idb --save` + server restart resolves the "Module not found" 500 error
-- **DynamoDB tenant_id mismatch in dev mode**: dev mode uses `DEV_TENANT_ID=dev-tenant` (not `nci`); query with `PK = "FEEDBACK#dev-tenant"` to find records
-- **AWS SSO token expiry mid-session**: `botocore.exceptions.TokenRetrievalError` → `aws sso login --profile eagle` to refresh; non-fatal for frontend but fails DDB writes
 
 ### tips
 
@@ -306,7 +360,5 @@ cd client && npx tsc --noEmit
 - Disable persistence with `EAGLE_PERSIST_TEST_RESULTS=false` for CI or local-only runs
 - API endpoints: `GET /api/admin/test-runs` (list) and `GET /api/admin/test-runs/{run_id}` (detail)
 - Admin test viewer at `/admin/tests` — run history with drill-down into individual results
-- **Slash-command intercept testing**: use bowser QA agent, not pytest — browser-level assertion of "no AI response rendered + banner visible" is the right layer for UI-intercept verification
-- **Feedback store unit test template**: mock `_get_table()` → `put_item`, call `write_feedback(...)`, assert `put_item.call_args` contains correct PK/SK/feedback_type; test `_detect_feedback_type` directly with keyword strings
-- **DynamoDB write verification without a test**: `aws dynamodb query --key-condition-expression "PK = :pk" --expression-attribute-values '{":pk":{"S":"FEEDBACK#dev-tenant"}}'` is the fastest smoke check
-- **`trailingSlash: true` + Next.js API routes**: POST to `/api/foo` gets 308-redirected to `/api/foo/`; browser `fetch` follows automatically, but `curl` requires `-L`; Next.js App Router route files handle both with/without slash at runtime
+- `document_export.py` rewrite-safe: existing tests assert on HTTP status + content-type + non-empty body, so internal formatting changes pass without test updates
+- New coverage gap: no test asserts checkbox `☐`/`☑` or blockquote content in DOCX/PDF output — add targeted export assertions to prevent regression
