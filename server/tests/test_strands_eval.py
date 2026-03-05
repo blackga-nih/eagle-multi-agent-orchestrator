@@ -51,9 +51,9 @@ except ImportError:
 
 _parser = argparse.ArgumentParser(description="EAGLE Strands Evaluation Suite")
 _parser.add_argument(
-    "--model", default="us.amazon.nova-pro-v1:0",
+    "--model", default="us.anthropic.claude-3-5-haiku-20241022-v1:0",
     help="Override Bedrock model ID for ALL test invocations "
-         "(default: us.amazon.nova-pro-v1:0).",
+         "(default: us.anthropic.claude-3-5-haiku-20241022-v1:0).",
 )
 _parser.add_argument(
     "--async", dest="run_async", action="store_true",
@@ -128,6 +128,7 @@ OA_INTAKE_SKILL = SKILL_CONSTANTS.get("oa-intake", "")
 
 # Module-level store: test_id -> trace JSON from StrandsResultCollector.to_trace_json()
 _test_traces: dict[int, list] = {}
+_test_video_paths: dict[int, str] = {}
 # Module-level store: test_id -> StrandsResultCollector.summary() dict
 _test_summaries: dict[int, dict] = {}
 
@@ -3124,6 +3125,14 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
     capture.start_test(test_id)
     new_session_id = None
 
+    # Start browser recording (if recorder available and test has a prompt)
+    rec_ctx = None
+    if recorder and hasattr(recorder, "has_recording") and recorder.has_recording(test_id):
+        try:
+            rec_ctx = await recorder.begin_test(test_id)
+        except Exception as rec_err:
+            print(f"  [recorder] begin_test failed: {rec_err}")
+
     try:
         if test_id == 1:
             passed, new_session_id = await test_fn()
@@ -3137,6 +3146,16 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         import traceback
         traceback.print_exc()
         result_val = False
+
+    # Finalize browser recording
+    if rec_ctx:
+        try:
+            await recorder.wait_for_response(rec_ctx)
+            video_path = await recorder.end_test(rec_ctx)
+            if video_path:
+                _test_video_paths[test_id] = video_path
+        except Exception as rec_err:
+            print(f"  [recorder] end_test failed: {rec_err}")
 
     # Auto-capture full conversation trace and summary from the latest StrandsResultCollector
     if StrandsResultCollector._latest is not None:
@@ -3321,6 +3340,8 @@ async def main():
         }
         if test_id in _test_traces:
             test_entry["trace"] = _test_traces[test_id]
+        if test_id in _test_video_paths:
+            test_entry["video"] = _test_video_paths[test_id]
         trace_output["results"][str(test_id)] = test_entry
 
     _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

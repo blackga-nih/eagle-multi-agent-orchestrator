@@ -260,25 +260,34 @@ class BrowserRecorder:
         )
         page = await context.new_page()
 
-        print(f"  [recorder] Recording test {test_id} → {self.base_url} (chat)")
+        chat_url = f"{self.base_url}/chat/"
+        print(f"  [recorder] Recording test {test_id} → {chat_url}")
 
-        await page.goto(self.base_url, wait_until="networkidle")
+        await page.goto(chat_url, wait_until="networkidle", timeout=30000)
+
+        # Handle auth redirect
+        await page.wait_for_timeout(2000)
+        if "/login" in page.url:
+            print(f"  [recorder] Auth redirect — skipping test {test_id}")
+            await context.close()
+            return None
+
+        # Click "New Chat" if visible to ensure a fresh session
+        new_chat_btn = page.get_by_role("button", name="New Chat")
+        try:
+            await new_chat_btn.click(timeout=5000)
+            await page.wait_for_timeout(1000)
+        except Exception:
+            pass  # Already on fresh chat or button not present
 
         # Wait for the chat textarea to appear
-        try:
-            await page.wait_for_selector("textarea", state="visible", timeout=15000)
-        except Exception:
-            await page.wait_for_timeout(3000)
-            if "/login" in page.url:
-                print(f"  [recorder] Auth redirect — skipping test {test_id}")
-                await context.close()
-                return None
+        textarea = page.locator("textarea")
+        await textarea.wait_for(state="visible", timeout=30000)
 
         # Brief pause so the page is visually settled for the video
         await page.wait_for_timeout(1000)
 
         # Type the prompt into the chat textarea
-        textarea = page.locator("textarea")
         await textarea.fill(prompt)
         await page.wait_for_timeout(500)
 
