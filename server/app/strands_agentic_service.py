@@ -112,19 +112,39 @@ class QueueCallbackHandler:
             pass
 
 
+# -- Model Selection -------------------------------------------------
+# If EAGLE_BEDROCK_MODEL_ID is explicitly set, use it.
+# Otherwise, default to Sonnet 4.6 on the NCI account (695681773636)
+# and Haiku 4.5 on any other account (personal dev, CI, etc.).
+
+_NCI_ACCOUNT = "695681773636"
+_SONNET = "us.anthropic.claude-sonnet-4-6"
+_HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+
+def _default_model() -> str:
+    if os.getenv("EAGLE_BEDROCK_MODEL_ID"):
+        return os.getenv("EAGLE_BEDROCK_MODEL_ID")
+    try:
+        import boto3
+        account = boto3.client("sts").get_caller_identity()["Account"]
+        return _SONNET if account == _NCI_ACCOUNT else _HAIKU
+    except Exception:
+        return _HAIKU
+
+
+MODEL = _default_model()
+logger.info("EAGLE model: %s", MODEL)
+
+
 # -- Shared Model (module-level) -------------------------------------
 # Created once at import time. Reused across all requests.
 # boto3 handles SSO/IAM natively — no credential bridging needed.
 
 _model = BedrockModel(
-    model_id=os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6"),
+    model_id=MODEL,
     region_name=os.getenv("AWS_REGION", "us-east-1"),
 )
-
-
-# -- Configuration ---------------------------------------------------
-
-MODEL = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
 # Note: Strands subagents don't use CLI tools like Read/Glob/Grep.
