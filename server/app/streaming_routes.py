@@ -26,7 +26,8 @@ from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWrite
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
 from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGLE_TOOLS
-from .session_store import add_message
+from .session_store import add_message, record_usage
+from .admin_service import record_request_cost, calculate_cost
 from .telemetry.log_context import set_log_context
 
 import os
@@ -53,9 +54,13 @@ async def stream_generator(
       4. tool_use events → TOOL_USE SSE events.
       5. complete/error → COMPLETE/ERROR SSE event.
     """
+    import time as _time
+    request_start = _time.time()
+
     writer = MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
     sse_queue: asyncio.Queue[str] = asyncio.Queue()
     full_response_parts: list[str] = []
+    tools_called: list[str] = []
 
     # Persist user message to DynamoDB so conversation history works on next turn
     if session_id:
@@ -82,15 +87,38 @@ async def stream_generator(
             session_id=session_id,
             messages=messages,
         )
-        aiter = gen.__aiter__()
-        while True:
+
+        # Fetch the next chunk as a cancellation-safe Task.
+        # asyncio.wait_for cancels the coroutine on timeout, which would close
+        # the async generator and discard all post-tool text.  By wrapping each
+        # __anext__ in a Task and shielding it, the timeout only cancels the
+        # shield wrapper — the underlying task keeps running.  On the next loop
+        # iteration we re-shield the same task, so we never lose a chunk.
+        async def _safe_next() -> tuple[dict, bool]:
+            """Return (chunk, done=False) or ({}, done=True) on exhaustion."""
             try:
-                chunk = await asyncio.wait_for(aiter.__anext__(), timeout=KEEPALIVE_INTERVAL)
-                yield chunk
-            except asyncio.TimeoutError:
-                yield {"type": "_keepalive"}
+                return await gen.__anext__(), False
             except StopAsyncIteration:
-                break
+                return {}, True
+
+        next_task: asyncio.Task = asyncio.ensure_future(_safe_next())
+        try:
+            while True:
+                try:
+                    chunk, done = await asyncio.wait_for(
+                        asyncio.shield(next_task), timeout=KEEPALIVE_INTERVAL
+                    )
+                    if done:
+                        break
+                    yield chunk
+                    next_task = asyncio.ensure_future(_safe_next())
+                except asyncio.TimeoutError:
+                    # Generator is still running (e.g. waiting for a subagent tool).
+                    # Send a keepalive comment and loop back to await the same task.
+                    yield {"type": "_keepalive"}
+        finally:
+            if not next_task.done():
+                next_task.cancel()
 
     try:
         async for chunk in _sdk_with_keepalive():
@@ -105,7 +133,10 @@ async def stream_generator(
                 yield await sse_queue.get()
 
             elif chunk_type == "tool_use":
-                await writer.write_tool_use(sse_queue, chunk.get("name", ""), {})
+                tool_name = chunk.get("name", "")
+                if tool_name:
+                    tools_called.append(tool_name)
+                await writer.write_tool_use(sse_queue, tool_name, {})
                 yield await sse_queue.get()
 
             elif chunk_type == "tool_result":
@@ -124,6 +155,41 @@ async def stream_generator(
                         await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
                     except Exception:
                         logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
+
+                # ── Telemetry: record usage + cost ──
+                elapsed_ms = int((_time.time() - request_start) * 1000)
+                usage = chunk.get("usage", {})
+                chunk_tools = chunk.get("tools_called", tools_called)
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
+                try:
+                    cost = calculate_cost(input_tokens, output_tokens)
+                    await asyncio.to_thread(
+                        record_usage, session_id or "", tenant_id, user_id,
+                        input_tokens, output_tokens, MODEL, cost,
+                    )
+                    await asyncio.to_thread(
+                        record_request_cost, tenant_id, user_id, session_id or "",
+                        input_tokens, output_tokens,
+                        model=MODEL, tools_used=chunk_tools, response_time_ms=elapsed_ms,
+                    )
+                    logger.info(json.dumps({
+                        "event": "chat_request",
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "endpoint": "sse",
+                        "tokens_in": input_tokens,
+                        "tokens_out": output_tokens,
+                        "cost_usd": cost,
+                        "tools_called": chunk_tools,
+                        "response_time_ms": elapsed_ms,
+                        "model": MODEL,
+                        "cycle_count": usage.get("cycle_count", 0),
+                    }, default=str))
+                except Exception:
+                    logger.warning("Telemetry emit failed for session=%s: %s", session_id, "see traceback", exc_info=True)
+
                 await writer.write_complete(sse_queue)
                 yield await sse_queue.get()
                 return
@@ -140,6 +206,29 @@ async def stream_generator(
                 await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
             except Exception:
                 logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
+
+        # ── Telemetry: fallback path ──
+        elapsed_ms = int((_time.time() - request_start) * 1000)
+        try:
+            await asyncio.to_thread(
+                record_usage, session_id or "", tenant_id, user_id, 0, 0, MODEL, 0.0,
+            )
+            logger.info(json.dumps({
+                "event": "chat_request",
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "session_id": session_id,
+                "endpoint": "sse",
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "cost_usd": 0.0,
+                "tools_called": tools_called,
+                "response_time_ms": elapsed_ms,
+                "model": MODEL,
+            }, default=str))
+        except Exception:
+            logger.warning("Telemetry emit failed (fallback) for session=%s", session_id, exc_info=True)
+
         await writer.write_complete(sse_queue)
         yield await sse_queue.get()
 
