@@ -98,8 +98,19 @@ from .package_store import (
     get_package_checklist, submit_package, approve_package, close_package,
 )
 from .document_store import (
-    create_document as create_acq_document, get_document,
-    finalize_document, list_package_documents, get_document_history,
+    get_document,
+    list_package_documents,
+    get_document_history,
+)
+from .document_service import (
+    create_package_document_version,
+    get_document_download_url,
+    finalize_document as finalize_document_version,
+)
+from .package_context_service import (
+    clear_active_package,
+    resolve_context,
+    set_active_package,
 )
 from .approval_store import (
     create_approval_chain, list_approval_chain,
@@ -182,6 +193,7 @@ def get_session_context(user: UserContext, session_id: Optional[str] = None) -> 
 class EagleChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    package_id: Optional[str] = None
 
 
 class EagleChatResponse(BaseModel):
@@ -223,6 +235,25 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
     if USE_PERSISTENT_SESSIONS:
         add_message(session_id, "user", req.message, tenant_id, user_id)
 
+    resolved_package_context = None
+    try:
+        resolved_package_context = resolve_context(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            explicit_package_id=req.package_id,
+        )
+        if req.package_id and resolved_package_context.is_package_mode:
+            set_active_package(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+                package_id=resolved_package_context.package_id,
+            )
+    except Exception:
+        logger.warning("Package context resolution failed for REST chat", exc_info=True)
+        resolved_package_context = None
+
     try:
         _text_parts: list[str] = []
         _usage: dict = {}
@@ -236,6 +267,7 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
             tier=user.tier or "advanced",
             session_id=session_id,
             messages=messages[:-1],  # History excluding current user message
+            package_context=resolved_package_context,
         ):
             _msg_type = type(_sdk_msg).__name__
             if _msg_type == "AssistantMessage":
@@ -2113,6 +2145,11 @@ async def approve_package_endpoint(
 
 # ── Acquisition Documents (DOCUMENT#) ─────────────────────────────
 
+class ResolvePackageContextRequest(BaseModel):
+    session_id: str
+    package_id: Optional[str] = None
+    action: Optional[str] = None  # "set" | "clear" | None
+
 @app.get("/api/packages/{package_id}/documents")
 async def list_documents_endpoint(
     package_id: str,
@@ -2122,28 +2159,98 @@ async def list_documents_endpoint(
     return list_package_documents(user.tenant_id, package_id)
 
 
+@app.post("/api/packages/resolve-context")
+async def resolve_package_context_endpoint(
+    body: ResolvePackageContextRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Resolve and optionally persist active package context for a session."""
+    if body.action == "clear":
+        clear_active_package(user.tenant_id, user.user_id, body.session_id)
+        return {"mode": "workspace", "package_id": None}
+
+    if body.package_id and body.action in (None, "set"):
+        set_active_package(
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+            session_id=body.session_id,
+            package_id=body.package_id,
+        )
+
+    ctx = resolve_context(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        session_id=body.session_id,
+        explicit_package_id=body.package_id,
+    )
+    return {
+        "mode": ctx.mode,
+        "package_id": ctx.package_id,
+        "package_title": ctx.package_title,
+        "acquisition_pathway": ctx.acquisition_pathway,
+        "required_documents": ctx.required_documents or [],
+        "completed_documents": ctx.completed_documents or [],
+    }
+
+
 @app.post("/api/packages/{package_id}/documents")
 async def create_document_endpoint(
     package_id: str,
     body: Dict[str, Any],
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Save a generated document for a package (auto-supersedes previous version)."""
-    doc = create_acq_document(
+    """Save a generated document for a package using canonical document service."""
+    result = create_package_document_version(
         tenant_id=user.tenant_id,
         package_id=package_id,
         doc_type=body["doc_type"],
         content=body["content"],
-        generated_by=user.user_id,
+        title=body.get("title") or body["doc_type"].replace("_", " ").title(),
+        file_type=body.get("file_type", "md"),
+        created_by_user_id=user.user_id,
         session_id=body.get("session_id"),
+        change_source=body.get("change_source", "user_edit"),
         template_id=body.get("template_id"),
     )
-    # Mark doc_type as completed on package
-    pkg = get_package(user.tenant_id, package_id)
-    if pkg:
-        completed = list(set(pkg.get("completed_documents", []) + [body["doc_type"]]))
-        update_package(user.tenant_id, package_id, {"completed_documents": completed})
-    return doc
+    if not result.success:
+        status = 404 if result.error and "not found" in result.error.lower() else 500
+        raise HTTPException(status_code=status, detail=result.error or "Document creation failed")
+
+    doc = get_document(user.tenant_id, package_id, body["doc_type"], result.version)
+    if doc:
+        return doc
+    return result.to_dict()
+
+
+@app.get("/api/packages/{package_id}/documents/{doc_type}/history")
+async def get_document_history_endpoint(
+    package_id: str,
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return version history for a package document type."""
+    return get_document_history(user.tenant_id, package_id, doc_type)
+
+
+@app.get("/api/packages/{package_id}/documents/{doc_type}/versions/{version}/download-url")
+async def get_document_download_url_endpoint(
+    package_id: str,
+    doc_type: str,
+    version: int,
+    expires_in: int = 3600,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return a presigned download URL for a specific document version."""
+    url = get_document_download_url(
+        tenant_id=user.tenant_id,
+        package_id=package_id,
+        doc_type=doc_type,
+        version=version,
+        expires_in=expires_in,
+    )
+    if not url:
+        raise HTTPException(status_code=404, detail="Document download URL unavailable")
+    return {"download_url": url, "expires_in": expires_in}
 
 
 @app.get("/api/packages/{package_id}/documents/{doc_type}")
@@ -2167,8 +2274,27 @@ async def finalize_document_endpoint(
     body: Dict[str, Any],
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Mark a document as final."""
-    doc = finalize_document(user.tenant_id, package_id, doc_type, body.get("version", 1))
+    """Mark a document version as final."""
+    doc = finalize_document_version(
+        user.tenant_id,
+        package_id,
+        doc_type,
+        body.get("version", 1),
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@app.post("/api/packages/{package_id}/documents/{doc_type}/versions/{version}/promote-final")
+async def promote_document_final_endpoint(
+    package_id: str,
+    doc_type: str,
+    version: int,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Promote a specific document version to final status."""
+    doc = finalize_document_version(user.tenant_id, package_id, doc_type, version)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc

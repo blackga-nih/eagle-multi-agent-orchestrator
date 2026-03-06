@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -162,6 +163,187 @@ TIER_BUDGETS = {
     "advanced": 0.25,
     "premium": 0.75,
 }
+
+# Fast-path document generation for explicit "generate document" requests.
+# This avoids long multi-tool loops for straightforward document creation asks.
+_DOC_TYPE_HINTS: list[tuple[str, list[str]]] = [
+    ("sow", ["statement of work", " sow"]),
+    ("igce", ["igce", "independent government cost estimate", "cost estimate"]),
+    ("market_research", ["market research"]),
+    ("acquisition_plan", ["acquisition plan"]),
+    ("justification", ["justification", "j&a", "j and a", "sole source"]),
+    ("eval_criteria", ["evaluation criteria", "eval criteria"]),
+    ("security_checklist", ["security checklist"]),
+    ("section_508", ["section 508", "508 compliance"]),
+    ("cor_certification", ["cor certification"]),
+    ("contract_type_justification", ["contract type justification"]),
+]
+_DOC_TYPE_LABELS: dict[str, str] = {
+    "sow": "Statement of Work",
+    "igce": "Independent Government Cost Estimate",
+    "market_research": "Market Research",
+    "acquisition_plan": "Acquisition Plan",
+    "justification": "Justification & Approval",
+    "eval_criteria": "Evaluation Criteria",
+    "security_checklist": "Security Checklist",
+    "section_508": "Section 508 Compliance",
+    "cor_certification": "COR Certification",
+    "contract_type_justification": "Contract Type Justification",
+}
+_DIRECT_DOC_VERBS = ("generate", "draft", "create", "write", "produce")
+_SLOW_PATH_HINTS = ("research", "far", "dfars", "policy", "compare", "analyze")
+_DOC_REQUEST_BLOCKERS = (
+    "what is",
+    "what's",
+    "how do i",
+    "how to",
+    "explain",
+    "difference between",
+)
+
+
+def _normalize_prompt(prompt: str) -> str:
+    return re.sub(r"\s+", " ", prompt.strip().lower())
+
+
+def _infer_doc_type_from_prompt(prompt: str) -> str | None:
+    lowered = f" {_normalize_prompt(prompt)} "
+    for doc_type, hints in _DOC_TYPE_HINTS:
+        if any(hint in lowered for hint in hints):
+            return doc_type
+    return None
+
+
+def _is_document_generation_request(prompt: str) -> tuple[bool, str | None]:
+    lowered = _normalize_prompt(prompt)
+    doc_type = _infer_doc_type_from_prompt(prompt)
+    if not doc_type:
+        return False, None
+    if any(lowered.startswith(blocker) for blocker in _DOC_REQUEST_BLOCKERS):
+        return False, None
+    if any(v in lowered for v in _DIRECT_DOC_VERBS):
+        return True, doc_type
+
+    phrase = _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ")).lower()
+    if lowered.startswith(phrase):
+        return True, doc_type
+    if re.search(rf"\b(need|want|please)\b.*\b{re.escape(phrase)}\b", lowered):
+        return True, doc_type
+
+    return False, None
+
+
+def _should_use_fast_document_path(prompt: str) -> tuple[bool, str | None]:
+    should_generate, doc_type = _is_document_generation_request(prompt)
+    if not should_generate or not doc_type:
+        return False, None
+
+    lowered = _normalize_prompt(prompt)
+    if any(h in lowered for h in _SLOW_PATH_HINTS):
+        return False, None
+    return True, doc_type
+
+
+def _fast_path_title(prompt: str, doc_type: str) -> str:
+    return _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ").title())
+
+
+def _build_scoped_session_id(
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+) -> str:
+    if session_id and "#" in session_id:
+        return session_id
+    return f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
+
+
+async def _maybe_fast_path_document_generation(
+    prompt: str,
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    package_context: Any = None,
+) -> dict | None:
+    should_fast_path, doc_type = _should_use_fast_document_path(prompt)
+    if not should_fast_path or not doc_type:
+        return None
+
+    from .agentic_service import _exec_create_document
+
+    params: dict[str, Any] = {
+        "doc_type": doc_type,
+        "title": _fast_path_title(prompt, doc_type),
+    }
+    if (
+        package_context is not None
+        and getattr(package_context, "is_package_mode", False)
+        and getattr(package_context, "package_id", None)
+    ):
+        params["package_id"] = package_context.package_id
+
+    scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
+    result = await asyncio.to_thread(
+        _exec_create_document,
+        params,
+        tenant_id,
+        scoped_session_id,
+    )
+    return {
+        "doc_type": doc_type,
+        "result": result,
+    }
+
+
+async def _ensure_create_document_for_direct_request(
+    prompt: str,
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    package_context: Any,
+    tools_called: list[str],
+) -> dict | None:
+    """Force a create_document call for direct doc requests that missed the tool.
+
+    This reconciles cases where the model produced inline draft content without
+    invoking create_document, which breaks document-card/editing UX.
+    """
+    should_generate, doc_type = _is_document_generation_request(prompt)
+    if not should_generate or not doc_type or "create_document" in tools_called:
+        return None
+
+    from .agentic_service import _exec_create_document
+
+    params: dict[str, Any] = {
+        "doc_type": doc_type,
+        "title": _fast_path_title(prompt, doc_type),
+    }
+    if (
+        package_context is not None
+        and getattr(package_context, "is_package_mode", False)
+        and getattr(package_context, "package_id", None)
+    ):
+        params["package_id"] = package_context.package_id
+
+    scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
+    result = await asyncio.to_thread(
+        _exec_create_document,
+        params,
+        tenant_id,
+        scoped_session_id,
+    )
+    if isinstance(result, dict) and result.get("error"):
+        logger.warning(
+            "Forced create_document failed for prompt='%s': %s",
+            prompt[:160],
+            result.get("error"),
+        )
+        return None
+
+    return {
+        "doc_type": doc_type,
+        "result": result,
+    }
 
 # -- Tool Schemas (for health/status endpoints) -------------------------
 # These are the Anthropic tool_use format schemas used by main.py and
@@ -514,6 +696,7 @@ def _make_service_tool(
     tenant_id: str,
     user_id: str,
     session_id: str | None,
+    package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
 ):
@@ -543,6 +726,14 @@ def _make_service_tool(
         """Placeholder docstring replaced below."""
         parsed = json.loads(params) if isinstance(params, str) else params
         try:
+            if (
+                tool_name == "create_document"
+                and package_context is not None
+                and getattr(package_context, "is_package_mode", False)
+                and getattr(package_context, "package_id", None)
+            ):
+                parsed.setdefault("package_id", package_context.package_id)
+
             if tool_name in TOOLS_NEEDING_SESSION:
                 result = handler(parsed, tenant_id, scoped_session_id)
             else:
@@ -626,13 +817,25 @@ def _build_service_tools(
     tenant_id: str,
     user_id: str,
     session_id: str | None,
+    package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
     """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session."""
     tools = []
     for name, desc in _SERVICE_TOOL_DEFS.items():
-        tools.append(_make_service_tool(name, desc, tenant_id, user_id, session_id, result_queue, loop))
+        tools.append(
+            _make_service_tool(
+                name,
+                desc,
+                tenant_id,
+                user_id,
+                session_id,
+                package_context,
+                result_queue,
+                loop,
+            )
+        )
     return tools
 
 
@@ -756,6 +959,10 @@ def build_supervisor_prompt(
         "4) If no results, explicitly say no KB match and ask a refinement question.\n"
         "5) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
         "6) Use search_far only as fallback reference.\n\n"
+        "Document Output Rules:\n"
+        "1) If the user asks to generate/draft/create a document, you MUST call create_document.\n"
+        "2) Do not paste full document bodies in chat unless the user explicitly asks for inline text.\n"
+        "3) After create_document, respond briefly and direct the user to open/edit the document card.\n\n"
         f"IMPORTANT: Use the available tool functions to delegate to specialists. "
         f"Include relevant context in the query you pass to each specialist. "
         f"Do not try to answer specialized questions yourself -- delegate to the expert."
@@ -791,6 +998,7 @@ async def sdk_query(
     skill_names: list[str] | None = None,
     session_id: str | None = None,
     workspace_id: str | None = None,
+    package_context: Any = None,
     max_turns: int = 15,
     messages: list[dict] | None = None,
 ) -> AsyncGenerator[Any, None]:
@@ -814,6 +1022,36 @@ async def sdk_query(
     Yields:
         AssistantMessage and ResultMessage adapter objects
     """
+    fast_path = await _maybe_fast_path_document_generation(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        package_context=package_context,
+    )
+    if fast_path is not None:
+        result = fast_path["result"]
+        if "error" in result:
+            yield AssistantMessage(content=[TextBlock(text=f"Document generation failed: {result['error']}")])
+            yield ResultMessage(result=f"Document generation failed: {result['error']}", usage={})
+            return
+
+        text = (
+            f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
+            "You can open it from the document card."
+        )
+        yield AssistantMessage(
+            content=[
+                TextBlock(text=text),
+                ToolUseBlock(name="create_document"),
+            ]
+        )
+        yield ResultMessage(
+            result=text,
+            usage={"tools_called": 1, "tools": ["create_document"], "fast_path": True},
+        )
+        return
+
     # Resolve active workspace when none provided
     resolved_workspace_id = workspace_id
     if not resolved_workspace_id:
@@ -837,6 +1075,7 @@ async def sdk_query(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
+        package_context=package_context,
     )
 
     system_prompt = build_supervisor_prompt(
@@ -870,6 +1109,21 @@ async def sdk_query(
             tools_called = list(metrics.tool_metrics.keys())
     except Exception:
         pass
+
+    forced_doc = await _ensure_create_document_for_direct_request(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        package_context=package_context,
+        tools_called=tools_called,
+    )
+    if forced_doc is not None:
+        tools_called.append("create_document")
+        result_text = (
+            f"Generated a draft {forced_doc['doc_type'].replace('_', ' ')} document. "
+            "Open the document card to review or edit it."
+        )
 
     # Build content blocks for AssistantMessage
     content_blocks = [TextBlock(text=result_text)]
@@ -907,6 +1161,7 @@ async def sdk_query_streaming(
     skill_names: list[str] | None = None,
     session_id: str | None = None,
     workspace_id: str | None = None,
+    package_context: Any = None,
     max_turns: int = 15,
     messages: list[dict] | None = None,
 ) -> AsyncGenerator[dict, None]:
@@ -919,6 +1174,33 @@ async def sdk_query_streaming(
     Runs the synchronous Strands Agent in a background thread and bridges
     to async via a queue.
     """
+    fast_path = await _maybe_fast_path_document_generation(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        package_context=package_context,
+    )
+    if fast_path is not None:
+        result = fast_path["result"]
+        if "error" in result:
+            yield {"type": "error", "error": result["error"]}
+            return
+        yield {"type": "tool_use", "name": "create_document"}
+        yield {"type": "tool_result", "name": "create_document", "result": result}
+        text = (
+            f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
+            "Open the document card to review or edit it."
+        )
+        yield {"type": "text", "data": text}
+        yield {
+            "type": "complete",
+            "text": text,
+            "tools_called": ["create_document"],
+            "usage": {"tools_called": 1, "tools": ["create_document"], "fast_path": True},
+        }
+        return
+
     # Resolve workspace
     resolved_workspace_id = workspace_id
     if not resolved_workspace_id:
@@ -945,6 +1227,7 @@ async def sdk_query_streaming(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
+        package_context=package_context,
         result_queue=result_queue,
         loop=loop,
     )
@@ -994,7 +1277,11 @@ async def sdk_query_streaming(
         drained: list[dict] = []
         while True:
             try:
-                drained.append(result_queue.get_nowait())
+                item = result_queue.get_nowait()
+                name = item.get("name")
+                if name:
+                    tools_called.append(name)
+                drained.append(item)
             except asyncio.QueueEmpty:
                 break
         return drained
@@ -1061,6 +1348,28 @@ async def sdk_query_streaming(
                     tools_called = list(metrics.tool_metrics.keys())
         except Exception:
             pass
+
+    forced_doc = None
+    if not error_holder:
+        forced_doc = await _ensure_create_document_for_direct_request(
+            prompt=prompt,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            package_context=package_context,
+            tools_called=tools_called,
+        )
+        if forced_doc is not None:
+            tools_called.append("create_document")
+            yield {"type": "tool_use", "name": "create_document"}
+            yield {"type": "tool_result", "name": "create_document", "result": forced_doc["result"]}
+            if not full_text_parts:
+                summary = (
+                    f"Generated a draft {forced_doc['doc_type'].replace('_', ' ')} document. "
+                    "Open the document card to review or edit it."
+                )
+                full_text_parts.append(summary)
+                yield {"type": "text", "data": summary}
 
     if error_holder:
         yield {"type": "error", "error": str(error_holder[0])}

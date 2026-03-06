@@ -15,9 +15,11 @@ import { DocumentType, DocumentStatus, WorkflowStatus } from '@/types/schema';
 
 export interface StoredDocument {
   id: string;
+  package_id?: string;
   title: string;
   document_type: DocumentType;
   content?: string;
+  mode?: 'package' | 'workspace';
   status: DocumentStatus;
   version: number;
   word_count?: number;
@@ -36,6 +38,7 @@ export interface PackageChecklist {
 
 export interface PackageData {
   id: string;
+  package_id?: string;
   title: string;
   status: WorkflowStatus;
   created_at: string;
@@ -99,6 +102,7 @@ export function saveGeneratedDocument(
   sessionTitle: string,
 ): void {
   const docId = getDocId(doc);
+  const packageKey = doc.package_id || sessionId;
   const now = new Date().toISOString();
 
   // --- Save document ---
@@ -107,11 +111,13 @@ export function saveGeneratedDocument(
 
   const stored: StoredDocument = {
     id: docId,
+    package_id: doc.package_id,
     title: doc.title,
     document_type: doc.document_type as DocumentType,
     content: doc.content,
-    status: 'draft',
-    version: existing ? existing.version + 1 : 1,
+    mode: doc.mode,
+    status: (doc.status as DocumentStatus | undefined) || 'draft',
+    version: doc.version ?? (existing ? existing.version + 1 : 1),
     word_count: doc.word_count,
     s3_key: doc.s3_key,
     session_id: sessionId,
@@ -123,11 +129,12 @@ export function saveGeneratedDocument(
 
   // --- Upsert package ---
   const packages = readMap<PackageData>(PACKAGES_KEY);
-  let pkg = packages[sessionId];
+  let pkg = packages[packageKey];
 
   if (!pkg) {
     pkg = {
-      id: sessionId,
+      id: packageKey,
+      package_id: doc.package_id,
       title: sessionTitle || 'Untitled Package',
       status: 'in_progress',
       created_at: now,
@@ -152,7 +159,7 @@ export function saveGeneratedDocument(
   }
 
   pkg.updated_at = now;
-  packages[sessionId] = pkg;
+  packages[packageKey] = pkg;
   writeMap(PACKAGES_KEY, packages);
 }
 

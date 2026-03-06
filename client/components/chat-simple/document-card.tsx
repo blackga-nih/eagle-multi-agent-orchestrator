@@ -69,6 +69,7 @@ export default function DocumentCard({ document, sessionId }: DocumentCardProps)
                     </h4>
                     {document.word_count && (
                         <p className="text-xs text-gray-500 mt-0.5">
+                            {document.version ? `v${document.version} • ` : ''}
                             {document.word_count.toLocaleString()} words
                         </p>
                     )}

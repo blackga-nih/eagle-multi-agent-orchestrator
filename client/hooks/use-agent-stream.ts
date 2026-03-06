@@ -39,10 +39,12 @@ export interface UseAgentStreamOptions {
   getToken?: () => Promise<string>;
   /** Active session ID — forwarded to client tools for localStorage namespacing. */
   sessionId?: string;
+  /** Optional active package context to route create_document into package mode. */
+  packageId?: string;
 }
 
 export interface UseAgentStreamReturn {
-  sendQuery: (query: string, sessionId?: string) => Promise<void>;
+  sendQuery: (query: string, sessionId?: string, packageId?: string) => Promise<void>;
   isStreaming: boolean;
   logs: AuditLogEntry[];
   lastMessage: Message | null;
@@ -70,15 +72,20 @@ function parseDocumentToolResult(event: StreamEvent): DocumentInfo | null {
     // Reject error responses (e.g. "Unknown document type")
     if (data.error) return null;
 
-    // Require at least a real title or document_type — reject empty/stub results
-    if (!data.title && !data.document_type && !data.s3_key) return null;
+    const normalizedDocType = data.doc_type ?? data.document_type;
+    // Require at least a real title or document type — reject empty/stub results
+    if (!data.title && !normalizedDocType && !data.s3_key) return null;
 
     return {
       document_id: data.document_id ?? data.s3_key ?? undefined,
-      document_type: data.document_type ?? 'unknown',
-      title: data.title ?? data.document_type ?? 'Document',
+      package_id: data.package_id ?? undefined,
+      document_type: normalizedDocType ?? 'unknown',
+      doc_type: normalizedDocType ?? undefined,
+      title: data.title ?? normalizedDocType ?? 'Document',
       content: data.content ?? undefined,
+      mode: data.mode ?? undefined,
       status: data.status ?? undefined,
+      version: data.version ?? undefined,
       word_count: data.word_count ?? undefined,
       generated_at: data.generated_at ?? undefined,
       s3_key: data.s3_key ?? undefined,
@@ -201,7 +208,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     eventCountRef.current = 0;
   }, []);
 
-  const sendQuery = useCallback(async (query: string, sessionId?: string) => {
+  const sendQuery = useCallback(async (query: string, sessionId?: string, packageId?: string) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -211,6 +218,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     setError(null);
 
     const finalSessionId = sessionId || generateUUID();
+    const activePackageId = packageId || options.packageId;
     const queryStartTime = new Date();
     let accumulatedText = '';
     // Stable ID used for the single streaming assistant message.
@@ -243,6 +251,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         body: JSON.stringify({
           query,
           session_id: finalSessionId,
+          package_id: activePackageId,
         }),
         signal: abortControllerRef.current.signal,
       });

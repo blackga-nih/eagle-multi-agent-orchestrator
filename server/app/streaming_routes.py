@@ -19,7 +19,7 @@ import json
 import logging
 from contextlib import suppress
 from contextlib import suppress
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from .cognito_auth import extract_user_context, UserContext
 from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWriter
@@ -27,6 +27,7 @@ from .models import ChatMessage
 from .subscription_service import SubscriptionService
 from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGLE_TOOLS
 from .session_store import add_message
+from .package_context_service import resolve_context, set_active_package
 from .telemetry.log_context import set_log_context
 from .health_checks import check_knowledge_base_health
 
@@ -44,6 +45,7 @@ async def stream_generator(
     subscription_service: SubscriptionService,
     session_id: str | None = None,
     messages: list[dict] | None = None,
+    package_context: Any = None,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events from sdk_query_streaming() with real-time token streaming.
 
@@ -82,6 +84,7 @@ async def stream_generator(
             tier=tier or "advanced",
             session_id=session_id,
             messages=messages,
+            package_context=package_context,
         )
         aiter = gen.__aiter__()
         pending_task = None
@@ -252,6 +255,33 @@ def create_streaming_router(
             except Exception:
                 pass
 
+        resolved_package_context = None
+        try:
+            resolved_package_context = resolve_context(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=message.session_id or "",
+                explicit_package_id=message.package_id,
+            )
+            if (
+                message.package_id
+                and message.session_id
+                and resolved_package_context.is_package_mode
+            ):
+                set_active_package(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    session_id=message.session_id,
+                    package_id=resolved_package_context.package_id,
+                )
+        except Exception:
+            logger.warning(
+                "Package context resolution failed for session=%s",
+                message.session_id,
+                exc_info=True,
+            )
+            resolved_package_context = None
+
         # Return streaming response
         return StreamingResponse(
             stream_generator(
@@ -262,6 +292,7 @@ def create_streaming_router(
                 subscription_service=subscription_service,
                 session_id=message.session_id,
                 messages=history,
+                package_context=resolved_package_context,
             ),
             media_type="text/event-stream",
             headers={

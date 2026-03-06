@@ -111,6 +111,14 @@ Rules:
 
 ## 5.1 New/Updated Backend Contracts
 
+### Existing Endpoint Decision
+
+The current `/api/packages/{package_id}/documents` endpoint (main.py:2125) already creates DOCUMENT# records via `document_store.create_document()`. This plan **extends** (not replaces) that endpoint:
+
+1. Existing endpoint remains the explicit API for package document creation.
+2. Chat tool path (`create_document`) will route into the same `document_service` when in package mode.
+3. Both paths converge on a shared service layer, ensuring consistent versioning and S3 storage.
+
 ### A. Package Context Resolution
 
 1. Add `active_package_id` support in chat request context (session metadata + explicit override).
@@ -171,6 +179,49 @@ For non-package mode:
 1. `mode: "workspace"`
 2. workspace-specific identifiers
 
+## 5.3 Context Flow Diagram
+
+Package context must propagate from the initial chat request through to the tool handler:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Frontend                                                                    │
+│   POST /api/chat { message, session_id, package_id? }                       │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ streaming_routes.py                                                         │
+│   1. Extract package_id from request body (explicit) or session metadata    │
+│   2. Call package_context_service.resolve_context(session_id, package_id)   │
+│   3. Pass resolved PackageContext to sdk_query_streaming()                  │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ strands_agentic_service.py                                                  │
+│   1. Receive PackageContext in sdk_query_streaming()                        │
+│   2. Pass to _build_service_tools(package_context=...)                      │
+│   3. Tool handler closure captures package_context                          │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ _exec_create_document (via tool dispatch)                                   │
+│   1. Check package_context.active_package_id                                │
+│   2. If set → call document_service.create_package_document_version()       │
+│   3. If not → call workspace document storage path                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Session Metadata Storage
+
+To support package context persistence across messages:
+
+1. Add `active_package_id` field to session metadata in `session_store.py`.
+2. When user starts a package workflow, store `active_package_id` in session.
+3. Subsequent messages in same session inherit package context unless overridden.
+
 ## 6. Server Refactor Plan
 
 ## 6.1 New Service Modules
@@ -180,7 +231,17 @@ For non-package mode:
 2. `app/package_context_service.py`
    - resolves active package by session metadata and request hints.
 
-## 6.2 Existing Module Changes
+## 6.2 Atomicity and Error Handling
+
+S3 write and DynamoDB write are not transactional. Use the following strategy:
+
+1. **Write order**: DynamoDB first (metadata with `status: "pending"`), then S3.
+2. **On S3 success**: Update DynamoDB record to `status: "draft"`.
+3. **On S3 failure**: Leave DynamoDB record as `status: "pending"` with `error_message` field.
+4. **Idempotency**: Use `content_hash` as idempotency key. If same hash exists for package+doc_type, return existing record instead of creating duplicate.
+5. **Cleanup job**: Background task scans for `status: "pending"` records older than 15 minutes and either retries S3 upload or marks as `status: "failed"`.
+
+## 6.3 Existing Module Changes
 
 1. `agentic_service.py`
    - replace direct S3-only save in `_exec_create_document` for package mode.
@@ -207,9 +268,31 @@ Steps:
 2. Infer doc_type and timestamp from filename.
 3. Map to package:
    - if session has explicit package metadata, use it;
-   - else optionally keep as workspace docs.
+   - else apply orphan strategy (see 7.1.5).
 4. Create `DOCUMENT#` versions in chronological order.
 5. Write migration audit records (`AUDIT#`).
+
+### 7.1.5 Orphan Document Strategy
+
+Documents that cannot be reliably mapped to a package:
+
+1. **Detection criteria**:
+   - No `package_id` in session metadata
+   - No package reference in surrounding chat messages
+   - Ambiguous doc_type that could belong to multiple packages
+
+2. **Handling options** (configurable per-tenant):
+   - **Option A (default)**: Create as `WORKDOC#` entity (workspace document, not package-scoped)
+   - **Option B**: Create placeholder package `PKG-MIGRATED-{timestamp}` and attach orphans
+   - **Option C**: Skip and log for manual review
+
+3. **Audit trail**:
+   - All orphan decisions recorded in `AUDIT#` with `action: "orphan_classification"`
+   - Include original S3 key, inferred doc_type, chosen option, and reason
+
+4. **Post-migration review**:
+   - Generate report of all orphaned documents
+   - Provide admin UI to reassign workspace docs to packages if needed
 
 ## 7.2 Dual-Write Window
 
@@ -283,14 +366,88 @@ Add telemetry fields on document events:
 
 ## 13. Suggested Task Breakdown (Ticket-Ready)
 
-1. Add package context resolver service + tests.
-2. Implement `document_service` canonical write path + tests.
-3. Wire `create_document` tool to canonical service for package mode.
-4. Extend `DOCUMENT#` schema fields and API serializers.
-5. Add history/download/finalize endpoints with authorization checks.
-6. Update frontend document card model for `version` + `package_id`.
-7. Add migration script and runbook.
-8. Add integration and E2E test coverage.
-9. Enable feature flag in staging; compare metrics and correctness.
-10. Enable in prod; deprecate legacy-only package document flow.
+### Task Dependency Graph
 
+```
+    ┌───┐     ┌───┐
+    │ 1 │     │ 2 │     (Independent: can run in parallel)
+    └─┬─┘     └─┬─┘
+      │         │
+      └────┬────┘
+           ▼
+         ┌───┐
+         │ 3 │           (Depends on 1, 2)
+         └─┬─┘
+           │
+     ┌─────┼─────┐
+     ▼     ▼     ▼
+   ┌───┐ ┌───┐ ┌───┐
+   │ 4 │ │ 5 │ │ 7 │     (Depend on 3; can run in parallel)
+   └─┬─┘ └─┬─┘ └───┘
+     │     │
+     └──┬──┘
+        ▼
+      ┌───┐
+      │ 6 │              (Depends on 4, 5)
+      └─┬─┘
+        │
+        ▼
+      ┌───┐
+      │ 8 │              (Depends on 6, 7)
+      └─┬─┘
+        │
+        ▼
+      ┌───┐
+      │ 9 │              (Depends on 8)
+      └─┬─┘
+        │
+        ▼
+      ┌────┐
+      │ 10 │             (Depends on 9)
+      └────┘
+```
+
+### Tasks
+
+| # | Task | Depends On | Estimate |
+|---|------|------------|----------|
+| 1 | Add package context resolver service + tests | — | 1d |
+| 2 | Implement `document_service` canonical write path + tests | — | 2d |
+| 3 | Wire `create_document` tool to canonical service for package mode | 1, 2 | 1d |
+| 4 | Extend `DOCUMENT#` schema fields and API serializers | 3 | 1d |
+| 5 | Add history/download/finalize endpoints with authorization checks | 3 | 1d |
+| 6 | Update frontend document card model for `version` + `package_id` | 4, 5 | 2d |
+| 7 | Add migration script and runbook | 3 | 2d |
+| 8 | Add integration and E2E test coverage | 6, 7 | 2d |
+| 9 | Enable feature flag in staging; compare metrics and correctness | 8 | 1d |
+| 10 | Enable in prod; deprecate legacy-only package document flow | 9 | 1d |
+
+**Critical path**: 1 → 3 → 4 → 6 → 8 → 9 → 10 (10 days)
+**Total with parallelization**: ~8-9 days
+
+---
+
+## 14. Implementation Progress
+
+**Last updated**: 2026-03-06
+
+### Completed
+
+| Task | Files Created |
+|------|---------------|
+| 1. Package context resolver | `server/app/package_context_service.py`, `server/tests/test_package_context_service.py` |
+| 2. Document service canonical write | `server/app/document_service.py`, `server/tests/test_document_service.py` |
+| 3. Wire `create_document` tool to canonical service for package mode | `server/app/streaming_routes.py`, `server/app/strands_agentic_service.py`, `server/app/agentic_service.py`, `server/app/models.py` |
+| 4. Extend DOCUMENT# schema fields + API serializers | `server/app/agentic_service.py`, `server/app/main.py` |
+| 5. Add history/download/finalize endpoints | `server/app/main.py` |
+| 6. Update frontend document card model (`version`, `package_id`, `mode`) | `client/types/chat.ts`, `client/hooks/use-agent-stream.ts`, `client/components/chat-simple/tool-use-display.tsx`, `client/components/chat-simple/document-card.tsx`, `client/lib/document-store.ts`, `client/app/api/invoke/route.ts` |
+| 7. Add migration script and runbook | `scripts/migrate-chat-s3-docs-to-package-records.py`, `docs/development/canonical-package-document-migration-runbook.md` |
+| 8. Add integration wiring coverage (backend) | `server/tests/test_canonical_package_document_flow.py` |
+
+### Remaining
+
+| # | Task | Status |
+|---|------|--------|
+| 8 | End-to-end UI/flow regression coverage (Playwright + full stack) | In progress (backend wiring tests added; E2E still pending) |
+| 9 | Enable feature flag in staging | Pending (operational rollout) |
+| 10 | Enable in prod | Pending (operational rollout) |
