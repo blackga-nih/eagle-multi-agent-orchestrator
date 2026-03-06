@@ -1075,8 +1075,8 @@ def _exec_search_far(params: dict, tenant_id: str) -> dict:
         "parts_searched": parts_filter or ["all"],
         "results_count": len(clauses),
         "clauses": clauses,
-        "source": "FAR/DFARS/HHSAR reference database",
-        "note": "Reference data — always verify against current FAR/DFARS at acquisition.gov",
+        "source": "static_reference_dataset",
+        "note": "Not live acquisition.gov lookup. Verify against current FAR/DFARS at acquisition.gov.",
     }
 
 
@@ -1091,6 +1091,7 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     doc_type = params.get("doc_type", "sow")
     title = params.get("title", "Untitled Acquisition")
     data = params.get("data", {})
+    package_id = params.get("package_id")
     output_format = params.get("output_format", "docx")  # docx, xlsx, or md
     timestamp = time.strftime("%Y%m%d_%H%M%S")
 
@@ -1156,25 +1157,71 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
 
     # Determine file extension and content to save
     ext = file_type if file_type in ("docx", "xlsx") else "md"
-    s3_key = f"eagle/{tenant_id}/{user_id}/documents/{doc_type}_{timestamp}.{ext}"
     bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    content_to_store = (
+        result.content if result and result.success and file_type in ("docx", "xlsx")
+        else content
+    )
+
+    # Package mode: route through canonical package document service.
+    if package_id:
+        from app.document_service import create_package_document_version
+
+        canonical = create_package_document_version(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            content=content_to_store,
+            title=title,
+            file_type=ext,
+            created_by_user_id=user_id,
+            session_id=session_id,
+            change_source="agent_tool",
+            template_id=params.get("template_id") or template_path,
+        )
+        if not canonical.success:
+            return {"error": canonical.error or "Failed to create package document"}
+
+        response = {
+            "mode": "package",
+            "package_id": package_id,
+            "document_id": canonical.document_id,
+            "doc_type": doc_type,
+            "document_type": doc_type,
+            "version": canonical.version,
+            "status": canonical.status or "draft",
+            "s3_key": canonical.s3_key,
+            "s3_location": f"s3://{bucket}/{canonical.s3_key}",
+            "file_type": ext,
+            "source": source,
+            "title": title,
+            "content": content,
+            "word_count": len(content.split()),
+            "generated_at": datetime.utcnow().isoformat(),
+            "note": "This is a draft document. Review and customize before official use.",
+        }
+        if template_path:
+            response["template_path"] = template_path
+        return response
+
+    s3_key = f"eagle/{tenant_id}/{user_id}/documents/{doc_type}_{timestamp}.{ext}"
 
     # Save to S3
     try:
         s3 = _get_s3()
-        if result and result.success and file_type in ("docx", "xlsx"):
+        if isinstance(content_to_store, bytes):
             # Save binary content (DOCX/XLSX)
             s3.put_object(
                 Bucket=bucket,
                 Key=s3_key,
-                Body=result.content,
+                Body=content_to_store,
                 ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 if file_type == "docx"
                 else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         else:
             # Save markdown content
-            s3.put_object(Bucket=bucket, Key=s3_key, Body=content.encode("utf-8"))
+            s3.put_object(Bucket=bucket, Key=s3_key, Body=content_to_store.encode("utf-8"))
         save_status = "saved"
         save_location = f"s3://{bucket}/{s3_key}"
     except (ClientError, BotoCoreError) as e:

@@ -20,10 +20,14 @@ export type Message = ChatMessage;
 
 export interface DocumentInfo {
   document_id?: string;
+  package_id?: string;
   document_type: string;
+  doc_type?: string;
   title: string;
   content?: string;
+  mode?: 'package' | 'workspace';
   status?: string;
+  version?: number;
   word_count?: number;
   generated_at?: string;
   s3_key?: string;

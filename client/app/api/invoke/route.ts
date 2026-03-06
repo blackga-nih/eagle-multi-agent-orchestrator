@@ -96,6 +96,7 @@ export async function POST(request: NextRequest) {
     const fastApiBody = {
       message,
       session_id: sessionId,
+      package_id: body.package_id,
     };
 
     const response = await fetch(`${FASTAPI_URL}/api/chat/stream`, {

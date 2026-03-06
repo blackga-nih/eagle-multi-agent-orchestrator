@@ -148,6 +148,7 @@ function DocumentResultCard({
   const title = String(data.title ?? data.document_type ?? 'Document');
   const docType = String(data.document_type ?? data.doc_type ?? 'unknown');
   const wordCount = data.word_count as number | undefined;
+  const version = data.version as number | undefined;
   const s3Key = String(data.s3_key ?? '');
 
   const handleOpen = () => {
@@ -158,10 +159,14 @@ function DocumentResultCard({
     // Store content in sessionStorage for instant load in document viewer
     const docInfo: DocumentInfo = {
       document_id: (data.document_id as string) || s3Key,
+      package_id: data.package_id as string | undefined,
       document_type: docType,
+      doc_type: docType,
       title,
       content: data.content as string | undefined,
+      mode: data.mode as 'package' | 'workspace' | undefined,
       status: data.status as string | undefined,
+      version,
       word_count: wordCount,
       generated_at: data.generated_at as string | undefined,
       s3_key: s3Key || undefined,
@@ -183,9 +188,10 @@ function DocumentResultCard({
           {DOC_LABEL[docType] ?? docType.replace(/_/g, ' ')}
         </span>
         <p className="text-xs font-medium text-gray-900 truncate">{title}</p>
-        {wordCount && (
-          <p className="text-[10px] text-gray-400">{wordCount.toLocaleString()} words</p>
-        )}
+        <p className="text-[10px] text-gray-400">
+          {version ? `v${version}` : 'Draft'}
+          {wordCount ? ` • ${wordCount.toLocaleString()} words` : ''}
+        </p>
       </div>
       <button
         type="button"
