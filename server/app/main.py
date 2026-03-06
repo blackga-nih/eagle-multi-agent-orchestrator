@@ -1026,6 +1026,8 @@ async def api_submit_feedback(
     session_id = body.get("session_id", "")
     feedback_text = body.get("feedback_text", "").strip()
     conversation_snapshot = body.get("conversation_snapshot", [])
+    page = body.get("page", "")
+    last_message_id = body.get("last_message_id", "")
 
     if not feedback_text:
         raise HTTPException(status_code=400, detail="feedback_text is required")
@@ -1040,6 +1042,8 @@ async def api_submit_feedback(
         feedback_text=feedback_text,
         conversation_snapshot=json.dumps(conversation_snapshot, default=str),
         cloudwatch_logs=json.dumps(cloudwatch_logs, default=str),
+        page=page,
+        last_message_id=last_message_id,
     )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 

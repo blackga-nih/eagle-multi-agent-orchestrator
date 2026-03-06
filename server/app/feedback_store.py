@@ -89,6 +89,8 @@ def write_feedback(
     feedback_text: str,
     conversation_snapshot: str,
     cloudwatch_logs: str,
+    page: str = "",
+    last_message_id: str = "",
 ) -> dict:
     """Write a feedback record and return the stored item."""
     feedback_id = str(uuid.uuid4())
@@ -110,6 +112,8 @@ def write_feedback(
         "feedback_type": _detect_feedback_type(feedback_text),
         "conversation_snapshot": conversation_snapshot,
         "cloudwatch_logs": cloudwatch_logs,
+        "page": page,
+        "last_message_id": last_message_id,
         "created_at": created_at,
         "ttl": _seven_year_ttl(),
     }

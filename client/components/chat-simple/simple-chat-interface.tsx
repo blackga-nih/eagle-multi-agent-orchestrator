@@ -10,6 +10,7 @@ import { useAgentStream, ToolUseEvent } from '@/hooks/use-agent-stream';
 import { useSlashCommands } from '@/hooks/use-slash-commands';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
+import { useFeedback } from '@/contexts/feedback-context';
 import { SlashCommand } from '@/lib/slash-commands';
 import { ChatMessage, DocumentInfo } from '@/types/chat';
 import { saveGeneratedDocument } from '@/lib/document-store';
@@ -51,6 +52,7 @@ export default function SimpleChatInterface() {
 
     const { currentSessionId, saveSession, loadSession, writeMessageOptimistic, renameSession } = useSession();
     const { getToken } = useAuth();
+    const { setSnapshot } = useFeedback();
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const lastAssistantIdRef = useRef<string | null>(null);
@@ -106,6 +108,19 @@ export default function SimpleChatInterface() {
         const timeoutId = setTimeout(saveSessionDebounced, 500);
         return () => clearTimeout(timeoutId);
     }, [saveSessionDebounced]);
+
+    // Keep feedback context in sync so the modal can include conversation state
+    useEffect(() => {
+        setSnapshot({
+            messages: messages.map((m) => ({
+                role: m.role,
+                content: m.content,
+                id: m.id,
+                timestamp: m.timestamp,
+            })),
+            lastMessageId: lastAssistantIdRef.current,
+        });
+    }, [messages, setSnapshot]);
 
     // Slash command handling
     const handleCommandSelect = (command: SlashCommand) => {

@@ -6,6 +6,7 @@ import { Check } from 'lucide-react';
 import Modal from '@/components/ui/modal';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
+import { useFeedback } from '@/contexts/feedback-context';
 import type { FeedbackType } from '@/types/schema';
 
 const FEEDBACK_TYPES: { value: FeedbackType; label: string }[] = [
@@ -27,6 +28,7 @@ export default function FeedbackModal() {
   const pathname = usePathname();
   const { user, getToken } = useAuth();
   const { currentSessionId } = useSession();
+  const { getSnapshot } = useFeedback();
 
   const resetForm = useCallback(() => {
     setFeedbackType(null);
@@ -80,6 +82,8 @@ export default function FeedbackModal() {
         feedbackType ? `[${feedbackType}]` : '',
       ].filter(Boolean).join(' ');
 
+      const { messages, lastMessageId } = getSnapshot();
+
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers,
@@ -88,6 +92,8 @@ export default function FeedbackModal() {
           feedback_type: feedbackType,
           session_id: currentSessionId || undefined,
           page: pathname,
+          last_message_id: lastMessageId || undefined,
+          conversation_snapshot: messages,
         }),
       });
 
