@@ -28,6 +28,7 @@ from .subscription_service import SubscriptionService
 from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGLE_TOOLS
 from .session_store import add_message
 from .telemetry.log_context import set_log_context
+from .health_checks import check_knowledge_base_health
 
 import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
@@ -83,25 +84,47 @@ async def stream_generator(
             messages=messages,
         )
         aiter = gen.__aiter__()
+        pending_task = None
         while True:
             try:
-                chunk = await asyncio.wait_for(aiter.__anext__(), timeout=KEEPALIVE_INTERVAL)
-                yield chunk
-            except asyncio.TimeoutError:
-                yield {"type": "_keepalive"}
+                # Reuse pending task if previous iteration timed out (don't lose chunks)
+                if pending_task is None:
+                    pending_task = asyncio.create_task(aiter.__anext__())
+
+                done, _ = await asyncio.wait({pending_task}, timeout=KEEPALIVE_INTERVAL)
+
+                if done:
+                    # Task completed - get result and clear pending
+                    chunk = pending_task.result()
+                    pending_task = None
+                    yield chunk
+                else:
+                    # Timeout - yield keepalive but keep the task pending
+                    yield {"type": "_keepalive"}
             except StopAsyncIteration:
                 break
+            except Exception as e:
+                # Handle StopAsyncIteration from the task result
+                if pending_task and pending_task.done():
+                    try:
+                        pending_task.result()
+                    except StopAsyncIteration:
+                        break
+                raise
 
     try:
         async for chunk in _sdk_with_keepalive():
             chunk_type = chunk.get("type", "")
+            logger.debug("SSE chunk: type=%s keys=%s", chunk_type, list(chunk.keys()))
 
             if chunk_type == "_keepalive":
                 yield ": keepalive\n\n"
 
             elif chunk_type == "text":
-                full_response_parts.append(chunk["data"])
-                await writer.write_text(sse_queue, chunk["data"])
+                text_data = chunk.get("data", "")
+                logger.debug("SSE text event: len=%d", len(text_data))
+                full_response_parts.append(text_data)
+                await writer.write_text(sse_queue, text_data)
                 yield await sse_queue.get()
 
             elif chunk_type == "tool_use":
@@ -117,6 +140,21 @@ async def stream_generator(
                 yield await sse_queue.get()
 
             elif chunk_type == "complete":
+                complete_text = chunk.get("text", "")
+                logger.debug("SSE complete: complete_text_len=%d full_parts=%d", len(complete_text), len(full_response_parts))
+                if not full_response_parts and complete_text:
+                    full_response_parts.append(complete_text)
+                    await writer.write_text(sse_queue, complete_text)
+                    yield await sse_queue.get()
+
+                # Guaranteed fallback: never send blank response to frontend
+                if not full_response_parts:
+                    fallback = "[No response generated. Please try again.]"
+                    logger.warning("No text generated for session=%s user=%s — emitting fallback", session_id, user_id)
+                    full_response_parts.append(fallback)
+                    await writer.write_text(sse_queue, fallback)
+                    yield await sse_queue.get()
+
                 # Persist assistant response to DynamoDB
                 if session_id and full_response_parts:
                     try:
@@ -144,7 +182,7 @@ async def stream_generator(
         yield await sse_queue.get()
 
     except asyncio.CancelledError:
-        logger.info("Streaming client disconnected user=%s session=%s", user_id, session_id)
+        logger.debug("Streaming client disconnected user=%s session=%s", user_id, session_id)
         return
     except Exception as e:
         logger.error("Streaming chat error user=%s session=%s: %s", user_id, session_id, str(e), exc_info=True)
@@ -243,6 +281,7 @@ def create_streaming_router(
         This endpoint does not require authentication and is intended
         for load-balancer health probes and operational dashboards.
         """
+        knowledge_base = check_knowledge_base_health()
         return {
             "status": "healthy",
             "service": "EAGLE – NCI Acquisition Assistant",
@@ -253,7 +292,10 @@ def create_streaming_router(
                 "dynamodb": True,
                 "cognito": True,
                 "s3": True,
+                "knowledge_metadata_table": knowledge_base["metadata_table"]["ok"],
+                "knowledge_document_bucket": knowledge_base["document_bucket"]["ok"],
             },
+            "knowledge_base": knowledge_base,
             "agents": [
                 {
                     "id": "eagle",

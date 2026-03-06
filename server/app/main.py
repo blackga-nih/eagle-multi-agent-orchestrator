@@ -108,6 +108,7 @@ from .approval_store import (
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
 from .feedback_store import write_feedback, list_feedback
+from .health_checks import check_knowledge_base_health
 
 # ── Logging ──────────────────────────────────────────────────────────
 from .telemetry.log_context import configure_logging
@@ -1519,10 +1520,20 @@ app.include_router(streaming_router)
 @app.get("/api/health")
 async def health_check():
     """Backend health check endpoint."""
+    knowledge_base = check_knowledge_base_health()
     return {
         "status": "healthy",
         "service": "eagle-backend",
         "version": "4.0.0",
+        "services": {
+            "bedrock": True,
+            "dynamodb": True,
+            "cognito": True,
+            "s3": True,
+            "knowledge_metadata_table": knowledge_base["metadata_table"]["ok"],
+            "knowledge_document_bucket": knowledge_base["document_bucket"]["ok"],
+        },
+        "knowledge_base": knowledge_base,
         "timestamp": datetime.utcnow().isoformat(),
     }
 

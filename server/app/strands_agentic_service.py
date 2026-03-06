@@ -40,6 +40,7 @@ if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
 from eagle_skill_constants import SKILL_CONSTANTS, AGENTS, SKILLS, PLUGIN_CONTENTS
+from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
 
 logger = logging.getLogger("eagle.strands_agent")
 
@@ -300,6 +301,8 @@ EAGLE_TOOLS = [
             "required": ["query"],
         },
     },
+    KNOWLEDGE_SEARCH_TOOL,
+    KNOWLEDGE_FETCH_TOOL,
     {
         "name": "create_document",
         "description": (
@@ -593,6 +596,14 @@ _SERVICE_TOOL_DEFS = {
         "Search the FAR and DFARS for clauses, requirements, and guidance. "
         "Pass JSON with 'query' and optional 'parts' array."
     ),
+    "knowledge_search": (
+        "Search the acquisition knowledge base metadata in DynamoDB. "
+        "Pass JSON with optional fields: topic, document_type, agent, authority_level, keywords, limit."
+    ),
+    "knowledge_fetch": (
+        "Fetch full knowledge document content from S3. "
+        "Pass JSON with s3_key (or document_id)."
+    ),
     "manage_skills": (
         "Create, list, update, delete, or publish custom skills. "
         "Pass JSON: {action, skill_id?, name?, display_name?, description?, prompt_body?, triggers?, tools?, model?, visibility?}. "
@@ -738,6 +749,13 @@ def build_supervisor_prompt(
         f"{base_prompt}\n\n"
         f"--- ACTIVE SPECIALISTS ---\n"
         f"Available specialists for delegation:\n{agent_list}\n\n"
+        "KB Retrieval Rules:\n"
+        "1) For policy/regulation/procedure/template questions, call knowledge_search first.\n"
+        "2) If search returns results, call knowledge_fetch on the top 1-3 relevant docs.\n"
+        "3) In final answer, include a Sources section with title + s3_key.\n"
+        "4) If no results, explicitly say no KB match and ask a refinement question.\n"
+        "5) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
+        "6) Use search_far only as fallback reference.\n\n"
         f"IMPORTANT: Use the available tool functions to delegate to specialists. "
         f"Include relevant context in the query you pass to each specialist. "
         f"Do not try to answer specialized questions yourself -- delegate to the expert."
@@ -1016,6 +1034,18 @@ async def sdk_query_streaming(
     usage = {}
     if result_holder:
         result = result_holder[0]
+        if not full_text_parts:
+            # Some Strands responses may not emit token deltas through callback_handler.
+            # Fall back to the final rendered result text so streaming clients still
+            # receive assistant content before COMPLETE.
+            try:
+                final_text = str(result)
+                if final_text:
+                    full_text_parts.append(final_text)
+                    # Yield as text event so SSE consumers receive it before COMPLETE
+                    yield {"type": "text", "data": final_text}
+            except Exception:
+                pass
         try:
             metrics = getattr(result, "metrics", None)
             if metrics:
@@ -1035,9 +1065,16 @@ async def sdk_query_streaming(
     if error_holder:
         yield {"type": "error", "error": str(error_holder[0])}
     else:
+        final_text = "".join(full_text_parts)
+        if not final_text.strip():
+            called = ", ".join(tools_called[:3]) if tools_called else "none"
+            final_text = (
+                "I completed the tool steps but did not receive a final answer text. "
+                f"Tools called: {called}. Please retry your request."
+            )
         yield {
             "type": "complete",
-            "text": "".join(full_text_parts),
+            "text": final_text,
             "tools_called": tools_called,
             "usage": usage,
         }

@@ -1075,8 +1075,8 @@ def _exec_search_far(params: dict, tenant_id: str) -> dict:
         "parts_searched": parts_filter or ["all"],
         "results_count": len(clauses),
         "clauses": clauses,
-        "source": "FAR/DFARS/HHSAR reference database",
-        "note": "Reference data — always verify against current FAR/DFARS at acquisition.gov",
+        "source": "static_reference_dataset",
+        "note": "Not live acquisition.gov lookup. Verify against current FAR/DFARS at acquisition.gov.",
     }
 
 
