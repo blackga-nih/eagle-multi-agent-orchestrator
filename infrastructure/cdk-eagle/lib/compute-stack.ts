@@ -78,6 +78,7 @@ export class EagleComputeStack extends cdk.Stack {
         COGNITO_CLIENT_ID: props.userPoolClientId,
         DOCUMENT_BUCKET: props.documentBucketName,
         METADATA_TABLE: props.metadataTableName,
+        AGENTCORE_MEMORY_ID: 'eagle_workspace_memory-Tch0BU74Ex',
         APP_HOST: '0.0.0.0',
         APP_PORT: '8000',
       },

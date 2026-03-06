@@ -4,7 +4,7 @@ parent: "[[backend/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, backend, agentic-service, eagle, aws, s3, dynamodb, cloudwatch]
-last_updated: 2026-02-25T00:00:00
+last_updated: 2026-03-05T00:00:00
 ---
 
 # Backend Expertise (Complete Mental Model)
@@ -138,7 +138,7 @@ Environment Variables (from CDK):
 
 ## Part 2: Tool Dispatch System
 
-### TOOL_DISPATCH (agentic_service.py line 2167)
+### TOOL_DISPATCH (agentic_service.py line ~2450)
 
 ```python
 TOOL_DISPATCH = {
@@ -149,13 +149,21 @@ TOOL_DISPATCH = {
     "create_document":  _exec_create_document,
     "get_intake_status": _exec_get_intake_status,
     "intake_workflow":  _exec_intake_workflow,
+    "query_compliance_matrix": _exec_query_compliance_matrix,
+    "manage_skills":    _exec_manage_skills,
+    "manage_prompts":   _exec_manage_prompts,
+    "manage_templates": _exec_manage_templates,
+    "workspace_memory": _exec_workspace_memory,
+    "web_search":       _exec_web_search,
+    "browse_url":       _exec_browse_url,
+    "code_execute":     _exec_code_execute,
 }
 ```
 
-### TOOLS_NEEDING_SESSION (agentic_service.py line 2178)
+### TOOLS_NEEDING_SESSION (agentic_service.py line ~2465)
 
 ```python
-TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status"}
+TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status", "workspace_memory"}
 ```
 
 These tools receive `session_id` as a third argument to enable per-user S3 prefix scoping.
@@ -680,6 +688,9 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 - `TIER_TOOLS` in sdk_agentic_service.py uses the same tool names as TOOL_DISPATCH keys — MCP tool names must match exactly (discovered: 2026-02-25, component: sdk_agentic_service)
 - `sdk_query()` wraps `create_eagle_mcp_server()` in try/except — MCP unavailability is non-fatal, subagents degrade gracefully without business tools (discovered: 2026-02-25, component: sdk_agentic_service)
 - Workspace 4-layer prompt resolution enables hot-reloadable agent prompts without ECS redeploy (discovered: 2026-02-25, component: wspc_store)
+- AgentCore tools (Memory, Browser, CodeInterpreter) all use lazy singleton pattern with graceful fallback — same as _get_s3()/_get_dynamodb() (discovered: 2026-03-05, component: agentcore_*)
+- AgentCore SDK uses `bedrock-agentcore` and `bedrock-agentcore-control` boto3 service names — not yet available in standard boto3, requires `bedrock-agentcore` pip package (discovered: 2026-03-05, component: agentcore_*)
+- New tools follow same handler pattern: `_exec_{name}(params, tenant_id)` or `(params, tenant_id, session_id)`, lazy import service module, delegate to service function (discovered: 2026-03-05, component: agentic_service)
 
 ### patterns_to_avoid
 - Don't test document generation with empty `data` dicts — generators produce minimal stubs

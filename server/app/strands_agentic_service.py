@@ -181,8 +181,8 @@ MODEL = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
 # via the @tool functions registered on the Agent.
 TIER_TOOLS = {
     "basic": [],
-    "advanced": ["Read", "Glob", "Grep"],
-    "premium": ["Read", "Glob", "Grep", "Bash"],
+    "advanced": ["Read", "Glob", "Grep", "workspace_memory", "web_search"],
+    "premium": ["Read", "Glob", "Grep", "Bash", "workspace_memory", "web_search", "browse_url", "code_execute"],
 }
 
 TIER_BUDGETS = {
@@ -475,6 +475,109 @@ EAGLE_TOOLS = [
             "required": ["params"],
         },
     },
+    {
+        "name": "workspace_memory",
+        "description": (
+            "View and edit your persistent workspace files. Use to track ongoing "
+            "work, key findings, and important context across sessions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "enum": ["view", "write", "append", "clear", "list", "search"],
+                    "description": "Operation: view/write/append/clear a file, list all files, or search",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "File path (e.g., _workspace.txt, _notes.txt)",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content for write/append operations",
+                },
+            },
+            "required": ["command", "path"],
+        },
+    },
+    {
+        "name": "web_search",
+        "description": (
+            "Search the web for current regulations, policy updates, news, "
+            "and federal acquisition information."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query text",
+                },
+                "search_type": {
+                    "type": "string",
+                    "enum": ["web", "news", "gov"],
+                    "description": "Type of search: web (general), news (recent), gov (federal documents)",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Max results to return (default: 10, max: 20)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "browse_url",
+        "description": (
+            "Fetch and analyze web pages, PDFs, or documents from URLs. "
+            "Can process up to 10 URLs at once."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 10,
+                    "description": "URLs to fetch and extract content from",
+                },
+                "question": {
+                    "type": "string",
+                    "description": "Optional question to focus extraction on",
+                },
+            },
+            "required": ["urls"],
+        },
+    },
+    {
+        "name": "code_execute",
+        "description": (
+            "Execute code in a managed sandbox for calculations, data analysis, "
+            "IGCE cost modeling, and other computational tasks. "
+            "Supports Python, JavaScript, and TypeScript."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "Code to execute",
+                },
+                "language": {
+                    "type": "string",
+                    "enum": ["python", "javascript", "typescript"],
+                    "description": "Programming language (default: python)",
+                },
+                "packages": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Packages to install before execution",
+                },
+            },
+            "required": ["code"],
+        },
+    },
 ]
 
 # Max prompt size per subagent to avoid context overflow
@@ -719,6 +822,23 @@ _SERVICE_TOOL_DEFS = {
         "List, view, set, or delete document templates. "
         "Pass JSON: {action, doc_type?, template_body?, display_name?, user_id?}. "
         "Actions: list, get, set, delete, resolve."
+    ),
+    "workspace_memory": (
+        "View and edit persistent workspace files. Track ongoing work, key findings, "
+        "and context across sessions. "
+        "Pass JSON: {command: view|write|append|clear|list|search, path, content?}."
+    ),
+    "web_search": (
+        "Search the web for current regulations, policy updates, and federal acquisition info. "
+        "Pass JSON: {query, search_type?: web|news|gov, count?: 10}."
+    ),
+    "browse_url": (
+        "Fetch and analyze web pages, PDFs, or documents from URLs. "
+        "Pass JSON: {urls: [...], question?}."
+    ),
+    "code_execute": (
+        "Execute code in a managed sandbox for calculations, data analysis, and cost modeling. "
+        "Pass JSON: {code, language?: python|javascript|typescript, packages?: [...]}."
     ),
 }
 

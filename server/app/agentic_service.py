@@ -408,6 +408,109 @@ EAGLE_TOOLS = [
             "required": ["params"],
         },
     },
+    {
+        "name": "workspace_memory",
+        "description": (
+            "View and edit your persistent workspace files. Use to track ongoing "
+            "work, key findings, and important context across sessions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "enum": ["view", "write", "append", "clear", "list", "search"],
+                    "description": "Operation: view/write/append/clear a file, list all files, or search",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "File path (e.g., _workspace.txt, _notes.txt)",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content for write/append operations",
+                },
+            },
+            "required": ["command", "path"],
+        },
+    },
+    {
+        "name": "web_search",
+        "description": (
+            "Search the web for current regulations, policy updates, news, "
+            "and federal acquisition information."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query text",
+                },
+                "search_type": {
+                    "type": "string",
+                    "enum": ["web", "news", "gov"],
+                    "description": "Type of search: web (general), news (recent), gov (federal documents)",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Max results to return (default: 10, max: 20)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "browse_url",
+        "description": (
+            "Fetch and analyze web pages, PDFs, or documents from URLs. "
+            "Can process up to 10 URLs at once."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 10,
+                    "description": "URLs to fetch and extract content from",
+                },
+                "question": {
+                    "type": "string",
+                    "description": "Optional question to focus extraction on",
+                },
+            },
+            "required": ["urls"],
+        },
+    },
+    {
+        "name": "code_execute",
+        "description": (
+            "Execute code in a managed sandbox for calculations, data analysis, "
+            "IGCE cost modeling, and other computational tasks. "
+            "Supports Python, JavaScript, and TypeScript."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "Code to execute",
+                },
+                "language": {
+                    "type": "string",
+                    "enum": ["python", "javascript", "typescript"],
+                    "description": "Programming language (default: python)",
+                },
+                "packages": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Packages to install before execution",
+                },
+            },
+            "required": ["code"],
+        },
+    },
 ]
 
 
@@ -2396,6 +2499,56 @@ def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
     return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
 
 
+# ── AgentCore Tool Handlers ──────────────────────────────────────────
+
+def _exec_workspace_memory(params: dict, tenant_id: str, session_id: str = None) -> dict:
+    """Execute workspace memory operations via AgentCore Memory."""
+    from .agentcore_memory import workspace_memory
+
+    command = params.get("command", "view")
+    path = params.get("path", "_workspace.txt")
+    content = params.get("content", "")
+    user_id = _extract_user_id(session_id)
+    return workspace_memory(command, path, tenant_id, user_id, content, session_id)
+
+
+def _exec_web_search(params: dict, tenant_id: str) -> dict:
+    """Execute web search via Brave Search + GovInfo."""
+    from .search_service import web_search
+
+    query = params.get("query", "")
+    if not query:
+        return {"error": "query is required"}
+    search_type = params.get("search_type", "web")
+    count = params.get("count", 10)
+    return web_search(query, search_type, tenant_id, count)
+
+
+def _exec_browse_url(params: dict, tenant_id: str) -> dict:
+    """Fetch and extract content from URLs via AgentCore Browser."""
+    from .agentcore_browser import browse_urls
+
+    urls = params.get("urls", [])
+    if isinstance(urls, str):
+        urls = [urls]
+    if not urls:
+        return {"error": "urls is required (list of URLs)"}
+    question = params.get("question")
+    return browse_urls(urls, question)
+
+
+def _exec_code_execute(params: dict, tenant_id: str) -> dict:
+    """Execute code via AgentCore Code Interpreter."""
+    from .agentcore_code import execute_code
+
+    code = params.get("code", "")
+    if not code:
+        return {"error": "code is required"}
+    language = params.get("language", "python")
+    packages = params.get("packages")
+    return execute_code(code, language, packages)
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -2412,10 +2565,14 @@ TOOL_DISPATCH = {
     "manage_skills": _exec_manage_skills,
     "manage_prompts": _exec_manage_prompts,
     "manage_templates": _exec_manage_templates,
+    "workspace_memory": _exec_workspace_memory,
+    "web_search": _exec_web_search,
+    "browse_url": _exec_browse_url,
+    "code_execute": _exec_code_execute,
 }
 
 # Tools that need session_id for per-user scoping
-TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status"}
+TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status", "workspace_memory"}
 
 
 def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> str:
