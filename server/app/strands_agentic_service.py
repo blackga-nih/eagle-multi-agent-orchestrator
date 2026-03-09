@@ -96,18 +96,42 @@ class QueueCallbackHandler:
     def __init__(self, chunk_queue: queue.Queue):
         self._queue = chunk_queue
         self.tool_count = 0
+        self._current_tool_id: str | None = None  # dedup guard
 
     def __call__(self, **kwargs: Any) -> None:
         data = kwargs.get("data", "")
         complete = kwargs.get("complete", False)
-        tool_use = kwargs.get("event", {}).get("contentBlockStart", {}).get("start", {}).get("toolUse")
 
         if data:
             self._queue.put({"type": "text", "data": data})
 
+        # Strands ToolUseStreamEvent — has structured current_tool_use with input
+        current_tool = kwargs.get("current_tool_use")
+        if current_tool and isinstance(current_tool, dict):
+            tool_id = current_tool.get("toolUseId", "")
+            if tool_id and tool_id != self._current_tool_id:
+                self._current_tool_id = tool_id
+                self.tool_count += 1
+                self._queue.put({
+                    "type": "tool_use",
+                    "name": current_tool.get("name", ""),
+                    "input": current_tool.get("input", ""),
+                    "tool_use_id": tool_id,
+                })
+            return  # Don't double-emit from contentBlockStart below
+
+        # Fallback: raw Bedrock contentBlockStart (legacy path)
+        tool_use = kwargs.get("event", {}).get("contentBlockStart", {}).get("start", {}).get("toolUse")
         if tool_use:
-            self.tool_count += 1
-            self._queue.put({"type": "tool_use", "name": tool_use.get("name", "")})
+            tool_id = tool_use.get("toolUseId", "")
+            if tool_id != self._current_tool_id:
+                self._current_tool_id = tool_id
+                self.tool_count += 1
+                self._queue.put({
+                    "type": "tool_use",
+                    "name": tool_use.get("name", ""),
+                    "tool_use_id": tool_id,
+                })
 
         if complete and not data:
             # Stream finished — don't send sentinel here, let the caller handle it
@@ -125,8 +149,9 @@ _HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
 def _default_model() -> str:
-    if os.getenv("EAGLE_BEDROCK_MODEL_ID"):
-        return os.getenv("EAGLE_BEDROCK_MODEL_ID")
+    env_model = os.getenv("EAGLE_BEDROCK_MODEL_ID")
+    if env_model:
+        return env_model
     try:
         import boto3
         account = boto3.client("sts").get_caller_identity()["Account"]
@@ -459,6 +484,62 @@ EAGLE_TOOLS = [
             "required": ["operation"],
         },
     },
+    # Progressive disclosure tools
+    {
+        "name": "list_skills",
+        "description": (
+            "List available skills, agents, and data files with descriptions and triggers. "
+            "Use to discover capabilities before diving deeper."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["skills", "agents", "data", ""],
+                    "description": "Filter: 'skills', 'agents', 'data', or '' for all",
+                },
+            },
+        },
+    },
+    {
+        "name": "load_skill",
+        "description": (
+            "Load full skill or agent instructions by name. Returns the complete "
+            "SKILL.md or agent.md content for following workflows without spawning a subagent."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Skill or agent name (e.g. 'oa-intake', 'compliance')",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "load_data",
+        "description": (
+            "Load reference data from the plugin data directory. Access thresholds, "
+            "contract types, document requirements, approval chains, contract vehicles."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Data file name (e.g. 'matrix', 'thresholds', 'contract-vehicles')",
+                },
+                "section": {
+                    "type": "string",
+                    "description": "Optional section key (e.g. 'thresholds', 'doc_rules', 'approval_chains')",
+                },
+            },
+            "required": ["name"],
+        },
+    },
     {
         "name": "search_far",
         "description": (
@@ -570,9 +651,10 @@ MAX_SKILL_PROMPT_CHARS = 4000
 
 # -- Skill -> @tool Registry (built from plugin metadata) ------------
 
-_PLUGIN_JSON_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "eagle-plugin", "plugin.json"
+_PLUGIN_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "eagle-plugin"
 )
+_PLUGIN_JSON_PATH = os.path.join(_PLUGIN_DIR, "plugin.json")
 
 
 def _load_plugin_config() -> dict:
@@ -641,7 +723,13 @@ def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> st
 
 # -- @tool Factory ---------------------------------------------------
 
-def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
+def _make_subagent_tool(
+    skill_name: str,
+    description: str,
+    prompt_body: str,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
     """Create a @tool-wrapped subagent from skill registry entry.
 
     Each invocation constructs a fresh Agent with the resolved prompt.
@@ -657,7 +745,17 @@ def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
             system_prompt=prompt_body,
             callback_handler=None,
         )
-        return str(agent(query))
+        raw = str(agent(query))
+
+        # Emit tool_result so the frontend can show the specialist's report
+        if result_queue and loop:
+            truncated = raw[:3000] + "..." if len(raw) > 3000 else raw
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "tool_result", "name": safe_name, "result": {"report": truncated}},
+            )
+
+        return raw
 
     # Override docstring (required for Strands schema extraction)
     subagent_tool.__doc__ = (
@@ -667,6 +765,121 @@ def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
     )
     return subagent_tool
 
+
+
+# -- Progressive Disclosure @tools ------------------------------------
+# These give the supervisor on-demand access to skill metadata and
+# plugin data WITHOUT spawning subagents or bloating the system prompt.
+# Pattern: Layer 1 (system prompt hints) → Layer 2 (list_skills) →
+#          Layer 3 (load_skill) → Layer 4 (load_data)
+
+@tool(name="list_skills")
+def _list_skills_tool(category: str = "") -> str:
+    """List available skills, agents, and data files with descriptions and triggers. Use this to discover what capabilities and reference data are available before diving deeper.
+
+    Args:
+        category: Filter by category: "skills", "agents", "data", or "" for all
+    """
+    result: dict[str, Any] = {}
+
+    if category in ("", "skills"):
+        skills_list = []
+        for name, entry in SKILLS.items():
+            skills_list.append({
+                "name": name,
+                "description": entry.get("description", ""),
+                "triggers": entry.get("triggers", []),
+            })
+        result["skills"] = skills_list
+
+    if category in ("", "agents"):
+        agents_list = []
+        for name, entry in AGENTS.items():
+            if name == "supervisor":
+                continue
+            agents_list.append({
+                "name": name,
+                "description": entry.get("description", ""),
+                "triggers": entry.get("triggers", []),
+            })
+        result["agents"] = agents_list
+
+    if category in ("", "data"):
+        config = _load_plugin_config()
+        data_index = config.get("data", {})
+        data_list = []
+        if isinstance(data_index, dict):
+            for name, meta in data_index.items():
+                data_list.append({
+                    "name": name,
+                    "description": meta.get("description", ""),
+                    "sections": meta.get("sections", []),
+                })
+        result["data"] = data_list
+
+    return json.dumps(result, indent=2)
+
+
+@tool(name="load_skill")
+def _load_skill_tool(name: str) -> str:
+    """Load full skill or agent instructions by name. Returns the complete SKILL.md or agent.md content so you can follow the workflow yourself without spawning a subagent. Use this when you need to understand a skill's detailed procedures, decision trees, or templates.
+
+    Args:
+        name: Skill or agent name (e.g. "oa-intake", "legal-counsel", "compliance")
+    """
+    entry = PLUGIN_CONTENTS.get(name)
+    if not entry:
+        available = sorted(PLUGIN_CONTENTS.keys())
+        return json.dumps({
+            "error": f"No skill or agent named '{name}'",
+            "available": available,
+        })
+    return entry["body"]
+
+
+@tool(name="load_data")
+def _load_data_tool(name: str, section: str = "") -> str:
+    """Load reference data from the eagle-plugin data directory. Use this to access thresholds, contract types, document requirements, approval chains, contract vehicles, and other acquisition reference data on demand.
+
+    Args:
+        name: Data file name (e.g. "matrix", "thresholds", "contract-vehicles")
+        section: Optional top-level key to extract (e.g. "thresholds", "doc_rules", "approval_chains", "contract_types"). Omit to get the full file.
+    """
+    config = _load_plugin_config()
+    data_index = config.get("data", {})
+
+    if isinstance(data_index, list):
+        # Legacy format — flat list of filenames
+        return json.dumps({"error": "Data index not configured. Available files: " + str(data_index)})
+
+    meta = data_index.get(name)
+    if not meta:
+        return json.dumps({
+            "error": f"No data file named '{name}'",
+            "available": sorted(data_index.keys()),
+        })
+
+    file_rel = meta.get("file", f"data/{name}.json")
+    file_path = os.path.join(_PLUGIN_DIR, file_rel)
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return json.dumps({"error": f"Data file not found: {file_rel}"})
+    except json.JSONDecodeError as exc:
+        return json.dumps({"error": f"Invalid JSON in {file_rel}: {str(exc)}"})
+
+    if section:
+        value = data.get(section)
+        if value is None:
+            return json.dumps({
+                "error": f"Section '{section}' not found in '{name}'",
+                "available_sections": list(data.keys()),
+            })
+        return json.dumps({section: value}, indent=2, default=str)
+
+    return json.dumps(data, indent=2, default=str)
 
 
 # -- Compliance Matrix @tool (available to all agents) ----------------
@@ -739,12 +952,19 @@ def _make_service_tool(
             else:
                 result = handler(parsed, tenant_id)
 
-            # Emit tool_result for create_document so frontend renders DocumentCard
-            # Only emit for successful results (not error responses)
-            if tool_name == "create_document" and result_queue and loop and "error" not in result:
+            # Emit tool_result so the frontend can display results in the tool card
+            if result_queue and loop:
+                # Truncate large results for non-document tools to avoid SSE bloat
+                emit_result = result
+                if tool_name != "create_document" and isinstance(result, dict):
+                    text_val = result.get("content") or result.get("text") or result.get("result")
+                    if isinstance(text_val, str) and len(text_val) > 2000:
+                        emit_result = {**result}
+                        key = "content" if "content" in result else "text" if "text" in result else "result"
+                        emit_result[key] = text_val[:2000] + "..."
                 loop.call_soon_threadsafe(
                     result_queue.put_nowait,
-                    {"type": "tool_result", "name": tool_name, "result": result},
+                    {"type": "tool_result", "name": tool_name, "result": emit_result},
                 )
 
             return json.dumps(result, indent=2, default=str)
@@ -838,6 +1058,8 @@ def _build_service_tools(
         )
     # Add compliance matrix — fast-path tool for thresholds, required docs, vehicles
     tools.append(_compliance_matrix_tool)
+    # Add progressive disclosure tools — list/load skills and data on demand
+    tools.extend([_list_skills_tool, _load_skill_tool, _load_data_tool])
     return tools
 
 
@@ -849,6 +1071,8 @@ def build_skill_tools(
     tenant_id: str = "demo-tenant",
     user_id: str = "demo-user",
     workspace_id: str | None = None,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
     """Build @tool-wrapped subagent functions from skill registry.
 
@@ -889,6 +1113,8 @@ def build_skill_tools(
             skill_name=name,
             description=meta["description"],
             prompt_body=_truncate_skill(prompt_body),
+            result_queue=result_queue,
+            loop=loop,
         ))
 
     # Merge active user-created SKILL# items
@@ -908,6 +1134,8 @@ def build_skill_tools(
                 skill_name=name,
                 description=skill.get("description", f"{name} specialist"),
                 prompt_body=_truncate_skill(skill_prompt),
+                result_queue=result_queue,
+                loop=loop,
             ))
     except Exception as exc:
         logger.warning("skill_store.list_active_skills failed for %s: %s -- skipping user skills", tenant_id, exc)
@@ -954,6 +1182,13 @@ def build_supervisor_prompt(
         f"{base_prompt}\n\n"
         f"--- ACTIVE SPECIALISTS ---\n"
         f"Available specialists for delegation:\n{agent_list}\n\n"
+        "Progressive Disclosure (how to find information):\n"
+        "  You have layered access to skills and data. Use the lightest layer that answers the question:\n"
+        "  Layer 1 — System prompt hints (you already have short descriptions above).\n"
+        "  Layer 2 — list_skills(): Discover available skills, agents, and data files with descriptions.\n"
+        "  Layer 3 — load_skill(name): Read full skill instructions/workflows to follow them yourself.\n"
+        "  Layer 4 — load_data(name, section?): Fetch reference data (thresholds, vehicles, doc rules).\n"
+        "  Only spawn a specialist subagent when you need expert reasoning, not for simple lookups.\n\n"
         "KB Retrieval Rules:\n"
         "1) For policy/regulation/procedure/template questions, call knowledge_search first.\n"
         "2) If search returns results, call knowledge_fetch on the top 1-3 relevant docs.\n"
@@ -966,11 +1201,15 @@ def build_supervisor_prompt(
         "2) Do not paste full document bodies in chat unless the user explicitly asks for inline text.\n"
         "3) After create_document, respond briefly and direct the user to open/edit the document card.\n\n"
         f"FAST vs DEEP routing:\n"
-        f"  FAST (seconds): Use query_compliance_matrix for thresholds, required docs, approval levels.\n"
-        f"    Use search_far for specific FAR/DFARS clause lookups by part number or keyword.\n"
-        f"    Use knowledge_search → knowledge_fetch to discover and retrieve KB documents.\n"
-        f"  DEEP (specialist): Use specialist agents only for complex analysis, multi-factor evaluation,\n"
-        f"    or when the user needs expert reasoning — not simple factual lookups.\n"
+        f"  FAST (seconds):\n"
+        f"    - load_data('matrix', 'thresholds') for threshold lookups.\n"
+        f"    - load_data('contract-vehicles', 'nitaac') for vehicle details.\n"
+        f"    - query_compliance_matrix for computed compliance decisions.\n"
+        f"    - search_far for specific FAR/DFARS clause lookups.\n"
+        f"    - knowledge_search → knowledge_fetch for KB documents.\n"
+        f"    - load_skill(name) to read a workflow and follow it yourself.\n"
+        f"  DEEP (specialist): Delegate to specialist subagents only for complex analysis,\n"
+        f"    multi-factor evaluation, or expert reasoning — not simple factual lookups.\n"
         f"  ALWAYS prefer FAST tools first. Only delegate to a specialist when FAST tools don't suffice.\n\n"
         f"IMPORTANT: Use the available tool functions to delegate to specialists. "
         f"Include relevant context in the query you pass to each specialist. "
@@ -1220,18 +1459,21 @@ async def sdk_query_streaming(
         except Exception as exc:
             logger.warning("workspace_store.get_or_create_default failed: %s", exc)
 
+    # Build an async result queue so tools can emit tool_result chunks to the frontend.
+    result_queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
         tenant_id=tenant_id,
         user_id=user_id,
         workspace_id=resolved_workspace_id,
+        result_queue=result_queue,
+        loop=loop,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
-    # Pass an async result queue so create_document can emit tool_result chunks.
-    result_queue: asyncio.Queue = asyncio.Queue()
-    loop = asyncio.get_running_loop()
     service_tools = _build_service_tools(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -1288,8 +1530,9 @@ async def sdk_query_streaming(
             try:
                 item = result_queue.get_nowait()
                 name = item.get("name")
-                if name:
-                    tools_called.append(name)
+                if not name:
+                    continue  # Skip empty-name results (raw Strands callback artifacts)
+                tools_called.append(name)
                 drained.append(item)
             except asyncio.QueueEmpty:
                 break

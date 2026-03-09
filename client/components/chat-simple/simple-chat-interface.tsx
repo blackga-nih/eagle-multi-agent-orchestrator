@@ -6,7 +6,7 @@ import SimpleWelcome from './simple-welcome';
 import SimpleQuickActions from './simple-quick-actions';
 import SlashCommandPicker from '@/components/chat/slash-command-picker';
 import CommandPalette from './command-palette';
-import { useAgentStream, ToolUseEvent } from '@/hooks/use-agent-stream';
+import { useAgentStream, ToolUseEvent, ServerToolResult } from '@/hooks/use-agent-stream';
 import { useSlashCommands } from '@/hooks/use-slash-commands';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
@@ -190,24 +190,44 @@ export default function SimpleChatInterface() {
             setStreamingMsg(newMessage);
         },
 
-        onComplete: () => {
+        onComplete: (toolResults?: ServerToolResult[]) => {
             const completedMsg = streamingMsgRef.current;
             if (completedMsg) {
                 lastAssistantIdRef.current = completedMsg.id;
                 setMessages((prev) => [...prev, completedMsg]);
 
                 // Migrate tool calls from the streaming ID to the committed message ID,
-                // and mark any server-side tools still "pending" as "done" (subagent
-                // delegations don't emit a result event — the text just streams in).
+                // mark pending tools as "done", and merge any server-side tool results.
                 const streamId = streamingMsgIdRef.current;
                 setToolCallsByMsg((prev) => {
                     const calls = prev[streamId] ?? prev[completedMsg.id] ?? [];
                     if (calls.length === 0) return prev;
-                    const finalized = calls.map((tc) =>
-                        !tc.isClientSide && (tc.status === 'pending' || tc.status === 'running')
-                            ? { ...tc, status: 'done' as const }
-                            : tc
-                    );
+
+                    // Build a lookup: toolName → result (FIFO — first result matches first call)
+                    const resultsByName = new Map<string, ServerToolResult[]>();
+                    if (toolResults) {
+                        for (const tr of toolResults) {
+                            const arr = resultsByName.get(tr.toolName) ?? [];
+                            arr.push(tr);
+                            resultsByName.set(tr.toolName, arr);
+                        }
+                    }
+
+                    const finalized = calls.map((tc) => {
+                        if (tc.isClientSide) return tc;
+                        // Try to match a server-side result by name
+                        const pending = resultsByName.get(tc.toolName);
+                        const matched = pending?.shift();
+                        if (matched) {
+                            return { ...tc, status: 'done' as const, result: matched.result as ClientToolResult };
+                        }
+                        // No result — just mark done
+                        if (tc.status === 'pending' || tc.status === 'running') {
+                            return { ...tc, status: 'done' as const };
+                        }
+                        return tc;
+                    });
+
                     const next = { ...prev };
                     delete next[streamId];
                     next[completedMsg.id] = finalized;
@@ -277,7 +297,8 @@ export default function SimpleChatInterface() {
                     result: undefined,
                 });
             } else {
-                // Client-side tool finished — update with result.
+                // Client-side tool finished — update by exact toolUseId.
+                // Server-side results are merged in onComplete via toolResults.
                 const status: ToolStatus = toolEvent.result.success ? 'done' : 'error';
                 upsertToolCall(parentId, toolEvent.toolUseId, {
                     status,

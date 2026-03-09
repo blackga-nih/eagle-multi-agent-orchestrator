@@ -119,12 +119,58 @@ dev-smoke: dev-up smoke
 # One-command local smoke with visible browser window
 dev-smoke-ui: dev-up smoke-ui
 
-# Start FastAPI backend only (local)
+# Start backend + frontend locally (no docker) — kills stale processes first
+dev-local:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Clearing ports 8000 + 3000 ==="
+    for port in 8000 3000 3001; do
+        for pid in $(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $5}' | sort -u); do
+            taskkill /F /T /PID "$pid" 2>/dev/null || true
+        done
+    done
+    # Kill any lingering node processes holding .next/trace
+    taskkill /F /IM node.exe 2>/dev/null || true
+    sleep 3
+    # Clear Next.js cache to purge stale env vars
+    rm -rf client/.next 2>/dev/null || true
+    unset FASTAPI_URL
+    export FASTAPI_URL=http://127.0.0.1:8000
+    echo "=== Starting backend (port 8000) ==="
+    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload &
+    BACKEND_PID=$!
+    sleep 5
+    echo "=== Starting frontend (port 3000) ==="
+    cd client && npm run dev &
+    FRONTEND_PID=$!
+    echo ""
+    echo "Backend PID: $BACKEND_PID (http://localhost:8000)"
+    echo "Frontend PID: $FRONTEND_PID (http://localhost:3000)"
+    echo "Press Ctrl+C to stop both."
+    trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT
+    wait
+
+# Start FastAPI backend only (local) — kills stale processes on port 8000 first
 dev-backend:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Clearing port 8000..."
+    for pid in $(netstat -ano 2>/dev/null | grep ':8000 ' | grep LISTENING | awk '{print $5}' | sort -u); do
+        taskkill /F /T /PID "$pid" 2>/dev/null || true
+    done
+    sleep 1
     cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
-# Start Next.js frontend only (local)
+# Start Next.js frontend only (local) — kills stale processes on port 3000 first
 dev-frontend:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Clearing port 3000..."
+    for pid in $(netstat -ano 2>/dev/null | grep ':3000 ' | grep LISTENING | awk '{print $5}' | sort -u); do
+        taskkill /F /T /PID "$pid" 2>/dev/null || true
+    done
+    sleep 1
+    unset FASTAPI_URL
     cd client && npm run dev
 
 # ── Lint ────────────────────────────────────────────────────

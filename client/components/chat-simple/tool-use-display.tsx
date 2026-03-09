@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { ClientToolResult } from '@/lib/client-tools';
 import { DocumentInfo } from '@/types/chat';
 
@@ -249,12 +250,18 @@ export default function ToolUseDisplay({
   // Special handling for create_document — show document card instead of raw JSON
   const docData = toolName === 'create_document' ? parseCreateDocumentResult(result) : null;
 
+  // Extract markdown report from subagent/tool results
+  // Subagent results arrive as { report: "markdown..." }, service tools as { content: "...", ... }
+  const reportText = hasResult && !docData && result.result && typeof result.result === 'object'
+    ? (result.result as Record<string, unknown>).report as string | undefined
+    : undefined;
+
   const resultText =
-    hasResult && !docData && result.result !== null && result.result !== undefined
+    hasResult && !docData && !reportText && result.result !== null && result.result !== undefined
       ? JSON.stringify(result.result, null, 2)
       : null;
 
-  const canExpand = (status === 'done' || status === 'error') && (resultText || errorText);
+  const canExpand = (status === 'done' || status === 'error') && (resultText || reportText || errorText);
   const showDocCard = status === 'done' && docData !== null;
 
   return (
@@ -309,13 +316,22 @@ export default function ToolUseDisplay({
 
       {/* Collapsible result panel (non-document tools) */}
       {expanded && (
-        <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white">
+        <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white max-h-64 overflow-y-auto">
           {errorText ? (
             <p className="text-red-600 font-mono text-[11px] whitespace-pre-wrap break-all">
               {errorText}
             </p>
+          ) : reportText ? (
+            <div className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
+                            [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1
+                            [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1
+                            [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5
+                            [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0
+                            [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded">
+              <ReactMarkdown>{reportText}</ReactMarkdown>
+            </div>
           ) : resultText ? (
-            <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+            <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
               {resultText}
             </pre>
           ) : null}

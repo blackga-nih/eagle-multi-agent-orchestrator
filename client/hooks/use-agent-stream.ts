@@ -24,10 +24,17 @@ export interface ToolUseEvent {
   executionTarget: 'client' | 'server';
 }
 
+/** Server-side tool result received via SSE tool_result event. */
+export interface ServerToolResult {
+  toolName: string;
+  result: { success: boolean; result: unknown; error?: string };
+}
+
 export interface UseAgentStreamOptions {
   onMessage?: (message: Message) => void;
   onEvent?: (event: StreamEvent) => void;
-  onComplete?: () => void;
+  /** Called when the stream finishes. Includes accumulated server-side tool results. */
+  onComplete?: (toolResults?: ServerToolResult[]) => void;
   onError?: (error: string) => void;
   onDocumentGenerated?: (doc: DocumentInfo) => void;
   /**
@@ -227,6 +234,8 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     const streamingMsgId = `stream-${Date.now()}`;
     let shouldFetchDocs = false;
     const emittedDocKeys = new Set<string>();
+    // Accumulate server-side tool results during streaming — merged at onComplete
+    const serverToolResults: ServerToolResult[] = [];
 
     // The session to use for client tool localStorage namespacing.
     // Prefer the sessionId passed to sendQuery; fall back to options.sessionId.
@@ -311,7 +320,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         await fetchCreatedDocuments(headers, queryStartTime, emittedDocKeys);
       }
 
-      options.onComplete?.();
+      options.onComplete?.(serverToolResults.length > 0 ? serverToolResults : undefined);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         return;
@@ -387,8 +396,17 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         }
       }
 
-      // Handle create_document tool results (streaming path)
-      if (event.type === 'tool_result') {
+      // Handle tool_result events — accumulate for merge at onComplete
+      if (event.type === 'tool_result' && event.tool_result) {
+        const tr = event.tool_result;
+
+        // Accumulate for batch merge when stream completes
+        serverToolResults.push({
+          toolName: tr.name,
+          result: { success: true, result: tr.result },
+        });
+
+        // Extract document info for create_document
         const docInfo = parseDocumentToolResult(event);
         if (docInfo) {
           if (docInfo.s3_key) emittedDocKeys.add(docInfo.s3_key);

@@ -18,7 +18,6 @@ import asyncio
 import json
 import logging
 from contextlib import suppress
-from contextlib import suppress
 from typing import Any, AsyncGenerator, Optional
 
 from .cognito_auth import extract_user_context, UserContext
@@ -118,7 +117,6 @@ async def stream_generator(
     try:
         async for chunk in _sdk_with_keepalive():
             chunk_type = chunk.get("type", "")
-            logger.debug("SSE chunk: type=%s keys=%s", chunk_type, list(chunk.keys()))
 
             if chunk_type == "_keepalive":
                 yield ": keepalive\n\n"
@@ -131,15 +129,27 @@ async def stream_generator(
                 yield await sse_queue.get()
 
             elif chunk_type == "tool_use":
-                await writer.write_tool_use(sse_queue, chunk.get("name", ""), {})
+                tool_input = chunk.get("input", {})
+                # Parse stringified input if needed (Strands may send JSON string)
+                if isinstance(tool_input, str):
+                    try:
+                        tool_input = json.loads(tool_input)
+                    except (json.JSONDecodeError, ValueError):
+                        tool_input = {"raw": tool_input} if tool_input else {}
+                await writer.write_tool_use(
+                    sse_queue,
+                    chunk.get("name", ""),
+                    tool_input,
+                    tool_use_id=chunk.get("tool_use_id", ""),
+                )
                 yield await sse_queue.get()
 
             elif chunk_type == "tool_result":
-                await writer.write_tool_result(
-                    sse_queue,
-                    chunk.get("name", ""),
-                    chunk.get("result", {}),
-                )
+                tr_name = chunk.get("name", "")
+                if not tr_name:
+                    logger.debug("Skipping empty-name tool_result: keys=%s", list(chunk.keys()))
+                    continue
+                await writer.write_tool_result(sse_queue, tr_name, chunk.get("result", {}))
                 yield await sse_queue.get()
 
             elif chunk_type == "complete":

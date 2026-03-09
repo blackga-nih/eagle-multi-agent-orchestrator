@@ -12,6 +12,39 @@ interface MarkdownRendererProps {
  * Renders markdown content with proper styling.
  * Uses react-markdown with tailwind prose classes.
  */
+/**
+ * Sanitize malformed markdown tables:
+ * - Collapse rows that are mostly empty cells (| | | | |)
+ * - Normalize inconsistent column counts
+ * - Remove separator-only rows with no header
+ */
+function sanitizeTables(md: string): string {
+  return md.replace(
+    // Match a contiguous block of pipe-table lines
+    /(?:^[|].*[|]\s*$\n?)+/gm,
+    (tableBlock) => {
+      const lines = tableBlock.trim().split('\n');
+      const cleaned: string[] = [];
+      for (const line of lines) {
+        // Strip each cell and check if it has content
+        const cells = line.split('|').slice(1, -1); // drop outer empty strings
+        const hasContent = cells.some((c) => c.trim().length > 0 && !/^[-:]+$/.test(c.trim()));
+        const isSeparator = cells.every((c) => /^[\s-:]*$/.test(c));
+
+        if (isSeparator && cleaned.length > 0) {
+          // Keep separator rows (---|---) only once after a header
+          const prevIsSep = cleaned.length > 0 && cleaned[cleaned.length - 1].split('|').slice(1, -1).every((c) => /^[\s-:]*$/.test(c));
+          if (!prevIsSep) cleaned.push(line);
+        } else if (hasContent) {
+          cleaned.push(line);
+        }
+        // Skip lines that are entirely empty cells
+      }
+      return cleaned.length > 0 ? cleaned.join('\n') + '\n' : '';
+    }
+  );
+}
+
 export default function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   if (!content) {
     return (
@@ -20,6 +53,8 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
       </div>
     );
   }
+
+  const cleanContent = sanitizeTables(content);
 
   return (
     <div className={`prose prose-sm max-w-none ${className}`}>
@@ -101,10 +136,10 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             </blockquote>
           ),
 
-          // Tables
+          // Tables — wrapped in a scrollable container for wide IGCE/cost tables
           table: ({ children }) => (
-            <div className="overflow-x-auto my-4">
-              <table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
+            <div className="overflow-x-auto my-4 border border-gray-200 rounded-lg">
+              <table className="min-w-full divide-y divide-gray-200">
                 {children}
               </table>
             </div>
@@ -176,7 +211,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
           ),
         }}
       >
-        {content}
+        {cleanContent}
       </ReactMarkdown>
     </div>
   );
