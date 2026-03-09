@@ -182,7 +182,7 @@ class TestAuthEnforcement:
         main_file = os.path.normpath(os.path.join(
             os.path.dirname(__file__), "..", "app", "main.py"
         ))
-        content = open(main_file).read()
+        content = open(main_file, encoding="utf-8").read()
         # The api_chat route must use get_user_from_header dependency
         assert "get_user_from_header" in content, "Auth guard not found in main.py"
         assert "REQUIRE_AUTH" in content, "REQUIRE_AUTH flag not read in main.py"
@@ -192,7 +192,7 @@ class TestAuthEnforcement:
         streaming_file = os.path.normpath(os.path.join(
             os.path.dirname(__file__), "..", "app", "streaming_routes.py"
         ))
-        content = open(streaming_file).read()
+        content = open(streaming_file, encoding="utf-8").read()
         assert "REQUIRE_AUTH" in content, "REQUIRE_AUTH not enforced in streaming_routes"
         assert "401" in content, "401 response not present in streaming_routes"
         assert 'user.user_id == "anonymous"' in content or 'status_code=401' in content, \
@@ -271,7 +271,7 @@ class TestFrontendWiring:
         route_file = os.path.normpath(route_file)
         assert os.path.exists(route_file), f"invoke route.ts not found: {route_file}"
 
-        content = open(route_file).read()
+        content = open(route_file, encoding="utf-8").read()
         assert "/api/chat" in content, (
             "Frontend proxy should target /api/chat endpoint"
         )
@@ -286,7 +286,7 @@ class TestFrontendWiring:
             os.path.dirname(__file__), "..", "..", "client", "app", "api", "invoke", "route.ts"
         )
         route_file = os.path.normpath(route_file)
-        content = open(route_file).read()
+        content = open(route_file, encoding="utf-8").read()
 
         # fastApiBody uses JS shorthand: { message, session_id: sessionId }
         assert "message" in content, "Proxy should include 'message' in fastApiBody"
@@ -310,7 +310,7 @@ class TestSessionContinuity:
         streaming_file = os.path.normpath(os.path.join(
             os.path.dirname(__file__), "..", "app", "streaming_routes.py"
         ))
-        content = open(streaming_file).read()
+        content = open(streaming_file, encoding="utf-8").read()
 
         import re
         # Find the actual call site (not docstring mentions) — look for the
@@ -338,7 +338,7 @@ class TestSessionContinuity:
             os.path.dirname(__file__), "..", "app", "main.py"
         )
         main_file = os.path.normpath(main_file)
-        content = open(main_file).read()
+        content = open(main_file, encoding="utf-8").read()
 
         import re
         # Find the sdk_query call inside api_chat function

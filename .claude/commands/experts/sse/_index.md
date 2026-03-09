@@ -14,7 +14,7 @@ tags: [expert, sse, streaming, tool-use, tool-result, event-stream, observabilit
 This expert covers:
 - **Stream Protocol** - `server/app/stream_protocol.py` — `StreamEvent`, `MultiAgentStreamWriter`, SSE event types
 - **Streaming Routes** - `server/app/streaming_routes.py` — SSE endpoint, event dispatching, tool_result forwarding
-- **Callback Handler** - `server/app/strands_agentic_service.py` — `QueueCallbackHandler`, `chunk_queue`, `result_queue`
+- **Streaming Core** - `server/app/strands_agentic_service.py` — `stream_async()`, `result_queue`, `_drain_tool_results()`
 - **Tool Result Emission** - Factory tools (`_make_*_tool`), `_make_service_tool`, `_make_subagent_tool` — `_emit_tool_result()`
 - **Frontend Parsing** - `client/types/stream.ts` — `StreamEvent`, `ToolUse`, `ToolResult` types
 - **Frontend Consumer** - `client/hooks/use-agent-stream.ts` — SSE reader, `processEventData()`, `ServerToolResult` accumulation
@@ -47,27 +47,25 @@ This expert covers:
 ```
 Backend (Python)                              Frontend (TypeScript)
 ─────────────────                             ────────────────────
-Strands Agent (thread)                        use-agent-stream.ts
-  │                                             │
-  ├─ QueueCallbackHandler                       ├─ fetch('/api/invoke')
-  │   ├─ text → chunk_queue                     │   └─ ReadableStream
-  │   └─ current_tool_use → chunk_queue         │
-  │       (type: tool_use, name, input, id)     ├─ processEventData(line)
+Agent.stream_async(prompt)                    use-agent-stream.ts
+  │ (native async iterator)                     │
+  ├─ TextStreamEvent → text chunk               ├─ fetch('/api/invoke')
+  ├─ ToolUseStreamEvent → tool_use chunk        │   └─ ReadableStream
+  ├─ contentBlockStart (fallback) → tool_use    │
+  │   dedup: _current_tool_id guard             ├─ processEventData(line)
   │                                             │   ├─ text → accumulatedText
-  ├─ Tool execution (sync in thread)            │   ├─ tool_use → onToolUse()
+  ├─ Tool execution (inside agent loop)         │   ├─ tool_use → onToolUse()
   │   ├─ _make_service_tool                     │   ├─ tool_result → serverToolResults[]
-  │   │   └─ result_queue.put_nowait(           │   └─ complete → onComplete()
-  │   │       {tool_result, name, result})      │
-  │   ├─ _make_subagent_tool                    ├─ onComplete(serverToolResults)
-  │   │   └─ result_queue.put_nowait(           │   └─ merge into toolCallsByMsg
-  │   │       {tool_result, name, report})      │       by name (FIFO)
-  │   └─ _make_*_tool (factories)               │
-  │       └─ _emit_tool_result()                └─ tool-use-display.tsx
-  │           └─ result_queue.put_nowait()           ├─ canExpand = status + result
-  │                                                  ├─ chevron ▾ when canExpand
-sdk_query_streaming()                                └─ expanded: JSON or markdown
-  │
-  ├─ poll chunk_queue → yield chunks
+  │   │   └─ result_queue.put(tool_result)      │   └─ complete → onComplete()
+  │   ├─ _make_subagent_tool                    │
+  │   │   └─ result_queue.put(tool_result)      ├─ onComplete(serverToolResults)
+  │   └─ _make_*_tool (factories)               │   └─ merge into toolCallsByMsg
+  │       └─ _emit_tool_result()                │       by name (FIFO)
+  │           └─ result_queue.put()             │
+  │                                             └─ tool-use-display.tsx
+sdk_query_streaming()                              ├─ canExpand = status + result
+  │                                                ├─ chevron ▾ when canExpand
+  ├─ async for event in stream_async()             └─ expanded: JSON or markdown
   ├─ _drain_tool_results() → yield tool_result
   └─ yield {complete, text, tools_called, usage}
        │
@@ -77,6 +75,7 @@ streaming_routes.py
   │   ├─ text → writer.write_text()
   │   ├─ tool_use → writer.write_tool_use(name, input, id)
   │   ├─ tool_result → writer.write_tool_result(name, result)
+  │   ├─ _keepalive → ": keepalive\n\n" (every 20s)
   │   └─ complete → writer.write_complete()
   │
   └─ SSE: "data: {json}\n\n"
@@ -86,8 +85,8 @@ streaming_routes.py
 
 | Type | Backend Origin | Frontend Handler | UI Effect |
 |------|---------------|-----------------|-----------|
-| `text` | `QueueCallbackHandler` data kwarg | `accumulatedText` → `onMessage` | Streaming text bubble |
-| `tool_use` | `QueueCallbackHandler` current_tool_use | `onToolUse` → tool card (pending) | Tool card appears |
+| `text` | `stream_async()` TextStreamEvent | `accumulatedText` → `onMessage` | Streaming text bubble |
+| `tool_use` | `stream_async()` ToolUseStreamEvent | `onToolUse` → tool card (pending) | Tool card appears |
 | `tool_result` | `result_queue` via `_drain_tool_results` | `serverToolResults[]` → `onComplete` merge | Chevron + expandable result |
 | `complete` | End of `sdk_query_streaming` | `onComplete(toolResults)` | Finalize message + merge results |
 | `error` | Exception handler | `onError` | Error display |

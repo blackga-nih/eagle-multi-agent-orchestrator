@@ -272,7 +272,7 @@ cd server && grep -n "^@tool(name=" app/strands_agentic_service.py
 5. Check `canExpand` logic in `tool-use-display.tsx`
 
 ### Duplicate Tool Events
-1. Check `_current_tool_id` dedup in `QueueCallbackHandler`
+1. Check `_current_tool_id` dedup in stream event handler
 2. Verify only one of `current_tool_use` / `contentBlockStart` fires
 
 ### tool_result Not Matching Tool Card

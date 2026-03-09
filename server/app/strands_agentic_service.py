@@ -599,20 +599,31 @@ _PLUGIN_JSON_PATH = os.path.join(_PLUGIN_DIR, "plugin.json")
 
 
 def _load_plugin_config() -> dict:
-    """Load plugin manifest -- prefers DynamoDB PLUGIN#manifest, falls back to bundled file."""
+    """Load plugin config, merging DynamoDB manifest with bundled plugin.json.
+
+    The DynamoDB PLUGIN#manifest only stores version/agent_count/skill_count —
+    it does NOT include the 'data' index needed by load_data(). Always load
+    the bundled plugin.json as the base, then overlay any DynamoDB manifest
+    fields on top.
+    """
+    # Always start from the bundled plugin.json (has 'data', 'capabilities', etc.)
+    config: dict = {}
+    try:
+        with open(_PLUGIN_JSON_PATH, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    # Overlay DynamoDB manifest fields (version, agent_count, skill_count)
     try:
         from .plugin_store import get_plugin_manifest
         manifest = get_plugin_manifest()
         if manifest:
-            return manifest
+            config.update(manifest)
     except Exception:
         pass
 
-    try:
-        with open(_PLUGIN_JSON_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return config
 
 
 def _build_registry() -> dict:
@@ -1028,7 +1039,8 @@ _SERVICE_TOOL_DEFS = {
     ),
     "knowledge_fetch": (
         "Fetch full knowledge document content from S3. "
-        "Pass JSON with s3_key (or document_id)."
+        "REQUIRES an s3_key from a prior knowledge_search result — do NOT call without one. "
+        "Pass JSON: {\"s3_key\": \"path/to/document.md\"}."
     ),
     "manage_skills": (
         "Create, list, update, delete, or publish custom skills. "
@@ -1436,8 +1448,9 @@ async def sdk_query_streaming(
     {"type": "text", "data": "..."} chunks as they arrive from Bedrock
     ConverseStream, plus a final {"type": "complete", ...} event.
 
-    Runs the synchronous Strands Agent in a background thread and bridges
-    to async via a queue.
+    Uses Agent.stream_async() which handles the sync→async bridge
+    internally. Factory tools push results via an asyncio.Queue that
+    is drained between stream events.
     """
     fast_path = await _maybe_fast_path_document_generation(
         prompt=prompt,
@@ -1477,8 +1490,8 @@ async def sdk_query_streaming(
             logger.warning("workspace_store.get_or_create_default failed: %s", exc)
 
     # --- stream_async() approach: SDK handles sync→async bridge ---
-    # No chunk_queue, no result_queue, no background thread.
-    # AfterToolCallEvent hook captures tool results inline.
+    # result_queue is still used by factory tools to push tool_result events.
+    # These are drained between stream events in the main async for loop.
 
     result_queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()

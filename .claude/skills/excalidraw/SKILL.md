@@ -35,26 +35,26 @@ Generates all Excalidraw element types:
 ### 4. **Styling & Theming**
 
 **IMPORTANT**: Always follow the style guide in `docs/excalidraw-best-practices.md`. Key rules:
-- **Dark canvas background**: `#1a1a1a` (NOT white)
-- **Hachure fills**: Always use `fillStyle: "hachure"` (NOT solid) for shapes
-- **Bright borders + dark fills**: e.g. stroke `#3b82f6`, background `#1e3a8a`
+- **White/light canvas background**: `#ffffff` or `transparent` — NEVER use dark backgrounds like `#1a1a1a` (they render as opaque black rectangles behind every element in PNG exports and most viewers)
+- **Solid fills with light pastel backgrounds**: Use `fillStyle: "solid"` with light fill colors for readability
+- **Dark borders + light fills**: e.g. stroke `#1e40af`, background `#dbeafe`
 - **Hand-drawn roughness**: `roughness: 1` for organic feel
 - **Monospace headers**: `fontFamily: 3` for titles, `fontFamily: 1` for body
 - **Typography**: Title 48-60px, Section 32-36px, Body 16-20px
 - **Stroke width**: 3-4px main borders, 2px secondary
-- **Opacity**: 70-90 for subtle layering
+- **Opacity**: 100 for shapes, 100 for text (full opacity for clean PNG export)
 
-**Color Palette (bright borders / dark fills)**:
+**Color Palette (dark borders / light pastel fills)**:
 | Role | Border | Fill |
 |------|--------|------|
-| Blue (API/Services) | `#3b82f6` | `#1e3a8a` |
-| Orange (Data) | `#f59e0b` | `#92400e` |
-| Red (Security) | `#ef4444` | `#7f1d1d` |
-| Purple (Processing) | `#8b5cf6` | `#4c1d95` |
-| Cyan (Output) | `#06b6d4` | `#164e63` |
-| Green (Success) | `#10b981` | `#064e3b` |
+| Blue (API/Services) | `#1e40af` | `#dbeafe` |
+| Orange (Data) | `#b45309` | `#fef3c7` |
+| Red (Security) | `#b91c1c` | `#fee2e2` |
+| Purple (Processing) | `#6d28d9` | `#ede9fe` |
+| Cyan (Output) | `#0e7490` | `#cffafe` |
+| Green (Success) | `#047857` | `#d1fae5` |
 
-**Text Colors**: Titles `#10b981` (green monospace), Labels `#ffffff`, Details `#6b7280`
+**Text Colors**: Titles `#1e3a5f` (dark navy), Labels `#111827` (near black), Details `#6b7280` (gray)
 
 ### 5. **Advanced Features**
 - Element grouping (`groupIds`)

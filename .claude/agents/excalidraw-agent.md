@@ -13,7 +13,7 @@ You are the Excalidraw agent. You produce Obsidian-format Excalidraw diagrams (`
 ## Instructions
 
 1. **Load the skill** — Read `.claude/skills/excalidraw/SKILL.md` first. It defines diagram types, element generation, positioning, styling, output format, and file conventions.
-2. **Apply the style guide** — Follow `.claude/skills/excalidraw/docs/excalidraw-best-practices.md`: dark canvas `#1a1a1a`, hachure fills, bright borders / dark fills, roughness 1, typography and color palette from the skill.
+2. **Apply the style guide** — Follow `.claude/skills/excalidraw/docs/excalidraw-best-practices.md`: white/transparent canvas (NEVER dark `#1a1a1a`), solid fills with light pastels, dark borders / light fills, roughness 1, typography and color palette from the skill.
 3. **Use templates when relevant** — For sequence flows use `.claude/skills/excalidraw/templates/sequence-diagram.md`; for worker/pipeline diagrams use `.claude/skills/excalidraw/templates/concurrent-worker-pool.md`.
 4. **Output format** — Every file MUST be Obsidian Excalidraw format: YAML frontmatter `excalidraw-plugin: parsed` and `tags: [excalidraw]`, text elements with `^element-id` anchors, drawing in `%%` json block, extension `.excalidraw.md`.
 5. **Save location** — Write to `docs/excalidraw-diagrams/{context}/*.excalidraw.md` where `{context}` is e.g. `backend`, `frontend`, `deployment`, `claude-sdk`, or a kebab-case feature name. Create the directory if needed.
@@ -46,7 +46,7 @@ You are the Excalidraw agent. You produce Obsidian-format Excalidraw diagrams (`
 ## Core Rules
 
 - **Never** emit raw Excalidraw JSON only — always wrap in the Obsidian `.excalidraw.md` structure (frontmatter + text elements + `%%` json block).
-- **Always** use the skill’s color palette and dark canvas; no white background or solid fills.
+- **Always** use the skill’s color palette with white/transparent canvas and light pastel fills; NEVER use dark backgrounds like `#1a1a1a`.
 - **Always** export a PNG copy after writing the `.excalidraw.md` — this is mandatory, not optional.
 - **Prefer** existing templates for sequence and worker-pool diagrams; for others, follow the skill’s layout and element guidelines.
 - **One diagram per file** unless the user explicitly asks for multiple; for multiple, use distinct filenames (e.g. `flow-overview.excalidraw.md`, `flow-detail.excalidraw.md`).

@@ -58,63 +58,43 @@ The `tool_result` payload shape: `{"name": str, "result": any}`
 
 ## Part 2: Backend Streaming Pipeline
 
-### Two Queues Pattern
+### stream_async() Architecture
 
-`sdk_query_streaming()` in `strands_agentic_service.py` uses two queues:
+`sdk_query_streaming()` in `strands_agentic_service.py` uses `Agent.stream_async()` — the Strands SDK's native async iterator that handles sync→async bridging internally. No background thread, no `QueueCallbackHandler`.
 
-1. **`chunk_queue`** (stdlib `queue.Queue`) — fed by `QueueCallbackHandler` from the Strands agent thread
-   - `{"type": "text", "data": str}` — streaming text tokens
-   - `{"type": "tool_use", "name": str, "input": str|dict, "tool_use_id": str}` — tool invocation start
-
-2. **`result_queue`** (asyncio `Queue`) — fed by tool execution via `loop.call_soon_threadsafe()`
-   - `{"type": "tool_result", "name": str, "result": dict}` — tool execution result
-
-### QueueCallbackHandler
-
+**Event flow:**
 ```python
-class QueueCallbackHandler:
-    def __init__(self, chunk_queue):
-        self._queue = chunk_queue
-        self.tool_count = 0
-        self._current_tool_id = None  # dedup guard
+async for event in supervisor.stream_async(prompt):
+    # 1. Drain tool results from factory tools
+    for tool_result_chunk in _drain_tool_results():
+        yield tool_result_chunk
 
-    def __call__(self, **kwargs):
-        data = kwargs.get("data", "")
-        if data:
-            self._queue.put({"type": "text", "data": data})
+    # 2. Text streaming (TextStreamEvent)
+    data = event.get("data")
+    if data and isinstance(data, str):
+        yield {"type": "text", "data": data}
 
-        # Strands ToolUseStreamEvent — structured
-        current_tool = kwargs.get("current_tool_use")
-        if current_tool and isinstance(current_tool, dict):
-            tool_id = current_tool.get("toolUseId", "")
-            if tool_id and tool_id != self._current_tool_id:
-                self._current_tool_id = tool_id
-                self.tool_count += 1
-                self._queue.put({
-                    "type": "tool_use",
-                    "name": current_tool.get("name", ""),
-                    "input": current_tool.get("input", ""),
-                    "tool_use_id": tool_id,
-                })
-            return  # Don't double-emit from contentBlockStart
+    # 3. Tool use start (ToolUseStreamEvent)
+    current_tool = event.get("current_tool_use")
+    if current_tool and isinstance(current_tool, dict):
+        tool_id = current_tool.get("toolUseId", "")
+        if tool_id and tool_id != _current_tool_id:  # dedup guard
+            _current_tool_id = tool_id
+            yield {"type": "tool_use", "name": ..., "tool_use_id": tool_id}
 
-        # Fallback: raw Bedrock contentBlockStart
-        tool_use = kwargs.get("event", {}).get(
-            "contentBlockStart", {}
-        ).get("start", {}).get("toolUse")
-        if tool_use:
-            tool_id = tool_use.get("toolUseId", "")
-            if tool_id != self._current_tool_id:
-                self._current_tool_id = tool_id
-                self.tool_count += 1
-                self._queue.put({
-                    "type": "tool_use",
-                    "name": tool_use.get("name", ""),
-                    "tool_use_id": tool_id,
-                })
+    # 4. Bedrock contentBlockStart fallback
+    # (same dedup via _current_tool_id)
 ```
 
-**Key:** `_current_tool_id` prevents duplicate emissions from both `current_tool_use` and `contentBlockStart` for the same tool invocation.
+**Key:** `_current_tool_id` prevents duplicate emissions when both `current_tool_use` and `contentBlockStart` fire for the same tool invocation.
+
+### result_queue (asyncio.Queue)
+
+Factory tools (`_make_service_tool`, `_make_subagent_tool`, `_make_*_tool`) push results via `result_queue` because Strands `stream_async()` does NOT yield `ToolResultEvent` (it has `is_callback_event = False`).
+
+```python
+result_queue: asyncio.Queue = asyncio.Queue()
+```
 
 ### _drain_tool_results()
 
@@ -135,10 +115,9 @@ def _drain_tool_results() -> list[dict]:
     return drained
 ```
 
-Called at three points:
-1. Top of main polling loop (before checking chunk_queue)
-2. After processing each chunk from chunk_queue
-3. After thread.join() — final drain
+Called at two points:
+1. Top of each iteration of `async for event in stream_async()` — interleaves results with streaming events
+2. After the stream completes — final drain for any remaining results
 
 ### Tool Result Emission Patterns
 
@@ -370,13 +349,13 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 - **DO NOT wrap @tool with a generic `**kwargs` wrapper** — Strands generates tool schema from function signature; `**kwargs` produces empty schema and the model won't know what parameters to send
 - **DO NOT override `_tool_spec`** on wrapped tools — breaks the Strands tool registry and can affect ALL tools in the agent
 - **DO NOT use module-level @tool singletons** for tools that need per-request state (result_queue, loop) — use factory functions instead
-- **DO NOT emit tool_result from QueueCallbackHandler** — the callback fires during streaming, before the tool actually executes; use result_queue pattern instead
+- **DO NOT emit tool_result from stream_async event handling** — stream events fire during streaming, before the tool actually executes; use result_queue pattern instead
 
 ### common_issues
 
 - **Missing chevron on tool card**: Tool doesn't emit `tool_result` → no result data → `canExpand` is false. Fix: ensure the tool's factory function calls `_emit_tool_result()`.
 - **Empty-name tool_result events**: Strands raw callbacks emit artifacts with no tool name. Fix: filter in `_drain_tool_results()` and `streaming_routes.py`.
-- **Duplicate tool_use events**: Both `current_tool_use` and `contentBlockStart` fire for the same tool. Fix: `_current_tool_id` dedup guard in `QueueCallbackHandler`.
+- **Duplicate tool_use events**: Both `current_tool_use` and `contentBlockStart` fire for the same tool. Fix: `_current_tool_id` dedup guard in stream event handler.
 - **tool_result not matched to card**: Name mismatch between tool_use name and tool_result name. Fix: ensure both use the same `tool_name` / `safe_name`.
 - **Zombie server processes**: Stale uvicorn processes keep LISTENING sockets, serving old code. Fix: `taskkill /F /T /PID` with tree kill flag.
 

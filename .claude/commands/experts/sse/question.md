@@ -43,8 +43,8 @@ Questions about SSE event types, format, and wire protocol.
 Questions about how events are generated and queued.
 
 **Examples**:
-- "How does QueueCallbackHandler work?"
-- "What are the two queues in sdk_query_streaming?"
+- "How does stream_async() event routing work?"
+- "How does result_queue work in sdk_query_streaming?"
 - "How do tool_result events get from tools to the SSE stream?"
 
 **Resolution**:
