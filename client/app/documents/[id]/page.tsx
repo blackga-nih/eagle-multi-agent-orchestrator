@@ -50,6 +50,38 @@ const TEMPLATE_PREFIXES = Object.keys(TEMPLATE_MAP).sort((a, b) => b.length - a.
 
 // Alias for local usage (backward compat with existing references in this file)
 const DOC_TYPE_LABELS = DOCUMENT_TYPE_LABELS as Record<string, string>;
+const MAX_DOC_CONTEXT_CHARS = 2000;
+const MAX_SESSION_CONTEXT_CHARS = 1500;
+
+function truncateWithEllipsis(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return `${text.slice(0, maxChars - 3)}...`;
+}
+
+function sanitizeContextText(text: string): string {
+    return text
+        .replace(/Authorization:\s*[^\n]*/gi, '[REDACTED]')
+        .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, '[REDACTED]')
+        .replace(/AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)\s*[:=]?\s*[^\s\n]+/gi, '[REDACTED]');
+}
+
+async function extractResponseError(response: Response): Promise<string> {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        try {
+            const payload = await response.json() as { detail?: string; error?: string; message?: string };
+            return payload.detail || payload.error || payload.message || `Request failed (${response.status})`;
+        } catch {
+            return `Request failed (${response.status})`;
+        }
+    }
+    try {
+        const text = await response.text();
+        return text || `Request failed (${response.status})`;
+    } catch {
+        return `Request failed (${response.status})`;
+    }
+}
 
 export default function DocumentViewerPage({ params }: PageProps) {
     const { id } = use(params);
@@ -61,6 +93,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const [documentContent, setDocumentContent] = useState('');
     const [documentTitle, setDocumentTitle] = useState('');
     const [documentType, setDocumentType] = useState('');
+    const [packageId, setPackageId] = useState<string | undefined>(undefined);
     const [editContent, setEditContent] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -79,6 +112,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
         },
     ]);
     const [chatInput, setChatInput] = useState('');
+    const [streamingAssistantMsg, setStreamingAssistantMsg] = useState<ChatMessage | null>(null);
+    const streamingAssistantMsgRef = useRef<ChatMessage | null>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -104,6 +139,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 if (doc.content) {
                     setDocumentTitle(doc.title);
                     setDocumentType(doc.document_type);
+                    setPackageId(doc.package_id);
                     setDocumentContent(doc.content);
                     setEditContent(doc.content);
                     setIsLoading(false);
@@ -112,6 +148,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 // Has metadata but no content — keep metadata, fall through to fetch
                 setDocumentTitle(doc.title);
                 setDocumentType(doc.document_type);
+                setPackageId(doc.package_id);
             }
         } catch {
             // sessionStorage unavailable or parse error
@@ -122,6 +159,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
         if (stored2?.content) {
             setDocumentTitle(stored2.title);
             setDocumentType(stored2.document_type);
+            setPackageId(stored2.package_id);
             setDocumentContent(stored2.content);
             setEditContent(stored2.content);
             setIsLoading(false);
@@ -140,6 +178,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     const data = await res.json();
                     setDocumentTitle(data.title || 'Untitled Document');
                     setDocumentType(data.document_type || '');
+                    setPackageId(data.package_id || undefined);
                     setDocumentContent(data.content || '');
                     setEditContent(data.content || '');
                     setIsLoading(false);
@@ -219,21 +258,35 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const { sendQuery, isStreaming } = useAgentStream({
         getToken,
         onMessage: (msg) => {
-            setChatMessages((prev) => [
-                ...prev,
-                {
-                    id: msg.id,
-                    role: 'assistant',
-                    content: msg.content,
-                    timestamp: msg.timestamp,
-                    reasoning: msg.reasoning,
-                    agent_id: msg.agent_id,
-                    agent_name: msg.agent_name,
-                },
-            ]);
+            const next: ChatMessage = {
+                id: msg.id,
+                role: 'assistant',
+                content: msg.content,
+                timestamp: msg.timestamp,
+                reasoning: msg.reasoning,
+                agent_id: msg.agent_id,
+                agent_name: msg.agent_name,
+            };
+            streamingAssistantMsgRef.current = next;
+            setStreamingAssistantMsg(next);
+        },
+        onComplete: () => {
+            const completed = streamingAssistantMsgRef.current;
+            if (completed) {
+                setChatMessages((prev) => [...prev, completed]);
+            }
+            streamingAssistantMsgRef.current = null;
+            setStreamingAssistantMsg(null);
+        },
+        onError: () => {
+            streamingAssistantMsgRef.current = null;
+            setStreamingAssistantMsg(null);
         },
         onDocumentGenerated: (doc) => {
             // LLM regenerated the document — update the left panel
+            if (doc.package_id) {
+                setPackageId(doc.package_id);
+            }
             if (doc.content) {
                 setDocumentContent(doc.content);
                 setEditContent(doc.content);
@@ -288,14 +341,14 @@ ${docSnippet}`;
             timestamp: new Date(),
         };
         setChatMessages((prev) => [...prev, userMsg]);
-        sendQuery(autoPrompt, sessionId);
+        sendQuery(autoPrompt, sessionId, packageId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [unfilledCount, isLoading, isStreaming, showHydrationBanner]);
+    }, [unfilledCount, isLoading, isStreaming, showHydrationBanner, packageId]);
 
     // Scroll chat to bottom
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatMessages, isStreaming]);
+    }, [chatMessages, streamingAssistantMsg, isStreaming]);
 
     // Auto-resize chat textarea
     const adjustTextareaHeight = useCallback(() => {
@@ -310,6 +363,42 @@ ${docSnippet}`;
         adjustTextareaHeight();
     }, [chatInput, adjustTextareaHeight]);
 
+    const buildDocumentAssistantPrompt = useCallback((userRequest: string): string => {
+        const sanitizedDoc = sanitizeContextText(documentContent || '');
+        const docExcerpt = sanitizedDoc.length > MAX_DOC_CONTEXT_CHARS
+            ? `${sanitizedDoc.slice(0, 1000)}\n...\n${sanitizedDoc.slice(-1000)}`
+            : sanitizedDoc;
+
+        const sessionData = sessionId ? loadSession(sessionId) : null;
+        const sessionMessages = (sessionData?.messages || [])
+            .filter((m) => m.role === 'user')
+            .slice(0, 5)
+            .map((m) => ({
+                role: 'user' as const,
+                content: sanitizeContextText(typeof m.content === 'string' ? m.content : ''),
+            }));
+
+        const background = sessionMessages.length
+            ? extractBackgroundFromMessages(sessionMessages)
+            : '';
+
+        const boundedDoc = truncateWithEllipsis(docExcerpt, MAX_DOC_CONTEXT_CHARS);
+        const boundedSession = truncateWithEllipsis(background, MAX_SESSION_CONTEXT_CHARS);
+
+        return [
+            'You are assisting with edits to an acquisition document in EAGLE.',
+            '[DOCUMENT CONTEXT]',
+            `Title: ${documentTitle || 'Untitled Document'}`,
+            `Type: ${documentType || 'unknown'}`,
+            boundedDoc ? `Current Content Excerpt:\n${boundedDoc}` : 'Current Content Excerpt: [empty]',
+            '[ORIGIN SESSION CONTEXT]',
+            boundedSession || 'No origin session context was found for this document.',
+            '[USER REQUEST]',
+            userRequest,
+            'Instruction: If the user requests substantive edits or section completion, use create_document and return the updated draft.',
+        ].join('\n\n');
+    }, [documentContent, documentTitle, documentType, loadSession, sessionId]);
+
     const handleSendMessage = async () => {
         if (!chatInput.trim() || isStreaming) return;
 
@@ -320,11 +409,15 @@ ${docSnippet}`;
             timestamp: new Date(),
         };
         setChatMessages((prev) => [...prev, userMsg]);
-        const query = chatInput;
+        const query = buildDocumentAssistantPrompt(chatInput);
         setChatInput('');
 
-        await sendQuery(query, sessionId);
+        await sendQuery(query, sessionId || undefined, packageId);
     };
+
+    const displayChatMessages = streamingAssistantMsg
+        ? [...chatMessages, streamingAssistantMsg]
+        : chatMessages;
 
     const handleToggleEdit = () => {
         if (isEditing) {
@@ -360,10 +453,22 @@ ${docSnippet}`;
             });
 
             if (!res.ok) {
-                throw new Error(`Export failed: ${res.status}`);
+                const detail = await extractResponseError(res);
+                throw new Error(`Export failed (${res.status}): ${detail}`);
             }
 
             const blob = await res.blob();
+            if (blob.size === 0) {
+                throw new Error('Export returned an empty file.');
+            }
+
+            const sig = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+            const isDocx = sig.length >= 4 && sig[0] === 0x50 && sig[1] === 0x4b && sig[2] === 0x03 && sig[3] === 0x04;
+            const isPdf = sig.length >= 4 && sig[0] === 0x25 && sig[1] === 0x50 && sig[2] === 0x44 && sig[3] === 0x46;
+            if ((format === 'docx' && !isDocx) || (format === 'pdf' && !isPdf)) {
+                throw new Error(`Export returned invalid ${format.toUpperCase()} file content.`);
+            }
+
             const url = URL.createObjectURL(blob);
             const a = window.document.createElement('a');
             a.href = url;
@@ -549,7 +654,7 @@ ${docSnippet}`;
 
                         {/* Chat Messages */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                            {chatMessages.map((msg) => (
+                            {displayChatMessages.map((msg) => (
                                 <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                                     <div
                                         className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
@@ -589,7 +694,7 @@ ${docSnippet}`;
                             ))}
 
                             {/* Typing indicator */}
-                            {isStreaming && (
+                            {isStreaming && !streamingAssistantMsg && (
                                 <div className="flex gap-3">
                                     <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
                                         <Sparkles className="w-3.5 h-3.5 text-white" />

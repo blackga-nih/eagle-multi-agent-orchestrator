@@ -144,6 +144,11 @@ async def stream_generator(
 
             elif chunk_type == "complete":
                 complete_text = chunk.get("text", "")
+                complete_metadata = {}
+                if "tools_called" in chunk:
+                    complete_metadata["tools_called"] = chunk.get("tools_called") or []
+                if "usage" in chunk:
+                    complete_metadata["usage"] = chunk.get("usage") or {}
                 logger.debug("SSE complete: complete_text_len=%d full_parts=%d", len(complete_text), len(full_response_parts))
                 if not full_response_parts and complete_text:
                     full_response_parts.append(complete_text)
@@ -165,7 +170,10 @@ async def stream_generator(
                         await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
                     except Exception:
                         logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
-                await writer.write_complete(sse_queue)
+                await writer.write_complete(
+                    sse_queue,
+                    metadata=complete_metadata if complete_metadata else None,
+                )
                 yield await sse_queue.get()
                 return
 

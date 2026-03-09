@@ -35,7 +35,7 @@ import io
 
 # EAGLE modules (new)
 from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
-from .document_export import export_document
+from .document_export import export_document, ExportDependencyError
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
     update_session as eagle_update_session, delete_session as eagle_delete_session,
@@ -499,9 +499,12 @@ async def api_export_document(req: ExportRequest, user: UserContext = Depends(ge
                 "X-File-Size": str(result["size_bytes"]),
             }
         )
+    except ExportDependencyError as e:
+        logger.error("Export dependency error: %s", e)
+        raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
         logger.warning("Export validation error: %s", e)
-        raise HTTPException(status_code=400, detail="Invalid export parameters")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Export error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during export")
@@ -542,6 +545,9 @@ async def api_export_session(
                 "Content-Disposition": f'attachment; filename="{result["filename"]}"',
             }
         )
+    except ExportDependencyError as e:
+        logger.error("Session export dependency error: %s", e)
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error("Session export error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during session export")

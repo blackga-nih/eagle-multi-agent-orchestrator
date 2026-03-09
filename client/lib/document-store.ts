@@ -85,7 +85,7 @@ function writeMap<T>(key: string, map: Record<string, T>): void {
 }
 
 function getDocId(doc: DocumentInfo): string {
-  const raw = doc.document_id || doc.s3_key || doc.title;
+  const raw = doc.s3_key || doc.document_id || doc.title;
   return encodeURIComponent(raw);
 }
 
@@ -188,5 +188,15 @@ export function getGeneratedDocuments(): StoredDocument[] {
 
 export function getGeneratedDocument(id: string): StoredDocument | null {
   const map = readMap<StoredDocument>(DOCS_KEY);
-  return map[id] ?? null;
+  if (map[id]) return map[id];
+
+  const decoded = decodeURIComponent(id);
+  const normalizedId = encodeURIComponent(decoded);
+  if (map[normalizedId]) return map[normalizedId];
+
+  const match = Object.values(map).find((doc) => {
+    if (doc.id === id || doc.id === normalizedId) return true;
+    return doc.s3_key === decoded || doc.title === decoded;
+  });
+  return match ?? null;
 }
