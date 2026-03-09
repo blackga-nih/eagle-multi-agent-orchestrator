@@ -4,7 +4,7 @@ file-type: expertise
 domain: sse
 parent: "[[sse/_index]]"
 human_reviewed: false
-last_updated: "2026-03-09T15:00:00Z"
+last_updated: "2026-03-09T18:00:00Z"
 description: "SSE Expertise (Complete Mental Model)"
 allowed-tools: []
 tags: [expert, sse, streaming, expertise, mental-model]
@@ -57,6 +57,26 @@ The `tool_result` payload shape: `{"name": str, "result": any}`
 ---
 
 ## Part 2: Backend Streaming Pipeline
+
+### Fast-Path Document Generation
+
+Before starting the full agent loop, `sdk_query_streaming()` calls `_maybe_fast_path_document_generation()` (~line 1455). If the user prompt matches a direct doc-generation pattern (SOW, IGCE, AP, etc.), it bypasses the supervisor entirely:
+
+```python
+fast_path = await _maybe_fast_path_document_generation(prompt, tenant_id, ...)
+if fast_path is not None:
+    yield {"type": "tool_use", "name": "create_document"}
+    yield {"type": "tool_result", "name": "create_document", "result": result}
+    yield {"type": "text", "data": summary}
+    yield {"type": "complete", ...}
+    return
+```
+
+**Key:** Fast-path emits synthetic `tool_use` + `tool_result` events so the frontend renders a document card without the agent ever running.
+
+### Forced Document Reconciliation
+
+After the stream completes (post-`stream_async`), `_ensure_create_document_for_direct_request()` (~line 1646) checks whether the model should have called `create_document` but didn't. If so, it forces the call and emits synthetic `tool_use` + `tool_result` events. This fixes cases where the model produces inline draft text instead of using the document tool.
 
 ### stream_async() Architecture
 
@@ -137,7 +157,13 @@ Three patterns emit to `result_queue`:
 - Call `_emit_tool_result(tool_name, result_str, result_queue, loop)`
 - Shared helper parses JSON, truncates large text fields, pushes to queue
 
-All three use `loop.call_soon_threadsafe(result_queue.put_nowait, ...)` because tools execute in the Strands agent thread (not the asyncio event loop thread).
+**Pattern D: Knowledge tools** (`knowledge_search`, `knowledge_fetch`)
+- Wired as service tools via `_SERVICE_TOOL_DEFS` → `_make_service_tool()`
+- Dispatch goes through `TOOL_DISPATCH` in `agentic_service.py` → `exec_knowledge_search()` / `exec_knowledge_fetch()` in `tools/knowledge_tools.py`
+- Result emission follows Pattern A (service tool), not standalone
+- Schema-only entries in `EAGLE_TOOLS` list (for health endpoint reporting)
+
+All patterns use `loop.call_soon_threadsafe(result_queue.put_nowait, ...)` because tools execute in the Strands agent thread (not the asyncio event loop thread).
 
 ### _emit_tool_result() Helper
 
@@ -157,9 +183,30 @@ def _emit_tool_result(tool_name, result_str, result_queue, loop):
 
 ## Part 3: Streaming Routes (`server/app/streaming_routes.py`)
 
+### _sdk_with_keepalive() Wrapper
+
+Wraps `sdk_query_streaming()` to inject SSE keepalive comments (`: keepalive\n\n`) every 20 seconds while waiting for the next chunk. This prevents ALB idle timeout (300s) from killing long-running agent turns.
+
+```python
+async def _sdk_with_keepalive():
+    pending_task = None
+    while True:
+        if pending_task is None:
+            pending_task = asyncio.create_task(aiter.__anext__())
+        done, _ = await asyncio.wait({pending_task}, timeout=KEEPALIVE_INTERVAL)
+        if done:
+            chunk = pending_task.result()
+            pending_task = None
+            yield chunk
+        else:
+            yield {"type": "_keepalive"}  # → ": keepalive\n\n"
+```
+
+**Key:** The `pending_task` is reused across timeout iterations to avoid losing chunks. Only cleared when the task actually completes.
+
 ### stream_generator() async generator
 
-Iterates chunks from `sdk_query_streaming()` and converts to SSE via `MultiAgentStreamWriter`:
+Iterates chunks from `_sdk_with_keepalive()` (which wraps `sdk_query_streaming()`) and converts to SSE via `MultiAgentStreamWriter`:
 
 ```python
 async for chunk in gen:
@@ -185,11 +232,24 @@ async for chunk in gen:
         await writer.write_tool_result(sse_queue, tr_name, chunk.get("result", {}))
 
     elif chunk_type == "complete":
-        # Emit complete with metadata (tools_called, usage, text)
+        # If no text was streamed, use complete_text as fallback
+        if not full_response_parts and complete_text:
+            full_response_parts.append(complete_text)
+            await writer.write_text(sse_queue, complete_text)
+
+        # Guaranteed fallback: never send blank response to frontend
+        if not full_response_parts:
+            await writer.write_text(sse_queue, "[No response generated. Please try again.]")
+
+        # Persist to DynamoDB, then emit COMPLETE
         await writer.write_complete(sse_queue)
 ```
 
-**Key:** Empty-name tool_result events are filtered out (Strands raw callback artifacts).
+**Key guards:**
+- Empty-name tool_result events are filtered out (Strands raw callback artifacts)
+- Blank response fallback ensures the frontend always receives at least one TEXT event
+- `complete_text` field from the complete chunk is used if no text was streamed during the response
+- Fallback COMPLETE is emitted even if the generator exhausts without an explicit complete event (lines 187-195)
 
 ### SSE Wire Format
 
@@ -343,6 +403,11 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 - `loop.call_soon_threadsafe()` bridges sync Strands thread → async event loop
 - Empty-name filter in both `_drain_tool_results()` and `streaming_routes.py` catches Strands artifacts
 - FIFO name-matching in `onComplete` handles multiple calls to same tool
+- Fast-path document generation bypasses full agent loop for obvious doc requests, emitting synthetic tool_use/tool_result (discovered: 2026-03-09)
+- `_ensure_create_document_for_direct_request()` reconciles missed create_document calls after stream ends
+- `_sdk_with_keepalive()` reuses pending_task across timeout iterations to prevent chunk loss (discovered: 2026-03-09)
+- Blank response fallback in streaming_routes guarantees at least one TEXT event before COMPLETE
+- Agent result extraction at stream end (`event["result"]` with `hasattr(metrics)`) recovers final text when no text deltas were streamed
 
 ### patterns_to_avoid
 
@@ -350,6 +415,8 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 - **DO NOT override `_tool_spec`** on wrapped tools — breaks the Strands tool registry and can affect ALL tools in the agent
 - **DO NOT use module-level @tool singletons** for tools that need per-request state (result_queue, loop) — use factory functions instead
 - **DO NOT emit tool_result from stream_async event handling** — stream events fire during streaming, before the tool actually executes; use result_queue pattern instead
+- **DO NOT discard the pending_task in keepalive wrapper** — if `asyncio.wait` times out, the task is still running; discarding it loses the chunk. Reuse `pending_task` on next iteration.
+- **DO NOT assume `_load_plugin_config()` returns DynamoDB manifest shape** — it may lack `data` key. Always load bundled `plugin.json` first as fallback (bug fixed 2026-03-09).
 
 ### common_issues
 
@@ -366,3 +433,34 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 - Tool result data must be JSON-serializable; `_emit_tool_result` handles parsing
 - Large results (>2000 chars in text/content/body fields) are auto-truncated
 - Subagent reports are truncated at 3000 chars
+- Fast-path events are synthetic — they don't come from stream_async, so they won't appear in Strands callback logs
+- `_ensure_create_document_for_direct_request` only fires if `create_document` is NOT already in `tools_called`
+
+---
+
+## Part 9: Test Coverage
+
+### Backend Tests (pytest, `server/tests/`)
+
+| File | Tests | Coverage |
+|------|-------|---------|
+| `test_stream_protocol.py` | 14 | StreamEvent dataclass, to_dict/to_json/to_sse serialization, MultiAgentStreamWriter methods, all event types |
+| `test_sdk_query_streaming.py` | 10 | stream_async event flow, result_queue drain, _current_tool_id dedup, fast-path doc generation, forced doc reconciliation, empty-text fallback |
+| `test_streaming_routes.py` | 7 | stream_generator SSE formatting, keepalive injection, tool_use/tool_result routing, empty-name filtering, complete event guards |
+| `test_streaming_error_paths.py` | 9 | Exception handling, CancelledError disconnect, error event propagation, malformed chunk resilience, fallback COMPLETE on generator exhaust |
+
+**Total: 40 backend tests**
+
+### E2E Tests (Playwright, `client/tests/`)
+
+| File | Coverage |
+|------|---------|
+| `validate-sse-pipeline.spec.ts` | StreamEvent schema validation, tool_use/tool_result pairing, rendering verification, FIFO ordering, session persistence |
+| `validate-uc-simple-acquisition.spec.ts` | Full UC quality + SSE event flow + tool card rendering for simple acquisition scenario |
+
+### Coverage Gaps (as of 2026-03-09)
+
+- No unit tests for `_sdk_with_keepalive()` wrapper timeout/reuse behavior
+- No unit tests for knowledge_search/knowledge_fetch tool dispatch through service tools
+- No pytest coverage for `_load_plugin_config()` fallback chain
+- No E2E test for fast-path document generation (bypasses agent entirely)

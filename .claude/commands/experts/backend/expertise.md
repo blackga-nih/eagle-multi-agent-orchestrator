@@ -4,7 +4,7 @@ parent: "[[backend/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, backend, agentic-service, eagle, aws, s3, dynamodb, cloudwatch]
-last_updated: 2026-02-25T00:00:00
+last_updated: 2026-03-09T00:00:00
 ---
 
 # Backend Expertise (Complete Mental Model)
@@ -19,22 +19,23 @@ last_updated: 2026-02-25T00:00:00
 
 ```
 server/app/
-├── main.py                  # FastAPI app (v4.0.0), CORS, ~80+ endpoints, 1855 lines
-├── agentic_service.py       # 2358 lines — tool dispatch, handlers, stream_chat (LEGACY orchestrator)
-├── sdk_agentic_service.py   # SDK-based service — SKILL_AGENT_REGISTRY, sdk_query() (PRIMARY orchestrator)
-├── eagle_tools_mcp.py       # NEW — wraps execute_tool() as local MCP server (7 EAGLE business tools)
+├── main.py                  # FastAPI app (v4.0.0), CORS, ~80+ endpoints
+├── strands_agentic_service.py  # PRIMARY orchestrator — Strands SDK supervisor + subagents (BedrockModel)
+├── agentic_service.py       # TOOL_DISPATCH registry + handler implementations (used by both legacy and Strands paths)
+├── streaming_routes.py      # SSE streaming router — calls strands_agentic_service.sdk_query_streaming()
+├── sdk_agentic_service.py   # REPLACED by strands_agentic_service.py (still present, not deleted)
+├── eagle_tools_mcp.py       # MCP wrapper layer — present but NOT used by current Strands path
 ├── session_store.py         # Unified DynamoDB session/message/usage store (eagle table)
 ├── cognito_auth.py          # Cognito JWT auth, UserContext, DEV_MODE fallback
-├── auth.py                  # Legacy auth (get_current_user) — still active, imported by main.py + admin_auth.py
+├── auth.py                  # Legacy auth (get_current_user) — still active, imported by admin_auth.py
 ├── document_export.py       # DOCX/PDF/Markdown export
 ├── admin_service.py         # Dashboard stats, rate limiting, cost tracking
 ├── admin_auth.py            # Admin group auth (imports from auth.py — NOT yet migrated to cognito_auth)
 ├── admin_cost_service.py    # 4-level cost reports (tenant, user, service, comprehensive)
 ├── subscription_service.py  # Tier-based limits (SubscriptionTier enum)
 ├── cost_attribution.py      # Per-tenant/user cost attribution
-├── streaming_routes.py      # SSE streaming router (mounted via include_router at line 1121)
+├── stream_protocol.py       # SSE event format (MultiAgentStreamWriter)
 ├── models.py                # Pydantic models (ChatMessage, TenantContext, etc.)
-├── stream_protocol.py       # Stream protocol definitions
 ├── runtime_context.py       # Runtime context utilities
 ├── gateway_client.py        # API gateway client (still present, not archived)
 ├── mcp_agent_integration.py # MCP agent integration (still present, not archived)
@@ -52,6 +53,12 @@ server/app/
 ├── approval_store.py        # Approval chain + decision recording
 ├── pref_store.py            # User preferences
 ├── audit_store.py           # Audit event writer
+├── compliance_matrix.py     # NCI/NIH compliance decision tree (execute_operation())
+├── health_checks.py         # Health check helpers (check_knowledge_base_health)
+├── package_context_service.py # Package context resolution for chat
+└── tools/
+    ├── __init__.py
+    └── knowledge_tools.py   # knowledge_search / knowledge_fetch implementations + tool schemas
 server/
 ├── eagle_skill_constants.py # Auto-discovery: walks eagle-plugin/, exports AGENTS, SKILLS, PLUGIN_CONTENTS
 ├── config.py                # App configuration
@@ -65,26 +72,24 @@ server/
 | Layer | Technology | Notes |
 |-------|-----------|-------|
 | Framework | FastAPI 4.0.0 | REST + WebSocket + SSE |
-| LLM SDK | `anthropic` Python SDK | Direct API or Bedrock |
-| Agent SDK | `claude_agent_sdk` | query(), AgentDefinition, ClaudeAgentOptions |
-| AWS SDK | `boto3` | S3, DynamoDB, CloudWatch, Cognito |
+| LLM SDK | Strands Agents SDK | `from strands import Agent, tool` — boto3-native BedrockModel |
+| AWS SDK | `boto3` | S3, DynamoDB, CloudWatch, Cognito, STS |
 | Runtime | Python 3.11+ | `str | None` union syntax used |
-| Async | `asyncio` | `stream_chat()` and `sdk_query()` are async generators |
-| Auth | Cognito JWT | `cognito_auth.py` with DEV_MODE fallback; `auth.py` still active for legacy routes |
+| Async | `asyncio` | `sdk_query()` and `sdk_query_streaming()` are async generators; Strands Agent() is sync, bridged via `asyncio.to_thread` or `stream_async()` |
+| Auth | Cognito JWT | `cognito_auth.py` with DEV_MODE fallback; `auth.py` still active for legacy admin routes |
 | Persistence | DynamoDB `eagle` table | Single-table design via `session_store.py` |
-| Logging | `logging` | Logger: `eagle.agent`, `eagle.sessions`, `eagle.sdk_agent`, `eagle.tools_mcp` |
-| MCP | `create_sdk_mcp_server` | Local MCP via `eagle_tools_mcp.py` for SDK subagents |
+| Logging | `logging` | Logger: `eagle.strands_agent`, `eagle.sessions`, `eagle.knowledge_tools` |
 
 ### Entry Points
 
 | Function | File | Purpose |
 |----------|------|---------|
-| `execute_tool()` | agentic_service.py:2181 | Synchronous tool dispatch — called by test suite, chat, and eagle_tools_mcp |
-| `stream_chat()` | agentic_service.py:~2221 | Async streaming chat with tool-use loop (legacy path) |
-| `get_client()` | agentic_service.py:~2206 | Create Anthropic/AnthropicBedrock client |
-| `sdk_query()` | sdk_agentic_service.py:274 | PRIMARY: async generator — supervisor + skill subagents via Claude SDK |
-| `create_eagle_mcp_server()` | eagle_tools_mcp.py:122 | Factory: returns local MCP server wrapping all 7 execute_tool() handlers |
-| `api_chat()` | main.py:191 | REST chat — now calls sdk_query() (not stream_chat()) |
+| `sdk_query()` | strands_agentic_service.py:1269 | PRIMARY async generator — supervisor + skill subagents via Strands, returns AssistantMessage/ResultMessage adapters |
+| `sdk_query_streaming()` | strands_agentic_service.py:1433 | PRIMARY streaming — yields `{"type":"text","data":...}` dict chunks via `Agent.stream_async()` |
+| `sdk_query_single_skill()` | strands_agentic_service.py:1684 | Direct single-skill Agent call (no supervisor) |
+| `execute_tool()` | agentic_service.py:2569 | Synchronous tool dispatch — called by test suite and `_make_service_tool()` |
+| `stream_generator()` | streaming_routes.py:39 | SSE generator — calls `sdk_query_streaming()`, emits SSE events to frontend |
+| `api_chat()` | main.py:191 | REST chat endpoint — calls `sdk_query()` via streaming_routes |
 | `websocket_chat()` | main.py:718 | WebSocket streaming chat |
 | `api_list_sessions()` | main.py:298 | Session CRUD endpoints |
 | `api_export_document()` | main.py:445 | Document export (DOCX/PDF/MD) |
@@ -93,13 +98,23 @@ server/
 ### Configuration
 
 ```python
-# agentic_service.py (legacy orchestrator config)
-_USE_BEDROCK = os.getenv("USE_BEDROCK", "false").lower() == "true"
-_BEDROCK_REGION = os.getenv("AWS_REGION", "us-east-1")
-MODEL = os.getenv("ANTHROPIC_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0" if _USE_BEDROCK else "claude-haiku-4-5-20251001")
+# strands_agentic_service.py — Strands/Bedrock model selection
+# Auto-selects based on AWS account: Sonnet 4.6 for NCI (695681773636), Haiku 4.5 otherwise
+_NCI_ACCOUNT = "695681773636"
+_SONNET = "us.anthropic.claude-sonnet-4-6"
+_HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
-# sdk_agentic_service.py (SDK orchestrator config)
-MODEL = os.getenv("EAGLE_SDK_MODEL", "haiku")  # separate env var from legacy MODEL
+def _default_model() -> str:
+    env_model = os.getenv("EAGLE_BEDROCK_MODEL_ID")
+    if env_model:
+        return env_model
+    try:
+        account = boto3.client("sts").get_caller_identity()["Account"]
+        return _SONNET if account == _NCI_ACCOUNT else _HAIKU
+    except Exception:
+        return _HAIKU
+
+MODEL = _default_model()  # used by BedrockModel at import time
 
 # main.py feature flags
 USE_PERSISTENT_SESSIONS = os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true"
@@ -124,35 +139,44 @@ ECS Service (EagleComputeStack):
   Scaling: 1-3 tasks, target tracking
 
 Environment Variables (from CDK):
-  ANTHROPIC_API_KEY  → Secrets Manager
-  EAGLE_TABLE        → "eagle" (DynamoDB)
-  S3_BUCKET          → "nci-documents"
-  AWS_REGION         → "us-east-1"
-  LOG_GROUP          → "/eagle/app"
-  EAGLE_SDK_MODEL    → model alias for sdk_agentic_service (e.g. "haiku")
-  USE_PERSISTENT_SESSIONS → "true"
-  REQUIRE_AUTH       → "false" (dev) / "true" (prod)
+  ANTHROPIC_API_KEY        → Secrets Manager
+  EAGLE_BEDROCK_MODEL_ID   → override model (e.g. "us.anthropic.claude-haiku-4-5-20251001-v1:0")
+  EAGLE_TABLE              → "eagle" (DynamoDB)
+  S3_BUCKET                → "nci-documents"
+  METADATA_TABLE           → "eagle-document-metadata-dev" (knowledge base index)
+  DOCUMENT_BUCKET          → "eagle-documents-695681773636-dev" (knowledge base content)
+  AWS_REGION               → "us-east-1"
+  LOG_GROUP                → "/eagle/app"
+  USE_PERSISTENT_SESSIONS  → "true"
+  REQUIRE_AUTH             → "false" (dev) / "true" (prod)
 ```
 
 ---
 
 ## Part 2: Tool Dispatch System
 
-### TOOL_DISPATCH (agentic_service.py line 2167)
+### TOOL_DISPATCH (agentic_service.py line ~2548)
 
 ```python
 TOOL_DISPATCH = {
-    "s3_document_ops":  _exec_s3_document_ops,
-    "dynamodb_intake":  _exec_dynamodb_intake,
-    "cloudwatch_logs":  _exec_cloudwatch_logs,
-    "search_far":       _exec_search_far,
-    "create_document":  _exec_create_document,
-    "get_intake_status": _exec_get_intake_status,
-    "intake_workflow":  _exec_intake_workflow,
+    "s3_document_ops":         _exec_s3_document_ops,
+    "dynamodb_intake":         _exec_dynamodb_intake,
+    "cloudwatch_logs":         _exec_cloudwatch_logs,
+    "search_far":              _exec_search_far,
+    "create_document":         _exec_create_document,
+    "get_intake_status":       _exec_get_intake_status,
+    "intake_workflow":         _exec_intake_workflow,
+    "query_compliance_matrix": _exec_query_compliance_matrix,
+    # Knowledge base tools
+    "knowledge_search":        exec_knowledge_search,   # from tools/knowledge_tools.py
+    "knowledge_fetch":         exec_knowledge_fetch,    # from tools/knowledge_tools.py
+    "manage_skills":           _exec_manage_skills,
+    "manage_prompts":          _exec_manage_prompts,
+    "manage_templates":        _exec_manage_templates,
 }
 ```
 
-### TOOLS_NEEDING_SESSION (agentic_service.py line 2178)
+### TOOLS_NEEDING_SESSION (agentic_service.py line ~2566)
 
 ```python
 TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status"}
@@ -160,7 +184,7 @@ TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_statu
 
 These tools receive `session_id` as a third argument to enable per-user S3 prefix scoping.
 
-### execute_tool() Flow (line 2181)
+### execute_tool() Flow (line ~2569)
 
 ```
 execute_tool(tool_name, tool_input, session_id)
@@ -178,67 +202,84 @@ execute_tool(tool_name, tool_input, session_id)
 
 ### Handler Signatures
 
-| Handler | Signature |
-|---------|-----------|
-| `_exec_s3_document_ops` | `(params, tenant_id, session_id)` |
-| `_exec_dynamodb_intake` | `(params, tenant_id)` |
-| `_exec_cloudwatch_logs` | `(params, tenant_id)` |
-| `_exec_search_far` | `(params, tenant_id)` |
-| `_exec_create_document` | `(params, tenant_id, session_id)` |
-| `_exec_get_intake_status` | `(params, tenant_id, session_id)` |
-| `_exec_intake_workflow` | `(params, tenant_id)` |
+| Handler | Signature | Notes |
+|---------|-----------|-------|
+| `_exec_s3_document_ops` | `(params, tenant_id, session_id)` | Session-scoped |
+| `_exec_dynamodb_intake` | `(params, tenant_id)` | |
+| `_exec_cloudwatch_logs` | `(params, tenant_id)` | |
+| `_exec_search_far` | `(params, tenant_id)` | No AWS dependency |
+| `_exec_create_document` | `(params, tenant_id, session_id)` | Session-scoped |
+| `_exec_get_intake_status` | `(params, tenant_id, session_id)` | Session-scoped |
+| `_exec_intake_workflow` | `(params, tenant_id)` | Stateless |
+| `_exec_query_compliance_matrix` | `(params, tenant_id)` | From compliance_matrix.py |
+| `exec_knowledge_search` | `(params, tenant_id, session_id=None)` | From tools/knowledge_tools.py |
+| `exec_knowledge_fetch` | `(params, tenant_id, session_id=None)` | From tools/knowledge_tools.py |
+| `_exec_manage_skills` | `(params, tenant_id)` | |
+| `_exec_manage_prompts` | `(params, tenant_id)` | |
+| `_exec_manage_templates` | `(params, tenant_id)` | |
 
-### eagle_tools_mcp.py — MCP Wrapper Layer
+### _make_service_tool() — Strands Tool Factory (strands_agentic_service.py line ~932)
 
-`create_eagle_mcp_server(tenant_id, session_id)` wraps all 7 TOOL_DISPATCH handlers as a local MCP server:
+In the Strands path, `_make_service_tool()` is used instead of MCP. It:
+1. Looks up the handler from `TOOL_DISPATCH`
+2. Closes over `tenant_id`, `user_id`, `scoped_session_id`, `package_context`, `result_queue`, `loop`
+3. Builds a composite `scoped_session_id = f"{tenant_id}#advanced#{user_id}#{session_id or ''}"` so legacy handlers get proper per-user S3 scoping
+4. Emits `tool_result` events to `result_queue` for frontend observability
+5. Returns a `@tool`-decorated function suitable for `Agent(tools=[...])`
 
-```python
-# eagle_tools_mcp.py
-from claude_agent_sdk import create_sdk_mcp_server, tool
+**`_SERVICE_TOOL_DEFS`** (line ~1010): maps tool names to description strings for the 10 service tools wired into the supervisor:
+`s3_document_ops`, `dynamodb_intake`, `create_document`, `get_intake_status`, `intake_workflow`, `search_far`, `knowledge_search`, `knowledge_fetch`, `manage_skills`, `manage_prompts`, `manage_templates`
 
-def create_eagle_mcp_server(tenant_id="demo-tenant", session_id=None):
-    # Closes over _tenant_id and _session_id
-    # Registers 7 @tool-decorated async functions, each calling _execute_tool()
-    return create_sdk_mcp_server("eagle-tools", tools=[...])
-```
-
-Each tool function converts typed input dataclasses to dicts then calls `_execute_tool(tool_name, tool_input, session_id)`.
-
-The MCP server is wired into `sdk_query()` via:
-```python
-mcp_servers = {"eagle-tools": create_eagle_mcp_server(tenant_id=tenant_id, session_id=_mcp_session_id)}
-options = ClaudeAgentOptions(..., mcp_servers=mcp_servers)
-```
+**`_build_service_tools()`** (line ~1063): builds all service tools + adds 4 factory tools:
+- `_make_compliance_matrix_tool()` → `query_compliance_matrix`
+- `_make_list_skills_tool()` → `list_skills`
+- `_make_load_skill_tool()` → `load_skill`
+- `_make_load_data_tool()` → `load_data`
 
 ---
 
-## Part 3: SDK Agentic Service (sdk_agentic_service.py) — PRIMARY
+## Part 3: Strands Agentic Service (strands_agentic_service.py) — PRIMARY
 
 ### Architecture
 
 ```
-sdk_query()
-  |-- build_skill_agents()   → dict of name→AgentDefinition (from eagle-plugin/)
-  |-- build_supervisor_prompt() → supervisor system prompt with subagent list
-  |-- create_eagle_mcp_server() → local MCP with 7 EAGLE business tools
-  |-- ClaudeAgentOptions(model, system_prompt, allowed_tools=["Task"],
-  |       agents=agents, mcp_servers=mcp_servers, max_turns, max_budget_usd)
-  |-- query(prompt, options) → async generator of SDK message objects
+sdk_query() / sdk_query_streaming()
+  |-- _maybe_fast_path_document_generation()  → short-circuit for "generate X document" prompts
+  |-- workspace_store.get_or_create_default() → resolve workspace_id
+  |-- build_skill_tools()     → list of @tool-wrapped subagent functions
+  |-- _build_service_tools()  → list of @tool-wrapped AWS + data tools
+  |-- build_supervisor_prompt() → supervisor system prompt with subagent list + KB/document rules
+  |-- Agent(model=_model, system_prompt, tools=skill_tools+service_tools, messages=history)
+  |-- agent(prompt)  [sdk_query — sync, returns AgentResult]
+  |-- supervisor.stream_async(prompt)  [sdk_query_streaming — yields events]
 ```
+
+### Model Selection
+
+```python
+# strands_agentic_service.py — auto-selects by AWS account
+_NCI_ACCOUNT = "695681773636"
+_SONNET = "us.anthropic.claude-sonnet-4-6"
+_HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+# Override via env var:
+EAGLE_BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+```
+
+A single `_model = BedrockModel(model_id=MODEL, region_name=...)` is created at import time and reused across all requests (no per-request boto3 overhead).
 
 ### Tier-Gated Tool Access (TIER_TOOLS)
 
 ```python
+# strands_agentic_service.py
 TIER_TOOLS = {
     "basic":    [],
-    "advanced": ["Read", "Glob", "Grep", "s3_document_ops", "create_document"],
-    "premium":  ["Read", "Glob", "Grep", "Bash", "s3_document_ops",
-                 "dynamodb_intake", "cloudwatch_logs", "create_document",
-                 "get_intake_status", "intake_workflow", "search_far"],
+    "advanced": ["Read", "Glob", "Grep"],
+    "premium":  ["Read", "Glob", "Grep", "Bash"],
 }
 ```
 
-The MCP tool names (`s3_document_ops`, `create_document`, etc.) now appear directly in `TIER_TOOLS` — subagents reference MCP tools by the same name as TOOL_DISPATCH keys.
+Note: In the Strands path, tool access is managed by which `@tool` functions are passed to `Agent(tools=[...])`. `TIER_TOOLS` is preserved for compatibility but Strands subagents do not use CLI tools like Read/Glob/Grep. All service tools are available to all tiers in the Strands path.
 
 ### Tier Budgets
 
@@ -250,22 +291,78 @@ TIER_BUDGETS = {
 }
 ```
 
+### Tool Emission Pattern (Observability)
+
+All 3 tool wrapper types emit `tool_result` events via `result_queue`:
+
+1. **`_make_subagent_tool()`** (line ~678): Subagent @tools call `loop.call_soon_threadsafe(result_queue.put_nowait, {...})` with `{"type":"tool_result","name":safe_name,"result":{"report":truncated}}`.
+
+2. **`_make_service_tool()`** (line ~932): Service @tools emit via `loop.call_soon_threadsafe(result_queue.put_nowait, {"type":"tool_result","name":tool_name,"result":emit_result})`. Large content fields truncated to 2000 chars for non-document tools.
+
+3. **Factory tools** (`_make_list_skills_tool`, `_make_load_skill_tool`, `_make_load_data_tool`, `_make_compliance_matrix_tool`) (lines ~758–924): Use shared `_emit_tool_result()` helper which parses the JSON result and truncates large content fields before pushing to `result_queue`.
+
+`result_queue` is drained between stream events in `sdk_query_streaming()` via `_drain_tool_results()`.
+
+### Fast-Path Document Generation
+
+`_maybe_fast_path_document_generation()` (line ~227) and `_should_use_fast_document_path()` (line ~202) intercept explicit "generate X document" prompts before spawning the full supervisor/subagent loop:
+- Detects doc type from prompt via `_DOC_TYPE_HINTS`
+- Skips fast path if blocker phrases present ("what is", "how do i", "explain") or slow-path hints ("research", "far", "policy")
+- Calls `_exec_create_document` directly via `asyncio.to_thread`
+- `sdk_query_streaming()` yields `tool_use` + `tool_result` + `text` + `complete` events for the fast path
+
+`_ensure_create_document_for_direct_request()` (line ~264) is a reconciliation step that runs AFTER the agent loop — if the model produced inline draft content without calling `create_document`, this forces the call.
+
 ### Workspace Resolution (4-Layer Chain)
 
 1. `wspc_store.resolve_skill(tenant_id, user_id, workspace_id, name)` — workspace override
 2. Fall back to `PLUGIN_CONTENTS[skill_key]["body"]` — bundled eagle-plugin/ content
-3. `skill_store.list_active_skills(tenant_id)` — user-created SKILL# items (override bundled when same name)
+3. `skill_store.list_active_skills(tenant_id)` — user-created SKILL# items (merged after bundled)
 4. Supervisor prompt resolved via `wspc_store.resolve_agent(tenant_id, user_id, workspace_id, "supervisor")`
+
+### Supervisor Prompt Structure (build_supervisor_prompt)
+
+The supervisor prompt includes:
+- Tenant/user/tier context header
+- Base supervisor agent content (from workspace chain or bundled AGENTS["supervisor"])
+- Active specialists list (one line per skill/agent)
+- Progressive Disclosure rules (4 layers: hints → list_skills → load_skill → load_data)
+- KB Retrieval Rules (knowledge_search before knowledge_fetch; prefer KB over search_far)
+- Document Output Rules (must call create_document; don't inline docs)
+- FAST vs DEEP routing guidance
 
 ### SKILL_AGENT_REGISTRY
 
-Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `plugin.json` active lists. Supervisor agent is excluded (it orchestrates, not a subagent). Falls back to DynamoDB `PLUGIN#manifest` when available, else bundled `plugin.json`.
+Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `plugin.json` active lists. Supervisor agent is excluded. Falls back to bundled `plugin.json` when `plugin_store` DynamoDB is unavailable.
+
+**Important**: `_load_plugin_config()` (line ~601) ALWAYS loads bundled `eagle-plugin/plugin.json` first (which has the `data` index), then overlays DynamoDB manifest fields (version/agent_count/skill_count). The DynamoDB manifest does NOT contain the `data` index — `load_data()` would fail with "available: []" if only DynamoDB was used.
+
+### Adapter Message Types
+
+`strands_agentic_service.py` defines lightweight dataclass adapters that match the Claude SDK interface expected by `streaming_routes.py` and `main.py`:
+- `TextBlock(type, text)` — text content
+- `ToolUseBlock(type, name, input)` — tool use block
+- `AssistantMessage(content=[...])` — container for content blocks
+- `ResultMessage(result, usage)` — final result with usage metrics
+
+### sdk_query_streaming() Event Protocol
+
+Yields `dict` chunks consumed by `stream_generator()` in `streaming_routes.py`:
+
+| Chunk type | Keys | Trigger |
+|-----------|------|---------|
+| `text` | `data: str` | Streamed text delta from Bedrock ConverseStream |
+| `tool_use` | `name, input, tool_use_id` | Tool invocation start |
+| `tool_result` | `name, result` | Drained from result_queue (factory tools) |
+| `complete` | `text, tools_called, usage` | End of stream |
+| `error` | `error: str` | Exception during stream |
+| `_keepalive` | (internal) | Injected by streaming_routes when timeout exceeded |
 
 ---
 
-## Part 4: AWS Tool Handlers
+## Part 4: AWS Tool Handlers (agentic_service.py)
 
-### _exec_s3_document_ops (agentic_service.py line 384)
+### _exec_s3_document_ops (line ~384)
 
 **Actions**: `read`, `write`, `list`
 
@@ -279,7 +376,7 @@ Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `
 - **Key prefix**: `eagle/{tenant}/{user}/` (from `_get_user_prefix()`)
 - **Full key**: `{prefix}{params.key}`
 
-### _exec_dynamodb_intake (line 471)
+### _exec_dynamodb_intake (line ~471)
 
 **Actions**: `create`, `read`, `update`, `list`
 
@@ -295,7 +392,7 @@ Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `
 - `item_id` auto-generated via `uuid.uuid4().hex[:12]` on create
 - Timestamps: `created_at`, `updated_at` auto-set
 
-### _exec_cloudwatch_logs (line 589)
+### _exec_cloudwatch_logs (line ~589)
 
 **Actions**: `get_stream`, `recent`, `search`
 
@@ -308,7 +405,7 @@ Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `
 - **Log group**: `/eagle/test-runs`
 - Read-only operations; no write/delete actions
 
-### _exec_search_far (line 708)
+### _exec_search_far (line ~708)
 
 **Params**: `query` (search text), optional `parts` (FAR parts to search)
 
@@ -316,7 +413,7 @@ Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `
 - Uses embedded FAR reference data
 - No AWS resource dependency
 
-### _exec_create_document (line 1027)
+### _exec_create_document (line ~1027)
 
 **Params**: `doc_type`, `title`, `data` (dict of document-specific fields)
 
@@ -324,7 +421,7 @@ Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `
 - Saves generated markdown to S3: `eagle/{tenant}/{user}/documents/{doc_type}_{timestamp}.md`
 - Returns `{message, doc_type, s3_key, content_preview, word_count}`
 
-### _exec_get_intake_status (line 1828)
+### _exec_get_intake_status (line ~1828)
 
 **Params**: (none required)
 
@@ -332,10 +429,7 @@ Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `
 - Tracks 10 document types: 5 always required + 5 conditional
 - Returns `{status: {type: "complete"|"pending"}, summary: {complete, pending, total}}`
 
-**Always required**: sow, igce, market_research, acquisition_plan, cor_certification
-**Conditional**: justification, eval_criteria, security_checklist, section_508, contract_type_justification
-
-### _exec_intake_workflow (line 1955)
+### _exec_intake_workflow (line ~1955)
 
 **Actions**: `start`, `advance`, `status`
 
@@ -345,7 +439,22 @@ Built at module load from `eagle_skill_constants.AGENTS + SKILLS`, filtered by `
 | `advance` | `workflow_id`, `completed_actions` | `{stage, next_actions, progress_bar}` |
 | `status` | `workflow_id` | `{stage, progress, completed_documents}` |
 
-- 4-stage workflow: Requirements Gathering -> Compliance Check -> Document Generation -> Review & Submit
+### exec_knowledge_search (tools/knowledge_tools.py)
+
+**Params**: `topic`, `document_type`, `agent`, `authority_level`, `keywords`, `limit`
+
+- DynamoDB Scan on `METADATA_TABLE` (`eagle-document-metadata-dev`)
+- Returns `{results: [...summary fields...], count}`
+- Each result includes `s3_key` for passing to `knowledge_fetch`
+
+### exec_knowledge_fetch (tools/knowledge_tools.py)
+
+**Params**: `s3_key` (required) OR `document_id`
+
+- S3 GetObject from `DOCUMENT_BUCKET` (`eagle-documents-695681773636-dev`)
+- Returns `{document_id, content, truncated, content_length}`
+- Content truncated to 50KB maximum
+- REQUIRES an s3_key from a prior knowledge_search result — do NOT call without one
 
 ---
 
@@ -364,6 +473,14 @@ _extract_user_id(session_id) -> str
 _get_user_prefix(session_id) -> str
     # Returns "eagle/{tenant}/{user}/"
 ```
+
+### Composite Session ID (Strands path)
+
+The Strands path builds a composite session ID before calling legacy handlers:
+```python
+scoped_session_id = f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
+```
+`_extract_tenant_id()` and `_extract_user_id()` parse this format to return the real tenant and user rather than "demo-tenant"/"demo-user".
 
 ### S3 Key Patterns
 
@@ -394,16 +511,16 @@ _get_user_prefix(session_id) -> str
 
 | Type | Generator Function | Line | Key Content |
 |------|-------------------|------|-------------|
-| `sow` | `_generate_sow()` | 1086 | Statement of Work with objectives, deliverables, period of performance |
-| `igce` | `_generate_igce()` | 1173 | Independent Government Cost Estimate with line items, totals |
-| `market_research` | `_generate_market_research()` | 1250 | Market analysis, vendor capabilities, pricing benchmarks |
-| `justification` | `_generate_justification()` | 1313 | Justification & Approval for sole source (FAR 6.302) |
-| `acquisition_plan` | `_generate_acquisition_plan()` | 1381 | Streamlined 5-section acquisition plan |
-| `eval_criteria` | `_generate_eval_criteria()` | 1481 | Technical evaluation factors and rating scale |
-| `security_checklist` | `_generate_security_checklist()` | 1546 | IT security checklist (FISMA, FedRAMP) |
-| `section_508` | `_generate_section_508()` | 1610 | Section 508 accessibility compliance statement |
-| `cor_certification` | `_generate_cor_certification()` | 1681 | COR nominee certification with FAC-COR level |
-| `contract_type_justification` | `_generate_contract_type_justification()` | 1754 | Contract type D&F elements |
+| `sow` | `_generate_sow()` | ~1086 | Statement of Work with objectives, deliverables, period of performance |
+| `igce` | `_generate_igce()` | ~1173 | Independent Government Cost Estimate with line items, totals |
+| `market_research` | `_generate_market_research()` | ~1250 | Market analysis, vendor capabilities, pricing benchmarks |
+| `justification` | `_generate_justification()` | ~1313 | Justification & Approval for sole source (FAR 6.302) |
+| `acquisition_plan` | `_generate_acquisition_plan()` | ~1381 | Streamlined 5-section acquisition plan |
+| `eval_criteria` | `_generate_eval_criteria()` | ~1481 | Technical evaluation factors and rating scale |
+| `security_checklist` | `_generate_security_checklist()` | ~1546 | IT security checklist (FISMA, FedRAMP) |
+| `section_508` | `_generate_section_508()` | ~1610 | Section 508 accessibility compliance statement |
+| `cor_certification` | `_generate_cor_certification()` | ~1681 | COR nominee certification with FAC-COR level |
+| `contract_type_justification` | `_generate_contract_type_justification()` | ~1754 | Contract type D&F elements |
 
 ### Generator Pattern
 
@@ -428,31 +545,48 @@ s3_key = f"{prefix}documents/{doc_type}_{timestamp}.md"
 _get_s3().put_object(Bucket="nci-documents", Key=s3_key, Body=content.encode())
 ```
 
-### Document Data Fields
+---
 
-Each generator accepts different fields in the `data` dict. Common patterns:
-- `title` is always the first positional argument
-- `data.get("field", "default")` for optional fields
-- Generators produce self-contained markdown with FAR references
-- Word counts typically 200-800 words depending on type
+## Part 7: Progressive Disclosure @tools
+
+The supervisor has 4 lightweight @tools that give on-demand access to skill metadata and plugin data WITHOUT spawning subagents or bloating the system prompt.
+
+| Layer | Tool | When to Use |
+|-------|------|-------------|
+| 1 | System prompt hints | Already have short descriptions — no tool call needed |
+| 2 | `list_skills()` | Discover available skills, agents, and data file names |
+| 3 | `load_skill(name)` | Read full skill instructions/workflows to follow yourself |
+| 4 | `load_data(name, section?)` | Fetch reference data (thresholds, vehicles, doc rules) |
+
+**`list_skills`**: Returns `{skills, agents, data}` from `SKILLS`, `AGENTS`, and `_load_plugin_config()["data"]`.
+
+**`load_skill`**: Returns `PLUGIN_CONTENTS[name]["body"]` — the full SKILL.md or agent.md content.
+
+**`load_data`**: Reads from `eagle-plugin/data/{name}.json`. The `data` index is in `plugin.json` — `_load_plugin_config()` MUST include it (fixed bug: was returning only DynamoDB manifest which lacks the `data` key).
+
+**`query_compliance_matrix`**: Calls `compliance_matrix.execute_operation(parsed_params)`. Params are passed as a JSON string.
+
+All 4 tools are factory functions so they close over `result_queue`/`loop` for tool_result observability.
 
 ---
 
-## Part 7: SYSTEM_PROMPT (agentic_service.py — Legacy Path)
+## Part 8: SYSTEM_PROMPT (strands_agentic_service.py — Primary Path)
 
-### Structure (7 Sections, ~4800 chars)
+### Supervisor Prompt Sections (build_supervisor_prompt)
 
 | Section | Content |
 |---------|---------|
-| 1. Identity & Mission | EAGLE is NCI OA intake assistant, knows FAR/DFARS/HHSAR |
-| 2. Intake Philosophy | "Trish" pattern — start minimal, ask smart follow-ups |
-| 3. Five-Phase Workflow | Minimal Intake -> Clarifying -> Pathway -> Documents -> Summary |
-| 4. Key Thresholds | MPT $15K, SAT $250K, Cost Data $750K, 8(a) $4M/$7M, Davis-Bacon $25K |
-| 5. Specialist Lenses | Legal, Tech Translator, Market Intelligence, Public Interest |
-| 6. Document Types | Lists all 10 types with brief descriptions |
-| 7. Tool Usage | Guidance on when to use workflow vs. direct tool calls |
+| Tenant context | `Tenant: {id} | User: {id} | Tier: {tier}` |
+| Base prompt | From wspc_store/AGENTS["supervisor"]["body"] |
+| Active specialists | One line per skill: `- {name}: {description}` |
+| Progressive Disclosure | 4-layer system: hints → list_skills → load_skill → load_data |
+| KB Retrieval Rules | knowledge_search → knowledge_fetch → Sources section |
+| Document Output Rules | MUST call create_document; no inline doc bodies |
+| FAST vs DEEP routing | FAST: load_data/query_compliance/search_far/KB; DEEP: specialists only for complex analysis |
 
-### Five Phases
+### Five Phases (Legacy Path — agentic_service.py SYSTEM_PROMPT)
+
+Note: The Strands path uses `build_supervisor_prompt()`. The legacy `SYSTEM_PROMPT` in `agentic_service.py` is only used by the WebSocket path and direct `stream_chat()` callers.
 
 | Phase | Name | Actions |
 |-------|------|---------|
@@ -461,74 +595,6 @@ Each generator accepts different fields in the `data` dict. Common patterns:
 | 3 | Pathway Determination | Micro-purchase / Simplified / Negotiated; contract type; set-asides |
 | 4 | Document Requirements | Identify and generate required documents by acquisition type |
 | 5 | Summary & Handoff | Determination table, document checklist, next steps |
-
-Note: The SDK path (`sdk_agentic_service.py`) uses `build_supervisor_prompt()` instead, which injects tenant context + subagent list into the supervisor's system prompt dynamically.
-
----
-
-## Part 8: Known Issues and Patterns
-
-### Patterns That Work
-
-- Lazy singleton AWS clients (`_get_s3()`, etc.) avoid repeated initialization
-- `TOOLS_NEEDING_SESSION` set cleanly separates user-scoped vs. tenant-scoped handlers
-- `json.dumps(result, indent=2, default=str)` handles datetime serialization
-- Document generators use `data.get("field", "default")` for graceful degradation
-- `_get_user_prefix()` centralizes S3 path construction
-- `eagle_tools_mcp.py` factory pattern lets `sdk_query()` inject tenant/session into all MCP tools via closure
-- `TIER_TOOLS` gating in sdk_agentic_service lets different subscription tiers get different tool access without code branching
-- Workspace 4-layer resolution (workspace override → PLUGIN# → bundled file) allows hot-reload without redeploy
-
-### Patterns to Avoid
-
-- Don't add AWS client initialization outside lazy singletons (cold start cost)
-- Don't hardcode `"demo-tenant"` in handlers — always use `_extract_tenant_id()`
-- Don't skip `default=str` in `json.dumps()` — DynamoDB returns Decimal types
-- Don't add new tools without updating both `TOOL_DISPATCH` and `EAGLE_TOOLS` (legacy path) AND `TIER_TOOLS` (SDK path)
-- Don't assume `admin_auth.py` uses `cognito_auth.py` — it still imports from `auth.py` (legacy `get_current_user`)
-- Don't create a `server/legacy/` directory expecting archived files there — `auth.py`, `gateway_client.py`, `mcp_agent_integration.py`, `weather_mcp_service.py` are still in `server/app/` and some are still imported
-
-### Common Issues
-
-- **Missing EAGLE_TOOLS entry**: Tool is dispatchable but Claude doesn't know about it (never called via legacy path)
-- **Missing TOOL_DISPATCH entry**: Tool schema defined but `execute_tool()` returns "Unknown tool"
-- **Missing TIER_TOOLS entry**: Tool registered in TOOL_DISPATCH and eagle_tools_mcp but SDK subagents have no permission to call it
-- **Session scoping mismatch**: Tool added to `TOOLS_NEEDING_SESSION` but handler signature only takes `(params, tenant_id)`
-- **DynamoDB Decimal**: `json.dumps()` without `default=str` raises `TypeError` on Decimal values
-- **S3 prefix trailing slash**: `_get_user_prefix()` always ends with `/` — don't add another
-- **admin_auth.py import error**: If `auth.py` is ever removed, `admin_auth.py` will break — it imports `get_current_user` from `app.auth`
-
-### Adding a New Tool Handler
-
-Checklist for adding a new tool:
-
-1. **Define handler function**: `def _exec_new_tool(params, tenant_id)` or `(params, tenant_id, session_id)`
-2. **Add to TOOL_DISPATCH** (agentic_service.py line 2167): `"new_tool": _exec_new_tool,`
-3. **Add to TOOLS_NEEDING_SESSION** (line 2178) if it needs per-user scoping
-4. **Add to EAGLE_TOOLS** (line 173): Anthropic tool_use schema with name, description, input_schema (legacy path)
-5. **Add to eagle_tools_mcp.py**: new `@tool`-decorated async function + add to `tools=[...]` list in `create_sdk_mcp_server()` call
-6. **Add to TIER_TOOLS** in sdk_agentic_service.py for appropriate tiers
-7. **Update SYSTEM_PROMPT** if the tool needs usage guidance (legacy path) or supervisor prompt (SDK path)
-8. **Validate**: `python -c "import py_compile; py_compile.compile('server/app/agentic_service.py', doraise=True)"`
-
-### stream_chat() Tool-Use Loop (Legacy Path)
-
-```
-stream_chat(messages, on_text, on_tool_use, on_tool_result, session_id)
-  |-- MAX_TOOL_ITERATIONS = 10
-  |-- Loop:
-  |     |-- Send messages to Claude with EAGLE_TOOLS
-  |     |-- Stream response (text deltas + tool_use blocks)
-  |     |-- If stop_reason == "tool_use":
-  |     |     |-- For each tool_use block:
-  |     |     |     |-- execute_tool(name, input, session_id)
-  |     |     |     |-- Append tool_result to messages
-  |     |     |-- Continue loop
-  |     |-- Else: break (end_turn or max_tokens)
-  |-- Return {text, usage, model, tools_called}
-```
-
-Note: `api_chat()` in main.py now uses `sdk_query()` (SDK path), not `stream_chat()`. The `stream_chat()` path is used by WebSocket endpoint and direct callers.
 
 ---
 
@@ -606,17 +672,17 @@ from app.auth import get_current_user  # NOT from cognito_auth
 
 ---
 
-## Part 11: main.py Route Groups (~80+ endpoints, 1855 lines)
+## Part 11: main.py Route Groups (~80+ endpoints)
 
 | Group | Prefix | Count | Key Files Used |
 |-------|--------|-------|----------------|
-| Chat (SDK) | `/api/chat` | 1 | sdk_agentic_service.py |
+| Chat (SDK) | `/api/chat` | 1 | strands_agentic_service.py |
 | Sessions | `/api/sessions` | 6 | session_store.py |
 | Documents | `/api/documents` | 4 | document_export.py, S3 |
 | Admin (EAGLE) | `/api/admin` | 12 | admin_service.py, admin_cost_service.py |
 | User | `/api/user` | 3 | session_store.py |
 | Tenants | `/api/tenants` | 6 | cost_attribution.py, session_store.py |
-| WebSocket | `/ws/chat` | 1 | sdk_agentic_service.py |
+| WebSocket | `/ws/chat` | 1 | strands_agentic_service.py |
 | Health | `/api/health` | 1 | — |
 | MCP Weather | `/api/mcp/weather` | 2 | weather_mcp_service.py |
 | Plugin Admin | `/api/admin/plugin` | 5 | plugin_store.py |
@@ -631,6 +697,11 @@ from app.auth import get_current_user  # NOT from cognito_auth
 
 The streaming router is wired at main.py:1121: `streaming_router = create_streaming_router(subscription_service); app.include_router(streaming_router)`
 
+`streaming_routes.py` imports from `strands_agentic_service` (not `sdk_agentic_service`):
+```python
+from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGLE_TOOLS
+```
+
 ---
 
 ## Part 12: CDK Integration Points
@@ -640,7 +711,9 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 | Resource | CDK Reference | Backend Usage |
 |----------|---------------|---------------|
 | DynamoDB `eagle` | `Table.fromTableName()` (imported) | `session_store.py`, `agentic_service.py` |
+| DynamoDB `eagle-document-metadata-dev` | Created by Storage stack | `tools/knowledge_tools.py` — knowledge_search |
 | S3 `nci-documents` | `Bucket.fromBucketName()` (imported) | `agentic_service.py` s3_document_ops, create_document |
+| S3 `eagle-documents-695681773636-dev` | Created by Storage stack | `tools/knowledge_tools.py` — knowledge_fetch |
 | Cognito `eagle-users-dev` | Created by Core stack | `cognito_auth.py` JWT validation |
 | IAM `eagle-app-role-dev` | Created by Core stack | ECS task role with DDB/S3/CW permissions |
 | CloudWatch `/eagle/app` | Created by Core stack | Application logging |
@@ -654,18 +727,106 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 | ALB (internal) | Port 8000, /api/health | Not internet-accessible |
 | Auto-scaling | 1-3 tasks | CPU target tracking |
 
-### EagleCiCdStack → Backend
+---
 
-| Resource | Purpose |
-|----------|---------|
-| OIDC Provider | GitHub Actions federation |
-| Deploy Role | `eagle-github-actions-dev` — ECR push + ECS deploy |
+## Part 13: Known Issues and Patterns
+
+### Patterns That Work
+
+- Lazy singleton AWS clients (`_get_s3()`, etc.) avoid repeated initialization
+- `TOOLS_NEEDING_SESSION` set cleanly separates user-scoped vs. tenant-scoped handlers
+- `json.dumps(result, indent=2, default=str)` handles datetime + Decimal serialization
+- Document generators use `data.get("field", "default")` for graceful degradation
+- `_get_user_prefix()` centralizes S3 path construction
+- Composite `scoped_session_id = f"{tenant_id}#advanced#{user_id}#{session_id}"` gives legacy handlers the real tenant/user context without changing handler signatures
+- Single shared `_model = BedrockModel(...)` at import time — no per-request boto3 overhead
+- Factory tool pattern (`_make_service_tool`, `_make_list_skills_tool`, etc.) closes over `result_queue`/`loop` — all tool handlers automatically emit `tool_result` events for frontend observability
+- `_maybe_fast_path_document_generation()` + `_ensure_create_document_for_direct_request()` dual-safety: fast path for explicit "generate" requests, reconciliation step for missed tool calls
+- `_load_plugin_config()` loads bundled `plugin.json` first (has full `data` index), then overlays DynamoDB manifest — prevents `load_data()` from returning "available: []"
+- `knowledge_fetch` description says "REQUIRES an s3_key from a prior knowledge_search result" — prevents hallucinated calls
+- `_emit_tool_result()` shared helper truncates large content fields (content/text/body keys) to 2000 chars before pushing to result_queue — prevents SSE bloat
+- Unified `eagle` DynamoDB table with PK/SK patterns handles sessions, messages, usage, costs in one table
+- Write-through cache in session_store.py gives fast reads without stale data
+- `DEV_MODE` flag in cognito_auth.py lets backend run without Cognito — essential for local dev
+- CDK `fromTableName()` / `fromBucketName()` pattern — import existing resources without recreating them
+- Internal ALB for backend keeps API not internet-accessible — frontend ALB is the only public entry point
+- Dockerfile copies `eagle-plugin/` to `../eagle-plugin/` so `eagle_skill_constants.py` can walk it at runtime
+- Workspace 4-layer prompt resolution enables hot-reloadable agent prompts without ECS redeploy
+
+### Patterns to Avoid
+
+- Don't add AWS client initialization outside lazy singletons (cold start cost)
+- Don't hardcode `"demo-tenant"` in handlers — always use `_extract_tenant_id()`
+- Don't skip `default=str` in `json.dumps()` — DynamoDB returns Decimal types
+- Don't add new tools without updating BOTH `TOOL_DISPATCH` in `agentic_service.py` AND `_SERVICE_TOOL_DEFS` in `strands_agentic_service.py` (the Strands path skips TOOL_DISPATCH registration for tools not in _make_service_tool)
+- Don't assume `admin_auth.py` uses `cognito_auth.py` — it still imports from `auth.py` (legacy `get_current_user`)
+- Don't create a `server/legacy/` directory expecting archived files there — `auth.py`, `gateway_client.py`, `mcp_agent_integration.py`, `weather_mcp_service.py` are still in `server/app/` and some are still imported
+- Don't call `_load_plugin_config()` expecting only DynamoDB results — DynamoDB manifest only has version/agent_count/skill_count, NOT the `data` index
+- Don't call `knowledge_fetch` without an `s3_key` from a prior `knowledge_search` — the tool returns an error, but the model may still hallucinate keys
+- Don't add new progressive disclosure factory tools without closing over `result_queue`/`loop` — otherwise tool results won't be emitted and won't appear in the frontend activity panel
+- Don't test document generation with empty `data` dicts — generators produce minimal stubs
+- Don't call `_get_s3()` at module level — fails if AWS creds aren't configured at import time
+- Don't hardcode `"nci-documents"` bucket name — use `os.getenv("S3_BUCKET", "nci-documents")` for CDK flexibility
+- Don't delete AWS resources without confirming new CDK stacks have images pushed and running tasks
+- Don't expect `sdk_agentic_service.py` to be the active orchestrator — it has been replaced by `strands_agentic_service.py`; `streaming_routes.py` imports from `strands_agentic_service`
+- Don't open test files without `encoding="utf-8"` on Windows — cp1252 chokes on UTF-8 chars in main.py and other files with Unicode content
+
+### Common Issues
+
+- **`load_data` returns "available: []"**: `_load_plugin_config()` returned only DynamoDB manifest (fixed: always load bundled `plugin.json` first). Check `eagle-plugin/plugin.json` has `"data": {...}` key.
+- **Missing TOOL_DISPATCH entry**: Tool name in `_SERVICE_TOOL_DEFS` but not in `TOOL_DISPATCH` → `_make_service_tool()` raises `ValueError("No handler for tool: {name}")`
+- **Missing _SERVICE_TOOL_DEFS entry**: Tool registered in `TOOL_DISPATCH` but not wired into supervisor via `_build_service_tools()` → model can't call it
+- **Session scoping mismatch**: Tool added to `TOOLS_NEEDING_SESSION` but handler signature only takes `(params, tenant_id)`
+- **DynamoDB Decimal**: `json.dumps()` without `default=str` raises `TypeError` on Decimal values
+- **S3 prefix trailing slash**: `_get_user_prefix()` always ends with `/` — don't add another
+- **admin_auth.py import error**: If `auth.py` is ever removed, `admin_auth.py` will break — it imports `get_current_user` from `app.auth`
+- **Tool result not showing in frontend**: Factory tool doesn't close over `result_queue`/`loop` → result never pushed to queue → no `tool_result` SSE event
+- **AWS credentials not configured**: All tool handlers fail with ClientError
+- **S3 bucket "nci-documents" doesn't exist**: s3_document_ops and create_document fail
+- **DynamoDB table "eagle" doesn't exist**: dynamodb_intake and session_store fail
+- **METADATA_TABLE / DOCUMENT_BUCKET not set**: knowledge_search/knowledge_fetch fail silently with default names
+- **`MSYS_NO_PATHCONV=1` required** on MINGW64/Git Bash when running AWS CLI with `/aws/...` paths
+- **Versioned S3 buckets** can't be deleted with `aws s3 rb --force` on MINGW — use Python boto3 `bucket.object_versions.delete()`
+- **Windows cp1252 encoding**: `open(file).read()` chokes on UTF-8 chars in Python source files — always use `open(file, encoding="utf-8").read()`
+
+### Adding a New Tool Handler
+
+Checklist for adding a new tool to the Strands path:
+
+1. **Define handler function** in `agentic_service.py`: `def _exec_new_tool(params, tenant_id)` or `(params, tenant_id, session_id)`
+2. **Add to `TOOL_DISPATCH`** (`agentic_service.py` line ~2548): `"new_tool": _exec_new_tool,`
+3. **Add to `TOOLS_NEEDING_SESSION`** (line ~2566) if it needs per-user scoping
+4. **Add to `_SERVICE_TOOL_DEFS`** (`strands_agentic_service.py` line ~1010): `"new_tool": "description string"`
+   - This wires the tool into `_build_service_tools()` → supervisor's `Agent(tools=[...])`
+5. **Add to `EAGLE_TOOLS`** (strands_agentic_service.py line ~318): Anthropic tool_use schema for health/status endpoints
+6. **Update `SYSTEM_PROMPT` / `build_supervisor_prompt()`** if the tool needs usage guidance
+7. **Validate**: `python -c "import py_compile; py_compile.compile('server/app/agentic_service.py', doraise=True)"`
+
+### stream_chat() Tool-Use Loop (Legacy Path — WebSocket)
+
+```
+stream_chat(messages, on_text, on_tool_use, on_tool_result, session_id)
+  |-- MAX_TOOL_ITERATIONS = 10
+  |-- Loop:
+  |     |-- Send messages to Claude with EAGLE_TOOLS
+  |     |-- Stream response (text deltas + tool_use blocks)
+  |     |-- If stop_reason == "tool_use":
+  |     |     |-- For each tool_use block:
+  |     |     |     |-- execute_tool(name, input, session_id)
+  |     |     |     |-- Append tool_result to messages
+  |     |     |-- Continue loop
+  |     |-- Else: break (end_turn or max_tokens)
+  |-- Return {text, usage, model, tools_called}
+```
+
+Note: `api_chat()` REST endpoint and `stream_generator()` SSE use `sdk_query()` / `sdk_query_streaming()` (Strands path). The `stream_chat()` legacy path is used by WebSocket endpoint only.
 
 ---
 
 ## Learnings
 
 ### patterns_that_work
+
 - Tool dispatch via dict lookup is fast and easily extensible
 - Lazy AWS client singletons work well for Lambda-style cold starts
 - Generating markdown documents with embedded FAR references gives Claude useful context
@@ -676,12 +837,17 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 - CDK `fromTableName()` / `fromBucketName()` pattern — import existing resources into stacks without recreating them (discovered: 2026-02-16, component: cdk-eagle)
 - Internal ALB for backend keeps API not internet-accessible — frontend ALB is the only public entry point (discovered: 2026-02-16, component: compute-stack)
 - Dockerfile copies `eagle-plugin/` to `../eagle-plugin/` so `eagle_skill_constants.py` can walk it at runtime (discovered: 2026-02-16, component: docker)
-- `eagle_tools_mcp.py` closure pattern captures tenant_id + session_id at factory time — all 7 MCP tool handlers are automatically scoped without passing context on each call (discovered: 2026-02-25, component: eagle_tools_mcp)
-- `TIER_TOOLS` in sdk_agentic_service.py uses the same tool names as TOOL_DISPATCH keys — MCP tool names must match exactly (discovered: 2026-02-25, component: sdk_agentic_service)
-- `sdk_query()` wraps `create_eagle_mcp_server()` in try/except — MCP unavailability is non-fatal, subagents degrade gracefully without business tools (discovered: 2026-02-25, component: sdk_agentic_service)
 - Workspace 4-layer prompt resolution enables hot-reloadable agent prompts without ECS redeploy (discovered: 2026-02-25, component: wspc_store)
+- `_load_plugin_config()` must load bundled `plugin.json` first, then overlay DynamoDB — DynamoDB PLUGIN#manifest only stores version/agent_count/skill_count, NOT the `data` index needed by `load_data()` (discovered: 2026-03-09, component: strands_agentic_service)
+- Factory tool pattern (`_make_service_tool`, `_make_list_skills_tool`, etc.) closing over `result_queue`/`loop` gives automatic tool_result observability without changing handler signatures (discovered: 2026-03-09, component: strands_agentic_service)
+- `_emit_tool_result()` shared helper centralizes truncation and queue push for all factory tools — add new factory tools using this helper rather than inlining the queue push (discovered: 2026-03-09, component: strands_agentic_service)
+- Composite session_id `f"{tenant_id}#advanced#{user_id}#{session_id}"` lets Strands path pass real user context to legacy handlers without changing their signatures (discovered: 2026-03-09, component: strands_agentic_service)
+- `_maybe_fast_path_document_generation()` + `_ensure_create_document_for_direct_request()` dual-safety ensures `create_document` is always called for document requests — prevents both slow multi-tool loops and missed tool calls (discovered: 2026-03-09, component: strands_agentic_service)
+- Single shared `BedrockModel` at import time (not per-request) — accounts for no per-request boto3 overhead in Strands (discovered: 2026-03-09, component: strands_agentic_service)
+- `stream_async()` replaces two-queue architecture: SDK bridges sync→async internally; `result_queue` is still used by factory tools for tool_result events that aren't naturally yielded by the stream (discovered: 2026-03-09, component: strands_agentic_service)
 
 ### patterns_to_avoid
+
 - Don't test document generation with empty `data` dicts — generators produce minimal stubs
 - Don't assume DynamoDB items have all fields — use `.get()` with defaults
 - Don't call `_get_s3()` at module level — fails if AWS creds aren't configured at import time
@@ -690,9 +856,13 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 - Don't delete AWS resources (CF stacks, Lightsail, ECS) without confirming the new CDK stacks have images pushed and running tasks (discovered: 2026-02-16, component: aws-cleanup)
 - Don't expect `server/legacy/` to exist — `auth.py`, `gateway_client.py`, `mcp_agent_integration.py`, `weather_mcp_service.py` remain in `server/app/` (verified 2026-02-25)
 - Don't assume `admin_auth.py` was migrated to `cognito_auth` — it still imports `get_current_user` from `app.auth` (verified 2026-02-25)
-- Don't add a new MCP tool only to `eagle_tools_mcp.py` without also adding to TOOL_DISPATCH — the MCP layer delegates to `execute_tool()` which uses TOOL_DISPATCH
+- Don't add a tool only to `TOOL_DISPATCH` — also add to `_SERVICE_TOOL_DEFS` or the tool won't be wired into the Strands supervisor (discovered: 2026-03-09, component: strands_agentic_service)
+- Don't call `_load_plugin_config()` and expect `data` key from DynamoDB — DynamoDB manifest only has version/agent_count/skill_count (discovered: 2026-03-09, component: strands_agentic_service)
+- Don't open Python/text files on Windows without `encoding="utf-8"` — cp1252 raises UnicodeDecodeError on UTF-8 source files (discovered: 2026-03-09, component: test_chat_endpoints.py)
+- Don't assume `sdk_agentic_service.py` is the active orchestrator — `streaming_routes.py` imports from `strands_agentic_service` (verified 2026-03-09)
 
 ### common_issues
+
 - AWS credentials not configured → all tool handlers fail with ClientError
 - S3 bucket "nci-documents" doesn't exist → s3_document_ops and create_document fail
 - DynamoDB table "eagle" doesn't exist → dynamodb_intake and session_store fail
@@ -701,19 +871,25 @@ The streaming router is wired at main.py:1121: `streaming_router = create_stream
 - `MSYS_NO_PATHCONV=1` required on MINGW64/Git Bash when running AWS CLI with `/aws/...` paths — otherwise Git Bash converts them to `C:/Program Files/Git/aws/...` (discovered: 2026-02-16, component: aws-cli)
 - Cognito pools with custom domains require `delete-user-pool-domain` before `delete-user-pool` (discovered: 2026-02-16, component: cognito)
 - Versioned S3 buckets can't be deleted with `aws s3 rb --force` on MINGW — use Python boto3 with `bucket.object_versions.delete()` instead (discovered: 2026-02-16, component: s3)
-- `claude_agent_sdk` import error at startup → `eagle_tools_mcp.py` import fails → `sdk_query()` catches this and runs without MCP (non-fatal) (discovered: 2026-02-25, component: eagle_tools_mcp)
+- `load_data` tool returns `{"error": "No data file named 'matrix'", "available": []}` → `_load_plugin_config()` was returning only DynamoDB manifest (missing `data` key) — fixed: always load bundled `plugin.json` first (discovered: 2026-03-09, component: strands_agentic_service)
+- `tool_result` events missing from SSE stream → factory tool not using `_emit_tool_result()` or not closing over `result_queue`/`loop` (discovered: 2026-03-09, component: strands_agentic_service)
+- `knowledge_fetch` called without `s3_key` → returns `{"error": "s3_key or document_id required"}` — always call `knowledge_search` first and pass the returned `s3_key` (discovered: 2026-03-09, component: knowledge_tools)
+- `open(file).read()` on Windows with Python source files → UnicodeDecodeError (cp1252 vs UTF-8) — use `open(file, encoding="utf-8").read()` (discovered: 2026-03-09, component: test_chat_endpoints.py)
 
 ### tips
+
 - Use `execute_tool()` for testing — it's synchronous and returns JSON strings
 - The `search_far` tool has no AWS dependency — good for offline testing
 - `intake_workflow` is stateless — workflow state is tracked in the response, not persisted
-- Check `EAGLE_TOOLS` list for the exact parameter schemas Claude sees (legacy path)
-- Check `TIER_TOOLS` for what SDK subagents can call (SDK path)
-- Backend health check is at `/api/health` (not `/health`) — confirm ALB target group health path matches (discovered: 2026-02-25, verified from main.py line 1129)
-- `main.py` version is 4.0.0 — reflects the merged multi-tenant + EAGLE architecture (discovered: 2026-02-16)
-- `session_store.py` uses `boto3.resource("dynamodb")` (high-level) while `agentic_service.py` uses `boto3.client("dynamodb")` (low-level) — both access the same `eagle` table (discovered: 2026-02-16)
-- Old infrastructure (Lightsail, old ECS clusters, old CF stacks) was cleaned up 2026-02-16 — ~$51-63/mo savings. See `.claude/specs/aws-resource-cleanup.md` for full inventory (discovered: 2026-02-16)
-- Browser smoke test command at `.claude/commands/bowser/eagle-smoke-test.md` — tests login, home, chat, documents, workflows, admin, and backend health (discovered: 2026-02-17, component: bowser)
-- Frontend auth-context.tsx auto-detects dev mode when `NEXT_PUBLIC_COGNITO_USER_POOL_ID` is empty — provides mock `dev-user` / `dev-tenant` without real Cognito (discovered: 2026-02-17, component: auth)
-- Two separate MODEL env vars: `ANTHROPIC_MODEL` (agentic_service.py legacy) vs `EAGLE_SDK_MODEL` (sdk_agentic_service.py) — set both when changing models (discovered: 2026-02-25)
-- `api_chat()` REST endpoint now uses `sdk_query()`, not the legacy `stream_chat()` — tool calls go through MCP layer, not directly through TOOL_DISPATCH (discovered: 2026-02-25)
+- Check `EAGLE_TOOLS` list in `strands_agentic_service.py` for the exact parameter schemas (used by health/status endpoints)
+- Check `_SERVICE_TOOL_DEFS` in `strands_agentic_service.py` for what the supervisor can call
+- Backend health check is at `/api/health` (not `/health`) — confirm ALB target group health path matches (discovered: 2026-02-25, verified from main.py)
+- `main.py` version is 4.0.0 — reflects the merged multi-tenant + EAGLE architecture
+- `session_store.py` uses `boto3.resource("dynamodb")` (high-level) while `agentic_service.py` uses `boto3.client("dynamodb")` (low-level) — both access the same `eagle` table
+- Old infrastructure (Lightsail, old ECS clusters, old CF stacks) was cleaned up 2026-02-16 — ~$51-63/mo savings
+- Two model env vars: `EAGLE_BEDROCK_MODEL_ID` (strands, overrides auto-selection) vs `ANTHROPIC_MODEL` (legacy agentic_service.py only) — set `EAGLE_BEDROCK_MODEL_ID` for the Strands path
+- `api_chat()` REST endpoint uses `sdk_query()` (Strands path) — tool calls go through `_make_service_tool()` which calls `TOOL_DISPATCH` handlers directly with real tenant/user context
+- `stream_generator()` in `streaming_routes.py` injects keepalive SSE comments every 20s to prevent ALB idle timeout (raised to 300s); keepalive chunks are `{"type": "_keepalive"}` internally
+- `strands_agentic_service.py` docstring for `sdk_query_streaming()` correctly says "Uses Agent.stream_async()" — `result_queue` is still used by factory tools, not for streaming text
+- `knowledge_search` DynamoDB scan is efficient for ~200 docs — no secondary indexes needed at current scale
+- `DOCUMENT_BUCKET` and `METADATA_TABLE` have separate env vars from `S3_BUCKET`/`EAGLE_TABLE` — the knowledge base uses dedicated resources

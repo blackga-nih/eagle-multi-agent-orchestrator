@@ -4,7 +4,7 @@ parent: "[[frontend/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, frontend, nextjs, tailwind, chat, dashboard, test-results]
-last_updated: 2026-03-04T06:00:00
+last_updated: 2026-03-09T12:00:00
 ---
 
 # Frontend Expertise (Complete Mental Model)
@@ -21,7 +21,7 @@ last_updated: 2026-03-04T06:00:00
 - **TypeScript** throughout
 - **Tailwind CSS** with custom NCI color palette
 - **lucide-react** for icons
-- **react-markdown** for message rendering
+- **react-markdown** + **remark-gfm** for message rendering (GFM tables, strikethrough, task lists)
 - **amazon-cognito-identity-js** for auth
 
 ### Page Routes
@@ -89,7 +89,7 @@ components/
   |
   |-- chat-simple/                   # Minimalist chat (used at /chat)
   |   |-- simple-chat-interface.tsx  # Simple chat main — horizontal flex: chat-left + ActivityPanel-right
-  |   |-- simple-message-list.tsx    # Simple message list
+  |   |-- simple-message-list.tsx    # Message list — mdComponents (module-scope), MemoizedMarkdown, remarkGfm, streaming split
   |   |-- simple-welcome.tsx         # Simple welcome
   |   |-- simple-header.tsx          # Simple header
   |   |-- simple-quick-actions.tsx   # Quick action buttons
@@ -214,7 +214,7 @@ interface AcquisitionData {
 
 **Components**: `components/chat-simple/`
 - `simple-chat-interface.tsx`: Horizontal flex layout — left chat column + right ActivityPanel
-- `simple-message-list.tsx`: Clean message rendering
+- `simple-message-list.tsx`: Message rendering with GFM markdown (tables, lists, code), MemoizedMarkdown for completed messages, inline streaming cursor
 - `simple-welcome.tsx`: Simple welcome card
 - `simple-header.tsx`: Minimal header
 - `simple-quick-actions.tsx`: Quick action buttons
@@ -337,6 +337,50 @@ Followed by `SuggestedPrompts` component.
 - Expandable "Reasoning" panel (Brain icon, accordion)
 - Copy button (hover-to-show)
 - Typing indicator with bouncing dots
+
+### Simple Message List (`simple-message-list.tsx`)
+
+**Component**: `components/chat-simple/simple-message-list.tsx`
+
+This component handles rendering for the `/chat` (minimalist) interface. Key patterns:
+
+**`mdComponents` (module-scope constant)**:
+- Defined once outside the component to prevent unnecessary object recreation on every render
+- Covers: `p`, `ul`, `ol`, `li`, `strong`, `h1`–`h3`, `code`, `pre`, `blockquote`
+- Includes full GFM table components: `table` (scrollable wrapper), `thead`, `tbody`, `tr`, `th`, `td`
+- Table wrapper uses `overflow-x-auto` + `border border-gray-200 rounded-lg`
+
+**`remarkPlugins` (module-scope constant)**:
+- `const remarkPlugins = [remarkGfm]` — defined once at module scope, not inline
+
+**`MemoizedMarkdown` component**:
+- `React.memo` wrapper around `ReactMarkdown` with `remarkPlugins` + `mdComponents`
+- Used for completed (non-streaming) messages only — prevents re-parsing when other messages update
+
+**Streaming vs. completed split**:
+```typescript
+{isStreamingThis ? (
+    // Streaming: inline ReactMarkdown — content changes every token, cursor appended
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
+        {message.content + ' ...'}
+    </ReactMarkdown>
+) : (
+    // Completed: MemoizedMarkdown — stable reference, no re-parse on sibling updates
+    <MemoizedMarkdown content={message.content} />
+)}
+```
+
+**`isStreamingThis` detection**:
+```typescript
+const isStreamingThis = isTyping && isLastMessage && message.role === 'assistant';
+```
+
+**`isWaitingForFirstToken` detection** (prevents double indicator):
+```typescript
+const isWaitingForFirstToken =
+    isTyping && (messages.length === 0 || messages[lastIdx]?.role === 'user');
+```
+Shows bouncing typing dots only before any assistant text arrives. Once streaming message is in the list, the inline `' ...'` cursor is shown instead.
 
 ---
 
@@ -964,6 +1008,11 @@ CloudWatch /eagle/test-runs
 - Activity panel default tab is `'logs'` — most useful tab on first open
 - LogDetailModal: Formatted/Raw JSON toggle, Escape key to close, click-outside to close
 - `useEffect` on `filtered.length` for auto-scroll-to-bottom in log timeline
+- Module-scope `mdComponents` + `remarkPlugins` constants in `simple-message-list.tsx` prevent object recreation on every render (discovered: 2026-03-09)
+- `MemoizedMarkdown` (`React.memo`) for completed messages — only streaming message re-renders on each token (discovered: 2026-03-09)
+- Split streaming/completed rendering: streaming appends `' ...'` cursor inline; completed uses memoized component (discovered: 2026-03-09)
+- GFM table rendering requires both `remarkGfm` plugin AND all 6 table HTML components (`table`, `thead`, `tbody`, `tr`, `th`, `td`) in the components map (discovered: 2026-03-09)
+- `validate-sse-pipeline.spec.ts` covers SSE schema, tool pairing, and tool card rendering — superset of the deprecated `validate-tool-cards-chevron.spec.ts` (discovered: 2026-03-09)
 
 ### Patterns To Avoid
 
@@ -974,6 +1023,10 @@ CloudWatch /eagle/test-runs
 - Don't use short diagram actor aliases (`intake`, `docgen`) as SKILL_TEST_MAP keys — use the full plugin slug
 - Don't add a new agent to eagle-plugin/ without updating `AGENT_COLORS`, `AGENT_NAMES`, and `AGENT_ICONS` in `agent-colors.ts`
 - Don't use the horizontal flex layout inside a `flex-col` parent without `min-w-0` on the flex-1 child — this causes overflow
+- Don't define `components` or `remarkPlugins` inline inside JSX — each render creates a new object reference, thrashing ReactMarkdown's memoization (discovered: 2026-03-09)
+- Don't apply `MemoizedMarkdown` to the actively-streaming message — content changes every token and memo would suppress updates (discovered: 2026-03-09)
+- Don't use `taskkill /F /PID` in Git Bash without `MSYS_NO_PATHCONV=1` — MSYS converts `/F` to a Unix file path and the command silently fails (discovered: 2026-03-09)
+- Don't rename a superseded Playwright spec in place — prefix with `_deprecated_` so it is excluded from test runs while preserving git history (discovered: 2026-03-09)
 
 ### Common Issues
 
@@ -985,6 +1038,9 @@ CloudWatch /eagle/test-runs
 - **TEST_NAMES/TEST_DEFS out of sync**: New tests show raw IDs on Next.js page or are missing from HTML dashboard
 - **Unknown agent_id in logs**: Agent Logs renders with amber "default" color scheme — add to `agent-colors.ts`
 - **ActivityPanel not visible**: Verify parent has `flex` (horizontal) not `flex flex-col`; SimpleChatInterface wraps in `<div class="h-full flex">`
+- **Markdown tables not rendering**: Check both (a) `remarkGfm` in `remarkPlugins` array and (b) all 6 table components (`table`/`thead`/`tbody`/`tr`/`th`/`td`) in the `components` prop — either missing alone will break tables (discovered: 2026-03-09)
+- **Next.js dev server EPERM `.next/trace`**: Stale node process holding file lock — see `fix-next-cache.md` for kill + clear procedure (discovered: 2026-03-09)
+- **`taskkill /F /PID` fails silently in Git Bash**: MSYS path conversion mangles `/F` flag — prefix command with `MSYS_NO_PATHCONV=1` (discovered: 2026-03-09)
 
 ### Tips
 
@@ -1018,6 +1074,12 @@ CloudWatch /eagle/test-runs
 - `addUserInputLog()` called before `sendQuery()` ensures user turns appear as first entry in each log sequence (discovered: 2026-03-04)
 - LogDetailModal Formatted/Raw JSON toggle covers both human review and developer debugging in one modal (discovered: 2026-03-04)
 - Centralizing agent colors in `agent-colors.ts` with `getAgentColors()`/`getAgentName()`/`getAgentIcon()` helpers makes new agent onboarding a 3-line change (discovered: 2026-03-04)
+- Module-scope `mdComponents` constant (defined outside the component) avoids React object churn on every render (discovered: 2026-03-09, component: simple-message-list)
+- `MemoizedMarkdown = React.memo(...)` for completed messages eliminates redundant ReactMarkdown re-parses when new messages stream in (discovered: 2026-03-09, component: simple-message-list)
+- Streaming cursor pattern: append `' ...'` to `message.content` in the streaming branch; remove it automatically when `isStreamingThis` becomes false (discovered: 2026-03-09, component: simple-message-list)
+- `fix-next-cache.md` skill doc: encoding Windows-specific troubleshooting steps as a runnable script makes cache issues a 30-second fix instead of a debug session (discovered: 2026-03-09)
+- `MSYS_NO_PATHCONV=1` prefix prevents Git Bash (MSYS2) from converting Windows-style flags (`/F`, `/PID`) in `taskkill` (discovered: 2026-03-09)
+- Playwright test consolidation: `validate-sse-pipeline.spec.ts` subsumes `validate-tool-cards-chevron.spec.ts` — prefixing deprecated tests with `_deprecated_` keeps them out of runs while preserving history (discovered: 2026-03-09)
 
 ### patterns_to_avoid
 - Don't rely on embedded data in HTML dashboard for production (use API)
@@ -1026,6 +1088,9 @@ CloudWatch /eagle/test-runs
 - Don't forget `errors` field in TestRun interface — DynamoDB returns it alongside `failed`/`skipped` (discovered: 2026-03-04)
 - Don't add a new Strands agent without updating all three maps in `agent-colors.ts` — unknown agents render amber fallback color
 - Don't put `useEffect` network calls (e.g. health checks) inside components that mount on every page — use a shared context provider instead (discovered: 2026-03-05)
+- Don't define `components` or `remarkPlugins` as inline JSX expressions — each render creates a new reference, defeating ReactMarkdown memoization (discovered: 2026-03-09, component: simple-message-list)
+- Don't apply `React.memo` to the actively-streaming message branch — it will suppress token-by-token updates (discovered: 2026-03-09, component: simple-message-list)
+- Don't run `taskkill /F /PID` raw in Git Bash without `MSYS_NO_PATHCONV=1` — the command silently fails (discovered: 2026-03-09)
 
 ### common_issues
 - trace_logs.json must exist for /admin/tests to show data (legacy — new tests page uses DynamoDB)
@@ -1036,6 +1101,8 @@ CloudWatch /eagle/test-runs
 - `@excalidraw/excalidraw` module not found — optional dependency, not installed (pre-existing)
 - ActivityPanel internal default tab is 'logs' — if you want a different default, change `useState<TabId>('logs')` in `activity-panel.tsx`
 - Navigation between protected pages feels slow: TopNav was re-mounting on every page (not in shared layout), firing checkBackendHealth() on each nav — fixed by BackendStatusContext (2026-03-05)
+- GFM tables render as plain text (no grid): missing either `remarkGfm` plugin or any of the 6 table HTML components in the `components` prop — both are required (discovered: 2026-03-09, component: simple-message-list)
+- `.next/trace` EPERM lock after crash: kill all Next.js node processes, then `mv .next/trace .next/trace.old` before restart (see `fix-next-cache.md`) (discovered: 2026-03-09)
 
 ### tips
 - Use /admin/eval to demonstrate EAGLE workflow to stakeholders (10 use cases as of 2026-02-25)
@@ -1046,3 +1113,8 @@ CloudWatch /eagle/test-runs
 - Run `pytest tests/ -v` to auto-persist results to DDB (controlled by `EAGLE_PERSIST_TEST_RESULTS` env var)
 - Agent Logs "Clear" button only appears when `logs.length > 0` and `activeTab === 'logs'`
 - The `addFormSubmitLog()` hook export is available but not yet wired to any form — use it to log intake form submissions to the Agent Logs tab
+- To fix zombie Next.js processes locking `.next/trace`, run the automated cleanup in `fix-next-cache.md` (kills Next.js node processes, clears trace file, restarts)
+- `validate-sse-pipeline.spec.ts` is the canonical tool-card E2E test — it validates SSE schema, 1:1 tool pairing, chevron expand/collapse, and green status dot in one run
+- Tool card Playwright selector: `.my-1.rounded-lg.border` — matches `ToolUseDisplay` wrapper class in `tool-use-display.tsx`
+- When adding GFM table support, add `remarkGfm` to both `remarkPlugins` constant AND ensure all 6 table HTML elements are in `mdComponents` (discovered: 2026-03-09)
+- `_deprecated_` prefix on Playwright specs excludes them from `npx playwright test` glob while keeping them in git history for reference (discovered: 2026-03-09)
