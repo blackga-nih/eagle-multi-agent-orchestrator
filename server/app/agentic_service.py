@@ -388,6 +388,24 @@ def _augment_document_data_from_context(
     return merged
 
 
+def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
+    """Detect boilerplate template previews that did not absorb user context."""
+    if not preview:
+        return False
+
+    normalized = " ".join(preview.lower().split())
+    if doc_type == "sow":
+        markers = [
+            "this section should provide brief description of the project",
+            "the background information should identify the requirement in very general terms",
+            "sample language",
+            "table of contents",
+        ]
+        return all(marker in normalized for marker in markers[:2]) and "table of contents" in normalized
+
+    return False
+
+
 def _get_user_prefix(session_id: str | None = None) -> str:
     """Get the S3 prefix for the current user: eagle/{tenant}/{user}/"""
     tenant_id = _extract_tenant_id(session_id)
@@ -1355,6 +1373,20 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
             file_type = result.file_type
             source = result.source
             template_path = result.template_path
+
+            # Some official templates are boilerplate-only and may not expose
+            # machine-replaceable placeholders. If the extracted preview is still
+            # generic, return markdown generator content for the editable response
+            # while still saving the populated binary artifact to S3.
+            if _looks_like_unfilled_template_preview(doc_type, content):
+                generator = markdown_generators.get(doc_type)
+                if generator:
+                    content = generator(title, data)
+                    source = f"{source}+markdown_context_response"
+                    logger.warning(
+                        "Template preview looked unfilled for doc_type=%s; using markdown generator for response content",
+                        doc_type,
+                    )
 
     except ImportError as e:
         # python-docx or openpyxl not available, use markdown

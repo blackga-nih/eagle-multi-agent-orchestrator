@@ -201,6 +201,15 @@ _DOC_REQUEST_BLOCKERS = (
     "difference between",
 )
 
+_PROMPT_SECTION_ALIASES = {
+    "project description": "project_description",
+    "technical requirements": "technical_requirements",
+    "scope of work": "scope_of_work",
+    "deliverables": "deliverables",
+    "environment tiers": "environment_tiers",
+    "security": "security",
+}
+
 
 def _normalize_prompt(prompt: str) -> str:
     return re.sub(r"\s+", " ", prompt.strip().lower())
@@ -244,6 +253,76 @@ def _should_use_fast_document_path(prompt: str) -> tuple[bool, str | None]:
     return True, doc_type
 
 
+def _extract_prompt_sections(prompt: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+
+    for raw_line in (prompt or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        heading = line.rstrip(":").strip().lower()
+        if heading in _PROMPT_SECTION_ALIASES:
+            current = _PROMPT_SECTION_ALIASES[heading]
+            sections.setdefault(current, [])
+            continue
+
+        if line.startswith("- ") or line.startswith("* "):
+            item = line[2:].strip().strip('"')
+            if not item:
+                continue
+            bucket = current or "general"
+            sections.setdefault(bucket, []).append(item)
+
+    return sections
+
+
+def _extract_context_data_from_prompt(prompt: str, doc_type: str) -> dict[str, Any]:
+    """Derive create_document data fields from the current user prompt."""
+    if not prompt:
+        return {}
+
+    data: dict[str, Any] = {}
+    sections = _extract_prompt_sections(prompt)
+
+    project_description = " ".join(sections.get("project_description", [])).strip()
+    if project_description:
+        data["description"] = project_description[:500]
+        data["requirement"] = project_description[:500]
+
+    scope_items = sections.get("scope_of_work", [])
+    tech_items = sections.get("technical_requirements", [])
+    if doc_type == "sow":
+        tasks = (scope_items + tech_items)[:20]
+        if tasks:
+            data["tasks"] = tasks
+        if sections.get("deliverables"):
+            data["deliverables"] = sections["deliverables"][:15]
+        if sections.get("security"):
+            data["security_requirements"] = "; ".join(sections["security"])[:600]
+        if sections.get("environment_tiers"):
+            data["place_of_performance"] = "; ".join(sections["environment_tiers"])[:300]
+        if scope_items:
+            data["scope"] = " ".join(scope_items)[:500]
+
+    # Common budget/timeline extraction (best effort)
+    m_money = re.search(r"\$[0-9][0-9,]*(?:\.[0-9]+)?", prompt)
+    if m_money:
+        money = m_money.group(0)
+        data.setdefault("estimated_cost", money)
+        data.setdefault("estimated_value", money)
+        data.setdefault("total_estimate", money)
+
+    m_period = re.search(r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})", prompt, flags=re.IGNORECASE)
+    if m_period:
+        period = m_period.group(0).strip()
+        data.setdefault("period_of_performance", period)
+        data.setdefault("timeline", period)
+
+    return data
+
+
 def _fast_path_title(prompt: str, doc_type: str) -> str:
     return _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ").title())
 
@@ -275,6 +354,9 @@ async def _maybe_fast_path_document_generation(
         "doc_type": doc_type,
         "title": _fast_path_title(prompt, doc_type),
     }
+    contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
+    if contextual_data:
+        params["data"] = contextual_data
     if (
         package_context is not None
         and getattr(package_context, "is_package_mode", False)
@@ -318,6 +400,9 @@ async def _ensure_create_document_for_direct_request(
         "doc_type": doc_type,
         "title": _fast_path_title(prompt, doc_type),
     }
+    contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
+    if contextual_data:
+        params["data"] = contextual_data
     if (
         package_context is not None
         and getattr(package_context, "is_package_mode", False)
@@ -699,6 +784,7 @@ def _make_service_tool(
     package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    prompt_context: str | None = None,
 ):
     """Create a Strands @tool that calls agentic_service handlers directly.
 
@@ -726,6 +812,17 @@ def _make_service_tool(
         """Placeholder docstring replaced below."""
         parsed = json.loads(params) if isinstance(params, str) else params
         try:
+            if tool_name == "create_document":
+                doc_type = str(parsed.get("doc_type", "")).strip().lower()
+                prompt_data = _extract_context_data_from_prompt(prompt_context or "", doc_type)
+                if prompt_data:
+                    existing_data = parsed.get("data")
+                    if not isinstance(existing_data, dict):
+                        existing_data = {}
+                    for k, v in prompt_data.items():
+                        existing_data.setdefault(k, v)
+                    parsed["data"] = existing_data
+
             if (
                 tool_name == "create_document"
                 and package_context is not None
@@ -817,6 +914,7 @@ def _build_service_tools(
     tenant_id: str,
     user_id: str,
     session_id: str | None,
+    prompt_context: str | None = None,
     package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
@@ -831,9 +929,10 @@ def _build_service_tools(
                 tenant_id,
                 user_id,
                 session_id,
-                package_context,
-                result_queue,
-                loop,
+                prompt_context=prompt_context,
+                package_context=package_context,
+                result_queue=result_queue,
+                loop=loop,
             )
         )
     return tools
@@ -1075,6 +1174,7 @@ async def sdk_query(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
+        prompt_context=prompt,
         package_context=package_context,
     )
 
@@ -1227,6 +1327,7 @@ async def sdk_query_streaming(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
+        prompt_context=prompt,
         package_context=package_context,
         result_queue=result_queue,
         loop=loop,
