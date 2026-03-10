@@ -124,6 +124,11 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const [isExporting, setIsExporting] = useState(false);
     const [exportError, setExportError] = useState<string | null>(null);
 
+    // Save state
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [s3Key, setS3Key] = useState<string | null>(null);
+
     const { getToken } = useAuth();
     const { loadSession } = useSession();
 
@@ -136,6 +141,11 @@ export default function DocumentViewerPage({ params }: PageProps) {
         }
         if (doc.document_type) {
             setDocumentType(doc.document_type);
+        }
+        // Track the S3 key for save operations
+        const docS3Key = doc.s3_key || doc.document_id;
+        if (docS3Key) {
+            setS3Key(docS3Key);
         }
 
         setDocumentContent(doc.content);
@@ -213,6 +223,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     setDocumentTitle(doc.title);
                     setDocumentType(doc.document_type);
                     setPackageId(doc.package_id);
+                    setS3Key(doc.s3_key || doc.document_id || null);
                     setDocumentContent(doc.content);
                     setEditContent(doc.content);
                     setIsLoading(false);
@@ -222,6 +233,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 setDocumentTitle(doc.title);
                 setDocumentType(doc.document_type);
                 setPackageId(doc.package_id);
+                setS3Key(doc.s3_key || doc.document_id || null);
             }
         } catch {
             // sessionStorage unavailable or parse error
@@ -233,6 +245,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
             setDocumentTitle(stored2.title);
             setDocumentType(stored2.document_type);
             setPackageId(stored2.package_id);
+            setS3Key(stored2.s3_key || stored2.id || null);
             setDocumentContent(stored2.content);
             setEditContent(stored2.content);
             setIsLoading(false);
@@ -252,6 +265,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     setDocumentTitle(data.title || 'Untitled Document');
                     setDocumentType(data.document_type || '');
                     setPackageId(data.package_id || undefined);
+                    setS3Key(data.s3_key || data.key || data.document_id || null);
                     setDocumentContent(data.content || '');
                     setEditContent(data.content || '');
                     setIsLoading(false);
@@ -458,19 +472,24 @@ ${docSnippet}`;
             : truncateWithEllipsis(docExcerpt, MAX_DOC_CONTEXT_CHARS);
         const boundedSession = truncateWithEllipsis(background, MAX_SESSION_CONTEXT_CHARS);
 
+        const s3KeyInfo = s3Key
+            ? `[DOCUMENT KEY]\n${s3Key}\nTo update this document in place, use create_document with update_existing_key="${s3Key}" and provide the full updated content in data.content.`
+            : '[DOCUMENT KEY]\nNot available - document must be saved to S3 first before updates can be applied.';
+
         return [
             'You are assisting with edits to an acquisition document in EAGLE.',
             '[DOCUMENT CONTEXT]',
             `Title: ${documentTitle || 'Untitled Document'}`,
             `Type: ${documentType || 'unknown'}`,
             boundedDoc ? `Current Content Excerpt:\n${boundedDoc}` : 'Current Content Excerpt: [empty]',
+            s3KeyInfo,
             '[ORIGIN SESSION CONTEXT]',
             boundedSession || 'No origin session context was found for this document.',
             '[USER REQUEST]',
             userRequest,
-            'Instruction: If the user requests substantive edits or section completion, use create_document and return the updated draft.',
+            'Instruction: If the user requests substantive edits or section completion, use create_document with update_existing_key to update the document in place.',
         ].join('\n\n');
-    }, [documentContent, documentTitle, documentType, loadSession, sessionId]);
+    }, [documentContent, documentTitle, documentType, loadSession, sessionId, s3Key]);
 
     const handleSendMessage = async () => {
         if (!chatInput.trim() || isStreaming) return;
@@ -494,12 +513,45 @@ ${docSnippet}`;
 
     const handleToggleEdit = () => {
         if (isEditing) {
-            // Switching from edit to preview — save edits
+            // Switching from edit to preview — save edits to local state
             setDocumentContent(editContent);
         } else {
             setEditContent(documentContent);
         }
         setIsEditing(!isEditing);
+    };
+
+    // Save handler - persists to S3
+    const handleSave = async () => {
+        if (!s3Key) {
+            setSaveError('No document key available - cannot save');
+            return;
+        }
+        setIsSaving(true);
+        setSaveError(null);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/documents/${encodeURIComponent(s3Key)}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ content: editContent, change_source: 'user_edit' }),
+            });
+            if (!res.ok) {
+                throw new Error(await extractResponseError(res));
+            }
+
+            // Update local state with saved content
+            setDocumentContent(editContent);
+            setDocUpdated(true);
+            setTimeout(() => setDocUpdated(false), 2000);
+        } catch (err) {
+            setSaveError(err instanceof Error ? err.message : 'Save failed');
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     // Download handler
@@ -662,6 +714,24 @@ ${docSnippet}`;
                                     </>
                                 )}
                             </button>
+
+                            {/* Save button (visible when editing) */}
+                            {isEditing && (
+                                <button
+                                    onClick={handleSave}
+                                    disabled={isSaving || editContent === documentContent || !s3Key}
+                                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    title={!s3Key ? 'Document must be saved to S3 first' : editContent === documentContent ? 'No changes to save' : 'Save to S3'}
+                                >
+                                    {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                    Save
+                                </button>
+                            )}
+
+                            {/* Save error */}
+                            {saveError && (
+                                <span className="text-xs text-red-600 ml-2">{saveError}</span>
+                            )}
                         </div>
                     </div>
                 </header>

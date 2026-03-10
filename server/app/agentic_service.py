@@ -1434,13 +1434,112 @@ def _exec_search_far_LEGACY(params: dict, tenant_id: str) -> dict:
     }
 
 
+def _update_document_content(
+    tenant_id: str,
+    doc_key: str,
+    content: str,
+    change_source: str = "ai_edit",
+    session_id: str = None,
+) -> dict:
+    """Update an existing document in S3.
+
+    For package documents, creates a new version.
+    For workspace documents, performs direct overwrite.
+    """
+    if not doc_key:
+        return {"error": "update_existing_key is required but empty"}
+    if not content:
+        return {"error": "content is required for update"}
+
+    user_id = _extract_user_id(session_id)
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+
+    # Security check
+    if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
+        return {"error": f"Access denied: document key must be within user's prefix"}
+
+    # Detect if this is a package document
+    is_package_doc = "/packages/" in doc_key
+
+    if is_package_doc:
+        from app.document_service import create_package_document_version
+
+        # Extract package_id and doc_type from the key
+        parts = doc_key.split("/")
+        try:
+            pkg_idx = parts.index("packages")
+            package_id = parts[pkg_idx + 1]
+            filename = parts[-1]
+            doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
+            title = doc_type.replace("_", " ").title()
+        except (ValueError, IndexError):
+            return {"error": "Invalid package document key format"}
+
+        result = create_package_document_version(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            content=content,
+            title=title,
+            file_type="md",
+            created_by_user_id=user_id,
+            session_id=session_id,
+            change_source=change_source,
+        )
+
+        if not result.success:
+            return {"error": result.error or "Failed to create document version"}
+
+        return {
+            "success": True,
+            "mode": "update_package",
+            "key": result.s3_key,
+            "version": result.version,
+            "document_id": result.document_id,
+            "message": f"Document updated (version {result.version})",
+        }
+    else:
+        # Workspace document: direct S3 overwrite
+        try:
+            s3 = _get_s3()
+            s3.put_object(
+                Bucket=bucket,
+                Key=doc_key,
+                Body=content.encode("utf-8"),
+                ContentType="text/markdown; charset=utf-8",
+            )
+            return {
+                "success": True,
+                "mode": "update_workspace",
+                "key": doc_key,
+                "message": "Document saved",
+            }
+        except (ClientError, BotoCoreError) as e:
+            logger.error("S3 put document error during update: %s", e, exc_info=True)
+            return {"error": f"Failed to save document: {str(e)}"}
+
+
 def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Generate acquisition documents and save to S3.
 
     Uses official S3 templates when available (DOCX/XLSX), falling back to
     markdown generators when templates are unavailable or fail to load.
+
+    If `update_existing_key` is provided, updates the existing document instead
+    of creating a new one.
     """
     from app.template_service import TemplateService
+
+    # Handle update mode - update existing document
+    update_key = params.get("update_existing_key")
+    if update_key:
+        return _update_document_content(
+            tenant_id=tenant_id,
+            doc_key=update_key,
+            content=params.get("data", {}).get("content", ""),
+            change_source="ai_edit",
+            session_id=session_id,
+        )
 
     doc_type = params.get("doc_type", "sow")
     title = params.get("title", "Untitled Acquisition")

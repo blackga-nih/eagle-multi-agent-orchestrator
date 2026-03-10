@@ -139,19 +139,50 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function PUT(_request: NextRequest, { params }: RouteParams) {
-  if (DEV_MODE) {
-    const { id } = await params;
-    return NextResponse.json({
-      status: 'not_implemented_dev',
-      message: 'Document update is not yet implemented in FastAPI route',
-      document_id: decodeURIComponent(id),
-    });
+export async function PUT(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
+  const authHeader = request.headers.get('authorization');
+
+  let body: { content: string; change_source?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
-  return NextResponse.json(
-    { error: 'Document update endpoint is not implemented for this route' },
-    { status: 501 },
-  );
+
+  if (!body.content || typeof body.content !== 'string') {
+    return NextResponse.json({ error: 'Missing required field: content' }, { status: 400 });
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authHeader) headers.Authorization = authHeader;
+
+  const docKey = await resolveDocKey(decodeURIComponent(id), headers);
+  if (!docKey) {
+    return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+  }
+
+  try {
+    const response = await fetch(`${FASTAPI_URL}/api/documents/${encodeURIComponent(docKey)}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        content: body.content,
+        change_source: body.change_source || 'user_edit',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return NextResponse.json({ error: errorText }, { status: response.status });
+    }
+    return NextResponse.json(await response.json());
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to update document', details: String(error) },
+      { status: 500 },
+    );
+  }
 }
 
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
