@@ -58,7 +58,7 @@ function DocumentsTab({
   const allDocs = Object.values(documents).flat();
 
   const openDoc = (doc: DocumentInfo) => {
-    const raw = doc.document_id || doc.s3_key || doc.title;
+    const raw = doc.s3_key || doc.document_id || doc.title;
     const docId = encodeURIComponent(raw);
     const params = new URLSearchParams();
     if (sessionId) params.set('session', sessionId);

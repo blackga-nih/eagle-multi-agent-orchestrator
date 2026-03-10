@@ -42,7 +42,15 @@ Return a JSON object with ALL of these fields:
 ### Content Analysis
 - key_requirements: 3-5 main requirements or takeaways as short bullets (array of strings)
 - section_summaries: Key sections mapped to brief summaries, e.g. {{"Purpose": "...", "Requirements": "..."}} (object)
-- keywords: 5-15 search terms (array of strings)
+- keywords: 10-20 search terms for discovery (array of strings). MUST include:
+  - Case/decision numbers if present (e.g., "B-302358", "B-321640", "B-409528")
+  - Statute citations (e.g., "31 USC 1341", "41 USC 3901")
+  - FAR/DFARS references (e.g., "FAR 16.505", "DFARS 252.227")
+  - Distinctive filename components (e.g., "IDIQ_Min_Fund", "ADA_Bonafide")
+  - Acronyms and abbreviations (e.g., "IDIQ", "ADA", "TOAP", "COFC")
+  - Key concepts and topics (e.g., "minimum obligation", "bona fide needs")
+  - Agency names (e.g., "GAO", "SBA", "Customs")
+  IMPORTANT: Users often search by exact identifiers like "B-302358" - include these verbatim.
 
 ### Regulatory References
 - far_references: FAR citations like "FAR 16.505", "FAR Part 6" (array of strings)

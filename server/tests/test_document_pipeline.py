@@ -229,6 +229,42 @@ class TestCreateDocumentTool:
             key,
         ), f"S3 key doesn't match expected pattern: {key}"
 
+    def test_sow_edit_request_clears_scope_section(self, mock_s3_client):
+        """Explicit clear request should patch SOW section content in-place."""
+        existing = (
+            "# Statement of Work\n\n"
+            "## 1. BACKGROUND AND PURPOSE\n\n"
+            "Background text.\n\n"
+            "## 2. SCOPE\n\n"
+            "Scope details that should be removed.\n\n"
+            "## 3. PERIOD OF PERFORMANCE\n\n"
+            "12 months from date of award\n"
+        )
+
+        with patch.dict(os.environ, ENV_PATCH, clear=False):
+            with patch("app.agentic_service._get_s3", return_value=mock_s3_client):
+                from app.agentic_service import _exec_create_document
+                result = _exec_create_document(
+                    {
+                        "doc_type": "sow",
+                        "title": "Editable SOW",
+                        "data": {
+                            "current_content": existing,
+                            "edit_request": "change the scope. leave it blank",
+                        },
+                    },
+                    tenant_id="test-tenant",
+                    session_id="ses-006",
+                )
+
+        assert result["document_type"] == "sow"
+        assert result["source"] == "inline_edit_clear_sections"
+        assert re.search(r"## 2\. SCOPE\s+\[To be completed\]", result["content"])
+        assert re.search(
+            r"## 3\. PERIOD OF PERFORMANCE\s+12 months from date of award",
+            result["content"],
+        )
+
 
 # ══════════════════════════════════════════════════════════════════════
 # T2 — execute_tool dispatch
@@ -301,29 +337,44 @@ class TestDocumentExportEndpoint:
     """Tests for POST /api/documents/export."""
 
     def test_export_docx(self, app_with_mocked_s3):
-        """Export as DOCX returns binary with correct content-type."""
+        """Export as DOCX returns a valid DOCX binary, or 503 if dependency missing."""
         with TestClient(app_with_mocked_s3) as client:
             resp = client.post("/api/documents/export", json={
                 "content": "# Test SOW\n\nThis is a test document.",
                 "title": "Test SOW",
                 "format": "docx",
             })
+        if resp.status_code == 503:
+            detail = resp.json().get("detail", "").lower()
+            assert "dependency missing" in detail
+            assert "python-docx" in detail
+            return
+
         assert resp.status_code == 200
-        # Content-type should be DOCX MIME or text (fallback if python-docx missing)
         ct = resp.headers.get("content-type", "")
-        assert "application/" in ct or "text/" in ct
+        assert "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in ct
         assert len(resp.content) > 0
+        assert resp.content.startswith(b"PK\x03\x04")
 
     def test_export_pdf_or_fallback(self, app_with_mocked_s3):
-        """Export as PDF returns 200 (real PDF or text fallback if reportlab missing)."""
+        """Export as PDF returns a valid PDF binary, or 503 if dependency missing."""
         with TestClient(app_with_mocked_s3) as client:
             resp = client.post("/api/documents/export", json={
                 "content": "# Cost Estimate\n\nTotal: $50,000",
                 "title": "IGCE Export",
                 "format": "pdf",
             })
+        if resp.status_code == 503:
+            detail = resp.json().get("detail", "").lower()
+            assert "dependency missing" in detail
+            assert "reportlab" in detail
+            return
+
         assert resp.status_code == 200
+        ct = resp.headers.get("content-type", "")
+        assert "application/pdf" in ct
         assert len(resp.content) > 0
+        assert resp.content.startswith(b"%PDF")
 
     def test_export_markdown(self, app_with_mocked_s3):
         """Export as MD returns raw markdown bytes."""
@@ -337,6 +388,22 @@ class TestDocumentExportEndpoint:
         ct = resp.headers.get("content-type", "")
         assert "markdown" in ct or "text" in ct
         assert b"# Markdown Doc" in resp.content
+
+    def test_export_dependency_error_returns_503(self, app_with_mocked_s3):
+        """Missing export dependencies surface as explicit 503 errors."""
+        from app.document_export import ExportDependencyError
+
+        with patch("app.main.export_document", side_effect=ExportDependencyError("DOCX export dependency missing: install python-docx.")):
+            with TestClient(app_with_mocked_s3) as client:
+                resp = client.post("/api/documents/export", json={
+                    "content": "# Test",
+                    "title": "Test",
+                    "format": "docx",
+                })
+
+        assert resp.status_code == 503
+        detail = resp.json().get("detail", "").lower()
+        assert "dependency missing" in detail
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -437,3 +504,23 @@ class TestStreamProtocol:
         assert parsed["type"] == "tool_use"
         assert parsed["tool_use"]["name"] == "create_document"
         assert parsed["agent_id"] == "eagle"
+
+    def test_writer_complete_event_with_metadata(self):
+        """write_complete() includes metadata payload when provided."""
+        import asyncio
+        from app.stream_protocol import MultiAgentStreamWriter
+
+        async def _run():
+            writer = MultiAgentStreamWriter("eagle", "EAGLE")
+            queue = asyncio.Queue()
+            await writer.write_complete(
+                queue,
+                metadata={"tools_called": ["create_document"], "usage": {"output_tokens": 12}},
+            )
+            return await queue.get()
+
+        sse_line = asyncio.get_event_loop().run_until_complete(_run())
+        parsed = json.loads(sse_line.replace("data: ", "").strip())
+        assert parsed["type"] == "complete"
+        assert parsed["metadata"]["tools_called"] == ["create_document"]
+        assert parsed["metadata"]["usage"]["output_tokens"] == 12

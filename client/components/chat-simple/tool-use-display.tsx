@@ -153,13 +153,13 @@ function DocumentResultCard({
   const s3Key = String(data.s3_key ?? '');
 
   const handleOpen = () => {
-    const docId = encodeURIComponent(data.document_id as string || s3Key || title);
+    const docId = encodeURIComponent(s3Key || (data.document_id as string) || title);
     const params = new URLSearchParams();
     if (sessionId) params.set('session', sessionId);
 
     // Store content in sessionStorage for instant load in document viewer
     const docInfo: DocumentInfo = {
-      document_id: (data.document_id as string) || s3Key,
+      document_id: s3Key || (data.document_id as string),
       package_id: data.package_id as string | undefined,
       document_type: docType,
       doc_type: docType,

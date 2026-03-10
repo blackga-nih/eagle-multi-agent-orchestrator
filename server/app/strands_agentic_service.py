@@ -30,6 +30,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
+from botocore.config import Config
 from strands import Agent, tool
 from strands.models import BedrockModel
 
@@ -109,9 +110,20 @@ logger.info("EAGLE model: %s", MODEL)
 # Created once at import time. Reused across all requests.
 # boto3 handles SSO/IAM natively — no credential bridging needed.
 
+_bedrock_client_config = Config(
+    connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "60")),
+    read_timeout=int(os.getenv("EAGLE_BEDROCK_READ_TIMEOUT", "300")),
+    retries={
+        "max_attempts": int(os.getenv("EAGLE_BEDROCK_MAX_ATTEMPTS", "4")),
+        "mode": os.getenv("EAGLE_BEDROCK_RETRY_MODE", "adaptive"),
+    },
+    tcp_keepalive=True,
+)
+
 _model = BedrockModel(
     model_id=MODEL,
     region_name=os.getenv("AWS_REGION", "us-east-1"),
+    boto_client_config=_bedrock_client_config,
 )
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
@@ -157,6 +169,7 @@ _DOC_TYPE_LABELS: dict[str, str] = {
     "contract_type_justification": "Contract Type Justification",
 }
 _DIRECT_DOC_VERBS = ("generate", "draft", "create", "write", "produce")
+_DOC_EDIT_VERBS = ("edit", "update", "revise", "modify", "fill", "rewrite", "adjust", "amend")
 _SLOW_PATH_HINTS = ("research", "far", "dfars", "policy", "compare", "analyze")
 _DOC_REQUEST_BLOCKERS = (
     "what is",
@@ -167,9 +180,64 @@ _DOC_REQUEST_BLOCKERS = (
     "difference between",
 )
 
+_PROMPT_SECTION_ALIASES = {
+    "project description": "project_description",
+    "technical requirements": "technical_requirements",
+    "scope of work": "scope_of_work",
+    "deliverables": "deliverables",
+    "environment tiers": "environment_tiers",
+    "security": "security",
+}
+
 
 def _normalize_prompt(prompt: str) -> str:
     return re.sub(r"\s+", " ", prompt.strip().lower())
+
+
+def _extract_user_request_from_prompt(prompt: str) -> str:
+    """Extract the [USER REQUEST] block from document-viewer prompts."""
+    if not prompt:
+        return ""
+    marker = "[USER REQUEST]"
+    if marker not in prompt:
+        return ""
+
+    tail = prompt.split(marker, 1)[1]
+    for stop in ("\n[", "\nInstruction:"):
+        idx = tail.find(stop)
+        if idx >= 0:
+            tail = tail[:idx]
+            break
+    return tail.strip()
+
+
+def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
+    """Extract document viewer context blocks from wrapped prompts."""
+    if not prompt:
+        return {}
+
+    out: dict[str, str] = {}
+
+    title_match = re.search(r"(?im)^\s*Title:\s*(.+?)\s*$", prompt)
+    if title_match:
+        out["title"] = title_match.group(1).strip()
+
+    type_match = re.search(r"(?im)^\s*Type:\s*([a-z0-9_ -]+)\s*$", prompt)
+    if type_match:
+        out["document_type"] = type_match.group(1).strip().lower().replace(" ", "_")
+
+    excerpt_match = re.search(
+        r"(?is)Current Content Excerpt:\s*(.+?)(?:\n\s*\[ORIGIN SESSION CONTEXT\]|\n\s*\[USER REQUEST\]|$)",
+        prompt,
+    )
+    if excerpt_match:
+        out["current_content"] = excerpt_match.group(1).strip()
+
+    user_request = _extract_user_request_from_prompt(prompt)
+    if user_request:
+        out["user_request"] = user_request
+
+    return out
 
 
 def _infer_doc_type_from_prompt(prompt: str) -> str | None:
@@ -190,6 +258,13 @@ def _is_document_generation_request(prompt: str) -> tuple[bool, str | None]:
     if any(v in lowered for v in _DIRECT_DOC_VERBS):
         return True, doc_type
 
+    # Document-viewer prompts include explicit wrappers; treat edit verbs in
+    # [USER REQUEST] as document generation intent.
+    if "[document context]" in lowered and "[user request]" in lowered:
+        user_req = _extract_user_request_from_prompt(prompt).lower()
+        if any(v in user_req for v in _DIRECT_DOC_VERBS) or any(v in user_req for v in _DOC_EDIT_VERBS):
+            return True, doc_type
+
     phrase = _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ")).lower()
     if lowered.startswith(phrase):
         return True, doc_type
@@ -205,9 +280,92 @@ def _should_use_fast_document_path(prompt: str) -> tuple[bool, str | None]:
         return False, None
 
     lowered = _normalize_prompt(prompt)
+    if "[document context]" in lowered:
+        return False, None
     if any(h in lowered for h in _SLOW_PATH_HINTS):
         return False, None
     return True, doc_type
+
+
+def _extract_prompt_sections(prompt: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+
+    for raw_line in (prompt or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        heading = line.rstrip(":").strip().lower()
+        if heading in _PROMPT_SECTION_ALIASES:
+            current = _PROMPT_SECTION_ALIASES[heading]
+            sections.setdefault(current, [])
+            continue
+
+        if line.startswith("- ") or line.startswith("* "):
+            item = line[2:].strip().strip('"')
+            if not item:
+                continue
+            bucket = current or "general"
+            sections.setdefault(bucket, []).append(item)
+
+    return sections
+
+
+def _extract_context_data_from_prompt(prompt: str, doc_type: str) -> dict[str, Any]:
+    """Derive create_document data fields from the current user prompt."""
+    if not prompt:
+        return {}
+
+    data: dict[str, Any] = {}
+    doc_ctx = _extract_document_context_from_prompt(prompt)
+    if doc_ctx.get("current_content"):
+        data["current_content"] = doc_ctx["current_content"]
+    if doc_ctx.get("user_request"):
+        data["edit_request"] = doc_ctx["user_request"]
+
+    sections = _extract_prompt_sections(prompt)
+
+    project_description = " ".join(sections.get("project_description", [])).strip()
+    if project_description:
+        data["description"] = project_description[:500]
+        data["requirement"] = project_description[:500]
+    else:
+        user_req = _extract_user_request_from_prompt(prompt)
+        if user_req:
+            data["description"] = user_req[:500]
+            data["requirement"] = user_req[:500]
+
+    scope_items = sections.get("scope_of_work", [])
+    tech_items = sections.get("technical_requirements", [])
+    if doc_type == "sow":
+        tasks = (scope_items + tech_items)[:20]
+        if tasks:
+            data["tasks"] = tasks
+        if sections.get("deliverables"):
+            data["deliverables"] = sections["deliverables"][:15]
+        if sections.get("security"):
+            data["security_requirements"] = "; ".join(sections["security"])[:600]
+        if sections.get("environment_tiers"):
+            data["place_of_performance"] = "; ".join(sections["environment_tiers"])[:300]
+        if scope_items:
+            data["scope"] = " ".join(scope_items)[:500]
+
+    # Common budget/timeline extraction (best effort)
+    m_money = re.search(r"\$[0-9][0-9,]*(?:\.[0-9]+)?", prompt)
+    if m_money:
+        money = m_money.group(0)
+        data.setdefault("estimated_cost", money)
+        data.setdefault("estimated_value", money)
+        data.setdefault("total_estimate", money)
+
+    m_period = re.search(r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})", prompt, flags=re.IGNORECASE)
+    if m_period:
+        period = m_period.group(0).strip()
+        data.setdefault("period_of_performance", period)
+        data.setdefault("timeline", period)
+
+    return data
 
 
 def _fast_path_title(prompt: str, doc_type: str) -> str:
@@ -237,10 +395,14 @@ async def _maybe_fast_path_document_generation(
 
     from .agentic_service import _exec_create_document
 
+    doc_ctx = _extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
         "doc_type": doc_type,
-        "title": _fast_path_title(prompt, doc_type),
+        "title": doc_ctx.get("title") or _fast_path_title(prompt, doc_type),
     }
+    contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
+    if contextual_data:
+        params["data"] = contextual_data
     if (
         package_context is not None
         and getattr(package_context, "is_package_mode", False)
@@ -280,10 +442,14 @@ async def _ensure_create_document_for_direct_request(
 
     from .agentic_service import _exec_create_document
 
+    doc_ctx = _extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
         "doc_type": doc_type,
-        "title": _fast_path_title(prompt, doc_type),
+        "title": doc_ctx.get("title") or _fast_path_title(prompt, doc_type),
     }
+    contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
+    if contextual_data:
+        params["data"] = contextual_data
     if (
         package_context is not None
         and getattr(package_context, "is_package_mode", False)
@@ -938,6 +1104,7 @@ def _make_service_tool(
     package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    prompt_context: str | None = None,
 ):
     """Create a Strands @tool that calls agentic_service handlers directly.
 
@@ -965,6 +1132,44 @@ def _make_service_tool(
         """Placeholder docstring replaced below."""
         parsed = json.loads(params) if isinstance(params, str) else params
         try:
+            if tool_name == "create_document":
+                prompt_doc_ctx = _extract_document_context_from_prompt(prompt_context or "")
+
+                doc_type = str(parsed.get("doc_type", "")).strip().lower()
+                if not doc_type:
+                    doc_type = (
+                        prompt_doc_ctx.get("document_type")
+                        or _infer_doc_type_from_prompt(prompt_context or "")
+                        or ""
+                    )
+                    if doc_type:
+                        parsed["doc_type"] = doc_type
+
+                title = str(parsed.get("title", "")).strip()
+                if not title:
+                    inferred_title = (
+                        prompt_doc_ctx.get("title")
+                        or _DOC_TYPE_LABELS.get(doc_type or "", "")
+                        or "Untitled Acquisition"
+                    )
+                    parsed["title"] = inferred_title
+
+                prompt_data = _extract_context_data_from_prompt(prompt_context or "", doc_type)
+                existing_data = parsed.get("data")
+                if not isinstance(existing_data, dict):
+                    existing_data = {}
+                if prompt_data:
+                    for k, v in prompt_data.items():
+                        existing_data.setdefault(k, v)
+                current_content = prompt_doc_ctx.get("current_content")
+                if current_content:
+                    existing_data.setdefault("current_content", current_content)
+                user_request = prompt_doc_ctx.get("user_request")
+                if user_request:
+                    existing_data.setdefault("edit_request", user_request)
+                if existing_data:
+                    parsed["data"] = existing_data
+
             if (
                 tool_name == "create_document"
                 and package_context is not None
@@ -1035,7 +1240,9 @@ _SERVICE_TOOL_DEFS = {
     ),
     "knowledge_search": (
         "Search the acquisition knowledge base metadata in DynamoDB. "
-        "Pass JSON with optional fields: topic, document_type, agent, authority_level, keywords, limit."
+        "Pass JSON with optional fields: query (for case numbers like 'B-302358', citations, identifiers), "
+        "topic, document_type, agent, authority_level, keywords, limit. "
+        "Use 'query' for specific identifiers - it searches document_id, title, summary, and keywords."
     ),
     "knowledge_fetch": (
         "Fetch full knowledge document content from S3. "
@@ -1064,6 +1271,7 @@ def _build_service_tools(
     tenant_id: str,
     user_id: str,
     session_id: str | None,
+    prompt_context: str | None = None,
     package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
@@ -1078,9 +1286,10 @@ def _build_service_tools(
                 tenant_id,
                 user_id,
                 session_id,
-                package_context,
-                result_queue,
-                loop,
+                prompt_context=prompt_context,
+                package_context=package_context,
+                result_queue=result_queue,
+                loop=loop,
             )
         )
     # Add compliance matrix and progressive disclosure tools.
@@ -1352,6 +1561,7 @@ async def sdk_query(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
+        prompt_context=prompt,
         package_context=package_context,
     )
 
@@ -1511,6 +1721,7 @@ async def sdk_query_streaming(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
+        prompt_context=prompt,
         package_context=package_context,
         result_queue=result_queue,
         loop=loop,

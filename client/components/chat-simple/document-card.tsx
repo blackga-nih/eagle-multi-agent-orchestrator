@@ -17,7 +17,7 @@ const DOC_TYPE_CONFIG: Record<string, { label: string; icon: typeof FileText; co
 };
 
 function getDocId(doc: DocumentInfo): string {
-    const raw = doc.document_id || doc.s3_key || doc.title;
+    const raw = doc.s3_key || doc.document_id || doc.title;
     return encodeURIComponent(raw);
 }
 

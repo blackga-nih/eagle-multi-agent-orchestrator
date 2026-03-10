@@ -1,18 +1,18 @@
 # EAGLE — Multi-Tenant AI Acquisition Assistant
 
-A multi-tenant AI platform built for the **NCI Office of Acquisitions**, using the **Anthropic Python SDK** (routed through **Amazon Bedrock** for model inference), **Cognito JWT authentication**, **DynamoDB session storage**, and **granular cost attribution**. This application serves as a reference implementation for multi-tenant AI applications on AWS.
+A multi-tenant AI platform built for the **NCI Office of Acquisitions**, using the **Strands Agents SDK** (with **Amazon Bedrock** inference via boto3-native `BedrockModel`), **Cognito JWT authentication**, **DynamoDB session storage**, and **granular cost attribution**. This application serves as a reference implementation for multi-tenant AI applications on AWS.
 
 ## Core Concept
 
 EAGLE (Enhanced Acquisition Guidance & Lifecycle Engine) uses a **supervisor + subagent architecture** to guide contracting officers through the federal acquisition lifecycle. The backend has two orchestration modes:
 
-1. **Claude Agent SDK** (`sdk_agentic_service.py`): Supervisor delegates to skill subagents via the `Task` tool, each with a fresh context window — **active** in `main.py` and `streaming_routes.py`
+1. **Strands Agents SDK** (`strands_agentic_service.py`): Supervisor delegates to specialist subagents with fresh per-call context windows — **active** in `main.py` and `streaming_routes.py`
 2. **Anthropic SDK** (`agentic_service.py`): Single system prompt with all skills injected — deprecated, kept for reference
 
 Both modes use **Claude on Amazon Bedrock** for model inference (not Amazon Bedrock AgentCore).
 
 ```
-User Login -> JWT with tenant_id -> Session Attributes -> Anthropic SDK (via Bedrock)
+User Login -> JWT with tenant_id -> Session Attributes -> Strands Agents SDK (via Bedrock)
                                                                |
                                     Tenant-specific response + cost tracking
 ```
@@ -55,7 +55,7 @@ Two paths for running EAGLE. **EC2 Runner is the standard method** — no local 
 
 - **Python 3.11+**, **Node.js 20+**, **Docker**, **AWS CLI** configured
 - **[just](https://github.com/casey/just)** task runner (`cargo install just` or `brew install just`)
-- AWS account with Bedrock model access enabled (Claude 3.5 Haiku / Sonnet)
+- AWS account with Bedrock model access enabled (Claude Sonnet 4.6 / Haiku 4.5, or override with `EAGLE_BEDROCK_MODEL_ID`)
 
 ### Standard Deployment (EC2 Runner)
 
@@ -157,11 +157,11 @@ just ship           # lint + CDK synth gate + deploy + smoke-prod verify
 │        │                │  ┌────────────────────┐   SSE / REST   ┌────────────────────────────┐ │  │
 │        │ JWT auth        │  │  Next.js Frontend   │◀─────────────▶│      FastAPI Backend        │ │  │
 │        └───────────────▶│  │  App Router · TS    │               │  streaming_routes.py        │ │  │
-│                          │  └────────────────────┘               │  sdk_agentic_service.py     │ │  │
+│                          │  └────────────────────┘               │  strands_agentic_service.py │ │  │
 │   ┌────────────────┐     │                                        └─────────────┬──────────────┘ │  │
 │   │    Cognito     │     └──────────────────────────────────────────────────────┼────────────────┘  │
 │   │  tenant_id     │                                                             │                   │
-│   │  user_id       │                                              Claude Agent SDK                   │
+│   │  user_id       │                                              Strands Agents SDK                 │
 │   │  tier (JWT)    │                                                             │                   │
 │   └────────────────┘                                                             ▼                   │
 │                                                              ┌───────────────────────────────────┐   │
@@ -177,7 +177,7 @@ just ship           # lint + CDK synth gate + deploy + smoke-prod verify
 │                                                         analyst)                                       │
 │                                                                                                        │
 │                                                    ▼  Amazon Bedrock                                  │
-│                                             Claude 3.5 Haiku / Sonnet                                 │
+│                                             Claude Sonnet 4.6 / Haiku 4.5                             │
 │                                                                                                        │
 │   ┌───────────────────────────────────┐       ┌────────────────────────────────────────────────────┐ │
 │   │            DynamoDB               │       │                        S3                           │ │
@@ -200,9 +200,9 @@ just ship           # lint + CDK synth gate + deploy + smoke-prod verify
 User ──▶ Cognito (JWT: tenant_id · user_id · tier)
      ──▶ Next.js Frontend
      ──▶ FastAPI Backend (ECS Fargate)
-     ──▶ Claude Agent SDK ──▶ Supervisor Agent
+    ──▶ Strands Agents SDK ──▶ Supervisor Agent
                           ──▶ Skill Subagents (each with fresh context window)
-                          ──▶ Amazon Bedrock (Claude 3.5 Haiku / Sonnet)
+             ──▶ Amazon Bedrock (Claude Sonnet 4.6 / Haiku 4.5)
                           ──▶ DynamoDB (session · usage · cost)  +  CloudWatch
 ```
 
@@ -214,13 +214,13 @@ The **EAGLE plugin** (`eagle-plugin/`) is the single source of truth for all age
 |------|-------|-------|
 | **Supervisor** | 1 | Orchestrator — routes to specialists |
 | **Specialist Agents** | 7 | legal-counsel, market-intelligence, tech-translator, public-interest, policy-supervisor, policy-librarian, policy-analyst |
-| **Skills** | 5 | oa-intake, document-generator, compliance, knowledge-retrieval, tech-review |
+| **Skills** | 7 | oa-intake, document-generator, compliance, knowledge-retrieval, tech-review, ingest-document, admin-manager |
 
 ### AI Orchestration
 
-The backend uses the **Anthropic Python SDK** (`anthropic>=0.40.0`) for all LLM interactions. When deployed on AWS, requests route through **Amazon Bedrock** via `USE_BEDROCK=true` — this uses Bedrock's model access, not a separate agent service.
+The backend uses the **Strands Agents SDK** with boto3-native **`BedrockModel`** for supervisor/subagent orchestration and model inference through **Amazon Bedrock**.
 
-The advanced path (`sdk_agentic_service.py`) uses the **Claude Agent SDK** to implement a supervisor/subagent pattern where each skill gets its own context window, enabling better separation of concerns for complex multi-step acquisition workflows.
+The active path (`strands_agentic_service.py`) implements the supervisor/subagent pattern where each skill gets its own context window, enabling better separation of concerns for complex multi-step acquisition workflows. A legacy Anthropic path remains for compatibility/reference.
 
 ### AWS Infrastructure (5 CDK Stacks)
 
@@ -230,8 +230,8 @@ All stacks in `infrastructure/cdk-eagle/`:
 |-------|-----------|
 | **EagleCiCdStack** | GitHub OIDC provider, deploy role |
 | **EagleCoreStack** | VPC (2 AZ, 1 NAT), Cognito User Pool, IAM app role, imports `nci-documents` S3 + `eagle` DDB |
-| **EagleStorageStack** | `eagle-documents-{env}` S3 (versioned), `eagle-document-metadata-{env}` DDB, metadata extraction Lambda (Claude 3.5 Haiku via Bedrock) |
-| **EagleComputeStack** | ECR repos, ECS Fargate cluster, backend ALB (internal), frontend ALB (public), auto-scaling |
+| **EagleStorageStack** | `eagle-documents-{env}` S3 (versioned), `eagle-document-metadata-{env}` DDB, metadata extraction Lambda (Claude via Bedrock) |
+| **EagleComputeStack** | ECR repos, ECS Fargate cluster, backend ALB (internal), frontend ALB (internal), auto-scaling |
 | **EagleEvalStack** | `eagle-eval-artifacts` S3, CloudWatch dashboards + alarms, SNS alerts |
 
 ### Environment Tiers
@@ -250,10 +250,11 @@ All stacks in `infrastructure/cdk-eagle/`:
 ```
 .
 ├── client/                  # Next.js 14+ frontend (App Router, TypeScript, Tailwind)
-├── server/                  # FastAPI backend (Python 3.11+, Anthropic SDK)
+├── server/                  # FastAPI backend (Python 3.11+, Strands + Bedrock)
 │   ├── app/
 │   │   ├── main.py          # FastAPI entry point
-│   │   ├── sdk_agentic_service.py  # Claude Agent SDK orchestration (active)
+│   │   ├── strands_agentic_service.py  # Strands orchestration (active)
+│   │   ├── sdk_agentic_service.py      # legacy compatibility layer
 │   │   ├── agentic_service.py      # Anthropic SDK orchestration (deprecated)
 │   │   ├── session_store.py # Unified DynamoDB access layer
 │   │   ├── cognito_auth.py
@@ -263,7 +264,7 @@ All stacks in `infrastructure/cdk-eagle/`:
 ├── eagle-plugin/            # Agent/skill source of truth
 │   ├── plugin.json          # Manifest
 │   ├── agents/              # 8 agents (supervisor + 7 specialists)
-│   └── skills/              # 5 skills with YAML frontmatter
+│   └── skills/              # 7 skills with YAML frontmatter
 ├── infrastructure/
 │   └── cdk-eagle/           # CDK stacks (TypeScript)
 │       ├── lib/             # core, storage, compute, cicd, eval stacks
@@ -532,7 +533,7 @@ githubRepo:  'your-repo-name',
 ### C2 — Enable Bedrock Model Access *(manual, one-time)*
 
 1. Open **AWS Console → Amazon Bedrock → Model access**
-2. Enable **Anthropic Claude 3.5 Haiku** and **Claude 3.5 Sonnet**
+2. Enable **Anthropic Claude Sonnet 4.6** and **Claude Haiku 4.5**
 3. Wait for **"Access granted"**
 
 ### C3 — Bootstrap CDK and Deploy All Stacks

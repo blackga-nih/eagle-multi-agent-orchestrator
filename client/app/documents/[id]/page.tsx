@@ -50,6 +50,39 @@ const TEMPLATE_PREFIXES = Object.keys(TEMPLATE_MAP).sort((a, b) => b.length - a.
 
 // Alias for local usage (backward compat with existing references in this file)
 const DOC_TYPE_LABELS = DOCUMENT_TYPE_LABELS as Record<string, string>;
+const MAX_DOC_CONTEXT_CHARS = 2000;
+const MAX_SESSION_CONTEXT_CHARS = 1500;
+const EDIT_INTENT_RE = /\b(edit|update|revise|modify|change|clear|fill|rewrite|amend|replace|adjust|section)\b/i;
+
+function truncateWithEllipsis(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return `${text.slice(0, maxChars - 3)}...`;
+}
+
+function sanitizeContextText(text: string): string {
+    return text
+        .replace(/Authorization:\s*[^\n]*/gi, '[REDACTED]')
+        .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, '[REDACTED]')
+        .replace(/AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)\s*[:=]?\s*[^\s\n]+/gi, '[REDACTED]');
+}
+
+async function extractResponseError(response: Response): Promise<string> {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        try {
+            const payload = await response.json() as { detail?: string; error?: string; message?: string };
+            return payload.detail || payload.error || payload.message || `Request failed (${response.status})`;
+        } catch {
+            return `Request failed (${response.status})`;
+        }
+    }
+    try {
+        const text = await response.text();
+        return text || `Request failed (${response.status})`;
+    } catch {
+        return `Request failed (${response.status})`;
+    }
+}
 
 export default function DocumentViewerPage({ params }: PageProps) {
     const { id } = use(params);
@@ -61,6 +94,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const [documentContent, setDocumentContent] = useState('');
     const [documentTitle, setDocumentTitle] = useState('');
     const [documentType, setDocumentType] = useState('');
+    const [packageId, setPackageId] = useState<string | undefined>(undefined);
     const [editContent, setEditContent] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -79,6 +113,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
         },
     ]);
     const [chatInput, setChatInput] = useState('');
+    const [streamingAssistantMsg, setStreamingAssistantMsg] = useState<ChatMessage | null>(null);
+    const streamingAssistantMsgRef = useRef<ChatMessage | null>(null);
+    const generatedDocFetchSeqRef = useRef(0);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -87,8 +124,89 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const [isExporting, setIsExporting] = useState(false);
     const [exportError, setExportError] = useState<string | null>(null);
 
+    // Save state
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [s3Key, setS3Key] = useState<string | null>(null);
+
     const { getToken } = useAuth();
     const { loadSession } = useSession();
+
+    const applyDocumentUpdate = useCallback((doc: Partial<DocumentInfo> & { content: string }) => {
+        if (doc.package_id) {
+            setPackageId(doc.package_id);
+        }
+        if (doc.title) {
+            setDocumentTitle(doc.title);
+        }
+        if (doc.document_type) {
+            setDocumentType(doc.document_type);
+        }
+        // Track the S3 key for save operations
+        const docS3Key = doc.s3_key || doc.document_id;
+        if (docS3Key) {
+            setS3Key(docS3Key);
+        }
+
+        setDocumentContent(doc.content);
+        setEditContent(doc.content);
+
+        const targetRawId = doc.s3_key || doc.document_id || decodeURIComponent(id);
+        const targetId = encodeURIComponent(targetRawId);
+        const persistedDoc: DocumentInfo = {
+            document_id: doc.document_id || targetRawId,
+            package_id: doc.package_id,
+            document_type: doc.document_type || documentType || 'document',
+            title: doc.title || documentTitle || 'Document',
+            content: doc.content,
+            s3_key: doc.s3_key,
+            status: doc.status,
+            version: doc.version,
+            generated_at: doc.generated_at,
+        };
+
+        try {
+            // Update both current-route cache and resolved-target cache.
+            sessionStorage.setItem(`doc-content-${id}`, JSON.stringify(persistedDoc));
+            sessionStorage.setItem(`doc-content-${targetId}`, JSON.stringify(persistedDoc));
+        } catch {
+            // sessionStorage unavailable
+        }
+
+        setDocUpdated(true);
+        setTimeout(() => setDocUpdated(false), 2000);
+    }, [documentTitle, documentType, id]);
+
+    const refreshGeneratedDocumentFromS3 = useCallback(async (doc: DocumentInfo) => {
+        const rawId = doc.s3_key || doc.document_id;
+        if (!rawId) return;
+
+        const fetchSeq = ++generatedDocFetchSeqRef.current;
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/documents/${encodeURIComponent(rawId)}?content=true`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (!res.ok) return;
+
+            const data = await res.json();
+            if (fetchSeq !== generatedDocFetchSeqRef.current) return;
+
+            if (typeof data.content === 'string' && data.content.length > 0) {
+                applyDocumentUpdate({
+                    ...doc,
+                    title: data.title || doc.title,
+                    document_type: data.document_type || doc.document_type,
+                    package_id: data.package_id || doc.package_id,
+                    document_id: data.document_id || doc.document_id || rawId,
+                    s3_key: data.s3_key || doc.s3_key || rawId,
+                    content: data.content,
+                });
+            }
+        } catch {
+            // Best-effort refresh: keep existing content if fetch fails.
+        }
+    }, [applyDocumentUpdate, getToken]);
 
     // Load document from sessionStorage or API
     useEffect(() => {
@@ -104,6 +222,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 if (doc.content) {
                     setDocumentTitle(doc.title);
                     setDocumentType(doc.document_type);
+                    setPackageId(doc.package_id);
+                    setS3Key(doc.s3_key || doc.document_id || null);
                     setDocumentContent(doc.content);
                     setEditContent(doc.content);
                     setIsLoading(false);
@@ -112,6 +232,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 // Has metadata but no content — keep metadata, fall through to fetch
                 setDocumentTitle(doc.title);
                 setDocumentType(doc.document_type);
+                setPackageId(doc.package_id);
+                setS3Key(doc.s3_key || doc.document_id || null);
             }
         } catch {
             // sessionStorage unavailable or parse error
@@ -122,6 +244,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
         if (stored2?.content) {
             setDocumentTitle(stored2.title);
             setDocumentType(stored2.document_type);
+            setPackageId(stored2.package_id);
+            setS3Key(stored2.s3_key || stored2.id || null);
             setDocumentContent(stored2.content);
             setEditContent(stored2.content);
             setIsLoading(false);
@@ -140,6 +264,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     const data = await res.json();
                     setDocumentTitle(data.title || 'Untitled Document');
                     setDocumentType(data.document_type || '');
+                    setPackageId(data.package_id || undefined);
+                    setS3Key(data.s3_key || data.key || data.document_id || null);
                     setDocumentContent(data.content || '');
                     setEditContent(data.content || '');
                     setIsLoading(false);
@@ -219,31 +345,38 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const { sendQuery, isStreaming } = useAgentStream({
         getToken,
         onMessage: (msg) => {
-            setChatMessages((prev) => [
-                ...prev,
-                {
-                    id: msg.id,
-                    role: 'assistant',
-                    content: msg.content,
-                    timestamp: msg.timestamp,
-                    reasoning: msg.reasoning,
-                    agent_id: msg.agent_id,
-                    agent_name: msg.agent_name,
-                },
-            ]);
+            const next: ChatMessage = {
+                id: msg.id,
+                role: 'assistant',
+                content: msg.content,
+                timestamp: msg.timestamp,
+                reasoning: msg.reasoning,
+                agent_id: msg.agent_id,
+                agent_name: msg.agent_name,
+            };
+            streamingAssistantMsgRef.current = next;
+            setStreamingAssistantMsg(next);
+        },
+        onComplete: () => {
+            const completed = streamingAssistantMsgRef.current;
+            if (completed) {
+                setChatMessages((prev) => [...prev, completed]);
+            }
+            streamingAssistantMsgRef.current = null;
+            setStreamingAssistantMsg(null);
+        },
+        onError: () => {
+            streamingAssistantMsgRef.current = null;
+            setStreamingAssistantMsg(null);
         },
         onDocumentGenerated: (doc) => {
-            // LLM regenerated the document — update the left panel
-            if (doc.content) {
-                setDocumentContent(doc.content);
-                setEditContent(doc.content);
-                if (doc.title) setDocumentTitle(doc.title);
-                if (doc.document_type) setDocumentType(doc.document_type);
-
-                // Flash update indicator
-                setDocUpdated(true);
-                setTimeout(() => setDocUpdated(false), 2000);
+            // LLM regenerated/updated the document.
+            // Some streams include full content directly; others only include key metadata.
+            if (doc.content && doc.content.length > 0) {
+                applyDocumentUpdate(doc as DocumentInfo & { content: string });
+                return;
             }
+            void refreshGeneratedDocumentFromS3(doc);
         },
     });
 
@@ -288,14 +421,14 @@ ${docSnippet}`;
             timestamp: new Date(),
         };
         setChatMessages((prev) => [...prev, userMsg]);
-        sendQuery(autoPrompt, sessionId);
+        sendQuery(autoPrompt, sessionId, packageId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [unfilledCount, isLoading, isStreaming, showHydrationBanner]);
+    }, [unfilledCount, isLoading, isStreaming, showHydrationBanner, packageId]);
 
     // Scroll chat to bottom
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatMessages, isStreaming]);
+    }, [chatMessages, streamingAssistantMsg, isStreaming]);
 
     // Auto-resize chat textarea
     const adjustTextareaHeight = useCallback(() => {
@@ -310,6 +443,54 @@ ${docSnippet}`;
         adjustTextareaHeight();
     }, [chatInput, adjustTextareaHeight]);
 
+    const buildDocumentAssistantPrompt = useCallback((userRequest: string): string => {
+        const sanitizedDoc = sanitizeContextText(documentContent || '');
+        // For edit operations, include full document content so backend edits
+        // apply to the complete document, not a head/tail excerpt.
+        const includeFullDocument = EDIT_INTENT_RE.test(userRequest);
+        const docExcerpt = includeFullDocument
+            ? sanitizedDoc
+            : (sanitizedDoc.length > MAX_DOC_CONTEXT_CHARS
+                ? `${sanitizedDoc.slice(0, 1000)}\n...\n${sanitizedDoc.slice(-1000)}`
+                : sanitizedDoc);
+
+        const sessionData = sessionId ? loadSession(sessionId) : null;
+        const sessionMessages = (sessionData?.messages || [])
+            .filter((m) => m.role === 'user')
+            .slice(0, 5)
+            .map((m) => ({
+                role: 'user' as const,
+                content: sanitizeContextText(typeof m.content === 'string' ? m.content : ''),
+            }));
+
+        const background = sessionMessages.length
+            ? extractBackgroundFromMessages(sessionMessages)
+            : '';
+
+        const boundedDoc = includeFullDocument
+            ? docExcerpt
+            : truncateWithEllipsis(docExcerpt, MAX_DOC_CONTEXT_CHARS);
+        const boundedSession = truncateWithEllipsis(background, MAX_SESSION_CONTEXT_CHARS);
+
+        const s3KeyInfo = s3Key
+            ? `[DOCUMENT KEY]\n${s3Key}\nTo update this document in place, use create_document with update_existing_key="${s3Key}" and provide the full updated content in data.content.`
+            : '[DOCUMENT KEY]\nNot available - document must be saved to S3 first before updates can be applied.';
+
+        return [
+            'You are assisting with edits to an acquisition document in EAGLE.',
+            '[DOCUMENT CONTEXT]',
+            `Title: ${documentTitle || 'Untitled Document'}`,
+            `Type: ${documentType || 'unknown'}`,
+            boundedDoc ? `Current Content Excerpt:\n${boundedDoc}` : 'Current Content Excerpt: [empty]',
+            s3KeyInfo,
+            '[ORIGIN SESSION CONTEXT]',
+            boundedSession || 'No origin session context was found for this document.',
+            '[USER REQUEST]',
+            userRequest,
+            'Instruction: If the user requests substantive edits or section completion, use create_document with update_existing_key to update the document in place.',
+        ].join('\n\n');
+    }, [documentContent, documentTitle, documentType, loadSession, sessionId, s3Key]);
+
     const handleSendMessage = async () => {
         if (!chatInput.trim() || isStreaming) return;
 
@@ -320,20 +501,57 @@ ${docSnippet}`;
             timestamp: new Date(),
         };
         setChatMessages((prev) => [...prev, userMsg]);
-        const query = chatInput;
+        const query = buildDocumentAssistantPrompt(chatInput);
         setChatInput('');
 
-        await sendQuery(query, sessionId);
+        await sendQuery(query, sessionId || undefined, packageId);
     };
+
+    const displayChatMessages = streamingAssistantMsg
+        ? [...chatMessages, streamingAssistantMsg]
+        : chatMessages;
 
     const handleToggleEdit = () => {
         if (isEditing) {
-            // Switching from edit to preview — save edits
+            // Switching from edit to preview — save edits to local state
             setDocumentContent(editContent);
         } else {
             setEditContent(documentContent);
         }
         setIsEditing(!isEditing);
+    };
+
+    // Save handler - persists to S3
+    const handleSave = async () => {
+        if (!s3Key) {
+            setSaveError('No document key available - cannot save');
+            return;
+        }
+        setIsSaving(true);
+        setSaveError(null);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/documents/${encodeURIComponent(s3Key)}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ content: editContent, change_source: 'user_edit' }),
+            });
+            if (!res.ok) {
+                throw new Error(await extractResponseError(res));
+            }
+
+            // Update local state with saved content
+            setDocumentContent(editContent);
+            setDocUpdated(true);
+            setTimeout(() => setDocUpdated(false), 2000);
+        } catch (err) {
+            setSaveError(err instanceof Error ? err.message : 'Save failed');
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     // Download handler
@@ -360,10 +578,22 @@ ${docSnippet}`;
             });
 
             if (!res.ok) {
-                throw new Error(`Export failed: ${res.status}`);
+                const detail = await extractResponseError(res);
+                throw new Error(`Export failed (${res.status}): ${detail}`);
             }
 
             const blob = await res.blob();
+            if (blob.size === 0) {
+                throw new Error('Export returned an empty file.');
+            }
+
+            const sig = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+            const isDocx = sig.length >= 4 && sig[0] === 0x50 && sig[1] === 0x4b && sig[2] === 0x03 && sig[3] === 0x04;
+            const isPdf = sig.length >= 4 && sig[0] === 0x25 && sig[1] === 0x50 && sig[2] === 0x44 && sig[3] === 0x46;
+            if ((format === 'docx' && !isDocx) || (format === 'pdf' && !isPdf)) {
+                throw new Error(`Export returned invalid ${format.toUpperCase()} file content.`);
+            }
+
             const url = URL.createObjectURL(blob);
             const a = window.document.createElement('a');
             a.href = url;
@@ -484,6 +714,24 @@ ${docSnippet}`;
                                     </>
                                 )}
                             </button>
+
+                            {/* Save button (visible when editing) */}
+                            {isEditing && (
+                                <button
+                                    onClick={handleSave}
+                                    disabled={isSaving || editContent === documentContent || !s3Key}
+                                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    title={!s3Key ? 'Document must be saved to S3 first' : editContent === documentContent ? 'No changes to save' : 'Save to S3'}
+                                >
+                                    {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                    Save
+                                </button>
+                            )}
+
+                            {/* Save error */}
+                            {saveError && (
+                                <span className="text-xs text-red-600 ml-2">{saveError}</span>
+                            )}
                         </div>
                     </div>
                 </header>
@@ -549,7 +797,7 @@ ${docSnippet}`;
 
                         {/* Chat Messages */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                            {chatMessages.map((msg) => (
+                            {displayChatMessages.map((msg) => (
                                 <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                                     <div
                                         className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
@@ -589,7 +837,7 @@ ${docSnippet}`;
                             ))}
 
                             {/* Typing indicator */}
-                            {isStreaming && (
+                            {isStreaming && !streamingAssistantMsg && (
                                 <div className="flex gap-3">
                                     <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
                                         <Sparkles className="w-3.5 h-3.5 text-white" />

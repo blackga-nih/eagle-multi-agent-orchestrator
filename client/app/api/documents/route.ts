@@ -5,31 +5,34 @@
  *
  * GET /api/documents
  *   - List documents for the authenticated user
- *   - Requires Authorization header (forwarded to backend)
+ *   - Forwards Authorization header when provided
  *
  * POST /api/documents
  *   - Export a document via FastAPI (proxies to /api/documents/export)
  *   - Returns a streaming response with proper content-type
  *     and content-disposition headers from the backend
- *   - Requires Authorization header (forwarded to backend)
+ *   - Forwards Authorization header when provided
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
-const DEV_MODE = process.env.DEV_MODE === 'true' || process.env.NODE_ENV === 'development';
+const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
+
+async function parseBackendError(response: Response): Promise<string> {
+  const text = await response.text();
+  if (!text) return `Backend error: ${response.status}`;
+
+  try {
+    const parsed = JSON.parse(text) as { detail?: string; error?: string; message?: string };
+    return parsed.detail || parsed.error || parsed.message || text;
+  } catch {
+    return text;
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
-
-    // In dev mode, allow requests without auth (backend has its own DEV_MODE bypass)
-    if (!authHeader && !DEV_MODE) {
-      return NextResponse.json(
-        { error: 'Missing Authorization header' },
-        { status: 401 }
-      );
-    }
 
     // Forward all query parameters to the backend
     const { searchParams } = new URL(request.url);
@@ -52,10 +55,10 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const errorText = await parseBackendError(response);
       console.error(`FastAPI /api/documents error: ${response.status} - ${errorText}`);
       return NextResponse.json(
-        { error: `Backend error: ${response.status}` },
+        { error: `Backend error: ${response.status}`, detail: errorText },
         { status: response.status }
       );
     }
@@ -86,14 +89,6 @@ export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
 
-    // In dev mode, allow requests without auth (backend has its own DEV_MODE bypass)
-    if (!authHeader && !DEV_MODE) {
-      return NextResponse.json(
-        { error: 'Missing Authorization header' },
-        { status: 401 }
-      );
-    }
-
     const body = await request.json();
 
     // Build headers - only include Authorization if present
@@ -111,10 +106,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const errorText = await parseBackendError(response);
       console.error(`FastAPI /api/documents/export error: ${response.status} - ${errorText}`);
       return NextResponse.json(
-        { error: `Backend error: ${response.status}` },
+        { error: `Backend error: ${response.status}`, detail: errorText },
         { status: response.status }
       );
     }

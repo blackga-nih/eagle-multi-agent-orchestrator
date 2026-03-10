@@ -10,6 +10,10 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger("eagle.export")
 
+
+class ExportDependencyError(RuntimeError):
+    """Raised when export dependencies are unavailable or output is invalid."""
+
 # ── Brand constants ──────────────────────────────────────────────────
 NCI_BLUE = "#003366"
 NCI_BLUE_RGB = (0, 51, 102)
@@ -32,8 +36,10 @@ def markdown_to_docx(content: str, title: str = "Document") -> bytes:
         from docx.enum.table import WD_TABLE_ALIGNMENT
         from docx.oxml.ns import qn
     except ImportError:
-        logger.warning("python-docx not installed, using fallback")
-        return _docx_fallback(content, title)
+        logger.error("DOCX export failed: python-docx is not installed")
+        raise ExportDependencyError(
+            "DOCX export dependency missing: install python-docx."
+        )
 
     doc = Document()
 
@@ -440,8 +446,10 @@ def markdown_to_pdf(content: str, title: str = "Document") -> bytes:
         from reportlab.lib import colors
         from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
     except ImportError:
-        logger.warning("reportlab not installed, using fallback")
-        return _pdf_fallback(content, title)
+        logger.error("PDF export failed: reportlab is not installed")
+        raise ExportDependencyError(
+            "PDF export dependency missing: install reportlab."
+        )
 
     buffer = io.BytesIO()
 
@@ -825,10 +833,14 @@ def export_document(
 
     if format.lower() == "docx":
         data = markdown_to_docx(content, title)
+        if not data.startswith(b"PK\x03\x04"):
+            raise ExportDependencyError("DOCX export produced invalid file signature.")
         filename = f"{safe_title}_{timestamp}.docx"
         content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     elif format.lower() == "pdf":
         data = markdown_to_pdf(content, title)
+        if not data.startswith(b"%PDF"):
+            raise ExportDependencyError("PDF export produced invalid file signature.")
         filename = f"{safe_title}_{timestamp}.pdf"
         content_type = "application/pdf"
     elif format.lower() in ("md", "markdown"):

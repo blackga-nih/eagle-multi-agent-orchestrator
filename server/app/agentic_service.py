@@ -7,6 +7,7 @@ import os
 import json
 import time
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Any, List
@@ -176,6 +177,333 @@ def _extract_user_id(session_id: str | None = None) -> str:
     if session_id.startswith("ws-"):
         return session_id
     return "demo-user"
+
+
+def _extract_leaf_session_id(session_id: str | None = None) -> str | None:
+    """Extract raw session id from composite format {tenant}#{tier}#{user}#{session}."""
+    if not session_id:
+        return None
+    if "#" in session_id:
+        parts = session_id.split("#", 3)
+        if len(parts) >= 4 and parts[3]:
+            return parts[3]
+        return None
+    return session_id
+
+
+def _normalize_context_text(text: str) -> str:
+    """Prefer the explicit user request section from wrapped prompts."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+
+    marker = "[USER REQUEST]"
+    if marker in cleaned:
+        tail = cleaned.split(marker, 1)[1].strip()
+        if "Instruction:" in tail:
+            tail = tail.split("Instruction:", 1)[0].strip()
+        if tail:
+            cleaned = tail
+    return cleaned
+
+
+def _load_recent_user_context(session_id: str | None = None) -> list[str]:
+    """Load recent user messages for contextualizing document generation."""
+    leaf_session_id = _extract_leaf_session_id(session_id)
+    if not leaf_session_id:
+        return []
+
+    tenant_id = _extract_tenant_id(session_id)
+    user_id = _extract_user_id(session_id)
+
+    try:
+        from .session_store import get_messages
+
+        messages = get_messages(leaf_session_id, tenant_id, user_id, limit=30)
+        user_texts: list[str] = []
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                normalized = _normalize_context_text(content)
+                if normalized:
+                    user_texts.append(normalized)
+                continue
+
+            if isinstance(content, list):
+                text_parts: list[str] = []
+                for block in content:
+                    if isinstance(block, dict):
+                        block_text = block.get("text")
+                        if isinstance(block_text, str) and block_text.strip():
+                            text_parts.append(block_text.strip())
+                if text_parts:
+                    normalized = _normalize_context_text("\n".join(text_parts))
+                    if normalized:
+                        user_texts.append(normalized)
+
+        return user_texts[-8:]
+    except Exception as exc:
+        logger.debug("Could not load session context for create_document: %s", exc)
+        return []
+
+
+def _extract_first_money_value(text: str) -> str | None:
+    """Extract a likely budget/estimate token from free text."""
+    if not text:
+        return None
+
+    m = re.search(r"\$[0-9][0-9,]*(?:\.[0-9]+)?", text)
+    if m:
+        return m.group(0)
+
+    m = re.search(r"\b[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:million|billion|k|m)\b", text, flags=re.IGNORECASE)
+    if m:
+        return m.group(0)
+
+    return None
+
+
+def _extract_period(text: str) -> str | None:
+    """Extract a likely period-of-performance phrase from free text."""
+    if not text:
+        return None
+
+    m = re.search(r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})", text, flags=re.IGNORECASE)
+    if m:
+        return m.group(0).strip()
+    return None
+
+
+def _extract_section_bullets(text: str) -> dict[str, list[str]]:
+    """Extract bullet lists grouped by heading from free-form user prompts."""
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+
+    aliases = {
+        "project description": "project_description",
+        "technical requirements": "technical_requirements",
+        "scope of work": "scope_of_work",
+        "deliverables": "deliverables",
+        "environment tiers": "environment_tiers",
+        "security": "security",
+    }
+
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        heading_key = line.rstrip(":").strip().lower()
+        if heading_key in aliases:
+            current = aliases[heading_key]
+            sections.setdefault(current, [])
+            continue
+
+        if line.startswith("- ") or line.startswith("* "):
+            item = line[2:].strip().strip('"')
+            if not item:
+                continue
+            bucket = current or "general"
+            sections.setdefault(bucket, []).append(item)
+            continue
+
+    return sections
+
+
+def _augment_document_data_from_context(
+    doc_type: str,
+    title: str,
+    data: dict | None,
+    session_id: str | None,
+) -> dict:
+    """Fill missing create_document fields from recent user conversation context."""
+    merged = dict(data or {})
+
+    # If caller already passed meaningful inputs, preserve them and only fill gaps.
+    context_messages = _load_recent_user_context(session_id)
+    if not context_messages:
+        return merged
+
+    last_user_text = context_messages[-1]
+    context_blob = " ".join(context_messages[-4:])
+
+    # Prefer explicit recent user request; keep bounded.
+    requirement = (last_user_text or context_blob).strip()
+    if requirement:
+        requirement = requirement[:500]
+
+    money = _extract_first_money_value(context_blob)
+    period = _extract_period(context_blob)
+
+    # Common keys used across multiple document generators/templates.
+    if requirement:
+        merged.setdefault("description", requirement)
+        merged.setdefault("requirement", requirement)
+        merged.setdefault("objective", requirement)
+    if money:
+        merged.setdefault("estimated_cost", money)
+        merged.setdefault("estimated_value", money)
+        merged.setdefault("budget", money)
+        merged.setdefault("total_estimate", money)
+    if period:
+        merged.setdefault("period_of_performance", period)
+        merged.setdefault("timeline", period)
+
+    parsed_sections = _extract_section_bullets("\n".join(context_messages[-3:]))
+
+    project_description = " ".join(parsed_sections.get("project_description", [])).strip()
+    if project_description:
+        existing_desc = str(merged.get("description", "")).strip()
+        if (
+            not existing_desc
+            or "project description" in existing_desc.lower()
+            or len(existing_desc) > 320
+        ):
+            merged["description"] = project_description[:500]
+        merged.setdefault("requirement", project_description[:500])
+        merged.setdefault("objective", project_description[:500])
+    if parsed_sections.get("deliverables"):
+        merged.setdefault("deliverables", parsed_sections["deliverables"][:15])
+    if parsed_sections.get("security"):
+        merged.setdefault("security_requirements", "; ".join(parsed_sections["security"])[:600])
+    if parsed_sections.get("environment_tiers"):
+        merged.setdefault("place_of_performance", "; ".join(parsed_sections["environment_tiers"])[:300])
+
+    # Minimal doc-type hints for better first-pass drafts.
+    if doc_type == "igce":
+        merged.setdefault("item_name", title or "Primary acquisition item")
+    if doc_type == "market_research":
+        merged.setdefault("requirement_summary", requirement or title)
+    if doc_type == "sow":
+        scope_items = parsed_sections.get("scope_of_work", [])
+        tech_items = parsed_sections.get("technical_requirements", [])
+        combined_tasks = (scope_items + tech_items)[:20]
+        if combined_tasks:
+            merged.setdefault("tasks", combined_tasks)
+        merged.setdefault("scope", requirement or title)
+
+    return merged
+
+
+def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
+    """Detect boilerplate template previews that did not absorb user context."""
+    if not preview:
+        return False
+
+    normalized = " ".join(preview.lower().split())
+    if doc_type == "sow":
+        markers = [
+            "this section should provide brief description of the project",
+            "the background information should identify the requirement in very general terms",
+            "sample language",
+            "table of contents",
+        ]
+        return all(marker in normalized for marker in markers[:2]) and "table of contents" in normalized
+
+    return False
+
+
+_SOW_SECTION_HINTS: dict[str, str] = {
+    "1": "background and purpose",
+    "2": "scope",
+    "3": "period of performance",
+    "4": "applicable documents and standards",
+    "5": "tasks and requirements",
+    "6": "deliverables",
+    "7": "government-furnished property",
+    "8": "quality assurance surveillance plan",
+    "9": "place of performance",
+    "10": "security requirements",
+}
+
+
+def _extract_sow_clear_targets(edit_request: str) -> list[str]:
+    """Return SOW section heading hints that the request asks to clear."""
+    req = (edit_request or "").strip().lower()
+    if not req:
+        return []
+
+    # Guardrail: only auto-clear when user explicitly asks to clear/blank.
+    clear_intent = (
+        "clear" in req
+        or "blank" in req
+        or "to be completed" in req
+        or "remove" in req
+    )
+    if not clear_intent:
+        return []
+
+    targets: list[str] = []
+
+    for section_num in re.findall(r"\bsection\s*(\d{1,2})\b", req):
+        hint = _SOW_SECTION_HINTS.get(section_num)
+        if hint and hint not in targets:
+            targets.append(hint)
+
+    heading_aliases = (
+        "background and purpose",
+        "scope",
+        "period of performance",
+        "applicable documents and standards",
+        "tasks and requirements",
+        "deliverables",
+        "government-furnished property",
+        "quality assurance surveillance plan",
+        "place of performance",
+        "security requirements",
+    )
+    for alias in heading_aliases:
+        if alias in req and alias not in targets:
+            targets.append(alias)
+
+    # "leave it blank" after "scope" is common shorthand.
+    if "scope" in req and "scope" not in targets:
+        targets.append("scope")
+
+    return targets
+
+
+def _apply_sow_clear_edits(current_content: str, edit_request: str) -> str | None:
+    """Apply explicit SOW section clear requests against existing markdown."""
+    if not isinstance(current_content, str) or not current_content.strip():
+        return None
+
+    targets = _extract_sow_clear_targets(edit_request)
+    if not targets:
+        return None
+
+    heading_matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*$", current_content))
+    if not heading_matches:
+        return None
+
+    rebuilt: list[str] = []
+    cursor = 0
+    changed = False
+
+    for idx, heading_match in enumerate(heading_matches):
+        heading_end = heading_match.end()
+        next_start = heading_matches[idx + 1].start() if idx + 1 < len(heading_matches) else len(current_content)
+
+        heading_text = heading_match.group(1).strip().lower()
+        body_text = current_content[heading_end:next_start]
+
+        rebuilt.append(current_content[cursor:heading_end])
+
+        if any(target in heading_text for target in targets):
+            replacement = "\n\n[To be completed]\n\n"
+            if body_text.strip() != "[To be completed]":
+                changed = True
+            rebuilt.append(replacement)
+        else:
+            rebuilt.append(body_text)
+
+        cursor = next_start
+
+    updated = "".join(rebuilt)
+    return updated if changed else None
 
 
 def _get_user_prefix(session_id: str | None = None) -> str:
@@ -1106,13 +1434,112 @@ def _exec_search_far_LEGACY(params: dict, tenant_id: str) -> dict:
     }
 
 
+def _update_document_content(
+    tenant_id: str,
+    doc_key: str,
+    content: str,
+    change_source: str = "ai_edit",
+    session_id: str = None,
+) -> dict:
+    """Update an existing document in S3.
+
+    For package documents, creates a new version.
+    For workspace documents, performs direct overwrite.
+    """
+    if not doc_key:
+        return {"error": "update_existing_key is required but empty"}
+    if not content:
+        return {"error": "content is required for update"}
+
+    user_id = _extract_user_id(session_id)
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+
+    # Security check
+    if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
+        return {"error": f"Access denied: document key must be within user's prefix"}
+
+    # Detect if this is a package document
+    is_package_doc = "/packages/" in doc_key
+
+    if is_package_doc:
+        from app.document_service import create_package_document_version
+
+        # Extract package_id and doc_type from the key
+        parts = doc_key.split("/")
+        try:
+            pkg_idx = parts.index("packages")
+            package_id = parts[pkg_idx + 1]
+            filename = parts[-1]
+            doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
+            title = doc_type.replace("_", " ").title()
+        except (ValueError, IndexError):
+            return {"error": "Invalid package document key format"}
+
+        result = create_package_document_version(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            content=content,
+            title=title,
+            file_type="md",
+            created_by_user_id=user_id,
+            session_id=session_id,
+            change_source=change_source,
+        )
+
+        if not result.success:
+            return {"error": result.error or "Failed to create document version"}
+
+        return {
+            "success": True,
+            "mode": "update_package",
+            "key": result.s3_key,
+            "version": result.version,
+            "document_id": result.document_id,
+            "message": f"Document updated (version {result.version})",
+        }
+    else:
+        # Workspace document: direct S3 overwrite
+        try:
+            s3 = _get_s3()
+            s3.put_object(
+                Bucket=bucket,
+                Key=doc_key,
+                Body=content.encode("utf-8"),
+                ContentType="text/markdown; charset=utf-8",
+            )
+            return {
+                "success": True,
+                "mode": "update_workspace",
+                "key": doc_key,
+                "message": "Document saved",
+            }
+        except (ClientError, BotoCoreError) as e:
+            logger.error("S3 put document error during update: %s", e, exc_info=True)
+            return {"error": f"Failed to save document: {str(e)}"}
+
+
 def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Generate acquisition documents and save to S3.
 
     Uses official S3 templates when available (DOCX/XLSX), falling back to
     markdown generators when templates are unavailable or fail to load.
+
+    If `update_existing_key` is provided, updates the existing document instead
+    of creating a new one.
     """
     from app.template_service import TemplateService
+
+    # Handle update mode - update existing document
+    update_key = params.get("update_existing_key")
+    if update_key:
+        return _update_document_content(
+            tenant_id=tenant_id,
+            doc_key=update_key,
+            content=params.get("data", {}).get("content", ""),
+            change_source="ai_edit",
+            session_id=session_id,
+        )
 
     doc_type = params.get("doc_type", "sow")
     title = params.get("title", "Untitled Acquisition")
@@ -1120,6 +1547,20 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     package_id = params.get("package_id")
     output_format = params.get("output_format", "docx")  # docx, xlsx, or md
     timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+    # Enrich missing/partial document fields from recent session context so
+    # first-pass drafts are less generic when tools are invoked with sparse params.
+    data = _augment_document_data_from_context(doc_type, title, data, session_id)
+
+    # Document-viewer edit flow: when current content + explicit clear request is
+    # present, patch the existing markdown directly instead of regenerating a
+    # fresh template that can ignore section-level edit intent.
+    inline_edited_content: str | None = None
+    if doc_type == "sow":
+        current_content = data.get("current_content")
+        edit_request = str(data.get("edit_request", "") or "")
+        if isinstance(current_content, str) and edit_request:
+            inline_edited_content = _apply_sow_clear_edits(current_content, edit_request)
 
     # Validate doc_type
     valid_doc_types = {
@@ -1147,39 +1588,60 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     # Get user_id for S3 path
     user_id = _extract_user_id(session_id)
 
-    # Try template-based generation first
-    try:
-        service = TemplateService(tenant_id, user_id, markdown_generators)
-        result = service.generate_document(doc_type, title, data, output_format)
+    if inline_edited_content is not None:
+        content = inline_edited_content
+        file_type = "md"
+        source = "inline_edit_clear_sections"
+        template_path = None
+        result = None
+    else:
+        # Try template-based generation first
+        try:
+            service = TemplateService(tenant_id, user_id, markdown_generators)
+            result = service.generate_document(doc_type, title, data, output_format)
 
-        if not result.success:
-            # Template service failed, use direct markdown fallback
+            if not result.success:
+                # Template service failed, use direct markdown fallback
+                generator = markdown_generators.get(doc_type)
+                if generator:
+                    content = generator(title, data)
+                    file_type = "md"
+                    source = "markdown_fallback"
+                    template_path = None
+                else:
+                    return {"error": f"No generator available for {doc_type}: {result.error}"}
+            else:
+                content = result.preview  # For response display
+                file_type = result.file_type
+                source = result.source
+                template_path = result.template_path
+
+                # Some official templates are boilerplate-only and may not expose
+                # machine-replaceable placeholders. If the extracted preview is still
+                # generic, return markdown generator content for the editable response
+                # while still saving the populated binary artifact to S3.
+                if _looks_like_unfilled_template_preview(doc_type, content):
+                    generator = markdown_generators.get(doc_type)
+                    if generator:
+                        content = generator(title, data)
+                        source = f"{source}+markdown_context_response"
+                        logger.warning(
+                            "Template preview looked unfilled for doc_type=%s; using markdown generator for response content",
+                            doc_type,
+                        )
+
+        except ImportError as e:
+            # python-docx or openpyxl not available, use markdown
+            logger.warning("Template libraries unavailable: %s, using markdown fallback", e)
             generator = markdown_generators.get(doc_type)
             if generator:
                 content = generator(title, data)
                 file_type = "md"
                 source = "markdown_fallback"
                 template_path = None
+                result = None
             else:
-                return {"error": f"No generator available for {doc_type}: {result.error}"}
-        else:
-            content = result.preview  # For response display
-            file_type = result.file_type
-            source = result.source
-            template_path = result.template_path
-
-    except ImportError as e:
-        # python-docx or openpyxl not available, use markdown
-        logger.warning("Template libraries unavailable: %s, using markdown fallback", e)
-        generator = markdown_generators.get(doc_type)
-        if generator:
-            content = generator(title, data)
-            file_type = "md"
-            source = "markdown_fallback"
-            template_path = None
-            result = None
-        else:
-            return {"error": f"No generator available for {doc_type}"}
+                return {"error": f"No generator available for {doc_type}"}
 
     # Determine file extension and content to save
     ext = file_type if file_type in ("docx", "xlsx") else "md"
@@ -1290,6 +1752,15 @@ def _generate_sow(title: str, data: dict) -> str:
         "Training and Knowledge Transfer",
         "Ongoing Support and Maintenance",
     ])
+    scope_override = str(data.get("scope", "") or "").strip()
+    if scope_override:
+        scope_text = scope_override
+    else:
+        scope_text = (
+            "The contractor shall provide all personnel, equipment, supplies, facilities,\n"
+            "transportation, tools, materials, supervision, and other items and non-personal\n"
+            f"services necessary to {desc}, as defined in this SOW."
+        )
 
     deliverables_text = "\n".join(f"   {i+1}. {d}" for i, d in enumerate(deliverables))
     tasks_text = "\n".join(f"   5.{i+1} Task {i+1}: {t}" for i, t in enumerate(tasks))
@@ -1310,9 +1781,7 @@ and performance requirements for this acquisition.
 
 ## 2. SCOPE
 
-The contractor shall provide all personnel, equipment, supplies, facilities,
-transportation, tools, materials, supervision, and other items and non-personal
-services necessary to {desc}, as defined in this SOW.
+{scope_text}
 
 ## 3. PERIOD OF PERFORMANCE
 

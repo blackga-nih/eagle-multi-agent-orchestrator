@@ -3,13 +3,31 @@ import json
 import os
 from datetime import datetime
 from typing import Dict, Any
+from botocore.config import Config
 from .models import TenantContext
 
 class BedrockAgentService:
     def __init__(self, agent_id: str, agent_alias_id: str = "TSTALIASID"):
         region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-        self.bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=region)
-        self.bedrock_runtime = boto3.client('bedrock-runtime', region_name=region)
+        bedrock_cfg = Config(
+            connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "60")),
+            read_timeout=int(os.getenv("EAGLE_BEDROCK_READ_TIMEOUT", "300")),
+            retries={
+                "max_attempts": int(os.getenv("EAGLE_BEDROCK_MAX_ATTEMPTS", "4")),
+                "mode": os.getenv("EAGLE_BEDROCK_RETRY_MODE", "adaptive"),
+            },
+            tcp_keepalive=True,
+        )
+        self.bedrock_agent_runtime = boto3.client(
+            'bedrock-agent-runtime',
+            region_name=region,
+            config=bedrock_cfg,
+        )
+        self.bedrock_runtime = boto3.client(
+            'bedrock-runtime',
+            region_name=region,
+            config=bedrock_cfg,
+        )
         self.agent_id = agent_id
         self.agent_alias_id = agent_alias_id
         self.model_id = "anthropic.claude-3-haiku-20240307-v1:0"

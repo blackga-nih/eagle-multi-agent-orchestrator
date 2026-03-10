@@ -188,6 +188,54 @@ def test_force_document_creation_skips_when_tool_already_called(monkeypatch):
     assert called["count"] == 0
 
 
+def test_forced_document_creation_carries_document_context(monkeypatch):
+    from app.strands_agentic_service import _ensure_create_document_for_direct_request
+
+    captured = {}
+
+    def fake_exec_create_document(params, tenant_id, session_id):
+        captured["params"] = params
+        return {
+            "mode": "workspace",
+            "document_type": "sow",
+            "title": params.get("title", ""),
+            "status": "saved",
+            "s3_key": "eagle/test-tenant/test-user/documents/sow_20260310_000000.md",
+            "word_count": 200,
+        }
+
+    monkeypatch.setattr("app.agentic_service._exec_create_document", fake_exec_create_document)
+
+    prompt = (
+        "You are assisting with edits to an acquisition document in EAGLE.\n\n"
+        "[DOCUMENT CONTEXT]\n\n"
+        "Title: Statement of Work\n\n"
+        "Type: sow\n\n"
+        "Current Content Excerpt:\n"
+        "## 2. SCOPE\n[To be completed]\n\n## 3. PERIOD OF PERFORMANCE\n12 months from date of award\n\n"
+        "[USER REQUEST]\n\n"
+        "make section 3 cleared too\n\n"
+        "Instruction: If the user requests substantive edits or section completion, use create_document and return the updated draft."
+    )
+
+    forced = asyncio.run(
+        _ensure_create_document_for_direct_request(
+            prompt=prompt,
+            tenant_id="test-tenant",
+            user_id="test-user",
+            session_id="sess-ctx-1",
+            package_context=None,
+            tools_called=[],
+        )
+    )
+
+    assert forced is not None
+    assert captured["params"]["title"] == "Statement of Work"
+    assert captured["params"]["doc_type"] == "sow"
+    assert captured["params"]["data"]["edit_request"] == "make section 3 cleared too"
+    assert "## 3. PERIOD OF PERFORMANCE" in captured["params"]["data"]["current_content"]
+
+
 def test_sdk_query_streaming_fast_path_emits_document_events(monkeypatch):
     from app.strands_agentic_service import sdk_query_streaming
 
@@ -221,3 +269,75 @@ def test_sdk_query_streaming_fast_path_emits_document_events(monkeypatch):
     assert "tool_use" in types
     assert "tool_result" in types
     assert "complete" in types
+
+
+def test_extract_document_context_from_prompt():
+    from app.strands_agentic_service import _extract_document_context_from_prompt
+
+    prompt = (
+        "You are assisting with edits to an acquisition document in EAGLE.\n\n"
+        "[DOCUMENT CONTEXT]\n\n"
+        "Title: Statement of Work\n\n"
+        "Type: sow\n\n"
+        "Current Content Excerpt:\n"
+        "## 1. BACKGROUND\n...\n## 2. SCOPE\nOriginal scope text.\n\n"
+        "[ORIGIN SESSION CONTEXT]\n\n"
+        "prior chat\n\n"
+        "[USER REQUEST]\n\n"
+        "change the scope. leave it blank\n\n"
+        "Instruction: If the user requests substantive edits or section completion, "
+        "use create_document and return the updated draft."
+    )
+
+    parsed = _extract_document_context_from_prompt(prompt)
+    assert parsed["title"] == "Statement of Work"
+    assert parsed["document_type"] == "sow"
+    assert "## 2. SCOPE" in parsed["current_content"]
+    assert parsed["user_request"] == "change the scope. leave it blank"
+
+
+def test_make_service_tool_infers_doc_context_for_create_document(monkeypatch):
+    import app.agentic_service as agentic_service
+    from app.strands_agentic_service import _make_service_tool
+
+    captured = {}
+
+    def fake_create_document(params, tenant_id, session_id):
+        captured["params"] = params
+        captured["tenant_id"] = tenant_id
+        captured["session_id"] = session_id
+        return {"status": "saved", "document_type": "sow", "title": params.get("title", "")}
+
+    monkeypatch.setitem(agentic_service.TOOL_DISPATCH, "create_document", fake_create_document)
+
+    prompt = (
+        "[DOCUMENT CONTEXT]\n\n"
+        "Title: Statement of Work\n\n"
+        "Type: sow\n\n"
+        "Current Content Excerpt:\n"
+        "## 2. SCOPE\nOriginal scope text.\n\n"
+        "[USER REQUEST]\n\n"
+        "change the scope. leave it blank\n\n"
+        "Instruction: If the user requests substantive edits or section completion, "
+        "use create_document and return the updated draft."
+    )
+
+    tool_fn = _make_service_tool(
+        tool_name="create_document",
+        description="test",
+        tenant_id="test-tenant",
+        user_id="test-user",
+        session_id="sess-321",
+        package_context=None,
+        result_queue=None,
+        loop=None,
+        prompt_context=prompt,
+    )
+
+    tool_fn("{}")
+
+    assert captured["tenant_id"] == "test-tenant"
+    assert captured["params"]["doc_type"] == "sow"
+    assert captured["params"]["title"] == "Statement of Work"
+    assert captured["params"]["data"]["edit_request"] == "change the scope. leave it blank"
+    assert "## 2. SCOPE" in captured["params"]["data"]["current_content"]

@@ -35,7 +35,7 @@ import io
 
 # EAGLE modules (new)
 from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
-from .document_export import export_document
+from .document_export import export_document, ExportDependencyError
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
     update_session as eagle_update_session, delete_session as eagle_delete_session,
@@ -499,9 +499,12 @@ async def api_export_document(req: ExportRequest, user: UserContext = Depends(ge
                 "X-File-Size": str(result["size_bytes"]),
             }
         )
+    except ExportDependencyError as e:
+        logger.error("Export dependency error: %s", e)
+        raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
         logger.warning("Export validation error: %s", e)
-        raise HTTPException(status_code=400, detail="Invalid export parameters")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Export error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during export")
@@ -542,6 +545,9 @@ async def api_export_session(
                 "Content-Disposition": f'attachment; filename="{result["filename"]}"',
             }
         )
+    except ExportDependencyError as e:
+        logger.error("Session export dependency error: %s", e)
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error("Session export error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during session export")
@@ -615,6 +621,100 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
             raise HTTPException(status_code=404, detail="Document not found")
         logger.error("S3 get document error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve document")
+
+
+# ── Document Update (PUT) ────────────────────────────────────────────
+
+
+class DocumentUpdateRequest(BaseModel):
+    """Request body for updating document content."""
+
+    content: str
+    change_source: str = "user_edit"  # "user_edit" | "ai_edit"
+
+
+@app.put("/api/documents/{doc_key:path}")
+async def api_update_document(
+    doc_key: str,
+    request: DocumentUpdateRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update document content in S3.
+
+    For package documents (eagle/{tenant}/packages/...), creates a new version.
+    For workspace documents, performs a direct overwrite.
+    """
+    import boto3
+    from botocore.exceptions import ClientError
+
+    tenant_id = user.tenant_id
+    user_id = user.user_id
+    bucket = _S3_BUCKET
+
+    # Security: ensure key is within user's prefix
+    if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Detect if this is a package document by checking the key pattern
+    # Package docs: eagle/{tenant}/{user}/packages/{package_id}/...
+    is_package_doc = "/packages/" in doc_key
+
+    if is_package_doc:
+        # Route through document_service for versioning
+        from app.document_service import create_package_document_version
+
+        # Extract package_id and doc_type from the key
+        # Pattern: eagle/{tenant}/{user}/packages/{package_id}/{doc_type}_v{N}.{ext}
+        parts = doc_key.split("/")
+        try:
+            pkg_idx = parts.index("packages")
+            package_id = parts[pkg_idx + 1]
+            filename = parts[-1]
+            # Extract doc_type from filename (e.g., "sow_v1.md" → "sow")
+            doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
+            title = doc_type.replace("_", " ").title()
+        except (ValueError, IndexError):
+            raise HTTPException(status_code=400, detail="Invalid package document key format")
+
+        result = create_package_document_version(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            content=request.content,
+            title=title,
+            file_type="md",
+            created_by_user_id=user_id,
+            change_source=request.change_source,
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=500, detail=result.error or "Failed to create document version")
+
+        return {
+            "success": True,
+            "key": result.s3_key,
+            "version": result.version,
+            "document_id": result.document_id,
+            "message": f"Document updated (version {result.version})",
+        }
+    else:
+        # Workspace document: direct S3 overwrite
+        try:
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            s3.put_object(
+                Bucket=bucket,
+                Key=doc_key,
+                Body=request.content.encode("utf-8"),
+                ContentType="text/markdown; charset=utf-8",
+            )
+            return {
+                "success": True,
+                "key": doc_key,
+                "message": "Document saved",
+            }
+        except ClientError as e:
+            logger.error("S3 put document error: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to save document")
 
 
 # ── S3 Presigned URL ─────────────────────────────────────────────────

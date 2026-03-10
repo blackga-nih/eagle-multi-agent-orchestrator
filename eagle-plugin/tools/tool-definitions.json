@@ -25,7 +25,7 @@
     },
     {
       "name": "create_document",
-      "description": "Generate acquisition documents including Statement of Work (SOW), Independent Government Cost Estimate (IGCE), Market Research Report, and Justification & Approval (J&A). Documents are saved to S3.",
+      "description": "Generate acquisition documents including Statement of Work (SOW), Independent Government Cost Estimate (IGCE), Market Research Report, and Justification & Approval (J&A). Documents are saved to S3. Can also update existing documents by providing update_existing_key.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -37,6 +37,10 @@
           "title": {
             "type": "string",
             "description": "Title of the acquisition/document"
+          },
+          "update_existing_key": {
+            "type": "string",
+            "description": "S3 key of existing document to update. If provided, creates a new version (package docs) or overwrites (workspace docs) instead of creating a new document."
           },
           "data": {
             "type": "object",

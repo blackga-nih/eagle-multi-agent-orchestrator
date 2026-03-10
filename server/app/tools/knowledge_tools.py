@@ -52,8 +52,8 @@ KNOWLEDGE_SEARCH_TOOL = {
     "description": (
         "Search the acquisition knowledge base for relevant documents, templates, and guidance. "
         "Returns summaries and metadata to help decide which documents to retrieve in full. "
-        "Use this to find SOW templates, FAR guidance, policy documents, checklists, etc. "
-        "Query by topic, document_type, agent, or keywords."
+        "Use 'query' for specific case numbers, citations, or identifiers (e.g., 'B-302358', 'GAO B-321640'). "
+        "Use topic/document_type/agent filters for broader discovery."
     ),
     "input_schema": {
         "type": "object",
@@ -87,6 +87,14 @@ KNOWLEDGE_SEARCH_TOOL = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Search keywords to match against document keywords",
+            },
+            "query": {
+                "type": "string",
+                "description": (
+                    "Free-text query to match against document_id, filename, title, and keywords. "
+                    "Use for case numbers (e.g., 'B-302358'), GAO decisions, citations, or specific terms. "
+                    "More flexible than keywords filter - does substring matching across multiple fields."
+                ),
             },
             "limit": {
                 "type": "integer",
@@ -149,8 +157,8 @@ def exec_knowledge_search(
     limit = min(params.get("limit", 10), 50)  # Cap at 50
 
     logger.info(
-        "knowledge_search: tenant=%s topic=%s doc_type=%s agent=%s limit=%d",
-        tenant_id, topic, document_type, agent, limit,
+        "knowledge_search: tenant=%s query=%s topic=%s doc_type=%s agent=%s limit=%d",
+        tenant_id, params.get("query"), topic, document_type, agent, limit,
     )
 
     # Build filter expression for DynamoDB Scan
@@ -200,6 +208,27 @@ def exec_knowledge_search(
             if any(kw in item_keywords or any(kw in ik for ik in item_keywords) for kw in keywords_lower):
                 filtered.append(item)
         items = filtered
+
+    # Free-text query filtering (search document_id, title, summary, keywords)
+    query = params.get("query")
+    if query:
+        query_lower = query.lower()
+        filtered = []
+        for item in items:
+            # Build searchable text from multiple fields
+            doc_id = item.get("document_id", "").lower()
+            title = item.get("title", "").lower()
+            summary = item.get("summary", "").lower()
+            keywords_text = " ".join(item.get("keywords", [])).lower()
+
+            # Combine all searchable fields
+            searchable = f"{doc_id} {title} {summary} {keywords_text}"
+
+            # Check if query appears anywhere in searchable text
+            if query_lower in searchable:
+                filtered.append(item)
+        items = filtered
+        logger.info("knowledge_search: query='%s' filtered to %d results", query, len(items))
 
     # Format results (return summary info, not full content)
     results = []
