@@ -17,6 +17,7 @@ import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
 import ActivityPanel from './activity-panel';
+import IntakeFormCard from './intake-form-card';
 
 // -----------------------------------------------------------------------
 // Types for per-message tool call tracking
@@ -62,6 +63,9 @@ export default function SimpleChatInterface() {
     const firstUserMsgRef = useRef<string | null>(null);
     /** Ctrl+K command palette state. */
     const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+    /** Intake form card state. */
+    const [showIntakeForm, setShowIntakeForm] = useState(false);
+    const [intakeFormSubmitted, setIntakeFormSubmitted] = useState(false);
 
     // Global Ctrl+K keyboard shortcut
     useEffect(() => {
@@ -169,6 +173,8 @@ export default function SimpleChatInterface() {
 
     /** Right panel state. */
     const [isPanelOpen, setIsPanelOpen] = useState(true);
+    /** Raw Bedrock ConverseStream trace events. */
+    const [bedrockTraces, setBedrockTraces] = useState<Record<string, unknown>[]>([]);
 
     // Agent stream
     const { sendQuery, isStreaming, error, logs, clearLogs, addUserInputLog } = useAgentStream({
@@ -283,6 +289,10 @@ export default function SimpleChatInterface() {
             }
         },
 
+        onBedrockTrace: (trace) => {
+            setBedrockTraces((prev) => [...prev, trace]);
+        },
+
         onToolUse: (toolEvent: ToolUseEvent) => {
             // Associate tool calls with the current streaming message ID.
             const parentId = streamingMsgIdRef.current;
@@ -388,6 +398,33 @@ export default function SimpleChatInterface() {
         textareaRef.current?.focus();
     };
 
+    const handleIntakeFormSubmit = async (payload: Record<string, unknown>) => {
+        setIntakeFormSubmitted(true);
+        const jsonStr = JSON.stringify(payload);
+        const userMessage: ChatMessage = {
+            id: Date.now().toString(),
+            role: 'user',
+            content: jsonStr,
+            timestamp: new Date(),
+        };
+        if (messages.length === 0) {
+            firstUserMsgRef.current = 'Intake form submission';
+        }
+        streamingMsgIdRef.current = `stream-${Date.now()}`;
+        setMessages((prev) => [...prev, userMessage]);
+        addUserInputLog('Intake form submitted');
+        writeMessageOptimistic(currentSessionId, userMessage);
+        await sendQuery(jsonStr, currentSessionId);
+    };
+
+    const handleQuickAction = (text: string) => {
+        if (text === '__INTAKE_FORM__') {
+            setShowIntakeForm(true);
+            return;
+        }
+        insertText(text);
+    };
+
     const displayMessages = streamingMsg ? [...messages, streamingMsg] : messages;
     const hasMessages = displayMessages.length > 0;
 
@@ -408,16 +445,24 @@ export default function SimpleChatInterface() {
                 />
 
                 {/* Main content area */}
-                {!hasMessages && !isLoadingSession ? (
+                {!hasMessages && !isLoadingSession && !showIntakeForm ? (
                     <SimpleWelcome onAction={insertText} />
                 ) : (
-                    <SimpleMessageList
-                        messages={displayMessages}
-                        isTyping={isStreaming}
-                        documents={documents}
-                        sessionId={currentSessionId}
-                        toolCallsByMsg={toolCallsByMsg}
-                    />
+                    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+                        <SimpleMessageList
+                            messages={displayMessages}
+                            isTyping={isStreaming}
+                            documents={documents}
+                            sessionId={currentSessionId}
+                            toolCallsByMsg={toolCallsByMsg}
+                        />
+                        {showIntakeForm && (
+                            <IntakeFormCard
+                                onSubmit={handleIntakeFormSubmit}
+                                disabled={intakeFormSubmitted}
+                            />
+                        )}
+                    </div>
                 )}
 
                 {/* Input footer */}
@@ -445,7 +490,7 @@ export default function SimpleChatInterface() {
                         )}
 
                         {/* Quick action pills — above the input */}
-                        <SimpleQuickActions onAction={insertText} />
+                        <SimpleQuickActions onAction={handleQuickAction} />
 
                         <div className="relative flex items-end gap-3">
                             {/* Slash command picker */}
@@ -498,12 +543,13 @@ export default function SimpleChatInterface() {
             {/* Right: activity panel */}
             <ActivityPanel
                 logs={logs}
-                clearLogs={clearLogs}
+                clearLogs={() => { clearLogs(); setBedrockTraces([]); }}
                 documents={documents}
                 sessionId={currentSessionId ?? ''}
                 isStreaming={isStreaming}
                 isOpen={isPanelOpen}
                 onToggle={() => setIsPanelOpen(v => !v)}
+                bedrockTraces={bedrockTraces}
             />
         </div>
     );

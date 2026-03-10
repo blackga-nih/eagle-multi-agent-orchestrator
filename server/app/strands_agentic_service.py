@@ -40,6 +40,7 @@ if _server_dir not in sys.path:
 
 from eagle_skill_constants import AGENTS, SKILLS, PLUGIN_CONTENTS
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
+from .tools.contract_matrix import query_contract_matrix
 
 logger = logging.getLogger("eagle.strands_agent")
 
@@ -223,6 +224,9 @@ _TRIVIAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_INTAKE_FORM_RE = re.compile(r'^\s*\{.*"form_type"\s*:\s*"baseline_intake".*\}\s*$', re.DOTALL)
+_INTAKE_RESPONSE = "Thanks for your submission."
+
 _GREETING_RESPONSES = [
     "Hey! What are you working on today?",
     "Hi there! What can I help you with?",
@@ -238,6 +242,24 @@ def _fast_trivial_response(prompt: str) -> dict | None:
     return {
         "text": random.choice(_GREETING_RESPONSES),
         "usage": {"fast_path": True, "trivial": True},
+    }
+
+
+def _fast_intake_form_response(prompt: str) -> dict | None:
+    """Return a canned response for baseline intake form submissions."""
+    stripped = prompt.strip()
+    if not _INTAKE_FORM_RE.match(stripped):
+        return None
+    # Parse and log the submission (session context storage is handled on next turn)
+    try:
+        payload = json.loads(stripped)
+        logger.info("Intake form submitted: form_type=%s, questions=%d",
+                     payload.get("form_type"), len(payload.get("answers", {})))
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {
+        "text": _INTAKE_RESPONSE,
+        "usage": {"fast_path": True, "intake_form": True},
     }
 
 
@@ -1338,6 +1360,8 @@ def _build_service_tools(
     # State push tools — enable real-time frontend UI updates via SSE METADATA
     tools.append(_make_update_state_tool(tenant_id, result_queue, loop))
     tools.append(_make_get_checklist_tool(tenant_id, result_queue, loop))
+    # Contract requirements matrix — deterministic FAR-grounded scoring
+    tools.append(query_contract_matrix)
     return tools
 
 
@@ -1564,6 +1588,13 @@ async def sdk_query(
         yield ResultMessage(result=trivial["text"], usage=trivial["usage"])
         return
 
+    # Intake form fast-path — canned ack, no LLM call
+    intake = _fast_intake_form_response(prompt)
+    if intake is not None:
+        yield AssistantMessage(content=[TextBlock(text=intake["text"])])
+        yield ResultMessage(result=intake["text"], usage=intake["usage"])
+        return
+
     fast_path = await _maybe_fast_path_document_generation(
         prompt=prompt,
         tenant_id=tenant_id,
@@ -1695,6 +1726,18 @@ async def sdk_query(
     yield ResultMessage(result=result_text, usage=usage)
 
 
+def _sanitize_event(event: dict) -> dict:
+    """Make a raw Strands stream event JSON-serializable."""
+    import copy
+    try:
+        sanitized = copy.deepcopy(event)
+        # Test serialization
+        json.dumps(sanitized, default=str)
+        return sanitized
+    except (TypeError, ValueError):
+        return {"raw": str(event)}
+
+
 async def sdk_query_streaming(
     prompt: str,
     tenant_id: str = "demo-tenant",
@@ -1722,6 +1765,13 @@ async def sdk_query_streaming(
     if trivial is not None:
         yield {"type": "text", "data": trivial["text"]}
         yield {"type": "complete", "text": trivial["text"], "tools_called": [], "usage": trivial["usage"]}
+        return
+
+    # Intake form fast-path — canned ack, no LLM call
+    intake = _fast_intake_form_response(prompt)
+    if intake is not None:
+        yield {"type": "text", "data": intake["text"]}
+        yield {"type": "complete", "text": intake["text"], "tools_called": [], "usage": intake["usage"]}
         return
 
     fast_path = await _maybe_fast_path_document_generation(
@@ -1839,6 +1889,7 @@ async def sdk_query_streaming(
             if data and isinstance(data, str):
                 full_text_parts.append(data)
                 yield {"type": "text", "data": data}
+                yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
                 continue
 
             # --- Tool use start (ToolUseStreamEvent) ---
@@ -1855,6 +1906,7 @@ async def sdk_query_streaming(
                         "input": current_tool.get("input", ""),
                         "tool_use_id": tool_id,
                     }
+                    yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
                 continue
 
             # --- Bedrock contentBlockStart fallback ---
@@ -1872,6 +1924,7 @@ async def sdk_query_streaming(
                             "name": tool_name,
                             "tool_use_id": tool_id,
                         }
+                        yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
                     continue
 
             # --- Agent result (final event) ---
