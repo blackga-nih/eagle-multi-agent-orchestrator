@@ -202,9 +202,33 @@ export default function SimpleChatInterface() {
                 lastAssistantIdRef.current = completedMsg.id;
                 setMessages((prev) => [...prev, completedMsg]);
 
+                // Migrate documents from the streaming ID to the committed message ID
+                // (tool_result may arrive before the first text chunk, keying docs
+                // to streamingMsgIdRef instead of the hook's message ID).
+                const streamId = streamingMsgIdRef.current;
+                if (streamId !== completedMsg.id) {
+                    setDocuments((prev) => {
+                        const orphaned = prev[streamId];
+                        if (!orphaned || orphaned.length === 0) return prev;
+                        const existing = prev[completedMsg.id] || [];
+                        // Merge, deduplicating by s3_key / document_id
+                        const merged = [...existing];
+                        for (const doc of orphaned) {
+                            const isDup = merged.some(
+                                (d) =>
+                                    (doc.s3_key && d.s3_key === doc.s3_key) ||
+                                    (doc.document_id && d.document_id === doc.document_id),
+                            );
+                            if (!isDup) merged.push(doc);
+                        }
+                        const next = { ...prev, [completedMsg.id]: merged };
+                        delete next[streamId];
+                        return next;
+                    });
+                }
+
                 // Migrate tool calls from the streaming ID to the committed message ID,
                 // mark pending tools as "done", and merge any server-side tool results.
-                const streamId = streamingMsgIdRef.current;
                 setToolCallsByMsg((prev) => {
                     const calls = prev[streamId] ?? prev[completedMsg.id] ?? [];
                     if (calls.length === 0) return prev;
@@ -275,10 +299,17 @@ export default function SimpleChatInterface() {
             // Attach to the active streaming message when tool_result arrives
             // before the first text chunk sets lastAssistantIdRef.
             const attachTo = lastAssistantIdRef.current ?? streamingMsgIdRef.current;
-            setDocuments((prev) => ({
-                ...prev,
-                [attachTo]: [...(prev[attachTo] || []), doc],
-            }));
+            setDocuments((prev) => {
+                const existing = prev[attachTo] || [];
+                // Dedup: skip if a doc with the same s3_key or document_id already exists
+                const isDuplicate = existing.some(
+                    (d) =>
+                        (doc.s3_key && d.s3_key === doc.s3_key) ||
+                        (doc.document_id && d.document_id === doc.document_id),
+                );
+                if (isDuplicate) return prev;
+                return { ...prev, [attachTo]: [...existing, doc] };
+            });
 
             // Persist to localStorage for Packages & Documents pages
             if (currentSessionId) {

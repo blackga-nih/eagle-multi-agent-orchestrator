@@ -229,12 +229,20 @@ export default function SimpleMessageList({
                                 </button>
                             )}
 
-                            {/* Document cards attached to this message */}
-                            {documents?.[message.id]?.map((doc, idx) => (
-                                <div key={`${message.id}-doc-${idx}`} className="mt-2">
-                                    <DocumentCard document={doc} sessionId={sessionId || ''} />
-                                </div>
-                            ))}
+                            {/* Document cards attached to this message —
+                                skip docs already rendered inline by ToolUseDisplay's
+                                DocumentResultCard (create_document tool calls with results). */}
+                            {(() => {
+                                const hasCreateDocTool = toolCalls.some(
+                                    (tc) => tc.toolName === 'create_document' && tc.status === 'done' && tc.result,
+                                );
+                                if (hasCreateDocTool) return null;
+                                return documents?.[message.id]?.map((doc, idx) => (
+                                    <div key={`${message.id}-doc-${idx}`} className="mt-2">
+                                        <DocumentCard document={doc} sessionId={sessionId || ''} />
+                                    </div>
+                                ));
+                            })()}
                         </div>
                     );
                 })}
