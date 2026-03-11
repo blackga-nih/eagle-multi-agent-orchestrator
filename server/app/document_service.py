@@ -26,6 +26,7 @@ from .document_store import (
     finalize_document as store_finalize_document,
 )
 from .package_store import get_package, update_package
+from .changelog_store import write_changelog_entry
 
 logger = logging.getLogger("eagle.document_service")
 
@@ -219,6 +220,20 @@ def create_package_document_version(
 
     word_count = len(content.split()) if isinstance(content, str) else None
 
+    # Step 6: Write changelog entry
+    is_update = next_version > 1
+    write_changelog_entry(
+        tenant_id=tenant_id,
+        package_id=package_id,
+        doc_type=doc_type,
+        version=next_version,
+        change_type="update" if is_update else "create",
+        change_source=change_source,
+        change_summary=f"{'Updated' if is_update else 'Created'} {doc_type} v{next_version}: {title}",
+        actor_user_id=created_by_user_id or "system",
+        session_id=session_id,
+    )
+
     logger.info(
         "Created document %s v%s for package %s",
         doc_type, next_version, package_id
@@ -288,6 +303,8 @@ def finalize_document(
     package_id: str,
     doc_type: str,
     version: int,
+    finalized_by_user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Optional[dict]:
     """Finalize a document version (transition from draft to final).
 
@@ -296,11 +313,26 @@ def finalize_document(
         package_id: Package identifier
         doc_type: Document type
         version: Version to finalize
+        finalized_by_user_id: User who finalized the document
+        session_id: Chat session that triggered finalization
 
     Returns:
         Updated document dict, or None if not found
     """
-    return store_finalize_document(tenant_id, package_id, doc_type, version)
+    result = store_finalize_document(tenant_id, package_id, doc_type, version)
+    if result:
+        write_changelog_entry(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            version=version,
+            change_type="finalize",
+            change_source="user_edit",
+            change_summary=f"Finalized {doc_type} v{version}",
+            actor_user_id=finalized_by_user_id or "system",
+            session_id=session_id,
+        )
+    return result
 
 
 # --- Internal helpers ---

@@ -609,12 +609,32 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
         response = s3.get_object(Bucket=bucket, Key=doc_key)
         content = response["Body"].read().decode("utf-8", errors="replace")
 
+        # Extract package_id and doc_type from key if this is a package document
+        # Pattern: eagle/{tenant}/{user}/packages/{package_id}/{doc_type}_v{N}.{ext}
+        package_id = None
+        doc_type = None
+        title = None
+        if "/packages/" in doc_key:
+            parts = doc_key.split("/")
+            try:
+                pkg_idx = parts.index("packages")
+                package_id = parts[pkg_idx + 1]
+                filename = parts[-1]
+                doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
+                title = doc_type.replace("_", " ").title()
+            except (ValueError, IndexError):
+                pass
+
         return {
             "key": doc_key,
+            "s3_key": doc_key,
             "content": content,
             "content_type": response.get("ContentType", "text/plain"),
             "size_bytes": response.get("ContentLength", 0),
             "last_modified": response.get("LastModified").isoformat() if response.get("LastModified") else None,
+            "package_id": package_id,
+            "document_type": doc_type,
+            "title": title,
         }
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchKey":
@@ -707,6 +727,21 @@ async def api_update_document(
                 Body=request.content.encode("utf-8"),
                 ContentType="text/markdown; charset=utf-8",
             )
+
+            # Write changelog entry for workspace document
+            from app.changelog_store import write_document_changelog_entry
+            try:
+                write_document_changelog_entry(
+                    tenant_id=tenant_id,
+                    document_key=doc_key,
+                    change_type="update",
+                    change_source=request.change_source,
+                    change_summary=f"Updated document via editor",
+                    actor_user_id=user_id,
+                )
+            except Exception as cl_err:
+                logger.warning("Failed to write changelog for workspace doc: %s", cl_err)
+
             return {
                 "success": True,
                 "key": doc_key,
@@ -2402,6 +2437,50 @@ async def promote_document_final_endpoint(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
+
+
+@app.get("/api/packages/{package_id}/documents/{doc_type}/changelog")
+async def get_document_changelog_endpoint(
+    package_id: str,
+    doc_type: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get changelog entries for a document."""
+    from .changelog_store import list_changelog_entries
+    entries = list_changelog_entries(user.tenant_id, package_id, doc_type, limit)
+    return {"entries": entries, "count": len(entries)}
+
+
+@app.get("/api/packages/{package_id}/changelog")
+async def get_package_changelog_endpoint(
+    package_id: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get all changelog entries for a package (all document types)."""
+    from .changelog_store import list_changelog_entries
+    entries = list_changelog_entries(user.tenant_id, package_id, None, limit)
+    return {"entries": entries, "count": len(entries)}
+
+
+@app.get("/api/document-changelog")
+async def get_document_key_changelog_endpoint(
+    key: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get changelog entries for a document by S3 key."""
+    from .changelog_store import list_document_changelog_entries
+
+    tenant_id = user.tenant_id
+
+    # Security: ensure key is within user's prefix
+    if not key.startswith(f"eagle/{tenant_id}/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    entries = list_document_changelog_entries(tenant_id, key, limit)
+    return {"entries": entries, "count": len(entries)}
 
 
 # ── Approval Chains (APPROVAL#) ────────────────────────────────────

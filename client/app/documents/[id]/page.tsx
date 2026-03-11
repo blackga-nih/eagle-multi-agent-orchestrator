@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, use, useCallback } from 'react';
+import { useState, useEffect, useRef, use, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     ArrowLeft,
@@ -15,6 +15,8 @@ import {
     Eye,
     Edit3,
     RefreshCw,
+    History,
+    MessageSquare,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import TopNav from '@/components/layout/top-nav';
@@ -84,11 +86,195 @@ async function extractResponseError(response: Response): Promise<string> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Changelog Panel Component
+// ---------------------------------------------------------------------------
+
+interface ChangelogEntry {
+    changelog_id: string;
+    change_type: 'create' | 'update' | 'finalize';
+    change_source: 'agent_tool' | 'user_edit';
+    change_summary: string;
+    doc_type: string;
+    version: number;
+    actor_user_id: string;
+    created_at: string;
+}
+
+function formatRelativeTime(dateStr: string): string {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+}
+
+function DocumentChangelogPanel({
+    packageId,
+    documentType,
+    documentKey,
+}: {
+    packageId?: string;
+    documentType?: string;
+    documentKey?: string;
+}) {
+    const [entries, setEntries] = useState<ChangelogEntry[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        // Need either (packageId + documentType) OR documentKey
+        const canFetchPackage = packageId && documentType;
+        const canFetchByKey = documentKey;
+
+        if (!canFetchPackage && !canFetchByKey) return;
+
+        const fetchChangelog = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                let url: string;
+                if (canFetchPackage) {
+                    url = `/api/packages/${packageId}/documents/${documentType}/changelog?limit=50`;
+                } else {
+                    url = `/api/document-changelog?key=${encodeURIComponent(documentKey!)}&limit=50`;
+                }
+
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Failed to fetch changelog');
+                const data = await res.json();
+                setEntries(data.entries || []);
+            } catch (err) {
+                setError(err instanceof Error ? err.message : 'Failed to load changelog');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchChangelog();
+    }, [packageId, documentType, documentKey]);
+
+    // No way to fetch changelog
+    if (!packageId && !documentType && !documentKey) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                    <History className="w-6 h-6 text-gray-400" />
+                </div>
+                <p className="text-sm text-gray-500">No document loaded</p>
+                <p className="text-xs text-gray-400 mt-1">Document history will appear here.</p>
+            </div>
+        );
+    }
+
+    if (loading) {
+        return (
+            <div className="flex-1 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#003366]" />
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <p className="text-sm text-red-500">{error}</p>
+            </div>
+        );
+    }
+
+    if (entries.length === 0) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                    <History className="w-6 h-6 text-gray-400" />
+                </div>
+                <p className="text-sm text-gray-500">No changelog entries yet.</p>
+                <p className="text-xs text-gray-400 mt-1">Document changes will appear here.</p>
+            </div>
+        );
+    }
+
+    const changeTypeStyles: Record<string, { bg: string; text: string }> = {
+        create: { bg: 'bg-green-100', text: 'text-green-700' },
+        update: { bg: 'bg-blue-100', text: 'text-blue-700' },
+        finalize: { bg: 'bg-purple-100', text: 'text-purple-700' },
+    };
+
+    return (
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {entries.map((entry) => {
+                const style = changeTypeStyles[entry.change_type] || { bg: 'bg-gray-100', text: 'text-gray-700' };
+                const isAgent = entry.change_source === 'agent_tool';
+
+                return (
+                    <div
+                        key={entry.changelog_id || `${entry.created_at}-${entry.doc_type}`}
+                        className="flex items-start gap-2.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 hover:shadow-sm transition"
+                    >
+                        <span className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center bg-gray-100">
+                            {isAgent ? (
+                                <Bot className="w-4 h-4 text-[#003366]" />
+                            ) : (
+                                <User className="w-4 h-4 text-gray-600" />
+                            )}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium uppercase ${style.bg} ${style.text}`}>
+                                    {entry.change_type}
+                                </span>
+                                <span className="text-[10px] text-gray-400">
+                                    v{entry.version}
+                                </span>
+                            </div>
+                            <p className="text-xs text-gray-700 mt-1">{entry.change_summary}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                                <p className="text-[10px] text-gray-400">
+                                    {formatRelativeTime(entry.created_at)} by {entry.actor_user_id}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+// Helper to extract package_id and doc_type from S3 key
+// Pattern: eagle/{tenant}/{user}/packages/{package_id}/{doc_type}_v{N}.{ext}
+function extractPackageInfo(key: string): { packageId?: string; docType?: string } {
+    if (!key.includes('/packages/')) return {};
+    const parts = key.split('/');
+    try {
+        const pkgIdx = parts.indexOf('packages');
+        const packageId = parts[pkgIdx + 1];
+        const filename = parts[parts.length - 1];
+        const docType = filename.includes('_v')
+            ? filename.split('_v')[0]
+            : filename.split('.')[0];
+        return { packageId, docType };
+    } catch {
+        return {};
+    }
+}
+
 export default function DocumentViewerPage({ params }: PageProps) {
     const { id } = use(params);
     const router = useRouter();
     const searchParams = useSearchParams();
     const sessionId = searchParams.get('session') || '';
+
+    // Extract package info from URL param as fallback
+    const urlPackageInfo = useMemo(() => extractPackageInfo(decodeURIComponent(id)), [id]);
 
     // Document state
     const [documentContent, setDocumentContent] = useState('');
@@ -102,6 +288,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const [unfilledCount, setUnfilledCount] = useState(0);
     const [showHydrationBanner, setShowHydrationBanner] = useState(false);
     const autoPromptSentRef = useRef(false);
+
+    // Assistant panel tab state
+    const [assistantTab, setAssistantTab] = useState<'chat' | 'changelog'>('chat');
 
     // Chat state
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -547,6 +736,56 @@ ${docSnippet}`;
             setDocumentContent(editContent);
             setDocUpdated(true);
             setTimeout(() => setDocUpdated(false), 2000);
+
+            // Clear sessionStorage cache so reload fetches fresh content
+            try {
+                sessionStorage.removeItem(`doc-content-${id}`);
+            } catch {
+                // Ignore sessionStorage errors
+            }
+
+            // Clear localStorage cache (eagle_generated_docs) so reload fetches fresh from S3
+            // Must match the fuzzy lookup logic in getGeneratedDocument()
+            try {
+                const docsKey = 'eagle_generated_docs';
+                const stored = localStorage.getItem(docsKey);
+                if (stored) {
+                    const docs = JSON.parse(stored) as Record<string, { id?: string; s3_key?: string; title?: string }>;
+                    const decodedId = decodeURIComponent(id);
+                    const normalizedId = encodeURIComponent(decodedId);
+                    const s3KeyDecoded = s3Key ? decodeURIComponent(s3Key) : null;
+                    let changed = false;
+
+                    // Delete by direct key lookup
+                    if (docs[id]) { delete docs[id]; changed = true; }
+                    if (docs[normalizedId]) { delete docs[normalizedId]; changed = true; }
+                    if (s3Key && docs[encodeURIComponent(s3Key)]) {
+                        delete docs[encodeURIComponent(s3Key)];
+                        changed = true;
+                    }
+
+                    // Also delete any fuzzy matches (same logic as getGeneratedDocument)
+                    for (const key of Object.keys(docs)) {
+                        const doc = docs[key];
+                        if (
+                            doc.id === id ||
+                            doc.id === normalizedId ||
+                            doc.s3_key === decodedId ||
+                            doc.s3_key === s3KeyDecoded ||
+                            doc.title === decodedId
+                        ) {
+                            delete docs[key];
+                            changed = true;
+                        }
+                    }
+
+                    if (changed) {
+                        localStorage.setItem(docsKey, JSON.stringify(docs));
+                    }
+                }
+            } catch {
+                // Ignore localStorage errors
+            }
         } catch (err) {
             setSaveError(err instanceof Error ? err.message : 'Save failed');
         } finally {
@@ -778,113 +1017,139 @@ ${docSnippet}`;
                         </div>
                     </div>
 
-                    {/* Right Panel — Chat */}
+                    {/* Right Panel — Chat/Changelog */}
                     <div className="flex flex-col bg-gray-50" style={{ width: '35%' }}>
-                        {/* Chat Header */}
-                        <div className="px-4 py-3 bg-white border-b border-gray-200">
-                            <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 bg-gradient-to-br from-[#003366] to-[#004488] rounded-lg flex items-center justify-center">
-                                    <Bot className="w-4 h-4 text-white" />
-                                </div>
-                                <div>
-                                    <h3 className="font-medium text-gray-900 text-sm">Document Assistant</h3>
-                                    <p className="text-xs text-gray-500">
-                                        {isStreaming ? 'Thinking...' : 'AI-powered editing help'}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Chat Messages */}
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                            {displayChatMessages.map((msg) => (
-                                <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                                    <div
-                                        className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
-                                            msg.role === 'assistant'
-                                                ? 'bg-gradient-to-br from-[#003366] to-[#004488]'
-                                                : 'bg-blue-500'
-                                        }`}
-                                    >
-                                        {msg.role === 'assistant' ? (
-                                            <Sparkles className="w-3.5 h-3.5 text-white" />
-                                        ) : (
-                                            <User className="w-3.5 h-3.5 text-white" />
-                                        )}
-                                    </div>
-                                    <div
-                                        className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                                            msg.role === 'assistant'
-                                                ? 'bg-white border border-gray-200 text-gray-700'
-                                                : 'bg-[#003366] text-white'
-                                        }`}
-                                    >
-                                        <ReactMarkdown
-                                            components={{
-                                                p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
-                                                ul: ({ children }) => <ul className="list-disc ml-4 mb-1.5 space-y-0.5 text-xs">{children}</ul>,
-                                                ol: ({ children }) => <ol className="list-decimal ml-4 mb-1.5 space-y-0.5 text-xs">{children}</ol>,
-                                                strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                                                code: ({ children }) => (
-                                                    <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
-                                                ),
-                                            }}
-                                        >
-                                            {msg.content}
-                                        </ReactMarkdown>
-                                    </div>
-                                </div>
-                            ))}
-
-                            {/* Typing indicator */}
-                            {isStreaming && !streamingAssistantMsg && (
-                                <div className="flex gap-3">
-                                    <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
-                                        <Sparkles className="w-3.5 h-3.5 text-white" />
-                                    </div>
-                                    <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3">
-                                        <div className="flex items-center gap-1.5">
-                                            <div className="typing-dot" />
-                                            <div className="typing-dot" />
-                                            <div className="typing-dot" />
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div ref={chatEndRef} />
-                        </div>
-
-                        {/* Chat Input */}
-                        <div className="p-3 bg-white border-t border-gray-200">
-                            <div className="flex gap-2">
-                                <textarea
-                                    ref={textareaRef}
-                                    value={chatInput}
-                                    onChange={(e) => setChatInput(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
-                                            e.preventDefault();
-                                            handleSendMessage();
-                                        }
-                                    }}
-                                    placeholder={isStreaming ? 'Waiting for response...' : 'Ask about this document...'}
-                                    disabled={isStreaming}
-                                    rows={1}
-                                    className={`flex-1 resize-none px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
-                                        isStreaming ? 'opacity-50' : ''
-                                    }`}
-                                    style={{ maxHeight: 120 }}
-                                />
+                        {/* Tab Header */}
+                        <div className="px-4 py-2 bg-white border-b border-gray-200">
+                            <div className="flex items-center gap-1">
                                 <button
-                                    onClick={handleSendMessage}
-                                    disabled={!chatInput.trim() || isStreaming}
-                                    className="px-3.5 py-2.5 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-colors"
+                                    onClick={() => setAssistantTab('chat')}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                                        assistantTab === 'chat'
+                                            ? 'bg-[#003366] text-white'
+                                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                                    }`}
                                 >
-                                    <Send className="w-4 h-4" />
+                                    <MessageSquare className="w-4 h-4" />
+                                    Chat
+                                </button>
+                                <button
+                                    onClick={() => setAssistantTab('changelog')}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                                        assistantTab === 'changelog'
+                                            ? 'bg-[#003366] text-white'
+                                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                                    }`}
+                                >
+                                    <History className="w-4 h-4" />
+                                    Changelog
                                 </button>
                             </div>
                         </div>
+
+                        {/* Chat Tab Content */}
+                        {assistantTab === 'chat' && (
+                            <>
+                                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                    {displayChatMessages.map((msg) => (
+                                        <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                                            <div
+                                                className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                                    msg.role === 'assistant'
+                                                        ? 'bg-gradient-to-br from-[#003366] to-[#004488]'
+                                                        : 'bg-blue-500'
+                                                }`}
+                                            >
+                                                {msg.role === 'assistant' ? (
+                                                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                                                ) : (
+                                                    <User className="w-3.5 h-3.5 text-white" />
+                                                )}
+                                            </div>
+                                            <div
+                                                className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                                                    msg.role === 'assistant'
+                                                        ? 'bg-white border border-gray-200 text-gray-700'
+                                                        : 'bg-[#003366] text-white'
+                                                }`}
+                                            >
+                                                <ReactMarkdown
+                                                    components={{
+                                                        p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+                                                        ul: ({ children }) => <ul className="list-disc ml-4 mb-1.5 space-y-0.5 text-xs">{children}</ul>,
+                                                        ol: ({ children }) => <ol className="list-decimal ml-4 mb-1.5 space-y-0.5 text-xs">{children}</ol>,
+                                                        strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                                                        code: ({ children }) => (
+                                                            <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
+                                                        ),
+                                                    }}
+                                                >
+                                                    {msg.content}
+                                                </ReactMarkdown>
+                                            </div>
+                                        </div>
+                                    ))}
+
+                                    {/* Typing indicator */}
+                                    {isStreaming && !streamingAssistantMsg && (
+                                        <div className="flex gap-3">
+                                            <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
+                                                <Sparkles className="w-3.5 h-3.5 text-white" />
+                                            </div>
+                                            <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3">
+                                                <div className="flex items-center gap-1.5">
+                                                    <div className="typing-dot" />
+                                                    <div className="typing-dot" />
+                                                    <div className="typing-dot" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div ref={chatEndRef} />
+                                </div>
+
+                                {/* Chat Input */}
+                                <div className="p-3 bg-white border-t border-gray-200">
+                                    <div className="flex gap-2">
+                                        <textarea
+                                            ref={textareaRef}
+                                            value={chatInput}
+                                            onChange={(e) => setChatInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+                                                    e.preventDefault();
+                                                    handleSendMessage();
+                                                }
+                                            }}
+                                            placeholder={isStreaming ? 'Waiting for response...' : 'Ask about this document...'}
+                                            disabled={isStreaming}
+                                            rows={1}
+                                            className={`flex-1 resize-none px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
+                                                isStreaming ? 'opacity-50' : ''
+                                            }`}
+                                            style={{ maxHeight: 120 }}
+                                        />
+                                        <button
+                                            onClick={handleSendMessage}
+                                            disabled={!chatInput.trim() || isStreaming}
+                                            className="px-3.5 py-2.5 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-colors"
+                                        >
+                                            <Send className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Changelog Tab Content */}
+                        {assistantTab === 'changelog' && (
+                            <DocumentChangelogPanel
+                                packageId={packageId || urlPackageInfo.packageId}
+                                documentType={documentType || urlPackageInfo.docType}
+                                documentKey={s3Key || decodeURIComponent(id)}
+                            />
+                        )}
                     </div>
                 </div>
             </div>

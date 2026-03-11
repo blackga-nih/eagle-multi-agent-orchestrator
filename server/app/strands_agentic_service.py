@@ -1264,6 +1264,14 @@ _SERVICE_TOOL_DEFS = {
         "Pass JSON: {action, doc_type?, template_body?, display_name?, user_id?}. "
         "Actions: list, get, set, delete, resolve."
     ),
+    "document_changelog_search": (
+        "Search changelog history for a document or package. "
+        "Pass JSON: {package_id (required), doc_type (optional), limit (default 20)}."
+    ),
+    "get_latest_document": (
+        "Get latest document version with recent changelog entries. "
+        "Pass JSON: {package_id (required), doc_type (required)}."
+    ),
 }
 
 

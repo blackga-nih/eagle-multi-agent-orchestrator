@@ -745,6 +745,55 @@ EAGLE_TOOLS = [
     # Knowledge base tools
     KNOWLEDGE_SEARCH_TOOL,
     KNOWLEDGE_FETCH_TOOL,
+    # Document changelog tools
+    {
+        "name": "document_changelog_search",
+        "description": (
+            "Search the changelog history for a document or package. Returns "
+            "a list of changes showing what changed, who made the change, when, "
+            "and why. Use this to understand document evolution or audit history."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "package_id": {
+                    "type": "string",
+                    "description": "Package ID to search changelog for (required)",
+                },
+                "doc_type": {
+                    "type": "string",
+                    "description": "Document type to filter by (optional - omit for all docs in package)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of entries to return (default: 20)",
+                },
+            },
+            "required": ["package_id"],
+        },
+    },
+    {
+        "name": "get_latest_document",
+        "description": (
+            "Get the latest version of a document along with its recent changelog. "
+            "Use this to ensure you're working with the most current content and "
+            "understand recent changes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "package_id": {
+                    "type": "string",
+                    "description": "Package ID containing the document",
+                },
+                "doc_type": {
+                    "type": "string",
+                    "description": "Document type (sow, igce, market_research, etc.)",
+                },
+            },
+            "required": ["package_id", "doc_type"],
+        },
+    },
 ]
 
 
@@ -1716,6 +1765,24 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
         save_status = "generated_but_not_saved"
         save_location = f"S3 save failed: {str(e)}"
         logger.warning("Failed to save document to S3: %s", e)
+
+    # Write changelog entry for document creation
+    if save_status == "saved":
+        try:
+            from app.changelog_store import write_document_changelog_entry
+
+            write_document_changelog_entry(
+                tenant_id=tenant_id,
+                document_key=s3_key,
+                change_type="create",
+                change_source="agent_tool",
+                change_summary=f"Created {doc_type}: {title}",
+                actor_user_id=user_id,
+                doc_type=doc_type,
+                session_id=session_id,
+            )
+        except Exception as e:
+            logger.warning("Failed to write changelog for document creation: %s", e)
 
     response = {
         "document_type": doc_type,
@@ -3010,6 +3077,78 @@ def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
     return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
 
 
+def _exec_document_changelog_search(params: dict, tenant_id: str) -> dict:
+    """Search changelog history for a document or package."""
+    from app.changelog_store import list_changelog_entries
+
+    package_id = params.get("package_id")
+    if not package_id:
+        return {"error": "package_id is required"}
+
+    doc_type = params.get("doc_type")  # Optional
+    limit = params.get("limit", 20)
+
+    entries = list_changelog_entries(tenant_id, package_id, doc_type, limit)
+
+    return {
+        "package_id": package_id,
+        "doc_type": doc_type,
+        "count": len(entries),
+        "entries": [
+            {
+                "change_type": e.get("change_type"),
+                "change_source": e.get("change_source"),
+                "change_summary": e.get("change_summary"),
+                "doc_type": e.get("doc_type"),
+                "version": e.get("version"),
+                "actor_user_id": e.get("actor_user_id"),
+                "created_at": e.get("created_at"),
+            }
+            for e in entries
+        ],
+    }
+
+
+def _exec_get_latest_document(params: dict, tenant_id: str) -> dict:
+    """Get latest document version with recent changelog entries."""
+    from app.document_store import get_document
+    from app.changelog_store import list_changelog_entries
+
+    package_id = params.get("package_id")
+    doc_type = params.get("doc_type")
+
+    if not package_id or not doc_type:
+        return {"error": "package_id and doc_type are required"}
+
+    # Get latest document (version=None returns latest)
+    doc = get_document(tenant_id, package_id, doc_type, version=None)
+    if not doc:
+        return {"error": f"No {doc_type} document found for package {package_id}"}
+
+    # Get recent changelog entries
+    changelog = list_changelog_entries(tenant_id, package_id, doc_type, limit=5)
+
+    return {
+        "document": {
+            "doc_type": doc.get("doc_type"),
+            "version": doc.get("version"),
+            "title": doc.get("title"),
+            "status": doc.get("status"),
+            "created_at": doc.get("created_at"),
+            "s3_key": doc.get("s3_key"),
+        },
+        "recent_changes": [
+            {
+                "change_type": e.get("change_type"),
+                "change_summary": e.get("change_summary"),
+                "actor_user_id": e.get("actor_user_id"),
+                "created_at": e.get("created_at"),
+            }
+            for e in changelog
+        ],
+    }
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -3029,6 +3168,9 @@ TOOL_DISPATCH = {
     "manage_skills": _exec_manage_skills,
     "manage_prompts": _exec_manage_prompts,
     "manage_templates": _exec_manage_templates,
+    # Document changelog tools
+    "document_changelog_search": _exec_document_changelog_search,
+    "get_latest_document": _exec_get_latest_document,
 }
 
 # Tools that need session_id for per-user scoping
