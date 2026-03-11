@@ -18,6 +18,8 @@ import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
 import ActivityPanel from './activity-panel';
 import IntakeFormCard from './intake-form-card';
+import { ChecklistPanel } from './checklist-panel';
+import { usePackageState } from '@/hooks/use-package-state';
 
 // -----------------------------------------------------------------------
 // Types for per-message tool call tracking
@@ -54,6 +56,7 @@ export default function SimpleChatInterface() {
     const { currentSessionId, saveSession, loadSession, writeMessageOptimistic, renameSession } = useSession();
     const { getToken } = useAuth();
     const { setSnapshot } = useFeedback();
+    const { state: packageState, handleMetadata } = usePackageState();
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const lastAssistantIdRef = useRef<string | null>(null);
@@ -324,6 +327,8 @@ export default function SimpleChatInterface() {
             setBedrockTraces((prev) => [...prev, trace]);
         },
 
+        onMetadata: handleMetadata,
+
         onToolUse: (toolEvent: ToolUseEvent) => {
             // Associate tool calls with the current streaming message ID.
             const parentId = streamingMsgIdRef.current;
@@ -421,7 +426,7 @@ export default function SimpleChatInterface() {
         const query = input;
         setInput('');
 
-        await sendQuery(query, currentSessionId);
+        await sendQuery(query, currentSessionId, packageState.packageId ?? undefined);
     };
 
     const insertText = (text: string) => {
@@ -445,7 +450,7 @@ export default function SimpleChatInterface() {
         setMessages((prev) => [...prev, userMessage]);
         addUserInputLog('Intake form submitted');
         writeMessageOptimistic(currentSessionId, userMessage);
-        await sendQuery(jsonStr, currentSessionId);
+        await sendQuery(jsonStr, currentSessionId, packageState.packageId ?? undefined);
     };
 
     const handleQuickAction = (text: string) => {
@@ -570,6 +575,11 @@ export default function SimpleChatInterface() {
                     </div>
                 </footer>
             </div>
+
+            {/* Middle-right: checklist panel (only when package context is active) */}
+            {packageState.packageId && (
+                <ChecklistPanel state={packageState} />
+            )}
 
             {/* Right: activity panel */}
             <ActivityPanel

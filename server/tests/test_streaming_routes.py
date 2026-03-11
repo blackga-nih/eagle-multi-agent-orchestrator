@@ -243,3 +243,123 @@ class TestToolUsePassthrough:
         tool_uses = [e for e in events if e.get("type") == "tool_use"]
         assert len(tool_uses) == 1
         assert tool_uses[0]["tool_use"]["tool_use_id"] == "tu-abc-123"
+
+
+class TestChecklistMetadataPush:
+    """Tests for forced checklist_update metadata on complete in package mode."""
+
+    def _make_package_context(self, package_id="pkg-001"):
+        """Create a PackageContext in package mode."""
+        from app.package_context_service import PackageContext
+        return PackageContext(
+            mode="package",
+            package_id=package_id,
+            package_title="Test AP",
+            required_documents=["SOW", "IGCE", "AP"],
+            completed_documents=["SOW"],
+        )
+
+    @pytest.mark.asyncio
+    async def test_checklist_update_emitted_on_complete_in_package_mode(self):
+        """When package_context.is_package_mode, complete should emit checklist_update metadata."""
+        from app.streaming_routes import stream_generator
+
+        fake_checklist = {
+            "required": ["SOW", "IGCE", "AP"],
+            "completed": ["SOW"],
+            "missing": ["IGCE", "AP"],
+            "complete": False,
+        }
+
+        async def fake_sdk(**kwargs):
+            yield {"type": "text", "data": "done"}
+            yield {"type": "complete", "text": "done", "tools_called": [], "usage": {}}
+
+        with patch("app.streaming_routes.sdk_query_streaming", fake_sdk), \
+             patch("app.streaming_routes.add_message"), \
+             patch("app.package_store.get_package_checklist", return_value=fake_checklist):
+            lines = await _collect_stream(stream_generator(
+                message="hi",
+                tenant_id="t",
+                user_id="u",
+                tier="advanced",
+                subscription_service=None,
+                session_id="s",
+                package_context=self._make_package_context(),
+            ))
+
+        events = _parse_sse_events(lines)
+        metadata_events = [
+            e for e in events
+            if e.get("type") == "metadata"
+            and isinstance(e.get("metadata"), dict)
+            and e["metadata"].get("state_type") == "checklist_update"
+        ]
+        assert len(metadata_events) == 1, f"Expected 1 checklist_update metadata, got {len(metadata_events)}"
+        md = metadata_events[0]["metadata"]
+        assert md["package_id"] == "pkg-001"
+        assert md["checklist"] == fake_checklist
+        assert md["progress_pct"] == 33  # 1/3 = 33%
+
+    @pytest.mark.asyncio
+    async def test_no_checklist_metadata_without_package_context(self):
+        """When package_context is None, no checklist_update metadata should be emitted."""
+        from app.streaming_routes import stream_generator
+
+        async def fake_sdk(**kwargs):
+            yield {"type": "text", "data": "done"}
+            yield {"type": "complete", "text": "done", "tools_called": [], "usage": {}}
+
+        with patch("app.streaming_routes.sdk_query_streaming", fake_sdk), \
+             patch("app.streaming_routes.add_message"):
+            lines = await _collect_stream(stream_generator(
+                message="hi",
+                tenant_id="t",
+                user_id="u",
+                tier="advanced",
+                subscription_service=None,
+                session_id="s",
+                package_context=None,
+            ))
+
+        events = _parse_sse_events(lines)
+        metadata_events = [
+            e for e in events
+            if e.get("type") == "metadata"
+            and isinstance(e.get("metadata"), dict)
+            and e["metadata"].get("state_type") == "checklist_update"
+        ]
+        assert len(metadata_events) == 0, "No checklist_update expected without package context"
+
+    @pytest.mark.asyncio
+    async def test_no_checklist_metadata_in_workspace_mode(self):
+        """PackageContext in workspace mode (is_package_mode=False) should not emit checklist."""
+        from app.streaming_routes import stream_generator
+        from app.package_context_service import PackageContext
+
+        workspace_ctx = PackageContext(mode="workspace")
+
+        async def fake_sdk(**kwargs):
+            yield {"type": "text", "data": "done"}
+            yield {"type": "complete", "text": "done", "tools_called": [], "usage": {}}
+
+        with patch("app.streaming_routes.sdk_query_streaming", fake_sdk), \
+             patch("app.streaming_routes.add_message"):
+            lines = await _collect_stream(stream_generator(
+                message="hi",
+                tenant_id="t",
+                user_id="u",
+                tier="advanced",
+                subscription_service=None,
+                session_id="s",
+                package_context=workspace_ctx,
+            ))
+
+        events = _parse_sse_events(lines)
+        metadata_events = [
+            e for e in events
+            if e.get("type") == "metadata"
+            and isinstance(e.get("metadata"), dict)
+            and e["metadata"].get("state_type") == "checklist_update"
+        ]
+        assert len(metadata_events) == 0, "No checklist_update expected in workspace mode"

@@ -1,7 +1,8 @@
 #!/bin/bash
 # ── Kill EAGLE dev zombies ────────────────────────────────────────
 # Finds and kills anything on ports 8000 (backend) and 3000 (frontend).
-# Safe to run anytime — idempotent.
+# Uses PowerShell Stop-Process as fallback when taskkill fails (common
+# on Git Bash / MINGW where taskkill reports "not found" for zombie PIDs).
 #
 # Usage:  ./kill-dev.sh
 #         ./kill-dev.sh 8000       # kill only port 8000
@@ -16,8 +17,17 @@ for port in $PORTS; do
   if [ -n "$pids" ]; then
     for pid in $pids; do
       echo "Killing PID $pid on port $port"
-      taskkill //F //PID "$pid" 2>/dev/null && killed=$((killed + 1)) || true
+      # Try taskkill first, fall back to PowerShell Stop-Process
+      if taskkill //F //PID "$pid" 2>/dev/null; then
+        killed=$((killed + 1))
+      elif powershell -Command "Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue" 2>/dev/null; then
+        echo "  (killed via PowerShell fallback)"
+        killed=$((killed + 1))
+      else
+        echo "  WARNING: Could not kill PID $pid — may need Task Manager or reboot"
+      fi
     done
+    sleep 1
   fi
 done
 

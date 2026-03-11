@@ -29,13 +29,16 @@ cleanup() {
   echo ""
   echo "Shutting down..."
   for pid in "${PIDS[@]}"; do
-    taskkill //F //PID "$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    taskkill //F //PID "$pid" 2>/dev/null || \
+      powershell -Command "Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue" 2>/dev/null || \
+      kill "$pid" 2>/dev/null || true
   done
   # Also sweep the ports to catch any children
   for port in $BACKEND_PORT $FRONTEND_PORT; do
     local_pids=$(netstat -ano 2>/dev/null | grep ":${port}" | grep LISTENING | awk '{print $5}' | sort -u | grep -v '^0$' || true)
     for p in $local_pids; do
-      taskkill //F //PID "$p" 2>/dev/null || true
+      taskkill //F //PID "$p" 2>/dev/null || \
+        powershell -Command "Stop-Process -Id $p -Force -ErrorAction SilentlyContinue" 2>/dev/null || true
     done
   done
   rm -f "$ROOT_DIR/server/.uvicorn.pid"
@@ -51,7 +54,10 @@ kill_port() {
   if [ -n "$pids" ]; then
     echo "Killing zombie(s) on port $port: $pids"
     for pid in $pids; do
-      taskkill //F //PID "$pid" 2>/dev/null || true
+      # taskkill often fails on Git Bash/MINGW — PowerShell fallback
+      if ! taskkill //F //PID "$pid" 2>/dev/null; then
+        powershell -Command "Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue" 2>/dev/null || true
+      fi
     done
     sleep 1
   fi
@@ -62,6 +68,25 @@ if [ -f "$ROOT_DIR/.env" ]; then
   set -a
   source "$ROOT_DIR/.env"
   set +a
+fi
+
+# ── AWS SSO pre-check ────────────────────────────────────────────
+# Ensures SSO session is valid before starting services that need AWS.
+# Uses AWS_PROFILE from .env (defaults to "eagle").
+_aws_profile="${AWS_PROFILE:-eagle}"
+if ! AWS_PROFILE="$_aws_profile" aws sts get-caller-identity &>/dev/null; then
+  echo ""
+  echo "⚠  AWS SSO session expired or missing for profile '$_aws_profile'"
+  echo "   Running: aws sso login --profile $_aws_profile"
+  echo ""
+  AWS_PROFILE="$_aws_profile" aws sso login --profile "$_aws_profile"
+  if ! AWS_PROFILE="$_aws_profile" aws sts get-caller-identity &>/dev/null; then
+    echo "ERROR: AWS SSO login failed. Backend will start but CloudWatch/DynamoDB/S3 calls will fail."
+  else
+    echo "✓ AWS SSO session active"
+  fi
+else
+  echo "✓ AWS SSO session active ($_aws_profile)"
 fi
 
 # ── Backend ───────────────────────────────────────────────────────

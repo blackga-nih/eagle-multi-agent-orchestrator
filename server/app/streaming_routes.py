@@ -28,7 +28,15 @@ from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGL
 from .session_store import add_message
 from .package_context_service import resolve_context, set_active_package
 from .telemetry.log_context import set_log_context
+from .telemetry.cloudwatch_emitter import (
+    emit_trace_started,
+    emit_trace_completed,
+    emit_tool_completed,
+    emit_telemetry_event,
+)
+from .reasoning_store import ReasoningLog
 from .health_checks import check_knowledge_base_health
+import time as _time
 
 import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
@@ -58,6 +66,16 @@ async def stream_generator(
     writer = MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
     sse_queue: asyncio.Queue[str] = asyncio.Queue()
     full_response_parts: list[str] = []
+
+    # --- Telemetry + Reasoning init ---
+    _trace_start = _time.time()
+    reasoning_log = ReasoningLog(session_id or "", tenant_id, user_id)
+    try:
+        await asyncio.to_thread(
+            emit_trace_started, tenant_id, user_id, session_id or "", message[:200]
+        )
+    except Exception:
+        logger.debug("trace.started emission failed (non-fatal)")
 
     # Persist user message to DynamoDB so conversation history works on next turn
     if session_id:
@@ -144,13 +162,47 @@ async def stream_generator(
                 )
                 yield await sse_queue.get()
 
+            elif chunk_type == "metadata":
+                await writer.write_metadata(sse_queue, chunk.get("content", {}))
+                yield await sse_queue.get()
+
+            elif chunk_type == "bedrock_trace":
+                trace_event = chunk.get("event", {})
+                logger.debug("SSE bedrock_trace event: keys=%s", list(trace_event.keys()) if isinstance(trace_event, dict) else type(trace_event).__name__)
+                await writer.write_bedrock_trace(sse_queue, trace_event)
+                yield await sse_queue.get()
+
             elif chunk_type == "tool_result":
                 tr_name = chunk.get("name", "")
                 if not tr_name:
                     logger.debug("Skipping empty-name tool_result: keys=%s", list(chunk.keys()))
                     continue
-                await writer.write_tool_result(sse_queue, tr_name, chunk.get("result", {}))
+                result_data = chunk.get("result", {})
+
+                await writer.write_tool_result(sse_queue, tr_name, result_data)
                 yield await sse_queue.get()
+
+                # CloudWatch: emit tool.completed
+                try:
+                    await asyncio.to_thread(
+                        emit_tool_completed, tenant_id, user_id, session_id or "", tr_name
+                    )
+                except Exception:
+                    pass
+
+                # Reasoning: extract, accumulate, and emit REASONING SSE
+                if isinstance(result_data, dict) and "reasoning" in result_data:
+                    reasoning_data = result_data["reasoning"]
+                    reasoning_log.add(
+                        event_type="tool_call",
+                        tool_name=tr_name,
+                        reasoning=reasoning_data.get("basis", ""),
+                        determination=reasoning_data.get("determination", ""),
+                        data=reasoning_data,
+                        confidence=reasoning_data.get("confidence", "high"),
+                    )
+                    await writer.write_reasoning(sse_queue, json.dumps(reasoning_data))
+                    yield await sse_queue.get()
 
             elif chunk_type == "complete":
                 complete_text = chunk.get("text", "")
@@ -175,6 +227,51 @@ async def stream_generator(
                         await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
                     except Exception:
                         logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
+
+                # CloudWatch: emit trace.completed
+                try:
+                    _elapsed = int((_time.time() - _trace_start) * 1000)
+                    await asyncio.to_thread(
+                        emit_trace_completed,
+                        {
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "session_id": session_id or "",
+                            "trace_id": f"t-{int(_trace_start * 1000)}",
+                            "duration_ms": _elapsed,
+                            "total_input_tokens": chunk.get("usage", {}).get("inputTokens", 0),
+                            "total_output_tokens": chunk.get("usage", {}).get("outputTokens", 0),
+                            "tools_called": chunk.get("tools_called", []),
+                        },
+                    )
+                except Exception:
+                    logger.debug("trace.completed emission failed (non-fatal)")
+
+                # Reasoning: persist accumulated log
+                if reasoning_log.entries:
+                    try:
+                        await asyncio.to_thread(reasoning_log.save)
+                    except Exception:
+                        logger.debug("reasoning_log save failed (non-fatal)")
+
+                # Force checklist refresh on every turn when in package mode
+                if package_context and getattr(package_context, "is_package_mode", False):
+                    try:
+                        from .package_store import get_package_checklist
+                        pkg_id = package_context.package_id
+                        checklist = await asyncio.to_thread(get_package_checklist, tenant_id, pkg_id)
+                        total = len(checklist.get("required", []))
+                        done = len(checklist.get("completed", []))
+                        await writer.write_metadata(sse_queue, {
+                            "state_type": "checklist_update",
+                            "package_id": pkg_id,
+                            "checklist": checklist,
+                            "progress_pct": round((done / total * 100) if total > 0 else 0),
+                        })
+                        yield await sse_queue.get()
+                    except Exception:
+                        logger.debug("checklist refresh failed (non-fatal)")
+
                 await writer.write_complete(sse_queue)
                 yield await sse_queue.get()
                 return
@@ -182,6 +279,15 @@ async def stream_generator(
             elif chunk_type == "error":
                 await writer.write_error(sse_queue, chunk.get("error", "Unknown error"))
                 yield await sse_queue.get()
+                # CloudWatch: emit error.occurred
+                try:
+                    await asyncio.to_thread(
+                        emit_telemetry_event, "error.occurred", tenant_id,
+                        {"error": str(chunk.get("error", ""))[:500], "session_id": session_id},
+                        session_id, user_id,
+                    )
+                except Exception:
+                    pass
                 return
 
         # Fallback COMPLETE if generator exhausts without a complete event

@@ -14,7 +14,7 @@ from botocore.exceptions import ClientError, BotoCoreError
 
 logger = logging.getLogger("eagle.telemetry.cloudwatch")
 
-LOG_GROUP = os.getenv("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
+LOG_GROUP = os.getenv("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/app")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 _logs_client = None
@@ -69,7 +69,7 @@ def emit_telemetry_event(
 
     try:
         client = _get_client()
-        stream_name = f"telemetry/{tenant_id}"
+        stream_name = f"session/{session_id}" if session_id else f"tenant/{tenant_id}"
 
         _ensure_log_group_and_stream(client, stream_name)
 
@@ -81,9 +81,10 @@ def emit_telemetry_event(
                 "message": json.dumps(event, default=str),
             }],
         )
+        logger.debug("CW emitted %s → %s/%s", event_type, LOG_GROUP, stream_name)
     except (ClientError, BotoCoreError, Exception) as e:
         # Telemetry should never break the main flow
-        logger.warning("Failed to emit telemetry event: %s", e)
+        logger.warning("CW telemetry FAILED [%s]: %s", event_type, e)
 
 
 def emit_trace_completed(summary: dict):
@@ -102,4 +103,55 @@ def emit_trace_completed(summary: dict):
             "tools_called": summary.get("tools_called", []),
             "agents_delegated": summary.get("agents_delegated", []),
         },
+    )
+
+
+def emit_trace_started(
+    tenant_id: str,
+    user_id: str,
+    session_id: str,
+    prompt_preview: str = "",
+):
+    """Emit trace.started when a chat request begins."""
+    emit_telemetry_event(
+        event_type="trace.started",
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        data={"prompt_preview": prompt_preview[:200]},
+    )
+
+
+def emit_tool_completed(
+    tenant_id: str,
+    user_id: str,
+    session_id: str,
+    tool_name: str,
+    duration_ms: int = 0,
+    success: bool = True,
+):
+    """Emit tool.completed after a tool call finishes."""
+    emit_telemetry_event(
+        event_type="tool.completed",
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        data={"tool_name": tool_name, "duration_ms": duration_ms, "success": success},
+    )
+
+
+def emit_feedback_submitted(
+    tenant_id: str,
+    user_id: str,
+    session_id: str,
+    feedback_type: str,
+    feedback_id: str,
+):
+    """Emit feedback.submitted after feedback is written to DynamoDB."""
+    emit_telemetry_event(
+        event_type="feedback.submitted",
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        data={"feedback_type": feedback_type, "feedback_id": feedback_id},
     )
