@@ -1,10 +1,13 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { FileText, Bell, Terminal, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { FileText, Bell, Terminal, Cpu, Cloud, PanelRightClose, PanelRightOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
+import { useNotifications, type AppNotification } from '@/contexts/notification-context';
 import AgentLogs from './agent-logs';
+import BedrockLogs from './bedrock-logs';
+import CloudWatchLogs from './cloudwatch-logs';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,9 +21,11 @@ interface ActivityPanelProps {
   isStreaming: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  /** Raw Bedrock trace payloads collected via onBedrockTrace. */
+  bedrockTraces?: Record<string, unknown>[];
 }
 
-type TabId = 'documents' | 'notifications' | 'logs';
+type TabId = 'documents' | 'notifications' | 'logs' | 'bedrock' | 'cloudwatch';
 
 interface TabDef {
   id: TabId;
@@ -32,6 +37,8 @@ const TABS: TabDef[] = [
   { id: 'documents',     label: 'Documents',     icon: FileText },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'logs',          label: 'Agent Logs',    icon: Terminal },
+  { id: 'bedrock',       label: 'Bedrock',       icon: Cpu },
+  { id: 'cloudwatch',    label: 'CloudWatch',    icon: Cloud },
 ];
 
 // ---------------------------------------------------------------------------
@@ -117,14 +124,15 @@ function DocumentsTab({
   );
 }
 
-/** Notification entry for document & package updates. */
+/** Notification entry for document, package, and feedback updates. */
 interface Notification {
   id: string;
-  icon: 'doc_created' | 'doc_updated' | 'pkg_created';
+  icon: 'doc_created' | 'doc_updated' | 'pkg_created' | 'feedback_sent';
   title: string;
   detail: string;
   status?: string;
   timestamp: string;
+  payload?: Record<string, unknown>;
 }
 
 /** Document types that are part of an acquisition package vs standalone docs. */
@@ -132,8 +140,63 @@ const PACKAGE_DOC_TYPES = new Set([
   'sow', 'igce', 'acquisition_plan', 'justification', 'eval_criteria',
 ]);
 
-function NotificationsTab({ documents }: {
+function NotificationCard({ n, iconStyles }: {
+  n: Notification;
+  iconStyles: Record<Notification['icon'], { bg: string; glyph: string }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const style = iconStyles[n.icon];
+
+  return (
+    <div
+      key={n.id}
+      className={`rounded-lg border border-[#D8DEE6] bg-white hover:shadow-sm transition ${n.payload ? 'cursor-pointer' : ''}`}
+      onClick={() => n.payload && setExpanded(!expanded)}
+    >
+      <div className="flex items-start gap-2.5 px-3 py-2.5">
+        <span className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm ${style.bg}`}>
+          {style.glyph}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1">
+            <p className="text-xs font-semibold text-[#003366]">{n.title}</p>
+            {n.payload && (
+              expanded
+                ? <ChevronDown className="w-3 h-3 text-gray-400" />
+                : <ChevronRight className="w-3 h-3 text-gray-400" />
+            )}
+          </div>
+          <p className="text-[11px] text-gray-500 truncate">{n.detail}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            {n.status && (
+              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-medium ${
+                n.status === 'saved' ? 'bg-green-100 text-green-700' :
+                n.status === 'template' ? 'bg-amber-100 text-amber-700' :
+                'bg-gray-100 text-gray-600'
+              }`}>
+                {n.status}
+              </span>
+            )}
+            <p className="text-[10px] text-gray-400">
+              {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </p>
+          </div>
+        </div>
+      </div>
+      {expanded && n.payload && (
+        <div className="border-t border-[#D8DEE6] px-3 py-2">
+          <pre className="text-[10px] text-gray-600 font-mono whitespace-pre-wrap break-all bg-gray-50 rounded p-2 max-h-48 overflow-y-auto">
+            {JSON.stringify(n.payload, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotificationsTab({ documents, appNotifications }: {
   documents: Record<string, DocumentInfo[]>;
+  appNotifications: AppNotification[];
 }) {
   const notifications = useMemo(() => {
     const items: Notification[] = [];
@@ -168,10 +231,22 @@ function NotificationsTab({ documents }: {
       });
     }
 
+    // Feedback notifications from the app notification context
+    for (const an of appNotifications) {
+      items.push({
+        id: an.id,
+        icon: an.icon,
+        title: an.title,
+        detail: an.detail,
+        timestamp: an.timestamp,
+        payload: an.payload,
+      });
+    }
+
     // Sort newest first
     items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return items;
-  }, [documents]);
+  }, [documents, appNotifications]);
 
   if (notifications.length === 0) {
     return (
@@ -180,47 +255,23 @@ function NotificationsTab({ documents }: {
           <Bell className="w-5 h-5 text-gray-400" />
         </div>
         <p className="text-sm text-gray-500">No notifications yet.</p>
-        <p className="text-xs text-gray-400 mt-1">Document and package updates will appear here.</p>
+        <p className="text-xs text-gray-400 mt-1">Document updates and feedback confirmations will appear here.</p>
       </div>
     );
   }
 
   const iconStyles: Record<Notification['icon'], { bg: string; glyph: string }> = {
-    doc_created:  { bg: 'bg-blue-100',   glyph: '\u{1F4C4}' },
-    doc_updated:  { bg: 'bg-amber-100',  glyph: '\u{1F4DD}' },
-    pkg_created:  { bg: 'bg-indigo-100', glyph: '\u{1F4E6}' },
+    doc_created:    { bg: 'bg-blue-100',    glyph: '\u{1F4C4}' },
+    doc_updated:    { bg: 'bg-amber-100',   glyph: '\u{1F4DD}' },
+    pkg_created:    { bg: 'bg-indigo-100',  glyph: '\u{1F4E6}' },
+    feedback_sent:  { bg: 'bg-emerald-100', glyph: '\u{2705}' },
   };
 
   return (
     <div className="space-y-1.5">
-      {notifications.map((n) => {
-        const style = iconStyles[n.icon];
-        return (
-          <div key={n.id} className="flex items-start gap-2.5 rounded-lg border border-[#D8DEE6] bg-white px-3 py-2.5 hover:shadow-sm transition">
-            <span className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm ${style.bg}`}>
-              {style.glyph}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-[#003366]">{n.title}</p>
-              <p className="text-[11px] text-gray-500 truncate">{n.detail}</p>
-              <div className="flex items-center gap-2 mt-0.5">
-                {n.status && (
-                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-medium ${
-                    n.status === 'saved' ? 'bg-green-100 text-green-700' :
-                    n.status === 'template' ? 'bg-amber-100 text-amber-700' :
-                    'bg-gray-100 text-gray-600'
-                  }`}>
-                    {n.status}
-                  </span>
-                )}
-                <p className="text-[10px] text-gray-400">
-                  {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                </p>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+      {notifications.map((n) => (
+        <NotificationCard key={n.id} n={n} iconStyles={iconStyles} />
+      ))}
     </div>
   );
 }
@@ -237,12 +288,14 @@ export default function ActivityPanel({
   isStreaming,
   isOpen,
   onToggle,
+  bedrockTraces = [],
 }: ActivityPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('logs');
+  const { notifications: appNotifications } = useNotifications();
 
   const docCount = Object.values(documents).flat().length;
 
-  const notifCount = docCount;
+  const notifCount = docCount + appNotifications.length;
 
   // Collapsed strip
   if (!isOpen) {
@@ -260,13 +313,16 @@ export default function ActivityPanel({
   return (
     <div className="w-[380px] shrink-0 border-l border-[#D8DEE6] bg-white flex flex-col">
       {/* Tab bar */}
-      <div className="flex items-center gap-1 p-2 bg-[#F5F7FA] border-b border-[#D8DEE6]">
+      <div className="flex flex-wrap items-center gap-1 p-2 bg-[#F5F7FA] border-b border-[#D8DEE6]">
         {TABS.map((tab) => {
           const Icon = tab.icon;
+          // Badge counts
+          const bedrockCount = bedrockTraces.length > 0 ? bedrockTraces.length : logs.filter(l => l.type === 'bedrock_trace').length;
           const badge =
-            tab.id === 'logs' && logs.length > 0 ? logs.length :
-            tab.id === 'documents' && docCount > 0 ? docCount :
-            tab.id === 'notifications' && notifCount > 0 ? notifCount :
+            tab.id === 'logs'      && logs.length > 0       ? logs.length :
+            tab.id === 'bedrock'   && bedrockCount > 0      ? bedrockCount :
+            tab.id === 'documents' && docCount > 0          ? docCount :
+            tab.id === 'notifications' && notifCount > 0    ? notifCount :
             0;
 
           return (
@@ -318,9 +374,11 @@ export default function ActivityPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {activeTab === 'documents' && <DocumentsTab documents={documents} sessionId={sessionId} />}
-        {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
-        {activeTab === 'logs' && <AgentLogs logs={logs} />}
+        {activeTab === 'documents'     && <DocumentsTab documents={documents} sessionId={sessionId} />}
+        {activeTab === 'notifications' && <NotificationsTab documents={documents} appNotifications={appNotifications} />}
+        {activeTab === 'logs'          && <AgentLogs logs={logs} />}
+        {activeTab === 'bedrock'       && <BedrockLogs bedrockTraces={bedrockTraces} logs={logs} />}
+        {activeTab === 'cloudwatch'    && <CloudWatchLogs sessionId={sessionId} />}
       </div>
     </div>
   );

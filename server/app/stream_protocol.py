@@ -23,6 +23,7 @@ class StreamEventType(str, Enum):
     COMPLETE = "complete"
     ERROR = "error"
     HANDOFF = "handoff"
+    BEDROCK_TRACE = "bedrock_trace"
 
 
 @dataclass
@@ -58,7 +59,7 @@ class StreamEvent:
 
     def to_json(self) -> str:
         """Serialize to a JSON string."""
-        return json.dumps(self.to_dict())
+        return json.dumps(self.to_dict(), default=str)
 
     def to_sse(self) -> str:
         """Format as a Server-Sent Events data line."""
@@ -138,6 +139,16 @@ class MultiAgentStreamWriter:
         )
         await queue.put(event.to_sse())
 
+    async def write_metadata(self, queue, metadata: Dict[str, Any]):
+        """Emit a METADATA event with structured state data for the frontend.
+
+        Used by the ``update_state`` tool to push real-time UI updates
+        (checklist progress, phase changes, compliance alerts) through the
+        SSE channel without requiring the frontend to poll.
+        """
+        event = self._create_event(StreamEventType.METADATA, metadata=metadata)
+        await queue.put(event.to_sse())
+
     async def write_handoff(self, queue, target_agent_id: str, reason: str):
         """Emit a HANDOFF event signalling transfer to another agent."""
         event = self._create_event(
@@ -154,4 +165,9 @@ class MultiAgentStreamWriter:
     async def write_error(self, queue, error_message: str):
         """Emit an ERROR event with a human-readable error description."""
         event = self._create_event(StreamEventType.ERROR, content=error_message)
+        await queue.put(event.to_sse())
+
+    async def write_bedrock_trace(self, queue, trace_data: Dict[str, Any]):
+        """Emit a BEDROCK_TRACE event with raw Bedrock ConverseStream data."""
+        event = self._create_event(StreamEventType.BEDROCK_TRACE, metadata=trace_data)
         await queue.put(event.to_sse())

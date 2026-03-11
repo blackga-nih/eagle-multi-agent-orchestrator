@@ -1727,14 +1727,15 @@ async def sdk_query(
 
 
 def _sanitize_event(event: dict) -> dict:
-    """Make a raw Strands stream event JSON-serializable."""
-    import copy
+    """Make a raw Strands stream event JSON-serializable.
+
+    Round-trips through json.dumps/loads so the returned dict contains
+    only JSON-native types (str, int, float, bool, None, list, dict).
+    This prevents downstream json.dumps (without default=str) from failing.
+    """
     try:
-        sanitized = copy.deepcopy(event)
-        # Test serialization
-        json.dumps(sanitized, default=str)
-        return sanitized
-    except (TypeError, ValueError):
+        return json.loads(json.dumps(event, default=str))
+    except (TypeError, ValueError, RecursionError):
         return {"raw": str(event)}
 
 
@@ -1884,12 +1885,11 @@ async def sdk_query_streaming(
             for tool_result_chunk in _drain_tool_results():
                 yield tool_result_chunk
 
-            # --- Text streaming ---
+            # --- Text streaming (no bedrock_trace — too noisy per-token) ---
             data = event.get("data")
             if data and isinstance(data, str):
                 full_text_parts.append(data)
                 yield {"type": "text", "data": data}
-                yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
                 continue
 
             # --- Tool use start (ToolUseStreamEvent) ---
@@ -1910,20 +1910,30 @@ async def sdk_query_streaming(
                 continue
 
             # --- Bedrock contentBlockStart fallback ---
-            tool_use = event.get("event", {})
-            if isinstance(tool_use, dict):
-                tool_use = tool_use.get("contentBlockStart", {}).get("start", {}).get("toolUse")
-                if tool_use:
-                    tool_id = tool_use.get("toolUseId", "")
+            raw_event = event.get("event", {})
+            if isinstance(raw_event, dict):
+                cbs = raw_event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
+                if cbs:
+                    tool_id = cbs.get("toolUseId", "")
                     if tool_id != _current_tool_id:
                         _current_tool_id = tool_id
-                        tool_name = tool_use.get("name", "")
+                        tool_name = cbs.get("name", "")
                         tools_called.append(tool_name)
                         yield {
                             "type": "tool_use",
                             "name": tool_name,
                             "tool_use_id": tool_id,
                         }
+                        yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
+                    continue
+
+                # --- Structural Bedrock events (messageStop, usage) ---
+                if "messageStop" in raw_event:
+                    yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
+                    continue
+                if "metadata" in raw_event:
+                    meta = raw_event.get("metadata", {})
+                    if isinstance(meta, dict) and "usage" in meta:
                         yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
                     continue
 
