@@ -136,6 +136,8 @@ def to_trace_attrs(
         "eagle.docs_required": len(s["required_documents"]),
         "eagle.docs_completed": len(s["completed_documents"]),
         "eagle.turn_count": s["turn_count"],
+        # Langfuse uses session.id to group supervisor + subagent traces into one Session view
+        "session.id": session_id or "",
     }
 
 

@@ -1295,13 +1295,28 @@ def _make_subagent_tool(
     prompt_body: str,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    tenant_id: str = "default",
+    user_id: str = "anonymous",
+    session_id: str | None = None,
+    tier: str = "advanced",
 ):
     """Create a @tool-wrapped subagent from skill registry entry.
 
     Each invocation constructs a fresh Agent with the resolved prompt.
     The shared _model is reused (no per-request boto3 overhead).
+    trace_attributes + session.id are forwarded so Langfuse groups
+    the subagent span under the same session as the supervisor.
     """
     safe_name = skill_name.replace("-", "_")
+    _subagent_trace_attrs = {
+        "eagle.tenant_id": tenant_id,
+        "eagle.user_id": user_id,
+        "eagle.tier": tier,
+        "eagle.session_id": session_id or "",
+        "eagle.subagent": safe_name,
+        # Langfuse uses session.id to group all traces into one Session view
+        "session.id": session_id or "",
+    }
 
     @tool(name=safe_name)
     def subagent_tool(query: str) -> str:
@@ -1310,6 +1325,7 @@ def _make_subagent_tool(
             model=_model,
             system_prompt=prompt_body,
             callback_handler=None,
+            trace_attributes=_subagent_trace_attrs,
         )
         raw = str(agent(query))
 
@@ -2066,6 +2082,7 @@ def build_skill_tools(
     skill_names: list[str] | None = None,
     tenant_id: str = "demo-tenant",
     user_id: str = "demo-user",
+    session_id: str | None = None,
     workspace_id: str | None = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
@@ -2111,6 +2128,10 @@ def build_skill_tools(
             prompt_body=_truncate_skill(prompt_body),
             result_queue=result_queue,
             loop=loop,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            tier=tier,
         ))
 
     # Merge active user-created SKILL# items
@@ -2132,6 +2153,10 @@ def build_skill_tools(
                 prompt_body=_truncate_skill(skill_prompt),
                 result_queue=result_queue,
                 loop=loop,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+                tier=tier,
             ))
     except Exception as exc:
         logger.warning("skill_store.list_active_skills failed for %s: %s -- skipping user skills", tenant_id, exc)
@@ -2334,6 +2359,7 @@ async def sdk_query(
         skill_names=skill_names,
         tenant_id=tenant_id,
         user_id=user_id,
+        session_id=session_id,
         workspace_id=resolved_workspace_id,
     )
 
@@ -2573,6 +2599,7 @@ async def sdk_query_streaming(
         skill_names=skill_names,
         tenant_id=tenant_id,
         user_id=user_id,
+        session_id=session_id,
         workspace_id=resolved_workspace_id,
         result_queue=result_queue,
         loop=loop,
