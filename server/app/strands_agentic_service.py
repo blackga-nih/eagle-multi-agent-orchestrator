@@ -36,7 +36,12 @@ import boto3
 from botocore.config import Config
 from strands import Agent, tool
 from strands.hooks import HookProvider
-from strands.hooks.events import AfterInvocationEvent, BeforeToolCallEvent
+from strands.hooks.events import (
+    AfterInvocationEvent,
+    AfterModelCallEvent,
+    AfterToolCallEvent,
+    BeforeToolCallEvent,
+)
 from strands.models import BedrockModel
 
 # Add server/ to path for eagle_skill_constants
@@ -73,9 +78,16 @@ class EagleSSEHookProvider(HookProvider):
         self.tenant_id = tenant_id
         self.user_id = user_id
         self.session_id = session_id
+        # Tracks whether update_state was called in the current model cycle.
+        # Reset to False by _on_after_model_call after each end_turn.
+        self._update_state_called_this_turn: bool = False
+        # Last known state snapshot for computing per-tool deltas.
+        self._last_state_snapshot: dict = {}
 
     def register_hooks(self, registry) -> None:
         registry.add_callback(BeforeToolCallEvent, self._on_before_tool_call)
+        registry.add_callback(AfterToolCallEvent, self._on_after_tool_call)
+        registry.add_callback(AfterModelCallEvent, self._on_after_model_call)
         registry.add_callback(AfterInvocationEvent, self._on_after_invocation)
 
     def _on_before_tool_call(self, event: BeforeToolCallEvent) -> None:
@@ -104,6 +116,11 @@ class EagleSSEHookProvider(HookProvider):
                 )
             except Exception:
                 pass
+
+            # Track when update_state is called so AfterModelCallEvent can verify it
+            # was called before the final end_turn synthesis response.
+            if tool_name == "update_state":
+                self._update_state_called_this_turn = True
 
             # Doc gating only applies to create_document / generate_document
             if tool_name not in ("create_document", "generate_document"):
@@ -216,6 +233,110 @@ class EagleSSEHookProvider(HookProvider):
 
         except Exception as exc:
             logger.debug("_on_before_tool_call: non-fatal error: %s", exc)
+
+    def _on_after_tool_call(self, event: AfterToolCallEvent) -> None:
+        """Capture state delta after every tool call and emit tool.completed telemetry.
+
+        Reads the live agent state from invocation_state, computes a delta against
+        the previous snapshot, and emits a tool.completed CloudWatch event with:
+          - tool_name, tool_use_id, success
+          - state_delta: {field: {before, after}} for changed state fields
+        """
+        try:
+            tool_use = getattr(event, "tool_use", None) or {}
+            tool_name = tool_use.get("name", "") if isinstance(tool_use, dict) else getattr(tool_use, "name", "")
+            tool_use_id = tool_use.get("toolUseId", "") if isinstance(tool_use, dict) else getattr(tool_use, "toolUseId", "")
+
+            # Read live supervisor state from invocation_state.
+            # invocation_state["agent"] is the Agent instance.
+            # Agent.state is an AgentState whose underlying dict is ._state.
+            invocation_state = getattr(event, "invocation_state", {}) or {}
+            agent_obj = invocation_state.get("agent_state", invocation_state.get("agent"))
+            raw_state: dict = {}
+            if agent_obj is not None:
+                agent_state_obj = getattr(agent_obj, "state", agent_obj)
+                # AgentState wraps the dict in ._state; fall back to __dict__ or direct
+                if hasattr(agent_state_obj, "_state") and isinstance(agent_state_obj._state, dict):
+                    raw_state = agent_state_obj._state
+                elif isinstance(agent_state_obj, dict):
+                    raw_state = agent_state_obj
+            current = normalize(raw_state) if raw_state else {}
+
+            # Compute delta vs previous snapshot (only tracked fields)
+            prev = self._last_state_snapshot
+            _TRACKED = ("phase", "required_documents", "completed_documents", "turn_count", "package_id")
+            delta = {
+                k: {"before": prev.get(k), "after": current.get(k)}
+                for k in _TRACKED
+                if prev.get(k) != current.get(k)
+            }
+            self._last_state_snapshot = dict(current)
+
+            logger.debug(
+                "eagle.tool_completed tool=%s session=%s delta_keys=%s success=%s",
+                tool_name, self.session_id, list(delta.keys()), event.exception is None,
+            )
+
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+                emit_tool_completed(
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
+                    session_id=self.session_id or "",
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    state_delta=delta,
+                    success=event.exception is None,
+                )
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.debug("_on_after_tool_call: non-fatal error: %s", exc)
+
+    def _on_after_model_call(self, event: AfterModelCallEvent) -> None:
+        """Detect when the model gives a final response without calling update_state.
+
+        Fires after every LLM call. When stop_reason is 'end_turn' (model is about
+        to return the final text response with no further tool calls), checks whether
+        update_state was called during this invocation cycle. Emits a warning to
+        CloudWatch if not, then resets the tracking flag for the next cycle.
+        """
+        try:
+            sr = getattr(event, "stop_response", None)
+            if not sr:
+                return
+            stop_reason = getattr(sr, "stop_reason", None)
+            # stop_reason is a StopReason enum or string
+            sr_str = str(stop_reason).lower() if stop_reason else ""
+            if "end_turn" not in sr_str:
+                return
+
+            if not self._update_state_called_this_turn:
+                logger.info(
+                    "eagle.state_not_updated_before_final_response session=%s "
+                    "(update_state was not called before end_turn — prompt may need updating)",
+                    self.session_id,
+                )
+                try:
+                    from .telemetry.cloudwatch_emitter import emit_warning
+                    emit_warning(
+                        tenant_id=self.tenant_id,
+                        session_id=self.session_id or "",
+                        user_id=self.user_id,
+                        message="update_state not called before final response",
+                    )
+                except Exception:
+                    pass
+            else:
+                logger.debug(
+                    "eagle.state_updated_before_final_response session=%s ✓",
+                    self.session_id,
+                )
+
+            # Reset for next model cycle
+            self._update_state_called_this_turn = False
+        except Exception as exc:
+            logger.debug("_on_after_model_call: non-fatal error: %s", exc)
 
     def _on_after_invocation(self, event: AfterInvocationEvent) -> None:
         """Flush agent state to DynamoDB and CloudWatch after every supervisor turn."""
@@ -2275,14 +2396,18 @@ def build_supervisor_prompt(
         "2) Do not paste full document bodies in chat unless the user explicitly asks for inline text.\n"
         "3) After create_document, respond briefly and direct the user to open/edit the document card.\n"
         "4) After create_document succeeds, call update_state with state_type='document_ready'.\n\n"
-        "State Push Rules (update_state tool):\n"
-        "The frontend has a live checklist panel. Call update_state after state-changing actions:\n"
+        "State Push Rules (update_state tool) — MANDATORY:\n"
+        "The frontend has a live checklist panel driven by eagle_state. You MUST call update_state:\n"
         "  - After create_document → update_state(state_type='document_ready', package_id, doc_type, version, document_id)\n"
         "  - After query_compliance_matrix reveals requirements → update_state(state_type='checklist_update', package_id)\n"
         "  - On phase transitions → update_state(state_type='phase_change', package_id, phase, previous)\n"
         "  - On compliance findings → update_state(state_type='compliance_alert', severity, items)\n"
         "  Just pass package_id for checklist_update — the tool auto-fetches current state from DB.\n"
-        "  Call get_package_checklist before generating docs to see what's done and what's missing.\n\n"
+        "  Call get_package_checklist before generating docs to see what's done and what's missing.\n"
+        "CRITICAL: After completing ALL requested analyses and BEFORE writing your final synthesis\n"
+        "  response, call update_state with state_type='phase_change' to record the transition.\n"
+        "  Example: update_state(state_type='phase_change', phase='analysis_complete', previous='intake')\n"
+        "  This MUST happen before the synthesis text. The frontend checklist depends on it.\n\n"
         f"FAST vs DEEP routing:\n"
         f"  FAST (seconds):\n"
         f"    - load_data('matrix', 'thresholds') for threshold lookups.\n"
@@ -2448,12 +2573,19 @@ async def sdk_query(
         _loaded_state = normalize(None)
     _loaded_state["session_id"] = _leaf_session
 
+    sse_hook = EagleSSEHookProvider(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=_leaf_session,
+    )
+
     supervisor = Agent(
         model=_get_model(),
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,
         messages=strands_history,
+        hooks=[sse_hook],
         state=_loaded_state,
         trace_attributes=to_trace_attrs(
             _loaded_state,

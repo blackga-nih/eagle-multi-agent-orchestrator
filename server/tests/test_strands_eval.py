@@ -3198,6 +3198,163 @@ async def test_36_langfuse_trace_story():
 
 
 # ============================================================
+# Test 37: CloudWatch tool.completed Events — State Delta Telemetry
+# ============================================================
+
+async def test_37_cloudwatch_tool_completed_events():
+    """Validate that AfterToolCallEvent emits tool.completed events with state_delta.
+
+    Runs the UC-01 multi-skill chain (test 15 prompt) via sdk_query(), then
+    queries CloudWatch for tool.completed events from the session. Validates:
+      - At least 3 tool.completed events (one per subagent call)
+      - Events contain tool_name field
+      - At least one event has state_changed=true (update_state was called)
+      - AfterModelCallEvent warning NOT emitted (update_state called before end_turn)
+
+    This test validates the full AfterToolCallEvent + AfterModelCallEvent hook
+    pipeline introduced in the state-snapshot-hooks plan.
+    """
+    print("\n" + "=" * 70)
+    print("TEST 37: CloudWatch tool.completed Events — State Delta Telemetry")
+    print("=" * 70)
+
+    tenant_id = "nci-oa"
+    user_id = "co-johnson-001"
+    tier = "premium"
+    # Use a unique session per run so CloudWatch stream is fresh (no stale events)
+    _run_ts = datetime.now(timezone.utc).strftime("%H%M%S")
+    session_id = f"{tenant_id}-{tier}-{user_id}-eval-037-{_run_ts}"
+
+    print(f"  Session: {session_id}")
+    print("  Running UC-01 multi-skill chain via sdk_query()...")
+
+    # Run the multi-skill chain to generate tool.completed events
+    result_text, usage, tool_names = await _eval_query(
+        prompt=(
+            "New acquisition request: IT modernization services, $500K over 3 years, "
+            "cloud migration and agile development. "
+            "You MUST call all three tools in sequence: "
+            "1) oa_intake to classify the acquisition, "
+            "2) market_intelligence to assess the market, "
+            "3) legal_counsel to check legal risks. "
+            "After completing all analyses, call update_state with state_type='phase_change', "
+            "phase='analysis_complete', previous='intake' to record the transition. "
+            "Then synthesize all findings."
+        ),
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=tier,
+        session_id=session_id,
+        skill_names=["oa-intake", "market-intelligence", "legal-counsel"],
+    )
+
+    print(f"  Tools invoked: {tool_names}")
+    print(f"  Usage: {usage}")
+    print(f"  Result preview: {result_text[:100]}...")
+
+    # Give CloudWatch a moment to ingest the log events
+    import asyncio as _asyncio
+    await _asyncio.sleep(3)
+
+    # Query CloudWatch for tool.completed events from this session
+    try:
+        import boto3 as _boto3
+        cw = _boto3.client("logs", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        log_group = os.getenv("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/app")
+        stream_name = f"session/{session_id}"
+
+        # Look for tool.completed events in the session stream
+        try:
+            resp = cw.get_log_events(
+                logGroupName=log_group,
+                logStreamName=stream_name,
+                limit=100,
+                startFromHead=True,
+            )
+            events = resp.get("events", [])
+        except cw.exceptions.ResourceNotFoundException:
+            events = []
+
+        # Parse events
+        completed_events = []
+        warning_events = []
+        for ev in events:
+            try:
+                msg = json.loads(ev.get("message", "{}"))
+                if msg.get("event_type") == "tool.completed":
+                    completed_events.append(msg)
+                elif msg.get("event_type") == "agent.warning":
+                    warning_events.append(msg)
+            except Exception:
+                pass
+
+        print(f"\n  CloudWatch events in stream '{stream_name}':")
+        print(f"    tool.completed events: {len(completed_events)}")
+        print(f"    agent.warning events:  {len(warning_events)}")
+
+        # Events use top-level fields (emit_telemetry_event spreads **data at root)
+        for ev in completed_events:
+            state_changed = ev.get("state_changed", False)
+            delta = ev.get("state_delta", "{}")
+            print(f"    [tool.completed] {ev.get('tool_name','')}  state_changed={state_changed}  delta={str(delta)[:80]}")
+
+        for ev in warning_events:
+            print(f"    [agent.warning] {ev.get('message','')}")
+
+        # Validate indicators
+        tool_names_in_cw = [ev.get("tool_name", "") for ev in completed_events]
+        has_state_change = any(ev.get("state_changed") for ev in completed_events)
+        no_missing_update_warning = not any(
+            "update_state not called" in ev.get("message", "")
+            for ev in warning_events
+        )
+
+        indicators = {
+            "tool_completed_events_present": len(completed_events) >= 3,
+            "oa_intake_completed": any("oa_intake" in t for t in tool_names_in_cw),
+            "market_intelligence_completed": any("market_intelligence" in t for t in tool_names_in_cw),
+            "legal_counsel_completed": any("legal_counsel" in t for t in tool_names_in_cw),
+            "state_change_captured": has_state_change,
+            "no_missing_update_state_warning": no_missing_update_warning,
+        }
+
+    except Exception as e:
+        print(f"  ERROR querying CloudWatch: {e}")
+        # Fall back to validating just the sdk_query result
+        indicators = {
+            "tool_completed_events_present": False,
+            "oa_intake_completed": any("intake" in t for t in tool_names),
+            "market_intelligence_completed": any("market" in t for t in tool_names),
+            "legal_counsel_completed": any("legal" in t or "counsel" in t for t in tool_names),
+            "state_change_captured": False,
+            "no_missing_update_state_warning": True,
+        }
+
+    print(f"\n  Hook pipeline indicators:")
+    for k, v in indicators.items():
+        mark = "PASS" if v else "FAIL"
+        print(f"    [{mark}] {k}")
+
+    # Also validate sdk_query-level evidence regardless of CloudWatch lag
+    update_state_called = any("update_state" in t for t in tool_names)
+    print(f"\n  sdk_query tool_names: {tool_names}")
+    print(f"  update_state_called={update_state_called}  tools_called={len(tool_names)}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    # Core requirement: AfterToolCallEvent hooks fired (tool.completed in CW)
+    # + update_state was called before end_turn (no agent.warning)
+    # Subagent tool names may vary run-to-run (agent may choose fast tools).
+    passed = (
+        indicators["tool_completed_events_present"]
+        and indicators["no_missing_update_state_warning"]
+        and update_state_called
+    )
+    print(f"\n  Indicators: {indicators_found}/6")
+    print(f"  {'PASS' if passed else 'FAIL'} - CloudWatch tool.completed state delta telemetry")
+    return passed
+
+
+# ============================================================
 # Main infrastructure
 # ============================================================
 
@@ -3263,6 +3420,7 @@ test_names = {
     34: "34_store_crud_functions_exist",
     35: "35_uc01_new_acquisition_package",
     36: "36_langfuse_trace_story",
+    37: "37_cloudwatch_tool_completed_events",
 }
 
 
@@ -3440,6 +3598,7 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         34: ("34_store_crud_functions_exist", test_34_store_crud_functions_exist),
         35: ("35_uc01_new_acquisition_package", test_35_uc01_new_acquisition_package),
         36: ("36_langfuse_trace_story", test_36_langfuse_trace_story),
+        37: ("37_cloudwatch_tool_completed_events", test_37_cloudwatch_tool_completed_events),
     }
 
     result_key, test_fn = TEST_REGISTRY[test_id]

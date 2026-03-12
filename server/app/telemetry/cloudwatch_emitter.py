@@ -207,16 +207,54 @@ def emit_tool_completed(
     user_id: str,
     session_id: str,
     tool_name: str,
+    tool_use_id: str = "",
     duration_ms: int = 0,
     success: bool = True,
+    state_delta: dict | None = None,
 ):
-    """Emit tool.completed after a tool call finishes (legacy compat)."""
+    """Emit tool.completed after a tool call finishes.
+
+    Includes state_delta so CloudWatch Insights can show what eagle_state
+    fields changed as a result of each tool call:
+      fields @timestamp, data.tool_name, data.state_delta
+      | filter event_type = "tool.completed"
+      | filter data.state_delta != "{}"
+    """
     emit_telemetry_event(
         event_type="tool.completed",
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
-        data={"tool_name": tool_name, "duration_ms": duration_ms, "success": success},
+        data={
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "duration_ms": duration_ms,
+            "success": success,
+            "state_delta": _safe_json_preview(state_delta or {}, _TOOL_IO_LIMIT),
+            "state_changed": bool(state_delta),
+        },
+    )
+
+
+def emit_warning(
+    tenant_id: str,
+    session_id: str,
+    user_id: str = "anonymous",
+    message: str = "",
+) -> None:
+    """Emit agent.warning for observability alerts (e.g. missing update_state).
+
+    Queryable via CloudWatch Insights:
+      fields @timestamp, data.message, session_id
+      | filter event_type = "agent.warning"
+      | sort @timestamp desc
+    """
+    emit_telemetry_event(
+        event_type="agent.warning",
+        tenant_id=tenant_id,
+        session_id=session_id,
+        user_id=user_id,
+        data={"message": _truncate(message, _PREVIEW_LIMIT)},
     )
 
 
