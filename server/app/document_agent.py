@@ -135,7 +135,7 @@ def _load_conversation_context(
 ) -> str:
     """Build a text summary of recent conversation messages for the prompt."""
     try:
-        from app.session_store import get_messages
+        from app.stores.session_store import get_messages
 
         leaf = _extract_leaf(session_id)
         if not leaf:
@@ -178,7 +178,7 @@ def _load_state_snapshot(session_id: str, tenant_id: str, user_id: str) -> str:
     state for this session.
     """
     try:
-        from app.session_store import get_messages
+        from app.stores.session_store import get_messages
 
         leaf = _extract_leaf(session_id)
         if not leaf:
@@ -651,7 +651,7 @@ def _get_default_model():
         retries={"max_attempts": 3, "mode": "adaptive"},
     )
     return BedrockModel(
-        model_id=os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-20250514"),
+        model_id=os.getenv("BEDROCK_MODEL_ID", os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")),
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         boto_client_config=config,
     )

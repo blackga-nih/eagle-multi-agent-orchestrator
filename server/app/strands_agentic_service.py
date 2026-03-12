@@ -208,7 +208,7 @@ class EagleSSEHookProvider(HookProvider):
             state["turn_count"] = state.get("turn_count", 0) + 1
             state = stamp(state)
 
-            from .session_store import save_agent_state
+            from .stores.session_store import save_agent_state
             save_agent_state(
                 session_id=self.session_id,
                 state=state,
@@ -633,7 +633,7 @@ async def _maybe_fast_path_document_generation(
     if not should_fast_path or not doc_type:
         return None
 
-    from .agentic_service import _exec_create_document
+    from .tool_dispatch import _exec_create_document
 
     doc_ctx = _extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
@@ -680,7 +680,7 @@ async def _ensure_create_document_for_direct_request(
     if not should_generate or not doc_type or "create_document" in tools_called or "generate_document" in tools_called:
         return None
 
-    from .agentic_service import _exec_create_document
+    from .tool_dispatch import _exec_create_document
 
     doc_ctx = _extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
@@ -1568,7 +1568,7 @@ def _make_update_state_tool(
             # Auto-fetch current checklist from DynamoDB
             pkg_id = parsed.get("package_id", "")
             if pkg_id:
-                from .package_store import get_package_checklist
+                from .stores.package_store import get_package_checklist
                 checklist = get_package_checklist(tenant_id, pkg_id)
                 payload["package_id"] = pkg_id
                 payload["checklist"] = checklist
@@ -1585,7 +1585,7 @@ def _make_update_state_tool(
             # Also fetch checklist if package_id is available
             pkg_id = parsed.get("package_id", "")
             if pkg_id:
-                from .package_store import get_package_checklist
+                from .stores.package_store import get_package_checklist
                 payload["package_id"] = pkg_id
                 payload["checklist"] = get_package_checklist(tenant_id, pkg_id)
 
@@ -1596,7 +1596,7 @@ def _make_update_state_tool(
             # Auto-refresh checklist
             pkg_id = parsed.get("package_id", "")
             if pkg_id:
-                from .package_store import get_package_checklist
+                from .stores.package_store import get_package_checklist
                 payload["package_id"] = pkg_id
                 payload["checklist"] = get_package_checklist(tenant_id, pkg_id)
 
@@ -1649,7 +1649,7 @@ def _make_get_checklist_tool(
         if not pkg_id:
             return json.dumps({"error": "package_id is required"})
 
-        from .package_store import get_package_checklist
+        from .stores.package_store import get_package_checklist
         checklist = get_package_checklist(tenant_id, pkg_id)
         out = json.dumps(checklist, default=str)
         _emit_tool_result("get_package_checklist", out, result_queue, loop)
@@ -1807,7 +1807,7 @@ def _make_service_tool(
                     }
                     # Also fetch updated checklist
                     try:
-                        from .package_store import get_package_checklist
+                        from .stores.package_store import get_package_checklist
                         checklist = get_package_checklist(tenant_id, pkg_id)
                         doc_ready_payload["checklist"] = checklist
                         total = len(checklist.get("required", []))
@@ -2108,7 +2108,7 @@ def build_skill_tools(
         prompt_body = ""
         if workspace_id:
             try:
-                from .wspc_store import resolve_skill
+                from .stores.workspace_config_store import resolve_skill
                 prompt_body, _source = resolve_skill(tenant_id, user_id, workspace_id, name)
             except Exception as exc:
                 logger.warning("wspc_store.resolve_skill failed for %s: %s -- using bundled", name, exc)
@@ -2136,7 +2136,7 @@ def build_skill_tools(
 
     # Merge active user-created SKILL# items
     try:
-        from .skill_store import list_active_skills
+        from .stores.skill_store import list_active_skills
         user_skills = list_active_skills(tenant_id)
         for skill in user_skills:
             name = skill.get("name", "")
@@ -2189,7 +2189,7 @@ def build_supervisor_prompt(
     base_prompt = ""
     if workspace_id:
         try:
-            from .wspc_store import resolve_agent
+            from .stores.workspace_config_store import resolve_agent
             base_prompt, _source = resolve_agent(tenant_id, user_id, workspace_id, "supervisor")
         except Exception as exc:
             logger.warning("wspc_store.resolve_agent failed for supervisor: %s -- using bundled", exc)
@@ -2348,7 +2348,7 @@ async def sdk_query(
     resolved_workspace_id = workspace_id
     if not resolved_workspace_id:
         try:
-            from .workspace_store import get_or_create_default
+            from .stores.workspace_store import get_or_create_default
             ws = get_or_create_default(tenant_id, user_id)
             resolved_workspace_id = ws.get("workspace_id")
         except Exception as exc:
@@ -2386,7 +2386,7 @@ async def sdk_query(
     # Load persisted agent state and normalize (fills any missing keys from defaults)
     _leaf_session = session_id.split("#")[-1] if session_id and "#" in session_id else session_id
     try:
-        from .session_store import load_agent_state
+        from .stores.session_store import load_agent_state
         _loaded_state = normalize(
             load_agent_state(_leaf_session, tenant_id, user_id) if _leaf_session else None
         )
@@ -2417,7 +2417,7 @@ async def sdk_query(
 
     # Flush final state to DynamoDB (non-streaming path; streaming path uses hook)
     try:
-        from .session_store import save_agent_state
+        from .stores.session_store import save_agent_state
         final_state = stamp(getattr(result, "state", None) or _loaded_state)
         final_state["turn_count"] = final_state.get("turn_count", 0) + 1
         if _leaf_session:
@@ -2562,7 +2562,7 @@ async def sdk_query_streaming(
         # Load state for fast-path doc (before the session-scoped load below)
         _fp_leaf = session_id.split("#")[-1] if session_id and "#" in session_id else session_id
         try:
-            from .session_store import load_agent_state
+            from .stores.session_store import load_agent_state
             _fp_state = normalize(
                 load_agent_state(_fp_leaf, tenant_id, user_id) if _fp_leaf else None
             )
@@ -2581,7 +2581,7 @@ async def sdk_query_streaming(
     resolved_workspace_id = workspace_id
     if not resolved_workspace_id:
         try:
-            from .workspace_store import get_or_create_default
+            from .stores.workspace_store import get_or_create_default
             ws = get_or_create_default(tenant_id, user_id)
             resolved_workspace_id = ws.get("workspace_id")
         except Exception as exc:
@@ -2629,7 +2629,7 @@ async def sdk_query_streaming(
     # Load persisted agent state and normalize (fills any missing keys from defaults)
     _leaf_session = session_id.split("#")[-1] if session_id and "#" in session_id else session_id
     try:
-        from .session_store import load_agent_state
+        from .stores.session_store import load_agent_state
         _loaded_state = normalize(
             load_agent_state(_leaf_session, tenant_id, user_id) if _leaf_session else None
         )
