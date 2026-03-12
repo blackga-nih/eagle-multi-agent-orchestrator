@@ -745,6 +745,109 @@ EAGLE_TOOLS = [
     # Knowledge base tools
     KNOWLEDGE_SEARCH_TOOL,
     KNOWLEDGE_FETCH_TOOL,
+    {
+        "name": "workspace_memory",
+        "description": (
+            "View and edit your persistent workspace files. Use to track ongoing "
+            "work, key findings, and important context across sessions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "enum": ["view", "write", "append", "clear", "list", "search"],
+                    "description": "Operation: view/write/append/clear a file, list all files, or search",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "File path (e.g., _workspace.txt, _notes.txt)",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content for write/append operations",
+                },
+            },
+            "required": ["command", "path"],
+        },
+    },
+    {
+        "name": "web_search",
+        "description": (
+            "Search the web for current regulations, policy updates, news, "
+            "and federal acquisition information."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query text",
+                },
+                "search_type": {
+                    "type": "string",
+                    "enum": ["web", "news", "gov"],
+                    "description": "Type of search: web (general), news (recent), gov (federal documents)",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Max results to return (default: 10, max: 20)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "browse_url",
+        "description": (
+            "Fetch and analyze web pages, PDFs, or documents from URLs. "
+            "Can process up to 10 URLs at once."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 10,
+                    "description": "URLs to fetch and extract content from",
+                },
+                "question": {
+                    "type": "string",
+                    "description": "Optional question to focus extraction on",
+                },
+            },
+            "required": ["urls"],
+        },
+    },
+    {
+        "name": "code_execute",
+        "description": (
+            "Execute code in a managed sandbox for calculations, data analysis, "
+            "IGCE cost modeling, and other computational tasks. "
+            "Supports Python, JavaScript, and TypeScript."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "Code to execute",
+                },
+                "language": {
+                    "type": "string",
+                    "enum": ["python", "javascript", "typescript"],
+                    "description": "Programming language (default: python)",
+                },
+                "packages": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Packages to install before execution",
+                },
+            },
+            "required": ["code"],
+        },
+    },
 ]
 
 
@@ -3059,6 +3162,232 @@ def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
     return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
 
 
+# ── Admin CRUD Tool Handlers ─────────────────────────────────────────
+
+def _exec_manage_skills(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for custom skills — wraps skill_store functions."""
+    from app.skill_store import (
+        create_skill, get_skill, update_skill, list_skills,
+        delete_skill, publish_skill, submit_for_review, disable_skill,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_skills(tenant_id, status=params.get("status"))
+        return {"action": "list", "count": len(items), "skills": items}
+
+    if action == "get":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for get"}
+        item = get_skill(tenant_id, skill_id)
+        return {"action": "get", "skill": item} if item else {"error": f"Skill {skill_id} not found"}
+
+    if action == "create":
+        required = ["name", "display_name", "description", "prompt_body"]
+        missing = [f for f in required if not params.get(f)]
+        if missing:
+            return {"error": f"Missing required fields: {', '.join(missing)}"}
+        item = create_skill(
+            tenant_id=tenant_id,
+            owner_user_id=params.get("owner_user_id", "admin"),
+            name=params["name"],
+            display_name=params["display_name"],
+            description=params["description"],
+            prompt_body=params["prompt_body"],
+            triggers=params.get("triggers"),
+            tools=params.get("tools"),
+            model=params.get("model"),
+            visibility=params.get("visibility", "private"),
+        )
+        return {"action": "create", "skill": item}
+
+    if action == "update":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for update"}
+        updates = {k: v for k, v in params.items() if k not in ("action", "skill_id")}
+        item = update_skill(tenant_id, skill_id, updates)
+        return {"action": "update", "skill": item} if item else {"error": f"Skill {skill_id} not found or no updatable fields"}
+
+    if action == "delete":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for delete"}
+        ok = delete_skill(tenant_id, skill_id)
+        return {"action": "delete", "deleted": ok, "skill_id": skill_id}
+
+    if action == "submit":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for submit"}
+        item = submit_for_review(tenant_id, skill_id)
+        return {"action": "submit", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in draft status"}
+
+    if action == "publish":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for publish"}
+        item = publish_skill(tenant_id, skill_id)
+        return {"action": "publish", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in review status"}
+
+    if action == "disable":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for disable"}
+        item = disable_skill(tenant_id, skill_id)
+        return {"action": "disable", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in active status"}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, create, update, delete, submit, publish, disable"}
+
+
+def _exec_manage_prompts(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for agent prompt overrides — wraps prompt_store functions."""
+    from app.prompt_store import (
+        put_prompt, get_prompt, delete_prompt, list_tenant_prompts, resolve_prompt,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_tenant_prompts(tenant_id)
+        return {"action": "list", "count": len(items), "prompts": items}
+
+    if action == "get":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for get"}
+        item = get_prompt(tenant_id, agent_name)
+        return {"action": "get", "prompt": item} if item else {"error": f"No prompt override for agent '{agent_name}'"}
+
+    if action == "set":
+        agent_name = params.get("agent_name")
+        prompt_body = params.get("prompt_body")
+        if not agent_name or not prompt_body:
+            return {"error": "agent_name and prompt_body are required for set"}
+        item = put_prompt(
+            tenant_id=tenant_id,
+            agent_name=agent_name,
+            prompt_body=prompt_body,
+            is_append=params.get("is_append", False),
+        )
+        return {"action": "set", "prompt": item}
+
+    if action == "delete":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for delete"}
+        ok = delete_prompt(tenant_id, agent_name)
+        return {"action": "delete", "deleted": ok, "agent_name": agent_name}
+
+    if action == "resolve":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for resolve"}
+        body = resolve_prompt(tenant_id, agent_name)
+        return {"action": "resolve", "agent_name": agent_name, "resolved_body": body}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
+
+
+def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for document templates — wraps template_store functions."""
+    from app.template_store import (
+        put_template, get_template, delete_template, list_tenant_templates, resolve_template,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_tenant_templates(tenant_id, doc_type=params.get("doc_type"))
+        return {"action": "list", "count": len(items), "templates": items}
+
+    if action == "get":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for get"}
+        item = get_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "get", "template": item} if item else {"error": f"No template for doc_type '{doc_type}'"}
+
+    if action == "set":
+        doc_type = params.get("doc_type")
+        template_body = params.get("template_body")
+        if not doc_type or not template_body:
+            return {"error": "doc_type and template_body are required for set"}
+        item = put_template(
+            tenant_id=tenant_id,
+            doc_type=doc_type,
+            user_id=params.get("user_id", "shared"),
+            template_body=template_body,
+            display_name=params.get("display_name", ""),
+        )
+        return {"action": "set", "template": item}
+
+    if action == "delete":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for delete"}
+        ok = delete_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "delete", "deleted": ok, "doc_type": doc_type}
+
+    if action == "resolve":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for resolve"}
+        body = resolve_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "resolve", "doc_type": doc_type, "resolved_body": body}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
+
+
+# ── AgentCore Tool Handlers ──────────────────────────────────────────
+
+def _exec_workspace_memory(params: dict, tenant_id: str, session_id: str = None) -> dict:
+    """Execute workspace memory operations via AgentCore Memory."""
+    from .agentcore_memory import workspace_memory
+
+    command = params.get("command", "view")
+    path = params.get("path", "_workspace.txt")
+    content = params.get("content", "")
+    user_id = _extract_user_id(session_id)
+    return workspace_memory(command, path, tenant_id, user_id, content, session_id)
+
+
+def _exec_web_search(params: dict, tenant_id: str) -> dict:
+    """Execute web search via Brave Search + GovInfo."""
+    from .search_service import web_search
+
+    query = params.get("query", "")
+    if not query:
+        return {"error": "query is required"}
+    search_type = params.get("search_type", "web")
+    count = params.get("count", 10)
+    return web_search(query, search_type, tenant_id, count)
+
+
+def _exec_browse_url(params: dict, tenant_id: str) -> dict:
+    """Fetch and extract content from URLs via AgentCore Browser."""
+    from .agentcore_browser import browse_urls
+
+    urls = params.get("urls", [])
+    if isinstance(urls, str):
+        urls = [urls]
+    if not urls:
+        return {"error": "urls is required (list of URLs)"}
+    question = params.get("question")
+    return browse_urls(urls, question)
+
+
+def _exec_code_execute(params: dict, tenant_id: str) -> dict:
+    """Execute code via AgentCore Code Interpreter."""
+    from .agentcore_code import execute_code
+
+    code = params.get("code", "")
+    if not code:
+        return {"error": "code is required"}
+    language = params.get("language", "python")
+    packages = params.get("packages")
+    return execute_code(code, language, packages)
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -3078,10 +3407,14 @@ TOOL_DISPATCH = {
     "manage_skills": _exec_manage_skills,
     "manage_prompts": _exec_manage_prompts,
     "manage_templates": _exec_manage_templates,
+    "workspace_memory": _exec_workspace_memory,
+    "web_search": _exec_web_search,
+    "browse_url": _exec_browse_url,
+    "code_execute": _exec_code_execute,
 }
 
 # Tools that need session_id for per-user scoping
-TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status"}
+TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status", "workspace_memory"}
 
 
 def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> str:

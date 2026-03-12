@@ -9,7 +9,6 @@ import {
     HelpCircle,
     Settings,
     Accessibility,
-    MessageSquare,
     type LucideIcon,
 } from 'lucide-react';
 
@@ -194,14 +193,6 @@ export const slashCommands: SlashCommand[] = [
         color: 'gray',
         category: 'Info',
     },
-    {
-        id: 'feedback',
-        name: '/feedback',
-        description: 'Send feedback — bug, suggestion, praise, or correction',
-        icon: MessageSquare,
-        color: 'red',
-        category: 'info',
-    },
 ];
 
 export function filterCommands(query: string): SlashCommand[] {
@@ -268,11 +259,6 @@ export const commandColorClasses: Record<string, { bg: string; text: string; bor
         bg: 'bg-gray-50',
         text: 'text-gray-600',
         border: 'border-gray-200',
-    },
-    red: {
-        bg: 'bg-red-50',
-        text: 'text-red-600',
-        border: 'border-red-200',
     },
     rose: {
         bg: 'bg-rose-50',

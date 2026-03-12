@@ -199,6 +199,47 @@ export class EagleCoreStack extends cdk.Stack {
       resources: [this.userPool.userPoolArn],
     }));
 
+    // Bedrock AgentCore: Memory, Browser, Code Interpreter
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        // Memory data plane
+        'bedrock-agentcore:CreateEvent',
+        'bedrock-agentcore:GetEvent',
+        'bedrock-agentcore:ListEvents',
+        'bedrock-agentcore:DeleteEvent',
+        'bedrock-agentcore:RetrieveMemoryRecords',
+        'bedrock-agentcore:ListMemoryRecords',
+        'bedrock-agentcore:GetMemoryRecord',
+        'bedrock-agentcore:DeleteMemoryRecord',
+        'bedrock-agentcore:ListActors',
+        'bedrock-agentcore:ListSessions',
+        'bedrock-agentcore:BatchCreateMemoryRecords',
+        'bedrock-agentcore:BatchDeleteMemoryRecords',
+        'bedrock-agentcore:BatchUpdateMemoryRecords',
+        // Browser + Code Interpreter data plane
+        'bedrock-agentcore:StartSession',
+        'bedrock-agentcore:StopSession',
+        'bedrock-agentcore:GetSession',
+        'bedrock-agentcore:InvokeSession',
+      ],
+      resources: [
+        `arn:aws:bedrock-agentcore:us-east-1:${this.account}:memory/*`,
+        `arn:aws:bedrock-agentcore:us-east-1:${this.account}:browser/*`,
+        `arn:aws:bedrock-agentcore:us-east-1:${this.account}:code-interpreter/*`,
+      ],
+    }));
+
+    // Bedrock AgentCore control plane
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'bedrock-agentcore-control:GetMemory',
+        'bedrock-agentcore-control:ListMemories',
+        'bedrock-agentcore-control:GetBrowser',
+        'bedrock-agentcore-control:GetCodeInterpreter',
+      ],
+      resources: ['*'],
+    }));
+
     // ── Outputs ──────────────────────────────────────────────
     new cdk.CfnOutput(this, 'VpcId', {
       value: this.vpc.vpcId,

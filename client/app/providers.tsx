@@ -4,7 +4,6 @@ import { ReactNode } from 'react';
 import { AuthProvider } from '@/contexts/auth-context';
 import { SessionProvider } from '@/contexts/session-context';
 import { BackendStatusProvider } from '@/contexts/backend-status-context';
-import { FeedbackProvider } from '@/contexts/feedback-context';
 import FeedbackModal from '@/components/feedback/feedback-modal';
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -12,10 +11,8 @@ export function Providers({ children }: { children: ReactNode }) {
         <AuthProvider>
             <SessionProvider>
                 <BackendStatusProvider>
-                    <FeedbackProvider>
-                        {children}
-                        <FeedbackModal />
-                    </FeedbackProvider>
+                    {children}
+                    <FeedbackModal />
                 </BackendStatusProvider>
             </SessionProvider>
         </AuthProvider>
