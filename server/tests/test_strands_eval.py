@@ -36,7 +36,7 @@ from pathlib import Path as _Path
 from dotenv import load_dotenv as _load_dotenv
 _env_path = _Path(_server_dir) / ".env"
 if _env_path.exists():
-    _load_dotenv(str(_env_path), override=True)
+    _load_dotenv(str(_env_path), override=False)  # shell env vars take precedence
 
 # Initialize Langfuse OTEL exporter if credentials are present
 def _setup_eval_langfuse():

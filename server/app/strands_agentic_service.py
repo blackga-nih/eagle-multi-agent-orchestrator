@@ -335,28 +335,41 @@ _bedrock_client_config = Config(
     tcp_keepalive=True,
 )
 
-# -- Extended Thinking ----------------------------------------------------
-# Set EAGLE_EXTENDED_THINKING=1 to enable Claude's extended thinking mode.
-# Bedrock surfaces reasoning blocks in the response; Strands passes them
-# through conversation history so they appear in Langfuse OTEL spans.
-# budget_tokens controls how much reasoning the model can produce (default 8k).
-# temperature MUST be 1 when thinking is enabled (Bedrock requirement).
-_EXTENDED_THINKING = os.getenv("EAGLE_EXTENDED_THINKING", "0").lower() in ("1", "true", "yes")
-_THINKING_BUDGET = int(os.getenv("EAGLE_THINKING_BUDGET_TOKENS", "8000"))
+# -- Model factory (lazy singleton) ------------------------------------------
+# Built on first use so EAGLE_EXTENDED_THINKING / EAGLE_BEDROCK_MODEL_ID are
+# read after .env is loaded (important for eval runner and local dev).
+# Extended thinking requires temperature=1 (Bedrock requirement) and a model
+# that supports it (Claude claude-haiku-4-5 / Sonnet 4.x+).
 
-_model_kwargs: dict = dict(
-    model_id=MODEL,
-    region_name=os.getenv("AWS_REGION", "us-east-1"),
-    boto_client_config=_bedrock_client_config,
-)
-if _EXTENDED_THINKING:
-    _model_kwargs["additional_request_fields"] = {
-        "thinking": {"type": "enabled", "budget_tokens": _THINKING_BUDGET}
-    }
-    _model_kwargs["temperature"] = 1.0  # Required by Bedrock when thinking is enabled
-    logger.info("EAGLE extended thinking ENABLED (budget=%d tokens)", _THINKING_BUDGET)
+_model: "BedrockModel | None" = None
 
-_model = BedrockModel(**_model_kwargs)
+
+def _get_model() -> "BedrockModel":
+    """Return the shared BedrockModel, building it on first call."""
+    global _model
+    if _model is not None:
+        return _model
+
+    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID") or MODEL
+    extended = os.getenv("EAGLE_EXTENDED_THINKING", "0").lower() in ("1", "true", "yes")
+    budget = int(os.getenv("EAGLE_THINKING_BUDGET_TOKENS", "8000"))
+
+    kwargs: dict = dict(
+        model_id=model_id,
+        region_name=os.getenv("AWS_REGION", "us-east-1"),
+        boto_client_config=_bedrock_client_config,
+    )
+    if extended:
+        kwargs["additional_request_fields"] = {
+            "thinking": {"type": "enabled", "budget_tokens": budget}
+        }
+        kwargs["temperature"] = 1.0
+        logger.info("EAGLE extended thinking ENABLED (model=%s, budget=%d)", model_id, budget)
+    else:
+        logger.info("EAGLE model: %s (thinking off)", model_id)
+
+    _model = BedrockModel(**kwargs)
+    return _model
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
 # Note: Strands subagents don't use CLI tools like Read/Glob/Grep.
@@ -1362,7 +1375,7 @@ def _make_subagent_tool(
     def subagent_tool(query: str) -> str:
         """Placeholder docstring replaced below."""
         agent = Agent(
-            model=_model,
+            model=_get_model(),
             system_prompt=prompt_body,
             callback_handler=None,
             trace_attributes=_subagent_trace_attrs,
@@ -2436,7 +2449,7 @@ async def sdk_query(
     _loaded_state["session_id"] = _leaf_session
 
     supervisor = Agent(
-        model=_model,
+        model=_get_model(),
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,
@@ -2685,7 +2698,7 @@ async def sdk_query_streaming(
     )
 
     supervisor = Agent(
-        model=_model,
+        model=_get_model(),
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,  # stream_async yields events directly
@@ -2920,7 +2933,7 @@ async def sdk_query_single_skill(
     )
 
     agent = Agent(
-        model=_model,
+        model=_get_model(),
         system_prompt=tenant_context + skill_content,
         callback_handler=None,
     )
