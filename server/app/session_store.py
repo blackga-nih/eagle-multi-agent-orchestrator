@@ -285,19 +285,18 @@ def list_sessions(
             ":sk_prefix": "SESSION#",
         }
 
-        filter_expr = None
+        query_kwargs: dict = {
+            "KeyConditionExpression": key_condition,
+            "ExpressionAttributeValues": expr_values,
+            "ScanIndexForward": False,
+            "Limit": limit,
+        }
         if status:
-            filter_expr = "#status = :status"
+            query_kwargs["FilterExpression"] = "#status = :status"
+            query_kwargs["ExpressionAttributeNames"] = {"#status": "status"}
             expr_values[":status"] = status
 
-        response = table.query(
-            KeyConditionExpression=key_condition,
-            ExpressionAttributeValues=expr_values,
-            FilterExpression=filter_expr if filter_expr else None,
-            ExpressionAttributeNames={"#status": "status"} if status else None,
-            ScanIndexForward=False,  # Descending order
-            Limit=limit
-        )
+        response = table.query(**query_kwargs)
 
         sessions = [_serialize_item(item) for item in response.get("Items", [])]
         return sessions

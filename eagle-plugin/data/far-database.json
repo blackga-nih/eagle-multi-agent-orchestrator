@@ -19,9 +19,9 @@
     "part": "2",
     "section": "2.101",
     "title": "Definitions",
-    "summary": "Micro-purchase threshold: $10,000 ($25,000 for DoD contingency operations). Simplified Acquisition Threshold (SAT): $250,000. Commercial product/service definitions provided.",
+    "summary": "Micro-purchase threshold: $15,000 ($25,000 for DoD contingency operations, $2,000 for construction subject to Davis-Bacon, $2,500 for services subject to SCA). Simplified Acquisition Threshold (SAT): $350,000. Commercial product/service definitions provided. Thresholds updated effective October 2025 per FAC 2025-06.",
     "applicability": "All acquisitions — defines key thresholds",
-    "keywords": ["micro-purchase", "threshold", "simplified", "sat", "definitions", "commercial", "$10,000", "$250,000"]
+    "keywords": ["micro-purchase", "threshold", "simplified", "sat", "definitions", "commercial", "$15,000", "$350,000"]
   },
   {
     "part": "3",
@@ -238,6 +238,38 @@
     "summary": "Selecting contract type requires negotiation and is a matter requiring judgment. Fixed-price types provide maximum incentive for cost control. Cost-reimbursement types place risk of cost overrun on Government. A firm-fixed-price contract is preferred when risk involved is minimal.",
     "applicability": "All contracts",
     "keywords": ["contract type", "fixed price", "cost reimbursement", "risk", "selection"]
+  },
+  {
+    "part": "16",
+    "section": "16.500",
+    "title": "Scope of Subpart — Indefinite-Delivery Contracts",
+    "summary": "This subpart prescribes policies and procedures for establishing and using indefinite-delivery contracts: definite-quantity, requirements, and indefinite-quantity (IDIQ). An IDIQ contract provides for an indefinite quantity of supplies or services during a fixed period, with a stated minimum and maximum quantity. Agencies must obligate a minimum amount on each IDIQ contract.",
+    "applicability": "All indefinite-delivery contracts",
+    "keywords": ["indefinite delivery", "idiq", "requirements contract", "definite quantity", "minimum", "maximum", "scope"]
+  },
+  {
+    "part": "16",
+    "section": "16.504",
+    "title": "Indefinite-Quantity Contracts",
+    "summary": "An indefinite-quantity (IDIQ) contract provides for an indefinite quantity within stated limits. The contract must require the Government to order and the contractor to furnish at least a stated minimum quantity. The contracting officer should establish a reasonable maximum. Multiple-award IDIQ preferred to provide fair opportunity. Single-award IDIQ requires a D&F that only one source can meet requirements, or conditions at 16.504(c)(1)(ii) are met.",
+    "applicability": "IDIQ contract formation",
+    "keywords": ["idiq", "indefinite quantity", "minimum guarantee", "maximum quantity", "multiple award", "single award", "d&f"]
+  },
+  {
+    "part": "16",
+    "section": "16.505",
+    "title": "Ordering — Fair Opportunity and Exceptions",
+    "summary": "For multiple-award IDIQ contracts, the contracting officer must provide each awardee a fair opportunity to be considered for each order exceeding the micro-purchase threshold, unless one of four statutory exceptions applies under 16.505(b)(2): (1) the agency need is so urgent that providing a fair opportunity would result in unacceptable delays; (2) only one awardee is capable of providing the supplies or services at the level of quality required because the supplies or services are unique or highly specialized; (3) the order must be issued on a sole-source basis in the interest of economy and efficiency because it is a logical follow-on to an order already issued under the contract; (4) it is necessary to place the order with a particular awardee to satisfy a minimum guarantee. Orders exceeding $7M ($15M DoD) require J&A documentation for exceptions. Fair opportunity is not the same as full and open competition under FAR Part 6.",
+    "applicability": "Task/delivery orders under multiple-award IDIQ contracts",
+    "keywords": ["fair opportunity", "exceptions", "ordering", "task order", "delivery order", "idiq", "sole source", "urgent", "unique", "specialized", "logical follow-on", "minimum guarantee", "j&a", "16.505", "single award task order"]
+  },
+  {
+    "part": "16",
+    "section": "16.506",
+    "title": "Solicitation Provisions and Contract Clauses for IDIQ",
+    "summary": "Contracting officer must insert clause 52.216-18 (Ordering) in indefinite-delivery contracts. Clause 52.216-19 (Order Limitations) establishes minimum and maximum order amounts. Clause 52.216-22 (Indefinite Quantity) specifies requirements for IDIQ contracts. For multiple-award contracts, include clause for fair opportunity procedures.",
+    "applicability": "IDIQ solicitations and contracts",
+    "keywords": ["clauses", "52.216-18", "52.216-19", "52.216-22", "ordering", "order limitations", "indefinite quantity"]
   },
   {
     "part": "16",

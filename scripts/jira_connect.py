@@ -166,6 +166,36 @@ def fetch_board_issues(board_id: int, max_results: int = 50) -> list[dict]:
     return results
 
 
+def get_transitions(issue_key: str) -> list[dict]:
+    """Return available transitions for an issue as [{id, name}, ...]."""
+    url = f"{JIRA_BASE_URL}/rest/api/2/issue/{issue_key}/transitions"
+    resp = requests.get(url, headers=get_headers())
+    if resp.status_code != 200:
+        print(f"Failed to get transitions for {issue_key}: {resp.status_code} - {resp.text}")
+        return []
+    return [{"id": t["id"], "name": t["to"]["name"]} for t in resp.json().get("transitions", [])]
+
+
+def transition_issue(issue_key: str, target_status: str) -> bool:
+    """Transition an issue to the named status. Returns True on success.
+
+    Fetches available transitions and picks the first one whose target status
+    name matches (case-insensitive). Prints available options if no match found.
+    """
+    transitions = get_transitions(issue_key)
+    match = next((t for t in transitions if t["name"].lower() == target_status.lower()), None)
+    if not match:
+        available = ", ".join(t["name"] for t in transitions)
+        print(f"No transition to '{target_status}' for {issue_key}. Available: {available}")
+        return False
+    url = f"{JIRA_BASE_URL}/rest/api/2/issue/{issue_key}/transitions"
+    resp = requests.post(url, headers=get_headers(), json={"transition": {"id": match["id"]}})
+    if resp.status_code == 204:
+        return True
+    print(f"Transition failed for {issue_key}: {resp.status_code} - {resp.text}")
+    return False
+
+
 def fetch_open_issues(project_key, assignees=None, max_results=50):
     """Fetch open issues (not Done), optionally filtered to specific assignees only.
 
@@ -225,8 +255,7 @@ def dry_run():
     if not JIRA_API_TOKEN:
         errors.append("JIRA_API_TOKEN is not set")
     else:
-        masked = JIRA_API_TOKEN[:4] + "..." + JIRA_API_TOKEN[-4:]
-        print(f"  JIRA_API_TOKEN: {masked} ({len(JIRA_API_TOKEN)} chars)")
+        print(f"  JIRA_API_TOKEN: [set, {len(JIRA_API_TOKEN)} chars]")
 
     print(f"\n  Auth method   : Bearer PAT (self-hosted Jira)")
     print(f"  API version   : REST API v2")

@@ -27,11 +27,13 @@ import logging
 import os
 import re
 import sys
-import threading
-import time as _time
+import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
+import boto3
+
+from botocore.config import Config
 from strands import Agent, tool
 from strands.models import BedrockModel
 
@@ -41,6 +43,8 @@ if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
 from eagle_skill_constants import AGENTS, SKILLS, PLUGIN_CONTENTS
+from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
+from .tools.contract_matrix import query_contract_matrix
 
 logger = logging.getLogger("eagle.strands_agent")
 
@@ -80,100 +84,51 @@ class ResultMessage:
     usage: dict = field(default_factory=dict)
 
 
-# -- Streaming Callback Handler ----------------------------------------
+# -- Model Selection -------------------------------------------------
+# If EAGLE_BEDROCK_MODEL_ID is explicitly set, use it.
+# Otherwise, default to Sonnet 4.6 on the NCI account (695681773636)
+# and Haiku 4.5 on any other account (personal dev, CI, etc.).
 
-_SENTINEL = object()  # Signals end of stream
+_NCI_ACCOUNT = "695681773636"
+_SONNET = "us.anthropic.claude-sonnet-4-6"
+_HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
-class QueueCallbackHandler:
-    """Strands callback handler that pushes text deltas and tool_use events into an async queue.
+def _default_model() -> str:
+    env_model = os.getenv("EAGLE_BEDROCK_MODEL_ID")
+    if env_model:
+        return env_model
+    try:
+        import boto3
+        account = boto3.client("sts").get_caller_identity()["Account"]
+        return _SONNET if account == _NCI_ACCOUNT else _HAIKU
+    except Exception:
+        return _HAIKU
 
-    Bedrock ConverseStream sends tool input across multiple events:
-      - contentBlockStart  → toolUse.name + toolUse.toolUseId  (block begins)
-      - contentBlockDelta  → toolUse.input  (JSON string fragments, streamed)
-      - contentBlockStop   → (block ends — we emit the assembled tool_use event here)
 
-    Text deltas arrive via the ``data`` kwarg and are emitted immediately.
-    Tool input is accumulated in ``_pending_tool`` and flushed at contentBlockStop.
-
-    Uses ``loop.call_soon_threadsafe`` to put items onto an ``asyncio.Queue``
-    from the background Strands thread — instant delivery, no polling.
-    """
-
-    def __init__(self, async_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
-        self._queue = async_queue
-        self._loop = loop
-        self.tool_count = 0
-        # Accumulator for in-flight tool block
-        self._pending_tool: dict | None = None   # {"name": str, "id": str, "input_parts": list[str]}
-
-    def _put(self, item: dict) -> None:
-        """Thread-safe put into asyncio.Queue."""
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
-
-    def __call__(self, **kwargs: Any) -> None:
-        event = kwargs.get("event", {})
-        data = kwargs.get("data", "")
-
-        # Text delta — emit immediately
-        if data:
-            self._put({"type": "text", "data": data})
-
-        # contentBlockStart — a new content block (tool or text) is opening
-        content_block_start = event.get("contentBlockStart", {})
-        if content_block_start:
-            tool_use_start = content_block_start.get("start", {}).get("toolUse")
-            if tool_use_start:
-                self._pending_tool = {
-                    "name": tool_use_start.get("name", ""),
-                    "id": tool_use_start.get("toolUseId", ""),
-                    "input_parts": [],
-                }
-
-        # contentBlockDelta — JSON input fragment for the current tool block
-        content_block_delta = event.get("contentBlockDelta", {})
-        if content_block_delta and self._pending_tool is not None:
-            delta_tool_use = content_block_delta.get("delta", {}).get("toolUse", {})
-            fragment = delta_tool_use.get("input", "")
-            if fragment:
-                self._pending_tool["input_parts"].append(fragment)
-
-        # contentBlockStop — tool block is complete; assemble and emit
-        if "contentBlockStop" in event and self._pending_tool is not None:
-            tool_name = self._pending_tool["name"]
-            tool_id = self._pending_tool["id"]
-            raw_input = "".join(self._pending_tool["input_parts"])
-
-            parsed_input: dict = {}
-            if raw_input:
-                try:
-                    parsed_input = json.loads(raw_input)
-                except json.JSONDecodeError:
-                    parsed_input = {"_raw": raw_input}
-
-            self.tool_count += 1
-            self._put({
-                "type": "tool_use",
-                "name": tool_name,
-                "tool_use_id": tool_id,
-                "input": parsed_input,
-            })
-            self._pending_tool = None
+MODEL = _default_model()
+logger.info("EAGLE model: %s", MODEL)
 
 
 # -- Shared Model (module-level) -------------------------------------
 # Created once at import time. Reused across all requests.
 # boto3 handles SSO/IAM natively — no credential bridging needed.
 
-_model = BedrockModel(
-    model_id=os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0"),
-    region_name=os.getenv("AWS_REGION", "us-east-1"),
+_bedrock_client_config = Config(
+    connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "60")),
+    read_timeout=int(os.getenv("EAGLE_BEDROCK_READ_TIMEOUT", "300")),
+    retries={
+        "max_attempts": int(os.getenv("EAGLE_BEDROCK_MAX_ATTEMPTS", "4")),
+        "mode": os.getenv("EAGLE_BEDROCK_RETRY_MODE", "adaptive"),
+    },
+    tcp_keepalive=True,
 )
 
-
-# -- Configuration ---------------------------------------------------
-
-MODEL = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
+_model = BedrockModel(
+    model_id=MODEL,
+    region_name=os.getenv("AWS_REGION", "us-east-1"),
+    boto_client_config=_bedrock_client_config,
+)
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
 # Note: Strands subagents don't use CLI tools like Read/Glob/Grep.
@@ -191,52 +146,388 @@ TIER_BUDGETS = {
     "premium": 0.75,
 }
 
-# -- Trivial Message Fast-Path ------------------------------------------
-# Regex matches greetings, acknowledgments, and simple conversational
-# messages that don't need the full supervisor+tools pipeline.
-_TRIVIAL_RE = re.compile(
-    r"^(hi|hello|hey|howdy|good\s+(morning|afternoon|evening|day)|"
-    r"thanks?|thank\s+you|thx|ok|okay|yes|no|sure|bye|goodbye|"
-    r"what('?s)?\s+up|how\s+are\s+you|nice|great|cool|got\s+it|"
-    r"sounds?\s+good|will\s+do|roger|acknowledged?|understood|yo|sup)[\s!?.]*$",
-    re.IGNORECASE,
+# Fast-path document generation for explicit "generate document" requests.
+# This avoids long multi-tool loops for straightforward document creation asks.
+_DOC_TYPE_HINTS: list[tuple[str, list[str]]] = [
+    ("sow", ["statement of work", " sow"]),
+    ("igce", ["igce", "independent government cost estimate", "cost estimate"]),
+    ("market_research", ["market research"]),
+    ("acquisition_plan", ["acquisition plan"]),
+    ("justification", ["justification", "j&a", "j and a", "sole source"]),
+    ("eval_criteria", ["evaluation criteria", "eval criteria"]),
+    ("security_checklist", ["security checklist"]),
+    ("section_508", ["section 508", "508 compliance"]),
+    ("cor_certification", ["cor certification"]),
+    ("contract_type_justification", ["contract type justification"]),
+]
+_DOC_TYPE_LABELS: dict[str, str] = {
+    "sow": "Statement of Work",
+    "igce": "Independent Government Cost Estimate",
+    "market_research": "Market Research",
+    "acquisition_plan": "Acquisition Plan",
+    "justification": "Justification & Approval",
+    "eval_criteria": "Evaluation Criteria",
+    "security_checklist": "Security Checklist",
+    "section_508": "Section 508 Compliance",
+    "cor_certification": "COR Certification",
+    "contract_type_justification": "Contract Type Justification",
+}
+_DIRECT_DOC_VERBS = ("generate", "draft", "create", "write", "produce")
+_DOC_EDIT_VERBS = ("edit", "update", "revise", "modify", "fill", "rewrite", "adjust", "amend")
+_SLOW_PATH_HINTS = ("research", "far", "dfars", "policy", "compare", "analyze")
+_DOC_REQUEST_BLOCKERS = (
+    "what is",
+    "what's",
+    "how do i",
+    "how to",
+    "explain",
+    "difference between",
 )
 
-_TRIVIAL_SYSTEM_PROMPT = (
-    "You are the EAGLE Acquisition Assistant for the NCI Office of Acquisitions. "
-    "Respond to this greeting or conversational message with a brief, friendly reply. "
-    "Keep it to 1-2 sentences. Be warm and professional. "
-    "If the user seems to need help, mention you can assist with acquisition documents, "
-    "FAR/DFARS guidance, and procurement workflows."
-)
+_PROMPT_SECTION_ALIASES = {
+    "project description": "project_description",
+    "technical requirements": "technical_requirements",
+    "scope of work": "scope_of_work",
+    "deliverables": "deliverables",
+    "environment tiers": "environment_tiers",
+    "security": "security",
+}
 
 
-def _is_trivial_message(prompt: str) -> bool:
-    """Return True if the message is a simple greeting/acknowledgment."""
-    return bool(_TRIVIAL_RE.match(prompt.strip()))
+def _normalize_prompt(prompt: str) -> str:
+    return re.sub(r"\s+", " ", prompt.strip().lower())
 
 
-# -- Supervisor Prompt Cache (60s TTL) ----------------------------------
-_supervisor_prompt_cache: dict[str, dict] = {}
-_SUPERVISOR_PROMPT_CACHE_TTL = 60
+def _extract_user_request_from_prompt(prompt: str) -> str:
+    """Extract the [USER REQUEST] block from document-viewer prompts."""
+    if not prompt:
+        return ""
+    marker = "[USER REQUEST]"
+    if marker not in prompt:
+        return ""
+
+    tail = prompt.split(marker, 1)[1]
+    for stop in ("\n[", "\nInstruction:"):
+        idx = tail.find(stop)
+        if idx >= 0:
+            tail = tail[:idx]
+            break
+    return tail.strip()
 
 
-def _sup_cache_key(tenant_id: str, user_id: str, tier: str, workspace_id: str | None, agent_key: str) -> str:
-    return f"{tenant_id}#{user_id}#{tier}#{workspace_id or 'none'}#{agent_key}"
+def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
+    """Extract document viewer context blocks from wrapped prompts."""
+    if not prompt:
+        return {}
+
+    out: dict[str, str] = {}
+
+    title_match = re.search(r"(?im)^\s*Title:\s*(.+?)\s*$", prompt)
+    if title_match:
+        out["title"] = title_match.group(1).strip()
+
+    type_match = re.search(r"(?im)^\s*Type:\s*([a-z0-9_ -]+)\s*$", prompt)
+    if type_match:
+        out["document_type"] = type_match.group(1).strip().lower().replace(" ", "_")
+
+    excerpt_match = re.search(
+        r"(?is)Current Content Excerpt:\s*(.+?)(?:\n\s*\[ORIGIN SESSION CONTEXT\]|\n\s*\[USER REQUEST\]|$)",
+        prompt,
+    )
+    if excerpt_match:
+        out["current_content"] = excerpt_match.group(1).strip()
+
+    user_request = _extract_user_request_from_prompt(prompt)
+    if user_request:
+        out["user_request"] = user_request
+
+    return out
 
 
-def _sup_cache_get(tenant_id: str, user_id: str, tier: str, workspace_id: str | None, agent_key: str) -> str | None:
-    key = _sup_cache_key(tenant_id, user_id, tier, workspace_id, agent_key)
-    entry = _supervisor_prompt_cache.get(key)
-    if entry and _time.time() < entry["ts"] + _SUPERVISOR_PROMPT_CACHE_TTL:
-        return entry["prompt"]
+def _infer_doc_type_from_prompt(prompt: str) -> str | None:
+    lowered = f" {_normalize_prompt(prompt)} "
+    for doc_type, hints in _DOC_TYPE_HINTS:
+        if any(hint in lowered for hint in hints):
+            return doc_type
     return None
 
 
-def _sup_cache_set(tenant_id: str, user_id: str, tier: str, workspace_id: str | None, agent_key: str, prompt: str) -> None:
-    key = _sup_cache_key(tenant_id, user_id, tier, workspace_id, agent_key)
-    _supervisor_prompt_cache[key] = {"ts": _time.time(), "prompt": prompt}
+def _is_document_generation_request(prompt: str) -> tuple[bool, str | None]:
+    lowered = _normalize_prompt(prompt)
+    doc_type = _infer_doc_type_from_prompt(prompt)
+    if not doc_type:
+        return False, None
+    if any(lowered.startswith(blocker) for blocker in _DOC_REQUEST_BLOCKERS):
+        return False, None
+    if any(v in lowered for v in _DIRECT_DOC_VERBS):
+        return True, doc_type
 
+    # Document-viewer prompts include explicit wrappers; treat edit verbs in
+    # [USER REQUEST] as document generation intent.
+    if "[document context]" in lowered and "[user request]" in lowered:
+        user_req = _extract_user_request_from_prompt(prompt).lower()
+        if any(v in user_req for v in _DIRECT_DOC_VERBS) or any(v in user_req for v in _DOC_EDIT_VERBS):
+            return True, doc_type
+
+    phrase = _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ")).lower()
+    if lowered.startswith(phrase):
+        return True, doc_type
+    if re.search(rf"\b(need|want|please)\b.*\b{re.escape(phrase)}\b", lowered):
+        return True, doc_type
+
+    return False, None
+
+
+def _should_use_fast_document_path(prompt: str) -> tuple[bool, str | None]:
+    should_generate, doc_type = _is_document_generation_request(prompt)
+    if not should_generate or not doc_type:
+        return False, None
+
+    lowered = _normalize_prompt(prompt)
+    if "[document context]" in lowered:
+        return False, None
+    if any(h in lowered for h in _SLOW_PATH_HINTS):
+        return False, None
+    return True, doc_type
+
+
+def _extract_prompt_sections(prompt: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+
+    for raw_line in (prompt or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        heading = line.rstrip(":").strip().lower()
+        if heading in _PROMPT_SECTION_ALIASES:
+            current = _PROMPT_SECTION_ALIASES[heading]
+            sections.setdefault(current, [])
+            continue
+
+        if line.startswith("- ") or line.startswith("* "):
+            item = line[2:].strip().strip('"')
+            if not item:
+                continue
+            bucket = current or "general"
+            sections.setdefault(bucket, []).append(item)
+
+    return sections
+
+
+def _extract_context_data_from_prompt(prompt: str, doc_type: str) -> dict[str, Any]:
+    """Derive create_document data fields from the current user prompt."""
+    if not prompt:
+        return {}
+
+    data: dict[str, Any] = {}
+    doc_ctx = _extract_document_context_from_prompt(prompt)
+    if doc_ctx.get("current_content"):
+        data["current_content"] = doc_ctx["current_content"]
+    if doc_ctx.get("user_request"):
+        data["edit_request"] = doc_ctx["user_request"]
+
+    sections = _extract_prompt_sections(prompt)
+
+    project_description = " ".join(sections.get("project_description", [])).strip()
+    if project_description:
+        data["description"] = project_description[:500]
+        data["requirement"] = project_description[:500]
+    else:
+        user_req = _extract_user_request_from_prompt(prompt)
+        if user_req:
+            data["description"] = user_req[:500]
+            data["requirement"] = user_req[:500]
+
+    scope_items = sections.get("scope_of_work", [])
+    tech_items = sections.get("technical_requirements", [])
+    if doc_type == "sow":
+        tasks = (scope_items + tech_items)[:20]
+        if tasks:
+            data["tasks"] = tasks
+        if sections.get("deliverables"):
+            data["deliverables"] = sections["deliverables"][:15]
+        if sections.get("security"):
+            data["security_requirements"] = "; ".join(sections["security"])[:600]
+        if sections.get("environment_tiers"):
+            data["place_of_performance"] = "; ".join(sections["environment_tiers"])[:300]
+        if scope_items:
+            data["scope"] = " ".join(scope_items)[:500]
+
+    # Common budget/timeline extraction (best effort)
+    m_money = re.search(r"\$[0-9][0-9,]*(?:\.[0-9]+)?", prompt)
+    if m_money:
+        money = m_money.group(0)
+        data.setdefault("estimated_cost", money)
+        data.setdefault("estimated_value", money)
+        data.setdefault("total_estimate", money)
+
+    m_period = re.search(r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})", prompt, flags=re.IGNORECASE)
+    if m_period:
+        period = m_period.group(0).strip()
+        data.setdefault("period_of_performance", period)
+        data.setdefault("timeline", period)
+
+    return data
+
+
+def _fast_path_title(prompt: str, doc_type: str) -> str:
+    return _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ").title())
+
+
+# -- Trivial greeting fast-path (no LLM call needed) --------------------
+
+_TRIVIAL_RE = re.compile(
+    r"^(?:h(?:i|ello|ey|owdy)|yo|sup|good\s*(?:morning|afternoon|evening)"
+    r"|thanks?(?:\s*you)?|ok(?:ay)?|sure|bye|goodbye|see\s*ya"
+    r"|how\s*are\s*you|what'?s?\s*up|hey\s*there)[\s!?.]*$",
+    re.IGNORECASE,
+)
+
+_INTAKE_FORM_RE = re.compile(r'^\s*\{.*"form_type"\s*:\s*"baseline_intake".*\}\s*$', re.DOTALL)
+_INTAKE_RESPONSE = "Thanks for your submission."
+
+_GREETING_RESPONSES = [
+    "Hey! What are you working on today?",
+    "Hi there! What can I help you with?",
+    "Hey! Got an acquisition question or need to start something?",
+]
+
+
+def _fast_trivial_response(prompt: str) -> dict | None:
+    """Return a canned response for trivial greetings, skipping the LLM entirely."""
+    if not _TRIVIAL_RE.match(prompt.strip()):
+        return None
+    import random
+    return {
+        "text": random.choice(_GREETING_RESPONSES),
+        "usage": {"fast_path": True, "trivial": True},
+    }
+
+
+def _fast_intake_form_response(prompt: str) -> dict | None:
+    """Return a canned response for baseline intake form submissions."""
+    stripped = prompt.strip()
+    if not _INTAKE_FORM_RE.match(stripped):
+        return None
+    # Parse and log the submission (session context storage is handled on next turn)
+    try:
+        payload = json.loads(stripped)
+        logger.info("Intake form submitted: form_type=%s, questions=%d",
+                     payload.get("form_type"), len(payload.get("answers", {})))
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {
+        "text": _INTAKE_RESPONSE,
+        "usage": {"fast_path": True, "intake_form": True},
+    }
+
+
+def _build_scoped_session_id(
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+) -> str:
+    if session_id and "#" in session_id:
+        return session_id
+    return f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
+
+
+async def _maybe_fast_path_document_generation(
+    prompt: str,
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    package_context: Any = None,
+) -> dict | None:
+    should_fast_path, doc_type = _should_use_fast_document_path(prompt)
+    if not should_fast_path or not doc_type:
+        return None
+
+    from .agentic_service import _exec_create_document
+
+    doc_ctx = _extract_document_context_from_prompt(prompt)
+    params: dict[str, Any] = {
+        "doc_type": doc_type,
+        "title": doc_ctx.get("title") or _fast_path_title(prompt, doc_type),
+    }
+    contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
+    if contextual_data:
+        params["data"] = contextual_data
+    if (
+        package_context is not None
+        and getattr(package_context, "is_package_mode", False)
+        and getattr(package_context, "package_id", None)
+    ):
+        params["package_id"] = package_context.package_id
+
+    scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
+    result = await asyncio.to_thread(
+        _exec_create_document,
+        params,
+        tenant_id,
+        scoped_session_id,
+    )
+    return {
+        "doc_type": doc_type,
+        "result": result,
+    }
+
+
+async def _ensure_create_document_for_direct_request(
+    prompt: str,
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    package_context: Any,
+    tools_called: list[str],
+) -> dict | None:
+    """Force a create_document call for direct doc requests that missed the tool.
+
+    This reconciles cases where the model produced inline draft content without
+    invoking create_document, which breaks document-card/editing UX.
+    """
+    should_generate, doc_type = _is_document_generation_request(prompt)
+    if not should_generate or not doc_type or "create_document" in tools_called or "generate_document" in tools_called:
+        return None
+
+    from .agentic_service import _exec_create_document
+
+    doc_ctx = _extract_document_context_from_prompt(prompt)
+    params: dict[str, Any] = {
+        "doc_type": doc_type,
+        "title": doc_ctx.get("title") or _fast_path_title(prompt, doc_type),
+    }
+    contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
+    if contextual_data:
+        params["data"] = contextual_data
+    if (
+        package_context is not None
+        and getattr(package_context, "is_package_mode", False)
+        and getattr(package_context, "package_id", None)
+    ):
+        params["package_id"] = package_context.package_id
+
+    scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
+    result = await asyncio.to_thread(
+        _exec_create_document,
+        params,
+        tenant_id,
+        scoped_session_id,
+    )
+    if isinstance(result, dict) and result.get("error"):
+        logger.warning(
+            "Forced create_document failed for prompt='%s': %s",
+            prompt[:160],
+            result.get("error"),
+        )
+        return None
+
+    return {
+        "doc_type": doc_type,
+        "result": result,
+    }
 
 # -- Tool Schemas (for health/status endpoints) -------------------------
 # These are the Anthropic tool_use format schemas used by main.py and
@@ -352,6 +643,62 @@ EAGLE_TOOLS = [
             "required": ["operation"],
         },
     },
+    # Progressive disclosure tools
+    {
+        "name": "list_skills",
+        "description": (
+            "List available skills, agents, and data files with descriptions and triggers. "
+            "Use to discover capabilities before diving deeper."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["skills", "agents", "data", ""],
+                    "description": "Filter: 'skills', 'agents', 'data', or '' for all",
+                },
+            },
+        },
+    },
+    {
+        "name": "load_skill",
+        "description": (
+            "Load full skill or agent instructions by name. Returns the complete "
+            "SKILL.md or agent.md content for following workflows without spawning a subagent."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Skill or agent name (e.g. 'oa-intake', 'compliance')",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "load_data",
+        "description": (
+            "Load reference data from the plugin data directory. Access thresholds, "
+            "contract types, document requirements, approval chains, contract vehicles."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Data file name (e.g. 'matrix', 'thresholds', 'contract-vehicles')",
+                },
+                "section": {
+                    "type": "string",
+                    "description": "Optional section key (e.g. 'thresholds', 'doc_rules', 'approval_chains')",
+                },
+            },
+            "required": ["name"],
+        },
+    },
     {
         "name": "search_far",
         "description": (
@@ -376,13 +723,44 @@ EAGLE_TOOLS = [
             "required": ["query"],
         },
     },
+    KNOWLEDGE_SEARCH_TOOL,
+    KNOWLEDGE_FETCH_TOOL,
+    {
+        "name": "generate_document",
+        "description": (
+            "Generate a complete acquisition document using AI-driven content. "
+            "Pass only the document type — conversation context and templates are "
+            "loaded automatically. The AI writes full prose using NCI templates as "
+            "guidelines. Produces SOW, IGCE, Market Research, J&A, Acquisition Plan, "
+            "Evaluation Criteria, Security Checklist, Section 508, COR Certification, "
+            "or Contract Type Justification. Includes omission tracking and decision rationale."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "doc_type": {
+                    "type": "string",
+                    "enum": [
+                        "sow", "igce", "market_research", "justification",
+                        "acquisition_plan", "eval_criteria", "security_checklist",
+                        "section_508", "cor_certification",
+                        "contract_type_justification"
+                    ],
+                    "description": "Type of acquisition document to generate",
+                },
+                "special_instructions": {
+                    "type": "string",
+                    "description": "Optional user-specific guidance (e.g. 'emphasize security', 'use FFP contract type')",
+                },
+            },
+            "required": ["doc_type"],
+        },
+    },
     {
         "name": "create_document",
         "description": (
-            "Generate acquisition documents including SOW, IGCE, Market Research, "
-            "J&A, Acquisition Plan, Evaluation Criteria, Security Checklist, "
-            "Section 508 Statement, COR Certification, and Contract Type "
-            "Justification. Documents are saved to S3."
+            "Legacy document generator — use generate_document instead for AI-driven content. "
+            "Kept for backward compatibility. Pass doc_type, title, and optional data fields."
         ),
         "input_schema": {
             "type": "object",
@@ -454,25 +832,79 @@ EAGLE_TOOLS = [
         },
     },
     {
-        "name": "query_compliance_matrix",
+        "name": "update_state",
         "description": (
-            "Query NCI/NIH contract requirements decision tree. "
-            "Pass a JSON params string with operation (query/list_methods/list_types/"
-            "list_thresholds/search_far/suggest_vehicle) and operation-specific fields."
+            "Push a structured state update to the frontend UI via SSE. "
+            "Used to send real-time checklist progress, phase changes, "
+            "document-ready notifications, and compliance alerts."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "params": {
+                "state_type": {
                     "type": "string",
-                    "description": (
-                        'JSON string. For query: {"operation":"query","contract_value":85000,'
-                        '"acquisition_method":"sap","contract_type":"ffp","is_services":true}. '
-                        'For search: {"operation":"search_far","keyword":"sole source"}.'
-                    ),
+                    "enum": ["checklist_update", "phase_change", "document_ready", "compliance_alert"],
+                    "description": "Type of state update to push to the frontend",
+                },
+                "package_id": {
+                    "type": "string",
+                    "description": "Acquisition package ID — checklist is auto-fetched from DB",
+                },
+                "phase": {
+                    "type": "string",
+                    "description": "New phase name (for phase_change)",
+                },
+                "previous": {
+                    "type": "string",
+                    "description": "Previous phase name (for phase_change)",
+                },
+                "doc_type": {
+                    "type": "string",
+                    "description": "Document type (for document_ready)",
+                },
+                "version": {
+                    "type": "integer",
+                    "description": "Document version (for document_ready)",
+                },
+                "document_id": {
+                    "type": "string",
+                    "description": "Document ID (for document_ready)",
+                },
+                "severity": {
+                    "type": "string",
+                    "enum": ["info", "warning", "critical"],
+                    "description": "Alert severity (for compliance_alert)",
+                },
+                "items": {
+                    "type": "array",
+                    "description": "Compliance finding items (for compliance_alert)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "note": {"type": "string"},
+                        },
+                    },
                 },
             },
-            "required": ["params"],
+            "required": ["state_type"],
+        },
+    },
+    {
+        "name": "get_package_checklist",
+        "description": (
+            "Fetch the current acquisition package checklist. Returns required, "
+            "completed, and missing documents for the given package."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "package_id": {
+                    "type": "string",
+                    "description": "The acquisition package ID to fetch checklist for",
+                },
+            },
+            "required": ["package_id"],
         },
     },
     {
@@ -586,26 +1018,38 @@ MAX_SKILL_PROMPT_CHARS = 4000
 
 # -- Skill -> @tool Registry (built from plugin metadata) ------------
 
-_PLUGIN_JSON_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "eagle-plugin", "plugin.json"
+_PLUGIN_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "eagle-plugin"
 )
+_PLUGIN_JSON_PATH = os.path.join(_PLUGIN_DIR, "plugin.json")
 
 
 def _load_plugin_config() -> dict:
-    """Load plugin manifest -- prefers DynamoDB PLUGIN#manifest, falls back to bundled file."""
+    """Load plugin config, merging DynamoDB manifest with bundled plugin.json.
+
+    The DynamoDB PLUGIN#manifest only stores version/agent_count/skill_count —
+    it does NOT include the 'data' index needed by load_data(). Always load
+    the bundled plugin.json as the base, then overlay any DynamoDB manifest
+    fields on top.
+    """
+    # Always start from the bundled plugin.json (has 'data', 'capabilities', etc.)
+    config: dict = {}
+    try:
+        with open(_PLUGIN_JSON_PATH, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    # Overlay DynamoDB manifest fields (version, agent_count, skill_count)
     try:
         from .plugin_store import get_plugin_manifest
         manifest = get_plugin_manifest()
         if manifest:
-            return manifest
+            config.update(manifest)
     except Exception:
         pass
 
-    try:
-        with open(_PLUGIN_JSON_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return config
 
 
 def _build_registry() -> dict:
@@ -647,28 +1091,6 @@ def _build_registry() -> dict:
 
 SKILL_AGENT_REGISTRY = _build_registry()
 
-# -- Skill Tools Cache (60s TTL) ------------------------------------
-_skill_tools_cache: dict[str, dict] = {}
-_SKILL_TOOLS_CACHE_TTL = 60
-
-
-def _tools_cache_key(tenant_id: str, tier: str, workspace_id: str | None) -> str:
-    return f"{tenant_id}#{tier}#{workspace_id or 'none'}"
-
-
-def _tools_cache_get(tenant_id: str, tier: str, workspace_id: str | None) -> list | None:
-    key = _tools_cache_key(tenant_id, tier, workspace_id)
-    entry = _skill_tools_cache.get(key)
-    if entry and _time.time() < entry["ts"] + _SKILL_TOOLS_CACHE_TTL:
-        return entry["tools"]
-    return None
-
-
-def _tools_cache_set(tenant_id: str, tier: str, workspace_id: str | None, tools: list) -> None:
-    _skill_tools_cache[_tools_cache_key(tenant_id, tier, workspace_id)] = {
-        "ts": _time.time(), "tools": tools,
-    }
-
 
 def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> str:
     """Truncate skill content to fit within subagent context budget."""
@@ -679,7 +1101,13 @@ def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> st
 
 # -- @tool Factory ---------------------------------------------------
 
-def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
+def _make_subagent_tool(
+    skill_name: str,
+    description: str,
+    prompt_body: str,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
     """Create a @tool-wrapped subagent from skill registry entry.
 
     Each invocation constructs a fresh Agent with the resolved prompt.
@@ -695,7 +1123,17 @@ def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
             system_prompt=prompt_body,
             callback_handler=None,
         )
-        return str(agent(query))
+        raw = str(agent(query))
+
+        # Emit tool_result so the frontend can show the specialist's report
+        if result_queue and loop:
+            truncated = raw[:3000] + "..." if len(raw) > 3000 else raw
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "tool_result", "name": safe_name, "result": {"report": truncated}},
+            )
+
+        return raw
 
     # Override docstring (required for Strands schema extraction)
     subagent_tool.__doc__ = (
@@ -706,20 +1144,323 @@ def _make_subagent_tool(skill_name: str, description: str, prompt_body: str):
     return subagent_tool
 
 
+
+# -- Progressive Disclosure @tools ------------------------------------
+# These give the supervisor on-demand access to skill metadata and
+# plugin data WITHOUT spawning subagents or bloating the system prompt.
+# Pattern: Layer 1 (system prompt hints) → Layer 2 (list_skills) →
+#          Layer 3 (load_skill) → Layer 4 (load_data)
+#
+# Each is a factory function that closes over result_queue/loop so
+# tool_result events reach the frontend for tool card observability.
+
+
+def _emit_tool_result(
+    tool_name: str,
+    result_str: str,
+    result_queue: asyncio.Queue | None,
+    loop: asyncio.AbstractEventLoop | None,
+):
+    """Emit a tool_result event to the frontend via result_queue."""
+    if not result_queue or not loop:
+        return
+    try:
+        parsed = json.loads(result_str) if isinstance(result_str, str) else result_str
+    except (json.JSONDecodeError, TypeError):
+        parsed = {"raw": result_str[:2000]} if result_str else {}
+    # Truncate large text fields to avoid SSE bloat
+    if isinstance(parsed, dict):
+        for key in ("content", "text", "body"):
+            val = parsed.get(key)
+            if isinstance(val, str) and len(val) > 2000:
+                parsed = {**parsed, key: val[:2000] + "..."}
+                break
+    loop.call_soon_threadsafe(
+        result_queue.put_nowait,
+        {"type": "tool_result", "name": tool_name, "result": parsed},
+    )
+
+
+def _make_list_skills_tool(
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    @tool(name="list_skills")
+    def list_skills_tool(category: str = "") -> str:
+        """List available skills, agents, and data files with descriptions and triggers. Use this to discover what capabilities and reference data are available before diving deeper.
+
+        Args:
+            category: Filter by category: "skills", "agents", "data", or "" for all
+        """
+        result: dict[str, Any] = {}
+
+        if category in ("", "skills"):
+            skills_list = []
+            for name, entry in SKILLS.items():
+                skills_list.append({
+                    "name": name,
+                    "description": entry.get("description", ""),
+                    "triggers": entry.get("triggers", []),
+                })
+            result["skills"] = skills_list
+
+        if category in ("", "agents"):
+            agents_list = []
+            for name, entry in AGENTS.items():
+                if name == "supervisor":
+                    continue
+                agents_list.append({
+                    "name": name,
+                    "description": entry.get("description", ""),
+                    "triggers": entry.get("triggers", []),
+                })
+            result["agents"] = agents_list
+
+        if category in ("", "data"):
+            config = _load_plugin_config()
+            data_index = config.get("data", {})
+            data_list = []
+            if isinstance(data_index, dict):
+                for name, meta in data_index.items():
+                    data_list.append({
+                        "name": name,
+                        "description": meta.get("description", ""),
+                        "sections": meta.get("sections", []),
+                    })
+            result["data"] = data_list
+
+        out = json.dumps(result, indent=2)
+        _emit_tool_result("list_skills", out, result_queue, loop)
+        return out
+
+    return list_skills_tool
+
+
+def _make_load_skill_tool(
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    @tool(name="load_skill")
+    def load_skill_tool(name: str) -> str:
+        """Load full skill or agent instructions by name. Returns the complete SKILL.md or agent.md content so you can follow the workflow yourself without spawning a subagent. Use this when you need to understand a skill's detailed procedures, decision trees, or templates.
+
+        Args:
+            name: Skill or agent name (e.g. "oa-intake", "legal-counsel", "compliance")
+        """
+        entry = PLUGIN_CONTENTS.get(name)
+        if not entry:
+            available = sorted(PLUGIN_CONTENTS.keys())
+            out = json.dumps({
+                "error": f"No skill or agent named '{name}'",
+                "available": available,
+            })
+        else:
+            out = entry["body"]
+        _emit_tool_result("load_skill", out, result_queue, loop)
+        return out
+
+    return load_skill_tool
+
+
+def _make_load_data_tool(
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    @tool(name="load_data")
+    def load_data_tool(name: str, section: str = "") -> str:
+        """Load reference data from the eagle-plugin data directory. Use this to access thresholds, contract types, document requirements, approval chains, contract vehicles, and other acquisition reference data on demand.
+
+        Args:
+            name: Data file name (e.g. "matrix", "thresholds", "contract-vehicles")
+            section: Optional top-level key to extract (e.g. "thresholds", "doc_rules", "approval_chains", "contract_types"). Omit to get the full file.
+        """
+        config = _load_plugin_config()
+        data_index = config.get("data", {})
+
+        if isinstance(data_index, list):
+            out = json.dumps({"error": "Data index not configured. Available files: " + str(data_index)})
+            _emit_tool_result("load_data", out, result_queue, loop)
+            return out
+
+        meta = data_index.get(name)
+        if not meta:
+            out = json.dumps({
+                "error": f"No data file named '{name}'",
+                "available": sorted(data_index.keys()),
+            })
+            _emit_tool_result("load_data", out, result_queue, loop)
+            return out
+
+        file_rel = meta.get("file", f"data/{name}.json")
+        file_path = os.path.join(_PLUGIN_DIR, file_rel)
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            out = json.dumps({"error": f"Data file not found: {file_rel}"})
+            _emit_tool_result("load_data", out, result_queue, loop)
+            return out
+        except json.JSONDecodeError as exc:
+            out = json.dumps({"error": f"Invalid JSON in {file_rel}: {str(exc)}"})
+            _emit_tool_result("load_data", out, result_queue, loop)
+            return out
+
+        if section:
+            value = data.get(section)
+            if value is None:
+                out = json.dumps({
+                    "error": f"Section '{section}' not found in '{name}'",
+                    "available_sections": list(data.keys()),
+                })
+                _emit_tool_result("load_data", out, result_queue, loop)
+                return out
+            out = json.dumps({section: value}, indent=2, default=str)
+            _emit_tool_result("load_data", out, result_queue, loop)
+            return out
+
+        out = json.dumps(data, indent=2, default=str)
+        _emit_tool_result("load_data", out, result_queue, loop)
+        return out
+
+    return load_data_tool
+
+
+# -- State Push @tools (update_state + get_package_checklist) ----------
+# These enable real-time frontend UI updates via SSE METADATA events.
+
+def _make_update_state_tool(
+    tenant_id: str,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    """Create a tool that pushes structured state to the frontend via SSE METADATA events.
+
+    State types:
+      - checklist_update: package checklist progress (required/completed/missing)
+      - phase_change: acquisition workflow phase transition
+      - document_ready: notification that a document was created/updated
+      - compliance_alert: compliance findings that need attention
+    """
+
+    @tool(name="update_state")
+    def update_state_tool(params: str) -> str:
+        """Push a structured state update to the frontend UI. The frontend renders this immediately as a live checklist, progress bar, or alert.
+
+        Args:
+            params: JSON string with keys: state_type (required: checklist_update|phase_change|document_ready|compliance_alert), package_id (optional), and state-type-specific fields. For checklist_update: reads current package state from DB automatically — just pass package_id. For phase_change: pass phase, previous. For document_ready: pass doc_type, version, document_id. For compliance_alert: pass severity (info|warning|critical), items (array of {name, note}).
+        """
+        parsed = json.loads(params) if isinstance(params, str) else params
+        state_type = parsed.get("state_type", "")
+
+        if not state_type:
+            return json.dumps({"error": "state_type is required"})
+
+        payload: dict = {"state_type": state_type}
+
+        if state_type == "checklist_update":
+            # Auto-fetch current checklist from DynamoDB
+            pkg_id = parsed.get("package_id", "")
+            if pkg_id:
+                from .package_store import get_package_checklist
+                checklist = get_package_checklist(tenant_id, pkg_id)
+                payload["package_id"] = pkg_id
+                payload["checklist"] = checklist
+                total = len(checklist.get("required", []))
+                done = len(checklist.get("completed", []))
+                payload["progress_pct"] = round((done / total * 100) if total > 0 else 0)
+            else:
+                payload["checklist"] = parsed.get("checklist", {})
+                payload["progress_pct"] = parsed.get("progress_pct", 0)
+
+        elif state_type == "phase_change":
+            payload["phase"] = parsed.get("phase", "")
+            payload["previous"] = parsed.get("previous", "")
+            # Also fetch checklist if package_id is available
+            pkg_id = parsed.get("package_id", "")
+            if pkg_id:
+                from .package_store import get_package_checklist
+                payload["package_id"] = pkg_id
+                payload["checklist"] = get_package_checklist(tenant_id, pkg_id)
+
+        elif state_type == "document_ready":
+            payload["doc_type"] = parsed.get("doc_type", "")
+            payload["version"] = parsed.get("version", 1)
+            payload["document_id"] = parsed.get("document_id", "")
+            # Auto-refresh checklist
+            pkg_id = parsed.get("package_id", "")
+            if pkg_id:
+                from .package_store import get_package_checklist
+                payload["package_id"] = pkg_id
+                payload["checklist"] = get_package_checklist(tenant_id, pkg_id)
+
+        elif state_type == "compliance_alert":
+            payload["severity"] = parsed.get("severity", "info")
+            payload["items"] = parsed.get("items", [])
+
+        else:
+            return json.dumps({"error": f"Unknown state_type: {state_type}"})
+
+        # Push to frontend via SSE METADATA event
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "metadata", "content": payload},
+            )
+
+        return json.dumps({"ok": True, "state_type": state_type, "pushed": True})
+
+    return update_state_tool
+
+
+def _make_get_checklist_tool(
+    tenant_id: str,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    @tool(name="get_package_checklist")
+    def get_checklist_tool(params: str) -> str:
+        """Fetch the current acquisition package checklist showing required, completed, and missing documents. Returns {required, completed, missing, complete} for the given package_id.
+
+        Args:
+            params: JSON string with key: package_id (required)
+        """
+        parsed = json.loads(params) if isinstance(params, str) else params
+        pkg_id = parsed.get("package_id", "")
+        if not pkg_id:
+            return json.dumps({"error": "package_id is required"})
+
+        from .package_store import get_package_checklist
+        checklist = get_package_checklist(tenant_id, pkg_id)
+        out = json.dumps(checklist, default=str)
+        _emit_tool_result("get_package_checklist", out, result_queue, loop)
+        return out
+
+    return get_checklist_tool
+
+
 # -- Compliance Matrix @tool (available to all agents) ----------------
 
-@tool(name="query_compliance_matrix")
-def _compliance_matrix_tool(params: str) -> str:
-    """Query NCI/NIH contract requirements decision tree. Pass a JSON string with keys: operation (required), contract_value, acquisition_method, contract_type, is_it, is_small_business, is_rd, is_human_subjects, is_services, keyword. Operations: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle.
+def _make_compliance_matrix_tool(
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    @tool(name="query_compliance_matrix")
+    def compliance_matrix_tool(params: str) -> str:
+        """Query NCI/NIH contract requirements decision tree. Pass a JSON string with keys: operation (required), contract_value, acquisition_method, contract_type, is_it, is_small_business, is_rd, is_human_subjects, is_services, keyword. Operations: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle.
 
-    Args:
-        params: JSON string, e.g. {"operation":"query","contract_value":85000,"acquisition_method":"sap","contract_type":"ffp","is_services":true}
-    """
-    from .compliance_matrix import execute_operation
+        Args:
+            params: JSON string, e.g. {"operation":"query","contract_value":85000,"acquisition_method":"sap","contract_type":"ffp","is_services":true}
+        """
+        from .compliance_matrix import execute_operation
 
-    parsed = json.loads(params) if isinstance(params, str) else params
-    result = execute_operation(parsed)
-    return json.dumps(result, indent=2, default=str)
+        parsed = json.loads(params) if isinstance(params, str) else params
+        result = execute_operation(parsed)
+        out = json.dumps(result, indent=2, default=str)
+        _emit_tool_result("query_compliance_matrix", out, result_queue, loop)
+        return out
+
+    return compliance_matrix_tool
 
 
 # -- AWS Service @tools (S3, DynamoDB, CloudWatch, Documents) ----------
@@ -733,8 +1474,10 @@ def _make_service_tool(
     tenant_id: str,
     user_id: str,
     session_id: str | None,
+    package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    prompt_context: str | None = None,
 ):
     """Create a Strands @tool that calls agentic_service handlers directly.
 
@@ -750,23 +1493,113 @@ def _make_service_tool(
     if not handler:
         raise ValueError(f"No handler for tool: {tool_name}")
 
+    # Ensure legacy handlers receive a composite session id format:
+    # {tenant_id}#{tier}#{user_id}#{session}
+    # This preserves per-user S3 scoping and avoids demo-user fallback.
+    scoped_session_id = session_id
+    if not scoped_session_id or "#" not in scoped_session_id:
+        scoped_session_id = f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
+
     @tool(name=tool_name)
     def service_tool(params: str) -> str:
         """Placeholder docstring replaced below."""
         parsed = json.loads(params) if isinstance(params, str) else params
         try:
+            if tool_name == "create_document":
+                prompt_doc_ctx = _extract_document_context_from_prompt(prompt_context or "")
+
+                doc_type = str(parsed.get("doc_type", "")).strip().lower()
+                if not doc_type:
+                    doc_type = (
+                        prompt_doc_ctx.get("document_type")
+                        or _infer_doc_type_from_prompt(prompt_context or "")
+                        or ""
+                    )
+                    if doc_type:
+                        parsed["doc_type"] = doc_type
+
+                title = str(parsed.get("title", "")).strip()
+                if not title:
+                    inferred_title = (
+                        prompt_doc_ctx.get("title")
+                        or _DOC_TYPE_LABELS.get(doc_type or "", "")
+                        or "Untitled Acquisition"
+                    )
+                    parsed["title"] = inferred_title
+
+                prompt_data = _extract_context_data_from_prompt(prompt_context or "", doc_type)
+                existing_data = parsed.get("data")
+                if not isinstance(existing_data, dict):
+                    existing_data = {}
+                if prompt_data:
+                    for k, v in prompt_data.items():
+                        existing_data.setdefault(k, v)
+                current_content = prompt_doc_ctx.get("current_content")
+                if current_content:
+                    existing_data.setdefault("current_content", current_content)
+                user_request = prompt_doc_ctx.get("user_request")
+                if user_request:
+                    existing_data.setdefault("edit_request", user_request)
+                if existing_data:
+                    parsed["data"] = existing_data
+
+            if (
+                tool_name == "create_document"
+                and package_context is not None
+                and getattr(package_context, "is_package_mode", False)
+                and getattr(package_context, "package_id", None)
+            ):
+                parsed.setdefault("package_id", package_context.package_id)
+
             if tool_name in TOOLS_NEEDING_SESSION:
-                result = handler(parsed, tenant_id, session_id)
+                result = handler(parsed, tenant_id, scoped_session_id)
             else:
                 result = handler(parsed, tenant_id)
 
-            # Emit tool_result for create_document so frontend renders DocumentCard
-            # Only emit for successful results (not error responses)
-            if tool_name == "create_document" and result_queue and loop and "error" not in result:
+            # Emit tool_result so the frontend can display results in the tool card
+            if result_queue and loop:
+                # Truncate large results for non-document tools to avoid SSE bloat
+                emit_result = result
+                if tool_name != "create_document" and isinstance(result, dict):
+                    text_val = result.get("content") or result.get("text") or result.get("result")
+                    if isinstance(text_val, str) and len(text_val) > 2000:
+                        emit_result = {**result}
+                        key = "content" if "content" in result else "text" if "text" in result else "result"
+                        emit_result[key] = text_val[:2000] + "..."
                 loop.call_soon_threadsafe(
                     result_queue.put_nowait,
-                    {"type": "tool_result", "name": tool_name, "result": result},
+                    {"type": "tool_result", "name": tool_name, "result": emit_result},
                 )
+
+                # Auto-push document_ready + checklist_update metadata for create_document in package mode
+                if (
+                    tool_name == "create_document"
+                    and isinstance(result, dict)
+                    and not result.get("error")
+                    and result.get("package_id")
+                ):
+                    pkg_id = result["package_id"]
+                    doc_ready_payload = {
+                        "state_type": "document_ready",
+                        "package_id": pkg_id,
+                        "doc_type": result.get("doc_type", parsed.get("doc_type", "")),
+                        "version": result.get("version", 1),
+                        "document_id": result.get("document_id", ""),
+                    }
+                    # Also fetch updated checklist
+                    try:
+                        from .package_store import get_package_checklist
+                        checklist = get_package_checklist(tenant_id, pkg_id)
+                        doc_ready_payload["checklist"] = checklist
+                        total = len(checklist.get("required", []))
+                        done = len(checklist.get("completed", []))
+                        doc_ready_payload["progress_pct"] = round((done / total * 100) if total > 0 else 0)
+                    except Exception:
+                        pass
+                    loop.call_soon_threadsafe(
+                        result_queue.put_nowait,
+                        {"type": "metadata", "content": doc_ready_payload},
+                    )
 
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -808,6 +1641,17 @@ _SERVICE_TOOL_DEFS = {
         "Search the FAR and DFARS for clauses, requirements, and guidance. "
         "Pass JSON with 'query' and optional 'parts' array."
     ),
+    "knowledge_search": (
+        "Search the acquisition knowledge base metadata in DynamoDB. "
+        "Pass JSON with optional fields: query (for case numbers like 'B-302358', citations, identifiers), "
+        "topic, document_type, agent, authority_level, keywords, limit. "
+        "Use 'query' for specific identifiers - it searches document_id, title, summary, and keywords."
+    ),
+    "knowledge_fetch": (
+        "Fetch full knowledge document content from S3. "
+        "REQUIRES an s3_key from a prior knowledge_search result — do NOT call without one. "
+        "Pass JSON: {\"s3_key\": \"path/to/document.md\"}."
+    ),
     "manage_skills": (
         "Create, list, update, delete, or publish custom skills. "
         "Pass JSON: {action, skill_id?, name?, display_name?, description?, prompt_body?, triggers?, tools?, model?, visibility?}. "
@@ -843,17 +1687,172 @@ _SERVICE_TOOL_DEFS = {
 }
 
 
+def _make_generate_document_tool(
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    package_context: Any = None,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    """Factory: create the generate_document @tool that uses document_agent."""
+
+    scoped_session_id = session_id
+    if not scoped_session_id or "#" not in (scoped_session_id or ""):
+        scoped_session_id = f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
+
+    @tool(name="generate_document")
+    def generate_document_tool(doc_type: str, special_instructions: str = "") -> str:
+        """Generate a complete acquisition document using AI-driven content."""
+        from app.document_agent import generate_document as _gen
+        from app.document_service import create_package_document_version
+
+        result = _gen(
+            doc_type=doc_type,
+            session_id=scoped_session_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            special_instructions=special_instructions,
+        )
+
+        if not result.success:
+            return json.dumps({"error": result.error})
+
+        response: dict = {
+            "doc_type": result.doc_type,
+            "title": result.title,
+            "content": result.content,
+            "word_count": result.word_count,
+            "missing_required": result.missing_required,
+            "omission_count": len(result.omissions),
+            "justification_count": len(result.justifications),
+            "source": "document_agent",
+        }
+
+        # Save via canonical document service in package mode
+        pkg_id = (
+            getattr(package_context, "package_id", None)
+            if package_context and getattr(package_context, "is_package_mode", False)
+            else None
+        )
+
+        if pkg_id:
+            try:
+                canonical = create_package_document_version(
+                    tenant_id=tenant_id,
+                    package_id=pkg_id,
+                    doc_type=doc_type,
+                    content=result.content,
+                    title=result.title,
+                    file_type="md",
+                    created_by_user_id=user_id,
+                    session_id=scoped_session_id,
+                    change_source="agent_tool",
+                )
+                if canonical.success:
+                    response["mode"] = "package"
+                    response["package_id"] = pkg_id
+                    response["document_id"] = canonical.document_id
+                    response["version"] = canonical.version
+                    response["status"] = canonical.status or "draft"
+                    response["s3_key"] = canonical.s3_key
+                else:
+                    response["save_error"] = canonical.error
+            except Exception as exc:
+                logger.warning("Package save failed for generate_document: %s", exc)
+                response["save_error"] = str(exc)
+        else:
+            # Non-package mode: save to user-scoped S3 path
+            try:
+                bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                s3_key = f"eagle/{tenant_id}/{user_id}/documents/{doc_type}_{timestamp}.md"
+                s3 = boto3.client("s3")
+                s3.put_object(
+                    Bucket=bucket,
+                    Key=s3_key,
+                    Body=result.content.encode("utf-8"),
+                )
+                response["s3_key"] = s3_key
+                response["s3_location"] = f"s3://{bucket}/{s3_key}"
+            except Exception as exc:
+                logger.warning("S3 save failed for generate_document: %s", exc)
+                response["save_error"] = str(exc)
+
+        # Emit SSE events for frontend
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "tool_result", "name": "generate_document", "result": response},
+            )
+            # Emit document_ready metadata
+            if pkg_id and response.get("version"):
+                loop.call_soon_threadsafe(
+                    result_queue.put_nowait,
+                    {
+                        "type": "metadata",
+                        "data": {
+                            "type": "document_ready",
+                            "package_id": pkg_id,
+                            "doc_type": doc_type,
+                            "version": response.get("version"),
+                            "title": result.title,
+                            "word_count": result.word_count,
+                            "source": "document_agent",
+                        },
+                    },
+                )
+
+        return json.dumps(response)
+
+    return generate_document_tool
+
+
 def _build_service_tools(
     tenant_id: str,
     user_id: str,
     session_id: str | None,
+    prompt_context: str | None = None,
+    package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
     """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session."""
     tools = []
     for name, desc in _SERVICE_TOOL_DEFS.items():
-        tools.append(_make_service_tool(name, desc, tenant_id, user_id, session_id, result_queue, loop))
+        tools.append(
+            _make_service_tool(
+                name,
+                desc,
+                tenant_id,
+                user_id,
+                session_id,
+                prompt_context=prompt_context,
+                package_context=package_context,
+                result_queue=result_queue,
+                loop=loop,
+            )
+        )
+    # AI-driven document generation (Agent-as-Tool)
+    tools.append(
+        _make_generate_document_tool(
+            tenant_id, user_id, session_id,
+            package_context=package_context,
+            result_queue=result_queue,
+            loop=loop,
+        )
+    )
+    # Add compliance matrix and progressive disclosure tools.
+    # These use factory functions that close over result_queue/loop for observability.
+    tools.append(_make_compliance_matrix_tool(result_queue, loop))
+    tools.append(_make_list_skills_tool(result_queue, loop))
+    tools.append(_make_load_skill_tool(result_queue, loop))
+    tools.append(_make_load_data_tool(result_queue, loop))
+    # State push tools — enable real-time frontend UI updates via SSE METADATA
+    tools.append(_make_update_state_tool(tenant_id, result_queue, loop))
+    tools.append(_make_get_checklist_tool(tenant_id, result_queue, loop))
+    # Contract requirements matrix — deterministic FAR-grounded scoring
+    tools.append(query_contract_matrix)
     return tools
 
 
@@ -865,6 +1864,8 @@ def build_skill_tools(
     tenant_id: str = "demo-tenant",
     user_id: str = "demo-user",
     workspace_id: str | None = None,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
     """Build @tool-wrapped subagent functions from skill registry.
 
@@ -877,12 +1878,6 @@ def build_skill_tools(
     Returns:
         List of @tool-decorated functions suitable for Agent(tools=[...])
     """
-    # Cache hit for normal path (no skill_names filter)
-    if skill_names is None:
-        cached = _tools_cache_get(tenant_id, tier, workspace_id)
-        if cached is not None:
-            return cached
-
     tools = []
 
     for name, meta in SKILL_AGENT_REGISTRY.items():
@@ -911,6 +1906,8 @@ def build_skill_tools(
             skill_name=name,
             description=meta["description"],
             prompt_body=_truncate_skill(prompt_body),
+            result_queue=result_queue,
+            loop=loop,
         ))
 
     # Merge active user-created SKILL# items
@@ -930,16 +1927,11 @@ def build_skill_tools(
                 skill_name=name,
                 description=skill.get("description", f"{name} specialist"),
                 prompt_body=_truncate_skill(skill_prompt),
+                result_queue=result_queue,
+                loop=loop,
             ))
     except Exception as exc:
         logger.warning("skill_store.list_active_skills failed for %s: %s -- skipping user skills", tenant_id, exc)
-
-    # Always include the compliance matrix tool (read-only, no tenant scoping)
-    tools.append(_compliance_matrix_tool)
-
-    # Cache for normal path
-    if skill_names is None:
-        _tools_cache_set(tenant_id, tier, workspace_id, tools)
 
     return tools
 
@@ -957,28 +1949,13 @@ def build_supervisor_prompt(
 
     Loads the base supervisor prompt from the 4-layer resolution chain when
     workspace_id is provided; otherwise falls back to AGENTS bundled content.
-    Results are cached for 60s to avoid repeated DynamoDB calls.
     """
     names = agent_names or list(SKILL_AGENT_REGISTRY.keys())
-    agent_key = ",".join(sorted(names))
-
-    # Check cache first
-    cached = _sup_cache_get(tenant_id, user_id, tier, workspace_id, agent_key)
-    if cached is not None:
-        return cached
-
     agent_list = "\n".join(
         f"- {name}: {SKILL_AGENT_REGISTRY[name]['description']}"
         for name in names
         if name in SKILL_AGENT_REGISTRY
     )
-
-    # List service tools the supervisor has direct access to
-    service_tool_names = [n for n in names if n in _SERVICE_TOOL_DEFS]
-    service_list = "\n".join(
-        f"- {name}: {_SERVICE_TOOL_DEFS[name]}"
-        for name in service_tool_names
-    ) if service_tool_names else ""
 
     # Resolve supervisor prompt via workspace chain
     base_prompt = ""
@@ -993,34 +1970,53 @@ def build_supervisor_prompt(
         supervisor_entry = AGENTS.get("supervisor")
         base_prompt = supervisor_entry["body"].strip() if supervisor_entry else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
 
-    result = (
+    return (
         f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}\n\n"
         f"{base_prompt}\n\n"
-        f"--- DIRECT HANDLING (NO DELEGATION) ---\n"
-        f"For the following types of messages, respond directly WITHOUT using any tools:\n"
-        f"- Greetings and pleasantries (hi, hello, good morning, thanks, etc.)\n"
-        f"- Simple yes/no or acknowledgment responses\n"
-        f"- Requests to repeat or clarify your last response\n"
-        f"- General conversational messages not related to acquisition\n"
-        f"For these, provide a brief, friendly response. Do NOT delegate to any specialist.\n\n"
-        f"--- SPECIALIST DELEGATION ---\n"
+        f"--- ACTIVE SPECIALISTS ---\n"
         f"Available specialists for delegation:\n{agent_list}\n\n"
-        f"For acquisition-related questions, regulatory queries, document generation, "
-        f"and other substantive work: use the available tool functions to delegate to specialists. "
-        f"Include relevant context in the query you pass to each specialist.\n\n"
-        + (
-            f"--- DIRECT SERVICE TOOLS ---\n"
-            f"You also have direct access to these AWS service tools (call them directly, do NOT delegate):\n"
-            f"{service_list}\n\n"
-            f"When using service tools, pass a JSON string as the 'params' argument.\n"
-            f"For document generation (create_document), always confirm with the user what was created "
-            f"and provide the document type, title, and S3 location in your response."
-            if service_list else ""
-        )
+        "Progressive Disclosure (how to find information):\n"
+        "  You have layered access to skills and data. Use the lightest layer that answers the question:\n"
+        "  Layer 1 — System prompt hints (you already have short descriptions above).\n"
+        "  Layer 2 — list_skills(): Discover available skills, agents, and data files with descriptions.\n"
+        "  Layer 3 — load_skill(name): Read full skill instructions/workflows to follow them yourself.\n"
+        "  Layer 4 — load_data(name, section?): Fetch reference data (thresholds, vehicles, doc rules).\n"
+        "  Only spawn a specialist subagent when you need expert reasoning, not for simple lookups.\n\n"
+        "KB Retrieval Rules:\n"
+        "1) For policy/regulation/procedure/template questions, call knowledge_search first.\n"
+        "2) If search returns results, call knowledge_fetch on the top 1-3 relevant docs.\n"
+        "3) In final answer, include a Sources section with title + s3_key.\n"
+        "4) If no results, explicitly say no KB match and ask a refinement question.\n"
+        "5) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
+        "6) Use search_far only as fallback reference.\n\n"
+        "Document Output Rules:\n"
+        "1) If the user asks to generate/draft/create a document, you MUST call create_document.\n"
+        "2) Do not paste full document bodies in chat unless the user explicitly asks for inline text.\n"
+        "3) After create_document, respond briefly and direct the user to open/edit the document card.\n"
+        "4) After create_document succeeds, call update_state with state_type='document_ready'.\n\n"
+        "State Push Rules (update_state tool):\n"
+        "The frontend has a live checklist panel. Call update_state after state-changing actions:\n"
+        "  - After create_document → update_state(state_type='document_ready', package_id, doc_type, version, document_id)\n"
+        "  - After query_compliance_matrix reveals requirements → update_state(state_type='checklist_update', package_id)\n"
+        "  - On phase transitions → update_state(state_type='phase_change', package_id, phase, previous)\n"
+        "  - On compliance findings → update_state(state_type='compliance_alert', severity, items)\n"
+        "  Just pass package_id for checklist_update — the tool auto-fetches current state from DB.\n"
+        "  Call get_package_checklist before generating docs to see what's done and what's missing.\n\n"
+        f"FAST vs DEEP routing:\n"
+        f"  FAST (seconds):\n"
+        f"    - load_data('matrix', 'thresholds') for threshold lookups.\n"
+        f"    - load_data('contract-vehicles', 'nitaac') for vehicle details.\n"
+        f"    - query_compliance_matrix for computed compliance decisions.\n"
+        f"    - search_far for specific FAR/DFARS clause lookups.\n"
+        f"    - knowledge_search → knowledge_fetch for KB documents.\n"
+        f"    - load_skill(name) to read a workflow and follow it yourself.\n"
+        f"  DEEP (specialist): Delegate to specialist subagents only for complex analysis,\n"
+        f"    multi-factor evaluation, or expert reasoning — not simple factual lookups.\n"
+        f"  ALWAYS prefer FAST tools first. Only delegate to a specialist when FAST tools don't suffice.\n\n"
+        f"IMPORTANT: Use the available tool functions to delegate to specialists. "
+        f"Include relevant context in the query you pass to each specialist. "
+        f"Do not try to answer specialized questions yourself -- delegate to the expert."
     )
-
-    _sup_cache_set(tenant_id, user_id, tier, workspace_id, agent_key, result)
-    return result
 
 
 # -- SDK Query Wrappers (same signatures as sdk_agentic_service.py) --
@@ -1052,6 +2048,7 @@ async def sdk_query(
     skill_names: list[str] | None = None,
     session_id: str | None = None,
     workspace_id: str | None = None,
+    package_context: Any = None,
     max_turns: int = 15,
     messages: list[dict] | None = None,
 ) -> AsyncGenerator[Any, None]:
@@ -1075,6 +2072,50 @@ async def sdk_query(
     Yields:
         AssistantMessage and ResultMessage adapter objects
     """
+    # Trivial greeting fast-path — no LLM call needed
+    trivial = _fast_trivial_response(prompt)
+    if trivial is not None:
+        yield AssistantMessage(content=[TextBlock(text=trivial["text"])])
+        yield ResultMessage(result=trivial["text"], usage=trivial["usage"])
+        return
+
+    # Intake form fast-path — canned ack, no LLM call
+    intake = _fast_intake_form_response(prompt)
+    if intake is not None:
+        yield AssistantMessage(content=[TextBlock(text=intake["text"])])
+        yield ResultMessage(result=intake["text"], usage=intake["usage"])
+        return
+
+    fast_path = await _maybe_fast_path_document_generation(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        package_context=package_context,
+    )
+    if fast_path is not None:
+        result = fast_path["result"]
+        if "error" in result:
+            yield AssistantMessage(content=[TextBlock(text=f"Document generation failed: {result['error']}")])
+            yield ResultMessage(result=f"Document generation failed: {result['error']}", usage={})
+            return
+
+        text = (
+            f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
+            "You can open it from the document card."
+        )
+        yield AssistantMessage(
+            content=[
+                TextBlock(text=text),
+                ToolUseBlock(name="create_document"),
+            ]
+        )
+        yield ResultMessage(
+            result=text,
+            usage={"tools_called": 1, "tools": ["create_document"], "fast_path": True},
+        )
+        return
+
     # Resolve active workspace when none provided
     resolved_workspace_id = workspace_id
     if not resolved_workspace_id:
@@ -1093,16 +2134,20 @@ async def sdk_query(
         workspace_id=resolved_workspace_id,
     )
 
-    # Add AWS service tools (S3, DynamoDB, doc generation, FAR search, intake)
-    composite_session = f"{tenant_id}#{tier}#{user_id}#{session_id or 'none'}"
-    service_tools = _build_service_tools(tenant_id, user_id, composite_session)
-    all_tools = skill_tools + service_tools
+    # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
+    service_tools = _build_service_tools(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        prompt_context=prompt,
+        package_context=package_context,
+    )
 
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,
         user_id=user_id,
         tier=tier,
-        agent_names=[getattr(t, 'tool_spec', {}).get('name', t.__name__) for t in all_tools],
+        agent_names=[t.__name__ for t in skill_tools],
         workspace_id=resolved_workspace_id,
     )
 
@@ -1112,14 +2157,13 @@ async def sdk_query(
     supervisor = Agent(
         model=_model,
         system_prompt=system_prompt,
-        tools=all_tools,
+        tools=skill_tools + service_tools,
         callback_handler=None,
         messages=strands_history,
     )
 
-    # Call invoke_async directly — avoids Strands' run_async() which creates
-    # a new ThreadPoolExecutor + asyncio.run() event loop on every call
-    result = await supervisor.invoke_async(prompt)
+    # Synchronous call -- Strands handles the agentic loop internally
+    result = supervisor(prompt)
     result_text = str(result)
 
     # Extract tool names called during execution from metrics.tool_metrics
@@ -1130,6 +2174,21 @@ async def sdk_query(
             tools_called = list(metrics.tool_metrics.keys())
     except Exception:
         pass
+
+    forced_doc = await _ensure_create_document_for_direct_request(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        package_context=package_context,
+        tools_called=tools_called,
+    )
+    if forced_doc is not None:
+        tools_called.append("create_document")
+        result_text = (
+            f"Generated a draft {forced_doc['doc_type'].replace('_', ' ')} document. "
+            "Open the document card to review or edit it."
+        )
 
     # Build content blocks for AssistantMessage
     content_blocks = [TextBlock(text=result_text)]
@@ -1159,6 +2218,19 @@ async def sdk_query(
     yield ResultMessage(result=result_text, usage=usage)
 
 
+def _sanitize_event(event: dict) -> dict:
+    """Make a raw Strands stream event JSON-serializable.
+
+    Round-trips through json.dumps/loads so the returned dict contains
+    only JSON-native types (str, int, float, bool, None, list, dict).
+    This prevents downstream json.dumps (without default=str) from failing.
+    """
+    try:
+        return json.loads(json.dumps(event, default=str))
+    except (TypeError, ValueError, RecursionError):
+        return {"raw": str(event)}
+
+
 async def sdk_query_streaming(
     prompt: str,
     tenant_id: str = "demo-tenant",
@@ -1167,6 +2239,7 @@ async def sdk_query_streaming(
     skill_names: list[str] | None = None,
     session_id: str | None = None,
     workspace_id: str | None = None,
+    package_context: Any = None,
     max_turns: int = 15,
     messages: list[dict] | None = None,
 ) -> AsyncGenerator[dict, None]:
@@ -1174,129 +2247,214 @@ async def sdk_query_streaming(
 
     Unlike sdk_query() which waits for the full response, this yields
     {"type": "text", "data": "..."} chunks as they arrive from Bedrock
-    ConverseStream, plus tool_use events with actual input data, and a
-    final {"type": "complete", ...} event.
+    ConverseStream, plus a final {"type": "complete", ...} event.
 
-    Runs the synchronous Strands Agent in a background thread and bridges
-    to async via a queue.
-
-    Fast-path: trivial messages (greetings, acknowledgments) skip workspace
-    resolution, tool building, and supervisor prompt construction. They use
-    a lightweight no-tools Agent with a short system prompt for ~2-4x faster
-    time-to-first-token.
+    Uses Agent.stream_async() which handles the sync→async bridge
+    internally. Factory tools push results via an asyncio.Queue that
+    is drained between stream events.
     """
-    t0 = _time.time()
-    use_fast_path = _is_trivial_message(prompt) and not skill_names
+    # Trivial greeting fast-path — no LLM call needed
+    trivial = _fast_trivial_response(prompt)
+    if trivial is not None:
+        yield {"type": "text", "data": trivial["text"]}
+        yield {"type": "complete", "text": trivial["text"], "tools_called": [], "usage": trivial["usage"]}
+        return
 
+    # Intake form fast-path — canned ack, no LLM call
+    intake = _fast_intake_form_response(prompt)
+    if intake is not None:
+        yield {"type": "text", "data": intake["text"]}
+        yield {"type": "complete", "text": intake["text"], "tools_called": [], "usage": intake["usage"]}
+        return
+
+    fast_path = await _maybe_fast_path_document_generation(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        package_context=package_context,
+    )
+    if fast_path is not None:
+        result = fast_path["result"]
+        if "error" in result:
+            yield {"type": "error", "error": result["error"]}
+            return
+        yield {"type": "tool_use", "name": "create_document"}
+        yield {"type": "tool_result", "name": "create_document", "result": result}
+        text = (
+            f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
+            "Open the document card to review or edit it."
+        )
+        yield {"type": "text", "data": text}
+        yield {
+            "type": "complete",
+            "text": text,
+            "tools_called": ["create_document"],
+            "usage": {"tools_called": 1, "tools": ["create_document"], "fast_path": True},
+        }
+        return
+
+    # Resolve workspace
+    resolved_workspace_id = workspace_id
+    if not resolved_workspace_id:
+        try:
+            from .workspace_store import get_or_create_default
+            ws = get_or_create_default(tenant_id, user_id)
+            resolved_workspace_id = ws.get("workspace_id")
+        except Exception as exc:
+            logger.warning("workspace_store.get_or_create_default failed: %s", exc)
+
+    # --- stream_async() approach: SDK handles sync→async bridge ---
+    # result_queue is still used by factory tools to push tool_result events.
+    # These are drained between stream events in the main async for loop.
+
+    result_queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
-    chunk_queue: asyncio.Queue = asyncio.Queue()
-    handler = QueueCallbackHandler(chunk_queue, loop)
+
+    skill_tools = build_skill_tools(
+        tier=tier,
+        skill_names=skill_names,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        workspace_id=resolved_workspace_id,
+        result_queue=result_queue,
+        loop=loop,
+    )
+
+    # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
+    service_tools = _build_service_tools(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        prompt_context=prompt,
+        package_context=package_context,
+        result_queue=result_queue,
+        loop=loop,
+    )
+
+    system_prompt = build_supervisor_prompt(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=tier,
+        agent_names=[t.__name__ for t in skill_tools],
+        workspace_id=resolved_workspace_id,
+    )
+
     strands_history = _to_strands_messages(messages) if messages else None
 
-    if use_fast_path:
-        # Fast path: no workspace, no tools, short prompt
-        logger.info("fast-path: trivial message detected (%r), skipping full pipeline", prompt[:40])
-        supervisor = Agent(
-            model=_model,
-            system_prompt=_TRIVIAL_SYSTEM_PROMPT,
-            tools=[],
-            callback_handler=handler,
-            messages=strands_history,
-        )
-        skill_tools = []
-    else:
-        # Full path: resolve workspace, build tools, build prompt
-        resolved_workspace_id = workspace_id
-        if not resolved_workspace_id:
-            try:
-                from .workspace_store import get_or_create_default
-                ws = get_or_create_default(tenant_id, user_id)
-                resolved_workspace_id = ws.get("workspace_id")
-            except Exception as exc:
-                logger.warning("workspace_store.get_or_create_default failed: %s", exc)
+    supervisor = Agent(
+        model=_model,
+        system_prompt=system_prompt,
+        tools=skill_tools + service_tools,
+        callback_handler=None,  # stream_async yields events directly
+        messages=strands_history,
+    )
 
-        skill_tools = build_skill_tools(
-            tier=tier,
-            skill_names=skill_names,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            workspace_id=resolved_workspace_id,
-        )
-
-        # Add AWS service tools (S3, DynamoDB, doc generation, FAR search, intake)
-        composite_session = f"{tenant_id}#{tier}#{user_id}#{session_id or 'none'}"
-        service_tools = _build_service_tools(tenant_id, user_id, composite_session, chunk_queue, loop)
-        all_tools = skill_tools + service_tools
-
-        system_prompt = build_supervisor_prompt(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            tier=tier,
-            agent_names=[getattr(t, 'tool_spec', {}).get('name', t.__name__) for t in all_tools],
-            workspace_id=resolved_workspace_id,
-        )
-
-        supervisor = Agent(
-            model=_model,
-            system_prompt=system_prompt,
-            tools=all_tools,
-            callback_handler=handler,
-            messages=strands_history,
-        )
-
-    t_setup = _time.time() - t0
-    logger.info("agent setup took %.3fs (fast_path=%s, tools=%d)", t_setup, use_fast_path, len(all_tools) if not use_fast_path else 0)
-
-    # Run synchronous Strands agent in a background thread.
-    # The callback handler puts chunks into the asyncio.Queue via
-    # loop.call_soon_threadsafe — instant delivery, no polling.
-    result_holder: list = []
-    error_holder: list = []
-
-    def _run_agent():
-        try:
-            result = supervisor(prompt)
-            result_holder.append(result)
-        except Exception as exc:
-            error_holder.append(exc)
-        finally:
-            loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
-
-    thread = threading.Thread(target=_run_agent, daemon=True)
-    thread.start()
-
-    # Yield chunks as they arrive — await is instant (no polling)
+    # Yield chunks via stream_async — SDK bridges sync→async internally
     full_text_parts: list[str] = []
     tools_called: list[str] = []
-    ttft_logged = False
+    _current_tool_id: str | None = None
+    error_holder: list[Exception] = []
+    agent_result = None
 
-    while True:
-        chunk = await chunk_queue.get()
+    def _drain_tool_results() -> list[dict]:
+        """Drain tool results that were pushed by factory tools via result_queue."""
+        drained: list[dict] = []
+        while True:
+            try:
+                item = result_queue.get_nowait()
+                name = item.get("name")
+                if not name:
+                    continue
+                tools_called.append(name)
+                drained.append(item)
+            except asyncio.QueueEmpty:
+                break
+        return drained
 
-        if chunk is _SENTINEL:
-            break
+    try:
+        async for event in supervisor.stream_async(prompt):
+            # Drain tool results that may have been pushed by factory tools
+            for tool_result_chunk in _drain_tool_results():
+                yield tool_result_chunk
 
-        if chunk.get("type") == "text":
-            if not ttft_logged:
-                ttft = _time.time() - t0
-                logger.info("TTFT: %.3fs (fast_path=%s)", ttft, use_fast_path)
-                ttft_logged = True
-            full_text_parts.append(chunk["data"])
-            yield chunk
-        elif chunk.get("type") == "tool_use":
-            tools_called.append(chunk.get("name", ""))
-            yield chunk
-        elif chunk.get("type") == "tool_result":
-            yield chunk
+            # --- Text streaming (no bedrock_trace — too noisy per-token) ---
+            data = event.get("data")
+            if data and isinstance(data, str):
+                full_text_parts.append(data)
+                yield {"type": "text", "data": data}
+                continue
 
-    thread.join(timeout=5)
+            # --- Tool use start (ToolUseStreamEvent) ---
+            current_tool = event.get("current_tool_use")
+            if current_tool and isinstance(current_tool, dict):
+                tool_id = current_tool.get("toolUseId", "")
+                if tool_id and tool_id != _current_tool_id:
+                    _current_tool_id = tool_id
+                    tool_name = current_tool.get("name", "")
+                    tools_called.append(tool_name)
+                    yield {
+                        "type": "tool_use",
+                        "name": tool_name,
+                        "input": current_tool.get("input", ""),
+                        "tool_use_id": tool_id,
+                    }
+                    yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
+                continue
+
+            # --- Bedrock contentBlockStart fallback ---
+            raw_event = event.get("event", {})
+            if isinstance(raw_event, dict):
+                cbs = raw_event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
+                if cbs:
+                    tool_id = cbs.get("toolUseId", "")
+                    if tool_id != _current_tool_id:
+                        _current_tool_id = tool_id
+                        tool_name = cbs.get("name", "")
+                        tools_called.append(tool_name)
+                        yield {
+                            "type": "tool_use",
+                            "name": tool_name,
+                            "tool_use_id": tool_id,
+                        }
+                        yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
+                    continue
+
+                # --- Structural Bedrock events (messageStop, usage) ---
+                if "messageStop" in raw_event:
+                    yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
+                    continue
+                if "metadata" in raw_event:
+                    meta = raw_event.get("metadata", {})
+                    if isinstance(meta, dict) and "usage" in meta:
+                        yield {"type": "bedrock_trace", "event": _sanitize_event(event)}
+                    continue
+
+            # --- Agent result (final event) ---
+            if "result" in event and hasattr(event.get("result"), "metrics"):
+                agent_result = event["result"]
+
+    except Exception as exc:
+        error_holder.append(exc)
+        logger.error("stream_async error: %s", exc)
+
+    # Final drain of any remaining tool results
+    for tool_result_chunk in _drain_tool_results():
+        yield tool_result_chunk
 
     # Extract usage from result
     usage = {}
-    if result_holder:
-        result = result_holder[0]
+    if agent_result is not None:
+        if not full_text_parts:
+            try:
+                final_text = str(agent_result)
+                if final_text:
+                    full_text_parts.append(final_text)
+                    yield {"type": "text", "data": final_text}
+            except Exception:
+                pass
         try:
-            metrics = getattr(result, "metrics", None)
+            metrics = getattr(agent_result, "metrics", None)
             if metrics:
                 acc = getattr(metrics, "accumulated_usage", None)
                 if acc and isinstance(acc, dict):
@@ -1306,21 +2464,63 @@ async def sdk_query_streaming(
                         "cycle_count": getattr(metrics, "cycle_count", 0),
                         "tools_called": len(tools_called),
                     }
-                if hasattr(metrics, "tool_metrics"):
+                # Always inject cycle_count if available
+                if "cycle_count" not in usage:
+                    usage["cycle_count"] = getattr(metrics, "cycle_count", 0)
+                # Extract per-tool metrics for token breakdown
+                if hasattr(metrics, "tool_metrics") and metrics.tool_metrics:
                     tools_called = list(metrics.tool_metrics.keys())
+                    try:
+                        tm = {}
+                        for tname, tdata in metrics.tool_metrics.items():
+                            if hasattr(tdata, "__dict__"):
+                                tm[tname] = {k: v for k, v in tdata.__dict__.items()
+                                              if not k.startswith("_")}
+                            elif isinstance(tdata, dict):
+                                tm[tname] = tdata
+                            else:
+                                tm[tname] = str(tdata)
+                        usage["tool_metrics"] = tm
+                    except Exception:
+                        pass
         except Exception:
             pass
 
-    total_time = _time.time() - t0
-    logger.info("stream complete: %.3fs total, %d tools, %d chars (fast_path=%s)",
-                total_time, len(tools_called), len("".join(full_text_parts)), use_fast_path)
+    forced_doc = None
+    if not error_holder:
+        forced_doc = await _ensure_create_document_for_direct_request(
+            prompt=prompt,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            package_context=package_context,
+            tools_called=tools_called,
+        )
+        if forced_doc is not None:
+            tools_called.append("create_document")
+            yield {"type": "tool_use", "name": "create_document"}
+            yield {"type": "tool_result", "name": "create_document", "result": forced_doc["result"]}
+            if not full_text_parts:
+                summary = (
+                    f"Generated a draft {forced_doc['doc_type'].replace('_', ' ')} document. "
+                    "Open the document card to review or edit it."
+                )
+                full_text_parts.append(summary)
+                yield {"type": "text", "data": summary}
 
     if error_holder:
         yield {"type": "error", "error": str(error_holder[0])}
     else:
+        final_text = "".join(full_text_parts)
+        if not final_text.strip():
+            called = ", ".join(tools_called[:3]) if tools_called else "none"
+            final_text = (
+                "I completed the tool steps but did not receive a final answer text. "
+                f"Tools called: {called}. Please retry your request."
+            )
         yield {
             "type": "complete",
-            "text": "".join(full_text_parts),
+            "text": final_text,
             "tools_called": tools_called,
             "usage": usage,
         }

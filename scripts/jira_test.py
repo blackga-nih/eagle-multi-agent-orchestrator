@@ -57,7 +57,7 @@ def test_env_vars():
 
     record("JIRA_BASE_URL is set", bool(base_url), base_url or "MISSING")
     record("JIRA_API_TOKEN is set", bool(api_token),
-           f"{api_token[:4]}...{api_token[-4:]} ({len(api_token)} chars)" if api_token else "MISSING")
+           f"[set, {len(api_token)} chars]" if api_token else "MISSING")
 
     if base_url:
         from urllib.parse import urlparse

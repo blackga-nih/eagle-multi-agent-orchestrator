@@ -26,20 +26,14 @@
 name: Claude Code Assistant
 
 on:
-  # PR events — Claude reviews the diff automatically
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-  # Issue/PR comments — respond when someone writes "@claude ..."
-  issue_comment:
-    types: [created]
-
-  # Issues — trigger when the "claude" label is added
-  issues:
-    types: [opened, labeled]
-
-  # Manual trigger for testing (visible in Actions tab → Run workflow)
+  # Disabled — use workflow_dispatch to trigger manually if needed
   workflow_dispatch:
+
+  # issue_comment:
+  #   types: [created]
+
+  # issues:
+  #   types: [opened, labeled]
 
 # Permissions needed by the action to read code, post comments, and create branches
 permissions:
@@ -72,6 +66,9 @@ jobs:
           # Pass the API key from repository secrets
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Lock to Haiku to avoid Sonnet/Opus charges on every PR/issue
+          claude_args: "--model claude-haiku-4-5-20251001"
 
           # Lock to Haiku to avoid Sonnet/Opus charges on every PR/issue
           claude_args: "--model claude-haiku-4-5-20251001"

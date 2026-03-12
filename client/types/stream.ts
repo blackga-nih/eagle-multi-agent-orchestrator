@@ -23,7 +23,8 @@ export type StreamEventType =
   | 'error'
   | 'handoff'
   | 'user_input'
-  | 'form_submit';
+  | 'form_submit'
+  | 'bedrock_trace';
 
 export interface ToolUse {
   name: string;

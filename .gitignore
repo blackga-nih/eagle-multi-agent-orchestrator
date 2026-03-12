@@ -1,3 +1,7 @@
+# Dev process files
+*.pid
+.uvicorn.pid
+
 # Python
 __pycache__/
 *.py[cod]
@@ -77,6 +81,7 @@ htmlcov/
 # Node / Next.js
 node_modules/
 .next/
+.next-old/
 next-env.d.ts
 
 # Playwright test artifacts
@@ -110,3 +115,6 @@ infrastructure/cdk-eagle/bootstrap-template*.yaml
 
 # Reference documents / binary design blobs (stored in S3 / SharePoint)
 docs/architecture/reference-documents/
+# Local backups
+.backup/
+infrastructure/cdk-eagle/import-mapping.json

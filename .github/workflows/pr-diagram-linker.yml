@@ -6,8 +6,8 @@
 name: PR Diagram Linker
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  # Disabled — use workflow_dispatch to trigger manually if needed
+  workflow_dispatch:
 
 permissions:
   contents: read

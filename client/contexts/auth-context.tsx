@@ -225,8 +225,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
         }
 
+        // Time-box the session check so a blocked/slow Cognito endpoint
+        // doesn't leave the app stuck on the loading spinner forever.
+        const timeoutId = setTimeout(() => {
+            setIsLoading(false);
+        }, 8000);
+
         cognitoUser.getSession(
             (err: Error | null, session: CognitoUserSession | null) => {
+                clearTimeout(timeoutId);
                 if (err || !session || !session.isValid()) {
                     setIsLoading(false);
                     return;
@@ -239,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Cleanup the refresh timer when the component unmounts.
         return () => {
+            clearTimeout(timeoutId);
             cancelRefreshTimer();
         };
     }, [scheduleTokenRefresh, cancelRefreshTimer]);

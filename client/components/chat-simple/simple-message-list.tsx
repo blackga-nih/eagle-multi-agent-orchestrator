@@ -1,13 +1,96 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { ChatMessage, DocumentInfo } from '@/types/chat';
 import DocumentCard from './document-card';
 import ToolUseDisplay from './tool-use-display';
 import CodeSandboxRenderer from './code-sandbox-renderer';
 import { ToolCallsByMessageId, TrackedToolCall } from './simple-chat-interface';
 import { CodeResult } from '@/lib/client-tools';
+
+/** Shared markdown components — defined once, reused across all messages. */
+const mdComponents = {
+    p: ({ children }: any) => (
+        <p className="mb-3 last:mb-0">{children}</p>
+    ),
+    ul: ({ children }: any) => (
+        <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>
+    ),
+    ol: ({ children }: any) => (
+        <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>
+    ),
+    li: ({ children }: any) => (
+        <li className="leading-relaxed">{children}</li>
+    ),
+    strong: ({ children }: any) => (
+        <strong className="font-semibold text-gray-900">{children}</strong>
+    ),
+    h1: ({ children }: any) => (
+        <h1 className="text-lg font-bold text-gray-900 mb-2 mt-4">{children}</h1>
+    ),
+    h2: ({ children }: any) => (
+        <h2 className="text-base font-semibold text-gray-900 mb-2 mt-3">{children}</h2>
+    ),
+    h3: ({ children }: any) => (
+        <h3 className="text-sm font-semibold text-gray-900 mb-1 mt-2">{children}</h3>
+    ),
+    code: ({ children }: any) => (
+        <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono text-gray-800">
+            {children}
+        </code>
+    ),
+    pre: ({ children }: any) => (
+        <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto my-3 text-xs font-mono">
+            {children}
+        </pre>
+    ),
+    blockquote: ({ children }: any) => (
+        <blockquote className="border-l-2 border-gray-300 pl-4 italic text-gray-600 my-2">
+            {children}
+        </blockquote>
+    ),
+    // Table components — GFM tables need remarkGfm + these elements
+    table: ({ children }: any) => (
+        <div className="overflow-x-auto my-3 border border-gray-200 rounded-lg">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+                {children}
+            </table>
+        </div>
+    ),
+    thead: ({ children }: any) => (
+        <thead className="bg-gray-50">{children}</thead>
+    ),
+    tbody: ({ children }: any) => (
+        <tbody className="divide-y divide-gray-100 bg-white">{children}</tbody>
+    ),
+    tr: ({ children }: any) => (
+        <tr className="hover:bg-gray-50">{children}</tr>
+    ),
+    th: ({ children }: any) => (
+        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">
+            {children}
+        </th>
+    ),
+    td: ({ children }: any) => (
+        <td className="px-3 py-2 text-sm text-gray-700">{children}</td>
+    ),
+};
+
+const remarkPlugins = [remarkGfm];
+
+/**
+ * Memoized markdown renderer for completed (non-streaming) messages.
+ * Prevents re-parsing on every parent render when only other messages update.
+ */
+const MemoizedMarkdown = memo(function MemoizedMarkdown({ content }: { content: string }) {
+    return (
+        <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
+            {content}
+        </ReactMarkdown>
+    );
+});
 
 interface SimpleMessageListProps {
     messages: ChatMessage[];
@@ -124,51 +207,15 @@ export default function SimpleMessageList({
                             )}
 
                             <div className="text-sm text-gray-800 leading-relaxed">
-                                <ReactMarkdown
-                                    components={{
-                                        p: ({ children }) => (
-                                            <p className="mb-3 last:mb-0">{children}</p>
-                                        ),
-                                        ul: ({ children }) => (
-                                            <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>
-                                        ),
-                                        ol: ({ children }) => (
-                                            <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>
-                                        ),
-                                        li: ({ children }) => (
-                                            <li className="leading-relaxed">{children}</li>
-                                        ),
-                                        strong: ({ children }) => (
-                                            <strong className="font-semibold text-gray-900">{children}</strong>
-                                        ),
-                                        h1: ({ children }) => (
-                                            <h1 className="text-lg font-bold text-gray-900 mb-2 mt-4">{children}</h1>
-                                        ),
-                                        h2: ({ children }) => (
-                                            <h2 className="text-base font-semibold text-gray-900 mb-2 mt-3">{children}</h2>
-                                        ),
-                                        h3: ({ children }) => (
-                                            <h3 className="text-sm font-semibold text-gray-900 mb-1 mt-2">{children}</h3>
-                                        ),
-                                        code: ({ children }) => (
-                                            <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono text-gray-800">
-                                                {children}
-                                            </code>
-                                        ),
-                                        pre: ({ children }) => (
-                                            <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto my-3 text-xs font-mono">
-                                                {children}
-                                            </pre>
-                                        ),
-                                        blockquote: ({ children }) => (
-                                            <blockquote className="border-l-2 border-gray-300 pl-4 italic text-gray-600 my-2">
-                                                {children}
-                                            </blockquote>
-                                        ),
-                                    }}
-                                >
-                                    {isStreamingThis ? message.content + ' ...' : message.content}
-                                </ReactMarkdown>
+                                {isStreamingThis ? (
+                                    // Streaming: use inline ReactMarkdown (content changes every token)
+                                    <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
+                                        {message.content + ' ...'}
+                                    </ReactMarkdown>
+                                ) : (
+                                    // Completed: memoized — won't re-render when other messages update
+                                    <MemoizedMarkdown content={message.content} />
+                                )}
                             </div>
 
                             {/* Copy button — visible on hover after streaming completes */}
@@ -182,12 +229,20 @@ export default function SimpleMessageList({
                                 </button>
                             )}
 
-                            {/* Document cards attached to this message */}
-                            {documents?.[message.id]?.map((doc, idx) => (
-                                <div key={`${message.id}-doc-${idx}`} className="mt-2">
-                                    <DocumentCard document={doc} sessionId={sessionId || ''} />
-                                </div>
-                            ))}
+                            {/* Document cards attached to this message —
+                                skip docs already rendered inline by ToolUseDisplay's
+                                DocumentResultCard (create_document tool calls with results). */}
+                            {(() => {
+                                const hasCreateDocTool = toolCalls.some(
+                                    (tc) => tc.toolName === 'create_document' && tc.status === 'done' && tc.result,
+                                );
+                                if (hasCreateDocTool) return null;
+                                return documents?.[message.id]?.map((doc, idx) => (
+                                    <div key={`${message.id}-doc-${idx}`} className="mt-2">
+                                        <DocumentCard document={doc} sessionId={sessionId || ''} />
+                                    </div>
+                                ));
+                            })()}
                         </div>
                     );
                 })}

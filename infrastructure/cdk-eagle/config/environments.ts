@@ -49,7 +49,7 @@ export const DEV_CONFIG: EagleConfig = {
 
   documentBucketName: `eagle-documents-${ACCOUNT}-dev`,
   documentMetadataTableName: 'eagle-document-metadata-dev',
-  bedrockMetadataModelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
+  bedrockMetadataModelId: 'us.anthropic.claude-sonnet-4-6',
   metadataLambdaMemory: 512,
   metadataLambdaTimeout: 120,
 
@@ -62,8 +62,8 @@ export const DEV_CONFIG: EagleConfig = {
   desiredCount: 1,
   maxCount: 4,
 
-  githubOwner: 'gblack686',
-  githubRepo: 'sample-multi-tenant-agent-core-app',
+  githubOwner: 'CBIIT',
+  githubRepo: 'sm_eagle',
 
 };
 

@@ -1,0 +1,132 @@
+# Required and recommended sections per document type.
+# Used by document_agent.py for post-generation validation.
+
+sow:
+  display_name: "Statement of Work"
+  required_sections:
+    - title
+    - background_and_purpose
+    - scope
+    - period_of_performance
+    - tasks
+    - deliverables
+  recommended_sections:
+    - applicable_standards
+    - place_of_performance
+    - security_requirements
+    - qasp
+    - contractor_personnel
+    - travel_requirements
+
+igce:
+  display_name: "Independent Government Cost Estimate"
+  required_sections:
+    - title
+    - purpose
+    - methodology
+    - cost_breakdown
+    - total_estimated_cost
+  recommended_sections:
+    - assumptions
+    - confidence_level
+    - data_sources
+    - cost_by_period
+
+acquisition_plan:
+  display_name: "Acquisition Plan"
+  required_sections:
+    - title
+    - statement_of_need
+    - competition_strategy
+    - contract_type
+    - milestones
+  recommended_sections:
+    - cost_estimate
+    - set_aside_decision
+    - source_selection
+    - budgeting_and_funding
+    - risks
+    - acquisition_streamlining
+
+justification:
+  display_name: "Justification & Approval"
+  required_sections:
+    - title
+    - authority_cited
+    - contractor_name
+    - description_of_action
+    - rationale
+    - market_research_summary
+  recommended_sections:
+    - price_determination
+    - efforts_to_compete
+    - actions_to_increase_competition
+    - approval_chain
+
+market_research:
+  display_name: "Market Research Report"
+  required_sections:
+    - title
+    - description_of_need
+    - sources_consulted
+    - potential_sources
+    - recommendation
+  recommended_sections:
+    - small_business_analysis
+    - commercial_availability
+    - contract_vehicle_analysis
+    - pricing_analysis
+
+eval_criteria:
+  display_name: "Evaluation Criteria"
+  required_sections:
+    - title
+    - evaluation_factors
+    - rating_scale
+    - basis_for_award
+  recommended_sections:
+    - evaluation_process
+    - subfactors
+
+security_checklist:
+  display_name: "Security Checklist"
+  required_sections:
+    - title
+    - security_assessment
+    - impact_level
+    - far_clauses
+  recommended_sections:
+    - it_systems
+    - issm_review
+
+section_508:
+  display_name: "Section 508 Compliance Statement"
+  required_sections:
+    - title
+    - applicability
+    - product_types
+    - exception_determination
+  recommended_sections:
+    - vpat_status
+    - contract_language
+
+cor_certification:
+  display_name: "COR Certification"
+  required_sections:
+    - title
+    - nominee_information
+    - fac_cor_level
+    - delegated_duties
+  recommended_sections:
+    - limitations
+    - signatures
+
+contract_type_justification:
+  display_name: "Contract Type Justification"
+  required_sections:
+    - title
+    - findings
+    - determination
+    - risk_assessment
+  recommended_sections:
+    - approval

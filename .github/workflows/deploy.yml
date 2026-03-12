@@ -16,6 +16,10 @@ on:
         default: 'true'
         type: string
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   id-token: write
@@ -26,19 +30,39 @@ env:
   CLUSTER_NAME: eagle-dev
   BACKEND_SERVICE: eagle-backend-dev
   FRONTEND_SERVICE: eagle-frontend-dev
+  EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-sonnet-4-6
 
 jobs:
+  # ── Detect changed paths ────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      infra: ${{ steps.filter.outputs.infra }}
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        filters: |
+          infra:
+            - 'infrastructure/**'
+          backend:
+            - 'server/**'
+            - 'deployment/docker/Dockerfile.backend'
+            - 'deployment/docker-compose*.yml'
+          frontend:
+            - 'client/**'
+            - 'deployment/docker/Dockerfile.frontend'
+
   # ── Deploy CDK Infrastructure ───────────────────────────────
   deploy-infra:
+    needs: changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.deploy_infra == 'true'
-    outputs:
-      user-pool-id: ${{ steps.outputs.outputs.user-pool-id }}
-      user-pool-client-id: ${{ steps.outputs.outputs.user-pool-client-id }}
-      backend-repo-uri: ${{ steps.outputs.outputs.backend-repo-uri }}
-      frontend-repo-uri: ${{ steps.outputs.outputs.frontend-repo-uri }}
-      backend-url: ${{ steps.outputs.outputs.backend-url }}
-      frontend-url: ${{ steps.outputs.outputs.frontend-url }}
+    if: |
+      (github.event_name == 'push' && needs.changes.outputs.infra == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_infra == 'true')
 
     steps:
     - name: Checkout code
@@ -54,17 +78,11 @@ jobs:
       uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8  # v4.0.2
       with:
         node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: infrastructure/cdk-eagle/package-lock.json
 
     - name: Install CDK dependencies
-      run: |
-        cd ${{ env.CDK_DIR }}
-        npm ci
-        npx cdk --version
-
-    - name: CDK Diff
-      run: |
-        cd ${{ env.CDK_DIR }}
-        npx cdk diff --all 2>&1 || true
+      run: cd ${{ env.CDK_DIR }} && npm ci
 
     - name: CDK Deploy
       run: |
@@ -76,33 +94,17 @@ jobs:
         npx cdk deploy EagleCiCdStack EagleStorageStack EagleEvalStack EagleBackupStack \
           --exclusively --require-approval never --outputs-file outputs.json
 
-    - name: Resolve deployment outputs
-      id: outputs
-      run: |
-        # Stable compute values — read from existing deployed stacks via AWS API
-        CORE=$(aws cloudformation describe-stacks --stack-name EagleCoreStack \
-          --query "Stacks[0].Outputs" --output json)
-        COMPUTE=$(aws cloudformation describe-stacks --stack-name EagleComputeStack \
-          --query "Stacks[0].Outputs" --output json)
-
-        echo "user-pool-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolId") | .OutputValue')" >> $GITHUB_OUTPUT
-        echo "user-pool-client-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue')" >> $GITHUB_OUTPUT
-        echo "backend-url=$(echo $COMPUTE | jq -r '.[] | select(.OutputKey=="BackendUrl") | .OutputValue')" >> $GITHUB_OUTPUT
-        echo "frontend-url=$(echo $COMPUTE | jq -r '.[] | select(.OutputKey=="FrontendUrl") | .OutputValue')" >> $GITHUB_OUTPUT
-
-        # ECR URIs — stable, derived from account ID
-        ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-        echo "backend-repo-uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-backend-dev" >> $GITHUB_OUTPUT
-        echo "frontend-repo-uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-frontend-dev" >> $GITHUB_OUTPUT
-
-        echo "--- CDK outputs (EagleCiCdStack, EagleStorageStack, EagleEvalStack) ---"
-        cat outputs.json | jq . 2>/dev/null || echo "(no outputs.json)"
-
   # ── Build & Push Backend Container ──────────────────────────
   deploy-backend:
-    needs: deploy-infra
+    needs: [changes, deploy-infra]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.deploy_app == 'true'
+    if: |
+      always() &&
+      needs.deploy-infra.result != 'failure' &&
+      (
+        (github.event_name == 'push' && needs.changes.outputs.backend == 'true') ||
+        (github.event_name == 'workflow_dispatch' && inputs.deploy_app == 'true')
+      )
 
     steps:
     - name: Checkout code
@@ -114,27 +116,73 @@ jobs:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
 
+    - name: Derive ECR URI
+      id: ecr
+      run: |
+        ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        echo "uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-backend-dev" >> $GITHUB_OUTPUT
+
     - name: Login to ECR
-      id: ecr-login
       uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2.0.1
 
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
     - name: Build and push backend image
-      env:
-        REPO_URI: ${{ needs.deploy-infra.outputs.backend-repo-uri }}
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: deployment/docker/Dockerfile.backend
+        push: true
+        tags: |
+          ${{ steps.ecr.outputs.uri }}:${{ github.sha }}
+          ${{ steps.ecr.outputs.uri }}:latest
+        cache-from: type=gha,scope=backend
+        cache-to: type=gha,mode=max,scope=backend
+
+    - name: Update task definition with Bedrock model ID
+      id: task-def
       run: |
-        docker build \
-          -f deployment/docker/Dockerfile.backend \
-          -t $REPO_URI:${{ github.sha }} \
-          -t $REPO_URI:latest \
-          .
-        docker push $REPO_URI:${{ github.sha }}
-        docker push $REPO_URI:latest
+        # Fetch current task def, strip read-only fields, inject EAGLE_BEDROCK_MODEL_ID
+        aws ecs describe-task-definition \
+          --task-definition ${{ env.BACKEND_SERVICE }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'taskDefinition' --output json > /tmp/current_td.json
+
+        python3 - <<'PYEOF'
+        import json
+
+        with open('/tmp/current_td.json') as f:
+            td = json.load(f)
+
+        for key in ['taskDefinitionArn','revision','status','requiresAttributes',
+                    'placementConstraints','compatibilities','registeredAt','registeredBy']:
+            td.pop(key, None)
+
+        env = td['containerDefinitions'][0].get('environment', [])
+        env = [e for e in env if e['name'] != 'EAGLE_BEDROCK_MODEL_ID']
+        env.append({'name': 'EAGLE_BEDROCK_MODEL_ID', 'value': '${{ env.EAGLE_BEDROCK_MODEL_ID }}'})
+        td['containerDefinitions'][0]['environment'] = env
+
+        with open('/tmp/new_td.json', 'w') as f:
+            json.dump(td, f)
+        print("Task def updated with EAGLE_BEDROCK_MODEL_ID=${{ env.EAGLE_BEDROCK_MODEL_ID }}")
+        PYEOF
+
+        NEW_TD_ARN=$(aws ecs register-task-definition \
+          --cli-input-json file:///tmp/new_td.json \
+          --region ${{ env.AWS_REGION }} \
+          --query 'taskDefinition.taskDefinitionArn' --output text)
+
+        echo "task-def-arn=$NEW_TD_ARN" >> $GITHUB_OUTPUT
+        echo "Registered: $NEW_TD_ARN"
 
     - name: Update ECS backend service
       run: |
         aws ecs update-service \
           --cluster ${{ env.CLUSTER_NAME }} \
           --service ${{ env.BACKEND_SERVICE }} \
+          --task-definition ${{ steps.task-def.outputs.task-def-arn }} \
           --force-new-deployment \
           --region ${{ env.AWS_REGION }}
 
@@ -148,9 +196,15 @@ jobs:
 
   # ── Build & Push Frontend Container ─────────────────────────
   deploy-frontend:
-    needs: deploy-infra
+    needs: [changes, deploy-infra]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.deploy_app == 'true'
+    if: |
+      always() &&
+      needs.deploy-infra.result != 'failure' &&
+      (
+        (github.event_name == 'push' && needs.changes.outputs.frontend == 'true') ||
+        (github.event_name == 'workflow_dispatch' && inputs.deploy_app == 'true')
+      )
 
     steps:
     - name: Checkout code
@@ -162,24 +216,38 @@ jobs:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
 
+    - name: Derive ECR URI and Cognito values
+      id: config
+      run: |
+        ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        echo "uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-frontend-dev" >> $GITHUB_OUTPUT
+
+        CORE=$(aws cloudformation describe-stacks --stack-name EagleCoreStack \
+          --query "Stacks[0].Outputs" --output json)
+        echo "user-pool-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolId") | .OutputValue')" >> $GITHUB_OUTPUT
+        echo "client-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue')" >> $GITHUB_OUTPUT
+
     - name: Login to ECR
-      id: ecr-login
       uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2.0.1
 
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
     - name: Build and push frontend image
-      env:
-        REPO_URI: ${{ needs.deploy-infra.outputs.frontend-repo-uri }}
-      run: |
-        docker build \
-          -f deployment/docker/Dockerfile.frontend \
-          --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_ID=${{ needs.deploy-infra.outputs.user-pool-id }} \
-          --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID=${{ needs.deploy-infra.outputs.user-pool-client-id }} \
-          --build-arg NEXT_PUBLIC_COGNITO_REGION=${{ env.AWS_REGION }} \
-          -t $REPO_URI:${{ github.sha }} \
-          -t $REPO_URI:latest \
-          .
-        docker push $REPO_URI:${{ github.sha }}
-        docker push $REPO_URI:latest
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: deployment/docker/Dockerfile.frontend
+        push: true
+        tags: |
+          ${{ steps.config.outputs.uri }}:${{ github.sha }}
+          ${{ steps.config.outputs.uri }}:latest
+        build-args: |
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID=${{ steps.config.outputs.user-pool-id }}
+          NEXT_PUBLIC_COGNITO_CLIENT_ID=${{ steps.config.outputs.client-id }}
+          NEXT_PUBLIC_COGNITO_REGION=${{ env.AWS_REGION }}
+        cache-from: type=gha,scope=frontend
+        cache-to: type=gha,mode=max,scope=frontend
 
     - name: Update ECS frontend service
       run: |
@@ -197,116 +265,49 @@ jobs:
           --region ${{ env.AWS_REGION }}
         echo "Frontend deployment stable"
 
-  # ── Post-Deploy Verification ────────────────────────────────
-  verify:
-    needs: [deploy-infra, deploy-backend, deploy-frontend]
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
-      with:
-        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: HTTP health check
+    - name: Sync EAGLE-DEV-ALB target group to new task IP
       run: |
-        BACKEND_URL="${{ needs.deploy-infra.outputs.backend-url }}"
-        FRONTEND_URL="${{ needs.deploy-infra.outputs.frontend-url }}"
+        TG_ARN="arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-DEV-FRONTEND-IP/0e76ba2b0ab49d0c"
 
-        echo "--- Backend Health Check ---"
-        curl -sf "${BACKEND_URL}/api/health" | jq . || echo "Backend health check failed"
+        TASK_ARN=$(aws ecs list-tasks \
+          --cluster ${{ env.CLUSTER_NAME }} \
+          --service-name ${{ env.FRONTEND_SERVICE }} \
+          --desired-status RUNNING \
+          --region ${{ env.AWS_REGION }} \
+          --query 'taskArns[0]' --output text)
 
-        echo "--- Frontend Check ---"
-        curl -sf "${FRONTEND_URL}/" -o /dev/null -w "HTTP %{http_code}" || echo "Frontend check failed"
+        NEW_IP=$(aws ecs describe-tasks \
+          --cluster ${{ env.CLUSTER_NAME }} \
+          --tasks "$TASK_ARN" \
+          --region ${{ env.AWS_REGION }} \
+          --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' \
+          --output text)
 
-        echo ""
-        echo "=== Deployment Complete ==="
-        echo "Frontend: ${FRONTEND_URL}"
-        echo "Backend:  ${BACKEND_URL}"
+        echo "New frontend task IP: $NEW_IP"
 
-    - name: ECS service and ALB target health
-      run: |
-        echo "=== ECS Service Health ==="
-        for SVC in ${{ env.BACKEND_SERVICE }} ${{ env.FRONTEND_SERVICE }}; do
-          echo "--- $SVC ---"
-          aws ecs describe-services \
-            --cluster ${{ env.CLUSTER_NAME }} \
-            --services "$SVC" \
-            --region ${{ env.AWS_REGION }} \
-            --query 'services[0].{status:status,desired:desiredCount,running:runningCount,pending:pendingCount,rolloutState:deployments[0].rolloutState}' \
-            --output table || echo "Could not describe $SVC"
+        OLD_TARGETS=$(aws elbv2 describe-target-health \
+          --target-group-arn "$TG_ARN" \
+          --region ${{ env.AWS_REGION }} \
+          --query 'TargetHealthDescriptions[*].{Id:Target.Id,Port:Target.Port}' \
+          --output json)
 
-          TG_ARN=$(aws ecs describe-services \
-            --cluster ${{ env.CLUSTER_NAME }} \
-            --services "$SVC" \
-            --region ${{ env.AWS_REGION }} \
-            --query 'services[0].loadBalancers[0].targetGroupArn' \
-            --output text 2>/dev/null || echo "None")
-
-          if [ "$TG_ARN" != "None" ] && [ "$TG_ARN" != "null" ] && [ -n "$TG_ARN" ]; then
-            echo "  ALB target group: $TG_ARN"
-            aws elbv2 describe-target-health \
+        echo "$OLD_TARGETS" | jq -c '.[]' | while read row; do
+          OLD_IP=$(echo "$row" | jq -r '.Id')
+          OLD_PORT=$(echo "$row" | jq -r '.Port')
+          if [ "$OLD_IP" != "$NEW_IP" ]; then
+            echo "Deregistering old target $OLD_IP:$OLD_PORT"
+            aws elbv2 deregister-targets \
               --target-group-arn "$TG_ARN" \
-              --region ${{ env.AWS_REGION }} \
-              --query 'TargetHealthDescriptions[*].{id:Target.Id,port:Target.Port,state:TargetHealth.State,reason:TargetHealth.Reason}' \
-              --output table || echo "Could not describe target health for $SVC"
+              --targets Id="$OLD_IP",Port="$OLD_PORT" \
+              --region ${{ env.AWS_REGION }}
           fi
         done
 
-  # ── Post-Deploy Eval Suite ───────────────────────────────────
-  post-deploy-eval:
-    needs: [deploy-infra, deploy-backend, deploy-frontend]
-    runs-on: ubuntu-latest
-    continue-on-error: true   # eval failures are non-blocking for the deploy
+        aws elbv2 register-targets \
+          --target-group-arn "$TG_ARN" \
+          --targets Id="$NEW_IP",Port=3000 \
+          --region ${{ env.AWS_REGION }}
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        echo "EAGLE-DEV-ALB now targeting $NEW_IP:3000"
 
-    - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
-      with:
-        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Setup Python 3.11
-      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-        cache-dependency-path: server/requirements.txt
-
-    - name: Install server dependencies
-      run: pip install -r server/requirements.txt pytest pytest-asyncio
-
-    - name: Derive S3 bucket name from account
-      id: s3
-      run: |
-        ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
-        echo "document-bucket=eagle-documents-${ACCOUNT_ID}-dev" >> $GITHUB_OUTPUT
-        echo "eval-bucket=eagle-eval-artifacts-${ACCOUNT_ID}-dev" >> $GITHUB_OUTPUT
-
-    - name: Run EAGLE SDK eval suite
-      env:
-        USE_BEDROCK: 'true'
-        CLAUDE_CODE_USE_BEDROCK: '1'
-        AWS_REGION: ${{ env.AWS_REGION }}
-        EAGLE_SESSIONS_TABLE: eagle
-        S3_BUCKET: ${{ steps.s3.outputs.document-bucket }}
-        EVAL_BUCKET: ${{ steps.s3.outputs.eval-bucket }}
-      run: |
-        cd server
-        python -m pytest tests/test_eagle_sdk_eval.py -v --tb=short 2>&1 | tee eval-results.txt
-        echo "Eval exit code: ${PIPESTATUS[0]}"
-
-    - name: Upload eval results artifact
-      if: always()
-      uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
-      with:
-        name: eval-results-${{ github.sha }}
-        path: |
-          server/eval-results.txt
-          data/eval/results/latest.json
-        retention-days: 30
-        if-no-files-found: warn
+  # Eval suite runs nightly via eval.yml — not on every deploy

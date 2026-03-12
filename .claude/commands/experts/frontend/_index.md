@@ -30,6 +30,7 @@ This expert covers:
 | `/experts:frontend:self-improve` | Update expertise after frontend work |
 | `/experts:frontend:plan_build_improve` | Full ACT-LEARN-REUSE workflow |
 | `/experts:frontend:maintenance` | Check builds, validate mappings, verify consistency |
+| `/experts:frontend:fix-next-cache` | Fix stale `.next` cache / EPERM trace file lock |
 
 ## Key Files
 

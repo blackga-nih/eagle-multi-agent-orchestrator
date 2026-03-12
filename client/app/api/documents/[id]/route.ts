@@ -1,290 +1,202 @@
 /**
  * Individual Document API Route
  *
- * GET /api/documents/[id]?user_id=xxx&version=1
- *   - Get document metadata and content
+ * GET /api/documents/[id]?content=true
+ *   - Proxies to FastAPI /api/documents/{doc_key:path}
+ *   - Supports ids passed as full S3 keys or legacy filename-only ids
  *
- * PUT /api/documents/[id]
- *   - Update document content (creates new version)
- *
- * DELETE /api/documents/[id]?user_id=xxx
- *   - Delete document and all versions
+ * PUT/DELETE are currently unsupported in the FastAPI document API.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.AGENTCORE_URL || 'http://localhost:8081';
+const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
+const DEV_MODE = process.env.DEV_MODE === 'true' || process.env.NODE_ENV === 'development';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(request: NextRequest, { params }: RouteParams) {
-  const { id } = await params;
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get('user_id') || 'default-user';
-  const version = searchParams.get('version');
-  const includeContent = searchParams.get('content') !== 'false';
-  const includeVersions = searchParams.get('versions') === 'true';
+const DOC_TYPE_BY_PREFIX: Array<{ prefix: string; type: string; title: string }> = [
+  { prefix: 'acquisition_plan', type: 'acquisition_plan', title: 'Acquisition Plan' },
+  { prefix: 'market_research', type: 'market_research', title: 'Market Research' },
+  { prefix: 'security_checklist', type: 'security_checklist', title: 'Security Checklist' },
+  { prefix: 'contract_type_justification', type: 'contract_type_justification', title: 'Contract Type Justification' },
+  { prefix: 'cor_certification', type: 'cor_certification', title: 'COR Certification' },
+  { prefix: 'eval_criteria', type: 'eval_criteria', title: 'Evaluation Criteria' },
+  { prefix: 'section_508', type: 'section_508', title: 'Section 508 Compliance' },
+  { prefix: 'justification', type: 'justification', title: 'Justification & Approval' },
+  { prefix: 'igce', type: 'igce', title: 'Cost Estimate (IGCE)' },
+  { prefix: 'sow', type: 'sow', title: 'Statement of Work' },
+];
 
-  try {
-    const queryParams = new URLSearchParams({ user_id: userId });
-    if (version) queryParams.set('version', version);
-    if (includeContent) queryParams.set('content', 'true');
-    if (includeVersions) queryParams.set('versions', 'true');
-
-    const response = await fetch(`${BACKEND_URL}/documents/${id}?${queryParams}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      return NextResponse.json(data);
+function inferDocTypeAndTitle(fileName: string): { document_type: string; title: string } {
+  const base = fileName.toLowerCase();
+  for (const entry of DOC_TYPE_BY_PREFIX) {
+    if (base.startsWith(`${entry.prefix}_`) || base === entry.prefix || base.includes(`${entry.prefix}.`)) {
+      return { document_type: entry.type, title: entry.title };
     }
-  } catch {
-    // Backend unavailable
   }
 
-  // Mock response for development
-  const mockDoc = getMockDocument(id, userId);
-  if (!mockDoc) {
+  if (base.endsWith('.docx')) {
+    return { document_type: 'docx', title: 'Word Document' };
+  }
+  if (base.endsWith('.pdf')) {
+    return { document_type: 'pdf', title: 'PDF Document' };
+  }
+  if (base.endsWith('.md')) {
+    return { document_type: 'markdown', title: 'Markdown Document' };
+  }
+
+  return { document_type: 'document', title: 'Document' };
+}
+
+async function resolveDocKey(id: string, headers: Record<string, string>): Promise<string | null> {
+  if (id.startsWith('eagle/')) return id;
+
+  // Legacy ids may only contain a filename. Resolve by listing user docs.
+  try {
+    const listResponse = await fetch(`${FASTAPI_URL}/api/documents`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!listResponse.ok) return null;
+
+    const data = await listResponse.json();
+    const docs: Array<{ key?: string; name?: string }> = data.documents || [];
+
+    const match = docs.find((doc) => {
+      const key = doc.key || '';
+      const name = doc.name || '';
+      return name === id || key === id || key.endsWith(`/${id}`);
+    });
+
+    return match?.key || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
+  const decodedId = decodeURIComponent(id);
+  const includeContent = request.nextUrl.searchParams.get('content') !== 'false';
+
+  const authHeader = request.headers.get('authorization');
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (authHeader) {
+    headers.Authorization = authHeader;
+  }
+
+  const docKey = await resolveDocKey(decodedId, headers);
+  if (!docKey) {
     return NextResponse.json(
-      { error: 'Document not found' },
-      { status: 404 }
+      {
+        error: 'Document not found',
+        detail: 'Could not resolve document key from id',
+      },
+      { status: 404 },
     );
   }
 
-  const response: Record<string, unknown> = { ...mockDoc };
+  try {
+    const query = includeContent ? '?content=true' : '';
+    const response = await fetch(`${FASTAPI_URL}/api/documents/${encodeURIComponent(docKey)}${query}`, {
+      method: 'GET',
+      headers,
+    });
 
-  if (includeContent) {
-    response.content = getMockContent(mockDoc.document_type);
+    if (!response.ok) {
+      const errorText = await response.text();
+      return NextResponse.json(
+        { error: `Backend error: ${response.status}`, detail: errorText },
+        { status: response.status },
+      );
+    }
+
+    const data = await response.json();
+    const key = data.key || docKey;
+    const fileName = key.split('/').pop() || decodedId;
+    const inferred = inferDocTypeAndTitle(fileName);
+
+    return NextResponse.json({
+      ...data,
+      key,
+      s3_key: key,
+      document_id: key,
+      document_type: inferred.document_type,
+      title: data.title || inferred.title,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to fetch document', details: String(error) },
+      { status: 500 },
+    );
   }
-
-  if (includeVersions) {
-    response.versions = getMockVersions(id);
-  }
-
-  return NextResponse.json(response);
 }
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
+  const authHeader = request.headers.get('authorization');
+
+  let body: { content: string; change_source?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  if (!body.content || typeof body.content !== 'string') {
+    return NextResponse.json({ error: 'Missing required field: content' }, { status: 400 });
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authHeader) headers.Authorization = authHeader;
+
+  const docKey = await resolveDocKey(decodeURIComponent(id), headers);
+  if (!docKey) {
+    return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+  }
 
   try {
-    const body = await request.json();
-
-    // Validate
-    if (!body.user_id) {
-      return NextResponse.json(
-        { error: 'Missing required field: user_id' },
-        { status: 400 }
-      );
-    }
-
-    try {
-      const response = await fetch(`${BACKEND_URL}/documents/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        return NextResponse.json(data);
-      }
-    } catch {
-      // Backend unavailable
-    }
-
-    // Mock response - simulate version increment
-    const mockDoc = getMockDocument(id, body.user_id);
-    if (!mockDoc) {
-      return NextResponse.json(
-        { error: 'Document not found' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      ...mockDoc,
-      current_version: mockDoc.current_version + 1,
-      updated_at: new Date().toISOString(),
-      ...(body.title && { title: body.title }),
-      ...(body.status && { status: body.status }),
-      ...(body.description && { description: body.description }),
+    const response = await fetch(`${FASTAPI_URL}/api/documents/${encodeURIComponent(docKey)}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        content: body.content,
+        change_source: body.change_source || 'user_edit',
+      }),
     });
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      return NextResponse.json({ error: errorText }, { status: response.status });
+    }
+    return NextResponse.json(await response.json());
   } catch (error) {
-    console.error('Update document error:', error);
     return NextResponse.json(
-      { error: 'Failed to update document' },
-      { status: 500 }
+      { error: 'Failed to update document', details: String(error) },
+      { status: 500 },
     );
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  const { id } = await params;
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get('user_id') || 'default-user';
-
-  try {
-    const response = await fetch(`${BACKEND_URL}/documents/${id}?user_id=${userId}`, {
-      method: 'DELETE',
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+  if (DEV_MODE) {
+    const { id } = await params;
+    return NextResponse.json({
+      success: true,
+      status: 'not_implemented_dev',
+      message: 'Document delete is not yet implemented in FastAPI route',
+      document_id: decodeURIComponent(id),
     });
-
-    if (response.ok) {
-      return NextResponse.json({ success: true, document_id: id });
-    }
-  } catch {
-    // Backend unavailable
   }
-
-  // Mock success response
-  return NextResponse.json({
-    success: true,
-    document_id: id,
-    message: 'Document deleted (mock)',
-  });
-}
-
-/**
- * Mock document data for development
- */
-function getMockDocument(documentId: string, userId: string) {
-  const docs: Record<string, {
-    document_id: string;
-    user_id: string;
-    document_type: string;
-    title: string;
-    description: string;
-    current_version: number;
-    status: string;
-    tags: string[];
-    created_at: string;
-    updated_at: string;
-  }> = {
-    'doc-001': {
-      document_id: 'doc-001',
-      user_id: userId,
-      document_type: 'sow',
-      title: 'IT Consulting Services SOW',
-      description: 'Statement of Work for IT consulting engagement',
-      current_version: 2,
-      status: 'draft',
-      tags: ['IT', 'services'],
-      created_at: '2026-01-28T10:00:00Z',
-      updated_at: '2026-01-29T14:30:00Z',
-    },
-    'doc-002': {
-      document_id: 'doc-002',
-      user_id: userId,
-      document_type: 'igce',
-      title: 'CT Scanner IGCE',
-      description: 'Independent Government Cost Estimate for medical imaging equipment',
-      current_version: 1,
-      status: 'in_review',
-      tags: ['medical', 'equipment'],
-      created_at: '2026-01-27T09:00:00Z',
-      updated_at: '2026-01-27T09:00:00Z',
-    },
-    'doc-003': {
-      document_id: 'doc-003',
-      user_id: userId,
-      document_type: 'justification',
-      title: 'Sole Source Justification - Lab Equipment',
-      description: 'J&A for specialized research equipment',
-      current_version: 3,
-      status: 'final',
-      tags: ['research', 'sole-source'],
-      created_at: '2026-01-20T11:00:00Z',
-      updated_at: '2026-01-25T16:45:00Z',
-    },
-  };
-
-  return docs[documentId] || null;
-}
-
-function getMockContent(documentType: string): string {
-  const contents: Record<string, string> = {
-    sow: `# Statement of Work
-
-## 1. Background
-The National Cancer Institute requires IT consulting services to support ongoing research initiatives.
-
-## 2. Scope of Work
-The contractor shall provide the following services:
-- Technical architecture review and recommendations
-- Cloud infrastructure optimization
-- Security assessment and remediation
-
-## 3. Period of Performance
-Base period: 12 months
-Option periods: Two 12-month options
-
-## 4. Deliverables
-- Monthly status reports
-- Technical documentation
-- Final recommendations report
-`,
-    igce: `# Independent Government Cost Estimate (IGCE)
-
-## Equipment: CT Scanner
-
-### Base Unit Cost
-| Item | Quantity | Unit Price | Total |
-|------|----------|------------|-------|
-| CT Scanner (64-slice) | 1 | $450,000 | $450,000 |
-| Installation | 1 | $25,000 | $25,000 |
-| Training | 1 | $15,000 | $15,000 |
-
-### Annual Maintenance
-- Year 1: $35,000
-- Year 2: $37,000
-- Year 3: $39,000
-
-### Total Estimated Cost: $601,000
-`,
-    justification: `# Justification and Approval (J&A)
-## Sole Source Justification
-
-### 1. Contracting Activity
-National Cancer Institute, Office of Acquisitions
-
-### 2. Description of Action
-Procurement of specialized laboratory equipment for cancer research.
-
-### 3. Statutory Authority
-FAR 6.302-1: Only one responsible source
-
-### 4. Rationale
-The required equipment has proprietary specifications that can only be met by a single manufacturer...
-`,
-  };
-
-  return contents[documentType] || '# Document\n\nContent not available.';
-}
-
-function getMockVersions(documentId: string) {
-  return [
-    {
-      version: 2,
-      s3_key: `users/default/documents/${documentId}/versions/v2.md`,
-      change_summary: 'Updated scope section',
-      changed_by: 'user-001',
-      change_source: 'user_edit',
-      created_at: '2026-01-29T14:30:00Z',
-      size_bytes: 2048,
-    },
-    {
-      version: 1,
-      s3_key: `users/default/documents/${documentId}/versions/v1.md`,
-      change_summary: 'Initial version',
-      changed_by: 'user-001',
-      change_source: 'user_edit',
-      created_at: '2026-01-28T10:00:00Z',
-      size_bytes: 1536,
-    },
-  ];
+  return NextResponse.json(
+    { error: 'Document delete endpoint is not implemented for this route' },
+    { status: 501 },
+  );
 }

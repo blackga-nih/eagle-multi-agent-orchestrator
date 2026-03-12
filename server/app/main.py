@@ -17,49 +17,49 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response, UploadFile, File
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 from collections import deque
 from datetime import datetime, timedelta
+from decimal import Decimal
 import asyncio
 import json
-import re as _re
 import time
 import logging
 import os
 import uuid
 import io
-import boto3 as _boto3
 
 # EAGLE modules (new)
-from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS, _skill_tools_cache, _supervisor_prompt_cache
-from .document_export import export_document
+from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
+from .document_export import export_document, ExportDependencyError
 from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
     update_session as eagle_update_session, delete_session as eagle_delete_session,
     list_sessions as eagle_list_sessions,
-    add_message, get_messages, get_messages_for_anthropic, get_usage_summary,
+    add_message, get_messages, get_messages_for_anthropic, record_usage, get_usage_summary,
     get_tenant_usage_overview, list_tenant_sessions,
 )
 from .cognito_auth import (
     UserContext, extract_user_context,
-    DEV_MODE
+    DEV_MODE, DEV_USER_ID, DEV_TENANT_ID
 )
 from .admin_service import (
     get_dashboard_stats, get_user_stats, get_top_users, get_tool_usage,
     record_request_cost, check_rate_limit, calculate_cost
 )
+from . import feedback_store
 
 # Existing multi-tenant modules (preserved)
-from .models import SubscriptionTier
+from .models import ChatMessage, ChatResponse, TenantContext, UsageMetric, SubscriptionTier
 from .auth import get_current_user
 from .subscription_service import SubscriptionService
 from .cost_attribution import CostAttributionService
 from .admin_cost_service import AdminCostService
-from .admin_auth import get_admin_user, verify_tenant_admin
+from .admin_auth import get_admin_user, verify_tenant_admin, AdminAuthService
 from .streaming_routes import create_streaming_router
 
 # Phase 4 — hot-reload stores
@@ -71,10 +71,9 @@ from .plugin_store import (
 from .workspace_store import (
     get_or_create_default, create_workspace, get_workspace,
     list_workspaces, activate_workspace, delete_workspace,
-    _workspace_cache,
 )
 from .wspc_store import (
-    put_override, list_overrides,
+    put_override, get_override, list_overrides,
     delete_override, delete_all_overrides,
 )
 from .prompt_store import (
@@ -82,36 +81,53 @@ from .prompt_store import (
     _prompt_cache,
 )
 from .config_store import (
-    put_config, delete_config, list_config,
+    get_config, put_config, delete_config, list_config,
     _config_cache,
 )
 from .template_store import (
-    put_template, delete_template,
+    put_template, get_template, delete_template,
     list_tenant_templates, resolve_template,
     _template_cache,
 )
 from .skill_store import (
-    create_skill, get_skill, update_skill, list_skills, submit_for_review, publish_skill, delete_skill,
+    create_skill, get_skill, update_skill, list_skills, list_active_skills,
+    submit_for_review, publish_skill, disable_skill, delete_skill,
 )
 from .package_store import (
     create_package, get_package, update_package, list_packages,
-    get_package_checklist, submit_package, approve_package,
+    get_package_checklist, submit_package, approve_package, close_package,
 )
 from .document_store import (
-    create_document as create_acq_document, get_document,
-    finalize_document, list_package_documents,
+    get_document,
+    list_package_documents,
+    get_document_history,
+)
+from .document_service import (
+    create_package_document_version,
+    get_document_download_url,
+    finalize_document as finalize_document_version,
+)
+from .package_context_service import (
+    clear_active_package,
+    resolve_context,
+    set_active_package,
 )
 from .approval_store import (
-    create_approval_chain, record_decision, get_chain_status,
+    create_approval_chain, list_approval_chain,
+    record_decision, get_chain_status,
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
-from .feedback_store import create_feedback as create_feedback_item, list_feedback
+from .feedback_store import write_feedback, list_feedback
+from .health_checks import check_knowledge_base_health
 
 # ── Logging ──────────────────────────────────────────────────────────
 from .telemetry.log_context import configure_logging
 configure_logging(level=logging.INFO)
 logger = logging.getLogger("eagle")
+
+# ── S3 bucket (single source of truth) ───────────────────────────────
+_S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
 
 app = FastAPI(
     title="EAGLE – NCI Acquisition Assistant",
@@ -127,6 +143,64 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── API Request Telemetry Middleware ─────────────────────────────────
+# Emits api.request events to CloudWatch scoped to the authenticated user.
+# Skips health checks and static assets to keep logs focused on user activity.
+_SKIP_PATHS = {"/api/health", "/favicon.ico", "/_next", "/api/logs"}
+
+@app.middleware("http")
+async def api_request_telemetry(request: Request, call_next):
+    path = request.url.path
+    # Skip non-user paths
+    if any(path.startswith(p) for p in _SKIP_PATHS):
+        return await call_next(request)
+
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = int((time.time() - start) * 1000)
+
+    # Extract user context from Authorization header (same as endpoints do)
+    try:
+        auth_header = request.headers.get("authorization")
+        user, _ = extract_user_context(auth_header)
+        user_id = user.user_id
+        tenant_id = user.tenant_id
+    except Exception:
+        user_id = "anonymous"
+        tenant_id = "unknown"
+
+    # Extract session_id from query params or X-Session-Id header
+    # (avoid reading POST body — it can only be consumed once)
+    session_id = (
+        request.query_params.get("session_id", "")
+        or request.headers.get("x-session-id", "")
+    )
+
+    # Emit to CloudWatch (fire-and-forget, non-blocking)
+    try:
+        from .telemetry.cloudwatch_emitter import emit_telemetry_event
+        import asyncio as _aio
+        _aio.get_event_loop().run_in_executor(
+            None,
+            emit_telemetry_event,
+            "api.request",
+            tenant_id,
+            {
+                "method": request.method,
+                "path": path,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+                "query_params": dict(request.query_params) if request.query_params else {},
+            },
+            session_id or None,
+            user_id,
+        )
+    except Exception:
+        pass
+
+    return response
+
 
 # ── Feature Flags ────────────────────────────────────────────────────
 USE_PERSISTENT_SESSIONS = os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true"
@@ -177,6 +251,7 @@ def get_session_context(user: UserContext, session_id: Optional[str] = None) -> 
 class EagleChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    package_id: Optional[str] = None
 
 
 class EagleChatResponse(BaseModel):
@@ -189,146 +264,59 @@ class EagleChatResponse(BaseModel):
     cost_usd: Optional[float] = None
 
 
-# ── Fast-path for trivial messages (bypasses Strands Agent overhead) ──
-
-@app.get("/api/perf-test")
-async def perf_test():
-    """Bare Bedrock call — no auth, no DDB, no Strands. Pure model latency."""
-    t0 = time.time()
-    client = _get_bedrock_client()
-    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
-    resp = await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: client.converse(
-            modelId=model_id,
-            messages=[{"role": "user", "content": [{"text": "hi"}]}],
-            system=[{"text": "Reply with just: Hello!"}],
-        ),
-    )
-    elapsed = int((time.time() - t0) * 1000)
-    text = resp["output"]["message"]["content"][0]["text"]
-    return {"text": text, "ms": elapsed}
-
-
-_TRIVIAL_RE = _re.compile(
-    r"^(hi|hello|hey|good\s*(morning|afternoon|evening)|thanks|thank\s*you|"
-    r"ok|okay|yes|no|sure|bye|goodbye|howdy|sup|yo|hola|greetings|"
-    r"what's up|whats up|how are you|how's it going)\s*[?!.,]*$",
-    _re.IGNORECASE,
-)
-
-_bedrock_client = None
-
-
-def _get_bedrock_client():
-    global _bedrock_client
-    if _bedrock_client is None:
-        _bedrock_client = _boto3.client(
-            "bedrock-runtime",
-            region_name=os.getenv("AWS_REGION", "us-east-1"),
-        )
-    return _bedrock_client
-
-
-_FAST_SYSTEM_PROMPT = (
-    "You are EAGLE, the Enhanced Acquisition Guidance and Learning Engine "
-    "for the NIH/NCI Office of Acquisitions. Respond briefly and warmly to "
-    "the user's greeting. Mention that you can help with acquisitions, FAR "
-    "regulations, document generation, and compliance guidance. Keep it to "
-    "2-3 sentences."
-)
-
-
-async def _fast_trivial_response(message: str) -> dict | None:
-    """If message is trivial, call Bedrock directly (no Strands overhead).
-
-    Returns response dict on hit, None if message is not trivial.
-    """
-    if not _TRIVIAL_RE.match(message.strip()):
-        return None
-
-    client = _get_bedrock_client()
-    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
-
-    resp = await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: client.converse(
-            modelId=model_id,
-            messages=[{"role": "user", "content": [{"text": message}]}],
-            system=[{"text": _FAST_SYSTEM_PROMPT}],
-        ),
-    )
-
-    # Some models (e.g. MiniMax) return reasoningContent blocks before text
-    content_blocks = resp["output"]["message"]["content"]
-    output_text = next(
-        (b["text"] for b in content_blocks if "text" in b),
-        str(content_blocks),
-    )
-    usage = resp.get("usage", {})
-    return {
-        "text": output_text,
-        "usage": usage,
-        "model": MODEL,
-        "tools_called": [],
-    }
-
-
 @app.post("/api/chat", response_model=EagleChatResponse)
 async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_from_header)):
     """REST chat endpoint using EAGLE Anthropic SDK with cost tracking."""
     start = time.time()
     tenant_id, user_id, session_id = get_session_context(user, req.session_id)
-    loop = asyncio.get_event_loop()
 
-    # Fast path: trivial messages bypass Strands Agent entirely
-    fast_result = await _fast_trivial_response(req.message)
-    if fast_result is not None:
-        elapsed_ms = int((time.time() - start) * 1000)
-        usage = fast_result.get("usage", {})
-        return EagleChatResponse(
-            response=fast_result["text"],
-            session_id=session_id,
-            usage=usage,
-            model=fast_result.get("model", MODEL),
-            tools_called=[],
-            response_time_ms=elapsed_ms,
-            cost_usd=0.0,
-        )
+    # Check rate limits
+    rate_check = check_rate_limit(tenant_id, user_id, user.tier)
+    if not rate_check["allowed"]:
+        raise HTTPException(status_code=429, detail=rate_check["reason"])
 
-    # Run rate-limit check and session setup concurrently (both are DynamoDB reads)
+    # Get or create session
     if USE_PERSISTENT_SESSIONS:
-        rate_fut, session_fut, messages_fut = await asyncio.gather(
-            loop.run_in_executor(None, check_rate_limit, tenant_id, user_id, user.tier),
-            loop.run_in_executor(None, eagle_get_session, session_id, tenant_id, user_id),
-            loop.run_in_executor(None, get_messages_for_anthropic, session_id, tenant_id, user_id),
-        )
-        rate_check, session, messages = rate_fut, session_fut, messages_fut
+        session = eagle_get_session(session_id, tenant_id, user_id)
         if not session:
-            loop.run_in_executor(None, eagle_create_session, tenant_id, user_id, session_id)
+            session = eagle_create_session(tenant_id, user_id, session_id)
+        messages = get_messages_for_anthropic(session_id, tenant_id, user_id)
     else:
-        rate_check = await loop.run_in_executor(None, check_rate_limit, tenant_id, user_id, user.tier)
         if session_id not in SESSIONS:
             SESSIONS[session_id] = []
         messages = SESSIONS[session_id]
-
-    if not rate_check["allowed"]:
-        raise HTTPException(status_code=429, detail=rate_check["reason"])
 
     # Add user message
     user_msg = {"role": "user", "content": req.message}
     messages.append(user_msg)
 
     if USE_PERSISTENT_SESSIONS:
-        # Fire-and-forget: DynamoDB write doesn't block the model call
-        loop.run_in_executor(
-            None, add_message, session_id, "user", req.message, tenant_id, user_id
+        add_message(session_id, "user", req.message, tenant_id, user_id)
+
+    resolved_package_context = None
+    try:
+        resolved_package_context = resolve_context(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            explicit_package_id=req.package_id,
         )
+        if req.package_id and resolved_package_context.is_package_mode:
+            set_active_package(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+                package_id=resolved_package_context.package_id,
+            )
+    except Exception:
+        logger.warning("Package context resolution failed for REST chat", exc_info=True)
+        resolved_package_context = None
 
     try:
         _text_parts: list[str] = []
         _usage: dict = {}
         _tools_called: list[str] = []
+        _final_text: str = ""
         _final_text: str = ""
         async for _sdk_msg in sdk_query(
             prompt=req.message,
@@ -337,6 +325,7 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
             tier=user.tier or "advanced",
             session_id=session_id,
             messages=messages[:-1],  # History excluding current user message
+            package_context=resolved_package_context,
         ):
             _msg_type = type(_sdk_msg).__name__
             if _msg_type == "AssistantMessage":
@@ -357,10 +346,7 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
-            # Fire-and-forget: don't block the response
-            loop.run_in_executor(
-                None, add_message, session_id, "assistant", result["text"], tenant_id, user_id
-            )
+            add_message(session_id, "assistant", result["text"], tenant_id, user_id)
         else:
             messages.append({"role": "assistant", "content": result["text"]})
 
@@ -372,16 +358,12 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         output_tokens = usage.get("output_tokens", 0)
         cost = calculate_cost(input_tokens, output_tokens)
 
-        # Fire-and-forget: cost recording doesn't block response
-        _cost_model = result.get("model", MODEL)
-        _cost_tools = result.get("tools_called", [])
-        loop.run_in_executor(
-            None, lambda: record_request_cost(
-                tenant_id, user_id, session_id,
-                input_tokens, output_tokens,
-                model=_cost_model, tools_used=_cost_tools,
-                response_time_ms=elapsed_ms,
-            )
+        record_request_cost(
+            tenant_id, user_id, session_id,
+            input_tokens, output_tokens,
+            model=result.get("model", MODEL),
+            tools_used=result.get("tools_called", []),
+            response_time_ms=elapsed_ms
         )
 
         _log_telemetry({
@@ -408,8 +390,8 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
             cost_usd=cost,
         )
     except Exception as e:
-        logger.error("REST chat error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("REST chat error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error processing chat request")
 
 
 # ── Session management endpoints (EAGLE enhanced) ────────────────────
@@ -454,61 +436,6 @@ async def api_create_session(
         session = {"session_id": session_id, "title": title or "New Conversation"}
 
     return session
-
-
-# ── AI session title generation (must be before {session_id} routes) ──
-
-class GenerateTitleRequest(BaseModel):
-    message: str
-    response_snippet: Optional[str] = None
-
-
-_TITLE_SYSTEM_PROMPT = (
-    "Generate a short, descriptive title (3-6 words) for a chat session based on "
-    "the user's message. The title should capture the main topic or intent. "
-    "Do NOT include quotes, periods, or punctuation. Just output the title text. "
-    "Examples: 'SOW for Cloud Migration', 'FAR Part 15 Guidance', "
-    "'IGCE Cost Estimate Review', 'New IT Services Acquisition'."
-)
-
-
-@app.post("/api/generate-title")
-async def api_generate_session_title(
-    req: GenerateTitleRequest,
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Use Bedrock to generate a short session title from the user's first message."""
-    user_text = req.message.strip()[:500]
-    if not user_text:
-        return {"title": "New Session"}
-
-    prompt = f"User message: {user_text}"
-    if req.response_snippet:
-        prompt += f"\n\nAssistant response preview: {req.response_snippet[:300]}"
-
-    try:
-        client = _get_bedrock_client()
-        model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
-        resp = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: client.converse(
-                modelId=model_id,
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                system=[{"text": _TITLE_SYSTEM_PROMPT}],
-                inferenceConfig={"maxTokens": 30, "temperature": 0.3},
-            ),
-        )
-        content_blocks = resp["output"]["message"]["content"]
-        title = next(
-            (b["text"] for b in content_blocks if "text" in b),
-            "New Session",
-        ).strip().strip('"\'.')
-        if len(title) > 60:
-            title = title[:57] + "..."
-        return {"title": title}
-    except Exception as e:
-        logger.warning("Failed to generate session title: %s", e)
-        return {"title": "New Session"}
 
 
 @app.get("/api/sessions/{session_id}")
@@ -608,7 +535,6 @@ async def api_get_messages(
     return {"session_id": session_id, "messages": messages}
 
 
-
 # ── Document export endpoints ────────────────────────────────────────
 
 class ExportRequest(BaseModel):
@@ -631,11 +557,15 @@ async def api_export_document(req: ExportRequest, user: UserContext = Depends(ge
                 "X-File-Size": str(result["size_bytes"]),
             }
         )
+    except ExportDependencyError as e:
+        logger.error("Export dependency error: %s", e)
+        raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
+        logger.warning("Export validation error: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error("Export error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Export error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during export")
 
 
 @app.get("/api/documents/export/{session_id}")
@@ -673,9 +603,12 @@ async def api_export_session(
                 "Content-Disposition": f'attachment; filename="{result["filename"]}"',
             }
         )
+    except ExportDependencyError as e:
+        logger.error("Session export dependency error: %s", e)
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        logger.error("Session export error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Session export error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during session export")
 
 
 # ── S3 Document Browser ──────────────────────────────────────────────
@@ -688,7 +621,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = _S3_BUCKET
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
@@ -711,8 +644,8 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
         return {"documents": documents, "bucket": bucket, "prefix": prefix}
     except ClientError as e:
-        logger.error("S3 list error: %s", e)
-        return {"documents": [], "error": str(e)}
+        logger.error("S3 list error: %s", e, exc_info=True)
+        return {"documents": [], "error": "Failed to list documents"}
 
 
 @app.get("/api/documents/{doc_key:path}")
@@ -723,7 +656,7 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = _S3_BUCKET
 
     # Security: ensure key is within user's prefix
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
@@ -744,7 +677,102 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchKey":
             raise HTTPException(status_code=404, detail="Document not found")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("S3 get document error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve document")
+
+
+# ── Document Update (PUT) ────────────────────────────────────────────
+
+
+class DocumentUpdateRequest(BaseModel):
+    """Request body for updating document content."""
+
+    content: str
+    change_source: str = "user_edit"  # "user_edit" | "ai_edit"
+
+
+@app.put("/api/documents/{doc_key:path}")
+async def api_update_document(
+    doc_key: str,
+    request: DocumentUpdateRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update document content in S3.
+
+    For package documents (eagle/{tenant}/packages/...), creates a new version.
+    For workspace documents, performs a direct overwrite.
+    """
+    import boto3
+    from botocore.exceptions import ClientError
+
+    tenant_id = user.tenant_id
+    user_id = user.user_id
+    bucket = _S3_BUCKET
+
+    # Security: ensure key is within user's prefix
+    if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Detect if this is a package document by checking the key pattern
+    # Package docs: eagle/{tenant}/{user}/packages/{package_id}/...
+    is_package_doc = "/packages/" in doc_key
+
+    if is_package_doc:
+        # Route through document_service for versioning
+        from app.document_service import create_package_document_version
+
+        # Extract package_id and doc_type from the key
+        # Pattern: eagle/{tenant}/{user}/packages/{package_id}/{doc_type}_v{N}.{ext}
+        parts = doc_key.split("/")
+        try:
+            pkg_idx = parts.index("packages")
+            package_id = parts[pkg_idx + 1]
+            filename = parts[-1]
+            # Extract doc_type from filename (e.g., "sow_v1.md" → "sow")
+            doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
+            title = doc_type.replace("_", " ").title()
+        except (ValueError, IndexError):
+            raise HTTPException(status_code=400, detail="Invalid package document key format")
+
+        result = create_package_document_version(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            content=request.content,
+            title=title,
+            file_type="md",
+            created_by_user_id=user_id,
+            change_source=request.change_source,
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=500, detail=result.error or "Failed to create document version")
+
+        return {
+            "success": True,
+            "key": result.s3_key,
+            "version": result.version,
+            "document_id": result.document_id,
+            "message": f"Document updated (version {result.version})",
+        }
+    else:
+        # Workspace document: direct S3 overwrite
+        try:
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            s3.put_object(
+                Bucket=bucket,
+                Key=doc_key,
+                Body=request.content.encode("utf-8"),
+                ContentType="text/markdown; charset=utf-8",
+            )
+            return {
+                "success": True,
+                "key": doc_key,
+                "message": "Document saved",
+            }
+        except ClientError as e:
+            logger.error("S3 put document error: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to save document")
 
 
 # ── S3 Presigned URL ─────────────────────────────────────────────────
@@ -765,7 +793,7 @@ async def api_presign_document(
     if not key.startswith(f"eagle/{tenant_id}/{user_id}/"):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    bucket = os.getenv("S3_BUCKET", "nci-documents")
+    bucket = _S3_BUCKET
     try:
         s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
         url = s3.generate_presigned_url(
@@ -813,7 +841,7 @@ async def api_upload_document(
 
     tenant_id = user.tenant_id
     user_id = user.user_id
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = _S3_BUCKET
 
     # Sanitize filename
     safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
@@ -823,8 +851,8 @@ async def api_upload_document(
         s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
         s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
     except ClientError as e:
-        logger.error("S3 upload error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("S3 upload error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to upload document")
 
     logger.info("Uploaded %s → s3://%s/%s", safe_name, bucket, key)
     return {"key": key, "filename": safe_name, "size_bytes": len(body), "content_type": content_type}
@@ -843,7 +871,7 @@ async def api_list_kb_reviews(
     user: UserContext = Depends(get_user_from_header),
 ):
     """List KB review records from DynamoDB (admin only)."""
-    from boto3.dynamodb.conditions import Attr
+    from boto3.dynamodb.conditions import Key, Attr
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
     try:
         ddb = _get_dynamo()
@@ -855,8 +883,8 @@ async def api_list_kb_reviews(
         reviews.sort(key=lambda r: r.get("created_at", ""), reverse=True)
         return {"reviews": reviews, "count": len(reviews)}
     except Exception as e:
-        logger.error("KB review list error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("KB review list error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to list KB reviews")
 
 
 @app.post("/api/admin/kb-review/{review_id}/approve")
@@ -870,7 +898,7 @@ async def api_approve_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = _S3_BUCKET
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -880,12 +908,13 @@ async def api_approve_kb_review(
     try:
         item = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("KB review fetch error (approve): %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch KB review")
 
     if not item:
         raise HTTPException(status_code=404, detail="KB review not found")
     if item.get("status") != "pending":
-        raise HTTPException(status_code=409, detail=f"Review already {item.get('status')}")
+        raise HTTPException(status_code=409, detail="Review already processed")
 
     proposed_diff = item.get("proposed_diff", [])
 
@@ -937,7 +966,7 @@ async def api_reject_kb_review(
     from botocore.exceptions import ClientError
 
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    bucket = os.getenv("S3_BUCKET", "")
+    bucket = _S3_BUCKET
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
     s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -946,12 +975,13 @@ async def api_reject_kb_review(
     try:
         item = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("KB review fetch error (reject): %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch KB review")
 
     if not item:
         raise HTTPException(status_code=404, detail="KB review not found")
     if item.get("status") != "pending":
-        raise HTTPException(status_code=409, detail=f"Review already {item.get('status')}")
+        raise HTTPException(status_code=409, detail="Review already processed")
 
     # Move S3 doc from pending/ to rejected/
     old_key = item.get("s3_key", "")
@@ -1152,6 +1182,83 @@ async def api_user_usage(
     return get_usage_summary(tenant_id, days)
 
 
+# ── Feedback endpoint ────────────────────────────────────────────────
+
+def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
+    """Return up to 50 recent CloudWatch log events matching session_id (non-fatal)."""
+    if not session_id:
+        return []
+    try:
+        log_group = os.environ.get("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
+        region = os.environ.get("AWS_REGION", "us-east-1")
+        client = _boto3.client("logs", region_name=region)
+        now_ms = int(time.time() * 1000)
+        day_ms = 24 * 60 * 60 * 1000
+        response = client.filter_log_events(
+            logGroupName=log_group,
+            startTime=now_ms - day_ms,
+            endTime=now_ms,
+            filterPattern=session_id,
+            limit=50,
+        )
+        return response.get("events", [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("feedback: cloudwatch fetch failed (non-fatal): %s", exc)
+        return []
+
+
+@app.post("/api/feedback")
+async def api_submit_feedback(
+    request: Request,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Record user feedback with conversation snapshot and recent CloudWatch logs."""
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    feedback_text = body.get("feedback_text", "").strip()
+    conversation_snapshot = body.get("conversation_snapshot", [])
+    page = body.get("page", "")
+    last_message_id = body.get("last_message_id", "")
+
+    if not feedback_text:
+        raise HTTPException(status_code=400, detail="feedback_text is required")
+
+    cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
+
+    item = feedback_store.write_feedback(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        tier=user.tier,
+        session_id=session_id,
+        feedback_text=feedback_text,
+        conversation_snapshot=json.dumps(conversation_snapshot, default=str),
+        cloudwatch_logs=json.dumps(cloudwatch_logs, default=str),
+        page=page,
+        last_message_id=last_message_id,
+    )
+
+    # CloudWatch: emit feedback.submitted (fire-and-forget)
+    try:
+        from .telemetry.cloudwatch_emitter import emit_feedback_submitted
+        emit_feedback_submitted(
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+            session_id=session_id or "",
+            feedback_type=item.get("feedback_type", "general"),
+            feedback_id=item.get("feedback_id", ""),
+        )
+    except Exception:
+        logger.debug("feedback.submitted emission failed (non-fatal)")
+
+    return {
+        "status": "ok",
+        "message": "Feedback recorded. Thank you!",
+        "feedback_id": item.get("feedback_id"),
+        "feedback_type": item.get("feedback_type"),
+        "created_at": item.get("created_at"),
+    }
+
+
 # ── Telemetry endpoint ───────────────────────────────────────────────
 
 @app.get("/api/telemetry")
@@ -1293,6 +1400,7 @@ async def websocket_chat(ws: WebSocket):
                 _text_parts: list[str] = []
                 _usage: dict = {}
                 _final_text: str = ""
+                _final_text: str = ""
                 async for _sdk_msg in sdk_query(
                     prompt=user_message,
                     tenant_id=tenant_id,
@@ -1370,14 +1478,14 @@ async def websocket_chat(ws: WebSocket):
 
             except Exception as e:
                 logger.error("Stream error: %s", e, exc_info=True)
-                await ws.send_json({"type": "error", "message": str(e)})
+                await ws.send_json({"type": "error", "message": "Internal error processing stream"})
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: %s", default_session_id)
     except Exception as e:
-        logger.error("WebSocket error: %s", e)
+        logger.error("WebSocket error: %s", e, exc_info=True)
         try:
-            await ws.send_json({"type": "error", "message": str(e)})
+            await ws.send_json({"type": "error", "message": "WebSocket connection error"})
         except Exception:
             pass
 
@@ -1606,7 +1714,8 @@ async def add_user_to_admin_group(request: dict):
         )
         return {"success": True, "message": f"Added {email} to {tenant_id}-admins group"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add user to admin group: {str(e)}")
+        logger.error("Failed to add user to admin group: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to add user to admin group")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1625,10 +1734,20 @@ app.include_router(streaming_router)
 @app.get("/api/health")
 async def health_check():
     """Backend health check endpoint."""
+    knowledge_base = check_knowledge_base_health()
     return {
         "status": "healthy",
         "service": "eagle-backend",
         "version": "4.0.0",
+        "services": {
+            "bedrock": True,
+            "dynamodb": True,
+            "cognito": True,
+            "s3": True,
+            "knowledge_metadata_table": knowledge_base["metadata_table"]["ok"],
+            "knowledge_document_bucket": knowledge_base["document_bucket"]["ok"],
+        },
+        "knowledge_base": knowledge_base,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -1649,9 +1768,6 @@ async def admin_reload_caches(user: UserContext = Depends(get_user_from_header))
     _prompt_cache.clear()
     _config_cache.clear()
     _template_cache.clear()
-    _workspace_cache.clear()
-    _skill_tools_cache.clear()
-    _supervisor_prompt_cache.clear()
     write_audit(
         tenant_id=user.tenant_id,
         entity_type="cache",
@@ -1659,7 +1775,7 @@ async def admin_reload_caches(user: UserContext = Depends(get_user_from_header))
         event_type="reload",
         actor_user_id=user.user_id,
     )
-    return {"status": "flushed", "caches": ["plugin", "prompt", "config", "template", "workspace", "skill_tools", "supervisor_prompt"]}
+    return {"status": "flushed", "caches": ["plugin", "prompt", "config", "template"]}
 
 
 @app.post("/api/admin/plugin/sync")
@@ -2211,6 +2327,11 @@ async def approve_package_endpoint(
 
 # ── Acquisition Documents (DOCUMENT#) ─────────────────────────────
 
+class ResolvePackageContextRequest(BaseModel):
+    session_id: str
+    package_id: Optional[str] = None
+    action: Optional[str] = None  # "set" | "clear" | None
+
 @app.get("/api/packages/{package_id}/documents")
 async def list_documents_endpoint(
     package_id: str,
@@ -2220,28 +2341,98 @@ async def list_documents_endpoint(
     return list_package_documents(user.tenant_id, package_id)
 
 
+@app.post("/api/packages/resolve-context")
+async def resolve_package_context_endpoint(
+    body: ResolvePackageContextRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Resolve and optionally persist active package context for a session."""
+    if body.action == "clear":
+        clear_active_package(user.tenant_id, user.user_id, body.session_id)
+        return {"mode": "workspace", "package_id": None}
+
+    if body.package_id and body.action in (None, "set"):
+        set_active_package(
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+            session_id=body.session_id,
+            package_id=body.package_id,
+        )
+
+    ctx = resolve_context(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        session_id=body.session_id,
+        explicit_package_id=body.package_id,
+    )
+    return {
+        "mode": ctx.mode,
+        "package_id": ctx.package_id,
+        "package_title": ctx.package_title,
+        "acquisition_pathway": ctx.acquisition_pathway,
+        "required_documents": ctx.required_documents or [],
+        "completed_documents": ctx.completed_documents or [],
+    }
+
+
 @app.post("/api/packages/{package_id}/documents")
 async def create_document_endpoint(
     package_id: str,
     body: Dict[str, Any],
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Save a generated document for a package (auto-supersedes previous version)."""
-    doc = create_acq_document(
+    """Save a generated document for a package using canonical document service."""
+    result = create_package_document_version(
         tenant_id=user.tenant_id,
         package_id=package_id,
         doc_type=body["doc_type"],
         content=body["content"],
-        generated_by=user.user_id,
+        title=body.get("title") or body["doc_type"].replace("_", " ").title(),
+        file_type=body.get("file_type", "md"),
+        created_by_user_id=user.user_id,
         session_id=body.get("session_id"),
+        change_source=body.get("change_source", "user_edit"),
         template_id=body.get("template_id"),
     )
-    # Mark doc_type as completed on package
-    pkg = get_package(user.tenant_id, package_id)
-    if pkg:
-        completed = list(set(pkg.get("completed_documents", []) + [body["doc_type"]]))
-        update_package(user.tenant_id, package_id, {"completed_documents": completed})
-    return doc
+    if not result.success:
+        status = 404 if result.error and "not found" in result.error.lower() else 500
+        raise HTTPException(status_code=status, detail=result.error or "Document creation failed")
+
+    doc = get_document(user.tenant_id, package_id, body["doc_type"], result.version)
+    if doc:
+        return doc
+    return result.to_dict()
+
+
+@app.get("/api/packages/{package_id}/documents/{doc_type}/history")
+async def get_document_history_endpoint(
+    package_id: str,
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return version history for a package document type."""
+    return get_document_history(user.tenant_id, package_id, doc_type)
+
+
+@app.get("/api/packages/{package_id}/documents/{doc_type}/versions/{version}/download-url")
+async def get_document_download_url_endpoint(
+    package_id: str,
+    doc_type: str,
+    version: int,
+    expires_in: int = 3600,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return a presigned download URL for a specific document version."""
+    url = get_document_download_url(
+        tenant_id=user.tenant_id,
+        package_id=package_id,
+        doc_type=doc_type,
+        version=version,
+        expires_in=expires_in,
+    )
+    if not url:
+        raise HTTPException(status_code=404, detail="Document download URL unavailable")
+    return {"download_url": url, "expires_in": expires_in}
 
 
 @app.get("/api/packages/{package_id}/documents/{doc_type}")
@@ -2265,8 +2456,27 @@ async def finalize_document_endpoint(
     body: Dict[str, Any],
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Mark a document as final."""
-    doc = finalize_document(user.tenant_id, package_id, doc_type, body.get("version", 1))
+    """Mark a document version as final."""
+    doc = finalize_document_version(
+        user.tenant_id,
+        package_id,
+        doc_type,
+        body.get("version", 1),
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@app.post("/api/packages/{package_id}/documents/{doc_type}/versions/{version}/promote-final")
+async def promote_document_final_endpoint(
+    package_id: str,
+    doc_type: str,
+    version: int,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Promote a specific document version to final status."""
+    doc = finalize_document_version(user.tenant_id, package_id, doc_type, version)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
@@ -2347,6 +2557,7 @@ async def reset_user_preferences(user: UserContext = Depends(get_user_from_heade
     return reset_prefs(user.tenant_id, user.user_id)
 
 
+
 # ── Test Run Viewer Endpoints ─────────────────────────────────────
 
 @app.get("/api/admin/test-runs")
@@ -2365,32 +2576,6 @@ async def get_test_run_detail(run_id: str):
     return {"run_id": run_id, "results": results, "count": len(results)}
 
 
-# ── Feedback Endpoints ────────────────────────────────────────────
-
-
-class FeedbackBody(BaseModel):
-    rating: int = 0
-    page: str
-    feedback_type: Optional[str] = None
-    comment: Optional[str] = None
-    session_id: Optional[str] = None
-
-
-@app.post("/api/feedback")
-async def submit_feedback(body: FeedbackBody, user: UserContext = Depends(get_user_from_header)):
-    """Submit user feedback (comment + optional type)."""
-    if body.rating and not 1 <= body.rating <= 5:
-        raise HTTPException(status_code=400, detail="Rating must be 1-5")
-    item = create_feedback_item(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        rating=body.rating,
-        page=body.page,
-        feedback_type=body.feedback_type,
-        comment=body.comment,
-        session_id=body.session_id,
-    )
-    return {"status": "ok", "feedback_id": item["feedback_id"]}
 
 
 @app.get("/api/feedback")
@@ -2398,6 +2583,7 @@ async def get_feedback(limit: int = 50, user: UserContext = Depends(get_user_fro
     """List feedback for the current tenant (admin use)."""
     items = list_feedback(user.tenant_id, limit=limit)
     return {"feedback": items, "count": len(items)}
+
 
 
 if __name__ == "__main__":

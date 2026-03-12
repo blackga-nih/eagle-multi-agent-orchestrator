@@ -1,17 +1,17 @@
 {
-  "version": "FY2024",
-  "last_updated": "2024-10-01",
+  "version": "FY2025",
+  "last_updated": "2025-10-01",
   "source": "FAR and annual adjustments",
   "thresholds": {
     "micro_purchase": {
-      "general": 10000,
+      "general": 15000,
       "construction": 2000,
       "services_subject_to_sca": 2500,
       "contingency_operations": 25000,
       "description": "Maximum for purchases using simplified methods without competition requirements"
     },
     "simplified_acquisition": {
-      "sat": 250000,
+      "sat": 350000,
       "commercial_simplified_test": 7500000,
       "commercial_simplified_test_certain": 15000000,
       "description": "Simplified Acquisition Threshold - full competition required above this"
@@ -24,7 +24,7 @@
       "description": "Synopsis on SAM.gov required above this threshold"
     },
     "cost_pricing_data": {
-      "tina_threshold": 2000000,
+      "tina_threshold": 2500000,
       "description": "Truth in Negotiations Act - certified cost or pricing data required"
     },
     "acquisition_plan": {

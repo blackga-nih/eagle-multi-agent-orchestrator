@@ -7,13 +7,20 @@ import os
 import json
 import time
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Any, List
 
-import anthropic
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
+
+from app.tools.knowledge_tools import (
+    KNOWLEDGE_SEARCH_TOOL,
+    KNOWLEDGE_FETCH_TOOL,
+    exec_knowledge_search,
+    exec_knowledge_fetch,
+)
 
 logger = logging.getLogger("eagle.agent")
 
@@ -170,6 +177,333 @@ def _extract_user_id(session_id: str | None = None) -> str:
     if session_id.startswith("ws-"):
         return session_id
     return "demo-user"
+
+
+def _extract_leaf_session_id(session_id: str | None = None) -> str | None:
+    """Extract raw session id from composite format {tenant}#{tier}#{user}#{session}."""
+    if not session_id:
+        return None
+    if "#" in session_id:
+        parts = session_id.split("#", 3)
+        if len(parts) >= 4 and parts[3]:
+            return parts[3]
+        return None
+    return session_id
+
+
+def _normalize_context_text(text: str) -> str:
+    """Prefer the explicit user request section from wrapped prompts."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+
+    marker = "[USER REQUEST]"
+    if marker in cleaned:
+        tail = cleaned.split(marker, 1)[1].strip()
+        if "Instruction:" in tail:
+            tail = tail.split("Instruction:", 1)[0].strip()
+        if tail:
+            cleaned = tail
+    return cleaned
+
+
+def _load_recent_user_context(session_id: str | None = None) -> list[str]:
+    """Load recent user messages for contextualizing document generation."""
+    leaf_session_id = _extract_leaf_session_id(session_id)
+    if not leaf_session_id:
+        return []
+
+    tenant_id = _extract_tenant_id(session_id)
+    user_id = _extract_user_id(session_id)
+
+    try:
+        from .session_store import get_messages
+
+        messages = get_messages(leaf_session_id, tenant_id, user_id, limit=30)
+        user_texts: list[str] = []
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                normalized = _normalize_context_text(content)
+                if normalized:
+                    user_texts.append(normalized)
+                continue
+
+            if isinstance(content, list):
+                text_parts: list[str] = []
+                for block in content:
+                    if isinstance(block, dict):
+                        block_text = block.get("text")
+                        if isinstance(block_text, str) and block_text.strip():
+                            text_parts.append(block_text.strip())
+                if text_parts:
+                    normalized = _normalize_context_text("\n".join(text_parts))
+                    if normalized:
+                        user_texts.append(normalized)
+
+        return user_texts[-8:]
+    except Exception as exc:
+        logger.debug("Could not load session context for create_document: %s", exc)
+        return []
+
+
+def _extract_first_money_value(text: str) -> str | None:
+    """Extract a likely budget/estimate token from free text."""
+    if not text:
+        return None
+
+    m = re.search(r"\$[0-9][0-9,]*(?:\.[0-9]+)?", text)
+    if m:
+        return m.group(0)
+
+    m = re.search(r"\b[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:million|billion|k|m)\b", text, flags=re.IGNORECASE)
+    if m:
+        return m.group(0)
+
+    return None
+
+
+def _extract_period(text: str) -> str | None:
+    """Extract a likely period-of-performance phrase from free text."""
+    if not text:
+        return None
+
+    m = re.search(r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})", text, flags=re.IGNORECASE)
+    if m:
+        return m.group(0).strip()
+    return None
+
+
+def _extract_section_bullets(text: str) -> dict[str, list[str]]:
+    """Extract bullet lists grouped by heading from free-form user prompts."""
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+
+    aliases = {
+        "project description": "project_description",
+        "technical requirements": "technical_requirements",
+        "scope of work": "scope_of_work",
+        "deliverables": "deliverables",
+        "environment tiers": "environment_tiers",
+        "security": "security",
+    }
+
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        heading_key = line.rstrip(":").strip().lower()
+        if heading_key in aliases:
+            current = aliases[heading_key]
+            sections.setdefault(current, [])
+            continue
+
+        if line.startswith("- ") or line.startswith("* "):
+            item = line[2:].strip().strip('"')
+            if not item:
+                continue
+            bucket = current or "general"
+            sections.setdefault(bucket, []).append(item)
+            continue
+
+    return sections
+
+
+def _augment_document_data_from_context(
+    doc_type: str,
+    title: str,
+    data: dict | None,
+    session_id: str | None,
+) -> dict:
+    """Fill missing create_document fields from recent user conversation context."""
+    merged = dict(data or {})
+
+    # If caller already passed meaningful inputs, preserve them and only fill gaps.
+    context_messages = _load_recent_user_context(session_id)
+    if not context_messages:
+        return merged
+
+    last_user_text = context_messages[-1]
+    context_blob = " ".join(context_messages[-4:])
+
+    # Prefer explicit recent user request; keep bounded.
+    requirement = (last_user_text or context_blob).strip()
+    if requirement:
+        requirement = requirement[:500]
+
+    money = _extract_first_money_value(context_blob)
+    period = _extract_period(context_blob)
+
+    # Common keys used across multiple document generators/templates.
+    if requirement:
+        merged.setdefault("description", requirement)
+        merged.setdefault("requirement", requirement)
+        merged.setdefault("objective", requirement)
+    if money:
+        merged.setdefault("estimated_cost", money)
+        merged.setdefault("estimated_value", money)
+        merged.setdefault("budget", money)
+        merged.setdefault("total_estimate", money)
+    if period:
+        merged.setdefault("period_of_performance", period)
+        merged.setdefault("timeline", period)
+
+    parsed_sections = _extract_section_bullets("\n".join(context_messages[-3:]))
+
+    project_description = " ".join(parsed_sections.get("project_description", [])).strip()
+    if project_description:
+        existing_desc = str(merged.get("description", "")).strip()
+        if (
+            not existing_desc
+            or "project description" in existing_desc.lower()
+            or len(existing_desc) > 320
+        ):
+            merged["description"] = project_description[:500]
+        merged.setdefault("requirement", project_description[:500])
+        merged.setdefault("objective", project_description[:500])
+    if parsed_sections.get("deliverables"):
+        merged.setdefault("deliverables", parsed_sections["deliverables"][:15])
+    if parsed_sections.get("security"):
+        merged.setdefault("security_requirements", "; ".join(parsed_sections["security"])[:600])
+    if parsed_sections.get("environment_tiers"):
+        merged.setdefault("place_of_performance", "; ".join(parsed_sections["environment_tiers"])[:300])
+
+    # Minimal doc-type hints for better first-pass drafts.
+    if doc_type == "igce":
+        merged.setdefault("item_name", title or "Primary acquisition item")
+    if doc_type == "market_research":
+        merged.setdefault("requirement_summary", requirement or title)
+    if doc_type == "sow":
+        scope_items = parsed_sections.get("scope_of_work", [])
+        tech_items = parsed_sections.get("technical_requirements", [])
+        combined_tasks = (scope_items + tech_items)[:20]
+        if combined_tasks:
+            merged.setdefault("tasks", combined_tasks)
+        merged.setdefault("scope", requirement or title)
+
+    return merged
+
+
+def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
+    """Detect boilerplate template previews that did not absorb user context."""
+    if not preview:
+        return False
+
+    normalized = " ".join(preview.lower().split())
+    if doc_type == "sow":
+        markers = [
+            "this section should provide brief description of the project",
+            "the background information should identify the requirement in very general terms",
+            "sample language",
+            "table of contents",
+        ]
+        return all(marker in normalized for marker in markers[:2]) and "table of contents" in normalized
+
+    return False
+
+
+_SOW_SECTION_HINTS: dict[str, str] = {
+    "1": "background and purpose",
+    "2": "scope",
+    "3": "period of performance",
+    "4": "applicable documents and standards",
+    "5": "tasks and requirements",
+    "6": "deliverables",
+    "7": "government-furnished property",
+    "8": "quality assurance surveillance plan",
+    "9": "place of performance",
+    "10": "security requirements",
+}
+
+
+def _extract_sow_clear_targets(edit_request: str) -> list[str]:
+    """Return SOW section heading hints that the request asks to clear."""
+    req = (edit_request or "").strip().lower()
+    if not req:
+        return []
+
+    # Guardrail: only auto-clear when user explicitly asks to clear/blank.
+    clear_intent = (
+        "clear" in req
+        or "blank" in req
+        or "to be completed" in req
+        or "remove" in req
+    )
+    if not clear_intent:
+        return []
+
+    targets: list[str] = []
+
+    for section_num in re.findall(r"\bsection\s*(\d{1,2})\b", req):
+        hint = _SOW_SECTION_HINTS.get(section_num)
+        if hint and hint not in targets:
+            targets.append(hint)
+
+    heading_aliases = (
+        "background and purpose",
+        "scope",
+        "period of performance",
+        "applicable documents and standards",
+        "tasks and requirements",
+        "deliverables",
+        "government-furnished property",
+        "quality assurance surveillance plan",
+        "place of performance",
+        "security requirements",
+    )
+    for alias in heading_aliases:
+        if alias in req and alias not in targets:
+            targets.append(alias)
+
+    # "leave it blank" after "scope" is common shorthand.
+    if "scope" in req and "scope" not in targets:
+        targets.append("scope")
+
+    return targets
+
+
+def _apply_sow_clear_edits(current_content: str, edit_request: str) -> str | None:
+    """Apply explicit SOW section clear requests against existing markdown."""
+    if not isinstance(current_content, str) or not current_content.strip():
+        return None
+
+    targets = _extract_sow_clear_targets(edit_request)
+    if not targets:
+        return None
+
+    heading_matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*$", current_content))
+    if not heading_matches:
+        return None
+
+    rebuilt: list[str] = []
+    cursor = 0
+    changed = False
+
+    for idx, heading_match in enumerate(heading_matches):
+        heading_end = heading_match.end()
+        next_start = heading_matches[idx + 1].start() if idx + 1 < len(heading_matches) else len(current_content)
+
+        heading_text = heading_match.group(1).strip().lower()
+        body_text = current_content[heading_end:next_start]
+
+        rebuilt.append(current_content[cursor:heading_end])
+
+        if any(target in heading_text for target in targets):
+            replacement = "\n\n[To be completed]\n\n"
+            if body_text.strip() != "[To be completed]":
+                changed = True
+            rebuilt.append(replacement)
+        else:
+            rebuilt.append(body_text)
+
+        cursor = next_start
+
+    updated = "".join(rebuilt)
+    return updated if changed else None
 
 
 def _get_user_prefix(session_id: str | None = None) -> str:
@@ -408,6 +742,9 @@ EAGLE_TOOLS = [
             "required": ["params"],
         },
     },
+    # Knowledge base tools
+    KNOWLEDGE_SEARCH_TOOL,
+    KNOWLEDGE_FETCH_TOOL,
     {
         "name": "workspace_memory",
         "description": (
@@ -519,7 +856,7 @@ EAGLE_TOOLS = [
 def _exec_s3_document_ops(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Real S3 operations scoped per-user."""
     operation = params.get("operation", "list")
-    bucket = params.get("bucket") or os.getenv("S3_BUCKET", "")
+    bucket = params.get("bucket") or os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     key = params.get("key", "")
     content = params.get("content", "")
     # Per-user prefix: eagle/{tenant}/{user}/
@@ -856,7 +1193,39 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
 
 
 def _exec_search_far(params: dict, tenant_id: str) -> dict:
-    """Search Federal Acquisition Regulation — comprehensive structured mock data."""
+    """Search Federal Acquisition Regulation using shared far-database.json."""
+    from .compliance_matrix import search_far as _cm_search_far
+
+    query = params.get("query", "")
+    parts_filter = params.get("parts", None)
+
+    results = _cm_search_far(query, parts_filter)
+
+    if not results:
+        results = [
+            {"part": "1", "section": "1.102", "title": "Statement of Guiding Principles",
+             "summary": "Deliver best value to the Government, satisfy the customer, minimize administrative costs, conduct business with integrity.",
+             "applicability": "All federal acquisitions"},
+        ]
+
+    return {
+        "query": query,
+        "parts_searched": parts_filter or ["all"],
+        "results_count": len(results),
+        "clauses": results[:15],
+        "source": "FAR/DFARS/HHSAR reference database (eagle-plugin/data/far-database.json)",
+        "note": "Reference data — always verify against current FAR/DFARS at acquisition.gov",
+        "reasoning": {
+            "action": "regulatory_lookup",
+            "basis": f"FAR search for '{query}'",
+            "determination": f"Found {len(results)} relevant sections",
+            "confidence": "high",
+        },
+    }
+
+
+def _exec_search_far_LEGACY(params: dict, tenant_id: str) -> dict:
+    """LEGACY — old inline mock data kept for reference. Not called."""
     query = params.get("query", "").lower()
     parts_filter = params.get("parts", [])
 
@@ -1169,50 +1538,303 @@ def _exec_search_far(params: dict, tenant_id: str) -> dict:
         "parts_searched": parts_filter or ["all"],
         "results_count": len(clauses),
         "clauses": clauses,
-        "source": "FAR/DFARS/HHSAR reference database",
-        "note": "Reference data — always verify against current FAR/DFARS at acquisition.gov",
+        "source": "static_reference_dataset",
+        "note": "Not live acquisition.gov lookup. Verify against current FAR/DFARS at acquisition.gov.",
     }
 
 
+def _update_document_content(
+    tenant_id: str,
+    doc_key: str,
+    content: str,
+    change_source: str = "ai_edit",
+    session_id: str = None,
+) -> dict:
+    """Update an existing document in S3.
+
+    For package documents, creates a new version.
+    For workspace documents, performs direct overwrite.
+    """
+    if not doc_key:
+        return {"error": "update_existing_key is required but empty"}
+    if not content:
+        return {"error": "content is required for update"}
+
+    user_id = _extract_user_id(session_id)
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+
+    # Security check
+    if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
+        return {"error": f"Access denied: document key must be within user's prefix"}
+
+    # Detect if this is a package document
+    is_package_doc = "/packages/" in doc_key
+
+    if is_package_doc:
+        from app.document_service import create_package_document_version
+
+        # Extract package_id and doc_type from the key
+        parts = doc_key.split("/")
+        try:
+            pkg_idx = parts.index("packages")
+            package_id = parts[pkg_idx + 1]
+            filename = parts[-1]
+            doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
+            title = doc_type.replace("_", " ").title()
+        except (ValueError, IndexError):
+            return {"error": "Invalid package document key format"}
+
+        result = create_package_document_version(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            content=content,
+            title=title,
+            file_type="md",
+            created_by_user_id=user_id,
+            session_id=session_id,
+            change_source=change_source,
+        )
+
+        if not result.success:
+            return {"error": result.error or "Failed to create document version"}
+
+        return {
+            "success": True,
+            "mode": "update_package",
+            "key": result.s3_key,
+            "version": result.version,
+            "document_id": result.document_id,
+            "message": f"Document updated (version {result.version})",
+        }
+    else:
+        # Workspace document: direct S3 overwrite
+        try:
+            s3 = _get_s3()
+            s3.put_object(
+                Bucket=bucket,
+                Key=doc_key,
+                Body=content.encode("utf-8"),
+                ContentType="text/markdown; charset=utf-8",
+            )
+            return {
+                "success": True,
+                "mode": "update_workspace",
+                "key": doc_key,
+                "message": "Document saved",
+            }
+        except (ClientError, BotoCoreError) as e:
+            logger.error("S3 put document error during update: %s", e, exc_info=True)
+            return {"error": f"Failed to save document: {str(e)}"}
+
+
 def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) -> dict:
-    """Generate acquisition documents and save to S3."""
+    """Generate acquisition documents and save to S3.
+
+    Uses official S3 templates when available (DOCX/XLSX), falling back to
+    markdown generators when templates are unavailable or fail to load.
+
+    If `update_existing_key` is provided, updates the existing document instead
+    of creating a new one.
+    """
+    from app.template_service import TemplateService
+
+    # Handle update mode - update existing document
+    update_key = params.get("update_existing_key")
+    if update_key:
+        return _update_document_content(
+            tenant_id=tenant_id,
+            doc_key=update_key,
+            content=params.get("data", {}).get("content", ""),
+            change_source="ai_edit",
+            session_id=session_id,
+        )
+
     doc_type = params.get("doc_type", "sow")
     title = params.get("title", "Untitled Acquisition")
     data = params.get("data", {})
+    package_id = params.get("package_id")
+    output_format = params.get("output_format", "docx")  # docx, xlsx, or md
     timestamp = time.strftime("%Y%m%d_%H%M%S")
 
-    # Generate document based on type
+    # Enrich missing/partial document fields from recent session context so
+    # first-pass drafts are less generic when tools are invoked with sparse params.
+    data = _augment_document_data_from_context(doc_type, title, data, session_id)
+
+    # Document-viewer edit flow: when current content + explicit clear request is
+    # present, patch the existing markdown directly instead of regenerating a
+    # fresh template that can ignore section-level edit intent.
+    inline_edited_content: str | None = None
     if doc_type == "sow":
-        content = _generate_sow(title, data)
-    elif doc_type == "igce":
-        content = _generate_igce(title, data)
-    elif doc_type == "market_research":
-        content = _generate_market_research(title, data)
-    elif doc_type == "justification":
-        content = _generate_justification(title, data)
-    elif doc_type == "acquisition_plan":
-        content = _generate_acquisition_plan(title, data)
-    elif doc_type == "eval_criteria":
-        content = _generate_eval_criteria(title, data)
-    elif doc_type == "security_checklist":
-        content = _generate_security_checklist(title, data)
-    elif doc_type == "section_508":
-        content = _generate_section_508(title, data)
-    elif doc_type == "cor_certification":
-        content = _generate_cor_certification(title, data)
-    elif doc_type == "contract_type_justification":
-        content = _generate_contract_type_justification(title, data)
-    else:
-        return {"error": f"Unknown document type: {doc_type}. Supported: sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification."}
+        current_content = data.get("current_content")
+        edit_request = str(data.get("edit_request", "") or "")
+        if isinstance(current_content, str) and edit_request:
+            inline_edited_content = _apply_sow_clear_edits(current_content, edit_request)
 
-    # Save to S3 - per-user path
+    # Validate doc_type
+    valid_doc_types = {
+        "sow", "igce", "market_research", "justification", "acquisition_plan",
+        "eval_criteria", "security_checklist", "section_508", "cor_certification",
+        "contract_type_justification",
+    }
+    if doc_type not in valid_doc_types:
+        return {"error": f"Unknown document type: {doc_type}. Supported: {', '.join(sorted(valid_doc_types))}."}
+
+    # Map doc_type to markdown generator functions (for fallback)
+    markdown_generators = {
+        "sow": _generate_sow,
+        "igce": _generate_igce,
+        "market_research": _generate_market_research,
+        "justification": _generate_justification,
+        "acquisition_plan": _generate_acquisition_plan,
+        "eval_criteria": _generate_eval_criteria,
+        "security_checklist": _generate_security_checklist,
+        "section_508": _generate_section_508,
+        "cor_certification": _generate_cor_certification,
+        "contract_type_justification": _generate_contract_type_justification,
+    }
+
+    # Get user_id for S3 path
     user_id = _extract_user_id(session_id)
-    s3_key = f"eagle/{tenant_id}/{user_id}/documents/{doc_type}_{timestamp}.md"
-    bucket = os.getenv("S3_BUCKET", "")
 
+    if inline_edited_content is not None:
+        content = inline_edited_content
+        file_type = "md"
+        source = "inline_edit_clear_sections"
+        template_path = None
+        result = None
+    else:
+        # Try template-based generation first
+        try:
+            service = TemplateService(tenant_id, user_id, markdown_generators)
+            result = service.generate_document(doc_type, title, data, output_format)
+
+            if not result.success:
+                # Template service failed, use direct markdown fallback
+                generator = markdown_generators.get(doc_type)
+                if generator:
+                    content = generator(title, data)
+                    file_type = "md"
+                    source = "markdown_fallback"
+                    template_path = None
+                else:
+                    return {"error": f"No generator available for {doc_type}: {result.error}"}
+            else:
+                content = result.preview  # For response display
+                file_type = result.file_type
+                source = result.source
+                template_path = result.template_path
+
+                # Some official templates are boilerplate-only and may not expose
+                # machine-replaceable placeholders. If the extracted preview is still
+                # generic, return markdown generator content for the editable response
+                # while still saving the populated binary artifact to S3.
+                if _looks_like_unfilled_template_preview(doc_type, content):
+                    generator = markdown_generators.get(doc_type)
+                    if generator:
+                        content = generator(title, data)
+                        source = f"{source}+markdown_context_response"
+                        logger.warning(
+                            "Template preview looked unfilled for doc_type=%s; using markdown generator for response content",
+                            doc_type,
+                        )
+
+        except ImportError as e:
+            # python-docx or openpyxl not available, use markdown
+            logger.warning("Template libraries unavailable: %s, using markdown fallback", e)
+            generator = markdown_generators.get(doc_type)
+            if generator:
+                content = generator(title, data)
+                file_type = "md"
+                source = "markdown_fallback"
+                template_path = None
+                result = None
+            else:
+                return {"error": f"No generator available for {doc_type}"}
+
+    # Determine file extension and content to save
+    ext = file_type if file_type in ("docx", "xlsx") else "md"
+    bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    content_to_store = (
+        result.content if result and result.success and file_type in ("docx", "xlsx")
+        else content
+    )
+
+    # Append AI reasoning appendix to document content if available
+    try:
+        from app.reasoning_store import ReasoningLog as _RLog
+        _rlog = _RLog.load(session_id or "", tenant_id, user_id)
+        if _rlog and _rlog.entries and isinstance(content_to_store, str):
+            content_to_store += _rlog.to_appendix_markdown()
+            content += _rlog.to_appendix_markdown()
+    except Exception:
+        pass  # Non-fatal — document still generated without appendix
+
+    # Package mode: route through canonical package document service.
+    if package_id:
+        from app.document_service import create_package_document_version
+
+        canonical = create_package_document_version(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            content=content_to_store,
+            title=title,
+            file_type=ext,
+            created_by_user_id=user_id,
+            session_id=session_id,
+            change_source="agent_tool",
+            template_id=params.get("template_id") or template_path,
+        )
+        if not canonical.success:
+            return {"error": canonical.error or "Failed to create package document"}
+
+        response = {
+            "mode": "package",
+            "package_id": package_id,
+            "document_id": canonical.document_id,
+            "doc_type": doc_type,
+            "document_type": doc_type,
+            "version": canonical.version,
+            "status": canonical.status or "draft",
+            "s3_key": canonical.s3_key,
+            "s3_location": f"s3://{bucket}/{canonical.s3_key}",
+            "file_type": ext,
+            "source": source,
+            "title": title,
+            "content": content,
+            "word_count": len(content.split()),
+            "generated_at": datetime.utcnow().isoformat(),
+            "note": "This is a draft document. Review and customize before official use.",
+            "reasoning": {
+                "action": "document_generation",
+                "basis": f"Generated {doc_type} based on intake context",
+                "determination": f"{doc_type} created (package mode)",
+                "confidence": "high",
+            },
+        }
+        if template_path:
+            response["template_path"] = template_path
+        return response
+
+    s3_key = f"eagle/{tenant_id}/{user_id}/documents/{doc_type}_{timestamp}.{ext}"
+
+    # Save to S3
     try:
         s3 = _get_s3()
-        s3.put_object(Bucket=bucket, Key=s3_key, Body=content.encode("utf-8"))
+        if isinstance(content_to_store, bytes):
+            # Save binary content (DOCX/XLSX)
+            s3.put_object(
+                Bucket=bucket,
+                Key=s3_key,
+                Body=content_to_store,
+                ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                if file_type == "docx"
+                else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            # Save markdown content
+            s3.put_object(Bucket=bucket, Key=s3_key, Body=content_to_store.encode("utf-8"))
         save_status = "saved"
         save_location = f"s3://{bucket}/{s3_key}"
     except (ClientError, BotoCoreError) as e:
@@ -1220,17 +1842,39 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
         save_location = f"S3 save failed: {str(e)}"
         logger.warning("Failed to save document to S3: %s", e)
 
-    return {
+    response = {
         "document_type": doc_type,
         "title": title,
         "status": save_status,
         "s3_location": save_location,
         "s3_key": s3_key,
+        "file_type": file_type,
+        "source": source,
         "content": content,
         "word_count": len(content.split()),
         "generated_at": datetime.utcnow().isoformat(),
         "note": "This is a draft document. Review and customize before official use.",
+        "reasoning": {
+            "action": "document_generation",
+            "basis": f"Generated {doc_type} based on intake context",
+            "determination": f"{doc_type} created",
+            "confidence": "high",
+        },
     }
+
+    if template_path:
+        response["template_path"] = template_path
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# DEPRECATED: Legacy f-string document generators.
+# These are replaced by document_agent.generate_document() which uses
+# LLM-driven content with templates as guidelines.
+# Kept for backward compatibility with create_document tool and fast-path.
+# Will be removed once generate_document is fully validated.
+# ---------------------------------------------------------------------------
 
 
 def _generate_sow(title: str, data: dict) -> str:
@@ -1248,6 +1892,15 @@ def _generate_sow(title: str, data: dict) -> str:
         "Training and Knowledge Transfer",
         "Ongoing Support and Maintenance",
     ])
+    scope_override = str(data.get("scope", "") or "").strip()
+    if scope_override:
+        scope_text = scope_override
+    else:
+        scope_text = (
+            "The contractor shall provide all personnel, equipment, supplies, facilities,\n"
+            "transportation, tools, materials, supervision, and other items and non-personal\n"
+            f"services necessary to {desc}, as defined in this SOW."
+        )
 
     deliverables_text = "\n".join(f"   {i+1}. {d}" for i, d in enumerate(deliverables))
     tasks_text = "\n".join(f"   5.{i+1} Task {i+1}: {t}" for i, t in enumerate(tasks))
@@ -1268,9 +1921,7 @@ and performance requirements for this acquisition.
 
 ## 2. SCOPE
 
-The contractor shall provide all personnel, equipment, supplies, facilities,
-transportation, tools, materials, supervision, and other items and non-personal
-services necessary to {desc}, as defined in this SOW.
+{scope_text}
 
 ## 3. PERIOD OF PERFORMANCE
 
@@ -1986,7 +2637,7 @@ def _exec_get_intake_status(params: dict, tenant_id: str, session_id: str = None
     try:
         s3 = _get_s3()
         resp = s3.list_objects_v2(
-            Bucket=os.getenv("S3_BUCKET", ""),
+            Bucket=os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev"),
             Prefix=f"eagle/{tenant_id}/{user_id}/documents/",
             MaxKeys=50,
         )
@@ -2320,7 +2971,195 @@ def _exec_query_compliance_matrix(params: dict, tenant_id: str) -> dict:
     raw = params.get("params", params)
     if isinstance(raw, str):
         raw = json.loads(raw)
-    return execute_operation(raw)
+    result = execute_operation(raw)
+    # Attach reasoning for downstream capture
+    if isinstance(result, dict) and "error" not in result:
+        method = result.get("method", result.get("acquisition_method", ""))
+        ctype = result.get("contract_type", "")
+        result["reasoning"] = {
+            "action": "compliance_determination",
+            "basis": f"{method} acquisition" + (f" via {ctype}" if ctype else ""),
+            "determination": f"{method} via {ctype}" if ctype else str(method),
+            "documents_required": result.get("documents_required", []),
+            "confidence": "high",
+        }
+    return result
+
+
+# ── Admin CRUD Tool Handlers ─────────────────────────────────────────
+
+def _exec_manage_skills(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for custom skills — wraps skill_store functions."""
+    from app.skill_store import (
+        create_skill, get_skill, update_skill, list_skills,
+        delete_skill, publish_skill, submit_for_review, disable_skill,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_skills(tenant_id, status=params.get("status"))
+        return {"action": "list", "count": len(items), "skills": items}
+
+    if action == "get":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for get"}
+        item = get_skill(tenant_id, skill_id)
+        return {"action": "get", "skill": item} if item else {"error": f"Skill {skill_id} not found"}
+
+    if action == "create":
+        required = ["name", "display_name", "description", "prompt_body"]
+        missing = [f for f in required if not params.get(f)]
+        if missing:
+            return {"error": f"Missing required fields: {', '.join(missing)}"}
+        item = create_skill(
+            tenant_id=tenant_id,
+            owner_user_id=params.get("owner_user_id", "admin"),
+            name=params["name"],
+            display_name=params["display_name"],
+            description=params["description"],
+            prompt_body=params["prompt_body"],
+            triggers=params.get("triggers"),
+            tools=params.get("tools"),
+            model=params.get("model"),
+            visibility=params.get("visibility", "private"),
+        )
+        return {"action": "create", "skill": item}
+
+    if action == "update":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for update"}
+        updates = {k: v for k, v in params.items() if k not in ("action", "skill_id")}
+        item = update_skill(tenant_id, skill_id, updates)
+        return {"action": "update", "skill": item} if item else {"error": f"Skill {skill_id} not found or no updatable fields"}
+
+    if action == "delete":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for delete"}
+        ok = delete_skill(tenant_id, skill_id)
+        return {"action": "delete", "deleted": ok, "skill_id": skill_id}
+
+    if action == "submit":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for submit"}
+        item = submit_for_review(tenant_id, skill_id)
+        return {"action": "submit", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in draft status"}
+
+    if action == "publish":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for publish"}
+        item = publish_skill(tenant_id, skill_id)
+        return {"action": "publish", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in review status"}
+
+    if action == "disable":
+        skill_id = params.get("skill_id")
+        if not skill_id:
+            return {"error": "skill_id is required for disable"}
+        item = disable_skill(tenant_id, skill_id)
+        return {"action": "disable", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in active status"}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, create, update, delete, submit, publish, disable"}
+
+
+def _exec_manage_prompts(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for agent prompt overrides — wraps prompt_store functions."""
+    from app.prompt_store import (
+        put_prompt, get_prompt, delete_prompt, list_tenant_prompts, resolve_prompt,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_tenant_prompts(tenant_id)
+        return {"action": "list", "count": len(items), "prompts": items}
+
+    if action == "get":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for get"}
+        item = get_prompt(tenant_id, agent_name)
+        return {"action": "get", "prompt": item} if item else {"error": f"No prompt override for agent '{agent_name}'"}
+
+    if action == "set":
+        agent_name = params.get("agent_name")
+        prompt_body = params.get("prompt_body")
+        if not agent_name or not prompt_body:
+            return {"error": "agent_name and prompt_body are required for set"}
+        item = put_prompt(
+            tenant_id=tenant_id,
+            agent_name=agent_name,
+            prompt_body=prompt_body,
+            is_append=params.get("is_append", False),
+        )
+        return {"action": "set", "prompt": item}
+
+    if action == "delete":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for delete"}
+        ok = delete_prompt(tenant_id, agent_name)
+        return {"action": "delete", "deleted": ok, "agent_name": agent_name}
+
+    if action == "resolve":
+        agent_name = params.get("agent_name")
+        if not agent_name:
+            return {"error": "agent_name is required for resolve"}
+        body = resolve_prompt(tenant_id, agent_name)
+        return {"action": "resolve", "agent_name": agent_name, "resolved_body": body}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
+
+
+def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
+    """CRUD handler for document templates — wraps template_store functions."""
+    from app.template_store import (
+        put_template, get_template, delete_template, list_tenant_templates, resolve_template,
+    )
+    action = params.get("action", "list")
+
+    if action == "list":
+        items = list_tenant_templates(tenant_id, doc_type=params.get("doc_type"))
+        return {"action": "list", "count": len(items), "templates": items}
+
+    if action == "get":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for get"}
+        item = get_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "get", "template": item} if item else {"error": f"No template for doc_type '{doc_type}'"}
+
+    if action == "set":
+        doc_type = params.get("doc_type")
+        template_body = params.get("template_body")
+        if not doc_type or not template_body:
+            return {"error": "doc_type and template_body are required for set"}
+        item = put_template(
+            tenant_id=tenant_id,
+            doc_type=doc_type,
+            user_id=params.get("user_id", "shared"),
+            template_body=template_body,
+            display_name=params.get("display_name", ""),
+        )
+        return {"action": "set", "template": item}
+
+    if action == "delete":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for delete"}
+        ok = delete_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "delete", "deleted": ok, "doc_type": doc_type}
+
+    if action == "resolve":
+        doc_type = params.get("doc_type")
+        if not doc_type:
+            return {"error": "doc_type is required for resolve"}
+        body = resolve_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "resolve", "doc_type": doc_type, "resolved_body": body}
+
+    return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
 
 
 # ── Admin CRUD Tool Handlers ─────────────────────────────────────────
@@ -2562,6 +3401,9 @@ TOOL_DISPATCH = {
     "get_intake_status": _exec_get_intake_status,
     "intake_workflow": _exec_intake_workflow,
     "query_compliance_matrix": _exec_query_compliance_matrix,
+    # Knowledge base tools
+    "knowledge_search": exec_knowledge_search,
+    "knowledge_fetch": exec_knowledge_fetch,
     "manage_skills": _exec_manage_skills,
     "manage_prompts": _exec_manage_prompts,
     "manage_templates": _exec_manage_templates,
@@ -2600,13 +3442,21 @@ def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> st
 
 # ── Anthropic Client ─────────────────────────────────────────────────
 
-def get_client() -> anthropic.Anthropic:
+def get_client() -> Any:
     """Create an Anthropic client.
 
     When USE_BEDROCK=true, returns an AnthropicBedrock client that routes
     requests through Amazon Bedrock using AWS credentials (no API key needed).
     Otherwise, uses the direct Anthropic API with ANTHROPIC_API_KEY.
     """
+    try:
+        import anthropic
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Anthropic SDK is required for legacy agentic_service chat path. "
+            "Install 'anthropic' or use the Strands chat path."
+        ) from exc
+
     if _USE_BEDROCK:
         return anthropic.AnthropicBedrock(aws_region=_BEDROCK_REGION)
     api_key = os.getenv("ANTHROPIC_API_KEY")

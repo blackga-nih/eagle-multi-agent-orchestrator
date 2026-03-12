@@ -17,7 +17,7 @@ const DOC_TYPE_CONFIG: Record<string, { label: string; icon: typeof FileText; co
 };
 
 function getDocId(doc: DocumentInfo): string {
-    const raw = doc.document_id || doc.s3_key || doc.title;
+    const raw = doc.s3_key || doc.document_id || doc.title;
     return encodeURIComponent(raw);
 }
 
@@ -69,6 +69,7 @@ export default function DocumentCard({ document, sessionId }: DocumentCardProps)
                     </h4>
                     {document.word_count && (
                         <p className="text-xs text-gray-500 mt-0.5">
+                            {document.version ? `v${document.version} • ` : ''}
                             {document.word_count.toLocaleString()} words
                         </p>
                     )}

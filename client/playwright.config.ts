@@ -29,6 +29,9 @@ export default defineConfig({
 
     // Screenshot on failure
     screenshot: 'only-on-failure',
+
+    // Record video for every test — uploaded to S3 by scripts/run-smoke.sh
+    video: 'on',
   },
 
   projects: [

@@ -1,0 +1,18 @@
+[
+  {
+    "ParameterKey": "appName",
+    "ParameterValue": "eagle"
+  },
+  {
+    "ParameterKey": "environment",
+    "ParameterValue": "stage"
+  },
+  {
+    "ParameterKey": "enableVersioning",
+    "ParameterValue": "Enabled"
+  },
+  {
+    "ParameterKey": "lifecycleDays",
+    "ParameterValue": "90"
+  }
+]

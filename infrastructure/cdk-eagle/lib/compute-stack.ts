@@ -74,6 +74,7 @@ export class EagleComputeStack extends cdk.Stack {
         REQUIRE_AUTH: 'true',
         USE_PERSISTENT_SESSIONS: 'true',
         DEV_MODE: 'false',
+        EAGLE_BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6',
         COGNITO_USER_POOL_ID: props.userPoolId,
         COGNITO_CLIENT_ID: props.userPoolClientId,
         DOCUMENT_BUCKET: props.documentBucketName,

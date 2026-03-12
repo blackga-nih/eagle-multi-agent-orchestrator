@@ -1,7 +1,7 @@
 'use client';
 
 const quickActions = [
-    { emoji: '🆕', label: 'New Intake', command: 'I need to start a new acquisition intake for procuring a CT scanner for NCI.' },
+    { emoji: '🆕', label: 'New Intake', command: '__INTAKE_FORM__' },
     { emoji: '📄', label: 'Generate SOW', command: 'Generate a Statement of Work for a new IT services contract at NCI.' },
     { emoji: '📚', label: 'Search FAR', command: 'Search FAR/DFARS for simplified acquisition procedures and thresholds.' },
     { emoji: '💰', label: 'Cost Estimate', command: 'Create a cost estimate for procuring medical imaging equipment for NCI.' },

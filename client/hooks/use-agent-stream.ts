@@ -24,25 +24,45 @@ export interface ToolUseEvent {
   executionTarget: 'client' | 'server';
 }
 
+/** Server-side tool result received via SSE tool_result event. */
+export interface ServerToolResult {
+  toolName: string;
+  result: { success: boolean; result: unknown; error?: string };
+}
+
 export interface UseAgentStreamOptions {
   onMessage?: (message: Message) => void;
   onEvent?: (event: StreamEvent) => void;
-  onComplete?: () => void;
+  /** Called when the stream finishes. Includes accumulated server-side tool results. */
+  onComplete?: (toolResults?: ServerToolResult[]) => void;
   onError?: (error: string) => void;
   onDocumentGenerated?: (doc: DocumentInfo) => void;
+  /**
+   * Called for every metadata event (state push from update_state tool).
+   * Receives structured payloads: checklist_update, phase_change,
+   * document_ready, compliance_alert.
+   */
+  onMetadata?: (metadata: Record<string, unknown>) => void;
   /**
    * Called for every tool_use event.
    * Fired first with result=undefined (tool is starting), then again once
    * a client-side tool finishes (result is populated).
    */
   onToolUse?: (event: ToolUseEvent) => void;
+  /**
+   * Called for every bedrock_trace event.
+   * Receives the raw Bedrock trace payload (ConverseStream chunk keys).
+   */
+  onBedrockTrace?: (trace: Record<string, unknown>) => void;
   getToken?: () => Promise<string>;
   /** Active session ID — forwarded to client tools for localStorage namespacing. */
   sessionId?: string;
+  /** Optional active package context to route create_document into package mode. */
+  packageId?: string;
 }
 
 export interface UseAgentStreamReturn {
-  sendQuery: (query: string, sessionId?: string) => Promise<void>;
+  sendQuery: (query: string, sessionId?: string, packageId?: string) => Promise<void>;
   isStreaming: boolean;
   logs: AuditLogEntry[];
   lastMessage: Message | null;
@@ -70,15 +90,20 @@ function parseDocumentToolResult(event: StreamEvent): DocumentInfo | null {
     // Reject error responses (e.g. "Unknown document type")
     if (data.error) return null;
 
-    // Require at least a real title or document_type — reject empty/stub results
-    if (!data.title && !data.document_type && !data.s3_key) return null;
+    const normalizedDocType = data.doc_type ?? data.document_type;
+    // Require at least a real title or document type — reject empty/stub results
+    if (!data.title && !normalizedDocType && !data.s3_key) return null;
 
     return {
       document_id: data.document_id ?? data.s3_key ?? undefined,
-      document_type: data.document_type ?? 'unknown',
-      title: data.title ?? data.document_type ?? 'Document',
+      package_id: data.package_id ?? undefined,
+      document_type: normalizedDocType ?? 'unknown',
+      doc_type: normalizedDocType ?? undefined,
+      title: data.title ?? normalizedDocType ?? 'Document',
       content: data.content ?? undefined,
+      mode: data.mode ?? undefined,
       status: data.status ?? undefined,
+      version: data.version ?? undefined,
       word_count: data.word_count ?? undefined,
       generated_at: data.generated_at ?? undefined,
       s3_key: data.s3_key ?? undefined,
@@ -182,6 +207,7 @@ function detectDocumentTypesFromText(text: string): DocumentInfo[] {
  * - Detecting create_document tool results and emitting DocumentInfo
  * - JWT authentication via getToken callback
  * - Collecting all events for audit logging
+ * - Raw Bedrock trace events via onBedrockTrace callback
  */
 export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStreamReturn {
   const [isStreaming, setIsStreaming] = useState(false);
@@ -201,7 +227,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     eventCountRef.current = 0;
   }, []);
 
-  const sendQuery = useCallback(async (query: string, sessionId?: string) => {
+  const sendQuery = useCallback(async (query: string, sessionId?: string, packageId?: string) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -211,6 +237,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     setError(null);
 
     const finalSessionId = sessionId || generateUUID();
+    const activePackageId = packageId || options.packageId;
     const queryStartTime = new Date();
     let accumulatedText = '';
     // Stable ID used for the single streaming assistant message.
@@ -219,6 +246,8 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     const streamingMsgId = `stream-${Date.now()}`;
     let shouldFetchDocs = false;
     const emittedDocKeys = new Set<string>();
+    // Accumulate server-side tool results during streaming — merged at onComplete
+    const serverToolResults: ServerToolResult[] = [];
 
     // The session to use for client tool localStorage namespacing.
     // Prefer the sessionId passed to sendQuery; fall back to options.sessionId.
@@ -237,12 +266,18 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         }
       }
 
+      // Pass session ID as header for middleware telemetry (body can only be read once)
+      if (finalSessionId) {
+        headers['X-Session-Id'] = finalSessionId;
+      }
+
       const response = await fetch(API_URL, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           query,
           session_id: finalSessionId,
+          package_id: activePackageId,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -302,7 +337,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         await fetchCreatedDocuments(headers, queryStartTime, emittedDocKeys);
       }
 
-      options.onComplete?.();
+      options.onComplete?.(serverToolResults.length > 0 ? serverToolResults : undefined);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         return;
@@ -378,8 +413,38 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         }
       }
 
-      // Handle create_document tool results (streaming path)
-      if (event.type === 'tool_result') {
+      // Handle metadata events — state push from update_state tool
+      if (event.type === 'metadata' && event.metadata) {
+        options.onMetadata?.(event.metadata as Record<string, unknown>);
+      }
+
+      // Handle bedrock_trace events — raw Bedrock ConverseStream chunk
+      if (event.type === 'bedrock_trace') {
+        options.onBedrockTrace?.(event.metadata || {});
+      }
+
+      // Handle reasoning events — AI decision rationale from tool results
+      if (event.type === 'reasoning') {
+        const reasoningLog: AuditLogEntry = {
+          ...event,
+          id: `reasoning-${eventCountRef.current++}`,
+          type: 'reasoning',
+          content: event.reasoning || event.content || '',
+        };
+        setLogs(prev => [...prev, reasoningLog]);
+      }
+
+      // Handle tool_result events — accumulate for merge at onComplete
+      if (event.type === 'tool_result' && event.tool_result) {
+        const tr = event.tool_result;
+
+        // Accumulate for batch merge when stream completes
+        serverToolResults.push({
+          toolName: tr.name,
+          result: { success: true, result: tr.result },
+        });
+
+        // Extract document info for create_document
         const docInfo = parseDocumentToolResult(event);
         if (docInfo) {
           if (docInfo.s3_key) emittedDocKeys.add(docInfo.s3_key);

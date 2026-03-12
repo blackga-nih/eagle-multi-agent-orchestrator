@@ -28,7 +28,7 @@ setup: cdk-install _cdk-bootstrap cdk-deploy deploy create-users check-aws
 
 # Create test + admin Cognito users with required tenant attributes
 create-users:
-    python scripts/create_users.py
+    python3 scripts/create_users.py
 
 # ── Development ─────────────────────────────────────────────
 
@@ -60,7 +60,7 @@ dev-sso PROFILE="":
 # For AWS SSO: run 'just dev-up-sso' instead
 dev-up:
     docker compose -f {{COMPOSE_FILE}} up --build --detach
-    python scripts/wait_for_backend.py
+    python3 scripts/wait_for_backend.py
 
 # Start stack detached with AWS SSO credentials
 dev-up-sso PROFILE="":
@@ -74,7 +74,7 @@ dev-up-sso PROFILE="":
         exit 1
     fi
     docker compose -f {{COMPOSE_FILE}} up --build --detach
-    python scripts/wait_for_backend.py
+    python3 scripts/wait_for_backend.py
 
 # Tear down local docker compose stack
 dev-down:
@@ -119,12 +119,95 @@ dev-smoke: dev-up smoke
 # One-command local smoke with visible browser window
 dev-smoke-ui: dev-up smoke-ui
 
-# Start FastAPI backend only (local)
-dev-backend:
-    cd server && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+# Kill processes on a given port (cross-platform: macOS/Linux + Windows/MINGW)
+[private]
+kill-port PORT:
+    #!/usr/bin/env bash
+    if [[ "$OSTYPE" == msys* ]] || [[ "$OSTYPE" == mingw* ]] || [[ "$OSTYPE" == cygwin* ]]; then
+        # Windows (Git Bash / MINGW) — netstat -ano + taskkill / PowerShell fallback
+        for pid in $(netstat -ano 2>/dev/null | grep ":{{PORT}} " | grep LISTENING | awk '{print $5}' | sort -u | grep -v '^0$'); do
+            echo "Killing PID $pid on port {{PORT}}"
+            taskkill //F //PID "$pid" 2>/dev/null \
+                || powershell -Command "Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue" 2>/dev/null \
+                || echo "  WARNING: could not kill PID $pid"
+        done
+    else
+        # macOS / Linux — lsof + kill
+        pids=$(lsof -ti :{{PORT}} 2>/dev/null || true)
+        for pid in $pids; do
+            echo "Killing PID $pid on port {{PORT}}"
+            kill -9 "$pid" 2>/dev/null || echo "  WARNING: could not kill PID $pid"
+        done
+    fi
 
-# Start Next.js frontend only (local)
+# Kill zombie processes on dev ports (8000, 3000)
+kill:
+    just kill-port 8000
+    just kill-port 3000
+    @echo "Dev ports cleared."
+
+# Verify AWS SSO session, auto-login if expired
+[private]
+ensure-sso PROFILE="eagle":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if AWS_PROFILE="{{PROFILE}}" aws sts get-caller-identity &>/dev/null; then
+        echo "✓ AWS SSO active ({{PROFILE}})"
+    else
+        echo "⚠ AWS SSO expired — logging in..."
+        AWS_PROFILE="{{PROFILE}}" aws sso login --profile "{{PROFILE}}"
+        if ! AWS_PROFILE="{{PROFILE}}" aws sts get-caller-identity &>/dev/null; then
+            echo "ERROR: SSO login failed. AWS services will not work."
+            exit 1
+        fi
+        echo "✓ AWS SSO active ({{PROFILE}})"
+    fi
+
+# Start backend + frontend locally (no docker) — kills zombies, checks SSO
+dev-local:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Clearing ports ==="
+    just kill-port 8000
+    just kill-port 3000
+    just kill-port 3001
+    sleep 2
+    echo "=== Checking AWS SSO ==="
+    just ensure-sso
+    # Clear Next.js cache to purge stale env vars
+    rm -rf client/.next 2>/dev/null || true
+    unset FASTAPI_URL
+    export FASTAPI_URL=http://127.0.0.1:8000
+    echo "=== Starting backend (port 8000) ==="
+    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app &
+    BACKEND_PID=$!
+    sleep 5
+    echo "=== Starting frontend (port 3000) ==="
+    cd client && npm run dev &
+    FRONTEND_PID=$!
+    echo ""
+    echo "Backend PID: $BACKEND_PID (http://localhost:8000)"
+    echo "Frontend PID: $FRONTEND_PID (http://localhost:3000)"
+    echo "Press Ctrl+C to stop both."
+    trap "just kill-port 8000; just kill-port 3000" EXIT
+    wait
+
+# Start FastAPI backend only (local) — kills zombies, checks SSO
+dev-backend:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just kill-port 8000
+    sleep 1
+    just ensure-sso
+    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app
+
+# Start Next.js frontend only (local) — kills zombies on port 3000
 dev-frontend:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just kill-port 3000
+    sleep 1
+    unset FASTAPI_URL
     cd client && npm run dev
 
 # ── Lint ────────────────────────────────────────────────────
@@ -134,7 +217,7 @@ lint: lint-py lint-ts
 
 # Lint Python with ruff
 lint-py:
-    cd server && python -m ruff check app/
+    cd server && python3 -m ruff check app/
 
 # Type-check TypeScript
 lint-ts:
@@ -144,15 +227,15 @@ lint-ts:
 
 # Run backend unit tests
 test *ARGS:
-    cd server && python -m pytest tests/ -v {{ARGS}}
+    cd server && python3 -m pytest tests/ -v {{ARGS}}
 
 # Run Playwright E2E tests against Fargate (headless)
 test-e2e *ARGS:
-    python -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); dns=[lb['DNSName'] for lb in c.describe_load_balancers()['LoadBalancers'] if 'Front' in lb['LoadBalancerName']]; print(f'Testing against: http://{dns[0]}')" && cd client && npx playwright test {{ARGS}}
+    python3 -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); dns=[lb['DNSName'] for lb in c.describe_load_balancers()['LoadBalancers'] if 'Front' in lb['LoadBalancerName']]; print(f'Testing against: http://{dns[0]}')" && cd client && npx playwright test {{ARGS}}
 
 # Run Playwright E2E tests against Fargate with a visible browser window
 test-e2e-ui *ARGS:
-    python -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); dns=[lb['DNSName'] for lb in c.describe_load_balancers()['LoadBalancers'] if 'Front' in lb['LoadBalancerName']]; print(f'Testing against: http://{dns[0]}')" && cd client && npx playwright test {{ARGS}} --headed
+    python3 -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); dns=[lb['DNSName'] for lb in c.describe_load_balancers()['LoadBalancers'] if 'Front' in lb['LoadBalancerName']]; print(f'Testing against: http://{dns[0]}')" && cd client && npx playwright test {{ARGS}} --headed
 
 # E2E use case tests — complete acquisition workflows through the UI
 # Headed + sequential so you can watch each scenario play out.
@@ -187,19 +270,139 @@ e2e WORKFLOW="full":
         ;;
     esac
 
+# Run all test suites and generate a markdown report matrix in test-reports/
+# Usage: just test-report           (all suites)
+#        just test-report --no-e2e  (skip Playwright — no running stack needed)
+test-report *ARGS:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    SKIP_E2E=false
+    for arg in {{ARGS}}; do
+        [[ "$arg" == "--no-e2e" ]] && SKIP_E2E=true
+    done
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    REPORT="test-reports/${TIMESTAMP}-test-report.md"
+    mkdir -p test-reports
+
+    echo "# EAGLE Test Report — ${TIMESTAMP}" > "$REPORT"
+    echo "" >> "$REPORT"
+    echo "| Suite | Passed | Failed | Errors | Skipped | Status |" >> "$REPORT"
+    echo "|-------|--------|--------|--------|---------|--------|" >> "$REPORT"
+
+    TOTAL_PASS=0; TOTAL_FAIL=0; TOTAL_ERR=0; TOTAL_SKIP=0
+
+    # ── L1a: Ruff ──
+    echo "Running ruff..."
+    RUFF_OUT=$(cd server && python3 -m ruff check app/ 2>&1)
+    RUFF_RC=$?
+    RUFF_ERRORS=$(echo "$RUFF_OUT" | grep -c "Found [0-9]" || true)
+    RUFF_COUNT=$(echo "$RUFF_OUT" | grep -oP 'Found \K[0-9]+' || echo "0")
+    if [ "$RUFF_RC" -eq 0 ]; then
+        echo "| Ruff (Python lint) | - | 0 | 0 | - | PASS |" >> "$REPORT"
+    else
+        echo "| Ruff (Python lint) | - | ${RUFF_COUNT} | 0 | - | FAIL |" >> "$REPORT"
+    fi
+
+    # ── L1b: TypeScript ──
+    echo "Running tsc..."
+    TSC_OUT=$(cd client && npx tsc --noEmit 2>&1)
+    TSC_RC=$?
+    TSC_ERRORS=$(echo "$TSC_OUT" | grep -c "error TS" || true)
+    if [ "$TSC_RC" -eq 0 ]; then
+        echo "| TypeScript (tsc) | - | 0 | 0 | - | PASS |" >> "$REPORT"
+    else
+        echo "| TypeScript (tsc) | - | ${TSC_ERRORS} | 0 | - | FAIL |" >> "$REPORT"
+    fi
+
+    export AWS_PROFILE="${AWS_PROFILE:-eagle}"
+
+    # ── L2: Pytest ──
+    echo "Running pytest..."
+    PYTEST_OUT=$(cd server && python3 -m pytest tests/ --ignore=tests/test_strands_eval.py -v --tb=no -q 2>&1)
+    PYTEST_RC=$?
+    # Parse "X passed, Y failed, Z errors, W skipped" from last line
+    PYTEST_SUMMARY=$(echo "$PYTEST_OUT" | grep -E "[0-9]+ (passed|failed|error)" | tail -1)
+    PY_PASS=$(echo "$PYTEST_SUMMARY" | grep -oP '[0-9]+(?= passed)' || echo "0")
+    PY_FAIL=$(echo "$PYTEST_SUMMARY" | grep -oP '[0-9]+(?= failed)' || echo "0")
+    PY_ERR=$(echo "$PYTEST_SUMMARY" | grep -oP '[0-9]+(?= error)' || echo "0")
+    PY_SKIP=$(echo "$PYTEST_SUMMARY" | grep -oP '[0-9]+(?= skipped)' || echo "0")
+    PY_STATUS="PASS"; [ "$PY_FAIL" -gt 0 ] || [ "$PY_ERR" -gt 0 ] && PY_STATUS="FAIL"
+    echo "| Pytest (unit) | ${PY_PASS} | ${PY_FAIL} | ${PY_ERR} | ${PY_SKIP} | ${PY_STATUS} |" >> "$REPORT"
+    TOTAL_PASS=$((TOTAL_PASS + PY_PASS))
+    TOTAL_FAIL=$((TOTAL_FAIL + PY_FAIL))
+    TOTAL_ERR=$((TOTAL_ERR + PY_ERR))
+    TOTAL_SKIP=$((TOTAL_SKIP + PY_SKIP))
+
+    # ── L3: Playwright (optional) ──
+    if [ "$SKIP_E2E" = false ]; then
+        echo "Running Playwright..."
+        PW_OUT=$(cd client && BASE_URL=http://localhost:3000 npx playwright test --reporter=list 2>&1)
+        PW_RC=$?
+        PW_PASS=$(echo "$PW_OUT" | grep -oP '[0-9]+(?= passed)' || echo "0")
+        PW_FAIL=$(echo "$PW_OUT" | grep -oP '[0-9]+(?= failed)' || echo "0")
+        PW_SKIP=$(echo "$PW_OUT" | grep -oP '[0-9]+(?= skipped)' || echo "0")
+        PW_STATUS="PASS"; [ "$PW_FAIL" -gt 0 ] && PW_STATUS="FAIL"
+        echo "| Playwright (E2E) | ${PW_PASS} | ${PW_FAIL} | 0 | ${PW_SKIP} | ${PW_STATUS} |" >> "$REPORT"
+        TOTAL_PASS=$((TOTAL_PASS + PW_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + PW_FAIL))
+        TOTAL_SKIP=$((TOTAL_SKIP + PW_SKIP))
+    else
+        echo "| Playwright (E2E) | - | - | - | - | SKIPPED |" >> "$REPORT"
+    fi
+
+    # ── L4: CDK synth ──
+    echo "Running CDK synth..."
+    CDK_OUT=$(cd infrastructure/cdk-eagle && npx cdk synth --quiet 2>&1)
+    CDK_RC=$?
+    if [ "$CDK_RC" -eq 0 ]; then
+        echo "| CDK synth | - | 0 | 0 | - | PASS |" >> "$REPORT"
+    else
+        echo "| CDK synth | - | 1 | 0 | - | FAIL |" >> "$REPORT"
+    fi
+
+    # ── Totals ──
+    echo "" >> "$REPORT"
+    echo "**Totals:** ${TOTAL_PASS} passed, ${TOTAL_FAIL} failed, ${TOTAL_ERR} errors, ${TOTAL_SKIP} skipped" >> "$REPORT"
+    echo "" >> "$REPORT"
+
+    # ── Failure details ──
+    if [ "$PY_FAIL" -gt 0 ] || [ "$PY_ERR" -gt 0 ]; then
+        echo "## Failed Tests (Pytest)" >> "$REPORT"
+        echo '```' >> "$REPORT"
+        echo "$PYTEST_OUT" | grep -E "^(FAILED|ERROR) " >> "$REPORT"
+        echo '```' >> "$REPORT"
+        echo "" >> "$REPORT"
+    fi
+
+    if [ "$RUFF_RC" -ne 0 ]; then
+        echo "## Ruff Lint Errors" >> "$REPORT"
+        echo '```' >> "$REPORT"
+        echo "$RUFF_OUT" | tail -5 >> "$REPORT"
+        echo '```' >> "$REPORT"
+        echo "" >> "$REPORT"
+    fi
+
+    echo "---" >> "$REPORT"
+    echo "*Generated: $(date -Iseconds) on branch $(git branch --show-current)*" >> "$REPORT"
+
+    echo ""
+    echo "=== Report saved: $REPORT ==="
+    echo ""
+    cat "$REPORT"
+
 # ── Eval Suite ──────────────────────────────────────────────
 
 # Run full eval suite (28 tests) with haiku and publish results
 eval:
-    cd server && python -u tests/test_eagle_sdk_eval.py --model haiku
+    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku
 
 # Run specific eval tests (e.g., just eval-quick 1,2,3)
 eval-quick TESTS:
-    cd server && python -u tests/test_eagle_sdk_eval.py --model haiku --tests {{TESTS}}
+    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests {{TESTS}}
 
 # Run AWS tool eval tests only (16-20)
 eval-aws:
-    cd server && python -u tests/test_eagle_sdk_eval.py --model haiku --tests 16,17,18,19,20
+    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests 16,17,18,19,20
 
 # ── Docker Build ────────────────────────────────────────────
 
@@ -207,13 +410,13 @@ eval-aws:
 build:
     docker compose -f {{COMPOSE_FILE}} build
 
-# Build backend image
+# Build backend image (linux/amd64 for ECS Fargate)
 build-backend:
-    docker build -f deployment/docker/Dockerfile.backend -t {{BACKEND_REPO}}:latest .
+    docker build --platform linux/amd64 -f deployment/docker/Dockerfile.backend -t {{BACKEND_REPO}}:latest .
 
-# Build frontend image (fetches Cognito config from CDK outputs)
+# Build frontend image (fetches Cognito config from CDK outputs, linux/amd64 for ECS Fargate)
 build-frontend:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     cf = boto3.client('cloudformation', region_name='us-east-1'); \
     stacks = cf.describe_stacks(StackName='EagleCoreStack')['Stacks'][0]['Outputs']; \
@@ -222,7 +425,7 @@ build-frontend:
     client_id = [v for k,v in outputs.items() if 'ClientId' in k][0]; \
     print(f'Building frontend: POOL_ID={pool_id} CLIENT_ID={client_id}'); \
     sys.exit(subprocess.call([ \
-      'docker', 'build', '-f', 'deployment/docker/Dockerfile.frontend', \
+      'docker', 'build', '--platform', 'linux/amd64', '-f', 'deployment/docker/Dockerfile.frontend', \
       '--build-arg', f'NEXT_PUBLIC_COGNITO_USER_POOL_ID={pool_id}', \
       '--build-arg', f'NEXT_PUBLIC_COGNITO_CLIENT_ID={client_id}', \
       '--build-arg', 'NEXT_PUBLIC_COGNITO_REGION=us-east-1', \
@@ -368,7 +571,7 @@ devbox-smoke:
 
 # Show ECS service health and running task counts
 status:
-    python -c "\
+    python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     elb = boto3.client('elbv2', region_name='us-east-1'); \
@@ -387,7 +590,7 @@ status:
 
 # Tail ECS logs for a service (default: backend)
 logs SERVICE="backend":
-    python -c "\
+    python3 -c "\
     import boto3, sys, time; \
     svc = '{{SERVICE}}'; \
     lg = f'/eagle/ecs/{svc}-dev'; \
@@ -399,7 +602,7 @@ logs SERVICE="backend":
 
 # Print live URLs from ALBs
 urls:
-    python -c "\
+    python3 -c "\
     import boto3; \
     elb = boto3.client('elbv2', region_name='us-east-1'); \
     lbs = elb.describe_load_balancers()['LoadBalancers']; \
@@ -410,7 +613,7 @@ urls:
 
 # Verify AWS credentials and service connectivity (all EAGLE resources)
 check-aws:
-    python scripts/check_aws.py
+    python3 scripts/check_aws.py
 
 # Verify AWS SSO credentials are valid and can access Bedrock
 check-sso:
@@ -438,7 +641,7 @@ check-sso:
 smoke-prod LEVEL="mid":
     #!/usr/bin/env bash
     set -euo pipefail
-    ALB=$(python -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); lbs=c.describe_load_balancers()['LoadBalancers']; front=next(lb['DNSName'] for lb in lbs if 'Front' in lb['LoadBalancerName']); print(f'http://{front}')")
+    ALB=$(python3 -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); lbs=c.describe_load_balancers()['LoadBalancers']; front=next(lb['DNSName'] for lb in lbs if 'Front' in lb['LoadBalancerName']); print(f'http://{front}')")
     echo "Smoke testing against: $ALB"
     case "{{LEVEL}}" in
       base)
@@ -504,14 +707,14 @@ ship: lint cdk-synth deploy smoke-prod
 # ── Internal Helpers (prefixed with _) ──────────────────────
 
 _cdk-bootstrap:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     account = boto3.client('sts', region_name='us-east-1').get_caller_identity()['Account']; \
     print(f'Bootstrapping CDK for account {account}...'); \
     sys.exit(subprocess.call(['npx', 'cdk', 'bootstrap', f'aws://{account}/us-east-1'], cwd='infrastructure/cdk-eagle'))"
 
 _ecr-login:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     sts = boto3.client('sts', region_name='us-east-1'); \
     account = sts.get_caller_identity()['Account']; \
@@ -525,7 +728,7 @@ _ecr-login:
     sys.exit(result.returncode)"
 
 _push-backend:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     account = boto3.client('sts', region_name='us-east-1').get_caller_identity()['Account']; \
     reg = f'{account}.dkr.ecr.us-east-1.amazonaws.com'; \
@@ -533,7 +736,7 @@ _push-backend:
     subprocess.check_call(['docker', 'push', f'{reg}/{{BACKEND_REPO}}:latest'])"
 
 _push-frontend:
-    python -c "\
+    python3 -c "\
     import boto3, subprocess, sys; \
     account = boto3.client('sts', region_name='us-east-1').get_caller_identity()['Account']; \
     reg = f'{account}.dkr.ecr.us-east-1.amazonaws.com'; \
@@ -541,7 +744,7 @@ _push-frontend:
     subprocess.check_call(['docker', 'push', f'{reg}/{{FRONTEND_REPO}}:latest'])"
 
 _ecs-update-all:
-    python -c "\
+    python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     ecs.update_service(cluster='eagle-dev', service='eagle-backend-dev', forceNewDeployment=True); \
@@ -550,21 +753,21 @@ _ecs-update-all:
     print('Frontend: force new deployment')"
 
 _ecs-update-backend:
-    python -c "\
+    python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     ecs.update_service(cluster='eagle-dev', service='eagle-backend-dev', forceNewDeployment=True); \
     print('Backend: force new deployment')"
 
 _ecs-update-frontend:
-    python -c "\
+    python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     ecs.update_service(cluster='eagle-dev', service='eagle-frontend-dev', forceNewDeployment=True); \
     print('Frontend: force new deployment')"
 
 _ecs-wait-all:
-    python -c "\
+    python3 -c "\
     import boto3; \
     print('Waiting for services to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
@@ -573,7 +776,7 @@ _ecs-wait-all:
     print('All services stable.')"
 
 _ecs-wait-backend:
-    python -c "\
+    python3 -c "\
     import boto3; \
     print('Waiting for backend to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
@@ -582,7 +785,7 @@ _ecs-wait-backend:
     print('Backend stable.')"
 
 _ecs-wait-frontend:
-    python -c "\
+    python3 -c "\
     import boto3; \
     print('Waiting for frontend to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \

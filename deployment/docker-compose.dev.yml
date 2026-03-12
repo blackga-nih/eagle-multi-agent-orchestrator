@@ -15,6 +15,9 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - S3_BUCKET=eagle-documents-695681773636-dev
+      - TEMPLATE_BUCKET=eagle-documents-695681773636-dev
+      - TEMPLATE_PREFIX=eagle-knowledge-base/approved/supervisor-core/essential-templates
     volumes:
       - ../server/app:/app/app
       - ${HOME}/.aws:/home/appuser/.aws

@@ -461,15 +461,20 @@ def get_requirements(
 def search_far(keyword: str, parts: list[str] | None = None) -> list[dict]:
     """Keyword search across the FAR database entries.
 
+    Splits the query into terms and scores each entry by how many terms match.
+    Returns entries sorted by relevance (most matching terms first).
+
     Args:
-        keyword: Search term (case-insensitive).
+        keyword: Search term(s) (case-insensitive, space-separated).
         parts: Optional list of FAR part numbers to restrict search.
 
     Returns:
-        List of matching FAR entries.
+        List of matching FAR entries, sorted by relevance.
     """
-    keyword_lower = keyword.lower()
-    results = []
+    terms = keyword.lower().split()
+    if not terms:
+        return []
+    scored = []
     for entry in _FAR_DATABASE:
         if parts and entry.get("part") not in parts:
             continue
@@ -479,9 +484,14 @@ def search_far(keyword: str, parts: list[str] | None = None) -> list[dict]:
             entry.get("section", ""),
             " ".join(entry.get("keywords", [])),
         ]).lower()
-        if keyword_lower in searchable:
-            results.append(entry)
-    return results
+        score = sum(1 for t in terms if t in searchable)
+        # Bonus for keyword exact matches
+        entry_kw = [k.lower() for k in entry.get("keywords", [])]
+        score += sum(2 for t in terms if t in entry_kw)
+        if score > 0:
+            scored.append((score, entry))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [entry for _, entry in scored]
 
 
 # ---------------------------------------------------------------------------
