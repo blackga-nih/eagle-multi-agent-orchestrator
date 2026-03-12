@@ -30,7 +30,37 @@ from typing import Any
 _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, _server_dir)
 sys.path.insert(0, os.path.join(_server_dir, "app"))
-from agentic_service import execute_tool
+
+# Load .env so LANGFUSE_* and ANTHROPIC_API_KEY are available
+from pathlib import Path as _Path
+from dotenv import load_dotenv as _load_dotenv
+_env_path = _Path(_server_dir) / ".env"
+if _env_path.exists():
+    _load_dotenv(str(_env_path), override=True)
+
+# Initialize Langfuse OTEL exporter if credentials are present
+def _setup_eval_langfuse():
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    if not public_key or not secret_key:
+        return
+    try:
+        import base64
+        from strands.telemetry import StrandsTelemetry
+        base = os.getenv("LANGFUSE_OTEL_ENDPOINT", "https://us.cloud.langfuse.com/api/public/otel")
+        endpoint = f"{base.rstrip('/')}/v1/traces"
+        auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+        StrandsTelemetry().setup_otlp_exporter(
+            endpoint=endpoint,
+            headers={"Authorization": f"Basic {auth}"},
+        )
+        print(f"[EAGLE EVAL] Langfuse OTEL → {endpoint}")
+    except Exception as exc:
+        print(f"[EAGLE EVAL] Langfuse setup skipped: {exc}")
+
+_setup_eval_langfuse()
+
+from tool_dispatch import execute_tool
 
 from strands import Agent, tool
 from strands.models import BedrockModel
@@ -121,6 +151,53 @@ from eagle_skill_constants import SKILL_CONSTANTS, PLUGIN_CONTENTS
 
 OA_INTAKE_SKILL = SKILL_CONSTANTS.get("oa-intake", "")
 
+# ============================================================
+# Production path helper — routes through sdk_query()
+# ============================================================
+# All tests that want to exercise the full production code path
+# (build_skill_tools, document gating, state load/save, trace_attributes,
+# workspace resolution) should call _eval_query() instead of constructing
+# Agent() directly. This ensures eval failures surface real production bugs.
+
+from app.strands_agentic_service import sdk_query as _sdk_query
+
+
+async def _eval_query(
+    prompt: str,
+    tenant_id: str = "test-tenant",
+    user_id: str = "test-user",
+    tier: str = "advanced",
+    session_id: str | None = None,
+    skill_names: list[str] | None = None,
+) -> tuple[str, dict, list[str]]:
+    """Run prompt through the production sdk_query() path.
+
+    Returns (result_text, usage_dict, tool_names). Uses the same BedrockModel,
+    prompt resolution, state management, hooks, and trace_attributes as the
+    live backend — including document gating and Langfuse session linking.
+    """
+    result_text = ""
+    usage: dict = {}
+    tool_names: list[str] = []
+    async for msg in _sdk_query(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=tier,
+        session_id=session_id,
+        skill_names=skill_names,
+    ):
+        if hasattr(msg, "result"):       # ResultMessage — final summary
+            result_text = msg.result
+            usage = msg.usage or {}
+        elif hasattr(msg, "content"):    # AssistantMessage — collect text + tool names
+            for block in msg.content:
+                if hasattr(block, "text"):
+                    result_text += block.text
+                elif hasattr(block, "name"):  # ToolUseBlock
+                    tool_names.append(block.name)
+    return result_text, usage, tool_names
+
 
 # ============================================================
 # StrandsResultCollector
@@ -143,6 +220,8 @@ class StrandsResultCollector:
         self.tool_use_blocks = []
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.system_prompt = ""
+        self.subagent_traces: dict[str, list] = {}  # tool_name -> conversation
         self.total_cost_usd = 0.0
         self.log_lines = []
         self.messages_raw = []
@@ -164,6 +243,15 @@ class StrandsResultCollector:
         self.result_text = str(result)
         self._log(f"{prefix}  [Result] {self.result_text[:300]}")
 
+        # Capture system prompt from agent
+        if agent is not None:
+            try:
+                sp = getattr(agent, "system_prompt", None)
+                if sp:
+                    self.system_prompt = str(sp)[:5000]
+            except Exception:
+                pass
+
         # Extract tool use from result.metrics.tool_metrics (preferred)
         try:
             metrics = getattr(result, "metrics", None)
@@ -179,11 +267,17 @@ class StrandsResultCollector:
         except Exception:
             pass
 
-        # Fallback: extract from agent.messages conversation history (Bedrock camelCase format)
+        # Always capture full conversation history for trace output
+        if agent is not None:
+            try:
+                self.messages_raw = list(getattr(agent, "messages", []) or [])
+            except Exception:
+                pass
+
+        # Fallback: extract tool_use from agent.messages if metrics didn't provide them
         if not self.tool_use_blocks and agent is not None:
             try:
-                messages = getattr(agent, "messages", []) or []
-                self.messages_raw = messages
+                messages = self.messages_raw or []
                 for msg in messages:
                     if isinstance(msg, dict) and msg.get("role") == "assistant":
                         for block in msg.get("content", []):
@@ -247,6 +341,120 @@ class StrandsResultCollector:
         }
 
     def to_trace_json(self):
+        # Prefer full conversation history (includes tool outputs + reasoning)
+        if self.messages_raw:
+            trace = []
+            # Include system prompt as first entry
+            if self.system_prompt:
+                trace.append({
+                    "role": "system",
+                    "content": [{"type": "text", "text": self.system_prompt}],
+                })
+            for msg in self.messages_raw:
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role", "unknown")
+                content = msg.get("content", [])
+                entry = {"role": role, "content": []}
+                for block in (content if isinstance(content, list) else [content]):
+                    if isinstance(block, dict):
+                        if "text" in block:
+                            entry["content"].append({"type": "text", "text": block["text"][:2000]})
+                        elif "toolUse" in block:
+                            tu = block["toolUse"]
+                            entry["content"].append({
+                                "type": "tool_use",
+                                "tool": tu.get("name", ""),
+                                "id": tu.get("toolUseId", ""),
+                                "input": tu.get("input", {}),
+                            })
+                        elif "toolResult" in block:
+                            tr = block["toolResult"]
+                            # Extract text from toolResult content blocks
+                            result_text = ""
+                            for rc in (tr.get("content", []) if isinstance(tr.get("content"), list) else []):
+                                if isinstance(rc, dict) and "text" in rc:
+                                    result_text += rc["text"][:2000]
+                            entry["content"].append({
+                                "type": "tool_result",
+                                "toolUseId": tr.get("toolUseId", ""),
+                                "status": tr.get("status", ""),
+                                "output": result_text[:4000],
+                            })
+                        elif "reasoningContent" in block:
+                            rc = block["reasoningContent"]
+                            text = rc.get("reasoningText", {}).get("text", "")
+                            entry["content"].append({"type": "reasoning", "text": text[:2000]})
+                        else:
+                            entry["content"].append(block)
+                    elif isinstance(block, str):
+                        entry["content"].append({"type": "text", "text": block[:2000]})
+                if entry["content"]:
+                    trace.append(entry)
+            # Append subagent traces (nested conversations from tool-wrapped agents)
+            if self.subagent_traces:
+                serialized_agents = {}
+                for agent_name, agent_data in self.subagent_traces.items():
+                    serialized_msgs = []
+                    for msg in (agent_data.get("messages") or []):
+                        if not isinstance(msg, dict):
+                            continue
+                        role = msg.get("role", "unknown")
+                        content = msg.get("content", [])
+                        entry = {"role": role, "content": []}
+                        for block in (content if isinstance(content, list) else [content]):
+                            if isinstance(block, dict):
+                                if "text" in block:
+                                    entry["content"].append({"type": "text", "text": block["text"][:3000]})
+                                elif "toolUse" in block:
+                                    tu = block["toolUse"]
+                                    entry["content"].append({
+                                        "type": "tool_use",
+                                        "tool": tu.get("name", ""),
+                                        "id": tu.get("toolUseId", ""),
+                                        "input": tu.get("input", {}),
+                                    })
+                                elif "toolResult" in block:
+                                    tr = block["toolResult"]
+                                    result_text = ""
+                                    for rc in (tr.get("content", []) if isinstance(tr.get("content"), list) else []):
+                                        if isinstance(rc, dict) and "text" in rc:
+                                            result_text += rc["text"][:3000]
+                                    entry["content"].append({
+                                        "type": "tool_result",
+                                        "toolUseId": tr.get("toolUseId", ""),
+                                        "output": result_text[:5000],
+                                    })
+                                elif "reasoningContent" in block:
+                                    rc = block["reasoningContent"]
+                                    text = rc.get("reasoningText", {}).get("text", "")
+                                    entry["content"].append({"type": "reasoning", "text": text[:3000]})
+                            elif isinstance(block, str):
+                                entry["content"].append({"type": "text", "text": block[:3000]})
+                        if entry["content"]:
+                            serialized_msgs.append(entry)
+                    serialized_agents[agent_name] = {
+                        "system_prompt": agent_data.get("system_prompt", "")[:3000],
+                        "input": agent_data.get("input", ""),
+                        "conversation": serialized_msgs,
+                        "result": agent_data.get("result", "")[:3000],
+                    }
+                trace.append({
+                    "type": "subagent_traces",
+                    "agents": serialized_agents,
+                })
+            # Append summary
+            trace.append({
+                "type": "summary",
+                "result": self.result_text[:2000],
+                "usage": {
+                    "input_tokens": self.total_input_tokens,
+                    "output_tokens": self.total_output_tokens,
+                },
+            })
+            return trace
+
+        # Fallback: tool_use blocks only (no tool outputs available)
         trace = []
         for tu in self.tool_use_blocks:
             trace.append({
@@ -299,7 +507,7 @@ def load_skill_file() -> tuple:
 # ============================================================
 
 async def test_1_session_creation():
-    """Create a new session with tenant context in system_prompt."""
+    """Create a new session with tenant context — via production sdk_query()."""
     print("\n" + "=" * 70)
     print("TEST 1: Session Creation + Tenant Context Injection")
     print("=" * 70)
@@ -307,49 +515,37 @@ async def test_1_session_creation():
     tenant_id = "acme-corp"
     user_id = "user-001"
     subscription_tier = "premium"
-
-    system_prompt = (
-        f"You are an AI assistant for tenant '{tenant_id}'. "
-        f"Subscription tier: {subscription_tier}. "
-        f"Current user: {user_id}. "
-        f"Always acknowledge the tenant and tier when greeting. "
-        f"Respond concisely."
-    )
+    session_id = f"{tenant_id}-{subscription_tier}-{user_id}-eval-001"
 
     print(f"  Tenant: {tenant_id} | User: {user_id} | Tier: {subscription_tier}")
-    print(f"  Budget: ${TIER_BUDGETS[subscription_tier]}")
+    print(f"  Session: {session_id}")
+    print(f"  Path: sdk_query() [production code path]")
     print()
 
-    agent = Agent(
-        model=_model,
-        system_prompt=system_prompt,
-        callback_handler=None,
+    result_text, usage, _ = await _eval_query(
+        prompt="Hello! What tenant am I from and what is my subscription tier?",
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=subscription_tier,
+        session_id=session_id,
     )
 
-    collector = StrandsResultCollector()
-    result = agent("Hello! What tenant am I from and what is my subscription tier?")
-    collector.process_result(result, indent=2)
-
-    print()
-    summary = collector.summary()
-    print(f"  --- Results ---")
-    print(f"  Session ID: {summary['session_id']}")
-    print(f"  Messages: {summary['total_messages']}")
-    print(f"  Text: {len(collector.result_text)} chars")
-    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
-    print(f"  Cost: ${summary['total_cost_usd']:.6f}")
-
-    all_text = collector.all_text_lower()
+    all_text = result_text.lower()
     tenant_mentioned = "acme" in all_text or tenant_id in all_text
     tier_mentioned = subscription_tier in all_text
 
+    print(f"  [Result] {result_text[:200]}")
+    print()
+    print(f"  --- Results ---")
+    print(f"  Session ID: {session_id}")
+    print(f"  Text: {len(result_text)} chars")
+    print(f"  Usage: {usage}")
     print(f"  Tenant recognized in response: {tenant_mentioned}")
     print(f"  Tier recognized in response: {tier_mentioned}")
 
-    # Strands has no built-in session_id -- pass if we got a response
-    passed = len(collector.result_text) > 0
+    passed = len(result_text) > 0
     print(f"\n  {'PASS' if passed else 'FAIL'} - Session created with tenant context")
-    return passed, None
+    return passed, session_id
 
 
 # ============================================================
@@ -828,51 +1024,46 @@ async def test_8_subagent_tool_tracking():
 # ============================================================
 
 async def test_9_oa_intake_workflow():
-    """Run through the OA Intake workflow. Single-turn (Strands is stateless)."""
+    """OA Intake workflow — via production sdk_query() with oa-intake skill."""
     print("\n" + "=" * 70)
     print("TEST 9: OA Intake Workflow (CT Scanner Acquisition)")
     print("=" * 70)
 
-    skill_content, skill_path = load_skill_file()
-    if not skill_content:
-        print("  SKIP - Skill file not found")
-        return None
+    tenant_id = "nci-oa"
+    user_id = "dr-smith-001"
+    tier = "premium"
+    session_id = f"{tenant_id}-{tier}-{user_id}-eval-009"
 
-    print(f"  Skill: {skill_path}")
+    print(f"  Tenant: {tenant_id} | User: {user_id} | Tier: {tier}")
+    print(f"  Session: {session_id}")
     print("  Workflow: CT Scanner intake Phase 1 (single-turn)")
+    print("  Path: sdk_query() [production code path]")
     print()
 
-    tenant_context = (
-        "Tenant: nci-oa | User: dr-smith-001 | Tier: premium\n"
-        "You are the OA Intake Agent. Follow the skill workflow exactly.\n\n"
+    result_text, usage, _ = await _eval_query(
+        prompt="Cat scan machine. Not sure the price. I need it in 6 weeks.",
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=tier,
+        session_id=session_id,
+        skill_names=["oa-intake"],
     )
 
-    agent = Agent(
-        model=_model,
-        system_prompt=tenant_context + skill_content,
-        callback_handler=None,
-    )
-
-    collector = StrandsResultCollector()
-    result = agent("Cat scan machine. Not sure the price. I need it in 6 weeks.")
-    collector.process_result(result, indent=3)
-
-    summary = collector.summary()
-    all_text = collector.all_text_lower()
-
+    all_text = result_text.lower()
     keywords = ["ct", "scanner", "cost", "price", "timeline", "equipment"]
     keywords_found = [kw for kw in keywords if kw in all_text]
     keywords_missing = [kw for kw in keywords if kw not in all_text]
     phase_pass = len(keywords_found) >= len(keywords) // 2
 
+    print(f"  [Result] {result_text[:200]}")
     print(f"  --- Phase 1 Results ---")
-    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+    print(f"  Usage: {usage}")
     print(f"  Keywords found: {keywords_found}")
     if keywords_missing:
         print(f"  Keywords missing: {keywords_missing}")
     print(f"  Phase 1: {'PASS' if phase_pass else 'FAIL'}")
 
-    passed = phase_pass and len(collector.result_text) > 0
+    passed = phase_pass and len(result_text) > 0
     print(f"  {'PASS' if passed else 'FAIL'} - OA Intake workflow (phase 1)")
     return passed
 
@@ -1217,123 +1408,53 @@ async def test_14_document_generator_skill():
 # ============================================================
 
 async def test_15_supervisor_multi_skill_chain():
-    """Test Supervisor invoking multiple skills as @tool-wrapped subagents."""
+    """Supervisor multi-skill chain — via production sdk_query() (full production path)."""
     print("\n" + "=" * 70)
     print("TEST 15: Supervisor Multi-Skill Chain (UC-01 End-to-End)")
     print("=" * 70)
 
-    legal_content, _ = load_skill_or_prompt(skill_name="legal-counsel")
-    market_content, _ = load_skill_or_prompt(skill_name="market-intelligence")
-    intake_content, _ = load_skill_or_prompt(skill_name="oa-intake")
-
-    missing = []
-    if not legal_content:
-        missing.append("legal-counsel")
-    if not market_content:
-        missing.append("market-intelligence")
-    if not intake_content:
-        missing.append("oa-intake")
-
-    if missing:
-        print(f"  SKIP - Missing skill files: {missing}")
-        return None
+    tenant_id = "nci-oa"
+    user_id = "co-johnson-001"
+    tier = "premium"
+    session_id = f"{tenant_id}-{tier}-{user_id}-eval-015"
 
     print("  Skill chain: OA Intake -> Market Intelligence -> Legal Counsel")
     print("  Scenario: $500K IT services, competitive, 3-year PoP")
+    print(f"  Session: {session_id}")
+    print("  Path: sdk_query() [production code path — hooks, state, trace_attrs active]")
     print()
 
-    # Build subagent tools
-    @tool(name="oa_intake")
-    def oa_intake_tool(query: str) -> str:
-        """Gathers acquisition requirements and determines type/threshold. Use for initial intake.
-
-        Args:
-            query: The acquisition details or question for intake processing
-        """
-        subagent = Agent(
-            model=_model,
-            system_prompt=intake_content[:3000],
-            callback_handler=None,
-        )
-        return str(subagent(query))
-
-    @tool(name="market_intelligence")
-    def market_intelligence_tool(query: str) -> str:
-        """Researches market conditions, vendors, and pricing. Use for market research.
-
-        Args:
-            query: The market research question or requirement
-        """
-        subagent = Agent(
-            model=_model,
-            system_prompt=market_content,
-            callback_handler=None,
-        )
-        return str(subagent(query))
-
-    @tool(name="legal_counsel")
-    def legal_counsel_tool(query: str) -> str:
-        """Assesses legal risks, protest vulnerabilities, FAR compliance. Use for legal review.
-
-        Args:
-            query: The legal question or compliance scenario
-        """
-        subagent = Agent(
-            model=_model,
-            system_prompt=legal_content,
-            callback_handler=None,
-        )
-        return str(subagent(query))
-
-    supervisor_prompt = (
-        "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions.\n"
-        "You orchestrate acquisition workflows by delegating to specialized skill tools.\n\n"
-        "Available tools:\n"
-        "- oa_intake: Gathers initial requirements and determines acquisition type\n"
-        "- market_intelligence: Researches vendors, pricing, small business opportunities\n"
-        "- legal_counsel: Assesses legal risks, protest vulnerabilities, FAR compliance\n\n"
-        "For this request, invoke each tool in sequence:\n"
-        "1. First use oa_intake to classify the acquisition\n"
-        "2. Then use market_intelligence to assess the market\n"
-        "3. Then use legal_counsel to check legal risks\n"
-        "4. Synthesize all findings into a brief summary"
+    result_text, usage, tool_names = await _eval_query(
+        prompt=(
+            "New acquisition request: IT modernization services, $500K over 3 years, "
+            "cloud migration and agile development. "
+            "You MUST call all three tools in sequence: "
+            "1) oa_intake to classify the acquisition, "
+            "2) market_intelligence to assess the market, "
+            "3) legal_counsel to check legal risks. "
+            "Then synthesize all findings."
+        ),
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=tier,
+        session_id=session_id,
+        skill_names=["oa-intake", "market-intelligence", "legal-counsel"],
     )
 
-    supervisor = Agent(
-        model=_model,
-        system_prompt=supervisor_prompt,
-        tools=[oa_intake_tool, market_intelligence_tool, legal_counsel_tool],
-        callback_handler=None,
-    )
+    all_text = result_text.lower()
 
-    collector = StrandsResultCollector()
-    result = supervisor(
-        "New acquisition request: We need IT modernization services for $500K "
-        "over 3 years. Includes cloud migration and agile development. "
-        "Run the full skill chain to assess this acquisition."
-    )
-    collector.process_result(result, indent=2, agent=supervisor)
-
+    print(f"  [Result] {result_text[:300]}")
     print()
-    summary = collector.summary()
     print(f"  --- Results ---")
-    print(f"  Messages: {summary['total_messages']}")
-    print(f"  Tool use blocks: {summary['tool_use_blocks']}")
-    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
-
-    tool_calls = collector.tool_use_blocks
-    tool_names = [t["tool"] for t in tool_calls]
-    print(f"  Tool invocations: {len(tool_calls)}")
-    for tn in tool_names:
-        print(f"    -> {tn}")
-
-    all_text = collector.all_text_lower()
+    print(f"  Session ID: {session_id}")
+    print(f"  Usage: {usage}")
+    print(f"  Tools invoked: {tool_names}")
 
     indicators = {
-        "multiple_tools": len(tool_calls) >= 2,
-        "intake_invoked": any("intake" in tn.lower() for tn in tool_names),
-        "market_invoked": any("market" in tn.lower() for tn in tool_names),
-        "legal_invoked": any("legal" in tn.lower() or "counsel" in tn.lower() for tn in tool_names),
+        "multiple_tools": len(tool_names) >= 2,
+        "intake_invoked": any("intake" in t for t in tool_names),
+        "market_invoked": any("market" in t for t in tool_names),
+        "legal_invoked": any("legal" in t or "counsel" in t for t in tool_names),
         "synthesis": any(w in all_text for w in ["summary", "recommend", "finding", "assessment", "result"]),
     }
 
@@ -1342,7 +1463,7 @@ async def test_15_supervisor_multi_skill_chain():
         print(f"    {indicator}: {found}")
 
     indicators_found = sum(1 for v in indicators.values() if v)
-    passed = indicators_found >= 3 and len(collector.result_text) > 0
+    passed = indicators_found >= 3 and len(result_text) > 0
     print(f"  Skill chain indicators: {indicators_found}/5")
     print(f"  {'PASS' if passed else 'FAIL'} - Supervisor multi-skill chain")
     return passed
@@ -3361,7 +3482,7 @@ async def main():
 
     # Persist to DynamoDB (same store as pytest — visible on /admin/tests)
     try:
-        from app.test_result_store import save_test_run, save_test_result
+        from app.stores.test_result_store import save_test_run, save_test_result
 
         eval_run_id = trace_output["run_id"]
         eval_summary = {

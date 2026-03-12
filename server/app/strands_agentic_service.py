@@ -1547,10 +1547,10 @@ def _make_update_state_tool(
       - document_ready: notification that a document was created/updated
       - compliance_alert: compliance findings that need attention
     """
-    from strands import ToolContext
+    from strands import ToolContext  # noqa: F401 (runtime type only)
 
     @tool(name="update_state")
-    def update_state_tool(params: str, tool_context: ToolContext | None = None) -> str:
+    def update_state_tool(params: str, tool_context: Any = None) -> str:
         """Push a structured state update to the frontend UI. The frontend renders this immediately as a live checklist, progress bar, or alert.
 
         Args:
@@ -1706,7 +1706,7 @@ def _make_service_tool(
     If result_queue and loop are provided, tool results for create_document
     are emitted as tool_result chunks so the frontend can render document cards.
     """
-    from .agentic_service import TOOL_DISPATCH, TOOLS_NEEDING_SESSION
+    from .tool_dispatch import TOOL_DISPATCH, TOOLS_NEEDING_SESSION
 
     handler = TOOL_DISPATCH.get(tool_name)
     if not handler:
