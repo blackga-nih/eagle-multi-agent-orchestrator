@@ -79,6 +79,53 @@ def create_feedback(
     return item
 
 
+def write_feedback(
+    tenant_id: str,
+    user_id: str,
+    tier: str = "",
+    session_id: str = "",
+    feedback_text: str = "",
+    feedback_type: Optional[str] = None,
+    conversation_snapshot: str = "",
+    cloudwatch_logs: str = "",
+    page: str = "",
+    last_message_id: str = "",
+) -> Dict[str, Any]:
+    """Rich feedback record — maps to create_feedback() with extended fields."""
+    item = create_feedback(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        page=page,
+        comment=feedback_text or None,
+        feedback_type=feedback_type,
+        session_id=session_id or None,
+    )
+    # Store extended fields if provided
+    if tier or conversation_snapshot or cloudwatch_logs or last_message_id:
+        updates: Dict[str, Any] = {}
+        if tier:
+            updates["tier"] = tier
+        if conversation_snapshot:
+            updates["conversation_snapshot"] = conversation_snapshot
+        if cloudwatch_logs:
+            updates["cloudwatch_logs"] = cloudwatch_logs
+        if last_message_id:
+            updates["last_message_id"] = last_message_id
+        if updates:
+            try:
+                expr = "SET " + ", ".join(f"#{k} = :{k}" for k in updates)
+                _get_table().update_item(
+                    Key={"PK": item["PK"], "SK": item["SK"]},
+                    UpdateExpression=expr,
+                    ExpressionAttributeNames={f"#{k}": k for k in updates},
+                    ExpressionAttributeValues={f":{k}": v for k, v in updates.items()},
+                )
+                item.update(updates)
+            except (ClientError, BotoCoreError) as exc:
+                logger.warning("feedback_store.write_feedback: extended update failed (non-fatal): %s", exc)
+    return item
+
+
 def list_feedback(tenant_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     """List feedback for a tenant, newest first."""
     try:

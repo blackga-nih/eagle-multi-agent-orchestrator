@@ -71,13 +71,16 @@ async def api_submit_feedback(
     """Record user feedback with conversation snapshot and recent CloudWatch logs."""
     body = await request.json()
     session_id = body.get("session_id", "")
-    feedback_text = body.get("feedback_text", "").strip()
+    # Accept "comment" (frontend field) or "feedback_text" (legacy/rich client)
+    feedback_text = (body.get("comment") or body.get("feedback_text") or "").strip()
+    feedback_type = body.get("feedback_type")
+    rating = body.get("rating", 0)
     conversation_snapshot = body.get("conversation_snapshot", [])
     page = body.get("page", "")
     last_message_id = body.get("last_message_id", "")
 
-    if not feedback_text:
-        raise HTTPException(status_code=400, detail="feedback_text is required")
+    if rating and not (0 <= int(rating) <= 5):
+        raise HTTPException(status_code=400, detail="rating must be between 0 and 5")
 
     cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
 
@@ -87,6 +90,7 @@ async def api_submit_feedback(
         tier=user.tier,
         session_id=session_id,
         feedback_text=feedback_text,
+        feedback_type=feedback_type,
         conversation_snapshot=json.dumps(conversation_snapshot, default=str),
         cloudwatch_logs=json.dumps(cloudwatch_logs, default=str),
         page=page,

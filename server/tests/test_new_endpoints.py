@@ -234,7 +234,7 @@ class TestFeedbackEndpoints:
     def test_post_feedback_success(self, client):
         """POST /api/feedback creates a feedback record and returns feedback_id."""
         fake_item = {"feedback_id": "fb-001", "tenant_id": "default", "rating": 4}
-        with patch("app.main.create_feedback_item", return_value=fake_item):
+        with patch("app.routes.user.feedback_store.write_feedback", return_value=fake_item):
             resp = client.post("/api/feedback", json={
                 "rating": 4,
                 "page": "/chat",
@@ -256,7 +256,7 @@ class TestFeedbackEndpoints:
     def test_post_feedback_minimal_body(self, client):
         """POST /api/feedback with only required field 'page' succeeds."""
         fake_item = {"feedback_id": "fb-002", "tenant_id": "default", "rating": 0}
-        with patch("app.main.create_feedback_item", return_value=fake_item):
+        with patch("app.routes.user.feedback_store.write_feedback", return_value=fake_item):
             resp = client.post("/api/feedback", json={
                 "rating": 0,
                 "page": "/admin",
@@ -270,7 +270,7 @@ class TestFeedbackEndpoints:
             {"feedback_id": "fb-001", "rating": 5, "page": "/chat"},
             {"feedback_id": "fb-002", "rating": 3, "page": "/admin"},
         ]
-        with patch("app.main.list_feedback", return_value=fake_items):
+        with patch("app.routes.user.list_feedback", return_value=fake_items):
             resp = client.get("/api/feedback")
         assert resp.status_code == 200
         data = resp.json()
@@ -279,7 +279,7 @@ class TestFeedbackEndpoints:
 
     def test_get_feedback_empty(self, client):
         """GET /api/feedback returns empty list when no feedback exists."""
-        with patch("app.main.list_feedback", return_value=[]):
+        with patch("app.routes.user.list_feedback", return_value=[]):
             resp = client.get("/api/feedback")
         assert resp.status_code == 200
         data = resp.json()
