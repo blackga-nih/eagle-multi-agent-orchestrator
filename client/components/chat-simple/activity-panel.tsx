@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { FileText, Bell, Terminal, Cloud, Cpu, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { FileText, Bell, Terminal, Cloud, Cpu, CheckSquare, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
 import AgentLogs from './agent-logs';
@@ -12,6 +12,29 @@ import BedrockLogs from './bedrock-logs';
 // Types
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Package / acquisition state pushed via SSE metadata events
+// ---------------------------------------------------------------------------
+
+export interface EagleChecklist {
+  required: string[];
+  completed: string[];
+  missing: string[];
+  complete: boolean;
+}
+
+export interface PackageState {
+  phase?: string;
+  previous_phase?: string;
+  package_id?: string;
+  checklist?: EagleChecklist;
+  progress_pct?: number;
+  compliance_alerts?: Array<{
+    severity: 'info' | 'warning' | 'critical';
+    items: Array<{ name: string; note: string }>;
+  }>;
+}
+
 interface ActivityPanelProps {
   logs: AuditLogEntry[];
   clearLogs: () => void;
@@ -21,9 +44,10 @@ interface ActivityPanelProps {
   onToggle: () => void;
   sessionId?: string;
   bedrockTraces?: Record<string, unknown>[];
+  eagleState?: PackageState | null;
 }
 
-type TabId = 'documents' | 'notifications' | 'logs' | 'cloudwatch' | 'bedrock';
+type TabId = 'documents' | 'notifications' | 'logs' | 'cloudwatch' | 'bedrock' | 'package';
 
 interface TabDef {
   id: TabId;
@@ -32,6 +56,7 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
+  { id: 'package',       label: 'Package',       icon: CheckSquare },
   { id: 'documents',     label: 'Docs',          icon: FileText },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'logs',          label: 'Agent Logs',    icon: Terminal },
@@ -211,6 +236,137 @@ function NotificationsTab({ documents }: {
 }
 
 // ---------------------------------------------------------------------------
+// Package Status Tab
+// ---------------------------------------------------------------------------
+
+const PHASE_STYLE: Record<string, string> = {
+  intake:   'bg-gray-100 text-gray-600',
+  analysis: 'bg-blue-100 text-blue-700',
+  drafting: 'bg-amber-100 text-amber-700',
+  review:   'bg-indigo-100 text-indigo-700',
+  complete: 'bg-green-100 text-green-700',
+};
+
+const DOC_LABELS: Record<string, string> = {
+  sow:              'Statement of Work',
+  igce:             'IGCE',
+  market_research:  'Market Research',
+  acquisition_plan: 'Acquisition Plan',
+  funding_doc:      'Funding Documentation',
+  justification:    'Justification',
+  eval_criteria:    'Evaluation Criteria',
+  j_a:              'J&A',
+};
+
+function PackageStatusTab({ eagleState }: { eagleState?: PackageState | null }) {
+  if (!eagleState?.phase && !eagleState?.checklist) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-center px-4">
+        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+          <CheckSquare className="w-5 h-5 text-gray-400" />
+        </div>
+        <p className="text-sm text-gray-500">No active package yet.</p>
+        <p className="text-xs text-gray-400 mt-1">Start an acquisition to see your checklist and compliance status.</p>
+      </div>
+    );
+  }
+
+  const phase = eagleState.phase ?? 'intake';
+  const checklist = eagleState.checklist;
+  const required = checklist?.required ?? [];
+  const completedSet = new Set(checklist?.completed ?? []);
+  const progressPct = required.length > 0
+    ? Math.round((completedSet.size / required.length) * 100)
+    : (eagleState.progress_pct ?? 0);
+  const alerts = eagleState.compliance_alerts ?? [];
+
+  return (
+    <div className="space-y-4">
+      {/* Phase + package ID */}
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Phase</span>
+        <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold capitalize ${PHASE_STYLE[phase] ?? PHASE_STYLE.intake}`}>
+          {phase}
+        </span>
+      </div>
+      {eagleState.package_id && (
+        <p className="text-[10px] text-gray-400 font-mono truncate">{eagleState.package_id}</p>
+      )}
+
+      {/* Progress bar */}
+      {required.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Documents</span>
+            <span className="text-[10px] text-gray-500">{completedSet.size}/{required.length}</span>
+          </div>
+          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-[#003366] to-[#2196F3] rounded-full transition-all duration-500"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Document checklist rows */}
+      {required.length > 0 && (
+        <div className="space-y-1.5">
+          {required.map((doc) => {
+            const done = completedSet.has(doc);
+            return (
+              <div
+                key={doc}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-xs transition ${
+                  done
+                    ? 'bg-green-50 border-green-200 text-green-800'
+                    : 'bg-gray-50 border-gray-100 text-gray-500'
+                }`}
+              >
+                <span className={`w-4 h-4 flex items-center justify-center rounded-full shrink-0 text-[9px] font-bold ${
+                  done ? 'bg-green-500 text-white' : 'border border-gray-300'
+                }`}>
+                  {done ? '✓' : ''}
+                </span>
+                <span className={done ? 'font-medium' : ''}>
+                  {DOC_LABELS[doc] ?? doc.replace(/_/g, ' ')}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Compliance alerts */}
+      {alerts.length > 0 && (
+        <div className="space-y-2">
+          <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Compliance</span>
+          {alerts.map((alert, i) => {
+            const color =
+              alert.severity === 'critical' ? 'bg-red-50 border-red-200 text-red-800' :
+              alert.severity === 'warning'  ? 'bg-amber-50 border-amber-200 text-amber-700' :
+              'bg-blue-50 border-blue-100 text-blue-700';
+            return (
+              <div key={i} className={`rounded-lg border px-3 py-2 text-xs ${color}`}>
+                <div className="font-semibold capitalize mb-1">{alert.severity}</div>
+                <ul className="space-y-0.5">
+                  {alert.items.map((item, j) => (
+                    <li key={j} className="flex gap-1.5">
+                      <span className="font-medium shrink-0">{item.name}:</span>
+                      <span className="opacity-80">{item.note}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Panel
 // ---------------------------------------------------------------------------
 
@@ -223,8 +379,9 @@ export default function ActivityPanel({
   onToggle,
   sessionId,
   bedrockTraces = [],
+  eagleState,
 }: ActivityPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('logs');
+  const [activeTab, setActiveTab] = useState<TabId>('package');
 
   const docCount = Object.values(documents).flat().length;
 
@@ -249,7 +406,9 @@ export default function ActivityPanel({
       <div className="flex items-center gap-1 p-2 bg-[#F5F7FA] border-b border-[#D8DEE6]">
         {TABS.map((tab) => {
           const Icon = tab.icon;
+          const alertCount = eagleState?.compliance_alerts?.length ?? 0;
           const badge =
+            tab.id === 'package' && alertCount > 0 ? alertCount :
             tab.id === 'logs' && logs.length > 0 ? logs.length :
             tab.id === 'documents' && docCount > 0 ? docCount :
             tab.id === 'notifications' && notifCount > 0 ? notifCount :
@@ -305,6 +464,7 @@ export default function ActivityPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
+        {activeTab === 'package' && <PackageStatusTab eagleState={eagleState} />}
         {activeTab === 'documents' && <DocumentsTab documents={documents} />}
         {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
         {activeTab === 'logs' && <AgentLogs logs={logs} />}

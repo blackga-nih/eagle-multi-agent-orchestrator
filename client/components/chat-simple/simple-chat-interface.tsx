@@ -15,7 +15,7 @@ import { ChatMessage, DocumentInfo } from '@/types/chat';
 import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
-import ActivityPanel from './activity-panel';
+import ActivityPanel, { PackageState } from './activity-panel';
 
 // -----------------------------------------------------------------------
 // Types for per-message tool call tracking
@@ -157,6 +157,9 @@ export default function SimpleChatInterface() {
     /** Bedrock trace events collected during the session. */
     const [bedrockTraces, setBedrockTraces] = useState<Record<string, unknown>[]>([]);
 
+    /** Live acquisition package state pushed via SSE metadata events. */
+    const [eagleState, setEagleState] = useState<PackageState | null>(null);
+
     // Agent stream
     const { sendQuery, isStreaming, error, logs, clearLogs, addUserInputLog } = useAgentStream({
         getToken,
@@ -164,6 +167,30 @@ export default function SimpleChatInterface() {
 
         onBedrockTrace: (trace) => {
             setBedrockTraces((prev) => [...prev, trace]);
+        },
+
+        onMetadata: (meta) => {
+            const stateType = meta.state_type as string | undefined;
+            setEagleState((prev) => {
+                const next: PackageState = { ...prev };
+                if (stateType === 'phase_change') {
+                    next.phase = meta.phase as string;
+                    next.previous_phase = meta.previous as string;
+                    if (meta.package_id) next.package_id = meta.package_id as string;
+                    if (meta.checklist) next.checklist = meta.checklist as PackageState['checklist'];
+                } else if (stateType === 'checklist_update' || stateType === 'document_ready') {
+                    if (meta.checklist) next.checklist = meta.checklist as PackageState['checklist'];
+                    if (meta.package_id) next.package_id = meta.package_id as string;
+                    if (meta.progress_pct !== undefined) next.progress_pct = meta.progress_pct as number;
+                } else if (stateType === 'compliance_alert') {
+                    const alert = {
+                        severity: meta.severity as 'info' | 'warning' | 'critical',
+                        items: meta.items as Array<{ name: string; note: string }>,
+                    };
+                    next.compliance_alerts = [...(prev?.compliance_alerts ?? []), alert];
+                }
+                return next;
+            });
         },
 
         onMessage: (msg) => {
@@ -429,6 +456,7 @@ export default function SimpleChatInterface() {
                 onToggle={() => setIsPanelOpen(v => !v)}
                 sessionId={currentSessionId ?? undefined}
                 bedrockTraces={bedrockTraces}
+                eagleState={eagleState}
             />
         </div>
     );
