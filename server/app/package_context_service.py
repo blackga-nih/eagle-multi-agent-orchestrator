@@ -13,8 +13,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from .session_store import get_session, update_session
-from .package_store import get_package
+from .stores.session_store import get_session, update_session
+from .stores.package_store import get_package
 
 logger = logging.getLogger("eagle.package_context")
 
@@ -128,9 +128,8 @@ def set_active_package(
         )
         return None
 
-    # Update session metadata
-    metadata = session.get("metadata", {})
-    metadata["active_package_id"] = package_id
+    # Update session metadata (copy to avoid mutating the session dict in place)
+    metadata = {**session.get("metadata", {}), "active_package_id": package_id}
 
     update_session(
         session_id=session_id,
@@ -167,7 +166,7 @@ def clear_active_package(
         )
         return False
 
-    metadata = session.get("metadata", {})
+    metadata = dict(session.get("metadata", {}))
     if "active_package_id" in metadata:
         del metadata["active_package_id"]
         update_session(
