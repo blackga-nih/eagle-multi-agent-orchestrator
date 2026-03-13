@@ -35,6 +35,7 @@ import boto3
 
 from botocore.config import Config
 from strands import Agent, tool
+from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.hooks import HookProvider
 from strands.hooks.events import (
     AfterInvocationEvent,
@@ -1473,6 +1474,7 @@ def _make_subagent_tool(
     user_id: str = "anonymous",
     session_id: str | None = None,
     tier: str = "advanced",
+    context_frame: dict | None = None,
 ):
     """Create a @tool-wrapped subagent from skill registry entry.
 
@@ -1480,6 +1482,12 @@ def _make_subagent_tool(
     The shared _model is reused (no per-request boto3 overhead).
     trace_attributes + session.id are forwarded so Langfuse groups
     the subagent span under the same session as the supervisor.
+
+    context_frame is a shared mutable dict containing:
+      - "state": the current eagle_state dict (populated after state load)
+      - "completed": list of skill names that have already returned results
+    At call time, a context header (~100 tokens) is prepended to the query
+    so subagents know the acquisition phase, tier, and prior analyses.
     """
     safe_name = skill_name.replace("-", "_")
     _subagent_trace_attrs = {
@@ -1495,13 +1503,35 @@ def _make_subagent_tool(
     @tool(name=safe_name)
     def subagent_tool(query: str) -> str:
         """Placeholder docstring replaced below."""
+        # Build context header from shared frame (read at call time, not factory time)
+        ctx = context_frame or {}
+        state = ctx.get("state") or {}
+        completed = ctx.get("completed") or []
+
+        header_parts = [f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}"]
+        if state.get("phase"):
+            header_parts.append(f"Phase: {state['phase']}")
+        if state.get("package_id"):
+            header_parts.append(f"Package: {state['package_id']}")
+        if state.get("required_documents"):
+            header_parts.append(f"Required docs: {', '.join(state['required_documents'])}")
+        if completed:
+            header_parts.append(f"Prior analyses completed: {', '.join(completed)}")
+
+        context_header = "[ACQUISITION CONTEXT] " + " | ".join(header_parts)
+        enriched_query = f"{context_header}\n\n{query}"
+
         agent = Agent(
             model=_get_model(),
             system_prompt=prompt_body,
             callback_handler=None,
             trace_attributes=_subagent_trace_attrs,
         )
-        raw = str(agent(query))
+        raw = str(agent(enriched_query))
+
+        # Track this subagent as completed so subsequent subagents know what ran
+        if context_frame is not None:
+            context_frame.setdefault("completed", []).append(skill_name)
 
         # Emit tool_result so the frontend can show the specialist's report
         if result_queue and loop:
@@ -2260,6 +2290,7 @@ def build_skill_tools(
     workspace_id: str | None = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    context_frame: dict | None = None,
 ) -> list:
     """Build @tool-wrapped subagent functions from skill registry.
 
@@ -2306,6 +2337,7 @@ def build_skill_tools(
             user_id=user_id,
             session_id=session_id,
             tier=tier,
+            context_frame=context_frame,
         ))
 
     # Merge active user-created SKILL# items
@@ -2331,6 +2363,7 @@ def build_skill_tools(
                 user_id=user_id,
                 session_id=session_id,
                 tier=tier,
+                context_frame=context_frame,
             ))
     except Exception as exc:
         logger.warning("skill_store.list_active_skills failed for %s: %s -- skipping user skills", tenant_id, exc)
@@ -2408,6 +2441,16 @@ def build_supervisor_prompt(
         "  response, call update_state with state_type='phase_change' to record the transition.\n"
         "  Example: update_state(state_type='phase_change', phase='analysis_complete', previous='intake')\n"
         "  This MUST happen before the synthesis text. The frontend checklist depends on it.\n\n"
+        "Response Length Rules — IMPORTANT:\n"
+        "  DEFAULT: Short and direct. 2-4 sentences for simple questions, 3-5 bullets for lists.\n"
+        "    Match response length to what was actually asked — don't over-explain.\n"
+        "  AFTER multi-skill analysis (when 2+ specialists have run), give a CONSULTATIVE BRIEF:\n"
+        "    1) KEY INSIGHT — one sentence: the single most important finding.\n"
+        "    2) WHY — one short paragraph: the main driver (regulatory/market/risk reason).\n"
+        "    3) SCENARIOS — 2-3 options: 'If X, then Y' — concrete, actionable alternatives.\n"
+        "    4) NEXT STEP — one clear action or question.\n"
+        "    Do NOT paste full specialist reports. Distill. The user wants to make a decision, not read a novel.\n"
+        "  FULL REPORT only when user explicitly asks: 'full analysis', 'complete report', 'all details'.\n\n"
         f"FAST vs DEEP routing:\n"
         f"  FAST (seconds):\n"
         f"    - load_data('matrix', 'thresholds') for threshold lookups.\n"
@@ -2532,6 +2575,12 @@ async def sdk_query(
         except Exception as exc:
             logger.warning("workspace_store.get_or_create_default failed: %s -- using bundled prompts", exc)
 
+    # context_frame is shared across all subagent tools for this request.
+    # "state" is populated after state load (tools read it at call time, not factory time).
+    # "completed" accumulates skill names as subagents return, giving later subagents
+    # awareness of what prior analyses have already run.
+    context_frame: dict = {"state": {}, "completed": []}
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -2539,6 +2588,7 @@ async def sdk_query(
         user_id=user_id,
         session_id=session_id,
         workspace_id=resolved_workspace_id,
+        context_frame=context_frame,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -2573,10 +2623,21 @@ async def sdk_query(
         _loaded_state = normalize(None)
     _loaded_state["session_id"] = _leaf_session
 
+    # Populate context_frame state now that eagle_state is loaded.
+    # Subagent tools read this at call time so they always see the current state.
+    context_frame["state"] = _loaded_state
+
     sse_hook = EagleSSEHookProvider(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=_leaf_session,
+    )
+
+    # Summarizing conversation manager: on context overflow, summarize the oldest
+    # 30% of messages (SDK default/recommended) while preserving the 10 most recent.
+    _conversation_manager = SummarizingConversationManager(
+        summary_ratio=0.3,
+        preserve_recent_messages=10,
     )
 
     supervisor = Agent(
@@ -2587,6 +2648,7 @@ async def sdk_query(
         messages=strands_history,
         hooks=[sse_hook],
         state=_loaded_state,
+        conversation_manager=_conversation_manager,
         trace_attributes=to_trace_attrs(
             _loaded_state,
             tenant_id=tenant_id,
@@ -2779,6 +2841,9 @@ async def sdk_query_streaming(
     result_queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
+    # Shared context frame — populated after state load, read at subagent call time
+    context_frame_stream: dict = {"state": {}, "completed": []}
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -2788,6 +2853,7 @@ async def sdk_query_streaming(
         workspace_id=resolved_workspace_id,
         result_queue=result_queue,
         loop=loop,
+        context_frame=context_frame_stream,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -2823,10 +2889,20 @@ async def sdk_query_streaming(
         _loaded_state = normalize(None)
     _loaded_state["session_id"] = _leaf_session
 
+    # Populate streaming context_frame now that eagle_state is loaded
+    context_frame_stream["state"] = _loaded_state
+
     sse_hook = EagleSSEHookProvider(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=_leaf_session,
+    )
+
+    # Summarizing conversation manager: on context overflow, summarize the oldest
+    # 30% of messages (SDK default/recommended) while preserving the 10 most recent.
+    _conversation_manager = SummarizingConversationManager(
+        summary_ratio=0.3,
+        preserve_recent_messages=10,
     )
 
     supervisor = Agent(
@@ -2837,6 +2913,7 @@ async def sdk_query_streaming(
         messages=strands_history,
         hooks=[sse_hook],
         state=_loaded_state,
+        conversation_manager=_conversation_manager,
         trace_attributes=to_trace_attrs(
             _loaded_state,
             tenant_id=tenant_id,
