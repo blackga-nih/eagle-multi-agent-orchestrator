@@ -33,9 +33,44 @@ from .health_checks import check_knowledge_base_health
 import time as _time
 
 import os
+import re as _re
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_citations(report: str) -> list[str]:
+    """Extract FAR/DFARS references and section titles from a subagent markdown report.
+
+    Returns up to 12 unique citation strings for display as chips in the UI.
+    """
+    if not report or not isinstance(report, str):
+        return []
+    seen: set[str] = set()
+    citations: list[str] = []
+
+    # FAR/DFARS/NIH references  e.g. "FAR 15.304", "FAR Part 39", "DFARS 252.227-7013"
+    for m in _re.finditer(
+        r'\b(?:FAR|DFARS|NIH|NCI|OMB)\s+(?:Part\s+)?\d+(?:\.\d+)?(?:-\d+)?(?:\.\d+)?',
+        report,
+    ):
+        ref = m.group(0).strip()
+        if ref not in seen:
+            seen.add(ref)
+            citations.append(ref)
+        if len(citations) >= 12:
+            return citations
+
+    # Markdown section headers  e.g. "## Market Research Report"
+    for m in _re.finditer(r'^#{1,3}\s+(.+)$', report, _re.MULTILINE):
+        title = m.group(1).strip().lstrip('#').strip()
+        if 5 <= len(title) <= 70 and title not in seen:
+            seen.add(title)
+            citations.append(title)
+        if len(citations) >= 12:
+            return citations
+
+    return citations
 
 
 async def stream_generator(
@@ -171,6 +206,13 @@ async def stream_generator(
                     logger.debug("Skipping empty-name tool_result: keys=%s", list(chunk.keys()))
                     continue
                 result_data = chunk.get("result", {})
+
+                # Attach citations extracted from subagent report text so the
+                # frontend can render FAR references and section titles as chips.
+                if isinstance(result_data, dict) and "report" in result_data:
+                    _cites = _extract_citations(result_data["report"])
+                    if _cites:
+                        result_data = {**result_data, "citations": _cites}
 
                 await writer.write_tool_result(sse_queue, tr_name, result_data)
                 yield await sse_queue.get()

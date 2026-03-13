@@ -39,6 +39,7 @@ from .routes.user import router as user_router
 from .routes.templates import router as templates_router
 from .routes.skills import router as skills_router
 from .routes.misc import router as misc_router
+from .routes.traces import router as traces_router
 
 # ── Logging ──────────────────────────────────────────────────────────
 from .telemetry.log_context import configure_logging
@@ -149,6 +150,7 @@ app.include_router(user_router)
 app.include_router(templates_router)
 app.include_router(skills_router)
 app.include_router(misc_router)
+app.include_router(traces_router)
 
 
 if __name__ == "__main__":

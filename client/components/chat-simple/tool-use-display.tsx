@@ -641,14 +641,34 @@ export default function ToolUseDisplay({
               {errorText}
             </p>
           ) : reportText ? (
-            <div className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
-                            [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1
-                            [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1
-                            [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5
-                            [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0
-                            [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded">
-              <ReactMarkdown>{reportText}</ReactMarkdown>
-            </div>
+            <>
+              {/* Citations chips — FAR refs and section titles from the report */}
+              {result?.result && typeof result.result === 'object' &&
+               Array.isArray((result.result as Record<string, unknown>).citations) &&
+               ((result.result as Record<string, unknown>).citations as string[]).length > 0 && (
+                <div className="flex items-center gap-1 flex-wrap mb-2 pb-2 border-b border-gray-100">
+                  <span className="text-[9px] text-gray-400 font-medium uppercase tracking-wider shrink-0">
+                    Cited
+                  </span>
+                  {((result.result as Record<string, unknown>).citations as string[]).map((c, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 text-[9px] text-gray-600 font-mono"
+                    >
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
+                              [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1
+                              [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1
+                              [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5
+                              [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0
+                              [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded">
+                <ReactMarkdown>{reportText}</ReactMarkdown>
+              </div>
+            </>
           ) : resultText ? (
             <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
               {resultText}

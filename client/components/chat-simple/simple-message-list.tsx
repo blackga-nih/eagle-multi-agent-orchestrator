@@ -7,6 +7,7 @@ import { ChatMessage, DocumentInfo } from '@/types/chat';
 import DocumentCard from './document-card';
 import ToolUseDisplay, { extractKnowledgeSources, KnowledgeSource } from './tool-use-display';
 import CodeSandboxRenderer from './code-sandbox-renderer';
+import TraceStory from './trace-story';
 import { ToolCallsByMessageId, TrackedToolCall } from './simple-chat-interface';
 import { CodeResult } from '@/lib/client-tools';
 
@@ -191,6 +192,45 @@ function SourceChips({ toolCalls }: { toolCalls: TrackedToolCall[] }) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// TraceModal — full-width slide-over showing the Langfuse trace story
+// ---------------------------------------------------------------------------
+
+function TraceModal({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-stretch justify-end"
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+
+            {/* Panel */}
+            <div className="relative z-10 w-full max-w-2xl bg-white shadow-2xl flex flex-col h-full">
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 bg-[#F5F7FA] shrink-0">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-[#003366]">Trace Story</span>
+                        <span className="text-[10px] text-gray-400 font-mono truncate max-w-[200px]">{sessionId}</span>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="text-gray-400 hover:text-gray-600 transition text-lg leading-none px-1"
+                        title="Close"
+                    >
+                        ×
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto p-5">
+                    <TraceStory sessionId={sessionId} />
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function SimpleMessageList({
     messages,
     isTyping,
@@ -200,6 +240,7 @@ export default function SimpleMessageList({
 }: SimpleMessageListProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const [traceOpen, setTraceOpen] = useState(false);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -284,15 +325,26 @@ export default function SimpleMessageList({
                                 )}
                             </div>
 
-                            {/* Copy button — visible on hover after streaming completes */}
+                            {/* Copy + View trace buttons — visible on hover after streaming completes */}
                             {!isStreamingThis && (
-                                <button
-                                    onClick={() => copyToClipboard(message.content, message.id)}
-                                    className="self-start text-[10px] text-gray-300 hover:text-gray-500 transition-colors opacity-0 group-hover:opacity-100"
-                                    title="Copy response"
-                                >
-                                    {copiedId === message.id ? '✓ Copied' : '⎘ Copy'}
-                                </button>
+                                <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                        onClick={() => copyToClipboard(message.content, message.id)}
+                                        className="text-[10px] text-gray-300 hover:text-gray-500 transition-colors"
+                                        title="Copy response"
+                                    >
+                                        {copiedId === message.id ? '✓ Copied' : '⎘ Copy'}
+                                    </button>
+                                    {sessionId && (
+                                        <button
+                                            onClick={() => setTraceOpen(true)}
+                                            className="text-[10px] text-gray-300 hover:text-[#003366] transition-colors"
+                                            title="View Langfuse trace story"
+                                        >
+                                            ⎆ Trace
+                                        </button>
+                                    )}
+                                </div>
                             )}
 
                             {/* Inline source chips — KB documents & FAR sections cited */}
@@ -334,6 +386,10 @@ export default function SimpleMessageList({
 
                 <div ref={messagesEndRef} />
             </div>
+
+            {traceOpen && sessionId && (
+                <TraceModal sessionId={sessionId} onClose={() => setTraceOpen(false)} />
+            )}
         </div>
     );
 }
