@@ -553,8 +553,8 @@ def _get_model() -> "BedrockModel":
 # via the @tool functions registered on the Agent.
 TIER_TOOLS = {
     "basic": [],
-    "advanced": ["Read", "Glob", "Grep", "workspace_memory", "web_search"],
-    "premium": ["Read", "Glob", "Grep", "Bash", "workspace_memory", "web_search", "browse_url", "code_execute"],
+    "advanced": ["Read", "Glob", "Grep", "workspace_memory", "web_search", "think"],
+    "premium": ["Read", "Glob", "Grep", "Bash", "workspace_memory", "web_search", "browse_url", "code_execute", "think"],
 }
 
 TIER_BUDGETS = {
@@ -2486,6 +2486,39 @@ def _make_workspace_memory_tool(tenant_id, user_id, session_id, result_queue=Non
     return workspace_memory
 
 
+def _make_think_tool(tenant_id, user_id, session_id, result_queue=None, loop=None):
+    """Factory: create the think @tool for extended reasoning.
+
+    Saves thought to _thoughts.txt in workspace memory so the model can
+    do structured multi-step analysis before generating a response.
+    """
+    from .tool_dispatch import _exec_workspace_memory
+
+    scoped = _scoped_session(tenant_id, user_id, session_id)
+
+    @tool(name="think")
+    def think(
+        thought: str = "",
+    ) -> str:
+        """Extended reasoning space for complex analysis. Use for multi-threshold
+        analysis, competing FAR requirements, risk assessment, strategy comparison,
+        or synthesizing research from multiple sources before responding.
+
+        Include the COMPLETE information that needs processing — full KB content,
+        search results, FAR text, and all relevant context. This is for substantial
+        reasoning work that needs careful analysis.
+
+        Args:
+            thought: The full analysis text including all context and reasoning
+        """
+        params = {"command": "append", "path": "_thoughts.txt", "content": thought}
+        _exec_workspace_memory(params, tenant_id, scoped)
+        _emit_tool_result("think", {"status": "thinking_complete"}, result_queue, loop)
+        return "Thinking complete."
+
+    return think
+
+
 def _make_generate_document_tool(
     tenant_id: str,
     user_id: str,
@@ -2647,6 +2680,7 @@ def _build_service_tools(
         _make_manage_prompts_tool(tenant_id, rq, lp),
         _make_manage_templates_tool(tenant_id, rq, lp),
         _make_workspace_memory_tool(tenant_id, user_id, session_id, rq, lp),
+        _make_think_tool(tenant_id, user_id, session_id, rq, lp),
     ]
 
     # AI-driven document generation (Agent-as-Tool)
@@ -2842,7 +2876,25 @@ def build_supervisor_prompt(
         "    3) SCENARIOS — 2-3 options: 'If X, then Y' — concrete, actionable alternatives.\n"
         "    4) NEXT STEP — one clear action or question.\n"
         "    Do NOT paste full specialist reports. Distill. The user wants to make a decision, not read a novel.\n"
+        "  DEEP RESEARCH (for complex regulatory, legal, protest, case law, or policy analysis):\n"
+        "    Produce a comprehensive, structured response with H2/H3 headers, comparison tables,\n"
+        "    case citations with holdings, risk flags, NIH-specific guidance, and a References section.\n"
+        "    Use think() to synthesize before writing. Include day-by-day timelines where applicable.\n"
         "  FULL REPORT only when user explicitly asks: 'full analysis', 'complete report', 'all details'.\n\n"
+        "Citation & Source Requirements:\n"
+        "  When using search or browse tools, include markdown inline citations [(Author, Year)](url).\n"
+        "  Conclude researched responses with a References section.\n"
+        "  Cite specific FAR sections: 'Per FAR 15.306(c)...'\n"
+        "  Cite specific GAO decisions: '*Equitus Corp.*, B-419701 (May 12, 2021)'\n"
+        "  When KB has the answer, cite the source document.\n"
+        "  NEVER fabricate FAR citations, threshold values, GAO case holdings, or regulatory guidance.\n"
+        "  Use search_far, query_compliance_matrix, and knowledge_search for authoritative data.\n"
+        "  If unable to verify, state limitations rather than guessing.\n\n"
+        "Think Tool Usage:\n"
+        "  Use think() for complex regulatory analysis BEFORE writing the final response.\n"
+        "  Include COMPLETE information: full KB content, search results, FAR text, all context.\n"
+        "  Use for: multi-threshold analysis, competing requirements, risk assessment,\n"
+        "    strategy comparison, synthesizing research from multiple sources.\n\n"
         f"FAST vs DEEP routing:\n"
         f"  FAST (seconds):\n"
         f"    - load_data('matrix', 'thresholds') for threshold lookups.\n"
@@ -3321,6 +3373,17 @@ async def sdk_query_streaming(
         ),
     )
 
+    # Enrich user prompt with research reminders (like arti's <reminders> injection)
+    _enriched_prompt = (
+        f"{prompt}\n\n"
+        "<reminders>"
+        "Search and browse for current information if needed. "
+        "If necessary, interleave tool calls with the think tool to perform complex analysis. "
+        "Only update the workspace when necessary. "
+        "Always include APA-style source citations with full URLs when sources are used."
+        "</reminders>"
+    )
+
     # Yield chunks via stream_async — SDK bridges sync→async internally
     full_text_parts: list[str] = []
     tools_called: list[str] = []
@@ -3344,7 +3407,7 @@ async def sdk_query_streaming(
         return drained
 
     try:
-        async for event in supervisor.stream_async(prompt):
+        async for event in supervisor.stream_async(_enriched_prompt):
             # Drain tool results that may have been pushed by factory tools
             for tool_result_chunk in _drain_tool_results():
                 yield tool_result_chunk

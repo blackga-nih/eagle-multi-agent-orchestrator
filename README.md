@@ -4,12 +4,7 @@ A multi-tenant AI platform built for the **NCI Office of Acquisitions**, using t
 
 ## Core Concept
 
-EAGLE (Enhanced Acquisition Guidance & Lifecycle Engine) uses a **supervisor + subagent architecture** to guide contracting officers through the federal acquisition lifecycle. The backend has two orchestration modes:
-
-1. **Strands Agents SDK** (`strands_agentic_service.py`): Supervisor delegates to specialist subagents with fresh per-call context windows — **active** in `main.py` and `streaming_routes.py`
-2. **Anthropic SDK** (`agentic_service.py`): Single system prompt with all skills injected — deprecated, kept for reference
-
-Both modes use **Claude on Amazon Bedrock** for model inference (not Amazon Bedrock AgentCore).
+EAGLE (Enhanced Acquisition Guidance & Lifecycle Engine) uses a **supervisor + subagent architecture** to guide contracting officers through the federal acquisition lifecycle. The backend uses the **Strands Agents SDK** (`strands_agentic_service.py`) where the supervisor delegates to specialist subagents, each with fresh per-call context windows. Model inference runs through **Claude on Amazon Bedrock** via boto3-native `BedrockModel` (not Amazon Bedrock AgentCore).
 
 ```
 User Login -> JWT with tenant_id -> Session Attributes -> Strands Agents SDK (via Bedrock)
@@ -254,11 +249,10 @@ All stacks in `infrastructure/cdk-eagle/`:
 │   ├── app/
 │   │   ├── main.py          # FastAPI entry point
 │   │   ├── strands_agentic_service.py  # Strands orchestration (active)
-│   │   ├── sdk_agentic_service.py      # legacy compatibility layer
-│   │   ├── agentic_service.py      # Anthropic SDK orchestration (deprecated)
-│   │   ├── session_store.py # Unified DynamoDB access layer
+│   │   ├── streaming_routes.py  # SSE streaming + health endpoints
+│   │   ├── routes/          # 12 route modules (chat, sessions, admin, packages, etc.)
+│   │   ├── stores/          # DynamoDB access layer (18 store modules)
 │   │   ├── cognito_auth.py
-│   │   ├── streaming_routes.py
 │   │   └── cost_attribution.py
 │   └── tests/               # Eval suite (28 tests)
 ├── eagle-plugin/            # Agent/skill source of truth
@@ -729,34 +723,36 @@ just ship   # lint + CDK synth gate + deploy + L5 smoke-prod verify (full ship)
 
 ## API Reference
 
-### Core
+EAGLE exposes **103 endpoints** across 16 domains. Key groups:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/chat` | Chat with agent (REST) |
+| Domain | Endpoints | Description |
+|--------|-----------|-------------|
+| **Chat** | 3 | REST, SSE streaming, and WebSocket chat with agent |
+| **Sessions** | 10 | CRUD, messages, audit logs, document extraction |
+| **Packages** | 18 | Acquisition package lifecycle, documents, approvals |
+| **Admin** | 23 | Dashboard, cost reports, plugin management, KB reviews, config |
+| **Documents** | 7 | S3 browser, export (DOCX/PDF/MD), upload, presigned URLs |
+| **Workspaces** | 10 | Workspace CRUD and agent/skill/config overrides |
+| **Skills** | 7 | User-created skill lifecycle (draft -> review -> active) |
+| **Templates** | 4 | Document template overrides with 4-layer fallback |
+| **User** | 5 | Profile, usage, preferences |
+| **Tenant** | 6 | Usage, costs, subscription, analytics |
+| **Traces** | 2 | Langfuse trace story and session listing |
+| **Health** | 2 | Liveness and readiness probes |
+| **Other** | 6 | Tools, telemetry, feedback, MCP weather |
+
+### Core Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/chat` | Chat with agent (REST, synchronous) |
 | POST | `/api/chat/stream` | Chat with agent (SSE streaming) |
-| GET | `/api/health` | Health check |
-| GET | `/api/tools` | List available tools |
+| WS | `/ws/chat` | Real-time chat via WebSocket |
+| GET | `/api/health` | Health check (agents, tools, services) |
+| GET | `/api/health/ready` | Readiness probe (DynamoDB + Bedrock) |
+| GET | `/api/tools` | List available EAGLE tools |
 
-### Sessions
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/sessions` | List sessions |
-| POST | `/api/sessions` | Create session |
-| GET | `/api/sessions/{id}` | Get session |
-| DELETE | `/api/sessions/{id}` | Delete session |
-| GET | `/api/sessions/{id}/messages` | Get messages |
-
-### Admin
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/admin/dashboard` | Dashboard data |
-| GET | `/api/admin/users` | List users |
-| GET | `/api/admin/cost-report` | Cost report |
-| GET | `/api/admin/tenants/{id}/comprehensive-report` | Full tenant report |
-| POST | `/api/admin/add-to-group` | Add user to Cognito group |
+For the complete endpoint reference with request/response formats and auth requirements, see [`docs/development/20260316-120000-report-api-endpoints-v1.md`](docs/development/20260316-120000-report-api-endpoints-v1.md).
 
 ---
 

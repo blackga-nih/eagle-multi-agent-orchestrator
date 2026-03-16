@@ -365,7 +365,7 @@ export default function SimpleChatInterface() {
     return (
         <div className="h-full flex bg-[#F5F7FA]">
             {/* Left: main chat area */}
-            <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex-1 flex flex-col min-w-0 min-h-0">
                 {/* Ctrl+K command palette */}
                 <CommandPalette
                     isOpen={isCommandPaletteOpen}
