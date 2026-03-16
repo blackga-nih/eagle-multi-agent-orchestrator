@@ -137,8 +137,10 @@ def to_trace_attrs(
         "eagle.docs_required": len(s["required_documents"]),
         "eagle.docs_completed": len(s["completed_documents"]),
         "eagle.turn_count": s["turn_count"],
-        # Langfuse uses session.id to group supervisor + subagent traces into one Session view
+        # Langfuse OTEL integration uses these attribute names for session/user grouping
         "session.id": session_id or "",
+        "langfuse.session.id": session_id or "",
+        "langfuse.user.id": user_id or "",
     }
 
 

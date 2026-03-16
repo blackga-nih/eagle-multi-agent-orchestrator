@@ -146,6 +146,24 @@ kill:
     just kill-port 3000
     @echo "Dev ports cleared."
 
+# Nuclear kill: terminate ALL python/node on dev ports + by image name
+kill-all:
+    #!/usr/bin/env bash
+    echo "=== Killing by port ==="
+    just kill-port 8000
+    just kill-port 3000
+    echo "=== Killing all uvicorn/python server processes ==="
+    taskkill //F //FI "IMAGENAME eq python.exe" 2>/dev/null || true
+    taskkill //F //FI "IMAGENAME eq python3.exe" 2>/dev/null || true
+    taskkill //F //FI "IMAGENAME eq python3.12.exe" 2>/dev/null || true
+    sleep 2
+    remaining=$(netstat -ano 2>/dev/null | grep ":8000.*LISTENING" | wc -l)
+    if [ "$remaining" -gt 0 ]; then
+        echo "⚠ $remaining zombie(s) still on :8000 — try closing all terminals or rebooting"
+    else
+        echo "✓ Port 8000 clear"
+    fi
+
 # Verify AWS SSO session, auto-login if expired
 [private]
 ensure-sso PROFILE="eagle":
@@ -167,10 +185,8 @@ ensure-sso PROFILE="eagle":
 dev-local:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "=== Clearing ports ==="
-    just kill-port 8000
-    just kill-port 3000
-    just kill-port 3001
+    echo "=== Killing all stale processes ==="
+    just kill-all
     sleep 2
     echo "=== Checking AWS SSO ==="
     just ensure-sso

@@ -58,6 +58,60 @@ from .tools.contract_matrix import query_contract_matrix
 logger = logging.getLogger("eagle.strands_agent")
 
 
+# -- Langfuse OTEL exporter (lazy, one-shot) --------------------------
+_langfuse_injected = False
+
+
+def _ensure_langfuse_exporter():
+    """Initialize Strands telemetry + Langfuse OTLP exporter (once).
+
+    Must be called **before** the first ``Agent()`` so that the Agent's cached
+    tracer references the real SDKTracerProvider (with the Langfuse exporter).
+
+    Flow:
+      1. ``StrandsTelemetry()`` creates a real SDKTracerProvider and sets it global.
+      2. We add a BatchSpanProcessor(OTLPSpanExporter) to that provider.
+      3. When ``Agent()`` later calls ``get_tracer()``, it picks up this provider.
+    """
+    global _langfuse_injected
+    if _langfuse_injected:
+        return
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    if not public_key or not secret_key:
+        return
+    try:
+        import base64
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from strands.telemetry import StrandsTelemetry
+
+        # Ensure a real SDKTracerProvider is the global provider
+        st = StrandsTelemetry()
+        provider = st.tracer_provider
+
+        base = os.getenv(
+            "LANGFUSE_OTEL_ENDPOINT",
+            "https://us.cloud.langfuse.com/api/public/otel",
+        )
+        endpoint = f"{base.rstrip('/')}/v1/traces"
+        auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+
+        exporter = OTLPSpanExporter(
+            endpoint=endpoint,
+            headers={"Authorization": f"Basic {auth}"},
+        )
+        # SimpleSpanProcessor exports immediately (no batching) — ensures
+        # traces reach Langfuse even if the process restarts via --reload.
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        _langfuse_injected = True
+        logger.info("[EAGLE] Langfuse OTEL exporter injected → %s", endpoint)
+        # Suppress non-fatal OTEL context detach warnings from Strands sync→async bridge
+        logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
+    except Exception as exc:
+        logger.warning("[EAGLE] Langfuse exporter injection failed: %s", exc)
+
+
 # -- EagleSSEHookProvider --------------------------------------------
 # Registers AfterInvocationEvent to flush agent state to DynamoDB
 # after every supervisor turn.
@@ -1896,228 +1950,540 @@ def _make_compliance_matrix_tool(
     return compliance_matrix_tool
 
 
-# -- AWS Service @tools (S3, DynamoDB, CloudWatch, Documents) ----------
-# These call the handlers in agentic_service.py directly with the real
-# tenant_id and session_id from the authenticated context — bypassing
-# execute_tool() which has stub _extract_tenant_id/_extract_user_id.
+# -- Native @tool factories (typed params, Strands auto-generates schema) ---
+# Each factory closes over tenant_id/user_id/session_id/result_queue/loop
+# so the model never sees those context params — only the typed business params.
 
-def _make_service_tool(
+
+def _emit_tool_result(
     tool_name: str,
-    description: str,
-    tenant_id: str,
-    user_id: str,
-    session_id: str | None,
-    package_context: Any = None,
-    result_queue: asyncio.Queue | None = None,
-    loop: asyncio.AbstractEventLoop | None = None,
-    prompt_context: str | None = None,
+    result: Any,
+    result_queue: asyncio.Queue | None,
+    loop: asyncio.AbstractEventLoop | None,
+    *,
+    truncate: bool = True,
 ):
-    """Create a Strands @tool that calls agentic_service handlers directly.
+    """Push a tool_result SSE event so the frontend can render tool cards."""
+    if not result_queue or not loop:
+        return
+    emit_result = result
+    if truncate and isinstance(result, dict):
+        text_val = result.get("content") or result.get("text") or result.get("result")
+        if isinstance(text_val, str) and len(text_val) > 2000:
+            emit_result = {**result}
+            key = "content" if "content" in result else "text" if "text" in result else "result"
+            emit_result[key] = text_val[:2000] + "..."
+    loop.call_soon_threadsafe(
+        result_queue.put_nowait,
+        {"type": "tool_result", "name": tool_name, "result": emit_result},
+    )
 
-    The handler receives the real tenant_id (from Cognito auth) and a
-    composite session_id (tenant-tier-user-session) for per-user S3 scoping.
 
-    If result_queue and loop are provided, tool results for create_document
-    are emitted as tool_result chunks so the frontend can render document cards.
-    """
-    from .tool_dispatch import TOOL_DISPATCH, TOOLS_NEEDING_SESSION
+def _scoped_session(tenant_id: str, user_id: str, session_id: str | None) -> str:
+    """Build composite session id for per-user S3/DDB scoping."""
+    if session_id and "#" in session_id:
+        return session_id
+    return f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
 
-    handler = TOOL_DISPATCH.get(tool_name)
-    if not handler:
-        raise ValueError(f"No handler for tool: {tool_name}")
 
-    # Ensure legacy handlers receive a composite session id format:
-    # {tenant_id}#{tier}#{user_id}#{session}
-    # This preserves per-user S3 scoping and avoids demo-user fallback.
-    scoped_session_id = session_id
-    if not scoped_session_id or "#" not in scoped_session_id:
-        scoped_session_id = f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
+# ── Phase 1: High-Impact Tools ──────────────────────────────────────
 
-    @tool(name=tool_name)
-    def service_tool(params: str) -> str:
-        """Placeholder docstring replaced below."""
-        parsed = json.loads(params) if isinstance(params, str) else params
-        try:
-            if tool_name == "create_document":
-                prompt_doc_ctx = _extract_document_context_from_prompt(prompt_context or "")
 
-                doc_type = str(parsed.get("doc_type", "")).strip().lower()
-                if not doc_type:
-                    doc_type = (
-                        prompt_doc_ctx.get("document_type")
-                        or _infer_doc_type_from_prompt(prompt_context or "")
-                        or ""
-                    )
-                    if doc_type:
-                        parsed["doc_type"] = doc_type
+def _make_search_far_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_search_far
 
-                title = str(parsed.get("title", "")).strip()
-                if not title:
-                    inferred_title = (
-                        prompt_doc_ctx.get("title")
-                        or _DOC_TYPE_LABELS.get(doc_type or "", "")
-                        or "Untitled Acquisition"
-                    )
-                    parsed["title"] = inferred_title
+    @tool(name="search_far")
+    def search_far(query: str, parts: str = "") -> str:
+        """Search the FAR and DFARS for clauses, requirements, and guidance.
 
-                prompt_data = _extract_context_data_from_prompt(prompt_context or "", doc_type)
-                existing_data = parsed.get("data")
+        Args:
+            query: Search topic, clause number, or keyword (e.g. "sole source", "6.302")
+            parts: Comma-separated FAR part numbers to filter (e.g. "6,13,15")
+        """
+        parts_list = [p.strip() for p in parts.split(",") if p.strip()] or None
+        result = _exec_search_far({"query": query, "parts": parts_list}, tenant_id)
+        _emit_tool_result("search_far", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return search_far
+
+
+def _make_knowledge_search_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import exec_knowledge_search
+
+    @tool(name="knowledge_search")
+    def knowledge_search(
+        query: str = "",
+        topic: str = "",
+        document_type: str = "",
+        primary_agent: str = "",
+        authority_level: str = "",
+        limit: int = 10,
+    ) -> str:
+        """Search the acquisition knowledge base metadata in DynamoDB.
+
+        Args:
+            query: Free-text query for case numbers (e.g. 'B-302358'), citations, or specific terms
+            topic: Filter by topic: funding, acquisition_packages, contract_types, compliance, legal, etc.
+            document_type: Filter by type: regulation, guidance, policy, template, memo, checklist, reference
+            primary_agent: Filter by agent: supervisor-core, financial-advisor, legal-counselor, etc.
+            authority_level: Filter by authority: statute, regulation, policy, guidance, internal
+            limit: Max results to return (default 10, max 50)
+        """
+        params: dict[str, Any] = {}
+        if query:
+            params["query"] = query
+        if topic:
+            params["topic"] = topic
+        if document_type:
+            params["document_type"] = document_type
+        if primary_agent:
+            params["agent"] = primary_agent
+        if authority_level:
+            params["authority_level"] = authority_level
+        params["limit"] = min(limit, 50)
+        result = exec_knowledge_search(params, tenant_id)
+        _emit_tool_result("knowledge_search", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return knowledge_search
+
+
+def _make_web_search_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_web_search
+
+    @tool(name="web_search")
+    def web_search(query: str, search_type: str = "web", count: int = 10) -> str:
+        """Search the web for current regulations, policy updates, and federal acquisition info.
+
+        Args:
+            query: Search query string
+            search_type: Type of search — web, news, or gov
+            count: Number of results to return (default 10)
+        """
+        result = _exec_web_search({"query": query, "search_type": search_type, "count": count}, tenant_id)
+        _emit_tool_result("web_search", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return web_search
+
+
+# ── Phase 2: Medium-Impact Tools ────────────────────────────────────
+
+
+def _make_browse_url_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_browse_url
+
+    @tool(name="browse_url")
+    def browse_url(url: str, question: str = "") -> str:
+        """Fetch and analyze web pages, PDFs, or documents from a URL.
+
+        Args:
+            url: URL to fetch and analyze
+            question: Optional question to focus the analysis
+        """
+        params: dict[str, Any] = {"urls": [url]}
+        if question:
+            params["question"] = question
+        result = _exec_browse_url(params, tenant_id)
+        _emit_tool_result("browse_url", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return browse_url
+
+
+def _make_knowledge_fetch_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import exec_knowledge_fetch
+
+    @tool(name="knowledge_fetch")
+    def knowledge_fetch(s3_key: str = "", document_id: str = "") -> str:
+        """Fetch full knowledge document content from S3.
+
+        REQUIRES an s3_key from a prior knowledge_search result — do NOT call without one.
+
+        Args:
+            s3_key: S3 key from knowledge_search results
+            document_id: Alternative — document_id from search results (same as s3_key)
+        """
+        params: dict[str, str] = {}
+        if s3_key:
+            params["s3_key"] = s3_key
+        if document_id:
+            params["document_id"] = document_id
+        result = exec_knowledge_fetch(params, tenant_id)
+        _emit_tool_result("knowledge_fetch", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return knowledge_fetch
+
+
+def _make_get_intake_status_tool(tenant_id, user_id, session_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_get_intake_status
+
+    scoped = _scoped_session(tenant_id, user_id, session_id)
+
+    @tool(name="get_intake_status")
+    def get_intake_status(intake_id: str = "") -> str:
+        """Get the current intake package status and completeness.
+
+        Shows which documents exist, which are missing, and next actions.
+
+        Args:
+            intake_id: Optional intake package ID to check
+        """
+        result = _exec_get_intake_status({"intake_id": intake_id}, tenant_id, scoped)
+        _emit_tool_result("get_intake_status", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return get_intake_status
+
+
+def _make_intake_workflow_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_intake_workflow
+
+    @tool(name="intake_workflow")
+    def intake_workflow(action: str = "status", intake_id: str = "", data: str = "") -> str:
+        """Manage the acquisition intake workflow: start, advance, status, complete, reset.
+
+        Args:
+            action: Workflow action — start, advance, status, complete, reset
+            intake_id: Intake workflow ID (required for advance/complete/reset)
+            data: JSON string of additional data for the action
+        """
+        params: dict[str, Any] = {"action": action}
+        if intake_id:
+            params["intake_id"] = intake_id
+        if data:
+            try:
+                params["data"] = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                params["data"] = {"note": data}
+        result = _exec_intake_workflow(params, tenant_id)
+        _emit_tool_result("intake_workflow", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return intake_workflow
+
+
+def _make_code_execute_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_code_execute
+
+    @tool(name="code_execute")
+    def code_execute(code: str, language: str = "python") -> str:
+        """Execute code in a managed sandbox for calculations, data analysis, and cost modeling.
+
+        Args:
+            code: Code to execute
+            language: Programming language — python, javascript, or typescript
+        """
+        result = _exec_code_execute({"code": code, "language": language}, tenant_id)
+        _emit_tool_result("code_execute", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return code_execute
+
+
+# ── Phase 3: Complex Tools ──────────────────────────────────────────
+
+
+def _make_s3_document_ops_tool(tenant_id, user_id, session_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_s3_document_ops
+
+    scoped = _scoped_session(tenant_id, user_id, session_id)
+
+    @tool(name="s3_document_ops")
+    def s3_document_ops(operation: str = "list", key: str = "", content: str = "") -> str:
+        """Read, write, or list documents in S3 scoped per-tenant.
+
+        Args:
+            operation: S3 operation — list, read, or write
+            key: Document key/path for read or write operations
+            content: Document content for write operations
+        """
+        params: dict[str, str] = {"operation": operation}
+        if key:
+            params["key"] = key
+        if content:
+            params["content"] = content
+        result = _exec_s3_document_ops(params, tenant_id, scoped)
+        _emit_tool_result("s3_document_ops", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return s3_document_ops
+
+
+def _make_dynamodb_intake_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_dynamodb_intake
+
+    @tool(name="dynamodb_intake")
+    def dynamodb_intake(operation: str = "list", item_id: str = "", data: str = "") -> str:
+        """Create, read, update, list, or query intake records in DynamoDB.
+
+        Args:
+            operation: DynamoDB operation — create, read, update, list, or query
+            item_id: Intake record ID (required for read/update)
+            data: JSON string of record data for create/update
+        """
+        params: dict[str, Any] = {"operation": operation}
+        if item_id:
+            params["item_id"] = item_id
+        if data:
+            try:
+                params["data"] = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                params["data"] = {"note": data}
+        result = _exec_dynamodb_intake(params, tenant_id)
+        _emit_tool_result("dynamodb_intake", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return dynamodb_intake
+
+
+def _make_create_document_tool(
+    tenant_id, user_id, session_id,
+    package_context=None, result_queue=None, loop=None,
+    prompt_context=None,
+):
+    from .tool_dispatch import _exec_create_document
+
+    scoped = _scoped_session(tenant_id, user_id, session_id)
+
+    @tool(name="create_document")
+    def create_document(doc_type: str, title: str = "", data: str = "") -> str:
+        """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, etc.).
+
+        Documents are saved to S3.
+
+        Args:
+            doc_type: Document type — sow, igce, market_research, justification, acquisition_plan,
+                      eval_criteria, security_checklist, section_508, cor_certification,
+                      contract_type_justification
+            title: Document title (auto-inferred if omitted)
+            data: JSON string of additional data fields for the document
+        """
+        # Build params dict from typed args
+        parsed: dict[str, Any] = {"doc_type": doc_type.strip().lower()}
+
+        # Infer title from prompt context if not provided
+        if title.strip():
+            parsed["title"] = title.strip()
+        else:
+            prompt_doc_ctx = _extract_document_context_from_prompt(prompt_context or "")
+            inferred_title = (
+                prompt_doc_ctx.get("title")
+                or _DOC_TYPE_LABELS.get(parsed["doc_type"], "")
+                or "Untitled Acquisition"
+            )
+            parsed["title"] = inferred_title
+
+        # Parse data JSON
+        existing_data: dict[str, Any] = {}
+        if data:
+            try:
+                existing_data = json.loads(data)
                 if not isinstance(existing_data, dict):
                     existing_data = {}
-                if prompt_data:
-                    for k, v in prompt_data.items():
-                        existing_data.setdefault(k, v)
-                current_content = prompt_doc_ctx.get("current_content")
-                if current_content:
-                    existing_data.setdefault("current_content", current_content)
-                user_request = prompt_doc_ctx.get("user_request")
-                if user_request:
-                    existing_data.setdefault("edit_request", user_request)
-                if existing_data:
-                    parsed["data"] = existing_data
+            except (json.JSONDecodeError, TypeError):
+                existing_data = {}
 
-            if (
-                tool_name == "create_document"
-                and package_context is not None
-                and getattr(package_context, "is_package_mode", False)
-                and getattr(package_context, "package_id", None)
-            ):
-                parsed.setdefault("package_id", package_context.package_id)
+        # Enrich from prompt context
+        prompt_doc_ctx = _extract_document_context_from_prompt(prompt_context or "")
+        prompt_data = _extract_context_data_from_prompt(prompt_context or "", parsed["doc_type"])
+        if prompt_data:
+            for k, v in prompt_data.items():
+                existing_data.setdefault(k, v)
+        current_content = prompt_doc_ctx.get("current_content")
+        if current_content:
+            existing_data.setdefault("current_content", current_content)
+        user_request = prompt_doc_ctx.get("user_request")
+        if user_request:
+            existing_data.setdefault("edit_request", user_request)
+        if existing_data:
+            parsed["data"] = existing_data
 
-            if tool_name in TOOLS_NEEDING_SESSION:
-                result = handler(parsed, tenant_id, scoped_session_id)
-            else:
-                result = handler(parsed, tenant_id)
+        # Package mode
+        if (
+            package_context is not None
+            and getattr(package_context, "is_package_mode", False)
+            and getattr(package_context, "package_id", None)
+        ):
+            parsed.setdefault("package_id", package_context.package_id)
 
-            # Emit tool_result so the frontend can display results in the tool card
-            if result_queue and loop:
-                # Truncate large results for non-document tools to avoid SSE bloat
-                emit_result = result
-                if tool_name != "create_document" and isinstance(result, dict):
-                    text_val = result.get("content") or result.get("text") or result.get("result")
-                    if isinstance(text_val, str) and len(text_val) > 2000:
-                        emit_result = {**result}
-                        key = "content" if "content" in result else "text" if "text" in result else "result"
-                        emit_result[key] = text_val[:2000] + "..."
-                loop.call_soon_threadsafe(
-                    result_queue.put_nowait,
-                    {"type": "tool_result", "name": tool_name, "result": emit_result},
-                )
+        result = _exec_create_document(parsed, tenant_id, scoped)
 
-                # Auto-push document_ready + checklist_update metadata for create_document in package mode
-                if (
-                    tool_name == "create_document"
-                    and isinstance(result, dict)
-                    and not result.get("error")
-                    and result.get("package_id")
-                ):
-                    pkg_id = result["package_id"]
-                    doc_ready_payload = {
-                        "state_type": "document_ready",
-                        "package_id": pkg_id,
-                        "doc_type": result.get("doc_type", parsed.get("doc_type", "")),
-                        "version": result.get("version", 1),
-                        "document_id": result.get("document_id", ""),
-                    }
-                    # Also fetch updated checklist
-                    try:
-                        from .stores.package_store import get_package_checklist
-                        checklist = get_package_checklist(tenant_id, pkg_id)
-                        doc_ready_payload["checklist"] = checklist
-                        total = len(checklist.get("required", []))
-                        done = len(checklist.get("completed", []))
-                        doc_ready_payload["progress_pct"] = round((done / total * 100) if total > 0 else 0)
-                    except Exception:
-                        pass
-                    loop.call_soon_threadsafe(
-                        result_queue.put_nowait,
-                        {"type": "metadata", "content": doc_ready_payload},
-                    )
+        # Emit tool_result (no truncation for document results)
+        _emit_tool_result("create_document", result, result_queue, loop, truncate=False)
 
-            return json.dumps(result, indent=2, default=str)
-        except Exception as exc:
-            logger.error("Service tool %s failed: %s", tool_name, exc, exc_info=True)
-            return json.dumps({"error": str(exc), "tool": tool_name})
+        # Auto-push document_ready metadata in package mode
+        if (
+            result_queue and loop
+            and isinstance(result, dict)
+            and not result.get("error")
+            and result.get("package_id")
+        ):
+            pkg_id = result["package_id"]
+            doc_ready_payload = {
+                "state_type": "document_ready",
+                "package_id": pkg_id,
+                "doc_type": result.get("doc_type", parsed.get("doc_type", "")),
+                "version": result.get("version", 1),
+                "document_id": result.get("document_id", ""),
+            }
+            try:
+                from .stores.package_store import get_package_checklist
+                checklist = get_package_checklist(tenant_id, pkg_id)
+                doc_ready_payload["checklist"] = checklist
+                total = len(checklist.get("required", []))
+                done = len(checklist.get("completed", []))
+                doc_ready_payload["progress_pct"] = round((done / total * 100) if total > 0 else 0)
+            except Exception:
+                pass
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "metadata", "content": doc_ready_payload},
+            )
 
-    service_tool.__doc__ = (
-        f"{description}\n\n"
-        f"Args:\n"
-        f"    params: JSON string with operation and operation-specific fields"
-    )
-    return service_tool
+        return json.dumps(result, indent=2, default=str)
+
+    return create_document
 
 
-# Tool definitions: name -> description (schemas are in EAGLE_TOOLS above)
-_SERVICE_TOOL_DEFS = {
-    "s3_document_ops": (
-        "Read, write, or list documents in S3 scoped per-tenant. "
-        "Operations: list, read, write. Pass JSON with 'operation' and optional 'key', 'content'."
-    ),
-    "dynamodb_intake": (
-        "Create, read, update, list, or query intake records in DynamoDB. "
-        "Operations: create, read, update, list, query. Pass JSON with 'operation' and optional 'item_id', 'data'."
-    ),
-    "create_document": (
-        "Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, "
-        "Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification). "
-        "Documents are saved to S3. Pass JSON with 'doc_type', 'title', and optional 'data'."
-    ),
-    "get_intake_status": (
-        "Get the current intake package status and completeness — shows which documents exist, "
-        "which are missing, and next actions. Pass JSON with optional 'intake_id'."
-    ),
-    "intake_workflow": (
-        "Manage the acquisition intake workflow: start, advance, status, complete, reset. "
-        "Pass JSON with 'action' and optional 'intake_id', 'data'."
-    ),
-    "search_far": (
-        "Search the FAR and DFARS for clauses, requirements, and guidance. "
-        "Pass JSON with 'query' and optional 'parts' array."
-    ),
-    "knowledge_search": (
-        "Search the acquisition knowledge base metadata in DynamoDB. "
-        "Pass JSON with optional fields: query (for case numbers like 'B-302358', citations, identifiers), "
-        "topic, document_type, agent, authority_level, keywords, limit. "
-        "Use 'query' for specific identifiers - it searches document_id, title, summary, and keywords."
-    ),
-    "knowledge_fetch": (
-        "Fetch full knowledge document content from S3. "
-        "REQUIRES an s3_key from a prior knowledge_search result — do NOT call without one. "
-        "Pass JSON: {\"s3_key\": \"path/to/document.md\"}."
-    ),
-    "manage_skills": (
-        "Create, list, update, delete, or publish custom skills. "
-        "Pass JSON: {action, skill_id?, name?, display_name?, description?, prompt_body?, triggers?, tools?, model?, visibility?}. "
-        "Actions: list, get, create, update, delete, submit, publish, disable."
-    ),
-    "manage_prompts": (
-        "List, view, set, or delete agent prompt overrides. "
-        "Pass JSON: {action, agent_name?, prompt_body?, is_append?}. "
-        "Actions: list, get, set, delete, resolve."
-    ),
-    "manage_templates": (
-        "List, view, set, or delete document templates. "
-        "Pass JSON: {action, doc_type?, template_body?, display_name?, user_id?}. "
-        "Actions: list, get, set, delete, resolve."
-    ),
-    "workspace_memory": (
-        "View and edit persistent workspace files. Track ongoing work, key findings, "
-        "and context across sessions. "
-        "Pass JSON: {command: view|write|append|clear|list|search, path, content?}."
-    ),
-    "web_search": (
-        "Search the web for current regulations, policy updates, and federal acquisition info. "
-        "Pass JSON: {query, search_type?: web|news|gov, count?: 10}."
-    ),
-    "browse_url": (
-        "Fetch and analyze web pages, PDFs, or documents from URLs. "
-        "Pass JSON: {urls: [...], question?}."
-    ),
-    "code_execute": (
-        "Execute code in a managed sandbox for calculations, data analysis, and cost modeling. "
-        "Pass JSON: {code, language?: python|javascript|typescript, packages?: [...]}."
-    ),
-}
+def _make_manage_skills_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_manage_skills
+
+    @tool(name="manage_skills")
+    def manage_skills(
+        action: str = "list",
+        skill_id: str = "",
+        name: str = "",
+        display_name: str = "",
+        description: str = "",
+        prompt_body: str = "",
+        visibility: str = "private",
+    ) -> str:
+        """Create, list, update, delete, or publish custom skills.
+
+        Args:
+            action: Skill action — list, get, create, update, delete, submit, publish, disable
+            skill_id: Skill ID (required for get/update/delete/submit/publish/disable)
+            name: Skill name (required for create)
+            display_name: Display name (required for create)
+            description: Skill description (required for create)
+            prompt_body: Skill prompt body (required for create)
+            visibility: Visibility — private or shared
+        """
+        params: dict[str, Any] = {"action": action}
+        if skill_id:
+            params["skill_id"] = skill_id
+        if name:
+            params["name"] = name
+        if display_name:
+            params["display_name"] = display_name
+        if description:
+            params["description"] = description
+        if prompt_body:
+            params["prompt_body"] = prompt_body
+        if visibility != "private":
+            params["visibility"] = visibility
+        result = _exec_manage_skills(params, tenant_id)
+        _emit_tool_result("manage_skills", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return manage_skills
+
+
+def _make_manage_prompts_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_manage_prompts
+
+    @tool(name="manage_prompts")
+    def manage_prompts(
+        action: str = "list",
+        agent_name: str = "",
+        prompt_body: str = "",
+        is_append: bool = False,
+    ) -> str:
+        """List, view, set, or delete agent prompt overrides.
+
+        Args:
+            action: Prompt action — list, get, set, delete, resolve
+            agent_name: Agent name (required for get/set/delete/resolve)
+            prompt_body: Prompt body text (required for set)
+            is_append: If true, append to existing prompt instead of replacing
+        """
+        params: dict[str, Any] = {"action": action}
+        if agent_name:
+            params["agent_name"] = agent_name
+        if prompt_body:
+            params["prompt_body"] = prompt_body
+        if is_append:
+            params["is_append"] = is_append
+        result = _exec_manage_prompts(params, tenant_id)
+        _emit_tool_result("manage_prompts", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return manage_prompts
+
+
+def _make_manage_templates_tool(tenant_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_manage_templates
+
+    @tool(name="manage_templates")
+    def manage_templates(
+        action: str = "list",
+        doc_type: str = "",
+        template_body: str = "",
+        display_name: str = "",
+        user_id: str = "",
+    ) -> str:
+        """List, view, set, or delete document templates.
+
+        Args:
+            action: Template action — list, get, set, delete, resolve
+            doc_type: Document type (required for get/set/delete/resolve)
+            template_body: Template body text (required for set)
+            display_name: Display name for the template
+            user_id: User ID scope (defaults to 'shared')
+        """
+        params: dict[str, Any] = {"action": action}
+        if doc_type:
+            params["doc_type"] = doc_type
+        if template_body:
+            params["template_body"] = template_body
+        if display_name:
+            params["display_name"] = display_name
+        if user_id:
+            params["user_id"] = user_id
+        result = _exec_manage_templates(params, tenant_id)
+        _emit_tool_result("manage_templates", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return manage_templates
+
+
+def _make_workspace_memory_tool(tenant_id, user_id, session_id, result_queue=None, loop=None):
+    from .tool_dispatch import _exec_workspace_memory
+
+    scoped = _scoped_session(tenant_id, user_id, session_id)
+
+    @tool(name="workspace_memory")
+    def workspace_memory(
+        command: str = "view",
+        path: str = "_workspace.txt",
+        content: str = "",
+    ) -> str:
+        """View and edit persistent workspace files for tracking work and context across sessions.
+
+        Args:
+            command: Memory command — view, write, append, clear, list, search
+            path: File path within workspace (default: _workspace.txt)
+            content: Content to write or append (required for write/append)
+        """
+        params = {"command": command, "path": path, "content": content}
+        result = _exec_workspace_memory(params, tenant_id, scoped)
+        _emit_tool_result("workspace_memory", result, result_queue, loop)
+        return json.dumps(result, default=str)
+
+    return workspace_memory
 
 
 def _make_generate_document_tool(
@@ -2250,40 +2616,56 @@ def _build_service_tools(
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
-    """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session."""
-    tools = []
-    for name, desc in _SERVICE_TOOL_DEFS.items():
-        tools.append(
-            _make_service_tool(
-                name,
-                desc,
-                tenant_id,
-                user_id,
-                session_id,
-                prompt_context=prompt_context,
-                package_context=package_context,
-                result_queue=result_queue,
-                loop=loop,
-            )
-        )
+    """Build native @tool wrappers for AWS service tools, scoped to the current tenant/user/session.
+
+    Each tool uses typed parameters so the model sees exact param names and types
+    instead of a generic ``params: str`` JSON blob.
+    """
+    rq, lp = result_queue, loop  # shorthand
+
+    tools = [
+        # Phase 1: High-impact tools (typed params fix model input errors)
+        _make_search_far_tool(tenant_id, rq, lp),
+        _make_knowledge_search_tool(tenant_id, rq, lp),
+        _make_web_search_tool(tenant_id, rq, lp),
+        # Phase 2: Medium-impact tools
+        _make_browse_url_tool(tenant_id, rq, lp),
+        _make_knowledge_fetch_tool(tenant_id, rq, lp),
+        _make_get_intake_status_tool(tenant_id, user_id, session_id, rq, lp),
+        _make_intake_workflow_tool(tenant_id, rq, lp),
+        _make_code_execute_tool(tenant_id, rq, lp),
+        # Phase 3: Complex tools
+        _make_s3_document_ops_tool(tenant_id, user_id, session_id, rq, lp),
+        _make_dynamodb_intake_tool(tenant_id, rq, lp),
+        _make_create_document_tool(
+            tenant_id, user_id, session_id,
+            package_context=package_context,
+            result_queue=rq, loop=lp,
+            prompt_context=prompt_context,
+        ),
+        _make_manage_skills_tool(tenant_id, rq, lp),
+        _make_manage_prompts_tool(tenant_id, rq, lp),
+        _make_manage_templates_tool(tenant_id, rq, lp),
+        _make_workspace_memory_tool(tenant_id, user_id, session_id, rq, lp),
+    ]
+
     # AI-driven document generation (Agent-as-Tool)
     tools.append(
         _make_generate_document_tool(
             tenant_id, user_id, session_id,
             package_context=package_context,
-            result_queue=result_queue,
-            loop=loop,
+            result_queue=rq,
+            loop=lp,
         )
     )
-    # Add compliance matrix and progressive disclosure tools.
-    # These use factory functions that close over result_queue/loop for observability.
-    tools.append(_make_compliance_matrix_tool(result_queue, loop))
-    tools.append(_make_list_skills_tool(result_queue, loop))
-    tools.append(_make_load_skill_tool(result_queue, loop))
-    tools.append(_make_load_data_tool(result_queue, loop))
+    # Compliance matrix and progressive disclosure tools
+    tools.append(_make_compliance_matrix_tool(rq, lp))
+    tools.append(_make_list_skills_tool(rq, lp))
+    tools.append(_make_load_skill_tool(rq, lp))
+    tools.append(_make_load_data_tool(rq, lp))
     # State push tools — enable real-time frontend UI updates via SSE METADATA
-    tools.append(_make_update_state_tool(tenant_id, result_queue, loop))
-    tools.append(_make_get_checklist_tool(tenant_id, result_queue, loop))
+    tools.append(_make_update_state_tool(tenant_id, rq, lp))
+    tools.append(_make_get_checklist_tool(tenant_id, rq, lp))
     # Contract requirements matrix — deterministic FAR-grounded scoring
     tools.append(query_contract_matrix)
     return tools
@@ -2650,6 +3032,9 @@ async def sdk_query(
         preserve_recent_messages=10,
     )
 
+    # Ensure Langfuse OTEL exporter is attached before Agent() caches its tracer
+    _ensure_langfuse_exporter()
+
     supervisor = Agent(
         model=_get_model(),
         system_prompt=system_prompt,
@@ -2914,6 +3299,9 @@ async def sdk_query_streaming(
         summary_ratio=0.3,
         preserve_recent_messages=10,
     )
+
+    # Ensure Langfuse OTEL exporter is attached before Agent() caches its tracer
+    _ensure_langfuse_exporter()
 
     supervisor = Agent(
         model=_get_model(),

@@ -761,7 +761,15 @@ def _exec_search_far(params: dict, tenant_id: str) -> dict:
     """Search Federal Acquisition Regulation using shared far-database.json."""
     from .compliance_matrix import search_far as _cm_search_far
 
-    query = params.get("query", "")
+    # Handle multiple input formats: {"query": "..."}, {"params": "..."}, or plain string
+    if isinstance(params, str):
+        params = {"query": params}
+    query = (
+        params.get("query", "")
+        or params.get("keyword", "")
+        or params.get("params", "")
+        or params.get("search_term", "")
+    )
     parts_filter = params.get("parts", None)
 
     results = _cm_search_far(query, parts_filter)

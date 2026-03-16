@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   GitBranch, RefreshCw, ChevronDown, ChevronRight,
-  Cpu, BarChart2, AlertCircle, Wrench, ArrowRight,
+  Cpu, BarChart2, AlertCircle, Wrench, ArrowRight, ExternalLink,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -16,22 +16,33 @@ interface InternalTool {
   output_preview: string | Record<string, unknown>;
 }
 
+interface ToolDetail {
+  name: string;
+  input: Record<string, unknown>;
+  output_preview?: string | Record<string, unknown>;
+}
+
 interface SubagentStory {
   name: string;
+  observation_id?: string;
   input_query: string;
   input_tokens: number;
   output_tokens: number;
   response_preview: string;
+  response_full?: string;
   internal_tools: InternalTool[];
 }
 
 interface TurnStory {
   turn: number;
+  observation_id?: string;
   input_tokens: number;
   output_tokens: number;
   tool_calls: string[];
+  tool_details?: ToolDetail[];
   has_reasoning: boolean;
   response_preview: string;
+  response_full?: string;
   subagents: SubagentStory[];
 }
 
@@ -39,6 +50,7 @@ interface TraceStory {
   trace_id: string;
   session_id: string;
   timestamp: string;
+  langfuse_url?: string;
   total_observations: number;
   supervisor_turns: number;
   total_tokens: {
@@ -192,10 +204,68 @@ function InternalToolRow({ tool }: { tool: InternalTool }) {
 // TurnCard — expandable supervisor turn with subagent breakdown
 // ---------------------------------------------------------------------------
 
-function TurnCard({ turn }: { turn: TurnStory }) {
+function ToolDetailCard({ tool }: { tool: ToolDetail }) {
+  const [open, setOpen] = useState(false);
+
+  const inputSummary = (() => {
+    if (!tool.input || typeof tool.input !== 'object') return '';
+    const val = tool.input.query ?? tool.input.keyword ?? tool.input.key ?? Object.values(tool.input)[0];
+    const s = String(val ?? '');
+    return s.length > 80 ? s.slice(0, 79) + '…' : s;
+  })();
+
+  return (
+    <div className="rounded border border-gray-200 bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left hover:bg-gray-50 transition"
+      >
+        {open
+          ? <ChevronDown className="w-2.5 h-2.5 text-gray-400 shrink-0" />
+          : <ChevronRight className="w-2.5 h-2.5 text-gray-400 shrink-0" />
+        }
+        <Wrench className="w-2.5 h-2.5 text-violet-500 shrink-0" />
+        <span className="text-[9px] font-bold text-gray-600 shrink-0">{tool.name}</span>
+        {inputSummary && (
+          <span className="text-[9px] text-gray-400 truncate flex-1 min-w-0">{inputSummary}</span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-gray-100 px-2 py-1.5 space-y-1.5 bg-gray-50/50">
+          {tool.input && Object.keys(tool.input).length > 0 && (
+            <div>
+              <span className="text-[8px] font-bold text-blue-500 uppercase block mb-0.5">Input</span>
+              <pre className="text-[9px] font-mono text-gray-600 whitespace-pre-wrap break-all bg-blue-50 border border-blue-100 rounded px-1.5 py-1 max-h-40 overflow-auto">
+                {JSON.stringify(tool.input, null, 2).slice(0, 800)}
+              </pre>
+            </div>
+          )}
+          {tool.output_preview && (
+            <div>
+              <span className="text-[8px] font-bold text-green-600 uppercase block mb-0.5">Output</span>
+              <pre className="text-[9px] font-mono text-gray-600 whitespace-pre-wrap break-all bg-green-50 border border-green-100 rounded px-1.5 py-1 max-h-40 overflow-auto">
+                {typeof tool.output_preview === 'string'
+                  ? tool.output_preview.slice(0, 600)
+                  : JSON.stringify(tool.output_preview, null, 2).slice(0, 600)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TurnCard({ turn, traceId, langfuseUrl }: { turn: TurnStory; traceId?: string; langfuseUrl?: string }) {
   const [open, setOpen] = useState(false);
   const hasSubagents = turn.subagents.length > 0;
-  const hasDetail = hasSubagents || !!turn.response_preview;
+  const hasToolDetails = (turn.tool_details?.length ?? 0) > 0;
+  const hasDetail = hasSubagents || hasToolDetails || !!turn.response_preview;
+
+  // Deep link: Langfuse supports ?observation=<id> to highlight a specific span
+  const turnLangfuseUrl = langfuseUrl && turn.observation_id
+    ? `${langfuseUrl}?observation=${turn.observation_id}`
+    : undefined;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
@@ -246,12 +316,19 @@ function TurnCard({ turn }: { turn: TurnStory }) {
 
       {open && hasDetail && (
         <div className="border-t border-gray-100 px-3 py-2.5 space-y-2.5 bg-gray-50/30">
-          {turn.response_preview && !hasSubagents && (
-            <p className="text-[10px] text-gray-600 leading-relaxed italic">
-              &ldquo;{turn.response_preview}&rdquo;
-            </p>
+          {/* Tool call details */}
+          {hasToolDetails && (
+            <div className="space-y-1.5">
+              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">
+                Tool calls ({turn.tool_details!.length})
+              </span>
+              {turn.tool_details!.map((td, i) => (
+                <ToolDetailCard key={i} tool={td} />
+              ))}
+            </div>
           )}
 
+          {/* Subagents */}
           {hasSubagents && (
             <div className="space-y-1.5">
               <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">
@@ -263,15 +340,29 @@ function TurnCard({ turn }: { turn: TurnStory }) {
             </div>
           )}
 
-          {turn.response_preview && hasSubagents && (
+          {/* Response */}
+          {(turn.response_full || turn.response_preview) && (
             <div>
-              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
-                Synthesis
+              <span className="text-[8px] font-bold text-green-600 uppercase tracking-wider block mb-0.5">
+                {hasSubagents ? 'Synthesis' : 'Response'}
               </span>
-              <p className="text-[10px] text-gray-600 leading-relaxed italic line-clamp-3">
-                &ldquo;{turn.response_preview}&rdquo;
+              <p className="text-[10px] text-gray-600 leading-relaxed italic max-h-48 overflow-auto">
+                &ldquo;{turn.response_full || turn.response_preview}&rdquo;
               </p>
             </div>
+          )}
+
+          {/* Deep link to Langfuse */}
+          {turnLangfuseUrl && (
+            <a
+              href={turnLangfuseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[9px] text-blue-500 hover:text-blue-700 transition"
+            >
+              <ExternalLink className="w-2.5 h-2.5" />
+              View full trace in Langfuse
+            </a>
           )}
         </div>
       )}
@@ -390,14 +481,27 @@ export default function TraceStory({ sessionId }: TraceStoryProps) {
             </>
           )}
         </div>
-        <button
-          onClick={fetchStory}
-          disabled={loading}
-          className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 disabled:opacity-40 transition"
-        >
-          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {story?.langfuse_url && (
+            <a
+              href={story.langfuse_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 transition"
+            >
+              <ExternalLink className="w-3 h-3" />
+              Langfuse
+            </a>
+          )}
+          <button
+            onClick={fetchStory}
+            disabled={loading}
+            className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 disabled:opacity-40 transition"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Generic error */}
@@ -438,7 +542,12 @@ export default function TraceStory({ sessionId }: TraceStoryProps) {
           </div>
 
           {story.story.map(turn => (
-            <TurnCard key={turn.turn} turn={turn} />
+            <TurnCard
+              key={turn.turn}
+              turn={turn}
+              traceId={story.trace_id}
+              langfuseUrl={story.langfuse_url}
+            />
           ))}
         </div>
       )}

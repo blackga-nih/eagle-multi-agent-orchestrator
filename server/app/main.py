@@ -47,36 +47,8 @@ configure_logging(level=logging.INFO)
 logger = logging.getLogger("eagle")
 
 # ── Langfuse OTEL Tracing ────────────────────────────────────────────
-def _setup_langfuse():
-    """Initialize Langfuse OTEL exporter if credentials are set.
-
-    When LANGFUSE_PUBLIC_KEY is absent this is a silent no-op so local dev
-    and CI work without any trace backend.
-    """
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-    if not public_key or not secret_key:
-        return
-    try:
-        import base64
-        from strands.telemetry import StrandsTelemetry
-        base = os.getenv(
-            "LANGFUSE_OTEL_ENDPOINT",
-            "https://us.cloud.langfuse.com/api/public/otel",
-        )
-        # OTLPSpanExporter only auto-appends /v1/traces for the generic env var,
-        # not for explicit endpoint= args, so we must include the full path.
-        endpoint = f"{base.rstrip('/')}/v1/traces"
-        auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
-        StrandsTelemetry().setup_otlp_exporter(
-            endpoint=endpoint,
-            headers={"Authorization": f"Basic {auth}"},
-        )
-        logger.info("[EAGLE STARTUP] Langfuse OTEL exporter enabled → %s", endpoint)
-    except Exception as exc:
-        logger.warning("[EAGLE STARTUP] Langfuse setup failed (non-fatal): %s", exc)
-
-_setup_langfuse()
+# Exporter injection moved to strands_agentic_service._ensure_langfuse_exporter()
+# (must run after Strands sets its global TracerProvider, before first Agent span)
 
 # ── App ──────────────────────────────────────────────────────────────
 

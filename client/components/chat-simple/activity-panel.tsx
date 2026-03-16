@@ -401,7 +401,7 @@ export default function ActivityPanel({
   return (
     <div className="w-[380px] shrink-0 border-l border-[#D8DEE6] bg-white flex flex-col">
       {/* Tab bar */}
-      <div className="flex items-center gap-1 p-2 bg-[#F5F7FA] border-b border-[#D8DEE6]">
+      <div className="flex flex-wrap items-center gap-1 p-2 bg-[#F5F7FA] border-b border-[#D8DEE6]">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const alertCount = eagleState?.compliance_alerts?.length ?? 0;

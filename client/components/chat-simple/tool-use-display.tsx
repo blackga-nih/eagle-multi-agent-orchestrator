@@ -324,6 +324,20 @@ export function extractKnowledgeSources(
     }
   }
 
+  if (toolName === 'query_compliance_matrix' && Array.isArray(data.results)) {
+    for (const r of data.results as Record<string, unknown>[]) {
+      if (r.part || r.section) {
+        sources.push({
+          document_id: String(r.part ?? r.section ?? ''),
+          title: String(r.title ?? `FAR ${r.part ?? ''}`),
+          summary: String(r.text ?? r.summary ?? ''),
+          document_type: 'far_regulation',
+          source_tool: 'search_far',
+        });
+      }
+    }
+  }
+
   return sources;
 }
 
@@ -565,7 +579,7 @@ export default function ToolUseDisplay({
       ? JSON.stringify(result.result, null, 2)
       : null;
 
-  const canExpand = (status === 'done' || status === 'error') && !hasSpecializedCard && (resultText || reportText || errorText);
+  const canExpand = (status === 'done' || status === 'error') && !hasSpecializedCard;
   const showDocCard = status === 'done' && docData !== null;
 
   return (
@@ -673,7 +687,9 @@ export default function ToolUseDisplay({
             <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
               {resultText}
             </pre>
-          ) : null}
+          ) : (
+            <p className="text-[11px] text-gray-400 italic">Completed successfully.</p>
+          )}
         </div>
       )}
     </div>

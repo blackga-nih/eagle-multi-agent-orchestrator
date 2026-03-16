@@ -11,6 +11,14 @@ import TraceStory from './trace-story';
 import { ToolCallsByMessageId, TrackedToolCall } from './simple-chat-interface';
 import { CodeResult } from '@/lib/client-tools';
 
+/** Strip <thinking>...</thinking> blocks from model output. */
+function stripThinkingBlocks(text: string): string {
+  return text
+    .replace(/<thinking>[\s\S]*?<\/thinking>/g, '')
+    .replace(/<thinking>[\s\S]*$/g, '')  // unclosed mid-stream
+    .trim();
+}
+
 /** Shared markdown components — defined once, reused across all messages. */
 const mdComponents = {
     p: ({ children }: any) => (
@@ -144,7 +152,7 @@ function SourceChips({ toolCalls }: { toolCalls: TrackedToolCall[] }) {
         const result: KnowledgeSource[] = [];
         for (const tc of toolCalls) {
             if (tc.status !== 'done') continue;
-            if (!['knowledge_search', 'knowledge_fetch', 'search_far'].includes(tc.toolName)) continue;
+            if (!['knowledge_search', 'knowledge_fetch', 'search_far', 'query_compliance_matrix'].includes(tc.toolName)) continue;
             for (const src of extractKnowledgeSources(tc.toolName, tc.result ?? null)) {
                 const key = src.document_id || src.title;
                 if (!seen.has(key)) {
@@ -317,11 +325,11 @@ export default function SimpleMessageList({
                                 {isStreamingThis ? (
                                     // Streaming: use inline ReactMarkdown (content changes every token)
                                     <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
-                                        {message.content + ' ...'}
+                                        {stripThinkingBlocks(message.content) + ' ...'}
                                     </ReactMarkdown>
                                 ) : (
                                     // Completed: memoized — won't re-render when other messages update
-                                    <MemoizedMarkdown content={message.content} />
+                                    <MemoizedMarkdown content={stripThinkingBlocks(message.content)} />
                                 )}
                             </div>
 
@@ -329,7 +337,7 @@ export default function SimpleMessageList({
                             {!isStreamingThis && (
                                 <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button
-                                        onClick={() => copyToClipboard(message.content, message.id)}
+                                        onClick={() => copyToClipboard(stripThinkingBlocks(message.content), message.id)}
                                         className="text-[10px] text-gray-300 hover:text-gray-500 transition-colors"
                                         title="Copy response"
                                     >

@@ -96,19 +96,44 @@ def _build_story(observations: list) -> list[dict]:
         resp_blocks = parse_resp_blocks(gen)
 
         tool_names = []
+        tool_details = []
         for b in resp_blocks:
             if isinstance(b, dict) and "toolUse" in b:
-                tool_names.append(b["toolUse"].get("name", ""))
+                tu = b["toolUse"]
+                tool_names.append(tu.get("name", ""))
+                tool_details.append({
+                    "name": tu.get("name", ""),
+                    "input": tu.get("input", {}),
+                })
+
+        # Attach tool results from TOOL observation spans
+        for td in tool_details:
+            for ts in kids(cycle["id"], "TOOL"):
+                if ts.get("name") == td["name"]:
+                    raw_out = ts.get("output") or {}
+                    if isinstance(raw_out, str):
+                        td["output_preview"] = raw_out[:800]
+                    elif isinstance(raw_out, dict):
+                        td["output_preview"] = {
+                            k: (str(v)[:300] if not isinstance(v, (int, float, bool)) else v)
+                            for k, v in list(raw_out.items())[:6]
+                        }
+                    else:
+                        td["output_preview"] = str(raw_out)[:800]
+                    break
 
         turn: dict = {
             "turn": turn_num,
+            "observation_id": cycle["id"],
             "input_tokens": gen.get("promptTokens", 0) or 0,
             "output_tokens": gen.get("completionTokens", 0) or 0,
             "tool_calls": tool_names,
+            "tool_details": tool_details,
             "has_reasoning": any(
                 "reasoningContent" in b for b in resp_blocks if isinstance(b, dict)
             ),
             "response_preview": text_preview(resp_blocks),
+            "response_full": text_preview(resp_blocks, 2000),
             "subagents": [],
         }
 
@@ -172,10 +197,12 @@ def _build_story(observations: list) -> list[dict]:
 
             turn["subagents"].append({
                 "name": ts.get("name", "unknown"),
+                "observation_id": sub["id"],
                 "input_query": subagent_query,
                 "input_tokens": sub_tok_in,
                 "output_tokens": sub_tok_out,
                 "response_preview": text_preview(sub_blocks, 400),
+                "response_full": text_preview(sub_blocks, 2000),
                 "internal_tools": internal_tools,
             })
 
@@ -240,6 +267,7 @@ async def get_trace_story(session_id: str = Query(..., description="Session ID t
         "trace_id": trace_id,
         "session_id": session_id,
         "timestamp": trace.get("timestamp"),
+        "langfuse_url": f"{host}/trace/{trace_id}",
         "total_observations": len(observations),
         "supervisor_turns": len(story),
         "total_tokens": {

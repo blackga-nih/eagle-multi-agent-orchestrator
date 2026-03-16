@@ -1,6 +1,6 @@
 """
 AgentCore Gateway Service — auto-discovers tools from MCP Gateway
-instead of manual _SERVICE_TOOL_DEFS registration.
+instead of manual tool registration.
 
 When AGENTCORE_GATEWAY_ID is set, tools are fetched from the Gateway's
 MCP endpoint with semantic search. Falls back to manual TOOL_DISPATCH
