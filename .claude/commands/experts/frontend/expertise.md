@@ -4,7 +4,7 @@ parent: "[[frontend/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, frontend, nextjs, tailwind, chat, dashboard, test-results]
-last_updated: 2026-03-04T06:00:00
+last_updated: 2026-03-16T06:00:00
 ---
 
 # Frontend Expertise (Complete Mental Model)
@@ -43,6 +43,7 @@ last_updated: 2026-03-04T06:00:00
 | `/admin/users` | `app/admin/users/page.tsx` | User management |
 | `/admin/templates` | `app/admin/templates/page.tsx` | Document templates |
 | `/admin/subscription` | `app/admin/subscription/page.tsx` | Subscription tiers |
+| `/admin/api-explorer` | `app/admin/api-explorer/page.tsx` | HTTP request log viewer — ring-buffer replay with route stats |
 | `/documents` | `app/documents/page.tsx` | Document browser |
 | `/documents/[id]` | `app/documents/[id]/page.tsx` | Single document view |
 | `/workflows` | `app/workflows/page.tsx` | Workflow list |
@@ -52,6 +53,7 @@ last_updated: 2026-03-04T06:00:00
 | Route | Purpose |
 |-------|---------|
 | `/api/health` | Proxies to FastAPI `/api/health`; returns 502 if backend unreachable |
+| `/api/health/ready` | Readiness probe — checks DynamoDB + Bedrock reachability; returns 503 on failure (no auth) |
 | `/api/trace-logs` | Serves trace_logs.json; `?list=1` lists all runs, `?run=<file>` loads specific run |
 | `/api/cloudwatch` | `?runs=1` lists CW streams; `?stream=<name>&group=test-runs` loads events |
 | `/api/prompts` | Loads skill prompt files from eagle-plugin/ |
@@ -61,7 +63,10 @@ last_updated: 2026-03-04T06:00:00
 | `/api/conversations/context` | Conversation context endpoint |
 | `/api/sessions` | Session management |
 | `/api/sessions/[sessionId]` | Single session CRUD |
-| `/api/sessions/[sessionId]/messages` | Session messages |
+| `/api/sessions/[sessionId]/messages` | GET (with `?limit=N&offset=0`) + DELETE to clear; proxies to FastAPI |
+| `/api/sessions/[sessionId]/audit-logs` | GET — persisted SSE audit events for a session (all turns); proxies to FastAPI |
+| `/api/sessions/[sessionId]/documents` | GET — document tool_results extracted from persisted audit_logs; proxies to FastAPI |
+| `/api/sessions/[sessionId]/summary` | GET — lightweight session overview: title, message_count, last_active, tools_used; proxies to FastAPI |
 | `/api/sessions/generate-title` | AI session naming — POST `{ message, response_snippet }` → `{ title }` |
 | `/api/documents` | Document CRUD |
 | `/api/documents/[id]` | Single document operations |
@@ -71,6 +76,38 @@ last_updated: 2026-03-04T06:00:00
 | `/api/admin/users` | User management |
 | `/api/admin/costs` | Cost data |
 | `/api/admin/telemetry` | Telemetry data |
+| `/api/admin/request-log` | GET `?limit=N&path_filter=` — recent HTTP request history from FastAPI in-memory ring buffer |
+| `/api/logs/cloudwatch` | GET `?session_id=&limit=100` — CloudWatch logs for a session; consumed by ActivityFeed |
+| `/api/traces/story` | GET `?session_id=` — Langfuse/trace story JSON for a session; consumed by ActivityFeed |
+
+### Session Sub-Routes Pattern
+
+All `/api/sessions/[sessionId]/*` routes follow the same proxy pattern:
+
+```typescript
+// Next.js 15+ style — params is a Promise
+interface RouteParams {
+  params: Promise<{ sessionId: string }>;
+}
+
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  const { sessionId } = await params;               // always await
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  const authorization = request.headers.get('Authorization');
+  if (authorization) headers['Authorization'] = authorization;   // forward Cognito token
+  const response = await fetch(`${FASTAPI_URL}/api/sessions/${sessionId}/<sub-path>`, {
+    method: 'GET', headers,
+  });
+  const data = await response.json();
+  return NextResponse.json(data, { status: response.status });
+}
+```
+
+Key points:
+- `params` must be `Promise<{ sessionId: string }>` — not `{ sessionId: string }` (Next.js 15+ requirement)
+- Always forward the `Authorization` header from the incoming request to FastAPI
+- Always proxy the backend status code (`response.status`)
+- Return `502` on network/fetch error, `503` for health routes
 
 ### Component Tree
 
@@ -94,10 +131,12 @@ components/
   |   |-- simple-header.tsx          # Simple header
   |   |-- simple-quick-actions.tsx   # Quick action buttons
   |   |-- document-card.tsx          # Document result card (links to /documents/[id])
-  |   |-- activity-panel.tsx         # 3-tab right panel (Documents, Activity, Agent Logs)
-  |   |-- agent-logs.tsx             # Multi-agent stream timeline with click-to-expand modal
+  |   |-- activity-panel.tsx         # 5-tab right panel (Package, Docs, Alerts, Activity, Bedrock)
+  |   |-- activity-feed.tsx          # Unified SSE+CW+Langfuse activity timeline (used in Activity tab)
+  |   |-- bedrock-logs.tsx           # Bedrock trace viewer (used in Bedrock tab)
   |   |-- command-palette.tsx        # Ctrl+K command palette
   |   |-- tool-use-display.tsx       # Inline tool call status display
+  |   |-- trace-detail-modal.tsx     # Click-to-expand raw event modal (used by ActivityFeed rows)
   |
   |-- layout/
   |   |-- top-nav.tsx                # Top navigation bar
@@ -219,8 +258,8 @@ interface AcquisitionData {
 - `simple-header.tsx`: Minimal header
 - `simple-quick-actions.tsx`: Quick action buttons
 - `document-card.tsx`: Renders document results from agent (links to `/documents/[id]`)
-- `activity-panel.tsx`: 3-tab collapsible right panel (380px open / 32px closed strip)
-- `agent-logs.tsx`: Multi-agent stream timeline component with LogDetailModal
+- `activity-panel.tsx`: 5-tab collapsible right panel (380px open / 36px closed strip)
+- `activity-feed.tsx`: Unified activity timeline (SSE + CloudWatch + Langfuse)
 - `command-palette.tsx`: Ctrl+K command palette overlay
 - `tool-use-display.tsx`: Inline tool call status badges
 
@@ -232,14 +271,82 @@ interface AcquisitionData {
   <div class="flex-1 flex flex-col min-w-0">   ← left: chat + input footer
     ...
   </div>
-  <ActivityPanel ... />                         ← right: 380px or 32px strip
+  <ActivityPanel ... />                         ← right: 380px or 36px strip
 </div>
 ```
 
 **Key state in `SimpleChatInterface`**:
 - `isPanelOpen` (boolean, default `true`) — controls ActivityPanel open/closed
 - `logs`, `clearLogs`, `addUserInputLog` — destructured from `useAgentStream`
+- `bedrockTraces` — `Record<string, unknown>[]` collected via `onBedrockTrace` callback
+- `eagleState` — `PackageState | null`, accumulated from `onMetadata` SSE metadata events
 - `addUserInputLog(input)` called in `handleSend()` before `sendQuery()` to echo user turns into the log stream
+
+### SSE Metadata → PackageState Accumulation Pattern
+
+`SimpleChatInterface` maintains live acquisition package state via the `onMetadata` callback on `useAgentStream`. The backend `update_state` tool emits SSE `metadata` events with a `state_type` discriminator. These are merged into a single `PackageState` object via functional state update:
+
+```typescript
+// Interfaces (exported from activity-panel.tsx)
+export interface EagleChecklist {
+  required: string[];
+  completed: string[];
+  missing: string[];
+  complete: boolean;
+}
+
+export interface PackageState {
+  phase?: string;
+  previous_phase?: string;
+  package_id?: string;
+  checklist?: EagleChecklist;
+  progress_pct?: number;
+  compliance_alerts?: Array<{
+    severity: 'info' | 'warning' | 'critical';
+    items: Array<{ name: string; note: string }>;
+  }>;
+}
+```
+
+```typescript
+// In SimpleChatInterface — wired to useAgentStream
+const [eagleState, setEagleState] = useState<PackageState | null>(null);
+
+onMetadata: (meta) => {
+  const stateType = meta.state_type as string | undefined;
+  setEagleState((prev) => {
+    const next: PackageState = { ...prev };
+    if (stateType === 'phase_change') {
+      next.phase = meta.phase as string;
+      next.previous_phase = meta.previous as string;
+      if (meta.package_id) next.package_id = meta.package_id as string;
+      if (meta.checklist) next.checklist = meta.checklist as PackageState['checklist'];
+    } else if (stateType === 'checklist_update' || stateType === 'document_ready') {
+      if (meta.checklist) next.checklist = meta.checklist as PackageState['checklist'];
+      if (meta.package_id) next.package_id = meta.package_id as string;
+      if (meta.progress_pct !== undefined) next.progress_pct = meta.progress_pct as number;
+    } else if (stateType === 'compliance_alert') {
+      const alert = {
+        severity: meta.severity as 'info' | 'warning' | 'critical',
+        items: meta.items as Array<{ name: string; note: string }>,
+      };
+      next.compliance_alerts = [...(prev?.compliance_alerts ?? []), alert];
+    }
+    return next;
+  });
+},
+```
+
+`eagleState` is then passed as a prop to `<ActivityPanel eagleState={eagleState} />`, where it drives the Package tab display.
+
+**SSE state_type values** emitted by the backend:
+
+| `state_type` | Fields updated |
+|---|---|
+| `phase_change` | `phase`, `previous_phase`, `package_id?`, `checklist?` |
+| `checklist_update` | `checklist`, `package_id?`, `progress_pct?` |
+| `document_ready` | `checklist`, `package_id?`, `progress_pct?` |
+| `compliance_alert` | appends to `compliance_alerts[]` (severity + items) |
 
 ### Activity Panel (`components/chat-simple/activity-panel.tsx`)
 
@@ -249,60 +356,145 @@ interface ActivityPanelProps {
   logs: AuditLogEntry[];
   clearLogs: () => void;
   documents: Record<string, DocumentInfo[]>;
-  messages: ChatMessage[];
-  sessionId: string | null;
   isStreaming: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  sessionId?: string;
+  bedrockTraces?: Record<string, unknown>[];
+  eagleState?: PackageState | null;
 }
 ```
 
-**Tabs**: `'documents' | 'activity' | 'logs'` (default: `'logs'`)
+**Tabs** (5 total): `'package' | 'documents' | 'notifications' | 'activity' | 'bedrock'`
 
-**Closed state** (isOpen=false): 32px wide vertical strip with left-angle arrow and "Activity" spelled vertically. Click to open.
+Default tab: `'package'` (first tab, shows acquisition checklist/compliance on open)
+
+**Tab IDs and icons** (from lucide-react):
+
+| Tab ID | Label | Icon |
+|--------|-------|------|
+| `package` | Package | `CheckSquare` |
+| `documents` | Docs | `FileText` |
+| `notifications` | Alerts | `Bell` |
+| `activity` | Activity | `Activity` |
+| `bedrock` | Bedrock | `Cpu` |
+
+**Badge counts on tabs**:
+- `package`: `eagleState.compliance_alerts.length` (when > 0)
+- `activity`: `logs.length` (when > 0)
+- `documents`: flat document count
+- `notifications`: same as documents count
+- `bedrock`: `bedrockTraces.length` (when > 0)
+
+**Closed state** (isOpen=false): 36px wide vertical strip with `PanelRightOpen` icon. Click to open.
 
 **Open state** (isOpen=true): 380px wide panel with tab bar + content scroll area.
 
+**Package tab** (`PackageStatusTab`): renders from `eagleState` prop
+- Empty state when `!eagleState?.phase && !eagleState?.checklist`
+- Phase badge (colored by PHASE_STYLE map: intake=gray, analysis=blue, drafting=amber, review=indigo, complete=green)
+- Optional `package_id` in monospace font below phase badge
+- Progress bar: `completedSet.size / required.length * 100%`, gradient `from-[#003366] to-[#2196F3]`
+- Document checklist rows: green bg+border for completed, gray for pending; green filled circle with ✓ for done
+- `DOC_LABELS` map translates doc keys (e.g. `sow` → "Statement of Work", `igce` → "IGCE", `acquisition_plan` → "Acquisition Plan", etc.)
+- Compliance alerts: red=critical, amber=warning, blue=info; each shows severity header + name:note item list
+
 **Documents tab** (`DocumentsTab`):
 - Flattens `Record<string, DocumentInfo[]>` → array of all docs
-- Renders cards with type icon from `DOC_TYPE_ICONS` map (10 doc types: sow, igce, market_research, acquisition_plan, justification, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification)
+- Renders cards with type icon from `DOCUMENT_TYPE_ICONS` (imported from `@/types/schema`)
 - Shows doc type, word count, status badge (saved=green, template=amber)
 
-**Activity tab** (`ActivityTab`):
-- Session ID badge (monospace, truncated)
-- Stats row: user/assistant message counts + pulsing "Streaming" indicator
-- Message timeline: user=blue-50 border-blue-100 / assistant=gray-50 border-gray-100
+**Notifications tab** (`NotificationsTab`):
+- Derives `Notification[]` from `documents` prop using `useMemo`
+- Package-level notification when 2+ acquisition package doc types present
+- Individual doc notifications sorted newest-first
 
-**Agent Logs tab**: renders `<AgentLogs logs={logs} />` — event count badge on tab + clear button in sub-header
+**Activity tab**: renders `<ActivityFeed sessionId={sessionId} logs={logs} isStreaming={isStreaming} />`
+- Has Clear button in sub-header (only when `activeTab === 'activity'` and `logs.length > 0`)
+
+**Bedrock tab**: renders `<BedrockLogs bedrockTraces={bedrockTraces} logs={logs} />`
 
 **EAGLE design tokens used**:
 - Background: `#F5F7FA`, `bg-white`
 - Border: `#D8DEE6`
 - Primary text: `#003366`
-- Accent: `#2196F3` (copy button links)
+- Accent: `#2196F3`
 
-### Agent Logs (`components/chat-simple/agent-logs.tsx`)
+### ActivityFeed (`components/chat-simple/activity-feed.tsx`)
 
-**Purpose**: Multi-agent stream timeline. Consumes `AuditLogEntry[]`, renders one card per non-reasoning event.
+**Purpose**: Unified activity timeline consolidating SSE events, CloudWatch logs, and Langfuse trace stories into a single chronological view. Replaces the prior split `AgentLogs` + `CloudWatchLogs` tabs.
 
-**Key functions**:
-- `groupLogs(logs)` — filters out `type === 'reasoning'` events before render
-- `getEventContent(log)` — extracts preview string: tool call signature for `tool_use`, result snippet for `tool_result`, handoff target for `handoff`, truncated content for text/error
-- `formatEventType(type)` — human label: `text` → "Report", `tool_use` → "Tool Use", etc.
-- `getEventTypeBadge(type)` — Tailwind class string for event type badge color
+**Props**:
+```typescript
+interface ActivityFeedProps {
+  sessionId?: string;
+  logs: AuditLogEntry[];    // live SSE audit log entries from useAgentStream
+  isStreaming: boolean;
+}
+```
 
-**Cards**: Agent-colored border+bg from `getAgentColors(log.agent_id)`. Shows agent icon circle, agent name, event type badge, timestamp, content preview (2-line clamp).
+**Data sources merged**:
 
-**Auto-scroll**: `useEffect` on `filtered.length` scrolls the container to bottom on each new entry.
+| Source | Color dot | Fetched via |
+|--------|-----------|-------------|
+| `sse` | green | `logs` prop (live from `useAgentStream`) + historical from `/api/sessions/[sessionId]/audit-logs` |
+| `cw` | sky | `/api/logs/cloudwatch?session_id=&limit=100` (auto-fetch 35s after streaming ends) |
+| `langfuse` | violet | `/api/traces/story?session_id=` (auto-fetch 35s after streaming ends) |
 
-**Empty state**: Gear icon + "No agent events yet." message.
+**Normalization functions**:
+- `normalizeSSE(logs)` — converts `AuditLogEntry[]` to `ActivityEvent[]`; buffers consecutive `text` events into merged `response` events
+- `normalizeCW(entries)` — converts CloudWatch log entries; handles `trace.completed`, `tool.completed`, `tool.result` event types
+- `normalizeLangfuse(stories)` — converts trace stories; emits `subagent` events with nested `subagent_tool` children
+- `mergeEvents(sse, cw, lf)` — sorts by timestamp; deduplicates CW `tool_timing` events within 5s of matching SSE `tool_use` events (merges duration/tokens in-place)
 
-**LogDetailModal**: Fixed overlay (z-50), click-outside to close, Escape key to close.
-- Header: agent icon + name + event type badge
-- Toggle: Formatted / Raw JSON (active = `bg-[#003366] text-white`)
-- Raw JSON mode: copy-to-clipboard button
-- Formatted mode: type-specific layout (tool name + input for tool_use, name + result for tool_result, content for text/error, target+reason for handoff, metadata for complete)
-- Footer: log entry id + formatted timestamp
+**`ActivityEvent` type**:
+```typescript
+export interface ActivityEvent {
+  id: string;
+  timestamp: string;
+  source: 'sse' | 'cw' | 'langfuse';
+  type: string;
+  agent: string;
+  label: string;
+  detail?: string;
+  tokens?: { in: number; out: number };
+  duration_ms?: number;
+  children?: ActivityEvent[];   // subagent tool calls (langfuse only)
+  raw?: unknown;
+}
+```
+
+**Filter bar** (inside feed): All / SSE / CW / Traces pill buttons
+
+**Historical hydration**: On mount (once per `sessionId`), fetches `/api/sessions/${sessionId}/audit-logs` and prepends historical `AuditLogEntry[]` before live `logs`
+
+**Auto-fetch enrichment**: 35 second delay after streaming ends triggers CW + Langfuse fetch (prevents early empty responses)
+
+**Detail modal**: `TraceDetailModal` opens on row click; shows source badge, type, agent, timestamp; download as JSON
+
+**Type color map** (for `ActivityRow` label coloring):
+
+| type | color |
+|------|-------|
+| `tool_use` | `text-yellow-700` |
+| `tool_result` | `text-orange-700` |
+| `document` | `text-blue-700` |
+| `reasoning` | `text-purple-600` |
+| `response` | `text-gray-700` |
+| `state_update` | `text-indigo-600` |
+| `persistence` | `text-teal-600` |
+| `turn_complete` | `text-gray-500` |
+| `error` | `text-red-600` |
+| `user_message` | `text-cyan-700` |
+| `subagent` | `text-violet-700` |
+| `trace_complete` | `text-indigo-500` |
+| `tool_timing` | `text-gray-400` |
+
+**ActivityRow columns**: source dot | relative time (mm:ss from first event) | agent badge (8px bold uppercase) | type icon | label | detail (truncated) | tokens badge (emerald) | duration badge (gray)
+
+### Agent Logs (legacy — `components/chat-simple/agent-logs.tsx`)
+
+Still present in the codebase but no longer directly surfaced as a tab in `ActivityPanel`. `ActivityFeed` is now the Activity tab renderer. If the old `agent-logs.tsx` component is still imported anywhere, it renders the older card-based SSE-only timeline.
 
 ### Home Page (`/`)
 
@@ -394,6 +586,41 @@ interface TestResultDetail {
 - Data stored in DynamoDB `eagle` table with `TESTRUN#` PK/SK pattern
 
 **Protected by**: `<AuthGuard>` wrapper + `<TopNav />` header
+
+### Admin API Explorer (`/admin/api-explorer`)
+
+**File**: `client/app/admin/api-explorer/page.tsx`
+
+**Purpose**: Displays recent HTTP request history from the FastAPI in-memory ring buffer. Useful for debugging API call patterns and latency.
+
+**Data source**: `GET /api/admin/request-log?limit=200&path_filter=` (proxies to FastAPI ring buffer)
+
+**Interfaces**:
+```typescript
+interface RequestEntry {
+  timestamp: string;
+  method: string;
+  path: string;
+  status_code: number;
+  duration_ms: number;
+  tenant_id: string;
+}
+
+interface RouteStat {
+  route: string;
+  calls: number;
+  avg_ms: number;
+  errors: number;
+}
+```
+
+**Features**:
+- Category filter tabs: all / sessions / chat / documents / admin / other
+- `categorize(path)` function maps API path prefixes to tab categories
+- Status code colored badges: green (<300), blue (3xx), yellow (4xx), red (5xx)
+- HTTP method colored text: GET=blue, POST=green, DELETE=red, PATCH=amber
+- Route stats summary (calls, avg_ms, errors)
+- Manual refresh button + auto-refresh toggle
 
 ### Eval Page (`/admin/eval`)
 
@@ -779,6 +1006,33 @@ The eval page (`/admin/eval`) uses a dark theme:
 - Accent: indigo-500 (`#818cf8`)
 - SVG diagram with dark backgrounds and colored phase rectangles
 
+### lucide-react Icon Usage Pattern
+
+Icons are always imported by name from `lucide-react` and sized with Tailwind `w-N h-N` classes. Never use string icon names or a generic Icon component — import each icon individually. Common icons and their usage:
+
+| Icon | Used in |
+|------|---------|
+| `Activity` | ActivityPanel activity tab |
+| `Bell` | ActivityPanel notifications tab |
+| `CheckSquare` | ActivityPanel package tab |
+| `Cpu` | ActivityPanel bedrock tab, tool_use events |
+| `FileText` | ActivityPanel documents tab, tool_result events |
+| `PanelRightClose` / `PanelRightOpen` | ActivityPanel collapse/expand toggle |
+| `Brain` | reasoning events |
+| `MessageSquare` | response events |
+| `Database` | state_update/persistence events |
+| `GitBranch` | subagent events, ActivityFeed empty state |
+| `AlertCircle` | error events |
+| `CheckCircle2` | turn_complete / trace_complete events |
+| `Clock` | tool_timing events |
+| `RefreshCw` | ActivityFeed refresh button |
+| `Filter` | ActivityFeed filter bar |
+| `BarChart2` | token count badges |
+| `User` | user_message events |
+| `ChevronDown` / `ChevronRight` | expandable children in ActivityRow |
+
+When the linter complains about an unused icon import (e.g., `Terminal`, `Cloud`), replace it with `Activity` or the appropriate semantic icon from the table above rather than leaving unused imports.
+
 ---
 
 ## Part 8: Agent Color System (`client/lib/agent-colors.ts`)
@@ -863,6 +1117,20 @@ export interface UseAgentStreamReturn {
   addFormSubmitLog: (formType: string, data: Record<string, unknown>, summary?: string) => void;
 }
 ```
+
+### Callbacks
+
+`useAgentStream` accepts an options object with callbacks:
+
+| Callback | Signature | Purpose |
+|----------|-----------|---------|
+| `onMessage` | `(msg) => void` | New assistant message chunk |
+| `onComplete` | `() => void` | Streaming turn finished |
+| `onError` | `() => void` | Streaming error |
+| `onDocumentGenerated` | `(doc: DocumentInfo) => void` | Document tool result received |
+| `onToolUse` | `(event: ToolUseEvent) => void` | Tool call started or completed |
+| `onBedrockTrace` | `(trace: Record<string, unknown>) => void` | Bedrock trace event received |
+| `onMetadata` | `(meta: Record<string, unknown>) => void` | SSE metadata event — used for PackageState accumulation |
 
 ### Log Entry Sources
 
@@ -951,19 +1219,25 @@ CloudWatch /eagle/test-runs
 
 - AuthGuard wrapper for all protected pages
 - `'use client'` directive on all interactive pages
-- Lucide icons consistently used throughout
+- Lucide icons consistently used throughout — import individually by name
 - Dark theme for eval page (SVG-based), light theme for chat and tests
 - Inline forms in message list (not separate pages)
 - Debounced session saves (500ms timeout)
 - Backend health check via `/api/health` proxy route (30-second polling interval)
+- Readiness probe via `/api/health/ready` — checks DynamoDB + Bedrock; returns 503 on failure
 - Full plugin slugs as SKILL_TEST_MAP keys (e.g., `'oa-intake'`, `'document-generator'`) matching eagle-plugin/ directory names
-- Collapsible right panel pattern: open=380px, closed=32px strip (vertical label + arrow)
+- Collapsible right panel pattern: open=380px, closed=36px strip with PanelRightOpen icon
 - Agent color system centralized in `client/lib/agent-colors.ts` — all 12 agents registered
-- `groupLogs()` to filter reasoning events before rendering the Agent Logs tab
+- `groupLogs()` to filter reasoning events before rendering the Activity tab
 - `addUserInputLog(input)` called in `handleSend()` so user turns appear in the agent log timeline
-- Activity panel default tab is `'logs'` — most useful tab on first open
-- LogDetailModal: Formatted/Raw JSON toggle, Escape key to close, click-outside to close
-- `useEffect` on `filtered.length` for auto-scroll-to-bottom in log timeline
+- Activity panel default tab is `'package'` — most useful tab for acquisition workflows (changed from 'logs')
+- ActivityFeed consolidates SSE + CloudWatch + Langfuse in a single unified timeline (replaces split tabs)
+- `onMetadata` callback on `useAgentStream` accumulates `PackageState` from SSE metadata events
+- `PackageState` / `EagleChecklist` interfaces exported from `activity-panel.tsx` for use in parent component
+- Session sub-routes (`/api/sessions/[sessionId]/*`) all use `params: Promise<{ sessionId: string }>` and forward the `Authorization` header
+- Admin proxy routes pass query params through using `searchParams.toString()` before proxying to FastAPI
+- `ActivityFeed` auto-fetches CloudWatch + Langfuse enrichment 35s after streaming ends (prevents stale empty responses)
+- `TraceDetailModal` reused from `trace-detail-modal.tsx` for click-to-expand raw event detail in ActivityFeed
 
 ### Patterns To Avoid
 
@@ -974,6 +1248,9 @@ CloudWatch /eagle/test-runs
 - Don't use short diagram actor aliases (`intake`, `docgen`) as SKILL_TEST_MAP keys — use the full plugin slug
 - Don't add a new agent to eagle-plugin/ without updating `AGENT_COLORS`, `AGENT_NAMES`, and `AGENT_ICONS` in `agent-colors.ts`
 - Don't use the horizontal flex layout inside a `flex-col` parent without `min-w-0` on the flex-1 child — this causes overflow
+- Don't use `params: { sessionId: string }` (non-Promise) in Next.js 15+ route handlers — must be `params: Promise<{ sessionId: string }>` and awaited
+- Don't leave unused icon imports from lucide-react — the linter will flag them; replace with the appropriate semantic icon
+- Don't reference `agent-logs.tsx` as the Activity tab renderer — `ActivityFeed` is the current implementation
 
 ### Common Issues
 
@@ -983,8 +1260,12 @@ CloudWatch /eagle/test-runs
 - **API routes fail**: Eval page shows empty run selector, traces tab says "No test traces"
 - **SKILL_TEST_MAP missing key**: Eval modal "Test Traces" tab shows no results for that skill
 - **TEST_NAMES/TEST_DEFS out of sync**: New tests show raw IDs on Next.js page or are missing from HTML dashboard
-- **Unknown agent_id in logs**: Agent Logs renders with amber "default" color scheme — add to `agent-colors.ts`
+- **Unknown agent_id in logs**: ActivityFeed renders with amber "default" color scheme — add to `agent-colors.ts`
 - **ActivityPanel not visible**: Verify parent has `flex` (horizontal) not `flex flex-col`; SimpleChatInterface wraps in `<div class="h-full flex">`
+- **Package tab empty on first open**: Expected — `PackageState` is null until the backend emits a `phase_change` or `checklist_update` metadata event
+- **Compliance alerts not accumulating**: Check that `onMetadata` callback is wired to `useAgentStream` and `stateType === 'compliance_alert'` branch is hit
+- **ActivityFeed showing no CW/Langfuse data**: Enrichment fetch runs 35s after streaming ends; use the Refresh button to trigger immediately
+- **Historical audit logs not hydrating**: Check that `/api/sessions/[sessionId]/audit-logs` route returns `{ events: [...] }` shape
 
 ### Tips
 
@@ -994,9 +1275,12 @@ CloudWatch /eagle/test-runs
 - The eval page's run selector prefers CloudWatch runs first, then local files
 - Dev mode auth (no Cognito) gives premium tier with admin role
 - `/api/health` proxies to FastAPI and returns 502 if backend is unreachable — useful for health indicator polling
-- Agent Logs tab shows event count badge — useful for confirming the stream is running
-- Click any event card in Agent Logs to open the LogDetailModal with full event details
-- Use "Raw JSON" toggle in LogDetailModal to inspect the full AuditLogEntry for debugging
+- `/api/health/ready` is the deep readiness probe (DynamoDB + Bedrock) — use for ECS health checks
+- Activity tab badge count shows number of log entries — useful for confirming the stream is running
+- Click any event row in ActivityFeed to open TraceDetailModal with full raw event JSON
+- ActivityFeed filter pills (All/SSE/CW/Traces) help isolate event source during debugging
+- Package tab shows `phase` badge even if checklist is empty — useful for tracking phase transitions during intake
+- Admin API Explorer (`/admin/api-explorer`) shows ring-buffer HTTP history — filter by category (sessions/chat/documents/admin)
 
 ---
 
@@ -1012,12 +1296,16 @@ CloudWatch /eagle/test-runs
 - DynamoDB-backed test results page (`/admin/tests`) with run list → detail drill-down (discovered: 2026-03-04)
 - `encodeURIComponent(runId)` for URL-safe run_id in API calls (discovered: 2026-03-04)
 - Grouping test results by `test_file` in detail view improves readability (discovered: 2026-03-04)
-- 3-tab right panel (Documents/Activity/Agent Logs) as sibling of chat column in horizontal flex (discovered: 2026-03-04)
-- Collapsible panel: open=380px / closed=32px toggle strip with vertical label (discovered: 2026-03-04)
-- `groupLogs()` filtering reasoning events keeps Agent Logs tab readable during long streams (discovered: 2026-03-04)
+- 5-tab right panel (Package/Docs/Alerts/Activity/Bedrock) as sibling of chat column in horizontal flex (discovered: 2026-03-16)
+- Collapsible panel: open=380px / closed=36px toggle strip with PanelRightOpen icon (discovered: 2026-03-04, updated: 2026-03-16)
+- `groupLogs()` filtering reasoning events keeps Activity tab readable during long streams (discovered: 2026-03-04)
 - `addUserInputLog()` called before `sendQuery()` ensures user turns appear as first entry in each log sequence (discovered: 2026-03-04)
-- LogDetailModal Formatted/Raw JSON toggle covers both human review and developer debugging in one modal (discovered: 2026-03-04)
 - Centralizing agent colors in `agent-colors.ts` with `getAgentColors()`/`getAgentName()`/`getAgentIcon()` helpers makes new agent onboarding a 3-line change (discovered: 2026-03-04)
+- ActivityFeed merges SSE + CW + Langfuse into a single timeline with dedup logic — eliminates duplicate tool_timing rows (discovered: 2026-03-16)
+- `onMetadata` callback accumulates `PackageState` via functional setState spread — each metadata event type updates only its slice (discovered: 2026-03-16)
+- Exporting `PackageState` and `EagleChecklist` from `activity-panel.tsx` keeps the type collocated with its renderer (discovered: 2026-03-16)
+- Session sub-routes pattern: `params: Promise<{ sessionId: string }>` + forward Authorization + proxy status code (discovered: 2026-03-16)
+- ActivityFeed historical hydration from `/api/sessions/[sessionId]/audit-logs` on mount ensures past-turn events appear even after page reload (discovered: 2026-03-16)
 
 ### patterns_to_avoid
 - Don't rely on embedded data in HTML dashboard for production (use API)
@@ -1026,6 +1314,8 @@ CloudWatch /eagle/test-runs
 - Don't forget `errors` field in TestRun interface — DynamoDB returns it alongside `failed`/`skipped` (discovered: 2026-03-04)
 - Don't add a new Strands agent without updating all three maps in `agent-colors.ts` — unknown agents render amber fallback color
 - Don't put `useEffect` network calls (e.g. health checks) inside components that mount on every page — use a shared context provider instead (discovered: 2026-03-05)
+- Don't use non-Promise `params` in Next.js 15+ dynamic route handlers — always `params: Promise<{ ... }>` and `await params` (discovered: 2026-03-16)
+- Don't leave stale icon imports (Terminal, Cloud) from lucide-react after component refactors — causes lint errors (discovered: 2026-03-16)
 
 ### common_issues
 - trace_logs.json must exist for /admin/tests to show data (legacy — new tests page uses DynamoDB)
@@ -1034,8 +1324,9 @@ CloudWatch /eagle/test-runs
 - HTML dashboard TEST_DEFS lags behind TEST_NAMES when new UC tests are added — check both before reporting test count
 - `kb-review/[id]/approve` and `kb-review/[id]/reject` routes have TS errors: `params` should be `Promise<{ id: string }>` in Next.js 15+ (pre-existing)
 - `@excalidraw/excalidraw` module not found — optional dependency, not installed (pre-existing)
-- ActivityPanel internal default tab is 'logs' — if you want a different default, change `useState<TabId>('logs')` in `activity-panel.tsx`
+- ActivityPanel internal default tab is 'package' — if you want a different default, change `useState<TabId>('package')` in `activity-panel.tsx`
 - Navigation between protected pages feels slow: TopNav was re-mounting on every page (not in shared layout), firing checkBackendHealth() on each nav — fixed by BackendStatusContext (2026-03-05)
+- ActivityFeed enrichment (CW + Langfuse) is delayed 35s post-stream — not a bug, by design; use Refresh button to trigger immediately
 
 ### tips
 - Use /admin/eval to demonstrate EAGLE workflow to stakeholders (10 use cases as of 2026-02-25)
@@ -1044,5 +1335,7 @@ CloudWatch /eagle/test-runs
 - SKILL_TEST_MAP line numbers shift as USE_CASES array grows — always verify line numbers with grep before editing
 - Tests page now uses DynamoDB persistence — no more trace_logs.json dependency for pytest results
 - Run `pytest tests/ -v` to auto-persist results to DDB (controlled by `EAGLE_PERSIST_TEST_RESULTS` env var)
-- Agent Logs "Clear" button only appears when `logs.length > 0` and `activeTab === 'logs'`
-- The `addFormSubmitLog()` hook export is available but not yet wired to any form — use it to log intake form submissions to the Agent Logs tab
+- Activity tab "Clear" button only appears when `logs.length > 0` and `activeTab === 'activity'`
+- The `addFormSubmitLog()` hook export is available but not yet wired to any form — use it to log intake form submissions to the Activity tab
+- Package tab `DOC_LABELS` map covers 8 doc types: sow, igce, market_research, acquisition_plan, funding_doc, justification, eval_criteria, j_a
+- Admin API Explorer categories: sessions / chat / documents / admin / other — useful for isolating call patterns

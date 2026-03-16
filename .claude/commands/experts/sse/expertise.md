@@ -4,7 +4,7 @@ file-type: expertise
 domain: sse
 parent: "[[sse/_index]]"
 human_reviewed: false
-last_updated: "2026-03-09T18:00:00Z"
+last_updated: "2026-03-16T00:00:00Z"
 description: "SSE Expertise (Complete Mental Model)"
 allowed-tools: []
 tags: [expert, sse, streaming, expertise, mental-model]
@@ -15,6 +15,8 @@ tags: [expert, sse, streaming, expertise, mental-model]
 ## Part 1: Stream Protocol (`server/app/stream_protocol.py`)
 
 ### StreamEventType Enum
+
+10 event types (confirmed from `stream_protocol.py`):
 
 ```python
 class StreamEventType(str, Enum):
@@ -27,6 +29,7 @@ class StreamEventType(str, Enum):
     COMPLETE = "complete"
     ERROR = "error"
     HANDOFF = "handoff"
+    BEDROCK_TRACE = "bedrock_trace"
 ```
 
 ### StreamEvent Dataclass
@@ -46,13 +49,18 @@ Serialization: `.to_dict()` → `.to_json()` → `.to_sse()` → `"data: {json}\
 
 Helper that pre-fills `agent_id` and `agent_name` on every event:
 - `write_text(queue, content)` — TEXT event
+- `write_reasoning(queue, reasoning)` — REASONING event
 - `write_tool_use(queue, tool_name, tool_input, tool_use_id="")` — TOOL_USE event
 - `write_tool_result(queue, tool_name, result)` — TOOL_RESULT event
-- `write_complete(queue)` — COMPLETE event
+- `write_metadata(queue, metadata: dict)` — METADATA event (used by `update_state` tool)
+- `write_handoff(queue, target_agent_id, reason)` — HANDOFF event
+- `write_complete(queue, metadata=None)` — COMPLETE event
 - `write_error(queue, error_message)` — ERROR event
+- `write_bedrock_trace(queue, trace_data: dict)` — BEDROCK_TRACE event
 
 The `tool_use` payload shape: `{"name": str, "input": dict, "tool_use_id"?: str}`
 The `tool_result` payload shape: `{"name": str, "result": any}`
+The `metadata` payload shape: `{"state_type": str, ...state-type-specific fields}` (see Part 9)
 
 ---
 
@@ -322,12 +330,29 @@ Inside `sendQuery()`:
    - Server-side tools just notify UI (tool card appears)
 3. **tool_result** → `serverToolResults.push({toolName, result: {success: true, result: tr.result}})`
    - Also checks for `create_document` results → `onDocumentGenerated()`
-4. **complete** → `onComplete(serverToolResults)`
+4. **metadata** → `options.onMetadata?.(event.metadata)` — fires immediately, not deferred to `onComplete`
+5. **complete** → `onComplete(serverToolResults)`
    - Triggers result merge in `simple-chat-interface.tsx`
+
+### useAgentStream Options
+
+```typescript
+interface UseAgentStreamOptions {
+  onMessage?: (msg: AssistantMessage) => void;
+  onToolUse?: (call: ToolCall) => void;
+  onDocumentGenerated?: (doc: DocumentResult) => void;
+  onMetadata?: (metadata: Record<string, unknown>) => void;  // NEW — state push
+  onBedrockTrace?: (trace: Record<string, unknown>) => void;
+  onComplete?: (toolResults?: ServerToolResult[]) => void;
+  onError?: (error: string) => void;
+}
+```
 
 ### Key: Results accumulated as plain JS array, merged atomically at `onComplete`
 
 This avoids React state batching issues — `serverToolResults` is a local variable, not React state.
+
+`onMetadata` fires per-event (not deferred), allowing PackageState to update while the agent is still streaming.
 
 ---
 
@@ -394,7 +419,159 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 
 ---
 
-## Part 8: Common Issues and Patterns
+## Part 8: update_state → eagle_state → SSE Metadata Pipeline
+
+### Overview
+
+The `update_state` tool is the sole mechanism for pushing real-time UI state to the frontend via the SSE `metadata` event type. It is mandatory — the system prompt instructs the supervisor to call it after every meaningful state change.
+
+```
+update_state tool call
+    → _make_update_state_tool() factory
+    → eagle_state.apply_event(state, state_type, params)  [pure, returns new state dict]
+    → loop.call_soon_threadsafe(result_queue.put_nowait, metadata_chunk)
+    → _drain_tool_results() picks up {"type": "metadata", ...}
+    → stream_generator() → writer.write_metadata(sse_queue, payload)
+    → SSE: data: {"type":"metadata","metadata":{...}}\n\n
+    → use-agent-stream.ts processEventData()
+    → options.onMetadata?.(event.metadata)
+    → simple-chat-interface.tsx onMetadata callback
+    → setEagleState(prev => accumulated PackageState)
+    → activity-panel.tsx PackageStatusTab renders checklist, phase, alerts
+```
+
+### 5 state_type Values and Payload Shapes
+
+Defined in `eagle_state.py:apply_event()` and `_make_update_state_tool()`:
+
+**1. `phase_change`**
+```json
+{
+  "state_type": "phase_change",
+  "phase": "analysis",
+  "previous": "intake",
+  "package_id": "PKG-2026-0001",
+  "checklist": { "required": [...], "completed": [...] }
+}
+```
+Frontend effect: `next.phase`, `next.previous_phase`, optional `next.package_id`, optional `next.checklist`
+
+**2. `checklist_update`**
+```json
+{
+  "state_type": "checklist_update",
+  "package_id": "PKG-2026-0001",
+  "checklist": { "required": ["sow", "igce"], "completed": ["sow"], "missing": ["igce"] },
+  "progress_pct": 50
+}
+```
+Frontend effect: `next.checklist`, `next.package_id`, `next.progress_pct`
+
+**3. `document_ready`**
+```json
+{
+  "state_type": "document_ready",
+  "package_id": "PKG-2026-0001",
+  "doc_type": "sow",
+  "version": "v1",
+  "document_id": "doc-abc123",
+  "checklist": { "required": [...], "completed": ["sow", ...] },
+  "progress_pct": 75
+}
+```
+Frontend effect: `next.checklist`, `next.package_id`, `next.progress_pct`
+Backend effect (in `eagle_state.apply_event`): adds `doc_type` to `completed_documents`, records in `document_versions`
+
+**4. `compliance_alert`**
+```json
+{
+  "state_type": "compliance_alert",
+  "severity": "warning",
+  "items": [
+    { "name": "FAR 15.304", "note": "Evaluation criteria not documented" }
+  ]
+}
+```
+Frontend effect: appends `{severity, items}` to `next.compliance_alerts` array (accumulates, never replaces)
+
+**5. `document_validation`** (backend-only, not forwarded to frontend as metadata)
+```json
+{
+  "state_type": "document_validation",
+  "doc_type": "sow",
+  "action": "block",
+  "reason": "Missing PWS",
+  "far_citation": "FAR 15.204"
+}
+```
+Backend effect only: appended to `validation_results` list in `eagle_state`. Not emitted as SSE metadata.
+
+### PackageState Accumulation in `simple-chat-interface.tsx`
+
+The `onMetadata` callback uses a **functional state updater** (`setEagleState(prev => ...)`) to safely accumulate across multiple metadata events during a single response:
+
+```typescript
+onMetadata: (meta) => {
+    const stateType = meta.state_type as string | undefined;
+    setEagleState((prev) => {
+        const next: PackageState = { ...prev };
+        if (stateType === 'phase_change') {
+            next.phase = meta.phase as string;
+            next.previous_phase = meta.previous as string;
+            if (meta.package_id) next.package_id = meta.package_id as string;
+            if (meta.checklist) next.checklist = meta.checklist as PackageState['checklist'];
+        } else if (stateType === 'checklist_update' || stateType === 'document_ready') {
+            if (meta.checklist) next.checklist = meta.checklist as PackageState['checklist'];
+            if (meta.package_id) next.package_id = meta.package_id as string;
+            if (meta.progress_pct !== undefined) next.progress_pct = meta.progress_pct as number;
+        } else if (stateType === 'compliance_alert') {
+            const alert = { severity: meta.severity, items: meta.items };
+            next.compliance_alerts = [...(prev?.compliance_alerts ?? []), alert];
+        }
+        return next;
+    });
+},
+```
+
+**Key patterns:**
+- `phase_change` / `checklist_update` / `document_ready` use **replace** semantics for their fields
+- `compliance_alert` uses **append** semantics — alerts accumulate in array, never replaced
+- All fields are optional: `if (meta.package_id)` guards prevent wiping with undefined
+- `prev` spread (`{ ...prev }`) preserves existing fields not touched by this event
+
+### eagle_state.py Schema Defaults
+
+```python
+_DEFAULTS = {
+    "schema_version": "1.0",
+    "phase": "intake",             # intake | analysis | drafting | review | complete
+    "previous_phase": None,
+    "package_id": None,
+    "required_documents": [],
+    "completed_documents": [],
+    "document_versions": {},       # {doc_type: {document_id, version, s3_key}}
+    "compliance_alerts": [],       # [{severity, items: [{name, note}]}]
+    "validation_results": [],      # [{doc_type, action, reason, far_citation}]
+    "turn_count": 0,
+    "last_updated": None,
+    "session_id": None,
+    "specialist_summaries": {},
+}
+```
+
+`normalize(state)` merges any stored state with these defaults — forward/backward compatible.
+
+### AfterModelCallEvent Guard
+
+`_EagleEventHandler.after_model_call()` checks whether `update_state` was called during the model cycle. If not, it emits a `WARN`-level CloudWatch log event:
+```
+update_state not called before final response
+```
+This catches drift where the LLM gives a final answer without persisting state.
+
+---
+
+## Part 9: Common Issues and Patterns
 
 ### patterns_that_work
 
@@ -408,6 +585,9 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 - `_sdk_with_keepalive()` reuses pending_task across timeout iterations to prevent chunk loss (discovered: 2026-03-09)
 - Blank response fallback in streaming_routes guarantees at least one TEXT event before COMPLETE
 - Agent result extraction at stream end (`event["result"]` with `hasattr(metrics)`) recovers final text when no text deltas were streamed
+- `onMetadata` functional state updater (`setEagleState(prev => ...)`) safely accumulates multiple metadata events in a single response without React batching issues (discovered: 2026-03-16)
+- `compliance_alert` uses append semantics so multiple alerts accumulate without overwriting (discovered: 2026-03-16)
+- `eagle_state.apply_event()` is pure — takes old state + event, returns new state dict; never mutates input; single source of truth for state transitions (discovered: 2026-03-16)
 
 ### patterns_to_avoid
 
@@ -417,6 +597,8 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 - **DO NOT emit tool_result from stream_async event handling** — stream events fire during streaming, before the tool actually executes; use result_queue pattern instead
 - **DO NOT discard the pending_task in keepalive wrapper** — if `asyncio.wait` times out, the task is still running; discarding it loses the chunk. Reuse `pending_task` on next iteration.
 - **DO NOT assume `_load_plugin_config()` returns DynamoDB manifest shape** — it may lack `data` key. Always load bundled `plugin.json` first as fallback (bug fixed 2026-03-09).
+- **DO NOT replace `compliance_alerts` array in `onMetadata`** — use append (`[...prev?.compliance_alerts ?? [], alert]`) or alerts from earlier events are lost.
+- **DO NOT emit `document_validation` state_type as SSE metadata** — it is backend-only, stored in `validation_results`, never forwarded to frontend.
 
 ### common_issues
 
@@ -424,7 +606,9 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 - **Empty-name tool_result events**: Strands raw callbacks emit artifacts with no tool name. Fix: filter in `_drain_tool_results()` and `streaming_routes.py`.
 - **Duplicate tool_use events**: Both `current_tool_use` and `contentBlockStart` fire for the same tool. Fix: `_current_tool_id` dedup guard in stream event handler.
 - **tool_result not matched to card**: Name mismatch between tool_use name and tool_result name. Fix: ensure both use the same `tool_name` / `safe_name`.
-- **Zombie server processes**: Stale uvicorn processes keep LISTENING sockets, serving old code. Fix: `taskkill /F /T /PID` with tree kill flag.
+- **Zombie server processes**: Stale uvicorn processes keep LISTENING sockets, serving old code. Fix: `taskkill /F /T /PID` with tree kill kill flag.
+- **Package tab not updating**: `onMetadata` wired in `use-agent-stream.ts` but not passed in `useAgentStream({...})` call in `simple-chat-interface.tsx`. Fix: confirm `onMetadata` option is present in the hook call site.
+- **PackageState fields undefined after metadata event**: `meta.phase` or `meta.checklist` was not sent in the SSE payload. Fix: ensure `_make_update_state_tool` builds the full payload including optional fields the frontend depends on.
 
 ### tips
 
@@ -438,7 +622,7 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 
 ---
 
-## Part 9: Test Coverage
+## Part 10: Test Coverage
 
 ### Backend Tests (pytest, `server/tests/`)
 
@@ -458,9 +642,21 @@ const TOOL_META: Record<string, {icon: string; label: string}> = {
 | `validate-sse-pipeline.spec.ts` | StreamEvent schema validation, tool_use/tool_result pairing, rendering verification, FIFO ordering, session persistence |
 | `validate-uc-simple-acquisition.spec.ts` | Full UC quality + SSE event flow + tool card rendering for simple acquisition scenario |
 
-### Coverage Gaps (as of 2026-03-09)
+### E2E Tests (Playwright, `client/tests/`)
+
+| File | Coverage |
+|------|---------|
+| `validate-sse-pipeline.spec.ts` | StreamEvent schema validation, tool_use/tool_result pairing, rendering verification, FIFO ordering, session persistence |
+| `validate-uc-simple-acquisition.spec.ts` | Full UC quality + SSE event flow + tool card rendering for simple acquisition scenario |
+| `validate-acquisition-package-flow.spec.ts` | metadata events with state_type, package flow from intake through document generation |
+| `validate-state-push-metadata.spec.ts` | state_type schema validation — phase_change/checklist_update/document_ready/compliance_alert payload shapes |
+
+### Coverage Gaps (as of 2026-03-16)
 
 - No unit tests for `_sdk_with_keepalive()` wrapper timeout/reuse behavior
 - No unit tests for knowledge_search/knowledge_fetch tool dispatch through service tools
 - No pytest coverage for `_load_plugin_config()` fallback chain
 - No E2E test for fast-path document generation (bypasses agent entirely)
+- No pytest unit tests for `eagle_state.apply_event()` all 5 state_type branches
+- No pytest unit tests for `_make_update_state_tool()` payload construction per state_type
+- No unit test asserting `compliance_alert` accumulates (append) while others replace (merge)

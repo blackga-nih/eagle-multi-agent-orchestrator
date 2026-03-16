@@ -52,22 +52,46 @@ stream_generator() ^sg-title
 Layer 4: MultiAgentStreamWriter — stream_protocol.py ^layer4-label
 
 MultiAgentStreamWriter ^writer-title
-• StreamEventType: text | reasoning | tool_use | tool_result | elicitation | metadata | complete | error | handoff
+• 10 StreamEventTypes: text | reasoning | tool_use | tool_result | elicitation | metadata | complete | error | handoff | bedrock_trace
+• write_metadata(queue, {state_type, ...}) → METADATA event
+• write_bedrock_trace(queue, trace_data) → BEDROCK_TRACE event
 • Wire format: data: {"type":"tool_use","agent_id":"eagle","agent_name":"EAGLE","timestamp":"...","tool_use":{"name":"search_far","input":{},"tool_use_id":"toulu_..."}}\n\n ^writer-body
+
+Layer 4b: update_state → eagle_state → metadata pipeline ^layer4b-label
+
+update_state tool (factory) ^us-title
+• state_type: phase_change | checklist_update | document_ready | compliance_alert
+• eagle_state.apply_event(state, state_type, params) → new state dict (pure)
+• loop.call_soon_threadsafe → result_queue → {"type":"metadata", ...}
+• streaming_routes: writer.write_metadata(sse_queue, payload) ^us-body
+
+PackageState accumulation (simple-chat-interface.tsx) ^ps-title
+• onMetadata(meta) → setEagleState(prev => ...) functional updater
+• phase_change: replace phase/previous_phase/package_id/checklist
+• checklist_update: replace checklist/package_id/progress_pct
+• document_ready: same as checklist_update
+• compliance_alert: APPEND to compliance_alerts array ^ps-body
 
 Layer 5: use-agent-stream.ts — Frontend Parser ^layer5-label
 
 use-agent-stream.ts ^hook-title
 • processEventData() routes by event.type
 • text → accumulate   tool_use → upsertToolCall   tool_result → match by name
+• metadata → options.onMetadata?.(event.metadata)  [fires immediately, not deferred]
+• bedrock_trace → options.onBedrockTrace?.(trace)
 • complete → finalize   error → show error ^hook-body
 
-Layer 6: simple-message-list.tsx — Rendering ^layer6-label
+Layer 6: simple-message-list.tsx + activity-panel.tsx — Rendering ^layer6-label
 
 simple-message-list.tsx ^render-title
 • MemoizedMarkdown (React.memo) for completed messages
 • remarkGfm for tables, ToolUseDisplay per card
 • Chevron expand/collapse   green dot = done ^render-body
+
+activity-panel.tsx PackageStatusTab ^ap-title
+• Renders eagleState: phase, checklist (required/completed/missing), progress_pct
+• compliance_alerts: severity badge + items list
+• Driven entirely by SSE metadata events — no polling ^ap-body
 
 Test Coverage Matrix ^matrix-label
 
