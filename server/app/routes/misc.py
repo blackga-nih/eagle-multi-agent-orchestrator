@@ -15,7 +15,7 @@ from ..stores.session_store import (
 from ..admin_service import check_rate_limit, record_request_cost, calculate_cost
 from ..health_checks import check_knowledge_base_health
 from ._deps import (
-    USE_PERSISTENT_SESSIONS, TELEMETRY_LOG, log_telemetry,
+    USE_PERSISTENT_SESSIONS, TELEMETRY_LOG, log_telemetry, API_REQUEST_LOG,
 )
 from .chat import SESSIONS  # shared in-memory fallback
 
@@ -251,6 +251,36 @@ async def websocket_chat(ws: WebSocket):
             await ws.send_json({"type": "error", "message": "WebSocket connection error"})
         except Exception:
             pass
+
+
+# ── Admin request log ─────────────────────────────────────────────────
+
+@router.get("/api/admin/request-log", tags=["admin"])
+async def api_request_log(limit: int = 200, path_filter: str = ""):
+    """Recent HTTP request history from in-memory ring buffer."""
+    from collections import defaultdict
+    entries = list(API_REQUEST_LOG)[-limit:]
+    if path_filter:
+        entries = [e for e in entries if path_filter in e["path"]]
+    entries = list(reversed(entries))  # newest first
+
+    route_stats: dict = defaultdict(lambda: {"count": 0, "total_ms": 0, "errors": 0})
+    for e in list(API_REQUEST_LOG):
+        key = f"{e['method']} {e['path']}"
+        route_stats[key]["count"] += 1
+        route_stats[key]["total_ms"] += e["duration_ms"]
+        if e["status_code"] >= 400:
+            route_stats[key]["errors"] += 1
+    stats = [
+        {
+            "route": k,
+            "calls": v["count"],
+            "avg_ms": round(v["total_ms"] / v["count"]) if v["count"] else 0,
+            "errors": v["errors"],
+        }
+        for k, v in sorted(route_stats.items(), key=lambda x: -x[1]["count"])
+    ]
+    return {"entries": entries, "route_stats": stats, "total_logged": len(API_REQUEST_LOG)}
 
 
 # ── Health Check ──────────────────────────────────────────────────────

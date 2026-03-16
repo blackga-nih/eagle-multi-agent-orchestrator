@@ -1,11 +1,10 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { FileText, Bell, Terminal, Cloud, Cpu, CheckSquare, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { FileText, Bell, Cpu, CheckSquare, PanelRightClose, PanelRightOpen, Activity } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
-import AgentLogs from './agent-logs';
-import CloudWatchLogs from './cloudwatch-logs';
+import ActivityFeed from './activity-feed';
 import BedrockLogs from './bedrock-logs';
 
 // ---------------------------------------------------------------------------
@@ -47,7 +46,7 @@ interface ActivityPanelProps {
   eagleState?: PackageState | null;
 }
 
-type TabId = 'documents' | 'notifications' | 'logs' | 'cloudwatch' | 'bedrock' | 'package';
+type TabId = 'documents' | 'notifications' | 'activity' | 'bedrock' | 'package';
 
 interface TabDef {
   id: TabId;
@@ -56,12 +55,11 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { id: 'package',       label: 'Package',       icon: CheckSquare },
-  { id: 'documents',     label: 'Docs',          icon: FileText },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'logs',          label: 'Agent Logs',    icon: Terminal },
-  { id: 'cloudwatch',    label: 'CloudWatch',    icon: Cloud },
-  { id: 'bedrock',       label: 'Bedrock',       icon: Cpu },
+  { id: 'package',       label: 'Package',    icon: CheckSquare },
+  { id: 'documents',     label: 'Docs',       icon: FileText },
+  { id: 'notifications', label: 'Alerts',     icon: Bell },
+  { id: 'activity',      label: 'Activity',   icon: Activity },
+  { id: 'bedrock',       label: 'Bedrock',    icon: Cpu },
 ];
 
 // ---------------------------------------------------------------------------
@@ -409,7 +407,7 @@ export default function ActivityPanel({
           const alertCount = eagleState?.compliance_alerts?.length ?? 0;
           const badge =
             tab.id === 'package' && alertCount > 0 ? alertCount :
-            tab.id === 'logs' && logs.length > 0 ? logs.length :
+            tab.id === 'activity' && logs.length > 0 ? logs.length :
             tab.id === 'documents' && docCount > 0 ? docCount :
             tab.id === 'notifications' && notifCount > 0 ? notifCount :
             tab.id === 'bedrock' && bedrockTraces.length > 0 ? bedrockTraces.length :
@@ -446,8 +444,8 @@ export default function ActivityPanel({
         </button>
       </div>
 
-      {/* Tab-specific header (Agent Logs clear button) */}
-      {activeTab === 'logs' && logs.length > 0 && (
+      {/* Tab-specific header (Activity clear button) */}
+      {activeTab === 'activity' && logs.length > 0 && (
         <div className="flex items-center justify-between px-4 py-2 border-b border-[#D8DEE6]">
           <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">
             {logs.length} event{logs.length !== 1 ? 's' : ''}
@@ -463,12 +461,13 @@ export default function ActivityPanel({
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className={`flex-1 min-h-0 ${activeTab === 'activity' ? 'flex flex-col p-4' : 'overflow-y-auto p-4'}`}>
         {activeTab === 'package' && <PackageStatusTab eagleState={eagleState} />}
         {activeTab === 'documents' && <DocumentsTab documents={documents} />}
         {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
-        {activeTab === 'logs' && <AgentLogs logs={logs} />}
-        {activeTab === 'cloudwatch' && <CloudWatchLogs sessionId={sessionId} />}
+        {activeTab === 'activity' && (
+          <ActivityFeed sessionId={sessionId} logs={logs} isStreaming={isStreaming} />
+        )}
         {activeTab === 'bedrock' && <BedrockLogs bedrockTraces={bedrockTraces} logs={logs} />}
       </div>
     </div>

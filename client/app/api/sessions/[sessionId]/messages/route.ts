@@ -45,3 +45,27 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     );
   }
 }
+
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { sessionId } = await params;
+
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    const authorization = request.headers.get('Authorization');
+    if (authorization) headers['Authorization'] = authorization;
+
+    const response = await fetch(`${FASTAPI_URL}/api/sessions/${sessionId}/messages`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    const data = await response.json();
+    return NextResponse.json(data, { status: response.status });
+  } catch (error) {
+    console.error('Session messages DELETE error:', error);
+    return NextResponse.json(
+      { error: 'Failed to clear session messages' },
+      { status: 502 }
+    );
+  }
+}

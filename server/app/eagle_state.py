@@ -36,6 +36,7 @@ _DEFAULTS: dict = {
     "turn_count": 0,
     "last_updated": None,          # ISO-8601
     "session_id": None,
+    "specialist_summaries": {},    # {skill_name: truncated_text[:3000]} — persists across turns
 }
 
 

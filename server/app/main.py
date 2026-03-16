@@ -127,6 +127,12 @@ async def api_request_telemetry(request: Request, call_next):
     except Exception:
         pass
 
+    try:
+        from .routes._deps import log_api_request
+        log_api_request(request.method, path, response.status_code, duration_ms, tenant_id)
+    except Exception:
+        pass
+
     return response
 
 

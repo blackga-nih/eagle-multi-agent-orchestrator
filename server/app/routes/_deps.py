@@ -33,6 +33,21 @@ def log_telemetry(entry: dict):
     logger.info(json.dumps(entry, default=str))
 
 
+# ── API Request log ring buffer ───────────────────────────────────────
+API_REQUEST_LOG: deque = deque(maxlen=1000)
+
+
+def log_api_request(method: str, path: str, status: int, duration_ms: int, tenant_id: str) -> None:
+    API_REQUEST_LOG.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "method": method,
+        "path": path,
+        "status_code": status,
+        "duration_ms": duration_ms,
+        "tenant_id": tenant_id,
+    })
+
+
 # ── Auth Helpers ─────────────────────────────────────────────────────
 
 async def get_user_from_header(authorization: Optional[str] = Header(None)) -> UserContext:

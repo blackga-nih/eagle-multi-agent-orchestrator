@@ -95,6 +95,12 @@ async def stream_generator(
     writer = MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
     sse_queue: asyncio.Queue[str] = asyncio.Queue()
     full_response_parts: list[str] = []
+    collected_events: list[dict] = []
+
+    def _capture(event_dict: dict) -> None:
+        """Append non-text SSE events for persistence in DynamoDB metadata."""
+        if event_dict.get("type") != "text":
+            collected_events.append(event_dict)
 
     # --- Telemetry + Reasoning init ---
     # Strands SDK handles OTEL tracing automatically via its built-in Tracer.
@@ -107,6 +113,11 @@ async def stream_generator(
     if session_id:
         try:
             await asyncio.to_thread(add_message, session_id, "user", message, tenant_id, user_id)
+            _persist_meta = {"persistence": "user_message_saved", "session_id": session_id}
+            await writer.write_metadata(sse_queue, _persist_meta)
+            _capture({"type": "metadata", "agent_id": writer.agent_id, "agent_name": writer.agent_name,
+                      "timestamp": datetime.now(timezone.utc).isoformat(), "metadata": _persist_meta})
+            yield await sse_queue.get()
         except Exception:
             logger.warning("Failed to persist user message for session=%s user=%s", session_id, user_id)
 
@@ -186,12 +197,20 @@ async def stream_generator(
                 await writer.write_tool_use(
                     sse_queue, tu_name, tool_input, tool_use_id=tu_id,
                 )
+                _tu_payload: dict = {"name": tu_name, "input": tool_input}
+                if tu_id:
+                    _tu_payload["tool_use_id"] = tu_id
+                _capture({"type": "tool_use", "agent_id": writer.agent_id, "agent_name": writer.agent_name,
+                          "timestamp": datetime.now(timezone.utc).isoformat(), "tool_use": _tu_payload})
                 yield await sse_queue.get()
 
                 # Tool start tracing handled by Strands SDK built-in Tracer
 
             elif chunk_type == "metadata":
-                await writer.write_metadata(sse_queue, chunk.get("content", {}))
+                _meta_content = chunk.get("content", {})
+                await writer.write_metadata(sse_queue, _meta_content)
+                _capture({"type": "metadata", "agent_id": writer.agent_id, "agent_name": writer.agent_name,
+                          "timestamp": datetime.now(timezone.utc).isoformat(), "metadata": _meta_content})
                 yield await sse_queue.get()
 
             elif chunk_type == "bedrock_trace":
@@ -215,6 +234,9 @@ async def stream_generator(
                         result_data = {**result_data, "citations": _cites}
 
                 await writer.write_tool_result(sse_queue, tr_name, result_data)
+                _capture({"type": "tool_result", "agent_id": writer.agent_id, "agent_name": writer.agent_name,
+                          "timestamp": datetime.now(timezone.utc).isoformat(),
+                          "tool_result": {"name": tr_name, "result": result_data}})
                 yield await sse_queue.get()
 
                 # Telemetry: tool.result
@@ -245,6 +267,9 @@ async def stream_generator(
                         confidence=reasoning_data.get("confidence", "high"),
                     )
                     await writer.write_reasoning(sse_queue, json.dumps(reasoning_data))
+                    _capture({"type": "reasoning", "agent_id": writer.agent_id, "agent_name": writer.agent_name,
+                              "timestamp": datetime.now(timezone.utc).isoformat(),
+                              "content": json.dumps(reasoning_data)})
                     yield await sse_queue.get()
 
             elif chunk_type == "complete":
@@ -272,7 +297,16 @@ async def stream_generator(
                 if session_id and full_response_parts:
                     try:
                         full_text = "".join(full_response_parts)
-                        await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
+                        await asyncio.to_thread(
+                            add_message, session_id, "assistant", full_text, tenant_id, user_id,
+                            metadata={"audit_logs": collected_events},
+                        )
+                        await writer.write_metadata(sse_queue, {
+                            "persistence": "assistant_message_saved",
+                            "session_id": session_id,
+                            "token_count": len(full_text.split()),
+                        })
+                        yield await sse_queue.get()
                     except Exception:
                         logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
 
@@ -318,11 +352,17 @@ async def stream_generator(
                     sse_queue,
                     metadata=complete_metadata if complete_metadata else None,
                 )
+                _capture({"type": "complete", "agent_id": writer.agent_id, "agent_name": writer.agent_name,
+                          "timestamp": datetime.now(timezone.utc).isoformat(),
+                          "metadata": complete_metadata if complete_metadata else {}})
                 yield await sse_queue.get()
                 return
 
             elif chunk_type == "error":
-                await writer.write_error(sse_queue, chunk.get("error", "Unknown error"))
+                _err_msg = chunk.get("error", "Unknown error")
+                await writer.write_error(sse_queue, _err_msg)
+                _capture({"type": "error", "agent_id": writer.agent_id, "agent_name": writer.agent_name,
+                          "timestamp": datetime.now(timezone.utc).isoformat(), "content": _err_msg})
                 yield await sse_queue.get()
                 # Error tracing handled by Strands SDK built-in Tracer
                 return
@@ -331,7 +371,10 @@ async def stream_generator(
         if session_id and full_response_parts:
             try:
                 full_text = "".join(full_response_parts)
-                await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
+                await asyncio.to_thread(
+                    add_message, session_id, "assistant", full_text, tenant_id, user_id,
+                    metadata={"audit_logs": collected_events},
+                )
             except Exception:
                 logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
         await writer.write_complete(sse_queue)
@@ -507,5 +550,31 @@ def create_streaming_router(
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+    # ------------------------------------------------------------------
+    # GET /api/health/ready - Readiness probe (DynamoDB + Bedrock)
+    # ------------------------------------------------------------------
+    @router.get("/api/health/ready")
+    async def readiness_check():
+        """Readiness probe — checks DynamoDB + Bedrock reachability."""
+        from fastapi.responses import JSONResponse
+        checks: dict = {}
+        try:
+            from .stores.session_store import _get_table
+            _get_table().load()
+            checks["dynamodb"] = "ok"
+        except Exception as e:
+            checks["dynamodb"] = f"error: {e}"
+        try:
+            import boto3
+            boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            checks["bedrock"] = "ok"
+        except Exception as e:
+            checks["bedrock"] = f"error: {e}"
+        all_ok = all(v == "ok" for v in checks.values())
+        return JSONResponse(
+            {"status": "ready" if all_ok else "degraded", "checks": checks},
+            status_code=200 if all_ok else 503,
+        )
 
     return router

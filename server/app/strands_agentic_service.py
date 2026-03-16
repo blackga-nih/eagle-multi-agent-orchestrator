@@ -1518,6 +1518,13 @@ def _make_subagent_tool(
         if completed:
             header_parts.append(f"Prior analyses completed: {', '.join(completed)}")
 
+        # Include prior specialist findings so document-generator sees actual research content
+        summaries = state.get("specialist_summaries") or {}
+        if summaries:
+            header_parts.append("Specialist findings:")
+            for _skill, _text in summaries.items():
+                header_parts.append(f"  [{_skill}]: {str(_text)[:1500]}")
+
         context_header = "[ACQUISITION CONTEXT] " + " | ".join(header_parts)
         enriched_query = f"{context_header}\n\n{query}"
 
@@ -1532,6 +1539,9 @@ def _make_subagent_tool(
         # Track this subagent as completed so subsequent subagents know what ran
         if context_frame is not None:
             context_frame.setdefault("completed", []).append(skill_name)
+            # Store result in shared state so document-generator can use market findings
+            # on same-turn AND cross-turn (persists via eagle_state to DynamoDB)
+            context_frame["state"].setdefault("specialist_summaries", {})[skill_name] = raw[:3000]
 
         # Emit tool_result so the frontend can show the specialist's report
         if result_queue and loop:

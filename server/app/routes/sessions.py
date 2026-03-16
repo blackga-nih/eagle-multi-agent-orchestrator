@@ -157,3 +157,110 @@ async def api_get_messages(
         messages = SESSIONS[session_id][-limit:]
 
     return {"session_id": session_id, "messages": messages}
+
+
+@router.get("/api/sessions/{session_id}/summary")
+async def api_get_session_summary(
+    session_id: str,
+    user: UserContext = Depends(get_user_from_header)
+):
+    """Lightweight session overview — title, count, last_active, tools used."""
+    tenant_id, user_id, _ = get_session_context(user)
+
+    if USE_PERSISTENT_SESSIONS:
+        session = eagle_get_session(session_id, tenant_id, user_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        messages = get_messages(session_id, tenant_id, user_id, limit=200)
+    else:
+        if session_id not in SESSIONS:
+            raise HTTPException(status_code=404, detail="Session not found")
+        msgs = SESSIONS[session_id]
+        session = {"title": None, "message_count": len(msgs), "updated_at": None}
+        messages = []
+
+    tools_used: set = set()
+    for msg in messages:
+        for ev in (msg.get("metadata") or {}).get("audit_logs", []):
+            if ev.get("type") == "tool_use" and ev.get("tool_use", {}).get("name"):
+                tools_used.add(ev["tool_use"]["name"])
+    return {
+        "session_id": session_id,
+        "title": session.get("title"),
+        "message_count": session.get("message_count", len(messages)),
+        "last_active": session.get("updated_at"),
+        "tools_used": sorted(tools_used),
+    }
+
+
+@router.delete("/api/sessions/{session_id}/messages")
+async def api_clear_messages(
+    session_id: str,
+    user: UserContext = Depends(get_user_from_header)
+):
+    """Delete all messages for a session without deleting the session itself."""
+    tenant_id, user_id, _ = get_session_context(user)
+
+    if not USE_PERSISTENT_SESSIONS:
+        if session_id not in SESSIONS:
+            raise HTTPException(status_code=404, detail="Session not found")
+        count = len(SESSIONS[session_id])
+        SESSIONS[session_id] = []
+        return {"status": "cleared", "session_id": session_id, "deleted_count": count}
+
+    from ..stores.session_store import _get_table
+    table = _get_table()
+    response = table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
+        ExpressionAttributeValues={
+            ":pk": f"SESSION#{tenant_id}#{user_id}",
+            ":sk_prefix": f"MSG#{session_id}#",
+        },
+        ProjectionExpression="PK, SK",
+    )
+    items = response.get("Items", [])
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+    return {"status": "cleared", "session_id": session_id, "deleted_count": len(items)}
+
+
+@router.get("/api/sessions/{session_id}/documents")
+async def api_get_session_documents(
+    session_id: str,
+    user: UserContext = Depends(get_user_from_header)
+):
+    """Extract document tool_results from persisted audit_logs for a session."""
+    tenant_id, user_id, _ = get_session_context(user)
+
+    if USE_PERSISTENT_SESSIONS:
+        messages = get_messages(session_id, tenant_id, user_id, limit=200)
+    else:
+        if session_id not in SESSIONS:
+            raise HTTPException(status_code=404, detail="Session not found")
+        messages = []  # in-memory sessions have no audit_log metadata
+
+    docs = []
+    for msg in messages:
+        for ev in (msg.get("metadata") or {}).get("audit_logs", []):
+            if ev.get("type") == "tool_result":
+                r = ev.get("tool_result", {})
+                if r.get("name") in ("create_document", "generate_document"):
+                    docs.append({"timestamp": ev.get("timestamp"), **r.get("result", {})})
+    return {"session_id": session_id, "documents": docs}
+
+
+@router.get("/api/sessions/{session_id}/audit-logs")
+async def api_get_audit_logs(
+    session_id: str,
+    user: UserContext = Depends(get_user_from_header)
+):
+    """Return persisted SSE audit events for a session (all turns combined)."""
+    tenant_id, user_id, _ = get_session_context(user)
+    messages = get_messages(session_id, tenant_id, user_id, limit=200)
+    events: list = []
+    for msg in messages:
+        logs = (msg.get("metadata") or {}).get("audit_logs", [])
+        if isinstance(logs, list):
+            events.extend(logs)
+    return {"session_id": session_id, "events": events}
