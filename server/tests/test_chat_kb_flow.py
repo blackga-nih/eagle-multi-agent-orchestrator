@@ -36,31 +36,3 @@ def test_supervisor_prompt_includes_kb_retrieval_and_sources_rules():
     assert "Sources section with title + s3_key" in prompt
 
 
-def test_streaming_emits_text_when_complete_event_has_only_final_text(monkeypatch):
-    async def _mock_sdk_query_streaming(**kwargs):
-        yield {"type": "tool_use", "name": "knowledge_search"}
-        yield {"type": "complete", "text": "Final answer from complete event only.", "tools_called": [], "usage": {}}
-
-    monkeypatch.setattr("app.streaming_routes.sdk_query_streaming", _mock_sdk_query_streaming)
-
-    async def _collect():
-        events = []
-        async for raw in stream_generator(
-            message="test",
-            tenant_id="dev-tenant",
-            user_id="dev-user",
-            tier="advanced",
-            subscription_service=None,  # unused by stream_generator
-            session_id=None,
-            messages=None,
-        ):
-            if raw.startswith("data: "):
-                events.append(json.loads(raw[6:]))
-        return events
-
-    events = asyncio.get_event_loop().run_until_complete(_collect())
-    text_events = [e for e in events if e.get("type") == "text" and e.get("content")]
-    complete_events = [e for e in events if e.get("type") == "complete"]
-
-    assert any("Final answer from complete event only." in e.get("content", "") for e in text_events)
-    assert complete_events

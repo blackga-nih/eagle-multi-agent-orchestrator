@@ -296,9 +296,9 @@ def test_extract_document_context_from_prompt():
     assert parsed["user_request"] == "change the scope. leave it blank"
 
 
-def test_make_service_tool_infers_doc_context_for_create_document(monkeypatch):
+def test_make_create_document_tool_infers_doc_context(monkeypatch):
     import app.tool_dispatch as tool_dispatch
-    from app.strands_agentic_service import _make_service_tool
+    from app.strands_agentic_service import _make_create_document_tool
 
     captured = {}
 
@@ -308,7 +308,7 @@ def test_make_service_tool_infers_doc_context_for_create_document(monkeypatch):
         captured["session_id"] = session_id
         return {"status": "saved", "document_type": "sow", "title": params.get("title", "")}
 
-    monkeypatch.setitem(tool_dispatch.TOOL_DISPATCH, "create_document", fake_create_document)
+    monkeypatch.setattr(tool_dispatch, "_exec_create_document", fake_create_document)
 
     prompt = (
         "[DOCUMENT CONTEXT]\n\n"
@@ -322,9 +322,7 @@ def test_make_service_tool_infers_doc_context_for_create_document(monkeypatch):
         "use create_document and return the updated draft."
     )
 
-    tool_fn = _make_service_tool(
-        tool_name="create_document",
-        description="test",
+    tool_fn = _make_create_document_tool(
         tenant_id="test-tenant",
         user_id="test-user",
         session_id="sess-321",
@@ -332,7 +330,8 @@ def test_make_service_tool_infers_doc_context_for_create_document(monkeypatch):
         prompt_context=prompt,
     )
 
-    tool_fn("{}")
+    # Call the @tool function with typed args (not JSON string)
+    tool_fn(doc_type="sow")
 
     assert captured["tenant_id"] == "test-tenant"
     assert captured["params"]["doc_type"] == "sow"
