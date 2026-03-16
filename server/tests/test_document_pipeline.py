@@ -229,6 +229,52 @@ class TestCreateDocumentTool:
             key,
         ), f"S3 key doesn't match expected pattern: {key}"
 
+    def test_ige_alias_normalizes_to_igce(self, mock_s3_client):
+        """IGE alias should generate an IGCE document instead of falling back to SOW."""
+        with patch.dict(os.environ, ENV_PATCH, clear=False):
+            with patch("app.agentic_service._get_s3", return_value=mock_s3_client):
+                from app.agentic_service import _exec_create_document
+                result = _exec_create_document(
+                    {"doc_type": "IGE", "title": "Independent Government Estimate - Olympus CK2"},
+                    tenant_id="test-tenant",
+                    session_id="ses-005",
+                )
+
+        assert result["document_type"] == "igce"
+        assert "/documents/igce_" in result["s3_key"]
+
+    def test_igce_uses_native_xlsx_output_format(self, mock_s3_client):
+        """IGCE requests should default to XLSX when invoking the template service."""
+        captured = {}
+
+        class FakeTemplateResult:
+            success = False
+            error = "template unavailable"
+
+        class FakeTemplateService:
+            def __init__(self, tenant_id, user_id, markdown_generators):
+                pass
+
+            def generate_document(self, doc_type, title, data, output_format):
+                captured["doc_type"] = doc_type
+                captured["output_format"] = output_format
+                return FakeTemplateResult()
+
+        with patch.dict(os.environ, ENV_PATCH, clear=False):
+            with patch("app.agentic_service._get_s3", return_value=mock_s3_client):
+                with patch("app.template_service.TemplateService", FakeTemplateService):
+                    from app.agentic_service import _exec_create_document
+
+                    result = _exec_create_document(
+                        {"doc_type": "igce", "title": "Cost Estimate"},
+                        tenant_id="test-tenant",
+                        session_id="ses-007",
+                    )
+
+        assert captured["doc_type"] == "igce"
+        assert captured["output_format"] == "xlsx"
+        assert result["document_type"] == "igce"
+
     def test_sow_edit_request_clears_scope_section(self, mock_s3_client):
         """Explicit clear request should patch SOW section content in-place."""
         existing = (
@@ -263,6 +309,35 @@ class TestCreateDocumentTool:
         assert re.search(
             r"## 3\. PERIOD OF PERFORMANCE\s+12 months from date of award",
             result["content"],
+        )
+
+    def test_update_existing_workspace_document_writes_changelog(self, mock_s3_client):
+        """Assistant updates to workspace docs should create changelog entries."""
+        doc_key = "eagle/test-tenant/test-user/documents/sow_20260311_153430.md"
+
+        with patch.dict(os.environ, ENV_PATCH, clear=False):
+            with patch("app.agentic_service._get_s3", return_value=mock_s3_client):
+                with patch("app.changelog_store.write_document_changelog_entry") as changelog_mock:
+                    from app.agentic_service import _update_document_content
+
+                    result = _update_document_content(
+                        tenant_id="test-tenant",
+                        doc_key=doc_key,
+                        content="# Updated SOW",
+                        change_source="ai_edit",
+                        session_id="test-tenant#advanced#test-user#ses-007",
+                    )
+
+        assert result["success"] is True
+        assert result["mode"] == "update_workspace"
+        changelog_mock.assert_called_once_with(
+            tenant_id="test-tenant",
+            document_key=doc_key,
+            change_type="update",
+            change_source="ai_edit",
+            change_summary="Updated document via AI agent",
+            actor_user_id="test-user",
+            session_id="test-tenant#advanced#test-user#ses-007",
         )
 
 

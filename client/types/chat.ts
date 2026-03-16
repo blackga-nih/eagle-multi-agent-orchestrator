@@ -18,6 +18,38 @@ export interface ChatMessage {
 /** Backward-compatible alias so existing imports of `Message` keep working. */
 export type Message = ChatMessage;
 
+export interface DocxPreviewBlock {
+  block_id: string;
+  kind: 'heading' | 'paragraph' | 'checkbox';
+  text: string;
+  level?: number | null;
+  checked?: boolean | null;
+}
+
+export interface XlsxPreviewCell {
+  cell_ref: string;
+  row: number;
+  col: number;
+  value: string;
+  display_value: string;
+  editable: boolean;
+  is_formula?: boolean;
+}
+
+export interface XlsxPreviewRow {
+  row_index: number;
+  cells: XlsxPreviewCell[];
+}
+
+export interface XlsxPreviewSheet {
+  sheet_id: string;
+  title: string;
+  max_row: number;
+  max_col: number;
+  truncated?: boolean;
+  rows: XlsxPreviewRow[];
+}
+
 export interface DocumentInfo {
   document_id?: string;
   package_id?: string;
@@ -25,6 +57,10 @@ export interface DocumentInfo {
   doc_type?: string;
   title: string;
   content?: string;
+  file_type?: string;
+  content_type?: string;
+  is_binary?: boolean;
+  download_url?: string | null;
   mode?: 'package' | 'workspace';
   status?: string;
   version?: number;
@@ -32,4 +68,7 @@ export interface DocumentInfo {
   generated_at?: string;
   s3_key?: string;
   s3_location?: string;
+  preview_mode?: 'docx_blocks' | 'xlsx_grid' | 'text_fallback' | 'none' | null;
+  preview_blocks?: DocxPreviewBlock[];
+  preview_sheets?: XlsxPreviewSheet[];
 }

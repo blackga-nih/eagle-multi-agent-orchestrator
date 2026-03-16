@@ -1,0 +1,336 @@
+"""XLSX preview extraction and structured editing helpers."""
+
+from __future__ import annotations
+
+import io
+import logging
+import os
+import re
+from dataclasses import dataclass
+from typing import Any, Optional
+
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
+from .changelog_store import write_document_changelog_entry
+from .document_service import create_package_document_version
+from .document_store import get_document
+from .template_service import XLSXPopulator
+
+logger = logging.getLogger("eagle.spreadsheet_edit")
+
+S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+MAX_PREVIEW_ROWS = 80
+MAX_PREVIEW_COLS = 18
+
+
+@dataclass
+class SpreadsheetCellEdit:
+    sheet_id: str
+    cell_ref: str
+    value: str
+
+
+def _get_s3():
+    return boto3.client("s3", region_name=AWS_REGION)
+
+
+def _extract_package_document_ref(doc_key: str) -> Optional[dict[str, object]]:
+    canonical = re.match(
+        r"^eagle/(?P<tenant>[^/]+)/packages/(?P<package_id>[^/]+)/(?P<doc_type>[^/]+)/v(?P<version>\d+)/(?P<filename>[^/]+)$",
+        doc_key,
+    )
+    if canonical:
+        info = canonical.groupdict()
+        return {
+            "tenant_id": info["tenant"],
+            "package_id": info["package_id"],
+            "doc_type": info["doc_type"],
+            "version": int(info["version"]),
+            "filename": info["filename"],
+        }
+    return None
+
+
+def _extract_workspace_document_ref(doc_key: str) -> Optional[dict[str, str]]:
+    match = re.match(
+        r"^eagle/(?P<tenant>[^/]+)/(?P<user>[^/]+)/documents/(?P<filename>[^/]+)$",
+        doc_key,
+    )
+    if not match:
+        return None
+    return match.groupdict()
+
+
+def _is_allowed_document_key(doc_key: str, tenant_id: str, user_id: Optional[str]) -> bool:
+    if doc_key.startswith(f"eagle/{tenant_id}/packages/"):
+        return True
+    if user_id and doc_key.startswith(f"eagle/{tenant_id}/{user_id}/documents/"):
+        return True
+    return False
+
+
+def _serialize_cell_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _coerce_cell_value(value: str) -> Any:
+    stripped = value.strip()
+    if stripped == "":
+        return None
+    if re.fullmatch(r"[-+]?\d+", stripped):
+        try:
+            return int(stripped)
+        except ValueError:
+            return value
+    if re.fullmatch(r"[-+]?\d*\.\d+", stripped):
+        try:
+            return float(stripped)
+        except ValueError:
+            return value
+    lowered = stripped.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    return value
+
+
+def _sheet_identity(ws) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", ws.title.lower()).strip("-") or "sheet"
+
+
+def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
+    """Return text plus structured worksheets for browser preview/editing."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return {
+            "content": "[XLSX preview unavailable - openpyxl not installed]",
+            "preview_mode": "none",
+            "preview_sheets": [],
+        }
+
+    wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+    wb_values = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
+    preview_sheets: list[dict[str, Any]] = []
+
+    for sheet_index, ws in enumerate(wb.worksheets):
+        if ws.sheet_state != "visible":
+            continue
+
+        values_ws = wb_values[ws.title]
+        row_limit = min(ws.max_row or 1, MAX_PREVIEW_ROWS)
+        col_limit = min(ws.max_column or 1, MAX_PREVIEW_COLS)
+        hidden_cells: set[str] = set()
+        for merged_range in ws.merged_cells.ranges:
+            for row in range(merged_range.min_row, merged_range.max_row + 1):
+                for col in range(merged_range.min_col, merged_range.max_col + 1):
+                    cell_ref = ws.cell(row=row, column=col).coordinate
+                    if row != merged_range.min_row or col != merged_range.min_col:
+                        hidden_cells.add(cell_ref)
+
+        rows: list[dict[str, Any]] = []
+        for row_idx in range(1, row_limit + 1):
+            cells: list[dict[str, Any]] = []
+            row_has_content = False
+            for col_idx in range(1, col_limit + 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                value_cell = values_ws.cell(row=row_idx, column=col_idx)
+                raw_value = cell.value
+                display_value = value_cell.value if value_cell.value is not None else raw_value
+                is_formula = isinstance(raw_value, str) and raw_value.startswith("=")
+                is_hidden = cell.coordinate in hidden_cells
+                editable = not is_formula and not is_hidden
+                cell_payload = {
+                    "cell_ref": cell.coordinate,
+                    "row": row_idx,
+                    "col": col_idx,
+                    "value": _serialize_cell_value(raw_value),
+                    "display_value": _serialize_cell_value(display_value),
+                    "editable": editable,
+                    "is_formula": is_formula,
+                }
+                if cell_payload["display_value"]:
+                    row_has_content = True
+                cells.append(cell_payload)
+
+            if row_has_content or any(cell["editable"] for cell in cells):
+                rows.append({"row_index": row_idx, "cells": cells})
+
+        if rows:
+            preview_sheets.append(
+                {
+                    "sheet_id": f"{sheet_index}:{_sheet_identity(ws)}",
+                    "title": ws.title,
+                    "max_row": row_limit,
+                    "max_col": col_limit,
+                    "truncated": ws.max_row > row_limit or ws.max_column > col_limit,
+                    "rows": rows,
+                }
+            )
+
+    return {
+        "content": XLSXPopulator.extract_text(xlsx_bytes),
+        "preview_mode": "xlsx_grid",
+        "preview_sheets": preview_sheets,
+    }
+
+
+def apply_xlsx_cell_edits(xlsx_bytes: bytes, cell_edits: list[SpreadsheetCellEdit]) -> tuple[bytes, int, list[str]]:
+    """Apply structured cell edits back to a workbook."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(xlsx_bytes))
+    sheet_map = {f"{idx}:{_sheet_identity(ws)}": ws for idx, ws in enumerate(wb.worksheets) if ws.sheet_state == "visible"}
+    applied = 0
+    missing: list[str] = []
+
+    for edit in cell_edits:
+        ws = sheet_map.get(edit.sheet_id)
+        if ws is None:
+            missing.append(f"{edit.sheet_id}:{edit.cell_ref}")
+            continue
+        cell = ws[edit.cell_ref]
+        raw_value = cell.value
+        if isinstance(raw_value, str) and raw_value.startswith("="):
+            missing.append(f"{edit.sheet_id}:{edit.cell_ref}")
+            continue
+        next_value = _coerce_cell_value(edit.value)
+        if cell.value != next_value:
+            cell.value = next_value
+            applied += 1
+
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue(), applied, missing
+
+
+def save_xlsx_preview_edits(
+    *,
+    tenant_id: str,
+    user_id: Optional[str],
+    doc_key: str,
+    cell_edits: list[dict[str, Any]],
+    session_id: Optional[str] = None,
+    change_source: str = "user_edit",
+) -> dict[str, Any]:
+    """Persist browser-side XLSX cell edits."""
+    if not doc_key:
+        return {"error": "document_key is required"}
+    if not cell_edits:
+        return {"error": "cell_edits are required"}
+    if not _is_allowed_document_key(doc_key, tenant_id, user_id):
+        return {"error": "Access denied for document key"}
+    if not doc_key.lower().endswith(".xlsx"):
+        return {"error": "Structured spreadsheet editing only supports .xlsx documents"}
+
+    edits = [
+        SpreadsheetCellEdit(
+            sheet_id=str(edit.get("sheet_id", "")),
+            cell_ref=str(edit.get("cell_ref", "")),
+            value=str(edit.get("value", "")),
+        )
+        for edit in cell_edits
+        if edit.get("sheet_id") and edit.get("cell_ref") is not None
+    ]
+    if not edits:
+        return {"error": "No valid spreadsheet cell edits were provided"}
+
+    s3 = _get_s3()
+    try:
+        response = s3.get_object(Bucket=S3_BUCKET, Key=doc_key)
+        original_bytes = response["Body"].read()
+        content_type = response.get("ContentType") or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    except (ClientError, BotoCoreError) as exc:
+        logger.error("Failed to load XLSX preview artifact: %s", exc, exc_info=True)
+        return {"error": f"Failed to load document: {exc}"}
+
+    try:
+        updated_bytes, applied_count, missing = apply_xlsx_cell_edits(original_bytes, edits)
+    except Exception as exc:
+        logger.error("Failed to apply structured XLSX edits: %s", exc, exc_info=True)
+        return {"error": f"Failed to apply spreadsheet edits: {exc}"}
+
+    if applied_count == 0:
+        return {"error": "No spreadsheet edits were applied.", "missing": missing}
+
+    preview_payload = extract_xlsx_preview_payload(updated_bytes)
+    package_ref = _extract_package_document_ref(doc_key)
+    if package_ref:
+        if package_ref["tenant_id"] != tenant_id:
+            return {"error": "Access denied for package document"}
+        package_id = str(package_ref["package_id"])
+        doc_type = str(package_ref["doc_type"])
+        version = int(package_ref["version"])
+        existing = get_document(tenant_id, package_id, doc_type, version)
+        title = (existing or {}).get("title") or doc_type.replace("_", " ").title()
+        result = create_package_document_version(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            content=updated_bytes,
+            title=title,
+            file_type="xlsx",
+            created_by_user_id=user_id,
+            session_id=session_id,
+            change_source=change_source,
+            template_id=(existing or {}).get("template_id"),
+        )
+        if not result.success:
+            return {"error": result.error or "Failed to save document version"}
+        return {
+            "success": True,
+            "mode": "package_xlsx_preview_edit",
+            "document_id": result.document_id,
+            "key": result.s3_key,
+            "version": result.version,
+            "file_type": "xlsx",
+            "content": preview_payload.get("content"),
+            "preview_mode": preview_payload.get("preview_mode"),
+            "preview_sheets": preview_payload.get("preview_sheets", []),
+            "missing": missing,
+            "message": f"Saved spreadsheet version {result.version}.",
+        }
+
+    workspace_ref = _extract_workspace_document_ref(doc_key)
+    if not workspace_ref:
+        return {"error": "Unsupported XLSX key format"}
+    if workspace_ref["tenant"] != tenant_id or workspace_ref["user"] != user_id:
+        return {"error": "Access denied for workspace document"}
+
+    try:
+        s3.put_object(
+            Bucket=S3_BUCKET,
+            Key=doc_key,
+            Body=updated_bytes,
+            ContentType=content_type,
+        )
+        write_document_changelog_entry(
+            tenant_id=tenant_id,
+            document_key=doc_key,
+            change_type="update",
+            change_source=change_source,
+            change_summary="Updated XLSX via preview editor",
+            actor_user_id=user_id or "user",
+        )
+    except Exception as exc:
+        logger.error("Failed to save workspace XLSX preview edits: %s", exc, exc_info=True)
+        return {"error": f"Failed to save spreadsheet: {exc}"}
+
+    return {
+        "success": True,
+        "mode": "workspace_xlsx_preview_edit",
+        "document_id": doc_key,
+        "key": doc_key,
+        "version": 0,
+        "file_type": "xlsx",
+        "content": preview_payload.get("content"),
+        "preview_mode": preview_payload.get("preview_mode"),
+        "preview_sheets": preview_payload.get("preview_sheets", []),
+        "missing": missing,
+        "message": "Spreadsheet saved.",
+    }

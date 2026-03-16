@@ -56,7 +56,7 @@ function parseUserIntent(message: string): ParsedIntent {
     // Extract document type from keywords
     const docTypePatterns: Record<string, string> = {
         'sow|statement of work': 'SOW',
-        'igce|cost estimate': 'IGCE',
+        'ige|igce|cost estimate': 'IGCE',
         'acquisition plan': 'Acquisition Plan',
         'market research': 'Market Research',
         'justification|j&a': 'Justification',
@@ -76,7 +76,7 @@ function parseUserIntent(message: string): ParsedIntent {
         /(?:project|program)\s+(?:called|named)\s+["']?([^"'.,]+)["']?/i,
         /(?:called|named)\s+["']?([^"'.,]+)["']?/i,
         /for\s+(?:the\s+)?["']?([A-Z][A-Za-z0-9\s]+?)["']?\s+(?:project|program|initiative)/i,
-        /["']([^"']+)["']\s+(?:sow|igce|acquisition)/i,
+        /["']([^"']+)["']\s+(?:sow|igce|ige|acquisition)/i,
     ];
 
     for (const pattern of projectPatterns) {

@@ -20,6 +20,8 @@ services:
       - TEMPLATE_PREFIX=eagle-knowledge-base/approved/supervisor-core/essential-templates
     volumes:
       - ../server/app:/app/app
+      - ../server/tests:/app/tests
+      - ../server/pytest.ini:/app/pytest.ini
       - ${HOME}/.aws:/home/appuser/.aws
 
   frontend:

@@ -26,6 +26,7 @@ const DOC_TYPE_BY_PREFIX: Array<{ prefix: string; type: string; title: string }>
   { prefix: 'eval_criteria', type: 'eval_criteria', title: 'Evaluation Criteria' },
   { prefix: 'section_508', type: 'section_508', title: 'Section 508 Compliance' },
   { prefix: 'justification', type: 'justification', title: 'Justification & Approval' },
+  { prefix: 'ige', type: 'igce', title: 'Cost Estimate (IGCE)' },
   { prefix: 'igce', type: 'igce', title: 'Cost Estimate (IGCE)' },
   { prefix: 'sow', type: 'sow', title: 'Statement of Work' },
 ];
@@ -41,11 +42,17 @@ function inferDocTypeAndTitle(fileName: string): { document_type: string; title:
   if (base.endsWith('.docx')) {
     return { document_type: 'docx', title: 'Word Document' };
   }
+  if (base.endsWith('.xlsx')) {
+    return { document_type: 'xlsx', title: 'Excel Workbook' };
+  }
   if (base.endsWith('.pdf')) {
     return { document_type: 'pdf', title: 'PDF Document' };
   }
   if (base.endsWith('.md')) {
     return { document_type: 'markdown', title: 'Markdown Document' };
+  }
+  if (base.endsWith('.txt')) {
+    return { document_type: 'txt', title: 'Text Document' };
   }
 
   return { document_type: 'document', title: 'Document' };
@@ -127,9 +134,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ...data,
       key,
       s3_key: key,
-      document_id: key,
-      document_type: inferred.document_type,
+      document_id: data.document_id || key,
+      document_type: data.document_type || inferred.document_type,
       title: data.title || inferred.title,
+      file_type: data.file_type,
+      content_type: data.content_type,
+      is_binary: Boolean(data.is_binary),
+      download_url: data.download_url || null,
     });
   } catch (error) {
     return NextResponse.json(

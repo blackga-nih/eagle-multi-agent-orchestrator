@@ -32,6 +32,8 @@ import logging
 import os
 import uuid
 import io
+import re
+from urllib import parse as urllib_parse
 
 # EAGLE modules (new)
 from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
@@ -107,6 +109,8 @@ from .document_service import (
     get_document_download_url,
     finalize_document as finalize_document_version,
 )
+from .document_ai_edit_service import extract_docx_preview_payload, save_docx_preview_edits
+from .spreadsheet_edit_service import extract_xlsx_preview_payload, save_xlsx_preview_edits
 from .package_context_service import (
     clear_active_package,
     resolve_context,
@@ -555,6 +559,166 @@ async def api_export_session(
 
 # ── S3 Document Browser ──────────────────────────────────────────────
 
+_BINARY_FILE_EXTENSIONS = {"doc", "docx", "pdf", "xls", "xlsx"}
+_TEXT_FILE_EXTENSIONS = {"md", "txt", "json", "csv", "html"}
+
+
+def _get_file_extension(name: str) -> str:
+    base = name.rsplit("/", 1)[-1]
+    if "." not in base:
+        return ""
+    return base.rsplit(".", 1)[-1].lower()
+
+
+def _guess_content_type(name: str) -> str:
+    ext = _get_file_extension(name)
+    if ext == "md":
+        return "text/markdown; charset=utf-8"
+    if ext == "txt":
+        return "text/plain; charset=utf-8"
+    if ext == "docx":
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if ext == "xlsx":
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if ext == "pdf":
+        return "application/pdf"
+    return "application/octet-stream"
+
+
+def _is_binary_document(name: str, content_type: Optional[str]) -> bool:
+    ext = _get_file_extension(name)
+    if ext in _BINARY_FILE_EXTENSIONS:
+        return True
+
+    lowered = (content_type or "").lower()
+    if lowered.startswith("text/"):
+        return False
+    if "json" in lowered or "markdown" in lowered or "csv" in lowered:
+        return False
+    if (
+        "officedocument" in lowered
+        or lowered == "application/pdf"
+        or lowered == "application/msword"
+        or lowered == "application/vnd.ms-excel"
+    ):
+        return True
+
+    return ext not in _TEXT_FILE_EXTENSIONS and bool(ext)
+
+
+def _supports_binary_preview(name: str) -> bool:
+    return _get_file_extension(name) in {"docx", "xlsx"}
+
+
+def _extract_binary_preview_payload(name: str, raw_bytes: bytes) -> dict[str, Any]:
+    ext = _get_file_extension(name)
+    if ext == "docx":
+        return extract_docx_preview_payload(raw_bytes)
+    if ext == "xlsx":
+        return extract_xlsx_preview_payload(raw_bytes)
+    return {"content": None, "preview_blocks": [], "preview_sheets": [], "preview_mode": "none"}
+
+
+def _is_allowed_document_key(doc_key: str, tenant_id: str, user_id: str) -> bool:
+    return (
+        doc_key.startswith(f"eagle/{tenant_id}/{user_id}/")
+        or doc_key.startswith(f"eagle/{tenant_id}/packages/")
+    )
+
+
+def _extract_package_document_ref(doc_key: str) -> Optional[dict[str, Any]]:
+    canonical = re.match(
+        r"^eagle/(?P<tenant>[^/]+)/packages/(?P<package_id>[^/]+)/(?P<doc_type>[^/]+)/v(?P<version>\d+)/(?P<filename>[^/]+)$",
+        doc_key,
+    )
+    if canonical:
+        info = canonical.groupdict()
+        return {
+            "tenant_id": info["tenant"],
+            "package_id": info["package_id"],
+            "doc_type": info["doc_type"],
+            "version": int(info["version"]),
+            "filename": info["filename"],
+        }
+
+    legacy = re.match(
+        r"^eagle/(?P<tenant>[^/]+)/(?P<user>[^/]+)/packages/(?P<package_id>[^/]+)/(?P<filename>[^/]+)$",
+        doc_key,
+    )
+    if not legacy:
+        return None
+
+    info = legacy.groupdict()
+    filename = info["filename"]
+    stem = filename.rsplit(".", 1)[0]
+    doc_type = stem.split("_v", 1)[0] if "_v" in stem else stem
+    version = None
+    version_match = re.search(r"_v(\d+)", stem)
+    if version_match:
+        version = int(version_match.group(1))
+
+    return {
+        "tenant_id": info["tenant"],
+        "package_id": info["package_id"],
+        "doc_type": doc_type,
+        "version": version,
+        "filename": filename,
+    }
+
+
+def _build_document_response(
+    *,
+    doc_key: str,
+    response: dict,
+    content: Optional[str],
+    download_url: Optional[str],
+    preview_blocks: Optional[List[dict[str, Any]]] = None,
+    preview_sheets: Optional[List[dict[str, Any]]] = None,
+    preview_mode: Optional[str] = None,
+) -> dict[str, Any]:
+    content_type = response.get("ContentType") or _guess_content_type(doc_key)
+    package_ref = _extract_package_document_ref(doc_key)
+
+    package_id = package_ref["package_id"] if package_ref else None
+    doc_type = package_ref["doc_type"] if package_ref else None
+    version = package_ref["version"] if package_ref else None
+    filename = (package_ref or {}).get("filename") or doc_key.rsplit("/", 1)[-1]
+    file_type = _get_file_extension(filename)
+    is_binary = _is_binary_document(filename, content_type)
+
+    title = None
+    document_id = doc_key
+    if package_ref and version is not None:
+        metadata = get_document(package_ref["tenant_id"], package_ref["package_id"], package_ref["doc_type"], version)
+        if metadata:
+            title = metadata.get("title")
+            document_id = metadata.get("document_id", document_id)
+            file_type = metadata.get("file_type", file_type)
+            version = metadata.get("version", version)
+    elif package_ref:
+        title = package_ref["doc_type"].replace("_", " ").title()
+
+    return {
+        "key": doc_key,
+        "s3_key": doc_key,
+        "document_id": document_id,
+        "content": content,
+        "preview_blocks": preview_blocks or [],
+        "preview_sheets": preview_sheets or [],
+        "preview_mode": preview_mode,
+        "content_type": content_type,
+        "file_type": file_type,
+        "is_binary": is_binary,
+        "download_url": download_url,
+        "size_bytes": response.get("ContentLength", 0),
+        "last_modified": response.get("LastModified").isoformat() if response.get("LastModified") else None,
+        "package_id": package_id,
+        "document_type": doc_type,
+        "version": version,
+        "title": title,
+    }
+
+
 @app.get("/api/documents")
 async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
     """List documents in S3 for the current user."""
@@ -591,7 +755,11 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
 
 @app.get("/api/documents/{doc_key:path}")
-async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_from_header)):
+async def api_get_document(
+    doc_key: str,
+    request: Request,
+    user: UserContext = Depends(get_user_from_header),
+):
     """Get document content from S3."""
     import boto3
     from botocore.exceptions import ClientError
@@ -600,22 +768,47 @@ async def api_get_document(doc_key: str, user: UserContext = Depends(get_user_fr
     user_id = user.user_id
     bucket = _S3_BUCKET
 
-    # Security: ensure key is within user's prefix
-    if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
+    include_content = request.query_params.get("content") != "false"
+    # Security: allow either workspace documents or canonical tenant package docs.
+    if not _is_allowed_document_key(doc_key, tenant_id, user_id):
         raise HTTPException(status_code=403, detail="Access denied")
 
     try:
         s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
         response = s3.get_object(Bucket=bucket, Key=doc_key)
-        content = response["Body"].read().decode("utf-8", errors="replace")
+        content_type = response.get("ContentType") or _guess_content_type(doc_key)
+        is_binary = _is_binary_document(doc_key, content_type)
+        content = None
+        download_url = None
+        preview_blocks = None
+        preview_sheets = None
+        preview_mode = None
 
-        return {
-            "key": doc_key,
-            "content": content,
-            "content_type": response.get("ContentType", "text/plain"),
-            "size_bytes": response.get("ContentLength", 0),
-            "last_modified": response.get("LastModified").isoformat() if response.get("LastModified") else None,
-        }
+        if not is_binary and include_content:
+            content = response["Body"].read().decode("utf-8", errors="replace")
+        else:
+            if include_content and _supports_binary_preview(doc_key):
+                raw_bytes = response["Body"].read()
+                preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
+                content = preview_payload.get("content")
+                preview_blocks = preview_payload.get("preview_blocks", [])
+                preview_sheets = preview_payload.get("preview_sheets", [])
+                preview_mode = preview_payload.get("preview_mode")
+            download_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": doc_key},
+                ExpiresIn=3600,
+            )
+
+        return _build_document_response(
+            doc_key=doc_key,
+            response=response,
+            content=content,
+            download_url=download_url,
+            preview_blocks=preview_blocks,
+            preview_sheets=preview_sheets,
+            preview_mode=preview_mode,
+        )
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchKey":
             raise HTTPException(status_code=404, detail="Document not found")
@@ -631,6 +824,21 @@ class DocumentUpdateRequest(BaseModel):
 
     content: str
     change_source: str = "user_edit"  # "user_edit" | "ai_edit"
+
+
+class DocxPreviewEditRequest(BaseModel):
+    """Request body for structured DOCX preview edits."""
+
+    preview_blocks: List[Dict[str, Any]]
+    preview_mode: str
+    change_source: str = "user_edit"
+
+
+class XlsxPreviewEditRequest(BaseModel):
+    """Request body for structured XLSX preview edits."""
+
+    cell_edits: List[Dict[str, Any]]
+    change_source: str = "user_edit"
 
 
 @app.put("/api/documents/{doc_key:path}")
@@ -651,30 +859,37 @@ async def api_update_document(
     user_id = user.user_id
     bucket = _S3_BUCKET
 
-    # Security: ensure key is within user's prefix
-    if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
+    # Security: allow either workspace documents or canonical tenant package docs.
+    if not _is_allowed_document_key(doc_key, tenant_id, user_id):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Detect if this is a package document by checking the key pattern
     # Package docs: eagle/{tenant}/{user}/packages/{package_id}/...
     is_package_doc = "/packages/" in doc_key
+    file_type = _get_file_extension(doc_key)
+
+    if _is_binary_document(doc_key, _guess_content_type(doc_key)):
+        raise HTTPException(
+            status_code=415,
+            detail="Binary Office documents cannot be saved through the plain text editor. Use the DOCX AI edit flow or download the original file.",
+        )
 
     if is_package_doc:
         # Route through document_service for versioning
         from app.document_service import create_package_document_version
 
-        # Extract package_id and doc_type from the key
-        # Pattern: eagle/{tenant}/{user}/packages/{package_id}/{doc_type}_v{N}.{ext}
-        parts = doc_key.split("/")
-        try:
-            pkg_idx = parts.index("packages")
-            package_id = parts[pkg_idx + 1]
-            filename = parts[-1]
-            # Extract doc_type from filename (e.g., "sow_v1.md" → "sow")
-            doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
-            title = doc_type.replace("_", " ").title()
-        except (ValueError, IndexError):
+        package_ref = _extract_package_document_ref(doc_key)
+        if not package_ref:
             raise HTTPException(status_code=400, detail="Invalid package document key format")
+
+        package_id = package_ref["package_id"]
+        doc_type = package_ref["doc_type"]
+        title = doc_type.replace("_", " ").title()
+        version = package_ref.get("version")
+        if version is not None:
+            current = get_document(tenant_id, package_id, doc_type, version)
+            if current and current.get("title"):
+                title = current["title"]
 
         result = create_package_document_version(
             tenant_id=tenant_id,
@@ -682,7 +897,7 @@ async def api_update_document(
             doc_type=doc_type,
             content=request.content,
             title=title,
-            file_type="md",
+            file_type=file_type or "md",
             created_by_user_id=user_id,
             change_source=request.change_source,
         )
@@ -705,8 +920,23 @@ async def api_update_document(
                 Bucket=bucket,
                 Key=doc_key,
                 Body=request.content.encode("utf-8"),
-                ContentType="text/markdown; charset=utf-8",
+                ContentType=_guess_content_type(doc_key),
             )
+
+            # Write changelog entry for workspace document
+            from app.changelog_store import write_document_changelog_entry
+            try:
+                write_document_changelog_entry(
+                    tenant_id=tenant_id,
+                    document_key=doc_key,
+                    change_type="update",
+                    change_source=request.change_source,
+                    change_summary=f"Updated document via editor",
+                    actor_user_id=user_id,
+                )
+            except Exception as cl_err:
+                logger.warning("Failed to write changelog for workspace doc: %s", cl_err)
+
             return {
                 "success": True,
                 "key": doc_key,
@@ -715,6 +945,45 @@ async def api_update_document(
         except ClientError as e:
             logger.error("S3 put document error: %s", e, exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to save document")
+
+
+@app.post("/api/documents/docx-edit/{doc_key:path}")
+async def api_update_docx_preview_document(
+    doc_key: str,
+    request: DocxPreviewEditRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update a DOCX document through structured preview blocks."""
+    result = save_docx_preview_edits(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        doc_key=doc_key,
+        preview_blocks=request.preview_blocks,
+        preview_mode=request.preview_mode,
+        change_source=request.change_source,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/documents/xlsx-edit/{doc_key:path}")
+async def api_update_xlsx_preview_document(
+    doc_key: str,
+    request: XlsxPreviewEditRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update an XLSX document through structured cell edits."""
+    result = save_xlsx_preview_edits(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        doc_key=doc_key,
+        cell_edits=request.cell_edits,
+        change_source=request.change_source,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 # ── S3 Presigned URL ─────────────────────────────────────────────────
@@ -1051,6 +1320,10 @@ def _get_doc_type(name: str) -> str:
         return "pdf"
     elif name_lower.endswith(".docx"):
         return "docx"
+    elif name_lower.endswith(".xlsx"):
+        return "xlsx"
+    elif name_lower.endswith(".txt"):
+        return "txt"
     else:
         return "document"
 
@@ -2402,6 +2675,50 @@ async def promote_document_final_endpoint(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
+
+
+@app.get("/api/packages/{package_id}/documents/{doc_type}/changelog")
+async def get_document_changelog_endpoint(
+    package_id: str,
+    doc_type: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get changelog entries for a document."""
+    from .changelog_store import list_changelog_entries
+    entries = list_changelog_entries(user.tenant_id, package_id, doc_type, limit)
+    return {"entries": entries, "count": len(entries)}
+
+
+@app.get("/api/packages/{package_id}/changelog")
+async def get_package_changelog_endpoint(
+    package_id: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get all changelog entries for a package (all document types)."""
+    from .changelog_store import list_changelog_entries
+    entries = list_changelog_entries(user.tenant_id, package_id, None, limit)
+    return {"entries": entries, "count": len(entries)}
+
+
+@app.get("/api/document-changelog")
+async def get_document_key_changelog_endpoint(
+    key: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get changelog entries for a document by S3 key."""
+    from .changelog_store import list_document_changelog_entries
+
+    tenant_id = user.tenant_id
+
+    # Security: ensure key is within user's prefix
+    if not key.startswith(f"eagle/{tenant_id}/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    entries = list_document_changelog_entries(tenant_id, key, limit)
+    return {"entries": entries, "count": len(entries)}
 
 
 # ── Approval Chains (APPROVAL#) ────────────────────────────────────

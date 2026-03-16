@@ -3,6 +3,8 @@ EAGLE – NCI Acquisition Assistant
 Agentic Service using the Anthropic Python SDK directly.
 Real AWS tools (S3, DynamoDB, CloudWatch) scoped per-tenant.
 """
+from __future__ import annotations
+
 import os
 import json
 import time
@@ -21,6 +23,7 @@ from app.tools.knowledge_tools import (
     exec_knowledge_search,
     exec_knowledge_fetch,
 )
+from app.template_registry import get_template_mapping
 
 logger = logging.getLogger("eagle.agent")
 
@@ -107,6 +110,10 @@ SYSTEM_PROMPT = (
     "You have access to real AWS-backed tools for document storage (S3), "
     "intake tracking (DynamoDB), log inspection (CloudWatch), FAR search, "
     "document generation, intake status, and a guided intake workflow.\n\n"
+    "When the user asks to revise an existing DOCX document, use the "
+    "edit_docx_document tool for targeted replacements instead of rewriting "
+    "the file through markdown. Use checkbox_edits when the DOCX preview "
+    "shows checklist items.\n\n"
     "WORKFLOW: When a user wants to start a new acquisition intake, use the "
     "intake_workflow tool with action='start'. This creates a guided 4-stage "
     "process:\n"
@@ -386,6 +393,64 @@ def _augment_document_data_from_context(
         merged.setdefault("scope", requirement or title)
 
     return merged
+
+
+_DOC_TYPE_ALIASES = {
+    "ige": "igce",
+    "igce": "igce",
+    "independent_government_estimate": "igce",
+    "independent_government_cost_estimate": "igce",
+    "cost_estimate": "igce",
+    "statement_of_work": "sow",
+}
+
+_TITLE_DOC_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(statement\s+of\s+work|sow)\b", re.IGNORECASE), "sow"),
+    (
+        re.compile(
+            r"\b(igce|ige|independent\s+government\s+(?:cost\s+)?estimate|cost\s+estimate)\b",
+            re.IGNORECASE,
+        ),
+        "igce",
+    ),
+    (re.compile(r"\bmarket\s+research\b", re.IGNORECASE), "market_research"),
+    (re.compile(r"\bacquisition\s+plan\b", re.IGNORECASE), "acquisition_plan"),
+    (
+        re.compile(r"\b(j\s*(?:&|and)\s*a|justification(?:\s*&\s*approval)?|sole\s+source)\b", re.IGNORECASE),
+        "justification",
+    ),
+]
+
+
+def _infer_doc_type_from_title(title: str) -> str | None:
+    if not title:
+        return None
+    for pattern, doc_type in _TITLE_DOC_TYPE_PATTERNS:
+        if pattern.search(title):
+            return doc_type
+    return None
+
+
+def _normalize_create_document_doc_type(raw_doc_type: Any, title: str) -> str:
+    requested = str(raw_doc_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = _DOC_TYPE_ALIASES.get(requested, requested)
+    inferred = _infer_doc_type_from_title(title)
+
+    if normalized == "sow" and inferred == "igce":
+        logger.info("Overriding create_document doc_type from sow to igce based on title=%r", title)
+        return inferred
+    if normalized:
+        return normalized
+    if inferred:
+        return inferred
+    return "sow"
+
+
+def _default_output_format_for_doc_type(doc_type: str) -> str:
+    mapping = get_template_mapping(doc_type)
+    if mapping:
+        return mapping.file_type
+    return "md"
 
 
 def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
@@ -677,6 +742,61 @@ EAGLE_TOOLS = [
         },
     },
     {
+        "name": "edit_docx_document",
+        "description": (
+            "Apply targeted edits to an existing DOCX document in S3 using "
+            "python-docx. Use this for in-place updates that preserve fonts, "
+            "headers, tables, and overall Word formatting. Provide exact existing "
+            "text from the current preview and the replacement text."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "document_key": {
+                    "type": "string",
+                    "description": "Full S3 key for the target .docx document",
+                },
+                "edits": {
+                    "type": "array",
+                    "description": "One or more exact text replacements to apply",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "search_text": {
+                                "type": "string",
+                                "description": "Exact current text to find in the DOCX",
+                            },
+                            "replacement_text": {
+                                "type": "string",
+                                "description": "Replacement text to write while preserving formatting",
+                            },
+                        },
+                        "required": ["search_text", "replacement_text"],
+                    },
+                },
+                "checkbox_edits": {
+                    "type": "array",
+                    "description": "Optional checkbox toggles using the visible checkbox label text from the DOCX preview",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label_text": {
+                                "type": "string",
+                                "description": "Visible checkbox label text from the preview",
+                            },
+                            "checked": {
+                                "type": "boolean",
+                                "description": "Whether the checkbox should be checked",
+                            },
+                        },
+                        "required": ["label_text", "checked"],
+                    },
+                },
+            },
+            "required": ["document_key"],
+        },
+    },
+    {
         "name": "get_intake_status",
         "description": (
             "Get the current intake package status and completeness. Shows which "
@@ -745,6 +865,55 @@ EAGLE_TOOLS = [
     # Knowledge base tools
     KNOWLEDGE_SEARCH_TOOL,
     KNOWLEDGE_FETCH_TOOL,
+    # Document changelog tools
+    {
+        "name": "document_changelog_search",
+        "description": (
+            "Search the changelog history for a document or package. Returns "
+            "a list of changes showing what changed, who made the change, when, "
+            "and why. Use this to understand document evolution or audit history."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "package_id": {
+                    "type": "string",
+                    "description": "Package ID to search changelog for (required)",
+                },
+                "doc_type": {
+                    "type": "string",
+                    "description": "Document type to filter by (optional - omit for all docs in package)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of entries to return (default: 20)",
+                },
+            },
+            "required": ["package_id"],
+        },
+    },
+    {
+        "name": "get_latest_document",
+        "description": (
+            "Get the latest version of a document along with its recent changelog. "
+            "Use this to ensure you're working with the most current content and "
+            "understand recent changes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "package_id": {
+                    "type": "string",
+                    "description": "Package ID containing the document",
+                },
+                "doc_type": {
+                    "type": "string",
+                    "description": "Document type (sow, igce, market_research, etc.)",
+                },
+            },
+            "required": ["package_id", "doc_type"],
+        },
+    },
 ]
 
 
@@ -1508,6 +1677,17 @@ def _update_document_content(
                 Body=content.encode("utf-8"),
                 ContentType="text/markdown; charset=utf-8",
             )
+            from app.changelog_store import write_document_changelog_entry
+
+            write_document_changelog_entry(
+                tenant_id=tenant_id,
+                document_key=doc_key,
+                change_type="update",
+                change_source=change_source,
+                change_summary="Updated document via AI agent",
+                actor_user_id=user_id,
+                session_id=session_id,
+            )
             return {
                 "success": True,
                 "mode": "update_workspace",
@@ -1517,6 +1697,53 @@ def _update_document_content(
         except (ClientError, BotoCoreError) as e:
             logger.error("S3 put document error during update: %s", e, exc_info=True)
             return {"error": f"Failed to save document: {str(e)}"}
+
+
+def _exec_edit_docx_document(params: dict, tenant_id: str, session_id: str = None) -> dict:
+    """Apply targeted edits to an existing DOCX document."""
+    from app.document_ai_edit_service import DocxCheckboxEdit, DocxEdit, edit_docx_document
+
+    doc_key = params.get("document_key", "")
+    edits_input = params.get("edits") or []
+    checkbox_edits_input = params.get("checkbox_edits") or []
+    if edits_input and not isinstance(edits_input, list):
+        return {"error": "edits must be an array"}
+    if checkbox_edits_input and not isinstance(checkbox_edits_input, list):
+        return {"error": "checkbox_edits must be an array"}
+    if not edits_input and not checkbox_edits_input:
+        return {"error": "Provide edits or checkbox_edits"}
+
+    edits: list[DocxEdit] = []
+    for idx, edit in enumerate(edits_input, start=1):
+        if not isinstance(edit, dict):
+            return {"error": f"edit #{idx} must be an object"}
+        search_text = str(edit.get("search_text", "") or "").strip()
+        replacement_text = str(edit.get("replacement_text", "") or "")
+        if not search_text:
+            return {"error": f"edit #{idx} is missing search_text"}
+        edits.append(DocxEdit(search_text=search_text, replacement_text=replacement_text))
+
+    checkbox_edits: list[DocxCheckboxEdit] = []
+    for idx, edit in enumerate(checkbox_edits_input, start=1):
+        if not isinstance(edit, dict):
+            return {"error": f"checkbox_edit #{idx} must be an object"}
+        label_text = str(edit.get("label_text", "") or "").strip()
+        checked = edit.get("checked")
+        if not label_text:
+            return {"error": f"checkbox_edit #{idx} is missing label_text"}
+        if not isinstance(checked, bool):
+            return {"error": f"checkbox_edit #{idx} must provide boolean checked"}
+        checkbox_edits.append(DocxCheckboxEdit(label_text=label_text, checked=checked))
+
+    return edit_docx_document(
+        tenant_id=tenant_id,
+        user_id=_extract_user_id(session_id),
+        doc_key=doc_key,
+        edits=edits,
+        checkbox_edits=checkbox_edits,
+        session_id=session_id,
+        change_source="ai_edit",
+    )
 
 
 def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) -> dict:
@@ -1541,11 +1768,11 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
             session_id=session_id,
         )
 
-    doc_type = params.get("doc_type", "sow")
     title = params.get("title", "Untitled Acquisition")
+    doc_type = _normalize_create_document_doc_type(params.get("doc_type"), title)
     data = params.get("data", {})
     package_id = params.get("package_id")
-    output_format = params.get("output_format", "docx")  # docx, xlsx, or md
+    output_format = params.get("output_format") or _default_output_format_for_doc_type(doc_type)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
 
     # Enrich missing/partial document fields from recent session context so
@@ -1716,6 +1943,24 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
         save_status = "generated_but_not_saved"
         save_location = f"S3 save failed: {str(e)}"
         logger.warning("Failed to save document to S3: %s", e)
+
+    # Write changelog entry for document creation
+    if save_status == "saved":
+        try:
+            from app.changelog_store import write_document_changelog_entry
+
+            write_document_changelog_entry(
+                tenant_id=tenant_id,
+                document_key=s3_key,
+                change_type="create",
+                change_source="agent_tool",
+                change_summary=f"Created {doc_type}: {title}",
+                actor_user_id=user_id,
+                doc_type=doc_type,
+                session_id=session_id,
+            )
+        except Exception as e:
+            logger.warning("Failed to write changelog for document creation: %s", e)
 
     response = {
         "document_type": doc_type,
@@ -3010,6 +3255,78 @@ def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
     return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
 
 
+def _exec_document_changelog_search(params: dict, tenant_id: str) -> dict:
+    """Search changelog history for a document or package."""
+    from app.changelog_store import list_changelog_entries
+
+    package_id = params.get("package_id")
+    if not package_id:
+        return {"error": "package_id is required"}
+
+    doc_type = params.get("doc_type")  # Optional
+    limit = params.get("limit", 20)
+
+    entries = list_changelog_entries(tenant_id, package_id, doc_type, limit)
+
+    return {
+        "package_id": package_id,
+        "doc_type": doc_type,
+        "count": len(entries),
+        "entries": [
+            {
+                "change_type": e.get("change_type"),
+                "change_source": e.get("change_source"),
+                "change_summary": e.get("change_summary"),
+                "doc_type": e.get("doc_type"),
+                "version": e.get("version"),
+                "actor_user_id": e.get("actor_user_id"),
+                "created_at": e.get("created_at"),
+            }
+            for e in entries
+        ],
+    }
+
+
+def _exec_get_latest_document(params: dict, tenant_id: str) -> dict:
+    """Get latest document version with recent changelog entries."""
+    from app.document_store import get_document
+    from app.changelog_store import list_changelog_entries
+
+    package_id = params.get("package_id")
+    doc_type = params.get("doc_type")
+
+    if not package_id or not doc_type:
+        return {"error": "package_id and doc_type are required"}
+
+    # Get latest document (version=None returns latest)
+    doc = get_document(tenant_id, package_id, doc_type, version=None)
+    if not doc:
+        return {"error": f"No {doc_type} document found for package {package_id}"}
+
+    # Get recent changelog entries
+    changelog = list_changelog_entries(tenant_id, package_id, doc_type, limit=5)
+
+    return {
+        "document": {
+            "doc_type": doc.get("doc_type"),
+            "version": doc.get("version"),
+            "title": doc.get("title"),
+            "status": doc.get("status"),
+            "created_at": doc.get("created_at"),
+            "s3_key": doc.get("s3_key"),
+        },
+        "recent_changes": [
+            {
+                "change_type": e.get("change_type"),
+                "change_summary": e.get("change_summary"),
+                "actor_user_id": e.get("actor_user_id"),
+                "created_at": e.get("created_at"),
+            }
+            for e in changelog
+        ],
+    }
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -3020,6 +3337,7 @@ TOOL_DISPATCH = {
     "cloudwatch_logs": _exec_cloudwatch_logs,
     "search_far": _exec_search_far,
     "create_document": _exec_create_document,
+    "edit_docx_document": _exec_edit_docx_document,
     "get_intake_status": _exec_get_intake_status,
     "intake_workflow": _exec_intake_workflow,
     "query_compliance_matrix": _exec_query_compliance_matrix,
@@ -3029,10 +3347,13 @@ TOOL_DISPATCH = {
     "manage_skills": _exec_manage_skills,
     "manage_prompts": _exec_manage_prompts,
     "manage_templates": _exec_manage_templates,
+    # Document changelog tools
+    "document_changelog_search": _exec_document_changelog_search,
+    "get_latest_document": _exec_get_latest_document,
 }
 
 # Tools that need session_id for per-user scoping
-TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status"}
+TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "edit_docx_document", "get_intake_status"}
 
 
 def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> str:
