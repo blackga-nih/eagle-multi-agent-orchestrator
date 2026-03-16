@@ -146,7 +146,7 @@ TIER_BUDGETS = {
 # This avoids long multi-tool loops for straightforward document creation asks.
 _DOC_TYPE_HINTS: list[tuple[str, list[str]]] = [
     ("sow", ["statement of work", " sow"]),
-    ("igce", ["igce", "independent government cost estimate", "cost estimate"]),
+    ("igce", ["igce", "ige", "independent government estimate", "independent government cost estimate", "cost estimate"]),
     ("market_research", ["market research"]),
     ("acquisition_plan", ["acquisition plan"]),
     ("justification", ["justification", "j&a", "j and a", "sole source"]),
@@ -704,6 +704,60 @@ EAGLE_TOOLS = [
                 },
             },
             "required": ["doc_type", "title"],
+        },
+    },
+    {
+        "name": "edit_docx_document",
+        "description": (
+            "Apply targeted edits to an existing DOCX document in S3 using "
+            "python-docx. Use this to preserve Word formatting while replacing "
+            "specific existing text in the document."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "document_key": {
+                    "type": "string",
+                    "description": "Full S3 key for the target .docx document",
+                },
+                "edits": {
+                    "type": "array",
+                    "description": "Exact text replacements to apply",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "search_text": {
+                                "type": "string",
+                                "description": "Exact current text to find in the DOCX preview",
+                            },
+                            "replacement_text": {
+                                "type": "string",
+                                "description": "Replacement text to apply while preserving formatting",
+                            },
+                        },
+                        "required": ["search_text", "replacement_text"],
+                    },
+                },
+                "checkbox_edits": {
+                    "type": "array",
+                    "description": "Optional checkbox toggles using visible checkbox label text from the DOCX preview",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label_text": {
+                                "type": "string",
+                                "description": "Visible checkbox label text from the preview",
+                            },
+                            "checked": {
+                                "type": "boolean",
+                                "description": "Whether the checkbox should be checked",
+                            },
+                        },
+                        "required": ["label_text", "checked"],
+                    },
+                },
+            },
+            "required": ["document_key"],
         },
     },
     {
@@ -1444,6 +1498,7 @@ def build_supervisor_prompt(
         "6) Use search_far only as fallback reference.\n\n"
         "Document Output Rules:\n"
         "1) If the user asks to generate/draft/create a document, you MUST call create_document.\n"
+        "1a) If the user asks to revise an existing DOCX document, use edit_docx_document for targeted edits and checkbox_edits for checklist toggles.\n"
         "2) Do not paste full document bodies in chat unless the user explicitly asks for inline text.\n"
         "3) After create_document, respond briefly and direct the user to open/edit the document card.\n\n"
         f"FAST vs DEEP routing:\n"

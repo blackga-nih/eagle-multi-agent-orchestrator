@@ -59,6 +59,14 @@ def _now_iso() -> str:
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
+def _normalize_change_source(change_source: str) -> str:
+    """Collapse legacy/internal source labels to the UI-facing values."""
+    normalized = (change_source or "").strip().lower()
+    if normalized in {"ai_edit", "agent_tool"}:
+        return "agent_tool"
+    return change_source
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -103,7 +111,7 @@ def write_changelog_entry(
         "doc_type": doc_type,
         "version": version,
         "change_type": change_type,
-        "change_source": change_source,
+        "change_source": _normalize_change_source(change_source),
         "change_summary": change_summary,
         "actor_user_id": actor_user_id,
         "created_at": created_at,
@@ -227,7 +235,7 @@ def write_document_changelog_entry(
         "doc_type": doc_type or _infer_doc_type(document_key),
         "version": version,
         "change_type": change_type,
-        "change_source": change_source,
+        "change_source": _normalize_change_source(change_source),
         "change_summary": change_summary,
         "actor_user_id": actor_user_id,
         "created_at": created_at,

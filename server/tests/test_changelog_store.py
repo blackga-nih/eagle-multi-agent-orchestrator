@@ -101,6 +101,43 @@ class TestWriteChangelogEntry:
         assert item["change_type"] == "finalize"
         assert result["change_type"] == "finalize"
 
+    def test_write_changelog_entry_normalizes_ai_edit_source(self, mock_dynamodb_table):
+        """Should store assistant edits under the agent_tool source label."""
+        from app.changelog_store import write_changelog_entry
+
+        result = write_changelog_entry(
+            tenant_id="test-tenant",
+            package_id="pkg-123",
+            doc_type="sow",
+            version=2,
+            change_type="update",
+            change_source="ai_edit",
+            change_summary="Updated SOW via assistant",
+            actor_user_id="user-456",
+        )
+
+        item = mock_dynamodb_table.put_item.call_args.kwargs["Item"]
+        assert item["change_source"] == "agent_tool"
+        assert result["change_source"] == "agent_tool"
+
+    def test_write_document_changelog_entry_normalizes_ai_edit_source(self, mock_dynamodb_table):
+        """Should normalize workspace assistant edits to the agent_tool source label."""
+        from app.changelog_store import write_document_changelog_entry
+
+        result = write_document_changelog_entry(
+            tenant_id="test-tenant",
+            document_key="eagle/test-tenant/test-user/documents/sow_20260311_153430.docx",
+            change_type="update",
+            change_source="ai_edit",
+            change_summary="Applied DOCX assistant edit",
+            actor_user_id="user-456",
+        )
+
+        item = mock_dynamodb_table.put_item.call_args.kwargs["Item"]
+        assert item["change_source"] == "agent_tool"
+        assert item["document_key"].endswith("sow_20260311_153430.docx")
+        assert result["change_source"] == "agent_tool"
+
 
 class TestListChangelogEntries:
     """Tests for list_changelog_entries."""

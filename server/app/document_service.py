@@ -10,6 +10,8 @@ Orchestrates the creation of versioned package documents with:
 This is the single source of truth for package document creation,
 used by both the chat tool path and the package API path.
 """
+from __future__ import annotations
+
 import os
 import hashlib
 import logging
@@ -23,6 +25,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from .document_store import (
     get_document_history,
     get_document,
+    get_document_by_id as store_get_document_by_id,
     finalize_document as store_finalize_document,
 )
 from .package_store import get_package, update_package
@@ -296,6 +299,14 @@ def get_document_download_url(
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to generate presigned URL: %s", e)
         return None
+
+
+def get_document_by_id(
+    tenant_id: str,
+    document_id: str,
+) -> Optional[dict]:
+    """Fetch a package document metadata record by document_id."""
+    return store_get_document_by_id(tenant_id, document_id)
 
 
 def finalize_document(

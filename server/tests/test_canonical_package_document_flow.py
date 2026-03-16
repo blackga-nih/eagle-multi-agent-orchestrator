@@ -133,6 +133,16 @@ def test_fast_path_detects_multiline_document_prompt():
     assert doc_type == "sow"
 
 
+def test_fast_path_detects_ige_alias():
+    from app.strands_agentic_service import _should_use_fast_document_path
+
+    should_fast_path, doc_type = _should_use_fast_document_path(
+        "Generate an IGE for refurbished Olympus CK2 microscopes."
+    )
+    assert should_fast_path is True
+    assert doc_type == "igce"
+
+
 def test_force_document_creation_for_direct_request_without_tool(monkeypatch):
     from app.strands_agentic_service import _ensure_create_document_for_direct_request
 

@@ -105,6 +105,7 @@ function parseDocumentToolResult(event: StreamEvent): DocumentInfo | null {
 
 /** Known document type prefixes in S3 filenames. */
 const DOC_TYPE_MAP: Record<string, { type: string; label: string }> = {
+  ige: { type: 'igce', label: 'Independent Government Cost Estimate' },
   sow: { type: 'sow', label: 'Statement of Work' },
   igce: { type: 'igce', label: 'Independent Government Cost Estimate' },
   market_research: { type: 'market_research', label: 'Market Research Report' },
@@ -153,7 +154,7 @@ function parseDocumentsFromText(text: string): DocumentInfo[] {
 /** Map of keyword patterns to document types for text-based detection. */
 const DOC_KEYWORD_PATTERNS: Array<{ pattern: RegExp; type: string; label: string; template: string }> = [
   { pattern: /statement\s+of\s+work|(\b)sow(\b)/i, type: 'sow', label: 'Statement of Work', template: 'sow-template.md' },
-  { pattern: /igce|cost\s+estimate|independent\s+government/i, type: 'igce', label: 'Cost Estimate (IGCE)', template: 'igce-template.md' },
+  { pattern: /\b(igce|ige)\b|cost\s+estimate|independent\s+government/i, type: 'igce', label: 'Cost Estimate (IGCE)', template: 'igce-template.md' },
   { pattern: /market\s+research/i, type: 'market_research', label: 'Market Research Report', template: 'market-research-template.md' },
   { pattern: /acquisition\s+plan/i, type: 'acquisition_plan', label: 'Acquisition Plan', template: 'acquisition-plan-template.md' },
   { pattern: /justification\s*((&|and)\s*approval)?|(\b)j\s*(&|and)\s*a(\b)|sole\s*source/i, type: 'justification', label: 'Justification & Approval', template: 'justification-template.md' },

@@ -15,15 +15,23 @@ import { DocumentType, DocumentStatus, WorkflowStatus } from '@/types/schema';
 
 export interface StoredDocument {
   id: string;
+  document_id?: string;
   package_id?: string;
   title: string;
   document_type: DocumentType;
   content?: string;
+  file_type?: string;
+  content_type?: string;
+  is_binary?: boolean;
+  download_url?: string | null;
   mode?: 'package' | 'workspace';
   status: DocumentStatus;
   version: number;
   word_count?: number;
   s3_key?: string;
+  preview_mode?: DocumentInfo['preview_mode'];
+  preview_blocks?: DocumentInfo['preview_blocks'];
+  preview_sheets?: DocumentInfo['preview_sheets'];
   session_id: string;
   created_at: string;
   updated_at: string;
@@ -111,15 +119,23 @@ export function saveGeneratedDocument(
 
   const stored: StoredDocument = {
     id: docId,
+    document_id: doc.document_id,
     package_id: doc.package_id,
     title: doc.title,
     document_type: doc.document_type as DocumentType,
     content: doc.content,
+    file_type: doc.file_type,
+    content_type: doc.content_type,
+    is_binary: doc.is_binary,
+    download_url: doc.download_url ?? null,
     mode: doc.mode,
     status: (doc.status as DocumentStatus | undefined) || 'draft',
     version: doc.version ?? (existing ? existing.version + 1 : 1),
     word_count: doc.word_count,
     s3_key: doc.s3_key,
+    preview_mode: doc.preview_mode,
+    preview_blocks: doc.preview_blocks,
+    preview_sheets: doc.preview_sheets,
     session_id: sessionId,
     created_at: existing?.created_at || now,
     updated_at: now,

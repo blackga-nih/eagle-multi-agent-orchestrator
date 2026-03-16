@@ -190,7 +190,7 @@ lint-ts:
 
 # Run backend unit tests
 test *ARGS:
-    cd server && python3 -m pytest tests/ -v {{ARGS}}
+    docker compose -f deployment/docker-compose.dev.yml run --rm backend sh -lc "cd /app && pytest tests/ -v {{ARGS}}"
 
 # Run Playwright E2E tests against Fargate (headless)
 test-e2e *ARGS:

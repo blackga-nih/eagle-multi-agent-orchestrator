@@ -19,7 +19,7 @@ from typing import Optional
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 
 logger = logging.getLogger('eagle.document_store')
 
@@ -257,3 +257,28 @@ def get_document_history(
         logger.error('document_store.get_document_history failed: %s', e)
         return []
 
+
+def get_document_by_id(
+    tenant_id: str,
+    document_id: str,
+) -> Optional[dict]:
+    """Fetch a document by tenant and document_id.
+
+    The current table schema does not index document_id directly, so this uses
+    the tenant partition with a filter expression as an MVP lookup path.
+    """
+    table = _get_table()
+
+    try:
+        response = table.query(
+            KeyConditionExpression=Key("PK").eq(f"DOCUMENT#{tenant_id}"),
+            FilterExpression=Attr("document_id").eq(document_id),
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        if not items:
+            return None
+        return _item_to_dict(items[0])
+    except (ClientError, BotoCoreError) as e:
+        logger.error("document_store.get_document_by_id failed: %s", e)
+        return None
