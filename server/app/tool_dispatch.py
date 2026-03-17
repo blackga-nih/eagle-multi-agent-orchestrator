@@ -2760,6 +2760,125 @@ def _exec_web_search(params: dict, tenant_id: str) -> dict:
     return web_search(query, search_type, tenant_id, count)
 
 
+def _exec_edit_docx_document(params: dict, tenant_id: str, session_id: str = None) -> dict:
+    """Apply targeted edits to an existing DOCX document."""
+    from app.document_ai_edit_service import DocxCheckboxEdit, DocxEdit, edit_docx_document
+
+    doc_key = params.get("document_key", "")
+    edits_input = params.get("edits") or []
+    checkbox_edits_input = params.get("checkbox_edits") or []
+    if edits_input and not isinstance(edits_input, list):
+        return {"error": "edits must be an array"}
+    if checkbox_edits_input and not isinstance(checkbox_edits_input, list):
+        return {"error": "checkbox_edits must be an array"}
+    if not edits_input and not checkbox_edits_input:
+        return {"error": "Provide edits or checkbox_edits"}
+
+    edits: list[DocxEdit] = []
+    for idx, edit in enumerate(edits_input, start=1):
+        if not isinstance(edit, dict):
+            return {"error": f"edit #{idx} must be an object"}
+        search_text = str(edit.get("search_text", "") or "").strip()
+        replacement_text = str(edit.get("replacement_text", "") or "")
+        if not search_text:
+            return {"error": f"edit #{idx} is missing search_text"}
+        edits.append(DocxEdit(search_text=search_text, replacement_text=replacement_text))
+
+    checkbox_edits: list[DocxCheckboxEdit] = []
+    for idx, edit in enumerate(checkbox_edits_input, start=1):
+        if not isinstance(edit, dict):
+            return {"error": f"checkbox_edit #{idx} must be an object"}
+        label_text = str(edit.get("label_text", "") or "").strip()
+        checked = edit.get("checked")
+        if not label_text:
+            return {"error": f"checkbox_edit #{idx} is missing label_text"}
+        if not isinstance(checked, bool):
+            return {"error": f"checkbox_edit #{idx} must provide boolean checked"}
+        checkbox_edits.append(DocxCheckboxEdit(label_text=label_text, checked=checked))
+
+    return edit_docx_document(
+        tenant_id=tenant_id,
+        user_id=_extract_user_id(session_id),
+        doc_key=doc_key,
+        edits=edits,
+        checkbox_edits=checkbox_edits,
+        session_id=session_id,
+        change_source="ai_edit",
+    )
+
+
+def _exec_document_changelog_search(params: dict, tenant_id: str) -> dict:
+    """Search changelog history for a document or package."""
+    from app.changelog_store import list_changelog_entries
+
+    package_id = params.get("package_id")
+    if not package_id:
+        return {"error": "package_id is required"}
+
+    doc_type = params.get("doc_type")  # Optional
+    limit = params.get("limit", 20)
+
+    entries = list_changelog_entries(tenant_id, package_id, doc_type, limit)
+
+    return {
+        "package_id": package_id,
+        "doc_type": doc_type,
+        "count": len(entries),
+        "entries": [
+            {
+                "change_type": e.get("change_type"),
+                "change_source": e.get("change_source"),
+                "change_summary": e.get("change_summary"),
+                "doc_type": e.get("doc_type"),
+                "version": e.get("version"),
+                "actor_user_id": e.get("actor_user_id"),
+                "created_at": e.get("created_at"),
+            }
+            for e in entries
+        ],
+    }
+
+
+def _exec_get_latest_document(params: dict, tenant_id: str) -> dict:
+    """Get latest document version with recent changelog entries."""
+    from app.stores.document_store import get_document
+    from app.changelog_store import list_changelog_entries
+
+    package_id = params.get("package_id")
+    doc_type = params.get("doc_type")
+
+    if not package_id or not doc_type:
+        return {"error": "package_id and doc_type are required"}
+
+    # Get latest document (version=None returns latest)
+    doc = get_document(tenant_id, package_id, doc_type, version=None)
+    if not doc:
+        return {"error": f"No {doc_type} document found for package {package_id}"}
+
+    # Get recent changelog entries
+    changelog = list_changelog_entries(tenant_id, package_id, doc_type, limit=5)
+
+    return {
+        "document": {
+            "doc_type": doc.get("doc_type"),
+            "version": doc.get("version"),
+            "title": doc.get("title"),
+            "status": doc.get("status"),
+            "created_at": doc.get("created_at"),
+            "s3_key": doc.get("s3_key"),
+        },
+        "recent_changes": [
+            {
+                "change_type": e.get("change_type"),
+                "change_summary": e.get("change_summary"),
+                "actor_user_id": e.get("actor_user_id"),
+                "created_at": e.get("created_at"),
+            }
+            for e in changelog
+        ],
+    }
+
+
 def _exec_browse_url(params: dict, tenant_id: str) -> dict:
     """Fetch and extract content from URLs via AgentCore Browser."""
     from .agentcore.browser import browse_urls
@@ -2808,10 +2927,14 @@ TOOL_DISPATCH = {
     "web_search": _exec_web_search,
     "browse_url": _exec_browse_url,
     "code_execute": _exec_code_execute,
+    # Document editing + changelog tools
+    "edit_docx_document": _exec_edit_docx_document,
+    "document_changelog_search": _exec_document_changelog_search,
+    "get_latest_document": _exec_get_latest_document,
 }
 
 # Tools that need session_id for per-user scoping
-TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "get_intake_status", "workspace_memory"}
+TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "edit_docx_document", "get_intake_status", "workspace_memory"}
 
 
 def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> str:

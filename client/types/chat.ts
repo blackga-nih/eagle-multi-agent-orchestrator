@@ -33,3 +33,33 @@ export interface DocumentInfo {
   s3_key?: string;
   s3_location?: string;
 }
+
+export interface DocxPreviewBlock {
+  block_id: string;
+  kind: 'paragraph' | 'heading' | 'checkbox';
+  text: string;
+  level?: number | null;
+  checked?: boolean | null;
+}
+
+export interface XlsxPreviewCell {
+  cell_ref: string;
+  row: number;
+  col: number;
+  value: string;
+  display_value: string;
+  editable: boolean;
+  is_formula: boolean;
+}
+
+export interface XlsxPreviewSheet {
+  sheet_id: string;
+  title: string;
+  max_row: number;
+  max_col: number;
+  truncated: boolean;
+  rows: Array<{
+    row_index: number;
+    cells: XlsxPreviewCell[];
+  }>;
+}

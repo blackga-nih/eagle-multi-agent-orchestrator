@@ -25,6 +25,9 @@ tools:
   - browse_url
   - think
   - workspace_memory
+  - edit_docx_document
+  - document_changelog_search
+  - get_latest_document
   - load_skill
   - load_data
 model: null

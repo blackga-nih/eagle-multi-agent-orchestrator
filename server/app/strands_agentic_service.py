@@ -1427,6 +1427,109 @@ EAGLE_TOOLS = [
             "required": ["code"],
         },
     },
+    {
+        "name": "edit_docx_document",
+        "description": (
+            "Apply targeted edits to an existing DOCX document in S3 using "
+            "python-docx. Use this for in-place updates that preserve fonts, "
+            "headers, tables, and overall Word formatting. Provide exact existing "
+            "text from the current preview and the replacement text."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "document_key": {
+                    "type": "string",
+                    "description": "Full S3 key for the target .docx document",
+                },
+                "edits": {
+                    "type": "array",
+                    "description": "One or more exact text replacements to apply",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "search_text": {
+                                "type": "string",
+                                "description": "Exact current text to find in the DOCX",
+                            },
+                            "replacement_text": {
+                                "type": "string",
+                                "description": "Replacement text to write while preserving formatting",
+                            },
+                        },
+                        "required": ["search_text", "replacement_text"],
+                    },
+                },
+                "checkbox_edits": {
+                    "type": "array",
+                    "description": "Optional checkbox toggles using the visible checkbox label text from the DOCX preview",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label_text": {
+                                "type": "string",
+                                "description": "Visible checkbox label text from the preview",
+                            },
+                            "checked": {
+                                "type": "boolean",
+                                "description": "Whether the checkbox should be checked",
+                            },
+                        },
+                        "required": ["label_text", "checked"],
+                    },
+                },
+            },
+            "required": ["document_key"],
+        },
+    },
+    {
+        "name": "document_changelog_search",
+        "description": (
+            "Search the changelog history for a document or package. Returns "
+            "a list of changes showing what changed, who made the change, when, "
+            "and why. Use this to understand document evolution or audit history."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "package_id": {
+                    "type": "string",
+                    "description": "Package ID to search changelog for (required)",
+                },
+                "doc_type": {
+                    "type": "string",
+                    "description": "Document type to filter by (optional - omit for all docs in package)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of entries to return (default: 20)",
+                },
+            },
+            "required": ["package_id"],
+        },
+    },
+    {
+        "name": "get_latest_document",
+        "description": (
+            "Get the latest version of a document along with its recent changelog. "
+            "Use this to ensure you're working with the most current content and "
+            "understand recent changes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "package_id": {
+                    "type": "string",
+                    "description": "Package ID containing the document",
+                },
+                "doc_type": {
+                    "type": "string",
+                    "description": "Document type (sow, igce, market_research, etc.)",
+                },
+            },
+            "required": ["package_id", "doc_type"],
+        },
+    },
 ]
 
 # Max prompt size per subagent to avoid context overflow

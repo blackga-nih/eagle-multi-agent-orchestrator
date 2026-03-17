@@ -348,3 +348,49 @@ async def record_approval_decision(
         after=body.get("comments"),
     )
     return result
+
+
+# ── Document Changelog ───────────────────────────────────────────────
+
+@router.get("/api/packages/{package_id}/documents/{doc_type}/changelog")
+async def get_document_changelog_endpoint(
+    package_id: str,
+    doc_type: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get changelog entries for a document."""
+    from ..changelog_store import list_changelog_entries
+    entries = list_changelog_entries(user.tenant_id, package_id, doc_type, limit)
+    return {"entries": entries, "count": len(entries)}
+
+
+@router.get("/api/packages/{package_id}/changelog")
+async def get_package_changelog_endpoint(
+    package_id: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get all changelog entries for a package (all document types)."""
+    from ..changelog_store import list_changelog_entries
+    entries = list_changelog_entries(user.tenant_id, package_id, None, limit)
+    return {"entries": entries, "count": len(entries)}
+
+
+@router.get("/api/document-changelog")
+async def get_document_key_changelog_endpoint(
+    key: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get changelog entries for a document by S3 key."""
+    from ..changelog_store import list_document_changelog_entries
+
+    tenant_id = user.tenant_id
+
+    # Security: ensure key is within user's tenant prefix
+    if not key.startswith(f"eagle/{tenant_id}/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    entries = list_document_changelog_entries(tenant_id, key, limit)
+    return {"entries": entries, "count": len(entries)}

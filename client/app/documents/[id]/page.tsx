@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, use, useCallback } from 'react';
+import { useState, useEffect, useRef, use, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     ArrowLeft,
@@ -15,6 +15,8 @@ import {
     Eye,
     Edit3,
     RefreshCw,
+    History,
+    MessageSquare,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import TopNav from '@/components/layout/top-nav';
@@ -22,7 +24,7 @@ import MarkdownRenderer from '@/components/ui/markdown-renderer';
 import { useAgentStream } from '@/hooks/use-agent-stream';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
-import { ChatMessage, DocumentInfo } from '@/types/chat';
+import { ChatMessage, DocumentInfo, DocxPreviewBlock, XlsxPreviewCell, XlsxPreviewSheet } from '@/types/chat';
 import {
     hasPlaceholders,
     hydrateTemplate,
@@ -50,6 +52,49 @@ const TEMPLATE_PREFIXES = Object.keys(TEMPLATE_MAP).sort((a, b) => b.length - a.
 
 // Alias for local usage (backward compat with existing references in this file)
 const DOC_TYPE_LABELS = DOCUMENT_TYPE_LABELS as Record<string, string>;
+const MAX_DOC_CONTEXT_CHARS = 2000;
+const MAX_SESSION_CONTEXT_CHARS = 1500;
+const EDIT_INTENT_RE = /\b(edit|update|revise|modify|change|clear|fill|rewrite|amend|replace|adjust|section)\b/i;
+
+function truncateWithEllipsis(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return `${text.slice(0, maxChars - 3)}...`;
+}
+
+function sanitizeContextText(text: string): string {
+    return text
+        .replace(/Authorization:\s*[^\n]*/gi, '[REDACTED]')
+        .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, '[REDACTED]')
+        .replace(/AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)\s*[:=]?\s*[^\s\n]+/gi, '[REDACTED]');
+}
+
+async function extractResponseError(response: Response): Promise<string> {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        try {
+            const payload = await response.json() as { detail?: string; error?: string; message?: string };
+            return payload.detail || payload.error || payload.message || `Request failed (${response.status})`;
+        } catch {
+            return `Request failed (${response.status})`;
+        }
+    }
+    try {
+        const text = await response.text();
+        return text.slice(0, 200) || `Request failed (${response.status})`;
+    } catch {
+        return `Request failed (${response.status})`;
+    }
+}
+
+interface ChangelogEntry {
+    change_type: string;
+    change_source: string;
+    change_summary: string;
+    doc_type?: string;
+    version?: number;
+    actor_user_id?: string;
+    created_at: string;
+}
 
 export default function DocumentViewerPage({ params }: PageProps) {
     const { id } = use(params);
@@ -68,6 +113,29 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const [unfilledCount, setUnfilledCount] = useState(0);
     const [showHydrationBanner, setShowHydrationBanner] = useState(false);
     const autoPromptSentRef = useRef(false);
+
+    // Binary document state
+    const [docxPreviewBlocks, setDocxPreviewBlocks] = useState<DocxPreviewBlock[]>([]);
+    const [editDocxPreviewBlocks, setEditDocxPreviewBlocks] = useState<DocxPreviewBlock[]>([]);
+    const [docxPreviewMode, setDocxPreviewMode] = useState<string | null>(null);
+    const [xlsxPreviewSheets, setXlsxPreviewSheets] = useState<XlsxPreviewSheet[]>([]);
+    const [editXlsxPreviewSheets, setEditXlsxPreviewSheets] = useState<XlsxPreviewSheet[]>([]);
+    const [activeXlsxSheetId, setActiveXlsxSheetId] = useState<string>('');
+    const [isBinaryDocument, setIsBinaryDocument] = useState(false);
+    const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [documentKey, setDocumentKey] = useState<string>('');
+    const [packageId, setPackageId] = useState<string | null>(null);
+    const [documentVersion, setDocumentVersion] = useState<number | null>(null);
+
+    // Right panel tab state
+    const [rightTab, setRightTab] = useState<'chat' | 'changelog'>('chat');
+    const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
+    const [changelogLoading, setChangelogLoading] = useState(false);
+
+    const isDocxDocument = useMemo(() => docxPreviewMode === 'docx_blocks' || docxPreviewMode === 'text_fallback', [docxPreviewMode]);
+    const isXlsxDocument = useMemo(() => xlsxPreviewSheets.length > 0, [xlsxPreviewSheets]);
 
     // Chat state
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -95,7 +163,6 @@ export default function DocumentViewerPage({ params }: PageProps) {
         const decodedId = decodeURIComponent(id);
 
         // Try sessionStorage first (instant load from chat navigation)
-        // Double-lookup: new keys use plain encodeURIComponent, old keys had dots as %2E
         try {
             const stored = sessionStorage.getItem(`doc-content-${id}`)
                 || sessionStorage.getItem(`doc-content-${encodeURIComponent(decodedId).replace(/\./g, '%2E')}`);
@@ -106,10 +173,12 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     setDocumentType(doc.document_type);
                     setDocumentContent(doc.content);
                     setEditContent(doc.content);
+                    setDocumentKey(doc.s3_key || decodedId);
+                    if (doc.package_id) setPackageId(doc.package_id);
+                    if (doc.version) setDocumentVersion(doc.version);
                     setIsLoading(false);
                     return;
                 }
-                // Has metadata but no content — keep metadata, fall through to fetch
                 setDocumentTitle(doc.title);
                 setDocumentType(doc.document_type);
             }
@@ -124,13 +193,13 @@ export default function DocumentViewerPage({ params }: PageProps) {
             setDocumentType(stored2.document_type);
             setDocumentContent(stored2.content);
             setEditContent(stored2.content);
+            setDocumentKey(stored2.s3_key || decodedId);
             setIsLoading(false);
             return;
         }
 
         // Fallback: try fetching from API, then from local templates
         async function fetchDocument() {
-            // Try backend API first
             try {
                 const token = await getToken();
                 const res = await fetch(`/api/documents/${encodeURIComponent(decodedId)}?content=true`, {
@@ -142,6 +211,29 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     setDocumentType(data.document_type || '');
                     setDocumentContent(data.content || '');
                     setEditContent(data.content || '');
+                    setDocumentKey(data.s3_key || data.key || decodedId);
+                    if (data.package_id) setPackageId(data.package_id);
+                    if (data.version) setDocumentVersion(data.version);
+
+                    // Handle binary document preview
+                    if (data.is_binary || data.preview_mode) {
+                        setIsBinaryDocument(true);
+                        if (data.download_url) setDownloadUrl(data.download_url);
+
+                        if (data.preview_blocks && data.preview_blocks.length > 0) {
+                            setDocxPreviewBlocks(data.preview_blocks);
+                            setEditDocxPreviewBlocks(JSON.parse(JSON.stringify(data.preview_blocks)));
+                            setDocxPreviewMode(data.preview_mode || 'docx_blocks');
+                        }
+                        if (data.preview_sheets && data.preview_sheets.length > 0) {
+                            setXlsxPreviewSheets(data.preview_sheets);
+                            setEditXlsxPreviewSheets(JSON.parse(JSON.stringify(data.preview_sheets)));
+                            if (data.preview_sheets[0]?.sheet_id) {
+                                setActiveXlsxSheetId(data.preview_sheets[0].sheet_id);
+                            }
+                        }
+                    }
+
                     setIsLoading(false);
                     return;
                 }
@@ -149,8 +241,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 // Backend unavailable — try template fallback
             }
 
-            // Try loading from local template files (no S3 required)
-            // Match by exact name first, then by longest prefix (e.g. sow_20260212.md → sow)
+            // Try loading from local template files
             let templateFile: string | null = null;
             let typeFromFile = '';
 
@@ -195,6 +286,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
     // Layer 1: Immediate hydration from session context
     useEffect(() => {
         if (isLoading || !documentContent || !sessionId || !documentType) return;
+        if (isBinaryDocument) return; // Skip hydration for binary docs
         if (!hasPlaceholders(documentContent)) return;
 
         const sessionData = loadSession(sessionId);
@@ -211,7 +303,6 @@ export default function DocumentViewerPage({ params }: PageProps) {
         if (result.unfilledCount > 0) {
             setShowHydrationBanner(true);
         }
-    // Run once after initial content loads
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLoading]);
 
@@ -233,14 +324,12 @@ export default function DocumentViewerPage({ params }: PageProps) {
             ]);
         },
         onDocumentGenerated: (doc) => {
-            // LLM regenerated the document — update the left panel
             if (doc.content) {
                 setDocumentContent(doc.content);
                 setEditContent(doc.content);
                 if (doc.title) setDocumentTitle(doc.title);
                 if (doc.document_type) setDocumentType(doc.document_type);
 
-                // Flash update indicator
                 setDocUpdated(true);
                 setTimeout(() => setDocUpdated(false), 2000);
             }
@@ -280,7 +369,6 @@ ${contextSnippet}
 Current document (first 3000 chars):
 ${docSnippet}`;
 
-        // Send as a chat message
         const userMsg: ChatMessage = {
             id: `auto-${Date.now()}`,
             role: 'user',
@@ -310,6 +398,32 @@ ${docSnippet}`;
         adjustTextareaHeight();
     }, [chatInput, adjustTextareaHeight]);
 
+    // Fetch changelog when tab switches
+    useEffect(() => {
+        if (rightTab !== 'changelog' || !documentKey) return;
+
+        const fetchChangelog = async () => {
+            setChangelogLoading(true);
+            try {
+                const token = await getToken();
+                const headers: Record<string, string> = {};
+                if (token) headers.Authorization = `Bearer ${token}`;
+
+                const res = await fetch(`/api/document-changelog?key=${encodeURIComponent(documentKey)}&limit=50`, { headers });
+                if (res.ok) {
+                    const data = await res.json();
+                    setChangelog(data.entries || []);
+                }
+            } catch {
+                // Silently fail
+            } finally {
+                setChangelogLoading(false);
+            }
+        };
+
+        fetchChangelog();
+    }, [rightTab, documentKey, getToken]);
+
     const handleSendMessage = async () => {
         if (!chatInput.trim() || isStreaming) return;
 
@@ -323,22 +437,142 @@ ${docSnippet}`;
         const query = chatInput;
         setChatInput('');
 
-        await sendQuery(query, sessionId);
+        // Build context-aware prompt for edit requests on binary documents
+        if (isBinaryDocument && EDIT_INTENT_RE.test(query) && documentKey) {
+            const docContext = documentContent
+                ? truncateWithEllipsis(sanitizeContextText(documentContent), MAX_DOC_CONTEXT_CHARS)
+                : '';
+            const enrichedQuery = `${query}\n\n[Document context: key=${documentKey}${docContext ? `, preview:\n${docContext}` : ''}]`;
+            await sendQuery(enrichedQuery, sessionId);
+        } else {
+            await sendQuery(query, sessionId);
+        }
     };
 
     const handleToggleEdit = () => {
         if (isEditing) {
             // Switching from edit to preview — save edits
-            setDocumentContent(editContent);
+            if (isDocxDocument) {
+                setDocxPreviewBlocks(JSON.parse(JSON.stringify(editDocxPreviewBlocks)));
+            } else if (isXlsxDocument) {
+                setXlsxPreviewSheets(JSON.parse(JSON.stringify(editXlsxPreviewSheets)));
+            } else {
+                setDocumentContent(editContent);
+            }
         } else {
-            setEditContent(documentContent);
+            if (isDocxDocument) {
+                setEditDocxPreviewBlocks(JSON.parse(JSON.stringify(docxPreviewBlocks)));
+            } else if (isXlsxDocument) {
+                setEditXlsxPreviewSheets(JSON.parse(JSON.stringify(xlsxPreviewSheets)));
+            } else {
+                setEditContent(documentContent);
+            }
         }
         setIsEditing(!isEditing);
+    };
+
+    // Save structured edits (DOCX/XLSX)
+    const handleSaveStructuredEdits = async () => {
+        setIsSaving(true);
+        setSaveError(null);
+        try {
+            const token = await getToken();
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (token) headers.Authorization = `Bearer ${token}`;
+
+            let res: Response;
+            if (isDocxDocument) {
+                res = await fetch(`/api/documents/${encodeURIComponent(documentKey)}/docx-edit`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        preview_blocks: editDocxPreviewBlocks,
+                        preview_mode: docxPreviewMode,
+                        change_source: 'user_edit',
+                    }),
+                });
+            } else if (isXlsxDocument) {
+                // Collect cell edits from modified sheets
+                const cellEdits: Array<{ sheet_id: string; cell_ref: string; value: string }> = [];
+                for (let si = 0; si < editXlsxPreviewSheets.length; si++) {
+                    const editSheet = editXlsxPreviewSheets[si];
+                    const origSheet = xlsxPreviewSheets[si];
+                    if (!origSheet) continue;
+                    for (let ri = 0; ri < editSheet.rows.length; ri++) {
+                        const editRow = editSheet.rows[ri];
+                        const origRow = origSheet.rows[ri];
+                        if (!origRow) continue;
+                        for (let ci = 0; ci < editRow.cells.length; ci++) {
+                            const editCell = editRow.cells[ci];
+                            const origCell = origRow.cells[ci];
+                            if (!origCell || !editCell.editable) continue;
+                            if (editCell.value !== origCell.value) {
+                                cellEdits.push({
+                                    sheet_id: editSheet.sheet_id,
+                                    cell_ref: editCell.cell_ref,
+                                    value: editCell.value,
+                                });
+                            }
+                        }
+                    }
+                }
+                if (cellEdits.length === 0) {
+                    setSaveError('No changes detected');
+                    setIsSaving(false);
+                    return;
+                }
+                res = await fetch(`/api/documents/${encodeURIComponent(documentKey)}/xlsx-edit`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ cell_edits: cellEdits, change_source: 'user_edit' }),
+                });
+            } else {
+                setIsSaving(false);
+                return;
+            }
+
+            if (!res.ok) {
+                const errMsg = await extractResponseError(res);
+                setSaveError(errMsg);
+                return;
+            }
+
+            const result = await res.json();
+
+            // Update state with new preview data
+            if (result.preview_blocks) {
+                setDocxPreviewBlocks(result.preview_blocks);
+                setEditDocxPreviewBlocks(JSON.parse(JSON.stringify(result.preview_blocks)));
+            }
+            if (result.preview_sheets) {
+                setXlsxPreviewSheets(result.preview_sheets);
+                setEditXlsxPreviewSheets(JSON.parse(JSON.stringify(result.preview_sheets)));
+            }
+            if (result.content) {
+                setDocumentContent(result.content);
+            }
+            if (result.version) setDocumentVersion(result.version);
+
+            setIsEditing(false);
+            setDocUpdated(true);
+            setTimeout(() => setDocUpdated(false), 2000);
+        } catch (err) {
+            setSaveError(err instanceof Error ? err.message : 'Save failed');
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     // Download handler
     const handleDownload = async (format: 'docx' | 'pdf') => {
         setShowDownloadMenu(false);
+
+        // For binary documents with a download URL, use presigned URL directly
+        if (isBinaryDocument && downloadUrl && format === 'docx') {
+            window.open(downloadUrl, '_blank');
+            return;
+        }
+
         setIsExporting(true);
         setExportError(null);
 
@@ -380,6 +614,32 @@ ${docSnippet}`;
         }
     };
 
+    // DOCX block editor helpers
+    const updateDocxBlock = useCallback((blockId: string, field: 'text' | 'checked', value: string | boolean) => {
+        setEditDocxPreviewBlocks(prev => prev.map(block =>
+            block.block_id === blockId
+                ? { ...block, [field]: value }
+                : block
+        ));
+    }, []);
+
+    // XLSX cell editor helpers
+    const updateXlsxCell = useCallback((sheetId: string, cellRef: string, value: string) => {
+        setEditXlsxPreviewSheets(prev => prev.map(sheet =>
+            sheet.sheet_id === sheetId
+                ? {
+                    ...sheet,
+                    rows: sheet.rows.map(row => ({
+                        ...row,
+                        cells: row.cells.map(cell =>
+                            cell.cell_ref === cellRef ? { ...cell, value } : cell
+                        ),
+                    })),
+                }
+                : sheet
+        ));
+    }, []);
+
     if (isLoading) {
         return (
             <div className="flex flex-col h-screen bg-gray-50">
@@ -393,6 +653,209 @@ ${docSnippet}`;
             </div>
         );
     }
+
+    // --- Render: DOCX Block Editor ---
+    const renderDocxBlockEditor = () => {
+        const blocks = isEditing ? editDocxPreviewBlocks : docxPreviewBlocks;
+        if (!blocks || blocks.length === 0) {
+            return <p className="text-gray-400 italic">No preview blocks available.</p>;
+        }
+
+        return (
+            <div className="space-y-2">
+                {blocks.map((block) => {
+                    if (block.kind === 'heading') {
+                        const HeadingTag = `h${Math.min(block.level || 1, 6)}` as keyof JSX.IntrinsicElements;
+                        const sizes: Record<number, string> = { 1: 'text-2xl', 2: 'text-xl', 3: 'text-lg' };
+                        const sizeClass = sizes[block.level || 1] || 'text-base';
+
+                        if (isEditing) {
+                            return (
+                                <input
+                                    key={block.block_id}
+                                    type="text"
+                                    value={block.text}
+                                    onChange={(e) => updateDocxBlock(block.block_id, 'text', e.target.value)}
+                                    className={`w-full ${sizeClass} font-bold border-b border-gray-200 focus:border-blue-500 focus:outline-none py-1 bg-transparent`}
+                                />
+                            );
+                        }
+                        return (
+                            <HeadingTag key={block.block_id} className={`${sizeClass} font-bold text-gray-900`}>
+                                {block.text}
+                            </HeadingTag>
+                        );
+                    }
+
+                    if (block.kind === 'checkbox') {
+                        return (
+                            <label key={block.block_id} className="flex items-start gap-2 py-0.5 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={block.checked ?? false}
+                                    disabled={!isEditing}
+                                    onChange={(e) => updateDocxBlock(block.block_id, 'checked', e.target.checked)}
+                                    className="mt-1 rounded border-gray-300"
+                                />
+                                {isEditing ? (
+                                    <input
+                                        type="text"
+                                        value={block.text}
+                                        onChange={(e) => updateDocxBlock(block.block_id, 'text', e.target.value)}
+                                        className="flex-1 border-b border-gray-200 focus:border-blue-500 focus:outline-none text-sm bg-transparent"
+                                    />
+                                ) : (
+                                    <span className={`text-sm ${block.checked ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                                        {block.text}
+                                    </span>
+                                )}
+                            </label>
+                        );
+                    }
+
+                    // Paragraph
+                    if (isEditing) {
+                        return (
+                            <textarea
+                                key={block.block_id}
+                                value={block.text}
+                                onChange={(e) => updateDocxBlock(block.block_id, 'text', e.target.value)}
+                                rows={Math.max(2, Math.ceil(block.text.length / 80))}
+                                className="w-full text-sm border border-gray-200 rounded-lg p-2 focus:border-blue-500 focus:outline-none resize-y bg-white"
+                            />
+                        );
+                    }
+                    return (
+                        <p key={block.block_id} className="text-sm text-gray-700 leading-relaxed">
+                            {block.text}
+                        </p>
+                    );
+                })}
+            </div>
+        );
+    };
+
+    // --- Render: XLSX Grid Editor ---
+    const renderXlsxGridEditor = () => {
+        const sheets = isEditing ? editXlsxPreviewSheets : xlsxPreviewSheets;
+        if (!sheets || sheets.length === 0) {
+            return <p className="text-gray-400 italic">No spreadsheet data available.</p>;
+        }
+
+        const activeSheet = sheets.find(s => s.sheet_id === activeXlsxSheetId) || sheets[0];
+
+        return (
+            <div className="flex flex-col h-full">
+                {/* Sheet tabs */}
+                {sheets.length > 1 && (
+                    <div className="flex gap-1 px-2 py-1 bg-gray-100 border-b border-gray-200 overflow-x-auto">
+                        {sheets.map((sheet) => (
+                            <button
+                                key={sheet.sheet_id}
+                                onClick={() => setActiveXlsxSheetId(sheet.sheet_id)}
+                                className={`px-3 py-1 text-xs rounded-t-lg whitespace-nowrap ${
+                                    sheet.sheet_id === activeXlsxSheetId
+                                        ? 'bg-white border border-b-white border-gray-200 font-medium text-gray-900'
+                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                {sheet.title}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {/* Grid */}
+                <div className="flex-1 overflow-auto">
+                    <table className="border-collapse text-xs w-full">
+                        <tbody>
+                            {activeSheet.rows.map((row) => (
+                                <tr key={row.row_index} className="border-b border-gray-100">
+                                    <td className="px-1 py-0.5 bg-gray-50 text-gray-400 text-right border-r border-gray-200 select-none w-8">
+                                        {row.row_index}
+                                    </td>
+                                    {row.cells.map((cell) => (
+                                        <td
+                                            key={cell.cell_ref}
+                                            className={`px-1.5 py-0.5 border-r border-gray-100 min-w-[80px] max-w-[200px] ${
+                                                cell.is_formula ? 'bg-blue-50/30 text-blue-700' : ''
+                                            } ${!cell.editable ? 'bg-gray-50/50' : ''}`}
+                                        >
+                                            {isEditing && cell.editable ? (
+                                                <input
+                                                    type="text"
+                                                    value={cell.value}
+                                                    onChange={(e) => updateXlsxCell(activeSheet.sheet_id, cell.cell_ref, e.target.value)}
+                                                    className="w-full border-none bg-transparent focus:bg-blue-50 focus:outline-none text-xs px-0.5"
+                                                />
+                                            ) : (
+                                                <span className="block truncate" title={cell.display_value}>
+                                                    {cell.display_value || cell.value}
+                                                </span>
+                                            )}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {activeSheet.truncated && (
+                    <div className="px-3 py-1 text-xs text-amber-600 bg-amber-50 border-t border-amber-200">
+                        Preview truncated. Download the file for the complete spreadsheet.
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // --- Render: Changelog Tab ---
+    const renderChangelogTab = () => {
+        if (changelogLoading) {
+            return (
+                <div className="flex items-center justify-center py-8 text-gray-400">
+                    <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                    Loading changelog...
+                </div>
+            );
+        }
+
+        if (changelog.length === 0) {
+            return (
+                <div className="text-center py-8 text-gray-400 text-sm">
+                    No changelog entries yet.
+                </div>
+            );
+        }
+
+        return (
+            <div className="space-y-3 p-4">
+                {changelog.map((entry, idx) => (
+                    <div key={idx} className="bg-white rounded-lg border border-gray-200 p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                                entry.change_source === 'agent_tool'
+                                    ? 'bg-purple-100 text-purple-700'
+                                    : 'bg-blue-100 text-blue-700'
+                            }`}>
+                                {entry.change_source === 'agent_tool' ? 'AI' : 'User'}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                                {entry.change_type}
+                                {entry.version ? ` v${entry.version}` : ''}
+                            </span>
+                        </div>
+                        <p className="text-sm text-gray-700">{entry.change_summary}</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                            {new Date(entry.created_at).toLocaleString()}
+                            {entry.actor_user_id ? ` by ${entry.actor_user_id}` : ''}
+                        </p>
+                    </div>
+                ))}
+            </div>
+        );
+    };
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
@@ -418,18 +881,39 @@ ${docSnippet}`;
                                             Updated
                                         </span>
                                     )}
+                                    {documentVersion && (
+                                        <span className="text-xs text-gray-400">v{documentVersion}</span>
+                                    )}
                                 </div>
                                 {documentType && (
                                     <span className="text-xs text-gray-500">
                                         {DOC_TYPE_LABELS[documentType] || documentType}
+                                        {isBinaryDocument && isDocxDocument && ' (DOCX)'}
+                                        {isBinaryDocument && isXlsxDocument && ' (XLSX)'}
                                     </span>
                                 )}
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
-                            {/* Export error */}
-                            {exportError && (
-                                <span className="text-xs text-red-600 mr-2">{exportError}</span>
+                            {/* Save/export errors */}
+                            {(exportError || saveError) && (
+                                <span className="text-xs text-red-600 mr-2">{exportError || saveError}</span>
+                            )}
+
+                            {/* Save button for structured edits */}
+                            {isEditing && (isDocxDocument || isXlsxDocument) && (
+                                <button
+                                    onClick={handleSaveStructuredEdits}
+                                    disabled={isSaving}
+                                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
+                                >
+                                    {isSaving ? (
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <Save className="w-4 h-4" />
+                                    )}
+                                    Save
+                                </button>
                             )}
 
                             {/* Download dropdown */}
@@ -515,7 +999,11 @@ ${docSnippet}`;
                     >
                         <div className="flex-1 overflow-y-auto p-8">
                             <div className="max-w-3xl mx-auto">
-                                {isEditing ? (
+                                {isDocxDocument ? (
+                                    renderDocxBlockEditor()
+                                ) : isXlsxDocument ? (
+                                    renderXlsxGridEditor()
+                                ) : isEditing ? (
                                     <textarea
                                         value={editContent}
                                         onChange={(e) => setEditContent(e.target.value)}
@@ -530,113 +1018,132 @@ ${docSnippet}`;
                         </div>
                     </div>
 
-                    {/* Right Panel — Chat */}
+                    {/* Right Panel — Chat + Changelog */}
                     <div className="flex flex-col bg-gray-50" style={{ width: '35%' }}>
-                        {/* Chat Header */}
-                        <div className="px-4 py-3 bg-white border-b border-gray-200">
-                            <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 bg-gradient-to-br from-[#003366] to-[#004488] rounded-lg flex items-center justify-center">
-                                    <Bot className="w-4 h-4 text-white" />
-                                </div>
-                                <div>
-                                    <h3 className="font-medium text-gray-900 text-sm">Document Assistant</h3>
-                                    <p className="text-xs text-gray-500">
-                                        {isStreaming ? 'Thinking...' : 'AI-powered editing help'}
-                                    </p>
-                                </div>
-                            </div>
+                        {/* Right panel tabs */}
+                        <div className="flex bg-white border-b border-gray-200">
+                            <button
+                                onClick={() => setRightTab('chat')}
+                                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                                    rightTab === 'chat'
+                                        ? 'border-[#003366] text-[#003366]'
+                                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                            >
+                                <MessageSquare className="w-4 h-4" />
+                                Chat
+                            </button>
+                            <button
+                                onClick={() => setRightTab('changelog')}
+                                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                                    rightTab === 'changelog'
+                                        ? 'border-[#003366] text-[#003366]'
+                                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                            >
+                                <History className="w-4 h-4" />
+                                Changelog
+                            </button>
                         </div>
 
-                        {/* Chat Messages */}
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                            {chatMessages.map((msg) => (
-                                <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                                    <div
-                                        className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
-                                            msg.role === 'assistant'
-                                                ? 'bg-gradient-to-br from-[#003366] to-[#004488]'
-                                                : 'bg-blue-500'
-                                        }`}
-                                    >
-                                        {msg.role === 'assistant' ? (
-                                            <Sparkles className="w-3.5 h-3.5 text-white" />
-                                        ) : (
-                                            <User className="w-3.5 h-3.5 text-white" />
-                                        )}
-                                    </div>
-                                    <div
-                                        className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                                            msg.role === 'assistant'
-                                                ? 'bg-white border border-gray-200 text-gray-700'
-                                                : 'bg-[#003366] text-white'
-                                        }`}
-                                    >
-                                        <ReactMarkdown
-                                            components={{
-                                                p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
-                                                ul: ({ children }) => <ul className="list-disc ml-4 mb-1.5 space-y-0.5 text-xs">{children}</ul>,
-                                                ol: ({ children }) => <ol className="list-decimal ml-4 mb-1.5 space-y-0.5 text-xs">{children}</ol>,
-                                                strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                                                code: ({ children }) => (
-                                                    <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
-                                                ),
-                                            }}
-                                        >
-                                            {msg.content}
-                                        </ReactMarkdown>
-                                    </div>
-                                </div>
-                            ))}
-
-                            {/* Typing indicator */}
-                            {isStreaming && (
-                                <div className="flex gap-3">
-                                    <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
-                                        <Sparkles className="w-3.5 h-3.5 text-white" />
-                                    </div>
-                                    <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3">
-                                        <div className="flex items-center gap-1.5">
-                                            <div className="typing-dot" />
-                                            <div className="typing-dot" />
-                                            <div className="typing-dot" />
+                        {rightTab === 'chat' ? (
+                            <>
+                                {/* Chat Messages */}
+                                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                    {chatMessages.map((msg) => (
+                                        <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                                            <div
+                                                className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                                    msg.role === 'assistant'
+                                                        ? 'bg-gradient-to-br from-[#003366] to-[#004488]'
+                                                        : 'bg-blue-500'
+                                                }`}
+                                            >
+                                                {msg.role === 'assistant' ? (
+                                                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                                                ) : (
+                                                    <User className="w-3.5 h-3.5 text-white" />
+                                                )}
+                                            </div>
+                                            <div
+                                                className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                                                    msg.role === 'assistant'
+                                                        ? 'bg-white border border-gray-200 text-gray-700'
+                                                        : 'bg-[#003366] text-white'
+                                                }`}
+                                            >
+                                                <ReactMarkdown
+                                                    components={{
+                                                        p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+                                                        ul: ({ children }) => <ul className="list-disc ml-4 mb-1.5 space-y-0.5 text-xs">{children}</ul>,
+                                                        ol: ({ children }) => <ol className="list-decimal ml-4 mb-1.5 space-y-0.5 text-xs">{children}</ol>,
+                                                        strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                                                        code: ({ children }) => (
+                                                            <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
+                                                        ),
+                                                    }}
+                                                >
+                                                    {msg.content}
+                                                </ReactMarkdown>
+                                            </div>
                                         </div>
+                                    ))}
+
+                                    {/* Typing indicator */}
+                                    {isStreaming && (
+                                        <div className="flex gap-3">
+                                            <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
+                                                <Sparkles className="w-3.5 h-3.5 text-white" />
+                                            </div>
+                                            <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3">
+                                                <div className="flex items-center gap-1.5">
+                                                    <div className="typing-dot" />
+                                                    <div className="typing-dot" />
+                                                    <div className="typing-dot" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div ref={chatEndRef} />
+                                </div>
+
+                                {/* Chat Input */}
+                                <div className="p-3 bg-white border-t border-gray-200">
+                                    <div className="flex gap-2">
+                                        <textarea
+                                            ref={textareaRef}
+                                            value={chatInput}
+                                            onChange={(e) => setChatInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+                                                    e.preventDefault();
+                                                    handleSendMessage();
+                                                }
+                                            }}
+                                            placeholder={isStreaming ? 'Waiting for response...' : 'Ask about this document...'}
+                                            disabled={isStreaming}
+                                            rows={1}
+                                            className={`flex-1 resize-none px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
+                                                isStreaming ? 'opacity-50' : ''
+                                            }`}
+                                            style={{ maxHeight: 120 }}
+                                        />
+                                        <button
+                                            onClick={handleSendMessage}
+                                            disabled={!chatInput.trim() || isStreaming}
+                                            className="px-3.5 py-2.5 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-colors"
+                                        >
+                                            <Send className="w-4 h-4" />
+                                        </button>
                                     </div>
                                 </div>
-                            )}
-
-                            <div ref={chatEndRef} />
-                        </div>
-
-                        {/* Chat Input */}
-                        <div className="p-3 bg-white border-t border-gray-200">
-                            <div className="flex gap-2">
-                                <textarea
-                                    ref={textareaRef}
-                                    value={chatInput}
-                                    onChange={(e) => setChatInput(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
-                                            e.preventDefault();
-                                            handleSendMessage();
-                                        }
-                                    }}
-                                    placeholder={isStreaming ? 'Waiting for response...' : 'Ask about this document...'}
-                                    disabled={isStreaming}
-                                    rows={1}
-                                    className={`flex-1 resize-none px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
-                                        isStreaming ? 'opacity-50' : ''
-                                    }`}
-                                    style={{ maxHeight: 120 }}
-                                />
-                                <button
-                                    onClick={handleSendMessage}
-                                    disabled={!chatInput.trim() || isStreaming}
-                                    className="px-3.5 py-2.5 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-colors"
-                                >
-                                    <Send className="w-4 h-4" />
-                                </button>
+                            </>
+                        ) : (
+                            <div className="flex-1 overflow-y-auto">
+                                {renderChangelogTab()}
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
             </div>

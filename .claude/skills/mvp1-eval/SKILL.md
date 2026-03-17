@@ -26,13 +26,13 @@ The suite is organized in 3 tiers, run sequentially. Stop and report if a tier h
 
 ### Tier 1: Unit Tests (fast, no AWS needed)
 
-These validate compliance matrix logic, document pipeline, KB flow, and canonical package routing.
+These validate compliance matrix logic, document pipeline, KB flow, canonical package routing, and document management (DOCX/XLSX editing, changelog, tool dispatch).
 
 ```bash
-python -m pytest tests/test_compliance_matrix.py tests/test_chat_kb_flow.py tests/test_canonical_package_document_flow.py tests/test_document_pipeline.py -v --tb=short 2>&1
+python -m pytest tests/test_compliance_matrix.py tests/test_chat_kb_flow.py tests/test_canonical_package_document_flow.py tests/test_document_pipeline.py tests/test_document_management_eval.py tests/test_document_ai_edit_service.py tests/test_spreadsheet_edit_service.py tests/test_changelog_store.py tests/test_manage_package_tool.py -v --tb=short 2>&1
 ```
 
-**Expected**: ~60+ tests, all pass. Report count and any failures.
+**Expected**: ~200+ tests, all pass. Report count and any failures.
 
 ### Tier 2: Integration Tests (needs AWS/Bedrock)
 
