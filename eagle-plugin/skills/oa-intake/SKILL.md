@@ -313,6 +313,28 @@ Suitable for small business?
 
 ---
 
+## CRITICAL: Package Persistence
+
+After completing Phase 3 (Pathway Determination), you MUST call `manage_package` to persist the package:
+
+```
+manage_package(
+  operation="create",
+  title="Cloud Hosting Services for Research Data Platform",
+  estimated_value="750000",
+  requirement_type="services",
+  contract_type="ffp",
+  acquisition_method="negotiated",
+  notes="FedRAMP High required, 3+2 year PoP"
+)
+```
+
+This creates the package in DynamoDB, auto-determines the pathway, and identifies required documents.
+The returned checklist is auto-pushed to the right panel. Present it to the user and ask which
+document to generate first.
+
+---
+
 ## Phase 4: Document Requirements Matrix
 
 **Use `documents_required` from the latest `query_compliance_matrix` result.**

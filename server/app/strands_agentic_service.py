@@ -1926,6 +1926,116 @@ def _make_get_checklist_tool(
     return get_checklist_tool
 
 
+# -- Manage Package @tool (create / status / checklist) ----------------
+
+def _make_manage_package_tool(
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
+    @tool(name="manage_package")
+    def manage_package(
+        operation: str,
+        title: str = "",
+        estimated_value: str = "0",
+        requirement_type: str = "services",
+        contract_type: str = "",
+        acquisition_method: str = "",
+        package_id: str = "",
+        notes: str = "",
+    ) -> str:
+        """Create or query acquisition packages. After intake, call with operation="create"
+        to persist the package and populate the right-panel checklist.
+
+        Args:
+            operation: create | status | checklist
+            title: Package title (required for create)
+            estimated_value: Dollar amount as string (e.g. "750000")
+            requirement_type: services | supplies | construction | it
+            contract_type: ffp | cpff | tm | cr | idiq
+            acquisition_method: negotiated | simplified | micro | sole | fss
+            package_id: Required for status/checklist operations
+            notes: Additional notes
+        """
+        from decimal import Decimal as D
+        from .stores.package_store import (
+            create_package,
+            get_package,
+            get_package_checklist,
+        )
+
+        op = operation.strip().lower()
+
+        if op == "create":
+            if not title.strip():
+                return json.dumps({"error": "title is required for create"})
+            try:
+                value = D(estimated_value.replace(",", "").replace("$", ""))
+            except Exception:
+                value = D("0")
+            pkg = create_package(
+                tenant_id=tenant_id,
+                owner_user_id=user_id,
+                title=title.strip(),
+                requirement_type=requirement_type.strip().lower() or "services",
+                estimated_value=value,
+                session_id=session_id,
+                notes=notes.strip(),
+                contract_vehicle=None,
+            )
+            pkg_id = pkg.get("package_id", "")
+            checklist = get_package_checklist(tenant_id, pkg_id)
+
+            # Auto-push phase_change metadata to frontend via SSE
+            if result_queue and loop and pkg_id:
+                payload = {
+                    "state_type": "phase_change",
+                    "phase": "intake",
+                    "previous": "",
+                    "package_id": pkg_id,
+                    "checklist": checklist,
+                }
+                loop.call_soon_threadsafe(
+                    result_queue.put_nowait,
+                    {"type": "metadata", "content": payload},
+                )
+
+            out = {
+                "ok": True,
+                "package_id": pkg_id,
+                "pathway": pkg.get("acquisition_pathway", ""),
+                "status": pkg.get("status", "intake"),
+                "title": pkg.get("title", ""),
+                "estimated_value": pkg.get("estimated_value", "0"),
+                "checklist": checklist,
+            }
+            _emit_tool_result("manage_package", out, result_queue, loop)
+            return json.dumps(out, default=str)
+
+        elif op == "status":
+            if not package_id.strip():
+                return json.dumps({"error": "package_id is required for status"})
+            pkg = get_package(tenant_id, package_id.strip())
+            if pkg is None:
+                return json.dumps({"error": f"Package {package_id} not found"})
+            _emit_tool_result("manage_package", pkg, result_queue, loop)
+            return json.dumps(pkg, default=str)
+
+        elif op == "checklist":
+            if not package_id.strip():
+                return json.dumps({"error": "package_id is required for checklist"})
+            checklist = get_package_checklist(tenant_id, package_id.strip())
+            _emit_tool_result("manage_package", checklist, result_queue, loop)
+            return json.dumps(checklist, default=str)
+
+        else:
+            return json.dumps({"error": f"Unknown operation: {operation}. Use create|status|checklist"})
+
+    return manage_package
+
+
 # -- Compliance Matrix @tool (available to all agents) ----------------
 
 def _make_compliance_matrix_tool(
@@ -2700,6 +2810,8 @@ def _build_service_tools(
     # State push tools — enable real-time frontend UI updates via SSE METADATA
     tools.append(_make_update_state_tool(tenant_id, rq, lp))
     tools.append(_make_get_checklist_tool(tenant_id, rq, lp))
+    # Package lifecycle — create/query acquisition packages from chat
+    tools.append(_make_manage_package_tool(tenant_id, user_id, session_id, rq, lp))
     # Contract requirements matrix — deterministic FAR-grounded scoring
     tools.append(query_contract_matrix)
     return tools

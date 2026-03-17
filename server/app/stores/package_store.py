@@ -23,13 +23,13 @@ TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # -- FAR Thresholds ---------------------------------------------------------
-_MICRO_PURCHASE_THRESHOLD = Decimal("10000")
-_SIMPLIFIED_THRESHOLD = Decimal("250000")
+_MICRO_PURCHASE_THRESHOLD = Decimal("15000")   # FAC 2025-06
+_SIMPLIFIED_THRESHOLD = Decimal("350000")       # FAC 2025-06
 
 # -- Required documents by acquisition pathway ------------------------------
 _REQUIRED_DOCS: dict[str, list[str]] = {
     "micro_purchase": [],
-    "simplified": ["igce"],
+    "simplified": ["sow", "igce", "market-research"],
     "full_competition": ["sow", "igce", "market-research", "acquisition-plan"],
     "sole_source": ["sow", "igce", "justification"],
 }
