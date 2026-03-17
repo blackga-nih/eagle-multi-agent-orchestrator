@@ -223,9 +223,10 @@ class TestCreateDocumentTool:
                     session_id="ses-004",
                 )
         key = result["s3_key"]
-        # Pattern: eagle/{tenant}/{user}/documents/{type}_{YYYYMMDD_HHMMSS}.md
+        # Pattern: eagle/{tenant}/{user}/documents/{type}_{YYYYMMDD_HHMMSS}.(md|xlsx)
+        # IGCE may output .xlsx when template_service is available
         assert re.match(
-            r"eagle/test-tenant/[^/]+/documents/igce_\d{8}_\d{6}\.md$",
+            r"eagle/test-tenant/[^/]+/documents/igce_\d{8}_\d{6}\.(md|xlsx)$",
             key,
         ), f"S3 key doesn't match expected pattern: {key}"
 
@@ -574,7 +575,7 @@ class TestStreamProtocol:
             sse_line = await queue.get()
             return sse_line
 
-        sse_line = asyncio.get_event_loop().run_until_complete(_run())
+        sse_line = asyncio.run(_run())
         parsed = json.loads(sse_line.replace("data: ", "").strip())
         assert parsed["type"] == "tool_use"
         assert parsed["tool_use"]["name"] == "create_document"
@@ -594,7 +595,7 @@ class TestStreamProtocol:
             )
             return await queue.get()
 
-        sse_line = asyncio.get_event_loop().run_until_complete(_run())
+        sse_line = asyncio.run(_run())
         parsed = json.loads(sse_line.replace("data: ", "").strip())
         assert parsed["type"] == "complete"
         assert parsed["metadata"]["tools_called"] == ["create_document"]

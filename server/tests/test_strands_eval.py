@@ -7,10 +7,12 @@ Tests the core patterns for the EAGLE multi-tenant architecture:
 7-15.  Skill validation: OA intake, legal, market, tech, public, doc gen, supervisor chain
 16-20. AWS tool integration: S3 ops, DynamoDB CRUD, CloudWatch logs, document generation,
        CloudWatch E2E verification -- direct execute_tool() calls with boto3 confirmation
-21-27. UC workflow validation: micro-purchase, option exercise, contract modification,
+21-27. UC workflow validation (MVP2/3): micro-purchase, option exercise, contract modification,
        CO package review, contract close-out, shutdown notification, score consolidation
 28.    Strands architecture: skill->tool orchestration via build_skill_tools()
 32-34. Admin & store validation: admin-manager registration, workspace defaults, store CRUD API
+35-42. MVP1 UC coverage (Excel-aligned): new acquisition, GSA schedule, sole source,
+       competitive range, IGCE, small business set-aside, tech-to-contract, E2E acquisition
 
 SDK: strands-agents
 Backend: AWS Bedrock (boto3 native)
@@ -2879,6 +2881,523 @@ async def test_35_uc01_new_acquisition_package():
 
 
 # ============================================================
+# Test 36: UC-02 GSA Schedule Purchase (Below SAT, >MPT)
+# Excel UC-2 | Jira: EAGLE-18 | MVP1
+# ============================================================
+
+async def test_36_uc02_gsa_schedule():
+    """UC-02: GSA Schedule purchase — $45K lab equipment, below SAT, FAR Part 8."""
+    print("\n" + "=" * 70)
+    print("TEST 36: UC-02 GSA Schedule Purchase ($45K, Below SAT)")
+    print("=" * 70)
+
+    intake_content, _ = load_skill_or_prompt(skill_name="oa-intake")
+    if not intake_content:
+        print("  SKIP - OA Intake skill not found")
+        return None
+
+    print("  Scenario: $45K microscope via GSA Schedule, below SAT, urgent need")
+    print()
+
+    tenant_context = (
+        "Tenant: nci-oa | User: cor-martinez-001 | Tier: premium\n"
+        "You are the OA Intake skill for the EAGLE Supervisor Agent.\n"
+        "Handle GSA Schedule purchases efficiently. Identify the correct vehicle "
+        "and streamlined documentation requirements.\n"
+        "IMPORTANT: Do not ask clarifying questions. All required information has been provided. "
+        "Analyze the request directly and provide your complete acquisition pathway, "
+        "vehicle recommendation, and required documents in your first response.\n\n"
+    )
+
+    agent = Agent(
+        model=_model,
+        system_prompt=tenant_context + intake_content,
+        callback_handler=None,
+    )
+
+    collector = StrandsResultCollector()
+    result = agent(
+        "I need to purchase a $45,000 confocal microscope for our genomics lab. "
+        "This is an urgent need — our current microscope failed last week and we have "
+        "active grant-funded experiments. I believe GSA Schedule covers this type of "
+        "equipment. The vendor is Zeiss and they're on GSA Schedule 66 III. "
+        "Building 37, Room 410. What's the acquisition pathway and what documents do I need?"
+    )
+    collector.process_result(result, indent=2)
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+
+    all_text = collector.all_text_lower()
+
+    indicators = {
+        "gsa_schedule": any(w in all_text for w in ["gsa schedule", "gsa ", "schedule 66", "federal supply"]),
+        "below_sat": any(w in all_text for w in ["simplified", "below sat", "under $", "threshold", "$350"]),
+        "far_part_8": any(w in all_text for w in ["far 8", "part 8", "far part 8", "required sources"]),
+        "streamlined_docs": any(w in all_text for w in ["market research", "sole source", "quote", "rfq", "request for"]),
+        "vehicle_identified": any(w in all_text for w in ["schedule", "bpa", "gsa advantage", "e-buy", "vehicle"]),
+    }
+
+    print("  UC-02 GSA indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 3 and len(collector.result_text) > 0
+    print(f"  UC-02 GSA indicators: {indicators_found}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-02 GSA Schedule Purchase")
+    return passed
+
+
+# ============================================================
+# Test 37: UC-03 Sole Source Justification (<SAT)
+# Excel UC-3 | Jira: EAGLE-27 | MVP1
+# ============================================================
+
+async def test_37_uc03_sole_source():
+    """UC-03: Sole source justification — $280K software maintenance, only original manufacturer."""
+    print("\n" + "=" * 70)
+    print("TEST 37: UC-03 Sole Source Justification ($280K, Below SAT)")
+    print("=" * 70)
+
+    intake_content, _ = load_skill_or_prompt(skill_name="oa-intake")
+    if not intake_content:
+        print("  SKIP - OA Intake skill not found")
+        return None
+
+    print("  Scenario: $280K sole-source software maintenance, FAR Part 6")
+    print()
+
+    tenant_context = (
+        "Tenant: nci-oa | User: cor-chen-001 | Tier: premium\n"
+        "You are the OA Intake skill for the EAGLE Supervisor Agent.\n"
+        "Handle sole source justification requests. Identify J&A requirements, "
+        "applicable FAR authority, and protest mitigation strategies.\n"
+        "IMPORTANT: Do not ask clarifying questions. All required information has been provided. "
+        "Analyze the request directly and provide your complete sole source assessment, "
+        "J&A requirements, and required documents in your first response.\n\n"
+    )
+
+    agent = Agent(
+        model=_model,
+        system_prompt=tenant_context + intake_content,
+        callback_handler=None,
+    )
+
+    collector = StrandsResultCollector()
+    result = agent(
+        "I need to sole-source a $280,000 annual software maintenance contract to "
+        "Illumina Inc. for our BaseSpace Sequence Hub platform. Only Illumina can "
+        "maintain this proprietary genomic analysis software — no other vendor has "
+        "access to the source code or can provide updates. We've used this system "
+        "for 3 years. The current contract expires in 60 days. "
+        "What's the justification authority and what documents do I need?"
+    )
+    collector.process_result(result, indent=2)
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+
+    all_text = collector.all_text_lower()
+
+    indicators = {
+        "sole_source": any(w in all_text for w in ["sole source", "sole-source", "only one", "single source"]),
+        "justification": any(w in all_text for w in ["justification", "j&a", "jofoc", "justify"]),
+        "far_part_6": any(w in all_text for w in ["far 6", "part 6", "far part 6", "6.302", "other than full"]),
+        "unique_vendor": any(w in all_text for w in ["proprietary", "unique", "only source", "original manufacturer", "one responsible"]),
+        "protest_mitigation": any(w in all_text for w in ["protest", "market research", "sources sought", "publiciz", "sam.gov"]),
+    }
+
+    print("  UC-03 Sole Source indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 3 and len(collector.result_text) > 0
+    print(f"  UC-03 Sole Source indicators: {indicators_found}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-03 Sole Source Justification")
+    return passed
+
+
+# ============================================================
+# Test 38: UC-04 FAR Part 15 Competitive Range Advisory
+# Excel UC-4 | Jira: TBD | MVP1
+# ============================================================
+
+async def test_38_uc04_competitive_range():
+    """UC-04: FAR Part 15 competitive range — advisory Q&A, no docs generated."""
+    print("\n" + "=" * 70)
+    print("TEST 38: UC-04 FAR Part 15 Competitive Range Determination")
+    print("=" * 70)
+
+    comp_content, _ = load_skill_or_prompt(skill_name="legal-counsel")
+    if not comp_content:
+        print("  SKIP - Legal Counsel skill not found")
+        return None
+
+    print("  Scenario: COR asks whether all offerors must stay in competitive range")
+    print()
+
+    tenant_context = (
+        "Tenant: nci-oa | User: cor-williams-001 | Tier: premium\n"
+        "You are the Compliance Strategist / Legal Counsel for the EAGLE Supervisor Agent.\n"
+        "Provide clear regulatory guidance on FAR Part 15 competitive range questions.\n"
+        "IMPORTANT: Do not ask clarifying questions. Provide a complete, authoritative "
+        "answer with FAR citations and practical guidance in your first response.\n\n"
+    )
+
+    agent = Agent(
+        model=_model,
+        system_prompt=tenant_context + comp_content,
+        callback_handler=None,
+    )
+
+    collector = StrandsResultCollector()
+    result = agent(
+        "We're in a FAR Part 15 negotiated procurement for IT modernization services, "
+        "$2.1M estimated value. We received 7 proposals and after initial evaluation, "
+        "3 are clearly in the competitive range but 2 are borderline — technically "
+        "acceptable but weak on past performance. Do we have to keep all offerors in "
+        "the competitive range? Can we narrow it? What are the rules and risks?"
+    )
+    collector.process_result(result, indent=2)
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+
+    all_text = collector.all_text_lower()
+
+    indicators = {
+        "competitive_range": any(w in all_text for w in ["competitive range", "competitive-range"]),
+        "far_15": any(w in all_text for w in ["far 15", "far part 15", "15.306", "15.503"]),
+        "can_narrow": any(w in all_text for w in ["narrow", "exclude", "eliminate", "not required to include all"]),
+        "discussions": any(w in all_text for w in ["discussion", "negotiation", "communicate", "deficien"]),
+        "protest_risk": any(w in all_text for w in ["protest", "debrief", "document", "rational", "gao"]),
+    }
+
+    print("  UC-04 Competitive Range indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 3 and len(collector.result_text) > 0
+    print(f"  UC-04 Competitive Range indicators: {indicators_found}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-04 Competitive Range Advisory")
+    return passed
+
+
+# ============================================================
+# Test 39: UC-10 IGCE Development for Complex Services
+# Excel UC-10 | Jira: EAGLE-29 | MVP1
+# ============================================================
+
+async def test_39_uc10_igce_development():
+    """UC-10: IGCE development — multi-category clinical research support services."""
+    print("\n" + "=" * 70)
+    print("TEST 39: UC-10 IGCE Development for Complex Services")
+    print("=" * 70)
+
+    intake_content, _ = load_skill_or_prompt(skill_name="oa-intake")
+    if not intake_content:
+        print("  SKIP - OA Intake skill not found")
+        return None
+
+    print("  Scenario: Multi-year, multi-labor-category IGCE for clinical research")
+    print()
+
+    tenant_context = (
+        "Tenant: nci-oa | User: cor-patel-001 | Tier: premium\n"
+        "You are the OA Intake skill for the EAGLE Supervisor Agent.\n"
+        "Handle IGCE development requests. Identify labor categories, ODCs, "
+        "escalation factors, and cost realism requirements.\n"
+        "IMPORTANT: Do not ask clarifying questions. All required information has been provided. "
+        "Analyze the request directly and provide your complete IGCE structure, "
+        "methodology, and cost elements in your first response.\n\n"
+    )
+
+    agent = Agent(
+        model=_model,
+        system_prompt=tenant_context + intake_content,
+        callback_handler=None,
+    )
+
+    collector = StrandsResultCollector()
+    result = agent(
+        "I need to develop an IGCE for a clinical research support services contract. "
+        "3-year period of performance (base + 2 option years). Labor categories: "
+        "Project Manager (1 FTE), Senior Biostatistician (2 FTE), Data Managers (3 FTE), "
+        "Clinical Research Associates (4 FTE). Plus ODCs for travel ($50K/year) and "
+        "software licenses ($30K/year). Estimated total value around $4.5M. "
+        "This will be evaluated under FAR Part 15 with cost realism analysis. "
+        "What should the IGCE include and what methodology should I use?"
+    )
+    collector.process_result(result, indent=2)
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+
+    all_text = collector.all_text_lower()
+
+    indicators = {
+        "igce": any(w in all_text for w in ["igce", "independent government cost estimate", "cost estimate"]),
+        "labor_categories": any(w in all_text for w in ["labor categor", "labor rate", "fte", "biostatistician", "project manager"]),
+        "escalation": any(w in all_text for w in ["escalat", "inflation", "annual increase", "rate adjustment", "option year"]),
+        "cost_realism": any(w in all_text for w in ["cost realism", "realism", "realistic", "far 15.404", "cost analysis"]),
+        "odcs_travel": any(w in all_text for w in ["odc", "other direct", "travel", "software", "non-labor"]),
+    }
+
+    print("  UC-10 IGCE indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 3 and len(collector.result_text) > 0
+    print(f"  UC-10 IGCE indicators: {indicators_found}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-10 IGCE Development")
+    return passed
+
+
+# ============================================================
+# Test 40: UC-13 Small Business Set-Aside Determination
+# Excel UC-13 | Jira: TBD | MVP1
+# ============================================================
+
+async def test_40_uc13_small_business_setaside():
+    """UC-13: Small business set-aside — $450K IT services, Rule of Two, FAR Part 19."""
+    print("\n" + "=" * 70)
+    print("TEST 40: UC-13 Small Business Set-Aside Determination ($450K)")
+    print("=" * 70)
+
+    skill_content, _ = load_skill_or_prompt(skill_name="market-intelligence")
+    if not skill_content:
+        print("  SKIP - Market Intelligence skill not found")
+        return None
+
+    print("  Scenario: $450K IT services, Rule of Two analysis, FAR Part 19")
+    print()
+
+    tenant_context = (
+        "Tenant: nci-oa | User: cor-jackson-001 | Tier: premium\n"
+        "You are the Market Intelligence specialist for the EAGLE Supervisor Agent.\n"
+        "Analyze small business set-aside determinations using Rule of Two, "
+        "SBA size standards, and FAR Part 19 requirements.\n"
+        "IMPORTANT: Do not ask clarifying questions. All required information has been provided. "
+        "Analyze the request directly and provide your complete set-aside determination, "
+        "Rule of Two analysis, and market research findings in your first response.\n\n"
+    )
+
+    agent = Agent(
+        model=_model,
+        system_prompt=tenant_context + skill_content,
+        callback_handler=None,
+    )
+
+    collector = StrandsResultCollector()
+    result = agent(
+        "I have a $450,000 IT services requirement for network infrastructure "
+        "monitoring and management at NCI. NAICS code 541512 (Computer Systems "
+        "Design Services, $34M size standard). I found 8 small businesses on "
+        "SAM.gov with relevant experience and 3 large businesses. "
+        "Should this be set aside for small business? What type of set-aside? "
+        "What market research documentation do I need?"
+    )
+    collector.process_result(result, indent=2)
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+
+    all_text = collector.all_text_lower()
+
+    indicators = {
+        "set_aside": any(w in all_text for w in ["set-aside", "set aside", "small business set"]),
+        "rule_of_two": any(w in all_text for w in ["rule of two", "rule of 2", "two or more", "reasonable expectation"]),
+        "far_part_19": any(w in all_text for w in ["far 19", "part 19", "far part 19", "19.502"]),
+        "naics_size": any(w in all_text for w in ["naics", "541512", "size standard", "$34m", "$34 million"]),
+        "market_research": any(w in all_text for w in ["market research", "sam.gov", "sources sought", "rfi", "capability statement"]),
+    }
+
+    print("  UC-13 Small Business indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 3 and len(collector.result_text) > 0
+    print(f"  UC-13 Small Business indicators: {indicators_found}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-13 Small Business Set-Aside")
+    return passed
+
+
+# ============================================================
+# Test 41: UC-16 Technical Requirements → Contract Language
+# Excel UC-16 | Jira: TBD | MVP1
+# ============================================================
+
+async def test_41_uc16_tech_to_contract_language():
+    """UC-16: Convert technical spec to contract language — genomic sequencing SOW."""
+    print("\n" + "=" * 70)
+    print("TEST 41: UC-16 Technical Requirements to Contract Language")
+    print("=" * 70)
+
+    tech_content, _ = load_skill_or_prompt(skill_name="tech-translator")
+    if not tech_content:
+        print("  SKIP - Tech Translator skill not found")
+        return None
+
+    print("  Scenario: 8-page genomic sequencing spec → SOW translation")
+    print()
+
+    tenant_context = (
+        "Tenant: nci-oa | User: scientist-lee-001 | Tier: premium\n"
+        "You are the Technical Translator specialist for the EAGLE Supervisor Agent.\n"
+        "Convert technical specifications into clear, contractually enforceable SOW language "
+        "that both technical and acquisition staff understand.\n"
+        "IMPORTANT: Do not ask clarifying questions. All required information has been provided. "
+        "Analyze the technical requirements and provide contract-ready SOW language "
+        "with performance standards and deliverables in your first response.\n\n"
+    )
+
+    agent = Agent(
+        model=_model,
+        system_prompt=tenant_context + tech_content,
+        callback_handler=None,
+    )
+
+    collector = StrandsResultCollector()
+    result = agent(
+        "I'm a program scientist and I need help turning my technical requirements "
+        "into a SOW. Here's what we need: whole-genome sequencing services for our "
+        "cancer genomics program. Requires Illumina NovaSeq 6000 or equivalent platform, "
+        "minimum 30x coverage depth, paired-end 150bp reads. We need library preparation "
+        "(DNA extraction, fragmentation, adapter ligation), sequencing, bioinformatics "
+        "pipeline (alignment to GRCh38, variant calling with GATK, quality metrics), "
+        "and data delivery via Globus to our HPC cluster. Expected throughput: 500 samples "
+        "per year across 3 years. CLIA-certified lab required. "
+        "Please translate this into SOW language a contracting officer can use."
+    )
+    collector.process_result(result, indent=2)
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+
+    all_text = collector.all_text_lower()
+
+    indicators = {
+        "sow_structure": any(w in all_text for w in ["scope of work", "statement of work", "sow", "performance work"]),
+        "deliverables": any(w in all_text for w in ["deliverable", "delivery", "milestone", "acceptance criteria"]),
+        "performance_standard": any(w in all_text for w in ["performance", "quality", "standard", "metric", "30x", "coverage"]),
+        "technical_translated": any(w in all_text for w in ["sequencing", "bioinformatic", "library prep", "variant"]),
+        "contract_language": any(w in all_text for w in ["contractor shall", "the contractor", "government", "period of performance", "far"]),
+    }
+
+    print("  UC-16 Tech Translation indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 3 and len(collector.result_text) > 0
+    print(f"  UC-16 Tech Translation indicators: {indicators_found}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-16 Tech to Contract Language")
+    return passed
+
+
+# ============================================================
+# Test 42: UC-29 End-to-End Multi-Specialist Acquisition
+# Excel UC-29 | Jira: TBD | MVP1
+# ============================================================
+
+async def test_42_uc29_e2e_acquisition():
+    """UC-29: End-to-end acquisition — $3.5M R&D services, multi-specialist chain."""
+    print("\n" + "=" * 70)
+    print("TEST 42: UC-29 End-to-End Acquisition Support ($3.5M R&D)")
+    print("=" * 70)
+
+    intake_content, _ = load_skill_or_prompt(skill_name="oa-intake")
+    if not intake_content:
+        print("  SKIP - OA Intake skill not found")
+        return None
+
+    print("  Scenario: $3.5M R&D services, multi-phase, cross-specialist chain")
+    print()
+
+    tenant_context = (
+        "Tenant: nci-oa | User: cor-thompson-001 | Tier: premium\n"
+        "You are the OA Intake skill for the EAGLE Supervisor Agent.\n"
+        "Handle complex, multi-phase acquisitions that require coordination across "
+        "multiple specialist areas: compliance, legal, market research, financial, "
+        "and technical translation.\n"
+        "IMPORTANT: Do not ask clarifying questions. All required information has been provided. "
+        "Analyze the full acquisition scope and provide a comprehensive package plan "
+        "including pathway, documents, compliance requirements, and specialist areas "
+        "that need engagement in your first response.\n\n"
+    )
+
+    agent = Agent(
+        model=_model,
+        system_prompt=tenant_context + intake_content,
+        callback_handler=None,
+    )
+
+    collector = StrandsResultCollector()
+    result = agent(
+        "I'm starting a new $3.5M acquisition for R&D services — bioinformatics "
+        "pipeline development and clinical data analysis support for NCI's Division "
+        "of Cancer Treatment and Diagnosis. This is a complex requirement: "
+        "Phase 1 (Year 1): develop ML-based variant classification pipeline. "
+        "Phase 2 (Years 2-3): operate pipeline + provide clinical data analysis. "
+        "Estimated 15 FTEs across data science, bioinformatics, and project management. "
+        "We want a CPFF contract type, FAR Part 15 competitive negotiated procurement. "
+        "I need the full acquisition package: SOW, IGCE, Acquisition Plan, "
+        "Market Research Report, and small business coordination. "
+        "What's the complete roadmap and what regulatory requirements apply?"
+    )
+    collector.process_result(result, indent=2)
+
+    print()
+    summary = collector.summary()
+    print(f"  --- Results ---")
+    print(f"  Messages: {summary['total_messages']}")
+    print(f"  Tokens: {summary['total_input_tokens']} in / {summary['total_output_tokens']} out")
+
+    all_text = collector.all_text_lower()
+
+    indicators = {
+        "full_package": any(w in all_text for w in ["acquisition plan", "sow", "igce", "market research"]),
+        "far_15_competitive": any(w in all_text for w in ["far 15", "part 15", "competitive", "negotiated", "full and open"]),
+        "multi_phase": any(w in all_text for w in ["phase", "multi-phase", "year 1", "year 2", "base year"]),
+        "cost_threshold": any(w in all_text for w in ["tina", "$750", "certified cost", "cost or pricing", "above sat"]),
+        "small_business": any(w in all_text for w in ["small business", "set-aside", "subcontracting plan", "far 19", "rule of two"]),
+    }
+
+    print("  UC-29 E2E indicators:")
+    for indicator, found in indicators.items():
+        print(f"    {indicator}: {found}")
+
+    indicators_found = sum(1 for v in indicators.values() if v)
+    passed = indicators_found >= 3 and len(collector.result_text) > 0
+    print(f"  UC-29 E2E indicators: {indicators_found}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-29 End-to-End Acquisition")
+    return passed
+
+
+# ============================================================
 # Main infrastructure
 # ============================================================
 
@@ -2943,6 +3462,13 @@ test_names = {
     33: "33_workspace_store_default_creation",
     34: "34_store_crud_functions_exist",
     35: "35_uc01_new_acquisition_package",
+    36: "36_uc02_gsa_schedule",
+    37: "37_uc03_sole_source",
+    38: "38_uc04_competitive_range",
+    39: "39_uc10_igce_development",
+    40: "40_uc13_small_business_setaside",
+    41: "41_uc16_tech_to_contract_language",
+    42: "42_uc29_e2e_acquisition",
 }
 
 
@@ -3119,6 +3645,13 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         33: ("33_workspace_store_default_creation", test_33_workspace_store_default_creation),
         34: ("34_store_crud_functions_exist", test_34_store_crud_functions_exist),
         35: ("35_uc01_new_acquisition_package", test_35_uc01_new_acquisition_package),
+        36: ("36_uc02_gsa_schedule", test_36_uc02_gsa_schedule),
+        37: ("37_uc03_sole_source", test_37_uc03_sole_source),
+        38: ("38_uc04_competitive_range", test_38_uc04_competitive_range),
+        39: ("39_uc10_igce_development", test_39_uc10_igce_development),
+        40: ("40_uc13_small_business_setaside", test_40_uc13_small_business_setaside),
+        41: ("41_uc16_tech_to_contract_language", test_41_uc16_tech_to_contract_language),
+        42: ("42_uc29_e2e_acquisition", test_42_uc29_e2e_acquisition),
     }
 
     result_key, test_fn = TEST_REGISTRY[test_id]

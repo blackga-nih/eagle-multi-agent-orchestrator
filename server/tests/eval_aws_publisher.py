@@ -53,6 +53,20 @@ _TEST_NAMES = {
     26: "26_uc08_shutdown_notification",
     27: "27_uc09_score_consolidation",
     28: "28_sdk_skill_subagent_orchestration",
+    29: "29_compliance_matrix_query_requirements",
+    30: "30_compliance_matrix_search_far",
+    31: "31_compliance_matrix_vehicle_suggestion",
+    32: "32_admin_manager_skill_registered",
+    33: "33_workspace_store_default_creation",
+    34: "34_store_crud_functions_exist",
+    35: "35_uc01_new_acquisition_package",
+    36: "36_uc02_gsa_schedule",
+    37: "37_uc03_sole_source",
+    38: "38_uc04_competitive_range",
+    39: "39_uc10_igce_development",
+    40: "40_uc13_small_business_setaside",
+    41: "41_uc16_tech_to_contract_language",
+    42: "42_uc29_e2e_acquisition",
 }
 
 

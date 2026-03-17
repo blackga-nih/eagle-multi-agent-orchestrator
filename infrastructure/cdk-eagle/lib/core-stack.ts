@@ -137,9 +137,9 @@ export class EagleCoreStack extends cdk.Stack {
       ],
     }));
 
-    // Document bucket: read access for ECS backend (static ARN avoids cross-stack token cycle)
+    // Document bucket: read + write access for ECS backend (static ARN avoids cross-stack token cycle)
     this.appRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['s3:GetObject', 's3:ListBucket'],
+      actions: ['s3:GetObject', 's3:PutObject', 's3:ListBucket'],
       resources: [
         `arn:aws:s3:::${config.documentBucketName}`,
         `arn:aws:s3:::${config.documentBucketName}/*`,
@@ -176,6 +176,7 @@ export class EagleCoreStack extends cdk.Stack {
     // CloudWatch: App + eval logging
     this.appRole.addToPolicy(new iam.PolicyStatement({
       actions: [
+        'logs:CreateLogGroup',
         'logs:CreateLogStream',
         'logs:PutLogEvents',
         'logs:GetLogEvents',

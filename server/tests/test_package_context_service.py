@@ -8,9 +8,8 @@ Validates:
 
 All tests are fast (mocked stores, no AWS).
 """
+import copy
 from unittest import mock
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +57,7 @@ class TestResolveContext:
         from app.package_context_service import resolve_context
 
         with mock.patch("app.package_context_service.get_package", return_value=MOCK_PACKAGE), \
-             mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION):
+             mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION)):
             ctx = resolve_context(TENANT, USER, SESSION, explicit_package_id=PACKAGE_ID)
 
         assert ctx.mode == "package"
@@ -72,7 +71,7 @@ class TestResolveContext:
         from app.package_context_service import resolve_context
 
         with mock.patch("app.package_context_service.get_package", return_value=MOCK_PACKAGE), \
-             mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION_WITH_PACKAGE):
+             mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION_WITH_PACKAGE)):
             ctx = resolve_context(TENANT, USER, SESSION)
 
         assert ctx.mode == "package"
@@ -82,7 +81,7 @@ class TestResolveContext:
         """Returns workspace mode when no package context found."""
         from app.package_context_service import resolve_context
 
-        with mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION):
+        with mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION)):
             ctx = resolve_context(TENANT, USER, SESSION)
 
         assert ctx.mode == "workspace"
@@ -95,7 +94,7 @@ class TestResolveContext:
 
         # Session has package_id but package doesn't exist
         with mock.patch("app.package_context_service.get_package", return_value=None), \
-             mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION_WITH_PACKAGE), \
+             mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION_WITH_PACKAGE)), \
              mock.patch("app.package_context_service.clear_active_package") as mock_clear:
             ctx = resolve_context(TENANT, USER, SESSION)
 
@@ -112,7 +111,7 @@ class TestResolveContext:
             return None
 
         with mock.patch("app.package_context_service.get_package", side_effect=get_package_side_effect), \
-             mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION_WITH_PACKAGE):
+             mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION_WITH_PACKAGE)):
             ctx = resolve_context(TENANT, USER, SESSION, explicit_package_id="invalid-pkg")
 
         # Falls back to session's active_package_id
@@ -132,7 +131,7 @@ class TestSetActivePackage:
         from app.package_context_service import set_active_package
 
         with mock.patch("app.package_context_service.get_package", return_value=MOCK_PACKAGE), \
-             mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION), \
+             mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION)), \
              mock.patch("app.package_context_service.update_session") as mock_update:
             ctx = set_active_package(TENANT, USER, SESSION, PACKAGE_ID)
 
@@ -172,7 +171,7 @@ class TestClearActivePackage:
         """Removes active_package_id from session metadata."""
         from app.package_context_service import clear_active_package
 
-        with mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION_WITH_PACKAGE), \
+        with mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION_WITH_PACKAGE)), \
              mock.patch("app.package_context_service.update_session") as mock_update:
             result = clear_active_package(TENANT, USER, SESSION)
 
@@ -185,7 +184,7 @@ class TestClearActivePackage:
         """Returns True even when no active package."""
         from app.package_context_service import clear_active_package
 
-        with mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION), \
+        with mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION)), \
              mock.patch("app.package_context_service.update_session") as mock_update:
             result = clear_active_package(TENANT, USER, SESSION)
 
@@ -213,7 +212,7 @@ class TestGetActivePackageId:
         """Returns active_package_id from session metadata."""
         from app.package_context_service import get_active_package_id
 
-        with mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION_WITH_PACKAGE):
+        with mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION_WITH_PACKAGE)):
             result = get_active_package_id(TENANT, USER, SESSION)
 
         assert result == PACKAGE_ID
@@ -222,7 +221,7 @@ class TestGetActivePackageId:
         """Returns None when no active package."""
         from app.package_context_service import get_active_package_id
 
-        with mock.patch("app.package_context_service.get_session", return_value=MOCK_SESSION):
+        with mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION)):
             result = get_active_package_id(TENANT, USER, SESSION)
 
         assert result is None

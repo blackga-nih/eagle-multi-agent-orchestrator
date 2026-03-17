@@ -55,7 +55,7 @@ def test_streaming_emits_text_when_complete_event_has_only_final_text(monkeypatc
                 events.append(json.loads(raw[6:]))
         return events
 
-    events = asyncio.get_event_loop().run_until_complete(_collect())
+    events = asyncio.run(_collect())
     text_events = [e for e in events if e.get("type") == "text" and e.get("content")]
     complete_events = [e for e in events if e.get("type") == "complete"]
 

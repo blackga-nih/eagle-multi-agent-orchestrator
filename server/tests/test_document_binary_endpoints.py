@@ -125,7 +125,8 @@ def _load_app():
         ):
             import importlib
 
-            sys.modules.pop("app.main", None)
+            for _mod in ("app.main", "app.changelog_store", "app.document_ai_edit_service", "app.spreadsheet_edit_service"):
+                sys.modules.pop(_mod, None)
 
             import app.main as main_module
 
@@ -171,7 +172,8 @@ def _load_app_without_docx_service():
         ):
             import importlib
 
-            sys.modules.pop("app.main", None)
+            for _mod in ("app.main", "app.changelog_store", "app.document_ai_edit_service", "app.spreadsheet_edit_service"):
+                sys.modules.pop(_mod, None)
 
             import app.main as main_module
 

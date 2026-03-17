@@ -191,8 +191,8 @@ export class EagleStorageStack extends cdk.Stack {
     const tableArn = `arn:aws:dynamodb:${this.region}:${this.account}:table/${config.documentMetadataTableName}`;
 
     appRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'DocumentBucketRead',
-      actions: ['s3:GetObject', 's3:GetBucketLocation', 's3:ListBucket'],
+      sid: 'DocumentBucketReadWrite',
+      actions: ['s3:GetObject', 's3:PutObject', 's3:GetBucketLocation', 's3:ListBucket'],
       resources: [bucketArn, `${bucketArn}/*`],
     }));
 

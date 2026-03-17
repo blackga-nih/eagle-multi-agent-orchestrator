@@ -14,11 +14,57 @@ import sys
 import socket
 import time
 from datetime import datetime
+from pathlib import Path as _Path
 
+from dotenv import load_dotenv
 import pytest
 
 # Ensure server/ is on the path for app.* imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _server_dir)
+
+# ── Load .env BEFORE any app.* imports ──────────────────────────────
+# app.cognito_auth reads DEV_MODE at import time; without this, tests
+# that import app modules before app.main would see DEV_MODE=false.
+_env_path = _Path(_server_dir) / ".env"
+if _env_path.exists():
+    load_dotenv(str(_env_path), override=True)
+
+# ── Module cleanup to prevent reload pollution between test files ────
+#
+# Several test files do ``importlib.reload(app.main)`` to inject mocked
+# dependencies.  After the module finishes, the reloaded app.main (and its
+# sub-modules that cache boto3 clients) leak into subsequent modules.
+#
+# We pop *only* the modules that are explicitly reloaded by test files.
+# DO NOT pop modules imported at module-level by other test files
+# (e.g. app.streaming_routes, app.template_service) — that creates a
+# split between the cached reference and the fresh re-import.
+
+_RELOAD_TARGETS = [
+    "app.main",
+    "app.changelog_store",
+]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _clean_app_main_between_modules(request):
+    """Purge reloaded modules and reset DynamoDB singletons after each test module."""
+    yield
+    # Reset lazy-init singletons so stale clients don't leak
+    for mod_name in ("app.changelog_store", "app.session_store", "app.package_store"):
+        mod = sys.modules.get(mod_name)
+        if mod:
+            for attr in ("_dynamodb", "_table", "_client"):
+                if hasattr(mod, attr):
+                    setattr(mod, attr, None)
+    # Clear template cache to prevent cross-module S3 result leakage
+    ts = sys.modules.get("app.template_service")
+    if ts and hasattr(ts, "_template_cache"):
+        ts._template_cache.clear()
+    for mod_name in _RELOAD_TARGETS:
+        sys.modules.pop(mod_name, None)
+
 
 _PERSIST = os.getenv("EAGLE_PERSIST_TEST_RESULTS", "true").lower() == "true"
 

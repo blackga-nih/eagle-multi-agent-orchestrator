@@ -1625,7 +1625,7 @@ def _update_document_content(
 
     # Security check
     if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
-        return {"error": f"Access denied: document key must be within user's prefix"}
+        return {"error": "Access denied: document key must be within user's prefix"}
 
     # Detect if this is a package document
     is_package_doc = "/packages/" in doc_key
