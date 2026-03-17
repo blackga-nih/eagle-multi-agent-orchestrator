@@ -10,12 +10,15 @@ triggers:
 tools:
   - search_far
   - create_document
+  - generate_document
   - s3_document_ops
   - dynamodb_intake
   - get_intake_status
   - update_state
+  - manage_package
   - get_package_checklist
   - query_compliance_matrix
+  - query_contract_matrix
   - knowledge_search
   - knowledge_fetch
   - web_search
