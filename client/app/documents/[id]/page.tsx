@@ -510,6 +510,10 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const canEditXlsxPreview = isBinaryDocument && isXlsxDocument && xlsxPreviewSheets.length > 0;
     const hasDocxPreviewChanges = docxPreviewBlocksEqual(editDocxPreviewBlocks, docxPreviewBlocks) === false;
     const hasXlsxPreviewChanges = xlsxPreviewSheetsEqual(editXlsxPreviewSheets, xlsxPreviewSheets) === false;
+    const currentBinaryDownloadTarget = useMemo(() => {
+        if (!isBinaryDocument) return null;
+        return s3Key || decodeURIComponent(id);
+    }, [id, isBinaryDocument, s3Key]);
 
     const applyDocumentUpdate = useCallback((doc: Partial<DocumentInfo> & { content: string }) => {
         if (doc.package_id) {
@@ -858,6 +862,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 setDocumentType(data.doc_type || documentType);
                 setPackageId(data.package_id || packageId);
                 setFileType(data.file_type || fileType);
+                setDownloadUrl(null);
                 setS3Key(data.s3_key || s3Key);
                 setCurrentDocumentId(nextDocumentId);
                 setCurrentVersion(nextVersion);
@@ -888,6 +893,37 @@ export default function DocumentViewerPage({ params }: PageProps) {
         s3Key,
         isBinaryDocument,
     ]);
+
+    useEffect(() => {
+        if (!currentBinaryDownloadTarget) return;
+
+        let cancelled = false;
+
+        const refreshBinaryDownloadUrl = async () => {
+            try {
+                const token = await getToken();
+                const response = await fetch(`/api/documents/${encodeURIComponent(currentBinaryDownloadTarget)}?content=false`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (!response.ok || cancelled) {
+                    return;
+                }
+
+                const data = await response.json() as { download_url?: string | null };
+                if (!cancelled) {
+                    setDownloadUrl(data.download_url || null);
+                }
+            } catch {
+                // Keep the last usable URL on transient failures.
+            }
+        };
+
+        void refreshBinaryDownloadUrl();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentBinaryDownloadTarget, getToken]);
 
     // Layer 1: Immediate hydration from session context
     useEffect(() => {
@@ -1220,6 +1256,7 @@ ${docSnippet}`;
                 setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(savedPreviewBlocks));
                 setCurrentDocumentId(result.document_id || currentDocumentId);
                 setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
+                setDownloadUrl(null);
                 setS3Key(result.s3_key || result.key || s3Key);
                 setIsEditing(false);
             } else if (isBinaryDocument && isXlsxDocument) {
@@ -1230,6 +1267,7 @@ ${docSnippet}`;
                 setActiveXlsxSheetId(savedPreviewSheets[0]?.sheet_id || null);
                 setCurrentDocumentId(result.document_id || currentDocumentId);
                 setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
+                setDownloadUrl(null);
                 setS3Key(result.s3_key || result.key || s3Key);
                 setIsEditing(false);
             } else {
@@ -1402,18 +1440,28 @@ ${docSnippet}`;
                                 <span className="text-xs text-red-600 mr-2">{exportError}</span>
                             )}
 
-                            {/* Download dropdown / original file link */}
+                            {/* Download controls */}
                             <div className="relative">
-                                {isBinaryDocument && downloadUrl ? (
-                                    <a
-                                        href={downloadUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
-                                    >
-                                        <Download className="w-4 h-4" />
-                                        Download Original
-                                    </a>
+                                {isBinaryDocument ? (
+                                    downloadUrl ? (
+                                        <a
+                                            href={downloadUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
+                                        >
+                                            <Download className="w-4 h-4" />
+                                            Download Current
+                                        </a>
+                                    ) : (
+                                        <button
+                                            disabled
+                                            className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-500 rounded-xl text-sm font-medium"
+                                        >
+                                            <RefreshCw className="w-4 h-4 animate-spin" />
+                                            Preparing Download
+                                        </button>
+                                    )
                                 ) : (
                                     <button
                                         onClick={() => setShowDownloadMenu(!showDownloadMenu)}
@@ -1554,7 +1602,7 @@ ${docSnippet}`;
                                                 This Word document remains stored as a native `.docx` file. Browser edits work on a structured preview and save back through `python-docx` so the source file stays native.
                                             </p>
                                             <p className="mt-3 leading-6">
-                                                Use `Edit` for direct paragraph and checkbox updates here, or use the assistant on the right for targeted DOCX revisions. Complex layout and styling still remain in the original Word file.
+                                                Use `Edit` for direct paragraph and checkbox updates here, or use the assistant on the right for targeted DOCX revisions. Complex layout and styling still remain in the native Word file.
                                             </p>
                                             {downloadUrl && (
                                                 <a
@@ -1564,7 +1612,7 @@ ${docSnippet}`;
                                                     className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-4 py-2 text-sm font-medium text-white hover:bg-[#004488]"
                                                 >
                                                     <Download className="h-4 w-4" />
-                                                    Open original file
+                                                    Open current file
                                                 </a>
                                             )}
                                         </div>
@@ -1686,7 +1734,7 @@ ${docSnippet}`;
                                             </div>
                                         ) : (
                                             <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
-                                                Preview unavailable for this DOCX. You can still download the original file.
+                                                Preview unavailable for this DOCX. You can still download the current file.
                                             </div>
                                         )}
                                     </div>
@@ -1711,7 +1759,7 @@ ${docSnippet}`;
                                                     className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-4 py-2 text-sm font-medium text-white hover:bg-[#004488]"
                                                 >
                                                     <Download className="h-4 w-4" />
-                                                    Open original file
+                                                    Open current file
                                                 </a>
                                             )}
                                         </div>
@@ -1734,7 +1782,7 @@ ${docSnippet}`;
                                                 </div>
                                                 {activeXlsxSheet.truncated && (
                                                     <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                                        Preview truncated for large worksheet dimensions. Download the original file for the full workbook view.
+                                                        Preview truncated for large worksheet dimensions. Download the current workbook for the full view.
                                                     </div>
                                                 )}
                                                 <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -1793,7 +1841,7 @@ ${docSnippet}`;
                                             </div>
                                         ) : (
                                             <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
-                                                Preview unavailable for this XLSX. You can still download the original file.
+                                                Preview unavailable for this XLSX. You can still download the current file.
                                             </div>
                                         )}
                                     </div>
@@ -1805,10 +1853,10 @@ ${docSnippet}`;
                                         </div>
                                         <p className="mt-3 leading-6">
                                             This file is stored as a native `{fileType || documentType || 'binary'}` document.
-                                            Inline editing is intentionally disabled so EAGLE does not strip the original formatting.
+                                            Inline editing is intentionally disabled so EAGLE does not strip the document formatting.
                                         </p>
                                         <p className="mt-3 leading-6">
-                                            Use the original file download and changelog on the right.
+                                            Use the current file download and changelog on the right.
                                         </p>
                                         {downloadUrl && (
                                             <a
@@ -1818,7 +1866,7 @@ ${docSnippet}`;
                                                 className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-4 py-2 text-sm font-medium text-white hover:bg-[#004488]"
                                             >
                                                 <Download className="h-4 w-4" />
-                                                Open original file
+                                                Open current file
                                             </a>
                                         )}
                                         {contentType && (
