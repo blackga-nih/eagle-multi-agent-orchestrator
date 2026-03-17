@@ -177,9 +177,13 @@ export default function SimpleChatInterface() {
                     next.phase = meta.phase as string;
                     next.previous_phase = meta.previous as string;
                     if (meta.package_id) next.package_id = meta.package_id as string;
-                    if (meta.checklist) next.checklist = meta.checklist as PackageState['checklist'];
+                    // Only overwrite checklist if the incoming one has required docs
+                    // (avoids clobbering valid data when agent passes a slug instead of real package_id)
+                    const incoming = meta.checklist as PackageState['checklist'] | undefined;
+                    if (incoming?.required?.length) next.checklist = incoming;
                 } else if (stateType === 'checklist_update' || stateType === 'document_ready') {
-                    if (meta.checklist) next.checklist = meta.checklist as PackageState['checklist'];
+                    const incoming = meta.checklist as PackageState['checklist'] | undefined;
+                    if (incoming?.required?.length) next.checklist = incoming;
                     if (meta.package_id) next.package_id = meta.package_id as string;
                     if (meta.progress_pct !== undefined) next.progress_pct = meta.progress_pct as number;
                 } else if (stateType === 'compliance_alert') {

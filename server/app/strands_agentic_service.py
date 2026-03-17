@@ -1855,7 +1855,12 @@ def _make_update_state_tool(
             if pkg_id:
                 from .stores.package_store import get_package_checklist
                 payload["package_id"] = pkg_id
-                payload["checklist"] = get_package_checklist(tenant_id, pkg_id)
+                checklist = get_package_checklist(tenant_id, pkg_id)
+                # Only include checklist if it has required docs — avoids
+                # overwriting a valid checklist when agent passes a slug
+                # instead of the real DynamoDB package_id.
+                if checklist.get("required"):
+                    payload["checklist"] = checklist
 
         elif state_type == "document_ready":
             payload["doc_type"] = parsed.get("doc_type", "")

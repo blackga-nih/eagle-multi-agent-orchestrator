@@ -246,14 +246,16 @@ const PHASE_STYLE: Record<string, string> = {
 };
 
 const DOC_LABELS: Record<string, string> = {
-  sow:              'Statement of Work',
-  igce:             'IGCE',
-  market_research:  'Market Research',
-  acquisition_plan: 'Acquisition Plan',
-  funding_doc:      'Funding Documentation',
-  justification:    'Justification',
-  eval_criteria:    'Evaluation Criteria',
-  j_a:              'J&A',
+  sow:                'Statement of Work',
+  igce:               'IGCE',
+  market_research:    'Market Research',
+  'market-research':  'Market Research',
+  acquisition_plan:   'Acquisition Plan',
+  'acquisition-plan': 'Acquisition Plan',
+  funding_doc:        'Funding Documentation',
+  justification:      'Justification',
+  eval_criteria:      'Evaluation Criteria',
+  j_a:                'J&A',
 };
 
 function PackageStatusTab({ eagleState }: { eagleState?: PackageState | null }) {
