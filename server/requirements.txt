@@ -10,7 +10,11 @@ cryptography==46.0.5
 requests==2.32.4
 python-dotenv==1.0.0
 # EAGLE additions
-strands-agents>=1.0.0
+strands-agents[otel]>=1.0.0
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+opentelemetry-exporter-otlp-proto-http>=1.20.0
+langfuse>=3.0.0
 # anthropic>=0.40.0 — kept for legacy agentic_service.py (execute_tool, health check)
 # claude-agent-sdk>=0.1.19 — REMOVED: replaced by strands-agents (Phase 5 migration)
 mcp>=1.5.0

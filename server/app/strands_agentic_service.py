@@ -45,6 +45,94 @@ from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
 logger = logging.getLogger("eagle.strands_agent")
 
 
+# -- Langfuse OTEL exporter (lazy, one-shot) --------------------------
+_langfuse_injected = False
+
+
+def _ensure_langfuse_exporter():
+    """Initialize Strands telemetry + Langfuse OTLP exporter (once).
+
+    Must be called **before** the first ``Agent()`` so that the Agent's cached
+    tracer references the real SDKTracerProvider (with the Langfuse exporter).
+    """
+    global _langfuse_injected
+    if _langfuse_injected:
+        return
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    if not public_key or not secret_key:
+        return
+    try:
+        import base64
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from strands.telemetry import StrandsTelemetry
+
+        st = StrandsTelemetry()
+        provider = st.tracer_provider
+
+        base = os.getenv(
+            "LANGFUSE_OTEL_ENDPOINT",
+            "https://us.cloud.langfuse.com/api/public/otel",
+        )
+        endpoint = f"{base.rstrip('/')}/v1/traces"
+        auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+
+        exporter = OTLPSpanExporter(
+            endpoint=endpoint,
+            headers={"Authorization": f"Basic {auth}"},
+        )
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        _langfuse_injected = True
+        logger.info("[EAGLE] Langfuse OTEL exporter injected → %s", endpoint)
+        logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
+    except Exception as exc:
+        logger.warning("[EAGLE] Langfuse exporter injection failed: %s", exc)
+
+
+def _build_trace_attrs(
+    *,
+    tenant_id: str,
+    user_id: str,
+    tier: str,
+    session_id: str = "",
+    subagent: str = "",
+) -> dict:
+    """Build trace_attributes dict for Langfuse/OTEL Agent() constructor.
+
+    Tags every trace with sm-eagle source, local-vs-live environment,
+    and hostname for source tracing.
+    """
+    import socket
+
+    hostname = socket.gethostname()
+    dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
+    environment = "local" if dev_mode else "live"
+
+    attrs = {
+        "eagle.source": "sm-eagle",
+        "eagle.environment": environment,
+        "eagle.hostname": hostname,
+        "eagle.tenant_id": tenant_id,
+        "eagle.user_id": user_id,
+        "eagle.tier": tier,
+        "eagle.session_id": session_id or "",
+        "session.id": session_id or "",
+        "langfuse.session.id": session_id or "",
+        "langfuse.user.id": user_id or "",
+    }
+    if subagent:
+        attrs["eagle.subagent"] = subagent
+
+    try:
+        local_ip = socket.gethostbyname(hostname)
+        attrs["eagle.ip"] = local_ip
+    except Exception:
+        pass
+
+    return attrs
+
+
 # -- Adapter Messages ------------------------------------------------
 # These match the interface expected by streaming_routes.py and main.py:
 #   type(msg).__name__ == "AssistantMessage" | "ResultMessage"
@@ -901,6 +989,10 @@ def _make_subagent_tool(
     prompt_body: str,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    tenant_id: str = "",
+    user_id: str = "",
+    tier: str = "",
+    session_id: str = "",
 ):
     """Create a @tool-wrapped subagent from skill registry entry.
 
@@ -912,10 +1004,18 @@ def _make_subagent_tool(
     @tool(name=safe_name)
     def subagent_tool(query: str) -> str:
         """Placeholder docstring replaced below."""
+        _ensure_langfuse_exporter()
         agent = Agent(
             model=_model,
             system_prompt=prompt_body,
             callback_handler=None,
+            trace_attributes=_build_trace_attrs(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                tier=tier,
+                session_id=session_id,
+                subagent=safe_name,
+            ),
         )
         raw = str(agent(query))
 
@@ -1371,6 +1471,7 @@ def build_skill_tools(
     tenant_id: str = "demo-tenant",
     user_id: str = "demo-user",
     workspace_id: str | None = None,
+    session_id: str = "",
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
@@ -1415,6 +1516,10 @@ def build_skill_tools(
             prompt_body=_truncate_skill(prompt_body),
             result_queue=result_queue,
             loop=loop,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            tier=tier,
+            session_id=session_id,
         ))
 
     # Merge active user-created SKILL# items
@@ -1436,6 +1541,10 @@ def build_skill_tools(
                 prompt_body=_truncate_skill(skill_prompt),
                 result_queue=result_queue,
                 loop=loop,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                tier=tier,
+                session_id=session_id,
             ))
     except Exception as exc:
         logger.warning("skill_store.list_active_skills failed for %s: %s -- skipping user skills", tenant_id, exc)
@@ -1617,6 +1726,7 @@ async def sdk_query(
         tenant_id=tenant_id,
         user_id=user_id,
         workspace_id=resolved_workspace_id,
+        session_id=session_id or "",
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -1639,12 +1749,19 @@ async def sdk_query(
     # Convert conversation history to Strands format (excludes current prompt)
     strands_history = _to_strands_messages(messages) if messages else None
 
+    _ensure_langfuse_exporter()
     supervisor = Agent(
         model=_model,
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,
         messages=strands_history,
+        trace_attributes=_build_trace_attrs(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            tier=tier,
+            session_id=session_id or "",
+        ),
     )
 
     # Synchronous call -- Strands handles the agentic loop internally
@@ -1775,6 +1892,7 @@ async def sdk_query_streaming(
         tenant_id=tenant_id,
         user_id=user_id,
         workspace_id=resolved_workspace_id,
+        session_id=session_id or "",
         result_queue=result_queue,
         loop=loop,
     )
@@ -1800,12 +1918,19 @@ async def sdk_query_streaming(
 
     strands_history = _to_strands_messages(messages) if messages else None
 
+    _ensure_langfuse_exporter()
     supervisor = Agent(
         model=_model,
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,  # stream_async yields events directly
         messages=strands_history,
+        trace_attributes=_build_trace_attrs(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            tier=tier,
+            session_id=session_id or "",
+        ),
     )
 
     # Yield chunks via stream_async — SDK bridges sync→async internally
@@ -1992,10 +2117,17 @@ async def sdk_query_single_skill(
         f"You are operating as the {skill_name} specialist for this tenant.\n\n"
     )
 
+    _ensure_langfuse_exporter()
     agent = Agent(
         model=_model,
         system_prompt=tenant_context + skill_content,
         callback_handler=None,
+        trace_attributes=_build_trace_attrs(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            tier=tier,
+            subagent=skill_name,
+        ),
     )
 
     result = agent(prompt)
