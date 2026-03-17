@@ -401,8 +401,9 @@ class TemplateService:
         if template_bytes is None:
             raise FileNotFoundError(f"Template not found for {doc_type}")
 
-        # Add title to data
-        data_with_title = {"title": title, **data}
+        # Normalize field names and add title
+        from app.template_registry import normalize_field_names
+        data_with_title = normalize_field_names({"title": title, **data}, doc_type)
 
         # Populate based on file type
         placeholder_map = get_placeholder_map(doc_type)

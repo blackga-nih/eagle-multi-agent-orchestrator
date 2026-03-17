@@ -786,9 +786,17 @@ EAGLE_TOOLS = [
                     "type": "string",
                     "description": "Title of the acquisition/document",
                 },
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "Full document content as markdown. Write complete, "
+                        "section-by-section content using the conversation context "
+                        "before calling this tool. This becomes the saved document body."
+                    ),
+                },
                 "data": {
                     "type": "object",
-                    "description": "Document-specific fields (description, line_items, vendors, etc.)",
+                    "description": "Document-specific fields (description, estimated_value, period_of_performance, competition, contract_type, etc.) for template population.",
                 },
             },
             "required": ["doc_type", "title"],
@@ -1607,7 +1615,14 @@ def build_supervisor_prompt(
         "6) Use search_far only as fallback reference.\n\n"
         "Document Output Rules:\n"
         "1) If the user asks to generate/draft/create a document, you MUST call create_document.\n"
-        "1a) If the user asks to revise an existing DOCX document, use edit_docx_document for targeted edits and checkbox_edits for checklist toggles.\n"
+        "1a) CRITICAL: Write the COMPLETE document content as the 'content' field (markdown with "
+        "section headings, filled-in details from the conversation). Do NOT leave template "
+        "placeholders — fill every section with specifics from the intake discussion.\n"
+        "1b) Also pass structured fields in 'data' (description, estimated_value, "
+        "period_of_performance, competition, contract_type, deliverables, tasks, etc.) "
+        "for template population.\n"
+        "1c) If the user asks to revise an existing DOCX document, use edit_docx_document "
+        "for targeted edits and checkbox_edits for checklist toggles.\n"
         "2) Do not paste full document bodies in chat unless the user explicitly asks for inline text.\n"
         "3) After create_document, respond briefly and direct the user to open/edit the document card.\n\n"
         f"FAST vs DEEP routing:\n"

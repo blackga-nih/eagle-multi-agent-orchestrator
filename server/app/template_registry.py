@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("eagle.template_registry")
 
@@ -141,6 +141,72 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         description="COR Appointment/Certification memorandum",
     ),
 }
+
+# ── Field Name Aliases ────────────────────────────────────────────────
+# Maps common AI-sent field names to canonical placeholder_map keys.
+# The AI often sends e.g. "competition_type" but the template expects "competition".
+FIELD_NAME_ALIASES: Dict[str, str] = {
+    # competition variants
+    "competition_type": "competition",
+    "competition_strategy": "competition",
+    "full_open": "competition",
+    # period variants
+    "contract_period": "period_of_performance",
+    "duration": "period_of_performance",
+    "pop": "period_of_performance",
+    "performance_period": "period_of_performance",
+    # cost/value variants
+    "estimated_cost": "estimated_value",
+    "budget": "estimated_value",
+    "total_cost": "total_estimate",
+    "total_value": "estimated_value",
+    # description variants
+    "requirement": "description",
+    "requirement_description": "description",
+    "objective": "description",
+    "requirement_summary": "description",
+    # contractor variants
+    "contractor_name": "contractor",
+    "vendor": "contractor",
+    "vendor_name": "contractor",
+    # set-aside variants
+    "set_aside_recommendation": "set_aside",
+    "set_aside_type": "set_aside",
+    "small_business": "set_aside",
+    # justification variants
+    "authority_cited": "authority",
+    "far_authority": "authority",
+    "justification_authority": "authority",
+    "justification_rationale": "rationale",
+    # market research variants
+    "vendors": "vendors_identified",
+    "vendor_list": "vendors_identified",
+    "market_analysis": "market_conditions",
+}
+
+
+def normalize_field_names(data: Dict[str, Any], doc_type: str) -> Dict[str, Any]:
+    """Normalize AI-sent field names to canonical placeholder_map names.
+
+    Preserves unrecognized keys for downstream markdown generators.
+    """
+    mapping = get_template_mapping(doc_type)
+    if not mapping:
+        return data
+
+    canonical_keys = set(mapping.placeholder_map.keys())
+    normalized: Dict[str, Any] = {}
+    for key, value in data.items():
+        if key in canonical_keys:
+            normalized[key] = value
+        else:
+            alias_target = FIELD_NAME_ALIASES.get(key)
+            if alias_target and alias_target in canonical_keys:
+                normalized.setdefault(alias_target, value)
+            else:
+                normalized[key] = value
+    return normalized
+
 
 # Document types that use markdown-only (no S3 template)
 MARKDOWN_ONLY_DOC_TYPES = frozenset({

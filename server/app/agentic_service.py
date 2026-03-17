@@ -110,6 +110,12 @@ SYSTEM_PROMPT = (
     "You have access to real AWS-backed tools for document storage (S3), "
     "intake tracking (DynamoDB), log inspection (CloudWatch), FAR search, "
     "document generation, intake status, and a guided intake workflow.\n\n"
+    "DOCUMENT GENERATION: When calling create_document, write the COMPLETE "
+    "document content as the 'content' field (markdown with section headings "
+    "filled in with specifics from the conversation). Also pass structured "
+    "fields in 'data' (description, estimated_value, period_of_performance, "
+    "competition, contract_type, deliverables, tasks). Do NOT leave template "
+    "placeholders — fill every section.\n\n"
     "When the user asks to revise an existing DOCX document, use the "
     "edit_docx_document tool for targeted replacements instead of rewriting "
     "the file through markdown. Use checkbox_edits when the DOCX preview "
@@ -459,16 +465,52 @@ def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
         return False
 
     normalized = " ".join(preview.lower().split())
-    if doc_type == "sow":
-        markers = [
+
+    # Generic check: remaining {{PLACEHOLDER}} tokens mean population failed
+    import re as _re
+    if _re.search(r"\{\{[A-Z_]{3,}\}\}", preview):
+        return True
+
+    # Per-doc-type heuristic markers (need >=2 hits to trigger)
+    _UNFILLED_MARKERS: dict[str, list[str]] = {
+        "sow": [
             "this section should provide brief description of the project",
             "the background information should identify the requirement in very general terms",
             "sample language",
             "table of contents",
-        ]
-        return all(marker in normalized for marker in markers[:2]) and "table of contents" in normalized
+        ],
+        "acquisition_plan": [
+            "this section should describe the requirement",
+            "describe the competition strategy",
+            "[tbd]",
+            "revised july 2024",
+            "far 7.1",
+        ],
+        "market_research": [
+            "[analysis of small business availability",
+            "[analysis of whether commercial",
+            "this section should describe the market",
+            "[insert requirement description",
+        ],
+        "justification": [
+            "[contractor name]",
+            "[provide detailed rationale",
+            "[describe efforts to compete",
+            "[insert authority",
+        ],
+        "cor_certification": [
+            "[nominee name]",
+            "[nominee title]",
+            "[contract number]",
+        ],
+    }
 
-    return False
+    markers = _UNFILLED_MARKERS.get(doc_type, [])
+    if not markers:
+        return False
+
+    hits = sum(1 for m in markers if m.lower() in normalized)
+    return hits >= 2
 
 
 _SOW_SECTION_HINTS: dict[str, str] = {
@@ -1770,7 +1812,15 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
 
     title = params.get("title", "Untitled Acquisition")
     doc_type = _normalize_create_document_doc_type(params.get("doc_type"), title)
-    data = params.get("data", {})
+    raw_data = params.get("data", {})
+    # AI sometimes sends data as a JSON string — parse it
+    if isinstance(raw_data, str):
+        try:
+            raw_data = json.loads(raw_data)
+        except (json.JSONDecodeError, TypeError):
+            raw_data = {}
+    data = raw_data if isinstance(raw_data, dict) else {}
+    ai_content = params.get("content")  # AI-provided full document markdown
     package_id = params.get("package_id")
     output_format = params.get("output_format") or _default_output_format_for_doc_type(doc_type)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1778,6 +1828,10 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     # Enrich missing/partial document fields from recent session context so
     # first-pass drafts are less generic when tools are invoked with sparse params.
     data = _augment_document_data_from_context(doc_type, title, data, session_id)
+
+    # Normalize AI-sent field names to canonical placeholder_map names
+    from app.template_registry import normalize_field_names
+    data = normalize_field_names(data, doc_type)
 
     # Document-viewer edit flow: when current content + explicit clear request is
     # present, patch the existing markdown directly instead of regenerating a
@@ -1821,14 +1875,40 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
         source = "inline_edit_clear_sections"
         template_path = None
         result = None
+    elif ai_content and isinstance(ai_content, str) and ai_content.strip():
+        # AI provided full document content — use it as primary source
+        content = ai_content.strip()
+        file_type = "md"
+        source = "ai_content"
+        template_path = None
+        result = None
+
+        # Still attempt template population for branded DOCX output
+        try:
+            service = TemplateService(tenant_id, user_id, markdown_generators)
+            template_result = service.generate_document(doc_type, title, data, output_format)
+            if template_result.success:
+                preview = template_result.preview or ""
+                if not _looks_like_unfilled_template_preview(doc_type, preview):
+                    # Template was successfully populated — use branded DOCX
+                    file_type = template_result.file_type
+                    source = "ai_content+s3_template"
+                    template_path = template_result.template_path
+                    result = template_result
+                else:
+                    logger.info(
+                        "Template still unfilled after population for %s; using AI content",
+                        doc_type,
+                    )
+        except Exception:
+            logger.debug("Template population alongside AI content failed, using AI markdown")
     else:
-        # Try template-based generation first
+        # No AI content — try template-based generation, then markdown fallback
         try:
             service = TemplateService(tenant_id, user_id, markdown_generators)
             result = service.generate_document(doc_type, title, data, output_format)
 
             if not result.success:
-                # Template service failed, use direct markdown fallback
                 generator = markdown_generators.get(doc_type)
                 if generator:
                     content = generator(title, data)
@@ -1843,22 +1923,20 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
                 source = result.source
                 template_path = result.template_path
 
-                # Some official templates are boilerplate-only and may not expose
-                # machine-replaceable placeholders. If the extracted preview is still
-                # generic, return markdown generator content for the editable response
-                # while still saving the populated binary artifact to S3.
+                # Detect unfilled templates and fall back to markdown
                 if _looks_like_unfilled_template_preview(doc_type, content):
                     generator = markdown_generators.get(doc_type)
                     if generator:
                         content = generator(title, data)
                         source = f"{source}+markdown_context_response"
+                        file_type = "md"
+                        result = None
                         logger.warning(
-                            "Template preview looked unfilled for doc_type=%s; using markdown generator for response content",
+                            "Template preview unfilled for doc_type=%s; using markdown generator and saving markdown to S3",
                             doc_type,
                         )
 
         except ImportError as e:
-            # python-docx or openpyxl not available, use markdown
             logger.warning("Template libraries unavailable: %s, using markdown fallback", e)
             generator = markdown_generators.get(doc_type)
             if generator:
