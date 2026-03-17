@@ -17,15 +17,13 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Response, UploadFile, File
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 from collections import deque
 from datetime import datetime, timedelta
-from decimal import Decimal
-import asyncio
 import json
 import time
 import logging
@@ -33,7 +31,6 @@ import os
 import uuid
 import io
 import re
-from urllib import parse as urllib_parse
 
 # EAGLE modules (new)
 from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
@@ -42,12 +39,12 @@ from .session_store import (
     create_session as eagle_create_session, get_session as eagle_get_session,
     update_session as eagle_update_session, delete_session as eagle_delete_session,
     list_sessions as eagle_list_sessions,
-    add_message, get_messages, get_messages_for_anthropic, record_usage, get_usage_summary,
+    add_message, get_messages, get_messages_for_anthropic, get_usage_summary,
     get_tenant_usage_overview, list_tenant_sessions,
 )
 from .cognito_auth import (
     UserContext, extract_user_context,
-    DEV_MODE, DEV_USER_ID, DEV_TENANT_ID
+    DEV_MODE
 )
 from .admin_service import (
     get_dashboard_stats, get_user_stats, get_top_users, get_tool_usage,
@@ -56,12 +53,12 @@ from .admin_service import (
 from . import feedback_store
 
 # Existing multi-tenant modules (preserved)
-from .models import ChatMessage, ChatResponse, TenantContext, UsageMetric, SubscriptionTier
+from .models import SubscriptionTier
 from .auth import get_current_user
 from .subscription_service import SubscriptionService
 from .cost_attribution import CostAttributionService
 from .admin_cost_service import AdminCostService
-from .admin_auth import get_admin_user, verify_tenant_admin, AdminAuthService
+from .admin_auth import get_admin_user, verify_tenant_admin
 from .streaming_routes import create_streaming_router
 
 # Phase 4 — hot-reload stores
@@ -75,7 +72,7 @@ from .workspace_store import (
     list_workspaces, activate_workspace, delete_workspace,
 )
 from .wspc_store import (
-    put_override, get_override, list_overrides,
+    put_override, list_overrides,
     delete_override, delete_all_overrides,
 )
 from .prompt_store import (
@@ -83,21 +80,20 @@ from .prompt_store import (
     _prompt_cache,
 )
 from .config_store import (
-    get_config, put_config, delete_config, list_config,
+    put_config, delete_config, list_config,
     _config_cache,
 )
 from .template_store import (
-    put_template, get_template, delete_template,
+    put_template, delete_template,
     list_tenant_templates, resolve_template,
     _template_cache,
 )
 from .skill_store import (
-    create_skill, get_skill, update_skill, list_skills, list_active_skills,
-    submit_for_review, publish_skill, disable_skill, delete_skill,
+    create_skill, get_skill, update_skill, list_skills, submit_for_review, publish_skill, delete_skill,
 )
 from .package_store import (
     create_package, get_package, update_package, list_packages,
-    get_package_checklist, submit_package, approve_package, close_package,
+    get_package_checklist, submit_package, approve_package,
 )
 from .document_store import (
     get_document,
@@ -117,12 +113,11 @@ from .package_context_service import (
     set_active_package,
 )
 from .approval_store import (
-    create_approval_chain, list_approval_chain,
-    record_decision, get_chain_status,
+    create_approval_chain, record_decision, get_chain_status,
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
-from .feedback_store import write_feedback, list_feedback
+from .feedback_store import list_feedback
 from .health_checks import check_knowledge_base_health
 
 # ── Logging ──────────────────────────────────────────────────────────
@@ -931,7 +926,7 @@ async def api_update_document(
                     document_key=doc_key,
                     change_type="update",
                     change_source=request.change_source,
-                    change_summary=f"Updated document via editor",
+                    change_summary="Updated document via editor",
                     actor_user_id=user_id,
                 )
             except Exception as cl_err:
@@ -1082,7 +1077,7 @@ async def api_list_kb_reviews(
     user: UserContext = Depends(get_user_from_header),
 ):
     """List KB review records from DynamoDB (admin only)."""
-    from boto3.dynamodb.conditions import Key, Attr
+    from boto3.dynamodb.conditions import Attr
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
     try:
         ddb = _get_dynamo()
@@ -1406,7 +1401,8 @@ def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
     try:
         log_group = os.environ.get("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
         region = os.environ.get("AWS_REGION", "us-east-1")
-        client = _boto3.client("logs", region_name=region)
+        import boto3
+        client = boto3.client("logs", region_name=region)
         now_ms = int(time.time() * 1000)
         day_ms = 24 * 60 * 60 * 1000
         response = client.filter_log_events(
@@ -1805,6 +1801,180 @@ async def execute_weather_mcp_tool(tool_name: str, arguments: dict, current_user
         return {"tool_name": tool_name, "subscription_tier": tier.value, "result": result}
     except ImportError:
         raise HTTPException(status_code=503, detail="Weather MCP service not available")
+
+
+# ── Admin Langfuse trace endpoints ────────────────────────────────────
+
+@app.get("/api/admin/traces")
+async def get_admin_traces(
+    limit: int = 50,
+    page: int = 1,
+    user_id: str = None,
+    session_id: str = None,
+    tag: str = None,
+    from_date: str = None,
+    to_date: str = None,
+    name: str = None,
+    admin_user: dict = Depends(get_admin_user),
+):
+    """List traces from Langfuse (admin only)."""
+    from .telemetry.langfuse_client import list_traces
+
+    tags = [tag] if tag else None
+    result = await list_traces(
+        limit=limit,
+        page=page,
+        user_id=user_id,
+        session_id=session_id,
+        tags=tags,
+        from_timestamp=from_date,
+        to_timestamp=to_date,
+        name=name,
+    )
+    # Normalize for frontend: wrap in {"traces": [...], "meta": {...}}
+    data = result.get("data", [])
+    traces = []
+    for t in data:
+        traces.append({
+            "trace_id": t.get("id", ""),
+            "name": t.get("name", ""),
+            "session_id": t.get("sessionId", ""),
+            "user_id": t.get("userId", ""),
+            "created_at": t.get("timestamp", ""),
+            "updated_at": t.get("updatedAt", ""),
+            "duration_ms": _langfuse_latency_ms(t),
+            "total_input_tokens": t.get("usage", {}).get("input", 0) if t.get("usage") else 0,
+            "total_output_tokens": t.get("usage", {}).get("output", 0) if t.get("usage") else 0,
+            "total_tokens": t.get("usage", {}).get("total", 0) if t.get("usage") else 0,
+            "total_cost_usd": float(t.get("usage", {}).get("totalCost", 0) or 0) if t.get("usage") else 0,
+            "tags": t.get("tags", []),
+            "metadata": t.get("metadata", {}),
+            "status": "error" if t.get("level") == "ERROR" else "success",
+            "environment": _extract_env_from_trace(t.get("tags", []), t.get("metadata")),
+            "input": _truncate(t.get("input"), 200),
+            "output": _truncate(t.get("output"), 200),
+            "observation_count": t.get("observationCount", 0),
+            "langfuse_url": _langfuse_url(t.get("id", "")),
+        })
+    return {
+        "traces": traces,
+        "meta": result.get("meta", {}),
+        "error": result.get("error"),
+    }
+
+
+@app.get("/api/admin/traces/{trace_id}")
+async def get_admin_trace_detail(
+    trace_id: str,
+    admin_user: dict = Depends(get_admin_user),
+):
+    """Get single trace detail + observations from Langfuse (admin only)."""
+    from .telemetry.langfuse_client import get_trace, list_observations, langfuse_trace_url
+
+    trace = await get_trace(trace_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found in Langfuse")
+
+    # Prefer inline observations from trace detail; fallback to observations API
+    raw_obs = trace.get("observations") or []
+    if not raw_obs:
+        obs_result = await list_observations(trace_id=trace_id, limit=100)
+        raw_obs = obs_result.get("data", [])
+
+    observations = []
+    for o in raw_obs:
+        observations.append({
+            "id": o.get("id", ""),
+            "name": o.get("name", ""),
+            "type": o.get("type", ""),
+            "start_time": o.get("startTime", ""),
+            "end_time": o.get("endTime", ""),
+            "duration_ms": _obs_duration_ms(o),
+            "model": o.get("model", ""),
+            "input_tokens": o.get("usage", {}).get("input", 0) if o.get("usage") else 0,
+            "output_tokens": o.get("usage", {}).get("output", 0) if o.get("usage") else 0,
+            "total_cost": float(o.get("usage", {}).get("totalCost", 0) or 0) if o.get("usage") else 0,
+            "input": _truncate(o.get("input"), 500),
+            "output": _truncate(o.get("output"), 500),
+            "metadata": o.get("metadata", {}),
+            "level": o.get("level", "DEFAULT"),
+            "status_message": o.get("statusMessage", ""),
+        })
+
+    return {
+        "trace_id": trace.get("id", ""),
+        "name": trace.get("name", ""),
+        "session_id": trace.get("sessionId", ""),
+        "user_id": trace.get("userId", ""),
+        "created_at": trace.get("timestamp", ""),
+        "duration_ms": _langfuse_latency_ms(trace),
+        "total_input_tokens": trace.get("usage", {}).get("input", 0) if trace.get("usage") else 0,
+        "total_output_tokens": trace.get("usage", {}).get("output", 0) if trace.get("usage") else 0,
+        "total_cost_usd": float(trace.get("usage", {}).get("totalCost", 0) or 0) if trace.get("usage") else 0,
+        "tags": trace.get("tags", []),
+        "metadata": trace.get("metadata", {}),
+        "status": "error" if trace.get("level") == "ERROR" else "success",
+        "environment": _extract_env_from_trace(trace.get("tags", []), trace.get("metadata")),
+        "input": trace.get("input"),
+        "output": trace.get("output"),
+        "observations": observations,
+        "langfuse_url": langfuse_trace_url(trace_id),
+    }
+
+
+def _langfuse_latency_ms(t: dict) -> int:
+    """Calculate latency from Langfuse trace latency field or timestamps."""
+    if t.get("latency"):
+        return int(t["latency"] * 1000)
+    return 0
+
+
+def _obs_duration_ms(o: dict) -> int:
+    """Calculate observation duration from start/end times."""
+    start = o.get("startTime")
+    end = o.get("endTime")
+    if start and end:
+        try:
+            from datetime import datetime as _dt
+            # Handle ISO timestamps with Z or +00:00
+            for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f+00:00"):
+                try:
+                    s = _dt.strptime(start.replace("+00:00", "Z").rstrip("Z") + "Z", fmt)
+                    e = _dt.strptime(end.replace("+00:00", "Z").rstrip("Z") + "Z", fmt)
+                    return int((e - s).total_seconds() * 1000)
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+    return 0
+
+
+def _extract_env_from_trace(tags: list, metadata: dict = None) -> str:
+    """Extract environment from tags (['env:local']) or OTEL metadata ({'eagle.environment': 'local'})."""
+    for tag in (tags or []):
+        if isinstance(tag, str) and tag.startswith("env:"):
+            return tag[4:]
+    if metadata:
+        if metadata.get("eagle.environment"):
+            return metadata["eagle.environment"]
+        # Strands OTEL puts attributes under trace_attributes
+        ta = metadata.get("trace_attributes", {})
+        if isinstance(ta, dict) and ta.get("eagle.environment"):
+            return ta["eagle.environment"]
+    return "unknown"
+
+
+def _truncate(value: Any, max_len: int = 200) -> Any:
+    """Truncate string values for list views."""
+    if isinstance(value, str) and len(value) > max_len:
+        return value[:max_len] + "..."
+    return value
+
+
+def _langfuse_url(trace_id: str) -> str:
+    """Build Langfuse UI link."""
+    from .telemetry.langfuse_client import langfuse_trace_url
+    return langfuse_trace_url(trace_id)
 
 
 # ── Admin cost report endpoints (original) ───────────────────────────
