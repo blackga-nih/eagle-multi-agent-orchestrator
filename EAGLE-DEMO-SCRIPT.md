@@ -248,6 +248,225 @@ Open a new chat session. Type:
 
 ---
 
+## Copy-Paste Test Prompts (All 9 MVP1 Use Cases)
+
+Use these prompts to quickly test each use case. Each starts a new chat session at http://localhost:3000/chat.
+
+---
+
+### UC-1: New IT Services Acquisition ($750K, Full Competition)
+**Eval test:** test_35 | **Jira:** EAGLE-16 | **Pathway:** Full Competition
+
+**Message 1 (intake):**
+```
+I need to procure cloud hosting services for our research data platform. Estimated value around $750,000.
+```
+
+**Message 2 (details -- send after EAGLE asks clarifying questions):**
+```
+3-year base period plus 2 option years, starting October 2026. No existing vehicles -- new standalone contract. We need FedRAMP High for PII and genomics research data. Full and open competition preferred. Fixed-price.
+```
+
+**Message 3 (generate SOW):**
+```
+Generate the Statement of Work for this cloud hosting acquisition.
+```
+
+**Message 4 (generate remaining docs):**
+```
+Now generate the IGCE, Market Research Report, and Acquisition Plan.
+```
+
+**Message 5 (revise SOW):**
+```
+The SOW needs a Section 508 accessibility requirement added under the technical requirements. Also add FedRAMP High authorization as a mandatory contractor qualification. Please regenerate it.
+```
+
+**What to verify:** Full competition pathway, TINA threshold ($750K), subcontracting plan requirement, 4 docs generated as NCI-branded PDF/DOCX with DRAFT watermarks, SOW v2 revision, package export ZIP.
+
+---
+
+### UC-2: GSA Schedule Purchase ($45K, Below SAT)
+**Eval test:** test_36 | **Jira:** EAGLE-18 | **Pathway:** Simplified (GSA Schedule)
+
+**Message 1 (intake):**
+```
+I need to purchase a $45,000 confocal microscope for our genomics lab. This is an urgent need -- our current microscope failed last week and we have active grant-funded experiments. I believe GSA Schedule covers this type of equipment. The vendor is Zeiss and they're on GSA Schedule 66 III. Building 37, Room 410. What's the acquisition pathway and what documents do I need?
+```
+
+**Message 2 (follow-up details if EAGLE asks):**
+```
+It's grant-funded under R01-CA-228473. No special security requirements. We need installation and 1-year warranty included. Delivery within 30 days. The quote is valid through end of month.
+```
+
+**Message 3 (generate purchase docs):**
+```
+Generate the purchase request documentation for this GSA Schedule order.
+```
+
+**What to verify:** GSA Schedule identification, below SAT ($350K), FAR Part 8 reference, streamlined documentation, vehicle recommendation.
+
+---
+
+### UC-2.1: Micro Purchase ($14K, Purchase Card)
+**Eval test:** test_21 | **Jira:** EAGLE-15 | **Pathway:** Micro Purchase
+
+**Message 1 (intake):**
+```
+I have a quote for $13,800 from Fisher Scientific for lab supplies -- centrifuge tubes, pipette tips, and reagents. Grant-funded, deliver to Building 37 Room 204. I want to use the purchase card.
+```
+
+**Message 2 (confirm details if EAGLE asks):**
+```
+The quote is from last week, valid for 30 days. Fisher Scientific is on AbilityOne/JWOD and I checked FedMall -- these specific items aren't available there. I have purchase card authority up to $15K. No hazmat involved.
+```
+
+**What to verify:** Micro-purchase threshold (<$15K), purchase card pathway, no full SOW required, priority sources check, price reasonableness.
+
+---
+
+### UC-3: Sole Source Justification ($280K, Below SAT)
+**Eval test:** test_37 | **Jira:** EAGLE-27 | **Pathway:** Sole Source
+
+**Message 1 (intake):**
+```
+I need to sole-source a $280,000 annual software maintenance contract to Illumina Inc. for our BaseSpace Sequence Hub platform. Only Illumina can maintain this proprietary genomic analysis software -- no other vendor has access to the source code or can provide updates. We've used this system for 3 years. The current contract expires in 60 days. What's the justification authority and what documents do I need?
+```
+
+**Message 2 (provide J&A details if EAGLE asks):**
+```
+We contacted two other genomics software firms (DNAnexus and Seven Bridges) and neither can maintain BaseSpace -- it's proprietary to Illumina. We have email documentation from both vendors confirming this. The system supports 200+ active research protocols and downtime would halt clinical trials. Previous contract: GS-35F-0038X.
+```
+
+**Message 3 (generate J&A document):**
+```
+Generate the Justification and Approval document for this sole source procurement.
+```
+
+**What to verify:** FAR 6.302-1 authority (only one responsible source), J&A requirement, protest mitigation (SAM.gov posting), below SAT simplified J&A format.
+
+---
+
+### UC-4: Competitive Range Advisory ($2.1M, FAR Part 15)
+**Eval test:** test_38 | **Jira:** -- | **Pathway:** Advisory (no docs generated)
+
+**Message 1 (advisory question):**
+```
+We're in a FAR Part 15 negotiated procurement for IT modernization services, $2.1M estimated value. We received 7 proposals and after initial evaluation, 3 are clearly in the competitive range but 2 are borderline -- technically acceptable but weak on past performance. Do we have to keep all offerors in the competitive range? Can we narrow it? What are the rules and risks?
+```
+
+**Message 2 (follow-up scenario):**
+```
+One of the borderline offerors is a small business and we have a 40% small business goal this quarter. Does that change the calculus? Also, if we exclude them and they protest, what's our exposure?
+```
+
+**Message 3 (documentation ask):**
+```
+What should we document in the competitive range determination memo to protect against a protest? Give me an outline.
+```
+
+**What to verify:** FAR 15.306/15.503 citations, competitive range narrowing guidance, discussion requirements, protest risk analysis, small business consideration.
+
+---
+
+### UC-10: IGCE Development ($4.5M, Multi-Category)
+**Eval test:** test_39 | **Jira:** EAGLE-29 | **Pathway:** Full Competition
+
+**Message 1 (intake):**
+```
+I need to develop an IGCE for a clinical research support services contract. 3-year period of performance (base + 2 option years). Labor categories: Project Manager (1 FTE), Senior Biostatistician (2 FTE), Data Managers (3 FTE), Clinical Research Associates (4 FTE). Plus ODCs for travel ($50K/year) and software licenses ($30K/year). Estimated total value around $4.5M. This will be evaluated under FAR Part 15 with cost realism analysis. What should the IGCE include and what methodology should I use?
+```
+
+**Message 2 (rate details if EAGLE asks):**
+```
+Use GSA rates as the baseline. PM at GS-14 equivalent (~$175K loaded), Senior Biostatistician at GS-13 (~$155K loaded), Data Managers at GS-12 (~$130K loaded), CRAs at GS-11 (~$115K loaded). Apply 3% annual escalation. Work location is NIH campus Bethesda with 25% travel to clinical sites. Indirect rate estimate: 45% fringe, 15% overhead, 8% G&A, 6% fee.
+```
+
+**Message 3 (generate IGCE):**
+```
+Generate the IGCE document with the rate structure we discussed.
+```
+
+**What to verify:** Labor categories with rates, escalation factors (2-3% per year), ODC line items, cost realism methodology, IGCE structure/format, NCI-branded output.
+
+---
+
+### UC-13: Small Business Set-Aside ($450K, FAR Part 19)
+**Eval test:** test_40 | **Jira:** -- | **Pathway:** Full Competition (Set-Aside)
+
+**Message 1 (intake):**
+```
+I have a $450,000 IT services requirement for network infrastructure monitoring and management at NCI. NAICS code 541512 (Computer Systems Design Services, $34M size standard). I found 8 small businesses on SAM.gov with relevant experience and 3 large businesses. Should this be set aside for small business? What type of set-aside? What market research documentation do I need?
+```
+
+**Message 2 (provide market research details):**
+```
+Here's what I found on SAM.gov: 5 of the 8 small businesses have prior federal IT monitoring contracts over $100K. Two are 8(a) certified, one is HUBZone, and one is SDVOSB. The requirement includes 24/7 NOC monitoring, incident response SLA under 15 minutes, and quarterly vulnerability assessments. Performance period is 1 base year plus 4 option years.
+```
+
+**Message 3 (generate market research report):**
+```
+Generate the Market Research Report documenting the small business set-aside determination.
+```
+
+**What to verify:** Rule of Two analysis, total small business set-aside recommendation, FAR Part 19 citations, NAICS/size standard, market research requirements, socioeconomic category consideration.
+
+---
+
+### UC-16: Technical Requirements to Contract Language
+**Eval test:** test_41 | **Jira:** -- | **Pathway:** Document Translation
+
+**Message 1 (technical spec):**
+```
+I'm a program scientist and I need help turning my technical requirements into a SOW. Here's what we need: whole-genome sequencing services for our cancer genomics program. Requires Illumina NovaSeq 6000 or equivalent platform, minimum 30x coverage depth, paired-end 150bp reads. We need library preparation (DNA extraction, fragmentation, adapter ligation), sequencing, bioinformatics pipeline (alignment to GRCh38, variant calling with GATK, quality metrics), and data delivery via Globus to our HPC cluster. Expected throughput: 500 samples per year across 3 years. CLIA-certified lab required. Please translate this into SOW language a contracting officer can use.
+```
+
+**Message 2 (additional requirements):**
+```
+A few more things: samples will ship on dry ice, contractor must provide a LIMS portal for tracking, turnaround time is 4 weeks per batch of 50 samples, and we need monthly quality reports with Q30 scores above 85%. Data must be BAM and VCF format. All data handling must comply with NIH Genomic Data Sharing Policy and dbGaP submission requirements.
+```
+
+**Message 3 (generate SOW):**
+```
+Generate the full Statement of Work incorporating all these technical requirements.
+```
+
+**What to verify:** SOW/PWS structure (scope, deliverables, performance standards), "contractor shall" language, technical terms preserved but explained, acceptance criteria, measurable performance metrics, NCI-branded output.
+
+---
+
+### UC-29: End-to-End Acquisition ($3.5M, Multi-Phase R&D)
+**Eval test:** test_42 | **Jira:** -- | **Pathway:** Full Competition (FAR Part 15)
+
+**Message 1 (intake):**
+```
+I'm starting a new $3.5M acquisition for R&D services -- bioinformatics pipeline development and clinical data analysis support for NCI's Division of Cancer Treatment and Diagnosis. This is a complex requirement: Phase 1 (Year 1): develop ML-based variant classification pipeline. Phase 2 (Years 2-3): operate pipeline + provide clinical data analysis. Estimated 15 FTEs across data science, bioinformatics, and project management. We want a CPFF contract type, FAR Part 15 competitive negotiated procurement. I need the full acquisition package: SOW, IGCE, Acquisition Plan, Market Research Report, and small business coordination. What's the complete roadmap and what regulatory requirements apply?
+```
+
+**Message 2 (additional details if EAGLE asks):**
+```
+Phase 1 team: 2 ML engineers, 2 bioinformaticians, 1 PM. Phase 2 adds: 3 clinical data analysts, 2 data engineers, 3 biostatisticians, 2 QA specialists. Travel: quarterly PI meetings at NIH Bethesda plus annual site visits to 4 NCTN clinical sites. All data subject to NIH data management and sharing policy. Need FISMA Moderate ATO for cloud infrastructure. Previous related contract was HHSN261201800001C (completed 2025).
+```
+
+**Message 3 (generate full package):**
+```
+Generate the Statement of Work for this acquisition.
+```
+
+**Message 4 (remaining docs):**
+```
+Now generate the IGCE, Acquisition Plan, and Market Research Report.
+```
+
+**Message 5 (small business strategy):**
+```
+What's the small business subcontracting plan strategy for this $3.5M contract? We need to meet NCI's socioeconomic goals.
+```
+
+**What to verify:** Full acquisition package (SOW, IGCE, AP, MR), FAR Part 15 competitive, TINA threshold ($3.5M > $750K), multi-phase structure, subcontracting plan requirement, small business coordination, 4+ docs generated.
+
+---
+
 ## Key Talking Points
 
 **Architecture:**
