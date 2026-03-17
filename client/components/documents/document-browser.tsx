@@ -124,23 +124,49 @@ export default function DocumentBrowser({
     }
   };
 
-  // Handle document download
-  const handleDownload = async (doc: DocumentMetadata, e: React.MouseEvent) => {
-    e.stopPropagation();
+  // Download format menu state
+  const [downloadMenuDocId, setDownloadMenuDocId] = useState<string | null>(null);
+
+  // Handle document download in selected format
+  const handleDownload = async (doc: DocumentMetadata, format: 'md' | 'docx' | 'pdf', e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setDownloadMenuDocId(null);
 
     try {
       const response = await fetch(`/api/documents/${doc.document_id}?user_id=${userId}&content=true`);
       if (!response.ok) throw new Error('Download failed');
 
-      const data = await response.json();
-      const content = data.content || '';
+      const result = await response.json();
+      const content = result.content || '';
+      const safeName = `${doc.title.replace(/[^a-z0-9]/gi, '_')}_v${doc.current_version}`;
 
-      // Create blob and download
-      const blob = new Blob([content], { type: 'text/markdown' });
+      if (format === 'md') {
+        const blob = new Blob([content], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${safeName}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      // DOCX or PDF — send to export API
+      const exportRes = await fetch('/api/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, title: doc.title, format }),
+      });
+
+      if (!exportRes.ok) throw new Error(`Export failed: ${exportRes.status}`);
+
+      const blob = await exportRes.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${doc.title.replace(/[^a-z0-9]/gi, '_')}_v${doc.current_version}.md`;
+      a.download = `${safeName}.${format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -438,14 +464,42 @@ export default function DocumentBrowser({
                             </div>
 
                             {/* Actions */}
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity relative">
                               <button
-                                onClick={(e) => handleDownload(doc, e)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDownloadMenuDocId(downloadMenuDocId === doc.document_id ? null : doc.document_id);
+                                }}
                                 className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
                                 title="Download"
                               >
                                 <Download className="w-4 h-4 text-gray-400" />
                               </button>
+                              {downloadMenuDocId === doc.document_id && (
+                                <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
+                                  <button
+                                    onClick={(e) => handleDownload(doc, 'md', e)}
+                                    className="w-full px-3 py-2 text-xs text-left hover:bg-gray-50 flex items-center gap-2"
+                                  >
+                                    <span className="w-6 h-6 rounded bg-gray-100 flex items-center justify-center text-gray-600 font-bold text-[9px]">MD</span>
+                                    Markdown (.md)
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDownload(doc, 'docx', e)}
+                                    className="w-full px-3 py-2 text-xs text-left hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100"
+                                  >
+                                    <span className="w-6 h-6 rounded bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-[9px]">DOCX</span>
+                                    Word (.docx)
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDownload(doc, 'pdf', e)}
+                                    className="w-full px-3 py-2 text-xs text-left hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100"
+                                  >
+                                    <span className="w-6 h-6 rounded bg-red-100 flex items-center justify-center text-red-600 font-bold text-[9px]">PDF</span>
+                                    PDF (.pdf)
+                                  </button>
+                                </div>
+                              )}
                               <button
                                 onClick={(e) => handleDelete(doc.document_id, e)}
                                 className="p-1.5 hover:bg-red-50 rounded-lg transition-colors"

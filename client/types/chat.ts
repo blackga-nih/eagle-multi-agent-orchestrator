@@ -32,6 +32,13 @@ export interface DocumentInfo {
   generated_at?: string;
   s3_key?: string;
   s3_location?: string;
+  file_type?: string;
+  content_type?: string;
+  is_binary?: boolean;
+  download_url?: string;
+  preview_mode?: 'docx_blocks' | 'text_fallback' | null;
+  preview_blocks?: DocxPreviewBlock[];
+  preview_sheets?: XlsxPreviewSheet[];
 }
 
 export interface DocxPreviewBlock {

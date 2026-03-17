@@ -176,16 +176,10 @@ export default function DocumentChecklist({ messages, data, sessionId }: Documen
         }
     };
 
-    const handleDownload = async (format: 'pdf' | 'docx') => {
+    const handleDownload = async (format: 'pdf' | 'docx' | 'md') => {
         setShowExportMenu(false);
         setIsExporting(true);
         try {
-            const token = await getToken();
-            const headers: Record<string, string> = {
-                'Content-Type': 'application/json',
-            };
-            if (token) headers['Authorization'] = `Bearer ${token}`;
-
             // Generate combined markdown content from all documents
             const packageTitle = data.requirement || 'Acquisition Package';
             const allDocContent = documents
@@ -193,6 +187,27 @@ export default function DocumentChecklist({ messages, data, sessionId }: Documen
                 .join('\n\n---\n\n');
 
             const content = `# ${packageTitle}\n\n**Generated:** ${new Date().toLocaleDateString()}\n**Session:** ${sessionId || 'N/A'}\n\n---\n\n${allDocContent}`;
+            const safeName = `Acquisition_Package_${packageTitle.replace(/[^a-z0-9]/gi, '_')}`;
+
+            // Markdown — direct download, no backend conversion needed
+            if (format === 'md') {
+                const blob = new Blob([content], { type: 'text/markdown' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${safeName}.md`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                return;
+            }
+
+            const token = await getToken();
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+            };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
 
             const response = await fetch('/api/documents', {
                 method: 'POST',
@@ -212,7 +227,7 @@ export default function DocumentChecklist({ messages, data, sessionId }: Documen
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `Acquisition_Package_${packageTitle.replace(/[^a-z0-9]/gi, '_')}.${format}`;
+            a.download = `${safeName}.${format}`;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
@@ -308,18 +323,25 @@ export default function DocumentChecklist({ messages, data, sessionId }: Documen
                         {showExportMenu && (
                             <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-100 rounded-xl shadow-xl z-20 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200">
                                 <button
-                                    onClick={() => handleDownload('pdf')}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors border-b border-gray-50"
+                                    onClick={() => handleDownload('md')}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors border-b border-gray-50"
                                 >
-                                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center text-red-600 font-bold text-xs">PDF</div>
-                                    <span>Download as PDF</span>
+                                    <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-600 font-bold text-xs">MD</div>
+                                    <span>Download as Markdown</span>
                                 </button>
                                 <button
                                     onClick={() => handleDownload('docx')}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors border-b border-gray-50"
                                 >
                                     <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs">DOCX</div>
                                     <span>Download as Word</span>
+                                </button>
+                                <button
+                                    onClick={() => handleDownload('pdf')}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors"
+                                >
+                                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center text-red-600 font-bold text-xs">PDF</div>
+                                    <span>Download as PDF</span>
                                 </button>
                             </div>
                         )}
