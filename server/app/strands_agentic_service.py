@@ -3467,6 +3467,11 @@ async def sdk_query_streaming(
         while True:
             try:
                 item = result_queue.get_nowait()
+                # Metadata events (from manage_package, update_state) have no "name"
+                # but must still be yielded so the SSE consumer can emit them.
+                if item.get("type") == "metadata":
+                    drained.append(item)
+                    continue
                 name = item.get("name")
                 if not name:
                     continue
