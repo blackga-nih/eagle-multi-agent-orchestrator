@@ -1,13 +1,11 @@
 """Performance tests for chat latency optimizations.
 
-Validates: workspace cache, skill tools cache, supervisor direct handling,
-async blocking fix, and cache reload wiring. All tests are fast (mocked, no AWS).
+Validates: workspace cache, skill tools build, supervisor direct handling,
+async generator pattern, and cache reload wiring. All tests are fast (mocked, no AWS).
 """
 import inspect
 import time
 from unittest import mock
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -81,77 +79,45 @@ class TestWorkspaceCache:
 
 
 # ---------------------------------------------------------------------------
-# 2. Skill Tools Cache
+# 2. Skill Tools Build
 # ---------------------------------------------------------------------------
 
-class TestSkillToolsCache:
-    """Verify build_skill_tools() caches results for 60s."""
+class TestSkillToolsBuild:
+    """Verify build_skill_tools() returns a list of tools."""
 
-    def test_cache_hit_returns_same_tools(self):
-        """Seeded cache -> build_skill_tools() returns cached list without rebuilding."""
-        from app.strands_agentic_service import (
-            _skill_tools_cache, _tools_cache_set, build_skill_tools,
-        )
+    def test_returns_list(self):
+        """build_skill_tools() always returns a list."""
+        from app.strands_agentic_service import build_skill_tools
 
-        fake_tools = [lambda: None, lambda: None]
-        _tools_cache_set(TENANT, TIER, WORKSPACE_ID, fake_tools)
-
-        result = build_skill_tools(
-            tier=TIER, tenant_id=TENANT, user_id=USER, workspace_id=WORKSPACE_ID,
-        )
-
-        assert result is fake_tools
-
-        # Cleanup
-        _skill_tools_cache.clear()
-
-    def test_cache_bypassed_when_skill_names_filter(self):
-        """skill_names param -> cache is skipped, tools are rebuilt."""
-        from app.strands_agentic_service import (
-            _skill_tools_cache, _tools_cache_set, build_skill_tools,
-        )
-
-        fake_tools = [lambda: None]
-        _tools_cache_set(TENANT, TIER, WORKSPACE_ID, fake_tools)
-
-        # Even with cache seeded, passing skill_names should bypass it
-        with mock.patch("app.strands_agentic_service.SKILL_AGENT_REGISTRY", {}):
-            result = build_skill_tools(
-                tier=TIER, skill_names=["nonexistent"],
-                tenant_id=TENANT, user_id=USER, workspace_id=WORKSPACE_ID,
-            )
-
-        # Should NOT be the cached list
-        assert result is not fake_tools
-        # Only the always-included compliance_matrix tool should remain
-        assert len(result) == 1
-
-        # Cleanup
-        _skill_tools_cache.clear()
-
-    def test_second_build_faster_than_first(self):
-        """Second call to build_skill_tools() should be <10ms (cache hit)."""
-        from app.strands_agentic_service import (
-            _skill_tools_cache, build_skill_tools,
-        )
-        _skill_tools_cache.clear()
-
-        # Mock DynamoDB calls to avoid real AWS
         with mock.patch("app.strands_agentic_service.PLUGIN_CONTENTS", {}), \
              mock.patch("app.strands_agentic_service.SKILL_AGENT_REGISTRY", {}):
+            result = build_skill_tools(
+                tier=TIER, tenant_id=TENANT, user_id=USER, workspace_id=WORKSPACE_ID,
+            )
 
-            # First call — populates cache
-            build_skill_tools(tier=TIER, tenant_id=TENANT, user_id=USER, workspace_id=WORKSPACE_ID)
+        assert isinstance(result, list)
 
-            # Second call — cache hit
-            t0 = time.perf_counter()
-            build_skill_tools(tier=TIER, tenant_id=TENANT, user_id=USER, workspace_id=WORKSPACE_ID)
-            elapsed_ms = (time.perf_counter() - t0) * 1000
+    def test_builds_tools_from_registry(self):
+        """build_skill_tools() creates one tool per registry entry with matching content."""
+        from app.strands_agentic_service import build_skill_tools
 
-        assert elapsed_ms < 10, f"Cache hit took {elapsed_ms:.1f}ms, expected <10ms"
+        fake_registry = {
+            "test-skill": {
+                "skill_key": "skills/test-skill/SKILL.md",
+                "description": "Test specialist",
+            }
+        }
+        fake_contents = {
+            "skills/test-skill/SKILL.md": {"body": "You are a test specialist."}
+        }
 
-        # Cleanup
-        _skill_tools_cache.clear()
+        with mock.patch("app.strands_agentic_service.SKILL_AGENT_REGISTRY", fake_registry), \
+             mock.patch("app.strands_agentic_service.PLUGIN_CONTENTS", fake_contents):
+            result = build_skill_tools(
+                tier=TIER, tenant_id=TENANT, user_id=USER, workspace_id=WORKSPACE_ID,
+            )
+
+        assert len(result) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -159,18 +125,16 @@ class TestSkillToolsCache:
 # ---------------------------------------------------------------------------
 
 class TestSupervisorDirectHandling:
-    """Verify supervisor prompt instructs direct handling for greetings."""
+    """Verify supervisor prompt instructs routing for fast vs deep queries."""
 
-    def test_prompt_contains_direct_handling_instruction(self):
+    def test_prompt_contains_fast_routing(self):
         prompt = self._get_prompt()
-        assert "DIRECT HANDLING" in prompt
-        assert "Greetings" in prompt or "greet" in prompt.lower()
-        assert "WITHOUT" in prompt
+        assert "FAST" in prompt
+        assert "DEEP" in prompt or "specialist" in prompt.lower()
 
     def test_prompt_still_has_delegation_instruction(self):
         prompt = self._get_prompt()
-        assert "SPECIALIST DELEGATION" in prompt
-        assert "delegate" in prompt.lower()
+        assert "delegate" in prompt.lower() or "specialist" in prompt.lower()
 
     @staticmethod
     def _get_prompt() -> str:
@@ -181,20 +145,16 @@ class TestSupervisorDirectHandling:
 
 
 # ---------------------------------------------------------------------------
-# 4. Async Blocking Fix
+# 4. Async Generator Pattern
 # ---------------------------------------------------------------------------
 
-class TestAsyncBlocking:
-    """Verify sdk_query() uses invoke_async instead of blocking synchronous call."""
+class TestAsyncGenerator:
+    """Verify sdk_query() is an async generator function."""
 
-    def test_sdk_query_uses_invoke_async(self):
+    def test_sdk_query_is_async_generator(self):
         from app.strands_agentic_service import sdk_query
-        source = inspect.getsource(sdk_query)
-        assert "invoke_async" in source, (
-            "sdk_query() should use invoke_async to avoid creating redundant event loops"
-        )
-        assert "supervisor(prompt)" not in source, (
-            "sdk_query() should NOT call supervisor(prompt) synchronously"
+        assert inspect.isasyncgenfunction(sdk_query), (
+            "sdk_query() should be an async generator function"
         )
 
 
@@ -203,12 +163,12 @@ class TestAsyncBlocking:
 # ---------------------------------------------------------------------------
 
 class TestCacheReload:
-    """Verify admin_reload_caches() clears the new caches."""
+    """Verify admin_reload_caches() clears the store caches."""
 
-    def test_reload_clears_workspace_cache(self):
+    def test_reload_clears_plugin_cache(self):
         source = inspect.getsource(__import__("app.main", fromlist=["admin_reload_caches"]))
-        assert "_workspace_cache" in source
+        assert "_plugin_cache" in source
 
-    def test_reload_clears_skill_tools_cache(self):
+    def test_reload_clears_prompt_cache(self):
         source = inspect.getsource(__import__("app.main", fromlist=["admin_reload_caches"]))
-        assert "_skill_tools_cache" in source
+        assert "_prompt_cache" in source

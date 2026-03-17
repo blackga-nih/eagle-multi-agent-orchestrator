@@ -12,7 +12,6 @@ All tests are fast (mocked AWS, no real calls).
 from datetime import datetime
 from unittest import mock
 
-import pytest
 from botocore.exceptions import ClientError
 
 
@@ -65,6 +64,7 @@ class TestCreatePackageDocumentVersion:
              mock.patch("app.document_service._get_table", return_value=mock_table), \
              mock.patch("app.document_service._get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package"), \
+             mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
              mock.patch("app.document_service.datetime", wraps=datetime,
                        **{"utcnow.return_value": FAKE_NOW}):
@@ -80,7 +80,7 @@ class TestCreatePackageDocumentVersion:
         assert result.version == 1
         assert result.doc_type == DOC_TYPE
         assert result.package_id == PACKAGE_ID
-        assert f"v1" in result.s3_key
+        assert "v1" in result.s3_key
         mock_s3.put_object.assert_called_once()
 
     def test_increments_version(self):
@@ -97,6 +97,7 @@ class TestCreatePackageDocumentVersion:
              mock.patch("app.document_service._get_table", return_value=mock_table), \
              mock.patch("app.document_service._get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package"), \
+             mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
              mock.patch("app.document_service.datetime", wraps=datetime,
                        **{"utcnow.return_value": FAKE_NOW}):
@@ -110,7 +111,7 @@ class TestCreatePackageDocumentVersion:
 
         assert result.success is True
         assert result.version == 2
-        assert f"v2" in result.s3_key
+        assert "v2" in result.s3_key
 
     def test_returns_error_when_package_not_found(self):
         """Returns error when package doesn't exist."""
@@ -171,6 +172,7 @@ class TestCreatePackageDocumentVersion:
              mock.patch("app.document_service.get_document_history", return_value=[]), \
              mock.patch("app.document_service._get_table", return_value=mock_table), \
              mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
              mock.patch("app.document_service.datetime", wraps=datetime,
                        **{"utcnow.return_value": FAKE_NOW}):
@@ -206,6 +208,7 @@ class TestCreatePackageDocumentVersion:
              mock.patch("app.document_service._get_table", return_value=mock_table), \
              mock.patch("app.document_service._get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package"), \
+             mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
              mock.patch("app.document_service.datetime", wraps=datetime,
                        **{"utcnow.return_value": FAKE_NOW}):
@@ -237,6 +240,7 @@ class TestCreatePackageDocumentVersion:
              mock.patch("app.document_service._get_table", return_value=mock_table), \
              mock.patch("app.document_service._get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package") as mock_update, \
+             mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
              mock.patch("app.document_service.datetime", wraps=datetime,
                        **{"utcnow.return_value": FAKE_NOW}):
@@ -267,6 +271,7 @@ class TestCreatePackageDocumentVersion:
              mock.patch("app.document_service._get_table", return_value=mock_table), \
              mock.patch("app.document_service._get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package"), \
+             mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
              mock.patch("app.document_service.datetime", wraps=datetime,
                        **{"utcnow.return_value": FAKE_NOW}):
@@ -342,7 +347,8 @@ class TestFinalizeDocument:
         """Calls store finalize_document."""
         from app.document_service import finalize_document
 
-        with mock.patch("app.document_service.store_finalize_document") as mock_finalize:
+        with mock.patch("app.document_service.store_finalize_document") as mock_finalize, \
+             mock.patch("app.document_service.write_changelog_entry"):
             mock_finalize.return_value = {"status": "final"}
             result = finalize_document(TENANT, PACKAGE_ID, DOC_TYPE, 1)
 

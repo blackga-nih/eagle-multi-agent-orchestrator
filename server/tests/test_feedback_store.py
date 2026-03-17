@@ -1,7 +1,7 @@
 """Tests for feedback_store.py -- DynamoDB-backed FEEDBACK# entity.
 
 Validates:
-  - create_feedback(): PK/SK pattern, TTL, required/optional fields, error handling
+  - write_feedback(): PK/SK pattern, TTL, required fields, error handling
   - list_feedback(): query params, sort order, limit, error handling
   - Module-level: singleton pattern, TABLE_NAME default
 
@@ -10,6 +10,7 @@ All tests are fast (mocked DDB, no AWS).
 from datetime import datetime, timedelta
 from unittest import mock
 
+import pytest
 from botocore.exceptions import ClientError
 
 
@@ -19,10 +20,16 @@ from botocore.exceptions import ClientError
 
 TENANT = "test-tenant"
 USER = "test-user"
+TIER = "advanced"
+SESSION = "sess-123"
 PAGE = "/chat"
+FEEDBACK_TEXT = "This tool is great!"
+CONVERSATION_SNAPSHOT = '[]'
+CLOUDWATCH_LOGS = '[]'
 FAKE_UUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 FAKE_NOW = datetime(2026, 3, 4, 12, 0, 0)
-FAKE_ISO = FAKE_NOW.isoformat()
+# _now_iso() format: "%Y-%m-%dT%H:%M:%S.%f" + "Z"
+FAKE_ISO = FAKE_NOW.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
 def _make_client_error(code="InternalServerError", msg="boom"):
@@ -32,79 +39,85 @@ def _make_client_error(code="InternalServerError", msg="boom"):
     )
 
 
-def _mock_create(mock_table, **kwargs):
-    """Call create_feedback with mocked table, uuid, and datetime."""
-    from app.feedback_store import create_feedback
+def _mock_write(mock_table, **kwargs):
+    """Call write_feedback with mocked table, uuid, and datetime."""
+    from app.feedback_store import write_feedback
+
+    defaults = dict(
+        tenant_id=TENANT,
+        user_id=USER,
+        tier=TIER,
+        session_id=SESSION,
+        feedback_text=FEEDBACK_TEXT,
+        conversation_snapshot=CONVERSATION_SNAPSHOT,
+        cloudwatch_logs=CLOUDWATCH_LOGS,
+    )
+    defaults.update(kwargs)
 
     with mock.patch("app.feedback_store._get_table", return_value=mock_table), \
          mock.patch("app.feedback_store.uuid.uuid4", return_value=FAKE_UUID), \
          mock.patch("app.feedback_store.datetime", wraps=datetime,
                     **{"utcnow.return_value": FAKE_NOW}):
-        return create_feedback(tenant_id=TENANT, user_id=USER, **kwargs)
+        return write_feedback(**defaults)
 
 
 # ---------------------------------------------------------------------------
-# TestCreateFeedback
+# TestWriteFeedback
 # ---------------------------------------------------------------------------
 
-class TestCreateFeedback:
-    """Verify create_feedback writes correct PK/SK and handles fields."""
+class TestWriteFeedback:
+    """Verify write_feedback writes correct PK/SK and handles fields."""
 
     def test_creates_item_with_correct_pk_sk(self):
         mock_table = mock.MagicMock()
-        _mock_create(mock_table, page=PAGE)
+        _mock_write(mock_table, page=PAGE)
 
         mock_table.put_item.assert_called_once()
         item = mock_table.put_item.call_args[1]["Item"]
         assert item["PK"] == f"FEEDBACK#{TENANT}"
         assert item["SK"] == f"FEEDBACK#{FAKE_ISO}#{FAKE_UUID}"
 
-    def test_sets_90_day_ttl(self):
+    def test_sets_7_year_ttl(self):
         mock_table = mock.MagicMock()
-        _mock_create(mock_table)
+        _mock_write(mock_table)
 
         item = mock_table.put_item.call_args[1]["Item"]
-        expected_ttl = int((FAKE_NOW + timedelta(days=90)).timestamp())
+        expected_ttl = int((FAKE_NOW + timedelta(days=365 * 7)).timestamp())
         assert item["ttl"] == expected_ttl
 
     def test_includes_required_fields(self):
         mock_table = mock.MagicMock()
-        _mock_create(mock_table, page=PAGE)
+        _mock_write(mock_table, page=PAGE)
 
         item = mock_table.put_item.call_args[1]["Item"]
         assert item["tenant_id"] == TENANT
         assert item["user_id"] == USER
+        assert item["tier"] == TIER
+        assert item["session_id"] == SESSION
+        assert item["feedback_text"] == FEEDBACK_TEXT
+        assert item["conversation_snapshot"] == CONVERSATION_SNAPSHOT
+        assert item["cloudwatch_logs"] == CLOUDWATCH_LOGS
         assert item["page"] == PAGE
         assert item["created_at"] == FAKE_ISO
         assert item["feedback_id"] == str(FAKE_UUID)
 
-    def test_optional_fields_included_when_provided(self):
+    def test_auto_detects_feedback_type(self):
         mock_table = mock.MagicMock()
-        _mock_create(
-            mock_table, page=PAGE,
-            rating=5, feedback_type="bug", comment="Great!", session_id="sess-1",
-        )
+        _mock_write(mock_table, feedback_text="This tool is great!")
 
         item = mock_table.put_item.call_args[1]["Item"]
-        assert item["rating"] == 5
+        assert item["feedback_type"] == "praise"
+
+    def test_bug_feedback_type(self):
+        mock_table = mock.MagicMock()
+        _mock_write(mock_table, feedback_text="There is a bug in the system")
+
+        item = mock_table.put_item.call_args[1]["Item"]
         assert item["feedback_type"] == "bug"
-        assert item["comment"] == "Great!"
-        assert item["session_id"] == "sess-1"
-
-    def test_optional_fields_omitted_when_not_provided(self):
-        """rating=0 is falsy and should NOT be included in the item."""
-        mock_table = mock.MagicMock()
-        _mock_create(mock_table)
-
-        item = mock_table.put_item.call_args[1]["Item"]
-        assert "rating" not in item
-        assert "feedback_type" not in item
-        assert "comment" not in item
-        assert "session_id" not in item
 
     def test_returns_created_item(self):
         mock_table = mock.MagicMock()
-        result = _mock_create(mock_table, page=PAGE)
+        result = _mock_write(mock_table, page=PAGE)
 
         assert isinstance(result, dict)
         assert result["PK"] == f"FEEDBACK#{TENANT}"
@@ -112,8 +125,7 @@ class TestCreateFeedback:
         assert result["feedback_id"] == str(FAKE_UUID)
 
     def test_raises_on_client_error(self):
-        import pytest
-        from app.feedback_store import create_feedback
+        from app.feedback_store import write_feedback
 
         mock_table = mock.MagicMock()
         mock_table.put_item.side_effect = _make_client_error()
@@ -122,7 +134,20 @@ class TestCreateFeedback:
              mock.patch("app.feedback_store.datetime", wraps=datetime,
                         **{"utcnow.return_value": FAKE_NOW}):
             with pytest.raises(ClientError):
-                create_feedback(tenant_id=TENANT, user_id=USER)
+                write_feedback(
+                    tenant_id=TENANT, user_id=USER, tier=TIER,
+                    session_id=SESSION, feedback_text=FEEDBACK_TEXT,
+                    conversation_snapshot=CONVERSATION_SNAPSHOT,
+                    cloudwatch_logs=CLOUDWATCH_LOGS,
+                )
+
+    def test_gsi_keys_present(self):
+        mock_table = mock.MagicMock()
+        _mock_write(mock_table)
+
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert item["GSI1PK"] == f"TENANT#{TENANT}"
+        assert item["GSI1SK"].startswith("FEEDBACK#")
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +167,6 @@ class TestListFeedback:
 
         mock_table.query.assert_called_once()
         call_kwargs = mock_table.query.call_args[1]
-        # KeyConditionExpression is a boto3 ConditionExpression object;
-        # verify it was built with the right PK value by checking the
-        # expression attribute values that boto3 generates.
         kce = call_kwargs["KeyConditionExpression"]
         assert kce is not None
 
@@ -174,8 +196,8 @@ class TestListFeedback:
         from app.feedback_store import list_feedback
 
         fake_items = [
-            {"PK": f"FEEDBACK#{TENANT}", "SK": "FEEDBACK#2026-03-04#abc", "rating": 5},
-            {"PK": f"FEEDBACK#{TENANT}", "SK": "FEEDBACK#2026-03-03#def", "rating": 3},
+            {"PK": f"FEEDBACK#{TENANT}", "SK": "FEEDBACK#2026-03-04#abc", "feedback_text": "good"},
+            {"PK": f"FEEDBACK#{TENANT}", "SK": "FEEDBACK#2026-03-03#def", "feedback_text": "ok"},
         ]
         mock_table = mock.MagicMock()
         mock_table.query.return_value = {"Items": fake_items}
@@ -183,18 +205,17 @@ class TestListFeedback:
             result = list_feedback(TENANT)
 
         assert len(result) == 2
-        assert result[0]["rating"] == 5
-        assert result[1]["rating"] == 3
+        assert result[0]["feedback_text"] == "good"
+        assert result[1]["feedback_text"] == "ok"
 
-    def test_returns_empty_list_on_error(self):
+    def test_raises_on_error(self):
         from app.feedback_store import list_feedback
 
         mock_table = mock.MagicMock()
         mock_table.query.side_effect = _make_client_error()
         with mock.patch("app.feedback_store._get_table", return_value=mock_table):
-            result = list_feedback(TENANT)
-
-        assert result == []
+            with pytest.raises(ClientError):
+                list_feedback(TENANT)
 
     def test_returns_empty_list_when_no_items(self):
         from app.feedback_store import list_feedback
@@ -232,6 +253,20 @@ class TestModuleLevel:
         finally:
             fs._dynamodb = old  # restore
 
-    def test_table_name_defaults_to_eagle(self):
-        from app.feedback_store import TABLE_NAME
-        assert TABLE_NAME == "eagle"
+    def test_table_name_default(self):
+        """TABLE_NAME defaults to 'eagle' via os.environ.get in _get_table."""
+        import app.feedback_store as fs
+
+        old_table = fs._table
+        try:
+            fs._table = None
+            mock_ddb = mock.MagicMock()
+            with mock.patch("app.feedback_store._get_dynamodb", return_value=mock_ddb), \
+                 mock.patch.dict("os.environ", {}, clear=False):
+                # Remove TABLE_NAME if present so default kicks in
+                import os
+                os.environ.pop("TABLE_NAME", None)
+                fs._get_table()
+            mock_ddb.Table.assert_called_once_with("eagle")
+        finally:
+            fs._table = old_table
