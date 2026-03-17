@@ -257,4 +257,6 @@ export interface AcquisitionData {
   funding?: string;
   equipmentType?: string;
   acquisitionType?: string;
+  /** Package state persisted from SSE metadata — restored on session load. */
+  eagleState?: Record<string, unknown>;
 }

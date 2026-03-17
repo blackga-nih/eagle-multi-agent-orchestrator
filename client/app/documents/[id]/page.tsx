@@ -86,14 +86,364 @@ async function extractResponseError(response: Response): Promise<string> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Utility functions for DOCX preview block normalisation / comparison
+// ---------------------------------------------------------------------------
+
+function normalizeDocxPreviewBlocks(blocks: unknown): DocxPreviewBlock[] {
+    if (!Array.isArray(blocks)) return [];
+    return blocks.flatMap((block) => {
+        if (!block || typeof block !== 'object') return [];
+        const raw = block as Record<string, unknown>;
+        const kind = raw.kind;
+        if (kind !== 'heading' && kind !== 'paragraph' && kind !== 'checkbox') return [];
+        return [{
+            block_id: typeof raw.block_id === 'string' ? raw.block_id : '',
+            kind,
+            text: typeof raw.text === 'string' ? raw.text : '',
+            level: typeof raw.level === 'number' ? raw.level : null,
+            checked: typeof raw.checked === 'boolean' ? raw.checked : null,
+        }];
+    });
+}
+
+function cloneDocxPreviewBlocks(blocks: DocxPreviewBlock[]): DocxPreviewBlock[] {
+    return blocks.map((block) => ({ ...block }));
+}
+
+function docxPreviewBlocksEqual(left: DocxPreviewBlock[], right: DocxPreviewBlock[]): boolean {
+    if (left.length !== right.length) return false;
+    return left.every((block, index) => {
+        const other = right[index];
+        return (
+            block.block_id === other.block_id
+            && block.kind === other.kind
+            && block.text === other.text
+            && (block.level ?? null) === (other.level ?? null)
+            && (block.checked ?? null) === (other.checked ?? null)
+        );
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Utility functions for XLSX preview sheet normalisation / comparison
+// ---------------------------------------------------------------------------
+
+function normalizeXlsxPreviewSheets(sheets: unknown): XlsxPreviewSheet[] {
+    if (!Array.isArray(sheets)) return [];
+    return sheets.flatMap((sheet) => {
+        if (!sheet || typeof sheet !== 'object') return [];
+        const rawSheet = sheet as Record<string, unknown>;
+        if (!Array.isArray(rawSheet.rows) || typeof rawSheet.sheet_id !== 'string' || typeof rawSheet.title !== 'string') {
+            return [];
+        }
+        const rows = rawSheet.rows.flatMap((row) => {
+            if (!row || typeof row !== 'object') return [];
+            const rawRow = row as Record<string, unknown>;
+            if (!Array.isArray(rawRow.cells) || typeof rawRow.row_index !== 'number') return [];
+            const cells = rawRow.cells.flatMap((cell) => {
+                if (!cell || typeof cell !== 'object') return [];
+                const rawCell = cell as Record<string, unknown>;
+                if (
+                    typeof rawCell.cell_ref !== 'string'
+                    || typeof rawCell.row !== 'number'
+                    || typeof rawCell.col !== 'number'
+                    || typeof rawCell.display_value !== 'string'
+                    || typeof rawCell.value !== 'string'
+                    || typeof rawCell.editable !== 'boolean'
+                ) {
+                    return [];
+                }
+                return [{
+                    cell_ref: rawCell.cell_ref,
+                    row: rawCell.row,
+                    col: rawCell.col,
+                    value: rawCell.value,
+                    display_value: rawCell.display_value,
+                    editable: rawCell.editable,
+                    is_formula: typeof rawCell.is_formula === 'boolean' ? rawCell.is_formula : false,
+                }];
+            });
+            return [{
+                row_index: rawRow.row_index,
+                cells,
+            }];
+        });
+        return [{
+            sheet_id: rawSheet.sheet_id,
+            title: rawSheet.title,
+            max_row: typeof rawSheet.max_row === 'number' ? rawSheet.max_row : rows.length,
+            max_col: typeof rawSheet.max_col === 'number' ? rawSheet.max_col : 0,
+            truncated: typeof rawSheet.truncated === 'boolean' ? rawSheet.truncated : false,
+            rows,
+        }];
+    });
+}
+
+function cloneXlsxPreviewSheets(sheets: XlsxPreviewSheet[]): XlsxPreviewSheet[] {
+    return sheets.map((sheet) => ({
+        ...sheet,
+        rows: sheet.rows.map((row) => ({
+            ...row,
+            cells: row.cells.map((cell) => ({ ...cell })),
+        })),
+    }));
+}
+
+function xlsxPreviewSheetsEqual(left: XlsxPreviewSheet[], right: XlsxPreviewSheet[]): boolean {
+    if (left.length !== right.length) return false;
+    return left.every((sheet, sheetIndex) => {
+        const otherSheet = right[sheetIndex];
+        if (!otherSheet || sheet.sheet_id !== otherSheet.sheet_id || sheet.rows.length !== otherSheet.rows.length) {
+            return false;
+        }
+        return sheet.rows.every((row, rowIndex) => {
+            const otherRow = otherSheet.rows[rowIndex];
+            if (!otherRow || row.row_index !== otherRow.row_index || row.cells.length !== otherRow.cells.length) {
+                return false;
+            }
+            return row.cells.every((cell, cellIndex) => {
+                const otherCell = otherRow.cells[cellIndex];
+                return Boolean(
+                    otherCell
+                    && cell.cell_ref === otherCell.cell_ref
+                    && cell.value === otherCell.value
+                    && cell.display_value === otherCell.display_value
+                    && cell.editable === otherCell.editable
+                );
+            });
+        });
+    });
+}
+
+function collectXlsxCellEdits(originalSheets: XlsxPreviewSheet[], editedSheets: XlsxPreviewSheet[]) {
+    const originalMap = new Map<string, XlsxPreviewCell>();
+    for (const sheet of originalSheets) {
+        for (const row of sheet.rows) {
+            for (const cell of row.cells) {
+                originalMap.set(`${sheet.sheet_id}:${cell.cell_ref}`, cell);
+            }
+        }
+    }
+
+    const edits: Array<{ sheet_id: string; cell_ref: string; value: string }> = [];
+    for (const sheet of editedSheets) {
+        for (const row of sheet.rows) {
+            for (const cell of row.cells) {
+                if (!cell.editable) continue;
+                const original = originalMap.get(`${sheet.sheet_id}:${cell.cell_ref}`);
+                if (!original) continue;
+                if (original.value !== cell.value) {
+                    edits.push({
+                        sheet_id: sheet.sheet_id,
+                        cell_ref: cell.cell_ref,
+                        value: cell.value,
+                    });
+                }
+            }
+        }
+    }
+    return edits;
+}
+
+function autoResizeTextarea(element: HTMLTextAreaElement | null) {
+    if (!element) return;
+    element.style.height = '0px';
+    element.style.height = `${element.scrollHeight}px`;
+}
+
+function formatRelativeTime(dateStr: string): string {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+}
+
+// ---------------------------------------------------------------------------
+// Changelog Panel Component
+// ---------------------------------------------------------------------------
+
 interface ChangelogEntry {
-    change_type: string;
-    change_source: string;
+    changelog_id: string;
+    change_type: 'create' | 'update' | 'finalize';
+    change_source: 'agent_tool' | 'user_edit';
     change_summary: string;
-    doc_type?: string;
-    version?: number;
-    actor_user_id?: string;
+    doc_type: string;
+    version: number;
+    actor_user_id: string;
     created_at: string;
+}
+
+function DocumentChangelogPanel({
+    packageId,
+    documentType,
+    documentKey,
+}: {
+    packageId?: string;
+    documentType?: string;
+    documentKey?: string;
+}) {
+    const [entries, setEntries] = useState<ChangelogEntry[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        // Need either (packageId + documentType) OR documentKey
+        const canFetchPackage = packageId && documentType;
+        const canFetchByKey = documentKey;
+
+        if (!canFetchPackage && !canFetchByKey) return;
+
+        const fetchChangelog = async () => {
+            setLoading((prev) => (entries.length === 0 ? true : prev));
+            setError(null);
+            try {
+                let url: string;
+                if (canFetchPackage) {
+                    url = `/api/packages/${packageId}/documents/${documentType}/changelog?limit=50`;
+                } else {
+                    url = `/api/document-changelog?key=${encodeURIComponent(documentKey!)}&limit=50`;
+                }
+
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Failed to fetch changelog');
+                const data = await res.json();
+                setEntries(data.entries || []);
+            } catch (err) {
+                setError(err instanceof Error ? err.message : 'Failed to load changelog');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        void fetchChangelog();
+        const intervalId = window.setInterval(() => {
+            void fetchChangelog();
+        }, 10000);
+
+        return () => window.clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [documentKey, documentType, packageId]);
+
+    // No way to fetch changelog
+    if (!packageId && !documentType && !documentKey) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                    <History className="w-6 h-6 text-gray-400" />
+                </div>
+                <p className="text-sm text-gray-500">No document loaded</p>
+                <p className="text-xs text-gray-400 mt-1">Document history will appear here.</p>
+            </div>
+        );
+    }
+
+    if (loading) {
+        return (
+            <div className="flex-1 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#003366]" />
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <p className="text-sm text-red-500">{error}</p>
+            </div>
+        );
+    }
+
+    if (entries.length === 0) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                    <History className="w-6 h-6 text-gray-400" />
+                </div>
+                <p className="text-sm text-gray-500">No changelog entries yet.</p>
+                <p className="text-xs text-gray-400 mt-1">Document changes will appear here.</p>
+            </div>
+        );
+    }
+
+    const changeTypeStyles: Record<string, { bg: string; text: string }> = {
+        create: { bg: 'bg-green-100', text: 'text-green-700' },
+        update: { bg: 'bg-blue-100', text: 'text-blue-700' },
+        finalize: { bg: 'bg-purple-100', text: 'text-purple-700' },
+    };
+
+    return (
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {entries.map((entry) => {
+                const style = changeTypeStyles[entry.change_type] || { bg: 'bg-gray-100', text: 'text-gray-700' };
+                const isAgent = entry.change_source === 'agent_tool';
+
+                return (
+                    <div
+                        key={entry.changelog_id || `${entry.created_at}-${entry.doc_type}`}
+                        className="flex items-start gap-2.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 hover:shadow-sm transition"
+                    >
+                        <span className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center bg-gray-100">
+                            {isAgent ? (
+                                <Bot className="w-4 h-4 text-[#003366]" />
+                            ) : (
+                                <User className="w-4 h-4 text-gray-600" />
+                            )}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium uppercase ${style.bg} ${style.text}`}>
+                                    {entry.change_type}
+                                </span>
+                                <span className="text-[10px] text-gray-400">
+                                    v{entry.version}
+                                </span>
+                            </div>
+                            <p className="text-xs text-gray-700 mt-1">{entry.change_summary}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                                <p className="text-[10px] text-gray-400">
+                                    {formatRelativeTime(entry.created_at)} by {entry.actor_user_id}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+// Helper to extract package_id and doc_type from S3 key.
+// Supports both:
+// - eagle/{tenant}/{user}/packages/{package_id}/{doc_type}_v{N}.{ext}
+// - eagle/{tenant}/packages/{package_id}/{doc_type}/v{N}/source.{ext}
+function extractPackageInfo(key: string): { packageId?: string; docType?: string } {
+    if (!key.includes('/packages/')) return {};
+    const parts = key.split('/');
+    try {
+        const pkgIdx = parts.indexOf('packages');
+        const packageId = parts[pkgIdx + 1];
+        const canonicalDocType = parts[pkgIdx + 2];
+        const versionSegment = parts[pkgIdx + 3];
+        if (canonicalDocType && versionSegment?.startsWith('v')) {
+            return { packageId, docType: canonicalDocType };
+        }
+        const filename = parts[parts.length - 1];
+        const docType = filename.includes('_v')
+            ? filename.split('_v')[0]
+            : filename.split('.')[0];
+        return { packageId, docType };
+    } catch {
+        return {};
+    }
 }
 
 export default function DocumentViewerPage({ params }: PageProps) {
@@ -102,11 +452,27 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const searchParams = useSearchParams();
     const sessionId = searchParams.get('session') || '';
 
+    // Extract package info from URL param as fallback
+    const urlPackageInfo = useMemo(() => extractPackageInfo(decodeURIComponent(id)), [id]);
+
     // Document state
     const [documentContent, setDocumentContent] = useState('');
     const [documentTitle, setDocumentTitle] = useState('');
     const [documentType, setDocumentType] = useState('');
+    const [fileType, setFileType] = useState('');
+    const [contentType, setContentType] = useState('');
+    const [isBinaryDocument, setIsBinaryDocument] = useState(false);
+    const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+    const [packageId, setPackageId] = useState<string | undefined>(undefined);
+    const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
+    const [currentVersion, setCurrentVersion] = useState<number | null>(null);
     const [editContent, setEditContent] = useState('');
+    const [docxPreviewMode, setDocxPreviewMode] = useState<DocumentInfo['preview_mode']>(null);
+    const [docxPreviewBlocks, setDocxPreviewBlocks] = useState<DocxPreviewBlock[]>([]);
+    const [editDocxPreviewBlocks, setEditDocxPreviewBlocks] = useState<DocxPreviewBlock[]>([]);
+    const [xlsxPreviewSheets, setXlsxPreviewSheets] = useState<XlsxPreviewSheet[]>([]);
+    const [editXlsxPreviewSheets, setEditXlsxPreviewSheets] = useState<XlsxPreviewSheet[]>([]);
+    const [activeXlsxSheetId, setActiveXlsxSheetId] = useState<string | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [docUpdated, setDocUpdated] = useState(false);
@@ -114,28 +480,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const [showHydrationBanner, setShowHydrationBanner] = useState(false);
     const autoPromptSentRef = useRef(false);
 
-    // Binary document state
-    const [docxPreviewBlocks, setDocxPreviewBlocks] = useState<DocxPreviewBlock[]>([]);
-    const [editDocxPreviewBlocks, setEditDocxPreviewBlocks] = useState<DocxPreviewBlock[]>([]);
-    const [docxPreviewMode, setDocxPreviewMode] = useState<string | null>(null);
-    const [xlsxPreviewSheets, setXlsxPreviewSheets] = useState<XlsxPreviewSheet[]>([]);
-    const [editXlsxPreviewSheets, setEditXlsxPreviewSheets] = useState<XlsxPreviewSheet[]>([]);
-    const [activeXlsxSheetId, setActiveXlsxSheetId] = useState<string>('');
-    const [isBinaryDocument, setIsBinaryDocument] = useState(false);
-    const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-    const [isSaving, setIsSaving] = useState(false);
-    const [saveError, setSaveError] = useState<string | null>(null);
-    const [documentKey, setDocumentKey] = useState<string>('');
-    const [packageId, setPackageId] = useState<string | null>(null);
-    const [documentVersion, setDocumentVersion] = useState<number | null>(null);
-
-    // Right panel tab state
-    const [rightTab, setRightTab] = useState<'chat' | 'changelog'>('chat');
-    const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
-    const [changelogLoading, setChangelogLoading] = useState(false);
-
-    const isDocxDocument = useMemo(() => docxPreviewMode === 'docx_blocks' || docxPreviewMode === 'text_fallback', [docxPreviewMode]);
-    const isXlsxDocument = useMemo(() => xlsxPreviewSheets.length > 0, [xlsxPreviewSheets]);
+    // Assistant panel tab state
+    const [assistantTab, setAssistantTab] = useState<'chat' | 'changelog'>('chat');
 
     // Chat state
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -147,20 +493,175 @@ export default function DocumentViewerPage({ params }: PageProps) {
         },
     ]);
     const [chatInput, setChatInput] = useState('');
+    const [streamingAssistantMsg, setStreamingAssistantMsg] = useState<ChatMessage | null>(null);
+    const streamingAssistantMsgRef = useRef<ChatMessage | null>(null);
+    const generatedDocFetchSeqRef = useRef(0);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const docxBlockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
     // Download state
     const [showDownloadMenu, setShowDownloadMenu] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [exportError, setExportError] = useState<string | null>(null);
 
+    // Save state
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [s3Key, setS3Key] = useState<string | null>(null);
+
     const { getToken } = useAuth();
     const { loadSession } = useSession();
+
+    const isDocxDocument = (fileType || '').toLowerCase() === 'docx';
+    const isXlsxDocument = (fileType || '').toLowerCase() === 'xlsx';
+    const canUseAiDocAssistant = !isBinaryDocument || isDocxDocument;
+    const canEditDocxPreview = isBinaryDocument && isDocxDocument && docxPreviewBlocks.length > 0;
+    const canEditXlsxPreview = isBinaryDocument && isXlsxDocument && xlsxPreviewSheets.length > 0;
+    const hasDocxPreviewChanges = docxPreviewBlocksEqual(editDocxPreviewBlocks, docxPreviewBlocks) === false;
+    const hasXlsxPreviewChanges = xlsxPreviewSheetsEqual(editXlsxPreviewSheets, xlsxPreviewSheets) === false;
+
+    const applyDocumentUpdate = useCallback((doc: Partial<DocumentInfo> & { content: string }) => {
+        if (doc.package_id) {
+            setPackageId(doc.package_id);
+        }
+        if (doc.title) {
+            setDocumentTitle(doc.title);
+        }
+        if (doc.document_type) {
+            setDocumentType(doc.document_type);
+        }
+        if (doc.file_type !== undefined) {
+            setFileType(doc.file_type || '');
+        }
+        if (doc.content_type !== undefined) {
+            setContentType(doc.content_type || '');
+        }
+        if (typeof doc.is_binary === 'boolean') {
+            setIsBinaryDocument(doc.is_binary);
+        }
+        if ('download_url' in doc) {
+            setDownloadUrl(doc.download_url || null);
+        }
+        // Track the S3 key for save operations
+        const docS3Key = doc.s3_key || doc.document_id;
+        if (docS3Key) {
+            setS3Key(docS3Key);
+        }
+        if (doc.document_id !== undefined) {
+            setCurrentDocumentId(doc.document_id || null);
+        }
+        if (doc.version !== undefined) {
+            setCurrentVersion(typeof doc.version === 'number' ? doc.version : null);
+        }
+
+        const nextPreviewBlocks = normalizeDocxPreviewBlocks(doc.preview_blocks);
+        const nextPreviewSheets = normalizeXlsxPreviewSheets(doc.preview_sheets);
+        setDocxPreviewMode(doc.preview_mode ?? null);
+        setDocxPreviewBlocks(nextPreviewBlocks);
+        setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(nextPreviewBlocks));
+        setXlsxPreviewSheets(nextPreviewSheets);
+        setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
+        setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
+
+        setDocumentContent(doc.content);
+        setEditContent(doc.content);
+
+        const targetRawId = doc.s3_key || doc.document_id || decodeURIComponent(id);
+        const targetId = encodeURIComponent(targetRawId);
+        const persistedDoc: DocumentInfo = {
+            document_id: doc.document_id || targetRawId,
+            package_id: doc.package_id,
+            document_type: doc.document_type || documentType || 'document',
+            title: doc.title || documentTitle || 'Document',
+            content: doc.content,
+            file_type: doc.file_type,
+            content_type: doc.content_type,
+            is_binary: doc.is_binary,
+            download_url: doc.download_url,
+            s3_key: doc.s3_key,
+            status: doc.status,
+            version: doc.version,
+            generated_at: doc.generated_at,
+            preview_mode: doc.preview_mode,
+            preview_blocks: nextPreviewBlocks,
+            preview_sheets: nextPreviewSheets,
+        };
+
+        try {
+            sessionStorage.setItem(`doc-content-${id}`, JSON.stringify(persistedDoc));
+            sessionStorage.setItem(`doc-content-${targetId}`, JSON.stringify(persistedDoc));
+        } catch {
+            // sessionStorage unavailable
+        }
+
+        setDocUpdated(true);
+        setTimeout(() => setDocUpdated(false), 2000);
+    }, [documentTitle, documentType, id]);
+
+    const refreshGeneratedDocumentFromS3 = useCallback(async (doc: DocumentInfo) => {
+        const rawId = doc.s3_key || doc.document_id;
+        if (!rawId) return;
+
+        const fetchSeq = ++generatedDocFetchSeqRef.current;
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/documents/${encodeURIComponent(rawId)}?content=true`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (!res.ok) return;
+
+            const data = await res.json();
+            if (fetchSeq !== generatedDocFetchSeqRef.current) return;
+
+            if (data.is_binary) {
+                setDocumentTitle(data.title || doc.title || 'Untitled Document');
+                setDocumentType(data.document_type || doc.document_type || '');
+                setPackageId(data.package_id || doc.package_id);
+                setFileType(data.file_type || '');
+                setContentType(data.content_type || '');
+                setIsBinaryDocument(true);
+                setDownloadUrl(data.download_url || null);
+                setS3Key(data.s3_key || doc.s3_key || rawId);
+                setCurrentDocumentId(data.document_id || doc.document_id || rawId);
+                setCurrentVersion(typeof data.version === 'number' ? data.version : null);
+                const nextPreviewBlocks = normalizeDocxPreviewBlocks(data.preview_blocks);
+                const nextPreviewSheets = normalizeXlsxPreviewSheets(data.preview_sheets);
+                setDocxPreviewMode(data.preview_mode ?? null);
+                setDocxPreviewBlocks(nextPreviewBlocks);
+                setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(nextPreviewBlocks));
+                setXlsxPreviewSheets(nextPreviewSheets);
+                setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
+                setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
+                setDocumentContent(data.content || '');
+                setEditContent(data.content || '');
+                return;
+            }
+
+            if (typeof data.content === 'string' && data.content.length > 0) {
+                applyDocumentUpdate({
+                    ...doc,
+                    title: data.title || doc.title,
+                    document_type: data.document_type || doc.document_type,
+                    package_id: data.package_id || doc.package_id,
+                    document_id: data.document_id || doc.document_id || rawId,
+                    s3_key: data.s3_key || doc.s3_key || rawId,
+                    file_type: data.file_type || doc.file_type,
+                    content_type: data.content_type || doc.content_type,
+                    is_binary: data.is_binary,
+                    download_url: data.download_url,
+                    content: data.content,
+                });
+            }
+        } catch {
+            // Best-effort refresh: keep existing content if fetch fails.
+        }
+    }, [applyDocumentUpdate, getToken]);
 
     // Load document from sessionStorage or API
     useEffect(() => {
         const decodedId = decodeURIComponent(id);
+        let loadedFromCache = false;
 
         // Try sessionStorage first (instant load from chat navigation)
         try {
@@ -168,37 +669,68 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 || sessionStorage.getItem(`doc-content-${encodeURIComponent(decodedId).replace(/\./g, '%2E')}`);
             if (stored) {
                 const doc: DocumentInfo = JSON.parse(stored);
-                if (doc.content) {
-                    setDocumentTitle(doc.title);
-                    setDocumentType(doc.document_type);
-                    setDocumentContent(doc.content);
-                    setEditContent(doc.content);
-                    setDocumentKey(doc.s3_key || decodedId);
-                    if (doc.package_id) setPackageId(doc.package_id);
-                    if (doc.version) setDocumentVersion(doc.version);
-                    setIsLoading(false);
-                    return;
-                }
                 setDocumentTitle(doc.title);
                 setDocumentType(doc.document_type);
+                setPackageId(doc.package_id);
+                setFileType(doc.file_type || '');
+                setContentType(doc.content_type || '');
+                setIsBinaryDocument(Boolean(doc.is_binary));
+                setDownloadUrl(doc.download_url || null);
+                setS3Key(doc.s3_key || doc.document_id || null);
+                setCurrentDocumentId(doc.document_id || null);
+                setCurrentVersion(typeof doc.version === 'number' ? doc.version : null);
+                const nextPreviewBlocks = normalizeDocxPreviewBlocks(doc.preview_blocks);
+                const nextPreviewSheets = normalizeXlsxPreviewSheets(doc.preview_sheets);
+                setDocxPreviewMode(doc.preview_mode ?? null);
+                setDocxPreviewBlocks(nextPreviewBlocks);
+                setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(nextPreviewBlocks));
+                setXlsxPreviewSheets(nextPreviewSheets);
+                setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
+                setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
+                if (doc.content) {
+                    setDocumentContent(doc.content);
+                    setEditContent(doc.content);
+                    setIsLoading(false);
+                    loadedFromCache = true;
+                }
             }
         } catch {
             // sessionStorage unavailable or parse error
         }
 
         // Try localStorage (handles navigation from Documents page)
-        const stored2 = getGeneratedDocument(id);
-        if (stored2?.content) {
-            setDocumentTitle(stored2.title);
-            setDocumentType(stored2.document_type);
-            setDocumentContent(stored2.content);
-            setEditContent(stored2.content);
-            setDocumentKey(stored2.s3_key || decodedId);
-            setIsLoading(false);
-            return;
+        if (!loadedFromCache) {
+            const stored2 = getGeneratedDocument(id);
+            if (stored2?.content) {
+                // Cast through unknown: StoredDocument is a narrower type; the object
+                // may have been written with full DocumentInfo fields at runtime.
+                const stored2Full = stored2 as unknown as DocumentInfo;
+                setDocumentTitle(stored2.title);
+                setDocumentType(stored2.document_type);
+                setPackageId(stored2.package_id);
+                setFileType(stored2Full.file_type || '');
+                setContentType(stored2Full.content_type || '');
+                setIsBinaryDocument(Boolean(stored2Full.is_binary));
+                setDownloadUrl(stored2Full.download_url || null);
+                setS3Key(stored2.s3_key || stored2Full.document_id || null);
+                setCurrentDocumentId(stored2Full.document_id || null);
+                setCurrentVersion(typeof stored2.version === 'number' ? stored2.version : null);
+                const nextPreviewBlocks = normalizeDocxPreviewBlocks(stored2Full.preview_blocks);
+                const nextPreviewSheets = normalizeXlsxPreviewSheets(stored2Full.preview_sheets);
+                setDocxPreviewMode(stored2Full.preview_mode ?? null);
+                setDocxPreviewBlocks(nextPreviewBlocks);
+                setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(nextPreviewBlocks));
+                setXlsxPreviewSheets(nextPreviewSheets);
+                setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
+                setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
+                setDocumentContent(stored2.content);
+                setEditContent(stored2.content);
+                setIsLoading(false);
+                loadedFromCache = true;
+            }
         }
 
-        // Fallback: try fetching from API, then from local templates
+        // Always fetch from API to get fresh content (even if we loaded from cache)
         async function fetchDocument() {
             try {
                 const token = await getToken();
@@ -209,36 +741,33 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     const data = await res.json();
                     setDocumentTitle(data.title || 'Untitled Document');
                     setDocumentType(data.document_type || '');
+                    setPackageId(data.package_id || undefined);
+                    setFileType(data.file_type || '');
+                    setContentType(data.content_type || '');
+                    setIsBinaryDocument(Boolean(data.is_binary));
+                    setDownloadUrl(data.download_url || null);
+                    setS3Key(data.s3_key || data.key || data.document_id || null);
+                    setCurrentDocumentId(data.document_id || data.key || null);
+                    setCurrentVersion(typeof data.version === 'number' ? data.version : null);
+                    const nextPreviewBlocks = normalizeDocxPreviewBlocks(data.preview_blocks);
+                    const nextPreviewSheets = normalizeXlsxPreviewSheets(data.preview_sheets);
+                    setDocxPreviewMode(data.preview_mode ?? null);
+                    setDocxPreviewBlocks(nextPreviewBlocks);
+                    setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(nextPreviewBlocks));
+                    setXlsxPreviewSheets(nextPreviewSheets);
+                    setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
+                    setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
                     setDocumentContent(data.content || '');
                     setEditContent(data.content || '');
-                    setDocumentKey(data.s3_key || data.key || decodedId);
-                    if (data.package_id) setPackageId(data.package_id);
-                    if (data.version) setDocumentVersion(data.version);
-
-                    // Handle binary document preview
-                    if (data.is_binary || data.preview_mode) {
-                        setIsBinaryDocument(true);
-                        if (data.download_url) setDownloadUrl(data.download_url);
-
-                        if (data.preview_blocks && data.preview_blocks.length > 0) {
-                            setDocxPreviewBlocks(data.preview_blocks);
-                            setEditDocxPreviewBlocks(JSON.parse(JSON.stringify(data.preview_blocks)));
-                            setDocxPreviewMode(data.preview_mode || 'docx_blocks');
-                        }
-                        if (data.preview_sheets && data.preview_sheets.length > 0) {
-                            setXlsxPreviewSheets(data.preview_sheets);
-                            setEditXlsxPreviewSheets(JSON.parse(JSON.stringify(data.preview_sheets)));
-                            if (data.preview_sheets[0]?.sheet_id) {
-                                setActiveXlsxSheetId(data.preview_sheets[0].sheet_id);
-                            }
-                        }
-                    }
-
                     setIsLoading(false);
                     return;
                 }
             } catch {
-                // Backend unavailable — try template fallback
+                // Backend unavailable — try template fallback only if no cache
+            }
+
+            if (loadedFromCache) {
+                return;
             }
 
             // Try loading from local template files
@@ -265,6 +794,12 @@ export default function DocumentViewerPage({ params }: PageProps) {
                         const content = await res.text();
                         setDocumentTitle(DOC_TYPE_LABELS[typeFromFile] || 'Document');
                         setDocumentType(typeFromFile);
+                        setDocxPreviewMode(null);
+                        setDocxPreviewBlocks([]);
+                        setEditDocxPreviewBlocks([]);
+                        setXlsxPreviewSheets([]);
+                        setEditXlsxPreviewSheets([]);
+                        setActiveXlsxSheetId(null);
                         setDocumentContent(content);
                         setEditContent(content);
                         setIsLoading(false);
@@ -276,6 +811,12 @@ export default function DocumentViewerPage({ params }: PageProps) {
             }
 
             setDocumentTitle('Document');
+            setDocxPreviewMode(null);
+            setDocxPreviewBlocks([]);
+            setEditDocxPreviewBlocks([]);
+            setXlsxPreviewSheets([]);
+            setEditXlsxPreviewSheets([]);
+            setActiveXlsxSheetId(null);
             setDocumentContent('*Unable to load document content. The document may have been created in this session — try going back and clicking "Open Document" again.*');
             setIsLoading(false);
         }
@@ -283,10 +824,81 @@ export default function DocumentViewerPage({ params }: PageProps) {
         fetchDocument();
     }, [id, getToken]);
 
+    // Poll for version changes when viewing a binary package document
+    useEffect(() => {
+        if (!isBinaryDocument || !packageId || !documentType) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const syncLatestVersion = async () => {
+            try {
+                const token = await getToken();
+                const response = await fetch(`/api/packages/${packageId}/documents/${documentType}`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (!response.ok || cancelled) {
+                    return;
+                }
+
+                const data = await response.json() as {
+                    document_id?: string;
+                    version?: number;
+                    title?: string;
+                    doc_type?: string;
+                    package_id?: string;
+                    s3_key?: string;
+                    file_type?: string;
+                };
+
+                const nextDocumentId = data.document_id || null;
+                const nextVersion = typeof data.version === 'number' ? data.version : null;
+                const versionChanged = nextVersion !== null && nextVersion !== currentVersion;
+                const documentChanged = Boolean(nextDocumentId && nextDocumentId !== currentDocumentId);
+
+                if (!versionChanged && !documentChanged) {
+                    return;
+                }
+
+                setDocumentTitle(data.title || documentTitle);
+                setDocumentType(data.doc_type || documentType);
+                setPackageId(data.package_id || packageId);
+                setFileType(data.file_type || fileType);
+                setS3Key(data.s3_key || s3Key);
+                setCurrentDocumentId(nextDocumentId);
+                setCurrentVersion(nextVersion);
+                setDocUpdated(true);
+                window.setTimeout(() => setDocUpdated(false), 2000);
+            } catch {
+                // Best-effort poll; keep the current editor state on transient failures.
+            }
+        };
+
+        void syncLatestVersion();
+        const intervalId = window.setInterval(() => {
+            void syncLatestVersion();
+        }, 10000);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(intervalId);
+        };
+    }, [
+        currentDocumentId,
+        currentVersion,
+        documentTitle,
+        documentType,
+        fileType,
+        getToken,
+        packageId,
+        s3Key,
+        isBinaryDocument,
+    ]);
+
     // Layer 1: Immediate hydration from session context
     useEffect(() => {
-        if (isLoading || !documentContent || !sessionId || !documentType) return;
-        if (isBinaryDocument) return; // Skip hydration for binary docs
+        if (isBinaryDocument || isLoading || !documentContent || !sessionId || !documentType) return;
         if (!hasPlaceholders(documentContent)) return;
 
         const sessionData = loadSession(sessionId);
@@ -303,36 +915,44 @@ export default function DocumentViewerPage({ params }: PageProps) {
         if (result.unfilledCount > 0) {
             setShowHydrationBanner(true);
         }
+    // Run once after initial content loads
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isLoading]);
+    }, [isBinaryDocument, isLoading]);
 
     // Agent stream for the document chat
     const { sendQuery, isStreaming } = useAgentStream({
         getToken,
         onMessage: (msg) => {
-            setChatMessages((prev) => [
-                ...prev,
-                {
-                    id: msg.id,
-                    role: 'assistant',
-                    content: msg.content,
-                    timestamp: msg.timestamp,
-                    reasoning: msg.reasoning,
-                    agent_id: msg.agent_id,
-                    agent_name: msg.agent_name,
-                },
-            ]);
+            const next: ChatMessage = {
+                id: msg.id,
+                role: 'assistant',
+                content: msg.content,
+                timestamp: msg.timestamp,
+                reasoning: msg.reasoning,
+                agent_id: msg.agent_id,
+                agent_name: msg.agent_name,
+            };
+            streamingAssistantMsgRef.current = next;
+            setStreamingAssistantMsg(next);
+        },
+        onComplete: () => {
+            const completed = streamingAssistantMsgRef.current;
+            if (completed) {
+                setChatMessages((prev) => [...prev, completed]);
+            }
+            streamingAssistantMsgRef.current = null;
+            setStreamingAssistantMsg(null);
+        },
+        onError: () => {
+            streamingAssistantMsgRef.current = null;
+            setStreamingAssistantMsg(null);
         },
         onDocumentGenerated: (doc) => {
-            if (doc.content) {
-                setDocumentContent(doc.content);
-                setEditContent(doc.content);
-                if (doc.title) setDocumentTitle(doc.title);
-                if (doc.document_type) setDocumentType(doc.document_type);
-
-                setDocUpdated(true);
-                setTimeout(() => setDocUpdated(false), 2000);
+            if (doc.content && doc.content.length > 0) {
+                applyDocumentUpdate(doc as DocumentInfo & { content: string });
+                return;
             }
+            void refreshGeneratedDocumentFromS3(doc);
         },
     });
 
@@ -344,7 +964,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
             isStreaming ||
             autoPromptSentRef.current ||
             !showHydrationBanner ||
-            !sessionId
+            !sessionId ||
+            isBinaryDocument
         ) return;
 
         autoPromptSentRef.current = true;
@@ -376,14 +997,14 @@ ${docSnippet}`;
             timestamp: new Date(),
         };
         setChatMessages((prev) => [...prev, userMsg]);
-        sendQuery(autoPrompt, sessionId);
+        sendQuery(autoPrompt, sessionId, packageId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [unfilledCount, isLoading, isStreaming, showHydrationBanner]);
+    }, [unfilledCount, isBinaryDocument, isLoading, isStreaming, showHydrationBanner, packageId]);
 
     // Scroll chat to bottom
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatMessages, isStreaming]);
+    }, [chatMessages, streamingAssistantMsg, isStreaming]);
 
     // Auto-resize chat textarea
     const adjustTextareaHeight = useCallback(() => {
@@ -398,34 +1019,61 @@ ${docSnippet}`;
         adjustTextareaHeight();
     }, [chatInput, adjustTextareaHeight]);
 
-    // Fetch changelog when tab switches
-    useEffect(() => {
-        if (rightTab !== 'changelog' || !documentKey) return;
+    const buildDocumentAssistantPrompt = useCallback((userRequest: string): string => {
+        const sanitizedDoc = sanitizeContextText(documentContent || '');
+        const includeFullDocument = EDIT_INTENT_RE.test(userRequest);
+        const docExcerpt = includeFullDocument
+            ? sanitizedDoc
+            : (sanitizedDoc.length > MAX_DOC_CONTEXT_CHARS
+                ? `${sanitizedDoc.slice(0, 1000)}\n...\n${sanitizedDoc.slice(-1000)}`
+                : sanitizedDoc);
 
-        const fetchChangelog = async () => {
-            setChangelogLoading(true);
-            try {
-                const token = await getToken();
-                const headers: Record<string, string> = {};
-                if (token) headers.Authorization = `Bearer ${token}`;
+        const sessionData = sessionId ? loadSession(sessionId) : null;
+        const sessionMessages = (sessionData?.messages || [])
+            .filter((m) => m.role === 'user')
+            .slice(0, 5)
+            .map((m) => ({
+                role: 'user' as const,
+                content: sanitizeContextText(typeof m.content === 'string' ? m.content : ''),
+            }));
 
-                const res = await fetch(`/api/document-changelog?key=${encodeURIComponent(documentKey)}&limit=50`, { headers });
-                if (res.ok) {
-                    const data = await res.json();
-                    setChangelog(data.entries || []);
-                }
-            } catch {
-                // Silently fail
-            } finally {
-                setChangelogLoading(false);
-            }
-        };
+        const background = sessionMessages.length
+            ? extractBackgroundFromMessages(sessionMessages)
+            : '';
 
-        fetchChangelog();
-    }, [rightTab, documentKey, getToken]);
+        const boundedDoc = includeFullDocument
+            ? docExcerpt
+            : truncateWithEllipsis(docExcerpt, MAX_DOC_CONTEXT_CHARS);
+        const boundedSession = truncateWithEllipsis(background, MAX_SESSION_CONTEXT_CHARS);
+
+        const s3KeyInfo = s3Key
+            ? (
+                isDocxDocument && isBinaryDocument
+                    ? `[DOCUMENT KEY]\n${s3Key}\nThis is a DOCX source file. For targeted edits, use edit_docx_document with exact existing text from the preview in edits[].search_text and the revised text in edits[].replacement_text. For checklist toggles shown in the preview, use checkbox_edits[] with label_text and checked. If the preview shows markdown heading markers like # or ##, do not include those markers in search_text.`
+                    : `[DOCUMENT KEY]\n${s3Key}\nTo update this document in place, use create_document with update_existing_key="${s3Key}" and provide the full updated content in data.content.`
+            )
+            : '[DOCUMENT KEY]\nNot available - document must be saved to S3 first before updates can be applied.';
+
+        return [
+            'You are assisting with edits to an acquisition document in EAGLE.',
+            '[DOCUMENT CONTEXT]',
+            `Title: ${documentTitle || 'Untitled Document'}`,
+            `Type: ${documentType || 'unknown'}`,
+            `File Type: ${fileType || 'unknown'}`,
+            boundedDoc ? `Current Content Excerpt:\n${boundedDoc}` : 'Current Content Excerpt: [empty]',
+            s3KeyInfo,
+            '[ORIGIN SESSION CONTEXT]',
+            boundedSession || 'No origin session context was found for this document.',
+            '[USER REQUEST]',
+            userRequest,
+            isDocxDocument && isBinaryDocument
+                ? 'Instruction: If the user requests changes to this DOCX, use edit_docx_document for targeted replacements so the Word formatting is preserved. Use checkbox_edits for checkbox toggles instead of text replacement.'
+                : 'Instruction: If the user requests substantive edits or section completion, use create_document with update_existing_key to update the document in place.',
+        ].join('\n\n');
+    }, [documentContent, documentTitle, documentType, fileType, isBinaryDocument, isDocxDocument, loadSession, sessionId, s3Key]);
 
     const handleSendMessage = async () => {
-        if (!chatInput.trim() || isStreaming) return;
+        if (!chatInput.trim() || isStreaming || !canUseAiDocAssistant) return;
 
         const userMsg: ChatMessage = {
             id: Date.now().toString(),
@@ -434,128 +1082,211 @@ ${docSnippet}`;
             timestamp: new Date(),
         };
         setChatMessages((prev) => [...prev, userMsg]);
-        const query = chatInput;
+        const query = buildDocumentAssistantPrompt(chatInput);
         setChatInput('');
 
-        // Build context-aware prompt for edit requests on binary documents
-        if (isBinaryDocument && EDIT_INTENT_RE.test(query) && documentKey) {
-            const docContext = documentContent
-                ? truncateWithEllipsis(sanitizeContextText(documentContent), MAX_DOC_CONTEXT_CHARS)
-                : '';
-            const enrichedQuery = `${query}\n\n[Document context: key=${documentKey}${docContext ? `, preview:\n${docContext}` : ''}]`;
-            await sendQuery(enrichedQuery, sessionId);
-        } else {
-            await sendQuery(query, sessionId);
-        }
+        await sendQuery(query, sessionId || undefined, packageId);
     };
 
+    const displayChatMessages = streamingAssistantMsg
+        ? [...chatMessages, streamingAssistantMsg]
+        : chatMessages;
+
+    const displayedXlsxSheets = isEditing ? editXlsxPreviewSheets : xlsxPreviewSheets;
+    const activeXlsxSheet = displayedXlsxSheets.find((sheet) => sheet.sheet_id === activeXlsxSheetId) || displayedXlsxSheets[0] || null;
+
+    const docxEditOutline = useMemo(
+        () => editDocxPreviewBlocks
+            .filter((block) => block.kind === 'heading')
+            .map((block) => ({
+                block_id: block.block_id,
+                level: block.level || 1,
+                text: block.text.trim() || 'Untitled section',
+            })),
+        [editDocxPreviewBlocks],
+    );
+
+    const updateDocxPreviewBlock = useCallback((blockId: string, patch: Partial<DocxPreviewBlock>) => {
+        setEditDocxPreviewBlocks((prev) => prev.map((block) => (
+            block.block_id === blockId ? { ...block, ...patch } : block
+        )));
+    }, []);
+
+    const scrollToDocxBlock = useCallback((blockId: string) => {
+        docxBlockRefs.current[blockId]?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+        });
+    }, []);
+
+    const updateXlsxPreviewCell = useCallback((sheetId: string, cellRef: string, value: string) => {
+        setEditXlsxPreviewSheets((prev) => prev.map((sheet) => {
+            if (sheet.sheet_id !== sheetId) return sheet;
+            return {
+                ...sheet,
+                rows: sheet.rows.map((row) => ({
+                    ...row,
+                    cells: row.cells.map((cell) => (
+                        cell.cell_ref === cellRef
+                            ? { ...cell, value, display_value: value }
+                            : cell
+                    )),
+                })),
+            };
+        }));
+    }, []);
+
+    // Sync activeXlsxSheetId when sheets change
+    useEffect(() => {
+        if (!xlsxPreviewSheets.length) {
+            setActiveXlsxSheetId(null);
+            return;
+        }
+        const exists = xlsxPreviewSheets.some((sheet) => sheet.sheet_id === activeXlsxSheetId);
+        if (!exists) {
+            setActiveXlsxSheetId(xlsxPreviewSheets[0].sheet_id);
+        }
+    }, [activeXlsxSheetId, xlsxPreviewSheets]);
+
     const handleToggleEdit = () => {
+        if (isBinaryDocument) {
+            if (isDocxDocument) {
+                if (!canEditDocxPreview) return;
+                setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(docxPreviewBlocks));
+                setIsEditing(!isEditing);
+                return;
+            }
+            if (isXlsxDocument) {
+                if (!canEditXlsxPreview) return;
+                setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(xlsxPreviewSheets));
+                setIsEditing(!isEditing);
+                return;
+            }
+            return;
+        }
         if (isEditing) {
-            // Switching from edit to preview — save edits
-            if (isDocxDocument) {
-                setDocxPreviewBlocks(JSON.parse(JSON.stringify(editDocxPreviewBlocks)));
-            } else if (isXlsxDocument) {
-                setXlsxPreviewSheets(JSON.parse(JSON.stringify(editXlsxPreviewSheets)));
-            } else {
-                setDocumentContent(editContent);
-            }
+            setDocumentContent(editContent);
         } else {
-            if (isDocxDocument) {
-                setEditDocxPreviewBlocks(JSON.parse(JSON.stringify(docxPreviewBlocks)));
-            } else if (isXlsxDocument) {
-                setEditXlsxPreviewSheets(JSON.parse(JSON.stringify(xlsxPreviewSheets)));
-            } else {
-                setEditContent(documentContent);
-            }
+            setEditContent(documentContent);
         }
         setIsEditing(!isEditing);
     };
 
-    // Save structured edits (DOCX/XLSX)
-    const handleSaveStructuredEdits = async () => {
+    // Save handler — persists to S3
+    const handleSave = async () => {
+        if (!s3Key) {
+            setSaveError('No document key available - cannot save');
+            return;
+        }
         setIsSaving(true);
         setSaveError(null);
         try {
             const token = await getToken();
-            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-            if (token) headers.Authorization = `Bearer ${token}`;
-
-            let res: Response;
-            if (isDocxDocument) {
-                res = await fetch(`/api/documents/${encodeURIComponent(documentKey)}/docx-edit`, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                        preview_blocks: editDocxPreviewBlocks,
-                        preview_mode: docxPreviewMode,
+            const requestUrl = isBinaryDocument && isDocxDocument
+                ? `/api/documents/${encodeURIComponent(s3Key)}/docx-edit`
+                : isBinaryDocument && isXlsxDocument
+                    ? `/api/documents/${encodeURIComponent(s3Key)}/xlsx-edit`
+                    : `/api/documents/${encodeURIComponent(s3Key)}`;
+            const requestBody = isBinaryDocument && isDocxDocument
+                ? {
+                    preview_blocks: editDocxPreviewBlocks,
+                    preview_mode: docxPreviewMode || 'docx_blocks',
+                    change_source: 'user_edit',
+                }
+                : isBinaryDocument && isXlsxDocument
+                    ? {
+                        cell_edits: collectXlsxCellEdits(xlsxPreviewSheets, editXlsxPreviewSheets),
                         change_source: 'user_edit',
-                    }),
-                });
-            } else if (isXlsxDocument) {
-                // Collect cell edits from modified sheets
-                const cellEdits: Array<{ sheet_id: string; cell_ref: string; value: string }> = [];
-                for (let si = 0; si < editXlsxPreviewSheets.length; si++) {
-                    const editSheet = editXlsxPreviewSheets[si];
-                    const origSheet = xlsxPreviewSheets[si];
-                    if (!origSheet) continue;
-                    for (let ri = 0; ri < editSheet.rows.length; ri++) {
-                        const editRow = editSheet.rows[ri];
-                        const origRow = origSheet.rows[ri];
-                        if (!origRow) continue;
-                        for (let ci = 0; ci < editRow.cells.length; ci++) {
-                            const editCell = editRow.cells[ci];
-                            const origCell = origRow.cells[ci];
-                            if (!origCell || !editCell.editable) continue;
-                            if (editCell.value !== origCell.value) {
-                                cellEdits.push({
-                                    sheet_id: editSheet.sheet_id,
-                                    cell_ref: editCell.cell_ref,
-                                    value: editCell.value,
-                                });
-                            }
-                        }
                     }
-                }
-                if (cellEdits.length === 0) {
-                    setSaveError('No changes detected');
-                    setIsSaving(false);
-                    return;
-                }
-                res = await fetch(`/api/documents/${encodeURIComponent(documentKey)}/xlsx-edit`, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ cell_edits: cellEdits, change_source: 'user_edit' }),
-                });
-            } else {
-                setIsSaving(false);
-                return;
-            }
-
+                : {
+                    content: editContent,
+                    change_source: 'user_edit',
+                };
+            const res = await fetch(requestUrl, {
+                method: isBinaryDocument ? 'POST' : 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify(requestBody),
+            });
             if (!res.ok) {
-                const errMsg = await extractResponseError(res);
-                setSaveError(errMsg);
-                return;
+                throw new Error(await extractResponseError(res));
             }
+            const result = await res.json() as DocumentInfo & { content?: string; message?: string; key?: string };
 
-            const result = await res.json();
-
-            // Update state with new preview data
-            if (result.preview_blocks) {
-                setDocxPreviewBlocks(result.preview_blocks);
-                setEditDocxPreviewBlocks(JSON.parse(JSON.stringify(result.preview_blocks)));
+            if (isBinaryDocument && isDocxDocument) {
+                const savedPreviewBlocks = normalizeDocxPreviewBlocks(result.preview_blocks);
+                setDocumentContent(result.content ?? documentContent);
+                setDocxPreviewMode(result.preview_mode ?? docxPreviewMode ?? null);
+                setDocxPreviewBlocks(savedPreviewBlocks);
+                setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(savedPreviewBlocks));
+                setCurrentDocumentId(result.document_id || currentDocumentId);
+                setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
+                setS3Key(result.s3_key || result.key || s3Key);
+                setIsEditing(false);
+            } else if (isBinaryDocument && isXlsxDocument) {
+                const savedPreviewSheets = normalizeXlsxPreviewSheets(result.preview_sheets);
+                setDocumentContent(result.content ?? documentContent);
+                setXlsxPreviewSheets(savedPreviewSheets);
+                setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(savedPreviewSheets));
+                setActiveXlsxSheetId(savedPreviewSheets[0]?.sheet_id || null);
+                setCurrentDocumentId(result.document_id || currentDocumentId);
+                setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
+                setS3Key(result.s3_key || result.key || s3Key);
+                setIsEditing(false);
+            } else {
+                setDocumentContent(editContent);
             }
-            if (result.preview_sheets) {
-                setXlsxPreviewSheets(result.preview_sheets);
-                setEditXlsxPreviewSheets(JSON.parse(JSON.stringify(result.preview_sheets)));
-            }
-            if (result.content) {
-                setDocumentContent(result.content);
-            }
-            if (result.version) setDocumentVersion(result.version);
-
-            setIsEditing(false);
             setDocUpdated(true);
             setTimeout(() => setDocUpdated(false), 2000);
+
+            // Clear sessionStorage cache so reload fetches fresh content
+            try {
+                sessionStorage.removeItem(`doc-content-${id}`);
+            } catch {
+                // Ignore sessionStorage errors
+            }
+
+            // Clear localStorage cache (eagle_generated_docs) so reload fetches fresh from S3
+            try {
+                const docsKey = 'eagle_generated_docs';
+                const stored = localStorage.getItem(docsKey);
+                if (stored) {
+                    const docs = JSON.parse(stored) as Record<string, { id?: string; s3_key?: string; title?: string }>;
+                    const decodedId = decodeURIComponent(id);
+                    const normalizedId = encodeURIComponent(decodedId);
+                    const s3KeyDecoded = s3Key ? decodeURIComponent(s3Key) : null;
+                    let changed = false;
+
+                    if (docs[id]) { delete docs[id]; changed = true; }
+                    if (docs[normalizedId]) { delete docs[normalizedId]; changed = true; }
+                    if (s3Key && docs[encodeURIComponent(s3Key)]) {
+                        delete docs[encodeURIComponent(s3Key)];
+                        changed = true;
+                    }
+
+                    for (const key of Object.keys(docs)) {
+                        const doc = docs[key];
+                        if (
+                            doc.id === id ||
+                            doc.id === normalizedId ||
+                            doc.s3_key === decodedId ||
+                            doc.s3_key === s3KeyDecoded ||
+                            doc.title === decodedId
+                        ) {
+                            delete docs[key];
+                            changed = true;
+                        }
+                    }
+
+                    if (changed) {
+                        localStorage.setItem(docsKey, JSON.stringify(docs));
+                    }
+                }
+            } catch {
+                // Ignore localStorage errors
+            }
         } catch (err) {
             setSaveError(err instanceof Error ? err.message : 'Save failed');
         } finally {
@@ -564,19 +1295,28 @@ ${docSnippet}`;
     };
 
     // Download handler
-    const handleDownload = async (format: 'docx' | 'pdf') => {
+    const handleDownload = async (format: 'docx' | 'pdf' | 'md') => {
         setShowDownloadMenu(false);
-
-        // For binary documents with a download URL, use presigned URL directly
-        if (isBinaryDocument && downloadUrl && format === 'docx') {
-            window.open(downloadUrl, '_blank');
-            return;
-        }
-
         setIsExporting(true);
         setExportError(null);
 
         try {
+            const safeName = documentTitle.replace(/[^a-z0-9]/gi, '_');
+
+            // Markdown — direct download, no backend conversion needed
+            if (format === 'md') {
+                const blob = new Blob([documentContent], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = window.document.createElement('a');
+                a.href = url;
+                a.download = `${safeName}.md`;
+                window.document.body.appendChild(a);
+                a.click();
+                window.document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                return;
+            }
+
             const token = await getToken();
             const headers: Record<string, string> = {
                 'Content-Type': 'application/json',
@@ -594,15 +1334,26 @@ ${docSnippet}`;
             });
 
             if (!res.ok) {
-                throw new Error(`Export failed: ${res.status}`);
+                const detail = await extractResponseError(res);
+                throw new Error(`Export failed (${res.status}): ${detail}`);
             }
 
             const blob = await res.blob();
+            if (blob.size === 0) {
+                throw new Error('Export returned an empty file.');
+            }
+
+            const sig = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+            const isDocxBlob = sig.length >= 4 && sig[0] === 0x50 && sig[1] === 0x4b && sig[2] === 0x03 && sig[3] === 0x04;
+            const isPdf = sig.length >= 4 && sig[0] === 0x25 && sig[1] === 0x50 && sig[2] === 0x44 && sig[3] === 0x46;
+            if ((format === 'docx' && !isDocxBlob) || (format === 'pdf' && !isPdf)) {
+                throw new Error(`Export returned invalid ${format.toUpperCase()} file content.`);
+            }
+
             const url = URL.createObjectURL(blob);
             const a = window.document.createElement('a');
             a.href = url;
-            const ext = format === 'docx' ? 'docx' : 'pdf';
-            a.download = `${documentTitle.replace(/[^a-z0-9]/gi, '_')}.${ext}`;
+            a.download = `${safeName}.${format}`;
             window.document.body.appendChild(a);
             a.click();
             window.document.body.removeChild(a);
@@ -613,32 +1364,6 @@ ${docSnippet}`;
             setIsExporting(false);
         }
     };
-
-    // DOCX block editor helpers
-    const updateDocxBlock = useCallback((blockId: string, field: 'text' | 'checked', value: string | boolean) => {
-        setEditDocxPreviewBlocks(prev => prev.map(block =>
-            block.block_id === blockId
-                ? { ...block, [field]: value }
-                : block
-        ));
-    }, []);
-
-    // XLSX cell editor helpers
-    const updateXlsxCell = useCallback((sheetId: string, cellRef: string, value: string) => {
-        setEditXlsxPreviewSheets(prev => prev.map(sheet =>
-            sheet.sheet_id === sheetId
-                ? {
-                    ...sheet,
-                    rows: sheet.rows.map(row => ({
-                        ...row,
-                        cells: row.cells.map(cell =>
-                            cell.cell_ref === cellRef ? { ...cell, value } : cell
-                        ),
-                    })),
-                }
-                : sheet
-        ));
-    }, []);
 
     if (isLoading) {
         return (
@@ -653,209 +1378,6 @@ ${docSnippet}`;
             </div>
         );
     }
-
-    // --- Render: DOCX Block Editor ---
-    const renderDocxBlockEditor = () => {
-        const blocks = isEditing ? editDocxPreviewBlocks : docxPreviewBlocks;
-        if (!blocks || blocks.length === 0) {
-            return <p className="text-gray-400 italic">No preview blocks available.</p>;
-        }
-
-        return (
-            <div className="space-y-2">
-                {blocks.map((block) => {
-                    if (block.kind === 'heading') {
-                        const HeadingTag = `h${Math.min(block.level || 1, 6)}` as keyof JSX.IntrinsicElements;
-                        const sizes: Record<number, string> = { 1: 'text-2xl', 2: 'text-xl', 3: 'text-lg' };
-                        const sizeClass = sizes[block.level || 1] || 'text-base';
-
-                        if (isEditing) {
-                            return (
-                                <input
-                                    key={block.block_id}
-                                    type="text"
-                                    value={block.text}
-                                    onChange={(e) => updateDocxBlock(block.block_id, 'text', e.target.value)}
-                                    className={`w-full ${sizeClass} font-bold border-b border-gray-200 focus:border-blue-500 focus:outline-none py-1 bg-transparent`}
-                                />
-                            );
-                        }
-                        return (
-                            <HeadingTag key={block.block_id} className={`${sizeClass} font-bold text-gray-900`}>
-                                {block.text}
-                            </HeadingTag>
-                        );
-                    }
-
-                    if (block.kind === 'checkbox') {
-                        return (
-                            <label key={block.block_id} className="flex items-start gap-2 py-0.5 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={block.checked ?? false}
-                                    disabled={!isEditing}
-                                    onChange={(e) => updateDocxBlock(block.block_id, 'checked', e.target.checked)}
-                                    className="mt-1 rounded border-gray-300"
-                                />
-                                {isEditing ? (
-                                    <input
-                                        type="text"
-                                        value={block.text}
-                                        onChange={(e) => updateDocxBlock(block.block_id, 'text', e.target.value)}
-                                        className="flex-1 border-b border-gray-200 focus:border-blue-500 focus:outline-none text-sm bg-transparent"
-                                    />
-                                ) : (
-                                    <span className={`text-sm ${block.checked ? 'line-through text-gray-400' : 'text-gray-700'}`}>
-                                        {block.text}
-                                    </span>
-                                )}
-                            </label>
-                        );
-                    }
-
-                    // Paragraph
-                    if (isEditing) {
-                        return (
-                            <textarea
-                                key={block.block_id}
-                                value={block.text}
-                                onChange={(e) => updateDocxBlock(block.block_id, 'text', e.target.value)}
-                                rows={Math.max(2, Math.ceil(block.text.length / 80))}
-                                className="w-full text-sm border border-gray-200 rounded-lg p-2 focus:border-blue-500 focus:outline-none resize-y bg-white"
-                            />
-                        );
-                    }
-                    return (
-                        <p key={block.block_id} className="text-sm text-gray-700 leading-relaxed">
-                            {block.text}
-                        </p>
-                    );
-                })}
-            </div>
-        );
-    };
-
-    // --- Render: XLSX Grid Editor ---
-    const renderXlsxGridEditor = () => {
-        const sheets = isEditing ? editXlsxPreviewSheets : xlsxPreviewSheets;
-        if (!sheets || sheets.length === 0) {
-            return <p className="text-gray-400 italic">No spreadsheet data available.</p>;
-        }
-
-        const activeSheet = sheets.find(s => s.sheet_id === activeXlsxSheetId) || sheets[0];
-
-        return (
-            <div className="flex flex-col h-full">
-                {/* Sheet tabs */}
-                {sheets.length > 1 && (
-                    <div className="flex gap-1 px-2 py-1 bg-gray-100 border-b border-gray-200 overflow-x-auto">
-                        {sheets.map((sheet) => (
-                            <button
-                                key={sheet.sheet_id}
-                                onClick={() => setActiveXlsxSheetId(sheet.sheet_id)}
-                                className={`px-3 py-1 text-xs rounded-t-lg whitespace-nowrap ${
-                                    sheet.sheet_id === activeXlsxSheetId
-                                        ? 'bg-white border border-b-white border-gray-200 font-medium text-gray-900'
-                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                                }`}
-                            >
-                                {sheet.title}
-                            </button>
-                        ))}
-                    </div>
-                )}
-
-                {/* Grid */}
-                <div className="flex-1 overflow-auto">
-                    <table className="border-collapse text-xs w-full">
-                        <tbody>
-                            {activeSheet.rows.map((row) => (
-                                <tr key={row.row_index} className="border-b border-gray-100">
-                                    <td className="px-1 py-0.5 bg-gray-50 text-gray-400 text-right border-r border-gray-200 select-none w-8">
-                                        {row.row_index}
-                                    </td>
-                                    {row.cells.map((cell) => (
-                                        <td
-                                            key={cell.cell_ref}
-                                            className={`px-1.5 py-0.5 border-r border-gray-100 min-w-[80px] max-w-[200px] ${
-                                                cell.is_formula ? 'bg-blue-50/30 text-blue-700' : ''
-                                            } ${!cell.editable ? 'bg-gray-50/50' : ''}`}
-                                        >
-                                            {isEditing && cell.editable ? (
-                                                <input
-                                                    type="text"
-                                                    value={cell.value}
-                                                    onChange={(e) => updateXlsxCell(activeSheet.sheet_id, cell.cell_ref, e.target.value)}
-                                                    className="w-full border-none bg-transparent focus:bg-blue-50 focus:outline-none text-xs px-0.5"
-                                                />
-                                            ) : (
-                                                <span className="block truncate" title={cell.display_value}>
-                                                    {cell.display_value || cell.value}
-                                                </span>
-                                            )}
-                                        </td>
-                                    ))}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-
-                {activeSheet.truncated && (
-                    <div className="px-3 py-1 text-xs text-amber-600 bg-amber-50 border-t border-amber-200">
-                        Preview truncated. Download the file for the complete spreadsheet.
-                    </div>
-                )}
-            </div>
-        );
-    };
-
-    // --- Render: Changelog Tab ---
-    const renderChangelogTab = () => {
-        if (changelogLoading) {
-            return (
-                <div className="flex items-center justify-center py-8 text-gray-400">
-                    <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                    Loading changelog...
-                </div>
-            );
-        }
-
-        if (changelog.length === 0) {
-            return (
-                <div className="text-center py-8 text-gray-400 text-sm">
-                    No changelog entries yet.
-                </div>
-            );
-        }
-
-        return (
-            <div className="space-y-3 p-4">
-                {changelog.map((entry, idx) => (
-                    <div key={idx} className="bg-white rounded-lg border border-gray-200 p-3">
-                        <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                                entry.change_source === 'agent_tool'
-                                    ? 'bg-purple-100 text-purple-700'
-                                    : 'bg-blue-100 text-blue-700'
-                            }`}>
-                                {entry.change_source === 'agent_tool' ? 'AI' : 'User'}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                                {entry.change_type}
-                                {entry.version ? ` v${entry.version}` : ''}
-                            </span>
-                        </div>
-                        <p className="text-sm text-gray-700">{entry.change_summary}</p>
-                        <p className="text-xs text-gray-400 mt-1">
-                            {new Date(entry.created_at).toLocaleString()}
-                            {entry.actor_user_id ? ` by ${entry.actor_user_id}` : ''}
-                        </p>
-                    </div>
-                ))}
-            </div>
-        );
-    };
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
@@ -881,8 +1403,8 @@ ${docSnippet}`;
                                             Updated
                                         </span>
                                     )}
-                                    {documentVersion && (
-                                        <span className="text-xs text-gray-400">v{documentVersion}</span>
+                                    {currentVersion !== null && (
+                                        <span className="text-xs text-gray-400">v{currentVersion}</span>
                                     )}
                                 </div>
                                 {documentType && (
@@ -895,47 +1417,50 @@ ${docSnippet}`;
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
-                            {/* Save/export errors */}
-                            {(exportError || saveError) && (
-                                <span className="text-xs text-red-600 mr-2">{exportError || saveError}</span>
+                            {/* Export error */}
+                            {exportError && (
+                                <span className="text-xs text-red-600 mr-2">{exportError}</span>
                             )}
 
-                            {/* Save button for structured edits */}
-                            {isEditing && (isDocxDocument || isXlsxDocument) && (
-                                <button
-                                    onClick={handleSaveStructuredEdits}
-                                    disabled={isSaving}
-                                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
-                                >
-                                    {isSaving ? (
-                                        <RefreshCw className="w-4 h-4 animate-spin" />
-                                    ) : (
-                                        <Save className="w-4 h-4" />
-                                    )}
-                                    Save
-                                </button>
-                            )}
-
-                            {/* Download dropdown */}
+                            {/* Download dropdown / original file link */}
                             <div className="relative">
-                                <button
-                                    onClick={() => setShowDownloadMenu(!showDownloadMenu)}
-                                    disabled={isExporting}
-                                    className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
-                                >
-                                    {isExporting ? (
-                                        <RefreshCw className="w-4 h-4 animate-spin" />
-                                    ) : (
+                                {isBinaryDocument && downloadUrl ? (
+                                    <a
+                                        href={downloadUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
+                                    >
                                         <Download className="w-4 h-4" />
-                                    )}
-                                    Download
-                                    <ChevronDown className="w-3 h-3" />
-                                </button>
-                                {showDownloadMenu && (
+                                        Download Original
+                                    </a>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+                                        disabled={isExporting}
+                                        className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                    >
+                                        {isExporting ? (
+                                            <RefreshCw className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <Download className="w-4 h-4" />
+                                        )}
+                                        Download
+                                        <ChevronDown className="w-3 h-3" />
+                                    </button>
+                                )}
+                                {showDownloadMenu && !isBinaryDocument && (
                                     <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden">
                                         <button
-                                            onClick={() => handleDownload('docx')}
+                                            onClick={() => handleDownload('md')}
                                             className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+                                        >
+                                            <FileText className="w-4 h-4 text-gray-600" />
+                                            Download as Markdown (.md)
+                                        </button>
+                                        <button
+                                            onClick={() => handleDownload('docx')}
+                                            className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100"
                                         >
                                             <FileText className="w-4 h-4 text-blue-600" />
                                             Download as Word (.docx)
@@ -954,7 +1479,19 @@ ${docSnippet}`;
                             {/* Edit / Preview toggle */}
                             <button
                                 onClick={handleToggleEdit}
-                                className="flex items-center gap-2 px-4 py-2 bg-[#003366] text-white rounded-xl text-sm font-medium hover:bg-[#004488] transition-colors"
+                                disabled={isBinaryDocument && !canEditDocxPreview && !canEditXlsxPreview}
+                                title={
+                                    isBinaryDocument && !canEditDocxPreview && !canEditXlsxPreview
+                                        ? 'Direct editing is unavailable for this binary document type.'
+                                        : isBinaryDocument
+                                            ? (
+                                                isDocxDocument
+                                                    ? 'Edit this structured DOCX preview. Changes will be applied back to the source document with python-docx.'
+                                                    : 'Edit this structured spreadsheet preview. Changes will be applied back to the workbook with openpyxl.'
+                                            )
+                                            : undefined
+                                }
+                                className="flex items-center gap-2 px-4 py-2 bg-[#003366] text-white rounded-xl text-sm font-medium hover:bg-[#004488] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {isEditing ? (
                                     <>
@@ -968,6 +1505,40 @@ ${docSnippet}`;
                                     </>
                                 )}
                             </button>
+
+                            {/* Save button (visible when editing) */}
+                            {isEditing && (
+                                <button
+                                    onClick={handleSave}
+                                    disabled={
+                                        isSaving
+                                        || !s3Key
+                                        || (isBinaryDocument && isDocxDocument
+                                            ? !hasDocxPreviewChanges
+                                            : isBinaryDocument && isXlsxDocument
+                                                ? !hasXlsxPreviewChanges
+                                            : editContent === documentContent)
+                                    }
+                                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    title={
+                                        !s3Key
+                                            ? 'Document must be saved to S3 first'
+                                            : isBinaryDocument && isDocxDocument
+                                                ? (hasDocxPreviewChanges ? 'Save DOCX preview edits to S3' : 'No changes to save')
+                                                : isBinaryDocument && isXlsxDocument
+                                                    ? (hasXlsxPreviewChanges ? 'Save spreadsheet edits to S3' : 'No changes to save')
+                                                : (editContent === documentContent ? 'No changes to save' : 'Save to S3')
+                                    }
+                                >
+                                    {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                    Save
+                                </button>
+                            )}
+
+                            {/* Save error */}
+                            {saveError && (
+                                <span className="text-xs text-red-600 ml-2">{saveError}</span>
+                            )}
                         </div>
                     </div>
                 </header>
@@ -998,11 +1569,298 @@ ${docSnippet}`;
                         style={{ width: '65%' }}
                     >
                         <div className="flex-1 overflow-y-auto p-8">
-                            <div className="max-w-3xl mx-auto">
-                                {isDocxDocument ? (
-                                    renderDocxBlockEditor()
-                                ) : isXlsxDocument ? (
-                                    renderXlsxGridEditor()
+                            <div className={`${isBinaryDocument && isDocxDocument && isEditing ? 'max-w-6xl' : 'max-w-3xl'} mx-auto`}>
+                                {isBinaryDocument && isDocxDocument ? (
+                                    <div className="space-y-6">
+                                        {/* DOCX info box */}
+                                        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-sm text-blue-950">
+                                            <div className="flex items-center gap-2 text-base font-semibold">
+                                                <FileText className="h-5 w-5" />
+                                                DOCX preview
+                                            </div>
+                                            <p className="mt-3 leading-6">
+                                                This Word document remains stored as a native `.docx` file. Browser edits work on a structured preview and save back through `python-docx` so the source file stays native.
+                                            </p>
+                                            <p className="mt-3 leading-6">
+                                                Use `Edit` for direct paragraph and checkbox updates here, or use the assistant on the right for targeted DOCX revisions. Complex layout and styling still remain in the original Word file.
+                                            </p>
+                                            {downloadUrl && (
+                                                <a
+                                                    href={downloadUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-4 py-2 text-sm font-medium text-white hover:bg-[#004488]"
+                                                >
+                                                    <Download className="h-4 w-4" />
+                                                    Open original file
+                                                </a>
+                                            )}
+                                        </div>
+                                        {isEditing ? (
+                                            <div className="lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-6">
+                                                {/* Outline sidebar */}
+                                                <aside className="hidden lg:block">
+                                                    <div className="rounded-2xl border border-[#d8e1ef] bg-[#f7f9fc] p-4 shadow-sm">
+                                                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5d6b82]">
+                                                            Outline
+                                                        </p>
+                                                        <p className="mt-2 text-sm text-[#44546a]">
+                                                            {editDocxPreviewBlocks.length} editable blocks
+                                                        </p>
+                                                        {hasDocxPreviewChanges && (
+                                                            <div className="mt-3 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
+                                                                Unsaved changes
+                                                            </div>
+                                                        )}
+                                                        <div className="mt-4 space-y-1.5">
+                                                            {docxEditOutline.map((heading) => (
+                                                                <button
+                                                                    key={heading.block_id}
+                                                                    onClick={() => scrollToDocxBlock(heading.block_id)}
+                                                                    className="block w-full rounded-xl px-3 py-2 text-left text-sm text-[#334155] hover:bg-white"
+                                                                    style={{ paddingLeft: `${12 + (heading.level - 1) * 12}px` }}
+                                                                >
+                                                                    {heading.text}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </aside>
+                                                {/* Block editor */}
+                                                <div className="rounded-[28px] border border-[#d9e2ec] bg-[#fcfbf8] shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
+                                                    <div className="rounded-t-[28px] border-b border-[#e4e7ec] bg-white px-6 py-4">
+                                                        <div className="flex items-center justify-between gap-4">
+                                                            <div>
+                                                                <p className="text-sm font-semibold text-[#102a43]">
+                                                                    Structured DOCX editor
+                                                                </p>
+                                                                <p className="mt-1 text-sm text-[#5d6b82]">
+                                                                    Edit paragraphs and headings directly. Changes are saved back to the source document with formatting-preserving backend ops.
+                                                                </p>
+                                                            </div>
+                                                            <div className="rounded-full border border-[#d8e1ef] bg-[#f8fafc] px-3 py-1 text-xs font-medium text-[#486581]">
+                                                                {docxEditOutline.length} sections
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-5 p-5 md:p-8">
+                                                        {editDocxPreviewBlocks.map((block) => (
+                                                            <div
+                                                                key={block.block_id}
+                                                                ref={(element) => { docxBlockRefs.current[block.block_id] = element; }}
+                                                                className={`rounded-2xl border px-5 py-4 transition-colors ${
+                                                                    block.kind === 'heading'
+                                                                        ? 'border-[#cdd7e1] bg-white shadow-sm'
+                                                                        : block.kind === 'checkbox'
+                                                                            ? 'border-[#d9e2ec] bg-[#fffefb]'
+                                                                            : 'border-[#e5e7eb] bg-white'
+                                                                }`}
+                                                            >
+                                                                {block.kind === 'checkbox' ? (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={Boolean(block.checked)}
+                                                                            onChange={(e) => updateDocxPreviewBlock(block.block_id, { checked: e.target.checked })}
+                                                                            className="mt-1 h-4 w-4 rounded border-gray-300 text-[#003366] focus:ring-[#003366]"
+                                                                        />
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7b8794]">
+                                                                                Checklist Item
+                                                                            </div>
+                                                                            <input
+                                                                                type="text"
+                                                                                value={block.text}
+                                                                                onChange={(e) => updateDocxPreviewBlock(block.block_id, { text: e.target.value })}
+                                                                                className="w-full border-0 bg-transparent px-0 text-base text-[#102a43] placeholder:text-[#9aa5b1] focus:outline-none"
+                                                                                placeholder="Checkbox label"
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7b8794]">
+                                                                            {block.kind === 'heading' ? `Heading ${block.level || 1}` : 'Paragraph'}
+                                                                        </div>
+                                                                        <textarea
+                                                                            value={block.text}
+                                                                            onChange={(e) => {
+                                                                                updateDocxPreviewBlock(block.block_id, { text: e.target.value });
+                                                                                autoResizeTextarea(e.currentTarget);
+                                                                            }}
+                                                                            onInput={(e) => autoResizeTextarea(e.currentTarget)}
+                                                                            ref={(element) => autoResizeTextarea(element)}
+                                                                            rows={1}
+                                                                            className={`w-full overflow-hidden border-0 bg-transparent px-0 text-[#102a43] placeholder:text-[#9aa5b1] focus:outline-none resize-none ${
+                                                                                block.kind === 'heading'
+                                                                                    ? 'text-[1.35rem] font-semibold leading-tight'
+                                                                                    : 'text-[1.02rem] leading-8'
+                                                                            }`}
+                                                                            placeholder={block.kind === 'heading' ? 'Heading text' : 'Paragraph text'}
+                                                                        />
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                        {editDocxPreviewBlocks.length === 0 && (
+                                                            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-5 text-sm text-gray-600">
+                                                                No editable preview blocks were extracted for this document.
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : documentContent ? (
+                                            <div className="prose prose-sm max-w-none">
+                                                <MarkdownRenderer content={documentContent} />
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
+                                                Preview unavailable for this DOCX. You can still download the original file.
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : isBinaryDocument && isXlsxDocument ? (
+                                    <div className="space-y-6">
+                                        {/* XLSX info box */}
+                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-950">
+                                            <div className="flex items-center gap-2 text-base font-semibold">
+                                                <FileText className="h-5 w-5" />
+                                                XLSX preview
+                                            </div>
+                                            <p className="mt-3 leading-6">
+                                                This spreadsheet remains stored as a native `.xlsx` file. The pane below shows worksheet data extracted with `openpyxl` so you can review and edit input cells without leaving the browser.
+                                            </p>
+                                            <p className="mt-3 leading-6">
+                                                Formula cells stay read-only. Changes are written back to the workbook with `openpyxl`, which preserves formulas, formatting, and sheet structure.
+                                            </p>
+                                            {downloadUrl && (
+                                                <a
+                                                    href={downloadUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-4 py-2 text-sm font-medium text-white hover:bg-[#004488]"
+                                                >
+                                                    <Download className="h-4 w-4" />
+                                                    Open original file
+                                                </a>
+                                            )}
+                                        </div>
+                                        {activeXlsxSheet ? (
+                                            <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5">
+                                                {/* Sheet tab selector */}
+                                                <div className="flex flex-wrap gap-2">
+                                                    {displayedXlsxSheets.map((sheet) => (
+                                                        <button
+                                                            key={sheet.sheet_id}
+                                                            onClick={() => setActiveXlsxSheetId(sheet.sheet_id)}
+                                                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                                                                activeXlsxSheet.sheet_id === sheet.sheet_id
+                                                                    ? 'bg-[#003366] text-white'
+                                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                            }`}
+                                                        >
+                                                            {sheet.title}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                {activeXlsxSheet.truncated && (
+                                                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                                        Preview truncated for large worksheet dimensions. Download the original file for the full workbook view.
+                                                    </div>
+                                                )}
+                                                {/* Full HTML table with column headers */}
+                                                <div className="overflow-x-auto rounded-xl border border-gray-200">
+                                                    <table className="min-w-full border-collapse text-sm">
+                                                        <thead className="bg-gray-50">
+                                                            <tr>
+                                                                <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold text-gray-600">Row</th>
+                                                                {activeXlsxSheet.rows[0]?.cells.map((cell) => (
+                                                                    <th
+                                                                        key={cell.cell_ref}
+                                                                        className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold text-gray-600"
+                                                                    >
+                                                                        {cell.cell_ref.replace(/\d+/g, '')}
+                                                                    </th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {activeXlsxSheet.rows.map((row) => (
+                                                                <tr key={row.row_index} className="align-top">
+                                                                    <td className="border-b border-r border-gray-200 bg-gray-50 px-3 py-2 font-medium text-gray-500">
+                                                                        {row.row_index}
+                                                                    </td>
+                                                                    {row.cells.map((cell) => (
+                                                                        <td
+                                                                            key={cell.cell_ref}
+                                                                            className={`border-b border-r border-gray-200 px-2 py-2 ${
+                                                                                cell.editable ? 'bg-white' : 'bg-gray-50'
+                                                                            }`}
+                                                                        >
+                                                                            {isEditing && cell.editable ? (
+                                                                                <input
+                                                                                    type="text"
+                                                                                    value={cell.value}
+                                                                                    onChange={(e) => updateXlsxPreviewCell(activeXlsxSheet.sheet_id, cell.cell_ref, e.target.value)}
+                                                                                    className="w-full min-w-[110px] rounded-md border border-gray-200 px-2 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                                                                />
+                                                                            ) : (
+                                                                                <div className={`min-w-[110px] whitespace-pre-wrap break-words text-sm ${
+                                                                                    cell.editable ? 'text-gray-900' : 'text-gray-500'
+                                                                                }`}>
+                                                                                    {cell.display_value || ''}
+                                                                                </div>
+                                                                            )}
+                                                                        </td>
+                                                                    ))}
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        ) : documentContent ? (
+                                            <div className="prose prose-sm max-w-none">
+                                                <MarkdownRenderer content={documentContent} />
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
+                                                Preview unavailable for this XLSX. You can still download the original file.
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : isBinaryDocument ? (
+                                    /* Generic binary document info box */
+                                    <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-sm text-blue-950">
+                                        <div className="flex items-center gap-2 text-base font-semibold">
+                                            <FileText className="h-5 w-5" />
+                                            Native document detected
+                                        </div>
+                                        <p className="mt-3 leading-6">
+                                            This file is stored as a native `{fileType || documentType || 'binary'}` document.
+                                            Inline editing is intentionally disabled so EAGLE does not strip the original formatting.
+                                        </p>
+                                        <p className="mt-3 leading-6">
+                                            Use the original file download and changelog on the right.
+                                        </p>
+                                        {downloadUrl && (
+                                            <a
+                                                href={downloadUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-4 py-2 text-sm font-medium text-white hover:bg-[#004488]"
+                                            >
+                                                <Download className="h-4 w-4" />
+                                                Open original file
+                                            </a>
+                                        )}
+                                        {contentType && (
+                                            <p className="mt-4 text-xs text-blue-800">
+                                                Content type: {contentType}
+                                            </p>
+                                        )}
+                                    </div>
                                 ) : isEditing ? (
                                     <textarea
                                         value={editContent}
@@ -1020,12 +1878,12 @@ ${docSnippet}`;
 
                     {/* Right Panel — Chat + Changelog */}
                     <div className="flex flex-col bg-gray-50" style={{ width: '35%' }}>
-                        {/* Right panel tabs */}
+                        {/* Tab header — underline style to match project convention */}
                         <div className="flex bg-white border-b border-gray-200">
                             <button
-                                onClick={() => setRightTab('chat')}
+                                onClick={() => setAssistantTab('chat')}
                                 className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                                    rightTab === 'chat'
+                                    assistantTab === 'chat'
                                         ? 'border-[#003366] text-[#003366]'
                                         : 'border-transparent text-gray-500 hover:text-gray-700'
                                 }`}
@@ -1034,9 +1892,9 @@ ${docSnippet}`;
                                 Chat
                             </button>
                             <button
-                                onClick={() => setRightTab('changelog')}
+                                onClick={() => setAssistantTab('changelog')}
                                 className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                                    rightTab === 'changelog'
+                                    assistantTab === 'changelog'
                                         ? 'border-[#003366] text-[#003366]'
                                         : 'border-transparent text-gray-500 hover:text-gray-700'
                                 }`}
@@ -1046,11 +1904,11 @@ ${docSnippet}`;
                             </button>
                         </div>
 
-                        {rightTab === 'chat' ? (
+                        {/* Chat tab */}
+                        {assistantTab === 'chat' && (
                             <>
-                                {/* Chat Messages */}
                                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                                    {chatMessages.map((msg) => (
+                                    {displayChatMessages.map((msg) => (
                                         <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                                             <div
                                                 className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
@@ -1090,7 +1948,7 @@ ${docSnippet}`;
                                     ))}
 
                                     {/* Typing indicator */}
-                                    {isStreaming && (
+                                    {isStreaming && !streamingAssistantMsg && (
                                         <div className="flex gap-3">
                                             <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
                                                 <Sparkles className="w-3.5 h-3.5 text-white" />
@@ -1116,22 +1974,30 @@ ${docSnippet}`;
                                             value={chatInput}
                                             onChange={(e) => setChatInput(e.target.value)}
                                             onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+                                                if (e.key === 'Enter' && !e.shiftKey && !isStreaming && canUseAiDocAssistant) {
                                                     e.preventDefault();
                                                     handleSendMessage();
                                                 }
                                             }}
-                                            placeholder={isStreaming ? 'Waiting for response...' : 'Ask about this document...'}
-                                            disabled={isStreaming}
+                                            placeholder={
+                                                !canUseAiDocAssistant
+                                                    ? 'AI editing is currently available for text documents and DOCX previews only.'
+                                                    : isBinaryDocument
+                                                        ? 'Ask for a targeted DOCX revision...'
+                                                    : isStreaming
+                                                        ? 'Waiting for response...'
+                                                        : 'Ask about this document...'
+                                            }
+                                            disabled={isStreaming || !canUseAiDocAssistant}
                                             rows={1}
                                             className={`flex-1 resize-none px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
-                                                isStreaming ? 'opacity-50' : ''
+                                                (isStreaming || !canUseAiDocAssistant) ? 'opacity-50' : ''
                                             }`}
                                             style={{ maxHeight: 120 }}
                                         />
                                         <button
                                             onClick={handleSendMessage}
-                                            disabled={!chatInput.trim() || isStreaming}
+                                            disabled={!chatInput.trim() || isStreaming || !canUseAiDocAssistant}
                                             className="px-3.5 py-2.5 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-colors"
                                         >
                                             <Send className="w-4 h-4" />
@@ -1139,10 +2005,15 @@ ${docSnippet}`;
                                     </div>
                                 </div>
                             </>
-                        ) : (
-                            <div className="flex-1 overflow-y-auto">
-                                {renderChangelogTab()}
-                            </div>
+                        )}
+
+                        {/* Changelog tab — DocumentChangelogPanel with polling */}
+                        {assistantTab === 'changelog' && (
+                            <DocumentChangelogPanel
+                                packageId={packageId || urlPackageInfo.packageId}
+                                documentType={documentType || urlPackageInfo.docType}
+                                documentKey={s3Key || decodeURIComponent(id)}
+                            />
                         )}
                     </div>
                 </div>

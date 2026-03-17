@@ -60,6 +60,10 @@ export default function SimpleChatInterface() {
     /** Ctrl+K command palette state. */
     const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
+    /** Live acquisition package state pushed via SSE metadata events.
+     *  Restored from session cache on load, updated by SSE metadata during streaming. */
+    const [eagleState, setEagleState] = useState<PackageState | null>(null);
+
     // Global Ctrl+K keyboard shortcut
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -72,7 +76,7 @@ export default function SimpleChatInterface() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    // Load session data
+    // Load session data — restores messages, documents, AND package state
     useEffect(() => {
         if (!currentSessionId) {
             setIsLoadingSession(false);
@@ -82,6 +86,13 @@ export default function SimpleChatInterface() {
         if (sessionData) {
             setMessages(sessionData.messages);
             setDocuments(sessionData.documents || {});
+            // Restore package state (eagleState) from acquisitionData
+            const saved = sessionData.acquisitionData as Record<string, unknown> | undefined;
+            if (saved?.eagleState) {
+                setEagleState(saved.eagleState as PackageState);
+            } else {
+                setEagleState(null);
+            }
             // Mark existing sessions as already titled (don't re-generate)
             if (sessionData.messages.length > 0) {
                 titleGeneratedRef.current.add(currentSessionId);
@@ -89,17 +100,21 @@ export default function SimpleChatInterface() {
         } else {
             setMessages([]);
             setDocuments({});
+            setEagleState(null);
         }
         firstUserMsgRef.current = null;
         setIsLoadingSession(false);
     }, [currentSessionId, loadSession]);
 
-    // Auto-save session
+    // Auto-save session — includes eagleState in acquisitionData for restoration
     const saveSessionDebounced = useCallback(() => {
         if (messages.length > 0) {
-            saveSession(messages, {}, documents);
+            const acquisitionData = eagleState
+                ? { eagleState: eagleState as unknown as Record<string, unknown> }
+                : {};
+            saveSession(messages, acquisitionData, documents);
         }
-    }, [messages, documents, saveSession]);
+    }, [messages, documents, eagleState, saveSession]);
 
     useEffect(() => {
         const timeoutId = setTimeout(saveSessionDebounced, 500);
@@ -156,9 +171,6 @@ export default function SimpleChatInterface() {
 
     /** Bedrock trace events collected during the session. */
     const [bedrockTraces, setBedrockTraces] = useState<Record<string, unknown>[]>([]);
-
-    /** Live acquisition package state pushed via SSE metadata events. */
-    const [eagleState, setEagleState] = useState<PackageState | null>(null);
 
     // Agent stream
     const { sendQuery, isStreaming, error, logs, clearLogs, addUserInputLog } = useAgentStream({
