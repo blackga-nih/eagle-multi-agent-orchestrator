@@ -3,7 +3,8 @@
 import logging
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ..cognito_auth import UserContext
@@ -296,6 +297,79 @@ async def promote_document_final_endpoint(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
+
+
+# ── Document Download (DOCX / PDF) ───────────────────────────────────
+
+@router.get("/api/packages/{package_id}/documents/{doc_type}/download")
+async def download_package_document(
+    package_id: str,
+    doc_type: str,
+    format: str = "docx",
+    version: Optional[int] = None,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Download a package document as DOCX or PDF (rendered from stored markdown)."""
+    from ..document_export import export_document, ExportDependencyError
+
+    doc = get_document(user.tenant_id, package_id, doc_type, version)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    content = doc.get("content") or doc.get("s3_content") or ""
+    if not content:
+        raise HTTPException(status_code=422, detail="Document has no content to export")
+
+    title = doc.get("title") or doc_type.replace("_", " ").title()
+
+    try:
+        result = export_document(content, format, title)
+    except ExportDependencyError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return Response(
+        content=result["data"],
+        media_type=result["content_type"],
+        headers={"Content-Disposition": f'attachment; filename="{result["filename"]}"'},
+    )
+
+
+# ── Workspace Document Export (no package required) ──────────────────
+
+@router.post("/api/documents/export")
+async def export_document_content(
+    format: str = "docx",
+    body: Dict[str, Any] = Body(...),
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Export arbitrary markdown content as DOCX or PDF — no package_id required.
+
+    Accepts: { content: str, title: str, doc_type: str }
+    Returns: binary DOCX or PDF with Content-Disposition: attachment.
+    """
+    from ..document_export import export_document, ExportDependencyError
+
+    content = body.get("content", "")
+    title = body.get("title", "Document")
+    doc_type = body.get("doc_type", "document")
+
+    if not content:
+        raise HTTPException(status_code=422, detail="content is required")
+
+    try:
+        result = export_document(content, format, title)
+    except ExportDependencyError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return Response(
+        content=result["data"],
+        media_type=result["content_type"],
+        headers={"Content-Disposition": f'attachment; filename="{result["filename"]}"'},
+    )
 
 
 # ── Approval Chains ──────────────────────────────────────────────────

@@ -76,6 +76,49 @@ function getDocIcon(type: string): string {
 // Sub-components
 // ---------------------------------------------------------------------------
 
+async function handleDocDownload(doc: DocumentInfo, format: 'docx' | 'pdf') {
+  if (doc.package_id) {
+    // Package mode: GET endpoint
+    const url = `/api/packages/${encodeURIComponent(doc.package_id)}/documents/${encodeURIComponent(doc.document_type)}/download?format=${format}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+  // Workspace mode: get content from doc or sessionStorage, POST to export endpoint
+  let content: string | undefined = doc.content;
+  if (!content) {
+    const docId = encodeURIComponent(doc.document_id || doc.s3_key || doc.title || '');
+    try {
+      const cached = sessionStorage.getItem(`doc-content-${docId}`);
+      if (cached) content = (JSON.parse(cached) as DocumentInfo).content;
+    } catch { /* ignore */ }
+  }
+  if (!content) return;
+  try {
+    const response = await fetch(`/api/documents/export?format=${format}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, title: doc.title, doc_type: doc.document_type }),
+    });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `${doc.title}.${format}`;
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch { /* ignore */ }
+}
+
 function DocumentsTab({ documents }: { documents: Record<string, DocumentInfo[]> }) {
   const allDocs = Object.values(documents).flat();
 
@@ -119,6 +162,18 @@ function DocumentsTab({ documents }: { documents: Record<string, DocumentInfo[]>
               )}
             </div>
           </div>
+          {(doc.package_id || doc.s3_key || doc.content) && (
+            <div className="flex gap-1.5 mt-2 pt-2 border-t border-gray-100">
+              <button type="button" onClick={() => { void handleDocDownload(doc, 'docx'); }}
+                className="flex-1 text-[10px] py-1 border border-[#003366] text-[#003366] rounded hover:bg-gray-50 transition-colors font-medium">
+                ↓ DOCX
+              </button>
+              <button type="button" onClick={() => { void handleDocDownload(doc, 'pdf'); }}
+                className="flex-1 text-[10px] py-1 border border-[#003366] text-[#003366] rounded hover:bg-gray-50 transition-colors font-medium">
+                ↓ PDF
+              </button>
+            </div>
+          )}
         </div>
       ))}
     </div>

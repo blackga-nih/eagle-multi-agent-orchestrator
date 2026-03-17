@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ClientToolResult } from '@/lib/client-tools';
 import { DocumentInfo } from '@/types/chat';
@@ -189,6 +189,75 @@ function DocumentResultCard({
   const version = data.version as number | undefined;
   const s3Key = String(data.s3_key ?? '');
 
+  const packageId = data.package_id as string | undefined;
+  const docTypeKey = docType;
+  const docContent = data.content as string | undefined;
+
+  // Auto-save document content to sessionStorage on mount so downloads work
+  // without requiring the user to click "Open Document" first.
+  useEffect(() => {
+    if (!docContent) return;
+    const docId = encodeURIComponent(s3Key || (data.document_id as string) || title);
+    const docInfo: DocumentInfo = {
+      document_id: s3Key || (data.document_id as string),
+      package_id: packageId,
+      document_type: docType,
+      doc_type: docType,
+      title,
+      content: docContent,
+      mode: data.mode as 'package' | 'workspace' | undefined,
+      status: data.status as string | undefined,
+      version,
+      word_count: wordCount,
+      generated_at: data.generated_at as string | undefined,
+      s3_key: s3Key || undefined,
+      s3_location: data.s3_location as string | undefined,
+    };
+    try {
+      sessionStorage.setItem(`doc-content-${docId}`, JSON.stringify(docInfo));
+    } catch {
+      // sessionStorage unavailable
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s3Key, title]);
+
+  const handleDownload = async (format: 'docx' | 'pdf') => {
+    if (packageId && docTypeKey) {
+      // Package mode: GET endpoint — browser handles the download directly
+      const url = `/api/packages/${encodeURIComponent(packageId)}/documents/${encodeURIComponent(docTypeKey)}/download?format=${format}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+    // Workspace mode: POST content to the export endpoint
+    if (!docContent) return;
+    try {
+      const response = await fetch(`/api/documents/export?format=${format}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: docContent, title, doc_type: docTypeKey }),
+      });
+      if (!response.ok) return;
+      const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition') ?? '';
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `${title}.${format}`;
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Download failed silently — user can retry
+    }
+  };
+
   const handleOpen = () => {
     const docId = encodeURIComponent(s3Key || (data.document_id as string) || title);
     const params = new URLSearchParams();
@@ -220,7 +289,11 @@ function DocumentResultCard({
   };
 
   return (
-    <div className="border-t border-[#E5E9F0] px-3 py-2.5 bg-white flex items-center gap-3">
+    <div className="border-t border-[#E5E9F0] px-3 py-2.5 bg-white flex items-center gap-3"
+         data-package-id={packageId ?? ''}
+         data-doc-type={docTypeKey}
+         data-s3-key={s3Key}
+         data-doc-title={title}>
       <div className="flex-1 min-w-0">
         <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">
           {DOC_LABEL[docType] ?? docType.replace(/_/g, ' ')}
@@ -242,6 +315,18 @@ function DocumentResultCard({
           <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
         </svg>
       </button>
+      {(packageId || docContent) && (
+        <>
+          <button type="button" onClick={() => { void handleDownload('docx'); }}
+            className="flex items-center gap-1 px-2 py-1 bg-white border border-[#003366] text-[#003366] text-[10px] font-medium rounded-md hover:bg-gray-50 transition-colors shrink-0">
+            ↓ DOCX
+          </button>
+          <button type="button" onClick={() => { void handleDownload('pdf'); }}
+            className="flex items-center gap-1 px-2 py-1 bg-white border border-[#003366] text-[#003366] text-[10px] font-medium rounded-md hover:bg-gray-50 transition-colors shrink-0">
+            ↓ PDF
+          </button>
+        </>
+      )}
     </div>
   );
 }
