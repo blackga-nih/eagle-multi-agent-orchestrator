@@ -8,16 +8,44 @@ model: sonnet
 
 Run a curated test suite validating the MVP1 acquisition package workflow end-to-end.
 
-## Pre-flight
+## Step 0: Load Repo Config
 
-1. Ensure AWS credentials are active:
+Resolve all environment-specific values from the config file before running anything.
+
 ```bash
-aws sts get-caller-identity --profile eagle 2>/dev/null || echo "AWS_PROFILE=eagle not authenticated — run: AWS_PROFILE=eagle aws sso login"
+# Determine repo name (used as config key)
+REPO_NAME=$(basename $(git rev-parse --show-toplevel))
+echo "Repo: $REPO_NAME"
 ```
 
-2. Set working directory:
+Then read `.claude/skills/mvp1-eval/config.json` and look up the entry matching `$REPO_NAME`.
+Extract these values for use in all subsequent steps:
+
+| Variable | Config key | Fallback |
+|----------|-----------|---------|
+| `AWS_PROFILE` | `aws_profile` | `eagle` |
+| `S3_BUCKET` | `s3_bucket` | `eagle-documents-dev` |
+| `SERVER_DIR` | `server_dir` | `server` |
+| `ENV_FILE` | `env_file` | `server/.env` |
+| `LANGFUSE_HOST` | `langfuse_host` | `https://us.cloud.langfuse.com` |
+| `TIER1_TESTS` | `tier1_tests[]` | see defaults below |
+| `TIER2_TESTS` | `tier2_tests[]` | see defaults below |
+| `TIER3_TEST` | `tier3_test` | `tests/test_strands_eval.py` |
+
+If `$REPO_NAME` is not found in the config, print a warning and use fallback values. Do **not** abort — the skill should work in unknown repos with sensible defaults.
+
+> **Adding a new repo**: Copy the `_template` block in `config.json`, rename the key to your repo basename, and fill in `aws_account` + `s3_bucket`. Everything else is usually identical.
+
+## Pre-flight
+
+1. Ensure AWS credentials are active (using `AWS_PROFILE` from config):
 ```bash
-cd server/
+aws sts get-caller-identity --profile $AWS_PROFILE 2>/dev/null || echo "AWS_PROFILE=$AWS_PROFILE not authenticated — run: AWS_PROFILE=$AWS_PROFILE aws sso login"
+```
+
+2. Set working directory (using `SERVER_DIR` from config):
+```bash
+cd $SERVER_DIR
 ```
 
 ## Test Tiers
@@ -138,7 +166,7 @@ from datetime import datetime, timedelta, timezone
 
 # Load from server/.env
 env = {}
-with open("server/.env") as f:
+with open(ENV_FILE) as f:  # ENV_FILE from config (e.g. "server/.env")
     for line in f:
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
@@ -171,7 +199,7 @@ For each trace from the test run, fetch observations and extract:
 7. **Documents created** — any TOOL output containing `s3_key`
 8. **S3 resource URLs** — if `s3_key` found, construct:
    `https://s3.console.aws.amazon.com/s3/object/{bucket}?prefix={s3_key}`
-   where bucket = `eagle-documents-695681773636-dev` (from env `S3_BUCKET`)
+   where bucket = `$S3_BUCKET` (from config, e.g. `eagle-documents-274487662938-dev`)
 
 ### 4c. Produce the Report
 

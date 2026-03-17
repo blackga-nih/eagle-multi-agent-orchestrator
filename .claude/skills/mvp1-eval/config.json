@@ -1,0 +1,73 @@
+{
+  "_comment": "Repo-keyed config for the mvp1-eval skill. Key = basename of repo root (git rev-parse --show-toplevel | xargs basename). Add an entry for each repo that runs this skill.",
+
+  "sample-multi-tenant-agent-core-app": {
+    "aws_profile": "eagle",
+    "aws_account": "274487662938",
+    "aws_region": "us-east-1",
+    "s3_bucket": "eagle-documents-274487662938-dev",
+    "server_dir": "server",
+    "env_file": "server/.env",
+    "langfuse_host": "https://us.cloud.langfuse.com",
+    "tier1_tests": [
+      "tests/test_compliance_matrix.py",
+      "tests/test_chat_kb_flow.py",
+      "tests/test_canonical_package_document_flow.py",
+      "tests/test_document_pipeline.py"
+    ],
+    "tier2_tests": [
+      "tests/test_strands_multi_agent.py",
+      "tests/test_strands_poc.py",
+      "tests/test_strands_service_integration.py"
+    ],
+    "tier3_test": "tests/test_strands_eval.py",
+    "notes": "NCI EAGLE instance — account 274487662938, power-user-* IAM prefix, eagle SSO profile"
+  },
+
+  "eagle-multi-agent-orchestrator": {
+    "aws_profile": "eagle",
+    "aws_account": "695681773636",
+    "aws_region": "us-east-1",
+    "s3_bucket": "eagle-documents-695681773636-dev",
+    "server_dir": "server",
+    "env_file": "server/.env",
+    "langfuse_host": "https://us.cloud.langfuse.com",
+    "tier1_tests": [
+      "tests/test_compliance_matrix.py",
+      "tests/test_chat_kb_flow.py",
+      "tests/test_canonical_package_document_flow.py",
+      "tests/test_document_pipeline.py"
+    ],
+    "tier2_tests": [
+      "tests/test_strands_multi_agent.py",
+      "tests/test_strands_poc.py",
+      "tests/test_strands_service_integration.py"
+    ],
+    "tier3_test": "tests/test_strands_eval.py",
+    "notes": "Upstream gblack686/blackga-nih instance — account 695681773636"
+  },
+
+  "_template": {
+    "_doc": "Copy this block, rename the key to your repo basename, and fill in the values.",
+    "aws_profile": "eagle",
+    "aws_account": "YOUR_ACCOUNT_ID",
+    "aws_region": "us-east-1",
+    "s3_bucket": "eagle-documents-YOUR_ACCOUNT_ID-dev",
+    "server_dir": "server",
+    "env_file": "server/.env",
+    "langfuse_host": "https://us.cloud.langfuse.com",
+    "tier1_tests": [
+      "tests/test_compliance_matrix.py",
+      "tests/test_chat_kb_flow.py",
+      "tests/test_canonical_package_document_flow.py",
+      "tests/test_document_pipeline.py"
+    ],
+    "tier2_tests": [
+      "tests/test_strands_multi_agent.py",
+      "tests/test_strands_poc.py",
+      "tests/test_strands_service_integration.py"
+    ],
+    "tier3_test": "tests/test_strands_eval.py",
+    "notes": "Describe this repo/environment here"
+  }
+}
