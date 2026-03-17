@@ -119,6 +119,7 @@ from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
 from .feedback_store import list_feedback
 from .health_checks import check_knowledge_base_health
+from .error_webhook import notify_error, close_webhook_client
 
 # ── Logging ──────────────────────────────────────────────────────────
 from .telemetry.log_context import configure_logging
@@ -142,6 +143,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Error Webhook Exception Handlers ─────────────────────────────────
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTPExceptions — send webhook on 5xx, return standard JSON."""
+    if exc.status_code >= 500:
+        notify_error(request=request, status_code=exc.status_code, exception=exc)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Handle unhandled exceptions — send webhook with traceback, return 500."""
+    import traceback
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    notify_error(request=request, status_code=500, exception=exc, traceback_str=tb)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+@app.on_event("shutdown")
+async def shutdown_webhook_client():
+    await close_webhook_client()
+
 
 # ── Feature Flags ────────────────────────────────────────────────────
 USE_PERSISTENT_SESSIONS = os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true"

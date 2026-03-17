@@ -11,20 +11,19 @@ subagent delegation instead of the legacy stream_chat() prompt-injection path.
 #   app.include_router(streaming_router)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone
 import asyncio
 import json
 import logging
-from contextlib import suppress
 from typing import Any, AsyncGenerator, Optional
 
-from .cognito_auth import extract_user_context, UserContext
-from .stream_protocol import StreamEvent, StreamEventType, MultiAgentStreamWriter
+from .cognito_auth import extract_user_context
+from .stream_protocol import MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
-from .strands_agentic_service import sdk_query, sdk_query_streaming, MODEL, EAGLE_TOOLS
+from .strands_agentic_service import sdk_query_streaming, MODEL, EAGLE_TOOLS
 from .session_store import add_message
 from .package_context_service import resolve_context, set_active_package
 from .telemetry.log_context import set_log_context
@@ -105,7 +104,7 @@ async def stream_generator(
                     yield {"type": "_keepalive"}
             except StopAsyncIteration:
                 break
-            except Exception as e:
+            except Exception:
                 # Handle StopAsyncIteration from the task result
                 if pending_task and pending_task.done():
                     try:
@@ -189,6 +188,12 @@ async def stream_generator(
 
             elif chunk_type == "error":
                 await writer.write_error(sse_queue, chunk.get("error", "Unknown error"))
+                from .error_webhook import notify_streaming_error
+                notify_streaming_error(
+                    "/api/chat/stream", "POST",
+                    Exception(chunk.get("error", "Unknown error")),
+                    tenant_id=tenant_id, user_id=user_id, session_id=session_id or "",
+                )
                 yield await sse_queue.get()
                 return
 
@@ -208,6 +213,11 @@ async def stream_generator(
     except Exception as e:
         logger.error("Streaming chat error user=%s session=%s: %s", user_id, session_id, str(e), exc_info=True)
         await writer.write_error(sse_queue, str(e))
+        from .error_webhook import notify_streaming_error
+        notify_streaming_error(
+            "/api/chat/stream", "POST", e,
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id or "",
+        )
         yield await sse_queue.get()
 
 
