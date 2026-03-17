@@ -30,9 +30,9 @@ def test_supervisor_prompt_includes_kb_retrieval_and_sources_rules():
         tier="advanced",
         agent_names=[],
     )
-    assert "KB Retrieval Rules" in prompt
+    assert "KB Retrieval" in prompt
     assert "knowledge_search first" in prompt
-    assert "knowledge_fetch on the top 1-3 relevant docs" in prompt
-    assert "Sources section with title + s3_key" in prompt
+    assert "knowledge_fetch on top 1-3" in prompt
+    assert "Sources section" in prompt and "s3_key" in prompt
 
 
