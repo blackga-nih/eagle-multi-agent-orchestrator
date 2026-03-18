@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Plus, Search, FileStack, Trash2, Eye, Code, Loader2, AlertCircle,
-  RefreshCw, Package, CheckCircle2, XCircle,
+  RefreshCw, Package, FileText, FileSpreadsheet, File, Filter,
+  Copy, CheckCircle2, X, ChevronDown,
 } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
@@ -12,11 +13,14 @@ import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
 import { useAuth } from '@/contexts/auth-context';
 import { pluginApi, templateApi } from '@/lib/admin-api';
-import type { PluginEntity, TemplateEntity } from '@/types/admin';
+import { listPackages, type PackageInfo } from '@/lib/document-api';
+import type { PluginEntity, TemplateEntity, S3Template } from '@/types/admin';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Constants & Helpers
 // ---------------------------------------------------------------------------
+
+type TabType = 'all' | 's3' | 'custom';
 
 const docTypeLabels: Record<string, string> = {
   sow: 'Statement of Work',
@@ -25,6 +29,13 @@ const docTypeLabels: Record<string, string> = {
   acquisition_plan: 'Acquisition Plan',
   justification: 'Justification',
   funding_doc: 'Funding Document',
+  cor_certification: 'COR Certification',
+  son_products: 'SON - Products',
+  son_services: 'SON - Services',
+  buy_american: 'Buy American',
+  subk_plan: 'Subcontracting Plan',
+  conference_request: 'Conference Request',
+  custom: 'Custom Document',
 };
 
 const docTypeColors: Record<string, string> = {
@@ -34,23 +45,60 @@ const docTypeColors: Record<string, string> = {
   acquisition_plan: 'bg-amber-100 text-amber-700',
   justification: 'bg-red-100 text-red-700',
   funding_doc: 'bg-cyan-100 text-cyan-700',
+  cor_certification: 'bg-teal-100 text-teal-700',
+  son_products: 'bg-indigo-100 text-indigo-700',
+  son_services: 'bg-indigo-100 text-indigo-700',
+  buy_american: 'bg-orange-100 text-orange-700',
+  subk_plan: 'bg-pink-100 text-pink-700',
+  conference_request: 'bg-slate-100 text-slate-700',
+  custom: 'bg-gray-100 text-gray-600',
+};
+
+const phaseColors: Record<string, string> = {
+  intake: 'bg-sky-100 text-sky-700',
+  planning: 'bg-violet-100 text-violet-700',
+  solicitation: 'bg-amber-100 text-amber-700',
+  evaluation: 'bg-emerald-100 text-emerald-700',
+  award: 'bg-blue-100 text-blue-700',
+  administration: 'bg-slate-100 text-slate-700',
+};
+
+const fileTypeIcons: Record<string, typeof FileText> = {
+  docx: FileText,
+  doc: FileText,
+  xlsx: FileSpreadsheet,
+  xls: FileSpreadsheet,
+  pdf: File,
 };
 
 function formatDate(d: string): string {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Unified card type for rendering both bundled plugin templates and custom template overrides
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Unified card type for rendering all template sources
 interface TemplateCard {
   key: string;
   name: string;
   description: string;
   docType: string;
-  source: 'bundled' | 'custom';
+  source: 'bundled' | 'custom' | 's3';
   content: string;
   version: number;
   updatedAt: string;
-  raw: PluginEntity | TemplateEntity;
+  // S3-specific fields
+  s3Key?: string;
+  fileType?: string;
+  sizeBytes?: number;
+  phase?: string;
+  useCase?: string;
+  registered?: boolean;
+  raw: PluginEntity | TemplateEntity | S3Template;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,18 +111,29 @@ export default function TemplatesPage() {
   // Data
   const [pluginTemplates, setPluginTemplates] = useState<PluginEntity[]>([]);
   const [customTemplates, setCustomTemplates] = useState<TemplateEntity[]>([]);
+  const [s3Templates, setS3Templates] = useState<S3Template[]>([]);
+  const [packages, setPackages] = useState<PackageInfo[]>([]);
+  const [phases, setPhases] = useState<Record<string, string>>({});
+  const [phaseCounts, setPhaseCounts] = useState<Record<string, number>>({});
 
   // UI
+  const [activeTab, setActiveTab] = useState<TabType>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [phaseFilter, setPhaseFilter] = useState<string | null>(null);
+  const [fileTypeFilter, setFileTypeFilter] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Modals
   const [selectedCard, setSelectedCard] = useState<TemplateCard | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewCard, setPreviewCard] = useState<TemplateCard | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [showCopyModal, setShowCopyModal] = useState(false);
+  const [copyTarget, setCopyTarget] = useState<TemplateCard | null>(null);
+  const [selectedPackageId, setSelectedPackageId] = useState<string>('');
 
   // Edit form state
   const [editBody, setEditBody] = useState('');
@@ -87,16 +146,23 @@ export default function TemplatesPage() {
   // Data fetching
   // -----------------------------------------------------------------------
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (refresh = false) => {
     setIsLoading(true);
     setError(null);
     try {
-      const [plugins, custom] = await Promise.all([
+      const token = await getToken();
+      const [plugins, custom, s3Response, pkgs] = await Promise.all([
         pluginApi.list(getToken, 'templates'),
         templateApi.list(getToken).catch(() => [] as TemplateEntity[]),
+        templateApi.listS3(getToken, undefined, refresh),
+        listPackages(token),
       ]);
       setPluginTemplates(plugins);
       setCustomTemplates(Array.isArray(custom) ? custom : []);
+      setS3Templates(s3Response.templates);
+      setPhases(s3Response.phases);
+      setPhaseCounts(s3Response.phase_counts);
+      setPackages(pkgs);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load templates');
     } finally {
@@ -110,7 +176,7 @@ export default function TemplatesPage() {
   // Build unified card list
   // -----------------------------------------------------------------------
 
-  const cards: TemplateCard[] = [
+  const cards: TemplateCard[] = useMemo(() => [
     ...pluginTemplates.map((p): TemplateCard => ({
       key: `plugin-${p.name}`,
       name: (p.metadata?.display_name as string) || p.name,
@@ -133,29 +199,87 @@ export default function TemplatesPage() {
       updatedAt: t.updated_at,
       raw: t,
     })),
-  ];
+    ...s3Templates.map((s): TemplateCard => ({
+      key: `s3-${s.s3_key}`,
+      name: s.display_name,
+      description: s.filename,
+      docType: s.doc_type || 'custom',
+      source: 's3',
+      content: '', // S3 templates are binary, no content preview
+      version: 1,
+      updatedAt: s.last_modified || '',
+      s3Key: s.s3_key,
+      fileType: s.file_type,
+      sizeBytes: s.size_bytes,
+      phase: s.category?.phase,
+      useCase: s.category?.use_case,
+      registered: s.registered,
+      raw: s,
+    })),
+  ], [pluginTemplates, customTemplates, s3Templates]);
 
-  const q = searchQuery.toLowerCase();
-  const filteredCards = cards.filter(c =>
-    c.name.toLowerCase().includes(q) ||
-    c.docType.toLowerCase().includes(q) ||
-    c.description.toLowerCase().includes(q),
-  );
+  // Filter cards based on tab, search, phase, and file type
+  const filteredCards = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return cards.filter(c => {
+      // Tab filter
+      if (activeTab === 's3' && c.source !== 's3') return false;
+      if (activeTab === 'custom' && c.source !== 'custom' && c.source !== 'bundled') return false;
+
+      // Phase filter (S3 templates only)
+      if (phaseFilter && c.source === 's3' && c.phase !== phaseFilter) return false;
+
+      // File type filter (S3 templates only)
+      if (fileTypeFilter && c.source === 's3' && c.fileType !== fileTypeFilter) return false;
+
+      // Search filter
+      return (
+        c.name.toLowerCase().includes(q) ||
+        c.docType.toLowerCase().includes(q) ||
+        c.description.toLowerCase().includes(q)
+      );
+    });
+  }, [cards, activeTab, searchQuery, phaseFilter, fileTypeFilter]);
+
+  // Get unique file types for filter
+  const uniqueFileTypes = useMemo(() => {
+    const types = new Set<string>();
+    s3Templates.forEach(t => types.add(t.file_type));
+    return Array.from(types).sort();
+  }, [s3Templates]);
+
+  // Tab counts
+  const tabCounts = useMemo(() => ({
+    all: cards.length,
+    s3: cards.filter(c => c.source === 's3').length,
+    custom: cards.filter(c => c.source === 'custom' || c.source === 'bundled').length,
+  }), [cards]);
 
   // -----------------------------------------------------------------------
   // Actions
   // -----------------------------------------------------------------------
 
   function openEdit(card: TemplateCard) {
-    setSelectedCard(card);
-    setEditBody(card.content);
-    setEditDisplayName(card.name);
+    if (card.source === 's3') {
+      // For S3 templates, open copy modal
+      openCopyModal(card);
+    } else {
+      setSelectedCard(card);
+      setEditBody(card.content);
+      setEditDisplayName(card.name);
+    }
   }
 
   function openPreview(card: TemplateCard, e: React.MouseEvent) {
     e.stopPropagation();
     setPreviewCard(card);
     setShowPreviewModal(true);
+  }
+
+  function openCopyModal(card: TemplateCard) {
+    setCopyTarget(card);
+    setSelectedPackageId('');
+    setShowCopyModal(true);
   }
 
   async function handleSaveTemplate() {
@@ -206,6 +330,49 @@ export default function TemplatesPage() {
     }
   }
 
+  async function handleCopyToPackage() {
+    if (!copyTarget?.s3Key || !selectedPackageId) return;
+    setSaving(true);
+    try {
+      const result = await templateApi.copyToPackage(getToken, {
+        s3_key: copyTarget.s3Key,
+        package_id: selectedPackageId,
+      });
+      setShowCopyModal(false);
+      setCopyTarget(null);
+      setSelectedPackageId('');
+      setSuccessMessage(`Template copied to package. Document ID: ${result.document_id}`);
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to copy template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Render helpers
+  // -----------------------------------------------------------------------
+
+  function renderFileTypeIcon(fileType: string | undefined) {
+    const Icon = fileTypeIcons[fileType || ''] || File;
+    return <Icon className="w-5 h-5" />;
+  }
+
+  function renderSourceBadge(source: 'bundled' | 'custom' | 's3') {
+    const config = {
+      bundled: { label: 'Bundled', class: 'bg-gray-100 text-gray-500' },
+      custom: { label: 'Custom', class: 'bg-blue-100 text-blue-700' },
+      s3: { label: 'S3 Library', class: 'bg-emerald-100 text-emerald-700' },
+    };
+    const { label, class: cls } = config[source];
+    return (
+      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${cls}`}>
+        {label}
+      </span>
+    );
+  }
+
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
@@ -219,7 +386,7 @@ export default function TemplatesPage() {
         <div className="p-8">
           <PageHeader
             title="Document Templates"
-            description="Manage reusable document templates and overrides"
+            description="Browse S3 template library and manage custom overrides"
             breadcrumbs={[
               { label: 'Admin', href: '/admin' },
               { label: 'Templates' },
@@ -227,7 +394,7 @@ export default function TemplatesPage() {
             actions={
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => fetchData()}
+                  onClick={() => fetchData(true)}
                   disabled={isLoading}
                   className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
                 >
@@ -245,19 +412,116 @@ export default function TemplatesPage() {
             }
           />
 
-          {/* Search */}
-          <div className="mb-6">
-            <div className="relative max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search templates..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              />
-            </div>
+          {/* Tabs */}
+          <div className="flex items-center gap-1 mb-6 bg-gray-100 rounded-xl p-1 w-fit">
+            {(['all', 's3', 'custom'] as TabType[]).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === tab
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {tab === 'all' ? 'All' : tab === 's3' ? 'S3 Library' : 'Custom & Bundled'}
+                <span className="ml-1.5 text-xs text-gray-400">({tabCounts[tab]})</span>
+              </button>
+            ))}
           </div>
+
+          {/* Filters (shown for S3 tab or All tab) */}
+          {(activeTab === 's3' || activeTab === 'all') && (
+            <div className="flex flex-wrap items-center gap-3 mb-6">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search templates..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-64 pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+
+              {/* Phase Filter */}
+              <div className="relative">
+                <select
+                  value={phaseFilter || ''}
+                  onChange={(e) => setPhaseFilter(e.target.value || null)}
+                  className="appearance-none pl-4 pr-10 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="">All Phases</option>
+                  {Object.entries(phases).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label} ({phaseCounts[key] || 0})
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+
+              {/* File Type Filter */}
+              <div className="relative">
+                <select
+                  value={fileTypeFilter || ''}
+                  onChange={(e) => setFileTypeFilter(e.target.value || null)}
+                  className="appearance-none pl-4 pr-10 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="">All File Types</option>
+                  {uniqueFileTypes.map(type => (
+                    <option key={type} value={type}>{type.toUpperCase()}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+
+              {/* Clear filters */}
+              {(phaseFilter || fileTypeFilter || searchQuery) && (
+                <button
+                  onClick={() => {
+                    setPhaseFilter(null);
+                    setFileTypeFilter(null);
+                    setSearchQuery('');
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-gray-700"
+                >
+                  <X className="w-4 h-4" />
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Search only for custom tab */}
+          {activeTab === 'custom' && (
+            <div className="mb-6">
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search templates..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Success Message */}
+          {successMessage && (
+            <div className="mb-6 flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl text-green-700">
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-medium">{successMessage}</p>
+              </div>
+              <button onClick={() => setSuccessMessage(null)} className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200">
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* Error */}
           {error && (
@@ -291,40 +555,85 @@ export default function TemplatesPage() {
                   onClick={() => openEdit(card)}
                 >
                   <div className="flex items-start justify-between mb-3">
-                    <div className={`p-3 rounded-xl ${card.source === 'bundled' ? 'bg-gray-100' : 'bg-blue-50'} group-hover:bg-blue-50 transition-colors`}>
-                      {card.source === 'bundled' ? (
+                    <div className={`p-3 rounded-xl ${
+                      card.source === 's3' ? 'bg-emerald-50' :
+                      card.source === 'bundled' ? 'bg-gray-100' : 'bg-blue-50'
+                    } group-hover:bg-blue-50 transition-colors`}>
+                      {card.source === 's3' ? (
+                        renderFileTypeIcon(card.fileType)
+                      ) : card.source === 'bundled' ? (
                         <Package className="w-6 h-6 text-gray-600 group-hover:text-blue-600" />
                       ) : (
                         <FileStack className="w-6 h-6 text-blue-600" />
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${
-                        card.source === 'bundled' ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {card.source === 'bundled' ? 'Bundled' : 'Custom'}
-                      </span>
+                      {renderSourceBadge(card.source)}
                     </div>
                   </div>
 
-                  <h3 className="font-semibold text-gray-900 mb-1 group-hover:text-blue-600 transition-colors">
+                  <h3 className="font-semibold text-gray-900 mb-1 group-hover:text-blue-600 transition-colors line-clamp-1">
                     {card.name}
                   </h3>
                   {card.description && (
-                    <p className="text-sm text-gray-500 mb-3 line-clamp-2">{card.description}</p>
+                    <p className="text-sm text-gray-500 mb-3 line-clamp-1">{card.description}</p>
+                  )}
+
+                  {/* S3 template metadata */}
+                  {card.source === 's3' && (
+                    <div className="flex items-center gap-2 mb-3 text-xs text-gray-400">
+                      <span className="uppercase">{card.fileType}</span>
+                      {card.sizeBytes !== undefined && (
+                        <>
+                          <span>·</span>
+                          <span>{formatBytes(card.sizeBytes)}</span>
+                        </>
+                      )}
+                      {card.registered && (
+                        <>
+                          <span>·</span>
+                          <span className="text-emerald-500 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Registered
+                          </span>
+                        </>
+                      )}
+                    </div>
                   )}
 
                   <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                    <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${docTypeColors[card.docType] || 'bg-gray-100 text-gray-600'}`}>
-                      {docTypeLabels[card.docType] || card.docType}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {/* Phase badge for S3 templates */}
+                      {card.phase && (
+                        <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${phaseColors[card.phase] || 'bg-gray-100 text-gray-600'}`}>
+                          {phases[card.phase] || card.phase}
+                        </span>
+                      )}
+                      {/* Doc type badge */}
+                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${docTypeColors[card.docType] || 'bg-gray-100 text-gray-600'}`}>
+                        {docTypeLabels[card.docType] || card.docType}
+                      </span>
+                    </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => openPreview(card, e)}
-                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
+                      {card.source === 's3' ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCopyModal(card);
+                          }}
+                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Use Template"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => openPreview(card, e)}
+                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -341,7 +650,7 @@ export default function TemplatesPage() {
         </div>
       </main>
 
-      {/* ─── Template Edit Modal ─── */}
+      {/* Template Edit Modal */}
       <Modal
         isOpen={!!selectedCard}
         onClose={() => setSelectedCard(null)}
@@ -415,7 +724,7 @@ export default function TemplatesPage() {
         )}
       </Modal>
 
-      {/* ─── Template Preview Modal ─── */}
+      {/* Template Preview Modal */}
       <Modal
         isOpen={showPreviewModal}
         onClose={() => setShowPreviewModal(false)}
@@ -445,7 +754,7 @@ export default function TemplatesPage() {
         )}
       </Modal>
 
-      {/* ─── New Template Modal ─── */}
+      {/* New Template Modal */}
       <Modal
         isOpen={showNewModal}
         onClose={() => setShowNewModal(false)}
@@ -504,6 +813,93 @@ export default function TemplatesPage() {
             />
           </div>
         </form>
+      </Modal>
+
+      {/* Copy to Package Modal */}
+      <Modal
+        isOpen={showCopyModal}
+        onClose={() => {
+          setShowCopyModal(false);
+          setCopyTarget(null);
+          setSelectedPackageId('');
+        }}
+        title="Use Template"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => {
+                setShowCopyModal(false);
+                setCopyTarget(null);
+                setSelectedPackageId('');
+              }}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCopyToPackage}
+              disabled={saving || !selectedPackageId}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              <Copy className="w-4 h-4" />
+              {saving ? 'Copying...' : 'Copy to Package'}
+            </button>
+          </div>
+        }
+      >
+        {copyTarget && (
+          <div className="space-y-4">
+            <div className="p-4 bg-gray-50 rounded-xl">
+              <div className="flex items-center gap-3 mb-2">
+                {renderFileTypeIcon(copyTarget.fileType)}
+                <div>
+                  <h4 className="font-medium text-gray-900">{copyTarget.name}</h4>
+                  <p className="text-sm text-gray-500">{copyTarget.description}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                {copyTarget.phase && (
+                  <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${phaseColors[copyTarget.phase] || 'bg-gray-100 text-gray-600'}`}>
+                    {phases[copyTarget.phase] || copyTarget.phase}
+                  </span>
+                )}
+                <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${docTypeColors[copyTarget.docType] || 'bg-gray-100 text-gray-600'}`}>
+                  {docTypeLabels[copyTarget.docType] || copyTarget.docType}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Select Target Package *
+              </label>
+              {packages.length === 0 ? (
+                <p className="text-sm text-gray-500 py-4 text-center bg-gray-50 rounded-xl">
+                  No packages available. Create a package first to use templates.
+                </p>
+              ) : (
+                <select
+                  value={selectedPackageId}
+                  onChange={(e) => setSelectedPackageId(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                >
+                  <option value="">Select a package...</option>
+                  {packages.map(pkg => (
+                    <option key={pkg.package_id} value={pkg.package_id}>
+                      {pkg.title || pkg.package_id}
+                      {pkg.status && ` (${pkg.status})`}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-500">
+              This will create a copy of the template in your selected package. You can then customize the copy within the package.
+            </p>
+          </div>
+        )}
       </Modal>
     </div>
     </AuthGuard>

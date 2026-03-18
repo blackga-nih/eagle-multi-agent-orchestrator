@@ -10,8 +10,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger("eagle.template_registry")
 
@@ -21,6 +26,54 @@ TEMPLATE_PREFIX = os.getenv(
     "TEMPLATE_PREFIX",
     "eagle-knowledge-base/approved/supervisor-core/essential-templates",
 )
+
+# ── Acquisition Phase Categories ──────────────────────────────────────
+ACQUISITION_PHASES = {
+    "intake": "Intake & Requirements",
+    "planning": "Acquisition Planning",
+    "solicitation": "Solicitation",
+    "evaluation": "Evaluation & Selection",
+    "award": "Award & Contract",
+    "administration": "Contract Administration",
+}
+
+# Maps doc_type to category metadata
+TEMPLATE_CATEGORIES: Dict[str, Dict[str, str]] = {
+    "sow": {"phase": "planning", "use_case": "competitive", "group": "requirements"},
+    "igce": {"phase": "planning", "use_case": "competitive", "group": "cost"},
+    "market_research": {"phase": "planning", "use_case": "competitive", "group": "research"},
+    "justification": {"phase": "planning", "use_case": "sole_source", "group": "justification"},
+    "acquisition_plan": {"phase": "planning", "use_case": "competitive", "group": "planning"},
+    "cor_certification": {"phase": "award", "use_case": "compliance", "group": "compliance"},
+    "son_products": {"phase": "intake", "use_case": "competitive", "group": "requirements"},
+    "son_services": {"phase": "intake", "use_case": "competitive", "group": "requirements"},
+    "buy_american": {"phase": "solicitation", "use_case": "compliance", "group": "compliance"},
+    "subk_plan": {"phase": "award", "use_case": "competitive", "group": "compliance"},
+    "conference_request": {"phase": "administration", "use_case": "compliance", "group": "compliance"},
+}
+
+# Pattern-based category inference for unregistered S3 files
+FILENAME_CATEGORY_PATTERNS: List[Tuple[str, Dict[str, str]]] = [
+    (r"j&a|justification|j_and_a|single.?source", {"phase": "planning", "use_case": "sole_source", "group": "justification"}),
+    (r"igce|ige|cost.?estimate", {"phase": "planning", "use_case": "competitive", "group": "cost"}),
+    (r"sow|statement.?of.?work", {"phase": "planning", "use_case": "competitive", "group": "requirements"}),
+    (r"son|statement.?of.?need", {"phase": "intake", "use_case": "competitive", "group": "requirements"}),
+    (r"market.?research|mr_|mrr", {"phase": "planning", "use_case": "competitive", "group": "research"}),
+    (r"acquisition.?plan|ap_|s-ap", {"phase": "planning", "use_case": "competitive", "group": "planning"}),
+    (r"cor|contracting.?officer", {"phase": "award", "use_case": "compliance", "group": "compliance"}),
+    (r"subk|subcontract", {"phase": "award", "use_case": "competitive", "group": "compliance"}),
+    (r"buy.?american", {"phase": "solicitation", "use_case": "compliance", "group": "compliance"}),
+    (r"conference|event.?request", {"phase": "administration", "use_case": "compliance", "group": "compliance"}),
+    (r"quotation|quote", {"phase": "solicitation", "use_case": "competitive", "group": "solicitation"}),
+    (r"receiving.?report", {"phase": "administration", "use_case": "compliance", "group": "compliance"}),
+    (r"srb|source.?review", {"phase": "evaluation", "use_case": "competitive", "group": "evaluation"}),
+    (r"bpa|blanket.?purchase", {"phase": "solicitation", "use_case": "competitive", "group": "solicitation"}),
+]
+
+# ── S3 Template Cache ─────────────────────────────────────────────────
+_s3_template_cache: Dict[str, Any] = {}
+_s3_cache_expiry: float = 0.0
+S3_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 
 @dataclass
@@ -407,3 +460,156 @@ def validate_document_completeness(doc_type: str, content: str):
         return validate_completeness(doc_type, content)
     except ImportError:
         return None
+
+
+# ── S3 Template Listing ───────────────────────────────────────────────
+
+def _infer_doc_type_from_filename(filename: str) -> Optional[str]:
+    """Infer doc_type from filename by matching against registered templates."""
+    filename_lower = filename.lower()
+
+    # Check if filename matches any registered template
+    for doc_type, mapping in TEMPLATE_REGISTRY.items():
+        if mapping.s3_filename.lower() == filename_lower:
+            return doc_type
+        for alt in mapping.alternates:
+            if alt.lower() == filename_lower:
+                return doc_type
+
+    # Check form templates
+    for doc_type, form_filename in FORM_TEMPLATES.items():
+        if form_filename.lower() == filename_lower:
+            return doc_type
+
+    return None
+
+
+def _infer_category_from_filename(filename: str) -> Optional[Dict[str, str]]:
+    """Infer category from filename using pattern matching."""
+    filename_lower = filename.lower()
+
+    for pattern, category in FILENAME_CATEGORY_PATTERNS:
+        if re.search(pattern, filename_lower):
+            return category
+
+    return None
+
+
+def _get_file_type(filename: str) -> str:
+    """Extract file extension as file type."""
+    if "." in filename:
+        return filename.rsplit(".", 1)[-1].lower()
+    return "unknown"
+
+
+def _build_display_name(filename: str) -> str:
+    """Build a human-readable display name from filename."""
+    # Remove extension
+    name = filename.rsplit(".", 1)[0] if "." in filename else filename
+    # Replace underscores and hyphens with spaces
+    name = name.replace("_", " ").replace("-", " ")
+    # Remove common prefixes like "01.D_" or "1.a."
+    name = re.sub(r"^\d+\.?[a-zA-Z]?\.?\s*", "", name)
+    # Title case
+    return name.strip().title()
+
+
+def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    """List all templates from S3 bucket with metadata.
+
+    Args:
+        refresh: Force cache refresh
+        phase_filter: Filter by acquisition phase
+
+    Returns:
+        List of template metadata dicts
+    """
+    global _s3_template_cache, _s3_cache_expiry
+
+    cache_key = "all"
+    now = time.time()
+
+    # Check cache
+    if not refresh and _s3_cache_expiry > now and cache_key in _s3_template_cache:
+        templates = _s3_template_cache[cache_key]
+    else:
+        # Fetch from S3
+        templates = []
+        try:
+            s3 = boto3.client("s3")
+            paginator = s3.get_paginator("list_objects_v2")
+
+            for page in paginator.paginate(Bucket=TEMPLATE_BUCKET, Prefix=TEMPLATE_PREFIX):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    # Skip directory markers
+                    if key.endswith("/"):
+                        continue
+
+                    filename = key.rsplit("/", 1)[-1] if "/" in key else key
+                    file_type = _get_file_type(filename)
+
+                    # Skip non-document files
+                    if file_type not in ("docx", "xlsx", "pdf", "doc", "xls"):
+                        continue
+
+                    doc_type = _infer_doc_type_from_filename(filename)
+
+                    # Get category from registry or infer from filename
+                    category = None
+                    if doc_type and doc_type in TEMPLATE_CATEGORIES:
+                        category = TEMPLATE_CATEGORIES[doc_type]
+                    else:
+                        category = _infer_category_from_filename(filename)
+
+                    templates.append({
+                        "s3_key": key,
+                        "filename": filename,
+                        "file_type": file_type,
+                        "size_bytes": obj.get("Size", 0),
+                        "last_modified": obj.get("LastModified").isoformat() if obj.get("LastModified") else None,
+                        "doc_type": doc_type,
+                        "category": category,
+                        "display_name": _build_display_name(filename),
+                        "registered": doc_type is not None,
+                    })
+
+            # Sort by display name
+            templates.sort(key=lambda t: t["display_name"])
+
+            # Update cache
+            _s3_template_cache[cache_key] = templates
+            _s3_cache_expiry = now + S3_CACHE_TTL_SECONDS
+
+            logger.info("Listed %d S3 templates from %s/%s", len(templates), TEMPLATE_BUCKET, TEMPLATE_PREFIX)
+
+        except ClientError as e:
+            logger.error("Failed to list S3 templates: %s", e)
+            raise
+
+    # Apply phase filter
+    if phase_filter:
+        templates = [t for t in templates if t.get("category", {}).get("phase") == phase_filter]
+
+    return templates
+
+
+def get_s3_template_by_key(s3_key: str) -> Optional[bytes]:
+    """Fetch a template's content from S3 by key.
+
+    Args:
+        s3_key: Full S3 key path
+
+    Returns:
+        Template file content as bytes, or None if not found
+    """
+    try:
+        s3 = boto3.client("s3")
+        response = s3.get_object(Bucket=TEMPLATE_BUCKET, Key=s3_key)
+        return response["Body"].read()
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            logger.warning("S3 template not found: %s", s3_key)
+            return None
+        logger.error("Failed to fetch S3 template %s: %s", s3_key, e)
+        raise

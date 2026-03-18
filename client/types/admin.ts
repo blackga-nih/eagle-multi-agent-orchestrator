@@ -149,3 +149,45 @@ export interface CreateTemplateBody {
   display_name?: string;
   template_body: string;
 }
+
+// ---------------------------------------------------------------------------
+// S3 Template Library
+// ---------------------------------------------------------------------------
+
+export interface TemplateCategory {
+  phase: string;
+  use_case: string;
+  group: string;
+}
+
+export interface S3Template {
+  s3_key: string;
+  filename: string;
+  file_type: string;
+  size_bytes: number;
+  last_modified: string | null;
+  doc_type: string | null;
+  category: TemplateCategory | null;
+  display_name: string;
+  registered: boolean;
+}
+
+export interface S3TemplateListResponse {
+  templates: S3Template[];
+  total: number;
+  phases: Record<string, string>;
+  phase_counts: Record<string, number>;
+}
+
+export interface CopyTemplateBody {
+  s3_key: string;
+  package_id: string;
+}
+
+export interface CopyTemplateResponse {
+  document_id: string;
+  doc_type: string;
+  filename: string;
+  package_id: string;
+  source: string;
+}

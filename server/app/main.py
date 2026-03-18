@@ -105,6 +105,11 @@ from .document_service import (
     get_document_download_url,
     finalize_document as finalize_document_version,
 )
+from .document_classification_service import (
+    classify_document,
+    extract_text_preview,
+    ClassificationResult,
+)
 from .document_ai_edit_service import extract_docx_preview_payload, save_docx_preview_edits
 from .spreadsheet_edit_service import extract_xlsx_preview_payload, save_xlsx_preview_edits
 from .package_context_service import (
@@ -1050,12 +1055,22 @@ _ALLOWED_UPLOAD_MIME = {
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 
 
+# In-memory upload tracking (for package assignment flow)
+# In production, use DynamoDB or Redis for persistence
+_upload_registry: Dict[str, Dict[str, Any]] = {}
+
+
 @app.post("/api/documents/upload")
 async def api_upload_document(
     file: UploadFile = File(...),
+    session_id: Optional[str] = None,
+    package_id: Optional[str] = None,
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Upload a document to the user's S3 workspace and trigger metadata extraction."""
+    """Upload a document to the user's S3 workspace with automatic classification.
+
+    Returns upload metadata including classification result for package assignment flow.
+    """
     import boto3
     from botocore.exceptions import ClientError
     import re
@@ -1076,9 +1091,12 @@ async def api_upload_document(
     user_id = user.user_id
     bucket = _S3_BUCKET
 
+    # Generate upload_id for tracking
+    upload_id = str(uuid.uuid4())
+
     # Sanitize filename
     safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
-    key = f"eagle/{tenant_id}/{user_id}/uploads/{safe_name}"
+    key = f"eagle/{tenant_id}/{user_id}/uploads/{upload_id}/{safe_name}"
 
     try:
         s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -1087,8 +1105,136 @@ async def api_upload_document(
         logger.error("S3 upload error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to upload document")
 
-    logger.info("Uploaded %s → s3://%s/%s", safe_name, bucket, key)
-    return {"key": key, "filename": safe_name, "size_bytes": len(body), "content_type": content_type}
+    # Extract text preview for classification
+    content_preview = extract_text_preview(body, content_type)
+
+    # Classify document
+    classification = classify_document(file.filename or safe_name, content_preview)
+
+    # Determine package context
+    package_context = {"mode": "workspace", "package_id": None}
+    if package_id:
+        pkg = get_package(tenant_id, package_id)
+        if pkg:
+            package_context = {"mode": "package", "package_id": package_id}
+
+    # Store upload metadata for later assignment
+    _upload_registry[upload_id] = {
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "s3_bucket": bucket,
+        "s3_key": key,
+        "filename": safe_name,
+        "original_filename": file.filename,
+        "content_type": content_type,
+        "size_bytes": len(body),
+        "classification": classification.to_dict(),
+        "session_id": session_id,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+    logger.info(
+        "Uploaded %s → s3://%s/%s (upload_id=%s, classified=%s)",
+        safe_name, bucket, key, upload_id, classification.doc_type
+    )
+
+    return {
+        "key": key,
+        "upload_id": upload_id,
+        "filename": safe_name,
+        "size_bytes": len(body),
+        "content_type": content_type,
+        "classification": classification.to_dict(),
+        "package_context": package_context,
+    }
+
+
+class AssignToPackageRequest(BaseModel):
+    """Request body for assigning an uploaded document to a package."""
+    package_id: str
+    doc_type: Optional[str] = None
+    title: Optional[str] = None
+
+
+@app.post("/api/documents/{upload_id}/assign-to-package")
+async def assign_upload_to_package(
+    upload_id: str,
+    body: AssignToPackageRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Assign an uploaded document to an acquisition package.
+
+    Creates a versioned package document from the uploaded file.
+    """
+    import boto3
+    from botocore.exceptions import ClientError
+
+    # Retrieve upload metadata
+    upload_meta = _upload_registry.get(upload_id)
+    if not upload_meta:
+        raise HTTPException(status_code=404, detail="Upload not found or expired")
+
+    # Verify ownership
+    if upload_meta["tenant_id"] != user.tenant_id or upload_meta["user_id"] != user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Verify package exists
+    pkg = get_package(user.tenant_id, body.package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail=f"Package {body.package_id} not found")
+
+    # Determine doc_type (from request, classification, or default)
+    doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "sow")
+    if doc_type == "unknown":
+        doc_type = "sow"  # Default to SOW for unknown types
+
+    # Determine title
+    title = body.title or upload_meta["classification"].get("suggested_title") or upload_meta["filename"]
+
+    # Fetch file content from S3
+    try:
+        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=upload_meta["s3_key"])
+        content = response["Body"].read()
+    except ClientError as e:
+        logger.error("S3 fetch error for upload %s: %s", upload_id, e)
+        raise HTTPException(status_code=500, detail="Failed to retrieve uploaded file")
+
+    # Determine file type from content_type
+    content_type = upload_meta["content_type"]
+    file_type = "md"  # default
+    if "pdf" in content_type:
+        file_type = "pdf"
+    elif "wordprocessingml" in content_type or "msword" in content_type:
+        file_type = "docx"
+    elif "spreadsheet" in content_type or "excel" in content_type:
+        file_type = "xlsx"
+
+    # Create versioned package document
+    result = create_package_document_version(
+        tenant_id=user.tenant_id,
+        package_id=body.package_id,
+        doc_type=doc_type,
+        content=content,
+        title=title,
+        file_type=file_type,
+        created_by_user_id=user.user_id,
+        session_id=upload_meta.get("session_id"),
+        change_source="user_upload",
+    )
+
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error or "Failed to create document")
+
+    # Clean up upload registry (optional — keep for debugging)
+    # del _upload_registry[upload_id]
+
+    logger.info(
+        "Assigned upload %s to package %s as %s v%s",
+        upload_id, body.package_id, doc_type, result.version
+    )
+
+    return result.to_dict()
 
 
 # ── Admin KB review endpoints ─────────────────────────────────────────
@@ -2514,6 +2660,96 @@ async def delete_template_endpoint(
     """Delete the current user's template override for a doc type."""
     ok = delete_template(user.tenant_id, doc_type, user.user_id)
     return {"deleted": ok}
+
+
+# ── S3 Template Library ────────────────────────────────────────────
+
+@app.get("/api/templates/s3")
+async def list_s3_templates_endpoint(
+    phase: Optional[str] = None,
+    refresh: bool = False,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List all templates from S3 bucket with metadata.
+
+    Query params:
+        phase: Filter by acquisition phase (intake, planning, solicitation, etc.)
+        refresh: Force cache refresh (default: false)
+    """
+    from app.template_registry import list_s3_templates, ACQUISITION_PHASES
+
+    templates = list_s3_templates(refresh=refresh, phase_filter=phase)
+
+    # Build phase counts for filter UI
+    phase_counts: Dict[str, int] = {p: 0 for p in ACQUISITION_PHASES}
+    all_templates = list_s3_templates(refresh=False) if phase else templates
+    for t in all_templates:
+        cat = t.get("category")
+        if cat and cat.get("phase") in phase_counts:
+            phase_counts[cat["phase"]] += 1
+
+    return {
+        "templates": templates,
+        "total": len(templates),
+        "phases": ACQUISITION_PHASES,
+        "phase_counts": phase_counts,
+    }
+
+
+@app.post("/api/templates/s3/copy")
+async def copy_s3_template_to_package(
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Copy an S3 template into an acquisition package.
+
+    Body:
+        s3_key: Full S3 key of the template
+        package_id: Target package ID
+
+    Returns:
+        Created document entry with document_id
+    """
+    from app.template_registry import get_s3_template_by_key, _infer_doc_type_from_filename
+    from app.document_store import create_document_from_s3
+
+    s3_key = body.get("s3_key")
+    package_id = body.get("package_id")
+
+    if not s3_key or not package_id:
+        raise HTTPException(status_code=400, detail="s3_key and package_id are required")
+
+    # Fetch template content from S3
+    content = get_s3_template_by_key(s3_key)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Template not found in S3")
+
+    # Extract filename and doc_type
+    filename = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+    file_type = filename.rsplit(".", 1)[-1].lower() if "." in filename else "unknown"
+
+    # Infer doc_type from filename
+    doc_type = _infer_doc_type_from_filename(filename) or "custom"
+
+    # Create document entry in package
+    document = create_document_from_s3(
+        tenant_id=user.tenant_id,
+        package_id=package_id,
+        doc_type=doc_type,
+        filename=filename,
+        file_type=file_type,
+        content=content,
+        source_s3_key=s3_key,
+        created_by=user.user_id,
+    )
+
+    return {
+        "document_id": document.get("document_id"),
+        "doc_type": doc_type,
+        "filename": filename,
+        "package_id": package_id,
+        "source": "s3_template",
+    }
 
 
 # ── User-Created Skills (SKILL#) ───────────────────────────────────

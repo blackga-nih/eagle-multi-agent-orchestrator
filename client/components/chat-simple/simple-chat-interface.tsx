@@ -17,6 +17,9 @@ import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
 import ActivityPanel from './activity-panel';
+import ChatUploadButton from './chat-upload-button';
+import PackageSelectorModal from './package-selector-modal';
+import { UploadResult, assignToPackage } from '@/lib/document-api';
 
 // -----------------------------------------------------------------------
 // Types for per-message tool call tracking
@@ -83,6 +86,10 @@ export default function SimpleChatInterface() {
     const firstUserMsgRef = useRef<string | null>(null);
     /** Ctrl+K command palette state. */
     const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+    /** Document upload state. */
+    const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+    const [isPackageSelectorOpen, setIsPackageSelectorOpen] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
 
     // Global Ctrl+K keyboard shortcut
     useEffect(() => {
@@ -457,10 +464,121 @@ export default function SimpleChatInterface() {
         textareaRef.current?.focus();
     };
 
+    // Upload handlers
+    const handleUploadComplete = (result: UploadResult) => {
+        setUploadResult(result);
+        setIsPackageSelectorOpen(true);
+    };
+
+    const handlePackageAssignment = async (packageId: string | null, docType: string, title: string) => {
+        if (!uploadResult) return;
+
+        try {
+            const token = await getToken();
+            if (packageId) {
+                await assignToPackage(uploadResult.upload_id, packageId, docType, title, token);
+                // Add system message about assignment
+                const systemMsg: ChatMessage = {
+                    id: `upload-${Date.now()}`,
+                    role: 'assistant',
+                    content: `Document "${title}" has been uploaded and assigned to package **${packageId}** as a ${docType.replace('_', ' ')}.`,
+                    timestamp: new Date(),
+                };
+                setMessages((prev) => [...prev, systemMsg]);
+            } else {
+                // Just saved to workspace
+                const systemMsg: ChatMessage = {
+                    id: `upload-${Date.now()}`,
+                    role: 'assistant',
+                    content: `Document "${title}" has been uploaded to your workspace.`,
+                    timestamp: new Date(),
+                };
+                setMessages((prev) => [...prev, systemMsg]);
+            }
+            setUploadResult(null);
+        } catch (err) {
+            throw err;
+        }
+    };
+
+    // Drag-drop handlers
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        // Only hide if leaving the main container
+        if (e.currentTarget === e.target) {
+            setIsDragging(false);
+        }
+    };
+
+    const handleDrop = async (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+
+        const files = e.dataTransfer.files;
+        if (files.length === 0) return;
+
+        const file = files[0];
+        // Validate file type
+        const validTypes = [
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'text/plain',
+            'text/markdown',
+        ];
+        if (!validTypes.includes(file.type)) {
+            // Show error in chat
+            const errorMsg: ChatMessage = {
+                id: `upload-error-${Date.now()}`,
+                role: 'assistant',
+                content: `Unsupported file type: ${file.type || 'unknown'}. Please upload PDF, Word, or text documents.`,
+                timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, errorMsg]);
+            return;
+        }
+
+        // Use the upload API
+        try {
+            const token = await getToken();
+            const { uploadDocument } = await import('@/lib/document-api');
+            const result = await uploadDocument(file, currentSessionId || undefined, undefined, token);
+            handleUploadComplete(result);
+        } catch (err) {
+            const errorMsg: ChatMessage = {
+                id: `upload-error-${Date.now()}`,
+                role: 'assistant',
+                content: `Upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, errorMsg]);
+        }
+    };
+
     return (
         <div className="h-full flex bg-[#F5F7FA]">
             {/* Left: main chat area */}
-            <div className="flex-1 flex flex-col min-w-0">
+            <div
+                className="flex-1 flex flex-col min-w-0 relative"
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+            >
+                {/* Drag overlay */}
+                {isDragging && (
+                    <div className="absolute inset-0 z-40 bg-blue-500/10 border-2 border-dashed border-blue-500 rounded-lg flex items-center justify-center pointer-events-none">
+                        <div className="bg-white px-6 py-4 rounded-xl shadow-lg">
+                            <p className="text-blue-600 font-medium">Drop document to upload</p>
+                            <p className="text-sm text-gray-500">PDF, Word, or text files</p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Ctrl+K command palette */}
                 <CommandPalette
                     isOpen={isCommandPaletteOpen}
@@ -543,6 +661,12 @@ export default function SimpleChatInterface() {
                                 className={`flex-1 resize-none overflow-hidden px-4 py-3 bg-white border border-[#D8DEE6] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2196F3]/30 focus:border-[#2196F3] transition-all text-sm leading-relaxed ${isStreaming ? 'opacity-50' : ''}`}
                                 style={{ maxHeight: 160 }}
                             />
+                            <ChatUploadButton
+                                onUploadComplete={handleUploadComplete}
+                                sessionId={currentSessionId || undefined}
+                                disabled={isStreaming}
+                                getToken={getToken}
+                            />
                             <button
                                 onClick={handleSend}
                                 disabled={!input.trim() || isStreaming}
@@ -567,6 +691,18 @@ export default function SimpleChatInterface() {
                 isStreaming={isStreaming}
                 isOpen={isPanelOpen}
                 onToggle={() => setIsPanelOpen(v => !v)}
+            />
+
+            {/* Package selector modal for uploaded documents */}
+            <PackageSelectorModal
+                isOpen={isPackageSelectorOpen}
+                onClose={() => {
+                    setIsPackageSelectorOpen(false);
+                    setUploadResult(null);
+                }}
+                uploadResult={uploadResult}
+                onAssign={handlePackageAssignment}
+                getToken={getToken}
             />
         </div>
     );

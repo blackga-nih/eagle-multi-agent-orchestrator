@@ -282,3 +282,96 @@ def get_document_by_id(
     except (ClientError, BotoCoreError) as e:
         logger.error("document_store.get_document_by_id failed: %s", e)
         return None
+
+
+def create_document_from_s3(
+    tenant_id: str,
+    package_id: str,
+    doc_type: str,
+    filename: str,
+    file_type: str,
+    content: bytes,
+    source_s3_key: str,
+    created_by: str,
+) -> dict:
+    """Create a document entry from an S3 template copy.
+
+    Stores binary content in S3 and creates a DynamoDB reference entry.
+    Used when copying templates from the S3 library into acquisition packages.
+
+    Args:
+        tenant_id: Tenant ID
+        package_id: Target package ID
+        doc_type: Document type (sow, igce, etc.)
+        filename: Original filename
+        file_type: File extension (docx, xlsx, etc.)
+        content: Binary file content
+        source_s3_key: Original S3 key the template was copied from
+        created_by: User ID who initiated the copy
+
+    Returns:
+        Created document dict with document_id
+    """
+    import base64
+
+    table = _get_table()
+    now = datetime.utcnow().isoformat()
+
+    existing = get_document_history(tenant_id, package_id, doc_type)
+    next_version = (max(d['version'] for d in existing) + 1) if existing else 1
+
+    document_id = str(uuid.uuid4())
+
+    # Store binary content as base64 for DynamoDB (MVP approach)
+    # Production would upload to S3 and store a reference
+    content_b64 = base64.b64encode(content).decode('utf-8') if content else None
+
+    item: dict = {
+        'PK': f'DOCUMENT#{tenant_id}',
+        'SK': _sk(package_id, doc_type, next_version),
+        'GSI1PK': f'TENANT#{tenant_id}',
+        'GSI1SK': _gsi1_sk(package_id, doc_type, next_version),
+        'document_id': document_id,
+        'package_id': package_id,
+        'doc_type': doc_type,
+        'filename': filename,
+        'file_type': file_type,
+        'content_b64': content_b64,
+        'source_s3_key': source_s3_key,
+        'version': next_version,
+        'status': 'draft',
+        'generated_by': created_by,
+        'created_at': now,
+        'source_type': 's3_template',
+    }
+
+    try:
+        table.put_item(Item=item)
+        logger.info(
+            'document_store.create_document_from_s3: [%s/%s/%s] v%s created from %s',
+            tenant_id, package_id, doc_type, next_version, source_s3_key,
+        )
+    except (ClientError, BotoCoreError) as e:
+        logger.error('document_store.create_document_from_s3 failed: %s', e)
+        raise
+
+    # Supersede prior versions
+    for prior in existing:
+        if prior['status'] != 'superseded':
+            try:
+                table.update_item(
+                    Key={
+                        'PK': f'DOCUMENT#{tenant_id}',
+                        'SK': _sk(package_id, doc_type, prior['version']),
+                    },
+                    UpdateExpression='SET #s = :superseded',
+                    ExpressionAttributeNames={'#s': 'status'},
+                    ExpressionAttributeValues={':superseded': 'superseded'},
+                )
+            except (ClientError, BotoCoreError) as e:
+                logger.warning(
+                    'document_store.create_document_from_s3: failed to supersede v%s: %s',
+                    prior['version'], e,
+                )
+
+    return item

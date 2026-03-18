@@ -17,6 +17,9 @@ import type {
   CreateSkillBody,
   SetOverrideBody,
   CreateTemplateBody,
+  S3TemplateListResponse,
+  CopyTemplateBody,
+  CopyTemplateResponse,
 } from '@/types/admin';
 
 type GetToken = () => Promise<string>;
@@ -186,4 +189,16 @@ export const templateApi = {
 
   delete: (getToken: GetToken, docType: string) =>
     apiDelete(getToken, `/api/templates/${docType}`),
+
+  // S3 Template Library
+  listS3: (getToken: GetToken, phase?: string, refresh?: boolean) => {
+    const params = new URLSearchParams();
+    if (phase) params.set('phase', phase);
+    if (refresh) params.set('refresh', 'true');
+    const query = params.toString();
+    return apiGet<S3TemplateListResponse>(getToken, `/api/templates/s3${query ? `?${query}` : ''}`);
+  },
+
+  copyToPackage: (getToken: GetToken, body: CopyTemplateBody) =>
+    apiPost<CopyTemplateResponse>(getToken, '/api/templates/s3/copy', body),
 };
