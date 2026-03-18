@@ -87,7 +87,7 @@ jobs:
     - name: CDK Deploy
       run: |
         cd ${{ env.CDK_DIR }}
-        npx cdk deploy EagleCiCdStack EagleStorageStack EagleEvalStack EagleBackupStack \
+        npx cdk deploy EagleCoreStack EagleCiCdStack EagleStorageStack EagleEvalStack EagleBackupStack \
           --exclusively --require-approval never --outputs-file outputs.json
 
   # ── Build & Push Backend Container ──────────────────────────
