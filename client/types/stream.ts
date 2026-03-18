@@ -17,6 +17,7 @@ export type StreamEventType =
   | 'reasoning'
   | 'tool_use'
   | 'tool_result'
+  | 'agent_status'
   | 'elicitation'
   | 'metadata'
   | 'complete'

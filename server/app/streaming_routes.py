@@ -69,6 +69,10 @@ async def stream_generator(
     await writer.write_text(sse_queue, "")
     yield await sse_queue.get()
 
+    # Send initial agent status so the frontend shows progress immediately
+    await writer.write_agent_status(sse_queue, "Analyzing your request...")
+    yield await sse_queue.get()
+
     # Wrap the SDK generator so we inject ": keepalive\n\n" SSE comments every
     # KEEPALIVE_INTERVAL seconds while waiting for the next chunk.  ALB idle
     # timeout is 300 s (raised from 60 s); keepalive every 20 s keeps it alive.
@@ -151,6 +155,14 @@ async def stream_generator(
                 await writer.write_tool_result(sse_queue, tr_name, chunk.get("result", {}))
                 yield await sse_queue.get()
 
+            elif chunk_type == "agent_status":
+                await writer.write_agent_status(
+                    sse_queue,
+                    chunk.get("status", ""),
+                    chunk.get("detail", ""),
+                )
+                yield await sse_queue.get()
+
             elif chunk_type == "complete":
                 complete_text = chunk.get("text", "")
                 complete_metadata = {}
@@ -187,13 +199,17 @@ async def stream_generator(
                 return
 
             elif chunk_type == "error":
-                await writer.write_error(sse_queue, chunk.get("error", "Unknown error"))
+                error_msg = chunk.get("error", "Unknown error")
+                await writer.write_error(sse_queue, error_msg)
                 from .error_webhook import notify_streaming_error
                 notify_streaming_error(
                     "/api/chat/stream", "POST",
-                    Exception(chunk.get("error", "Unknown error")),
+                    Exception(error_msg),
                     tenant_id=tenant_id, user_id=user_id, session_id=session_id or "",
                 )
+                # Classify and tag the Langfuse trace for filtering
+                from .telemetry.langfuse_client import notify_trace_error
+                notify_trace_error(session_id or "", error_msg)
                 yield await sse_queue.get()
                 return
 
@@ -218,6 +234,9 @@ async def stream_generator(
             "/api/chat/stream", "POST", e,
             tenant_id=tenant_id, user_id=user_id, session_id=session_id or "",
         )
+        # Classify and tag the Langfuse trace for filtering
+        from .telemetry.langfuse_client import notify_trace_error
+        notify_trace_error(session_id or "", str(e))
         yield await sse_queue.get()
 
 

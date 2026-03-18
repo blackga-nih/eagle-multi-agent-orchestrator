@@ -20,6 +20,7 @@ class StreamEventType(str, Enum):
     TOOL_RESULT = "tool_result"
     ELICITATION = "elicitation"
     METADATA = "metadata"
+    AGENT_STATUS = "agent_status"
     COMPLETE = "complete"
     ERROR = "error"
     HANDOFF = "handoff"
@@ -151,6 +152,14 @@ class MultiAgentStreamWriter:
         event = self._create_event(
             StreamEventType.COMPLETE,
             metadata=metadata if metadata else None,
+        )
+        await queue.put(event.to_sse())
+
+    async def write_agent_status(self, queue, status: str, detail: str = ""):
+        """Emit an AGENT_STATUS event with a human-readable progress message."""
+        event = self._create_event(
+            StreamEventType.AGENT_STATUS,
+            metadata={"status": status, "detail": detail},
         )
         await queue.put(event.to_sse())
 

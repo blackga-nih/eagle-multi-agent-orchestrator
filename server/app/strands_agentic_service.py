@@ -28,6 +28,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
 from botocore.config import Config
@@ -766,8 +767,10 @@ EAGLE_TOOLS = [
         "description": (
             "Generate acquisition documents including SOW, IGCE, Market Research, "
             "J&A, Acquisition Plan, Evaluation Criteria, Security Checklist, "
-            "Section 508 Statement, COR Certification, and Contract Type "
-            "Justification. Documents are saved to S3."
+            "Section 508 Statement, COR Certification, Contract Type "
+            "Justification, Statement of Need, Buy American DF, Subcontracting Plan, "
+            "and Conference Request. Documents are saved to S3. "
+            "Each doc_type has a defined section structure — fill EVERY section."
         ),
         "input_schema": {
             "type": "object",
@@ -778,7 +781,9 @@ EAGLE_TOOLS = [
                         "sow", "igce", "market_research", "justification",
                         "acquisition_plan", "eval_criteria", "security_checklist",
                         "section_508", "cor_certification",
-                        "contract_type_justification"
+                        "contract_type_justification",
+                        "son_products", "son_services", "buy_american",
+                        "subk_plan", "conference_request"
                     ],
                     "description": "Type of acquisition document to generate",
                 },
@@ -791,7 +796,8 @@ EAGLE_TOOLS = [
                     "description": (
                         "Full document content as markdown. Write complete, "
                         "section-by-section content using the conversation context "
-                        "before calling this tool. This becomes the saved document body."
+                        "before calling this tool. This becomes the saved document body. "
+                        "Cover ALL sections defined in the template schema."
                     ),
                 },
                 "data": {
@@ -1012,10 +1018,15 @@ def _make_subagent_tool(
     @tool(name=safe_name)
     def subagent_tool(query: str) -> str:
         """Placeholder docstring replaced below."""
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S UTC")
+        subagent_context = (
+            f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier} | Current datetime: {now_utc}\n"
+            f"You are the {skill_name} specialist.\n\n"
+        )
         _ensure_langfuse_exporter()
         agent = Agent(
             model=_model,
-            system_prompt=prompt_body,
+            system_prompt=subagent_context + prompt_body,
             callback_handler=None,
             trace_attributes=_build_trace_attrs(
                 tenant_id=tenant_id,
@@ -1560,6 +1571,39 @@ def build_skill_tools(
     return tools
 
 
+# -- Document Section Hints (injected into supervisor prompt) --------
+
+def _build_doc_type_section_hints() -> str:
+    """Build concise section hints for each doc type, for the supervisor prompt.
+
+    Returns a compact string with one line per doc type listing section names.
+    """
+    try:
+        from app.template_schema import load_template_schemas
+        schemas = load_template_schemas()
+    except Exception:
+        return ""
+
+    lines = []
+    # Only include the primary doc types with rich schemas
+    priority_types = [
+        "sow", "igce", "acquisition_plan", "market_research", "justification",
+    ]
+    for dt in priority_types:
+        schema = schemas.get(dt)
+        if not schema or not schema.sections:
+            continue
+        section_names = [
+            f"{s.number}. {s.title}" if s.number else s.title
+            for s in schema.sections[:12]  # Cap at 12 for prompt brevity
+        ]
+        lines.append(f"    {dt.upper()}: {' | '.join(section_names)}")
+
+    if lines:
+        return "\n".join(lines) + "\n"
+    return ""
+
+
 # -- Supervisor Prompt -----------------------------------------------
 
 def build_supervisor_prompt(
@@ -1594,8 +1638,9 @@ def build_supervisor_prompt(
         supervisor_entry = AGENTS.get("supervisor")
         base_prompt = supervisor_entry["body"].strip() if supervisor_entry else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
 
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S UTC")
     return (
-        f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}\n\n"
+        f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier} | Current datetime: {now_utc}\n\n"
         f"{base_prompt}\n\n"
         f"--- ACTIVE SPECIALISTS ---\n"
         f"Available specialists for delegation:\n{agent_list}\n\n"
@@ -1623,6 +1668,8 @@ def build_supervisor_prompt(
         "for template population.\n"
         "1c) If the user asks to revise an existing DOCX document, use edit_docx_document "
         "for targeted edits and checkbox_edits for checklist toggles.\n"
+        "1d) SECTION GUIDANCE — each document type has required sections. Fill ALL of them:\n"
+        f"{_build_doc_type_section_hints()}"
         "2) Do not paste full document bodies in chat unless the user explicitly asks for inline text.\n"
         "3) After create_document, respond briefly and direct the user to open/edit the document card.\n\n"
         f"FAST vs DEEP routing:\n"
@@ -1990,13 +2037,19 @@ async def sdk_query_streaming(
                 if tool_id and tool_id != _current_tool_id:
                     _current_tool_id = tool_id
                     tool_name = current_tool.get("name", "")
+                    tool_input = current_tool.get("input", "")
                     tools_called.append(tool_name)
                     yield {
                         "type": "tool_use",
                         "name": tool_name,
-                        "input": current_tool.get("input", ""),
+                        "input": tool_input,
                         "tool_use_id": tool_id,
                     }
+                    # Emit human-readable status for this tool
+                    from .telemetry.status_messages import get_tool_status_message
+                    input_dict = tool_input if isinstance(tool_input, dict) else {}
+                    status_msg = get_tool_status_message(tool_name, input_dict)
+                    yield {"type": "agent_status", "status": status_msg, "detail": tool_name}
                 continue
 
             # --- Bedrock contentBlockStart fallback ---
@@ -2014,6 +2067,9 @@ async def sdk_query_streaming(
                             "name": tool_name,
                             "tool_use_id": tool_id,
                         }
+                        from .telemetry.status_messages import get_tool_status_message
+                        status_msg = get_tool_status_message(tool_name)
+                        yield {"type": "agent_status", "status": status_msg, "detail": tool_name}
                     continue
 
             # --- Agent result (final event) ---
@@ -2023,6 +2079,9 @@ async def sdk_query_streaming(
     except Exception as exc:
         error_holder.append(exc)
         logger.error("stream_async error: %s", exc)
+        # Classify and tag the Langfuse trace for filtering
+        from .telemetry.langfuse_client import notify_trace_error
+        notify_trace_error(session_id or "", str(exc))
 
     # Final drain of any remaining tool results
     for tool_result_chunk in _drain_tool_results():
@@ -2127,8 +2186,9 @@ async def sdk_query_single_skill(
         raise ValueError(f"Skill not found: {skill_name} (key={skill_key})")
     skill_content = entry["body"]
 
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S UTC")
     tenant_context = (
-        f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}\n"
+        f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier} | Current datetime: {now_utc}\n"
         f"You are operating as the {skill_name} specialist for this tenant.\n\n"
     )
 

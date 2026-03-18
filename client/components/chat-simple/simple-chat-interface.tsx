@@ -65,6 +65,8 @@ export default function SimpleChatInterface() {
 
     // Tool calls grouped by message ID — populated as SSE tool_use events arrive.
     const [toolCallsByMsg, setToolCallsByMsg] = useState<ToolCallsByMessageId>({});
+    // Agent status text shown during model thinking / tool execution
+    const [agentStatus, setAgentStatus] = useState<string | null>(null);
     const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
     // Stable ID for the current streaming message — reset on each sendQuery call.
     const streamingMsgIdRef = useRef<string>(`stream-${Date.now()}`);
@@ -210,6 +212,7 @@ export default function SimpleChatInterface() {
         },
 
         onComplete: (toolResults?: ServerToolResult[]) => {
+            setAgentStatus(null);
             const completedMsg = streamingMsgRef.current;
             if (completedMsg) {
                 lastAssistantIdRef.current = completedMsg.id;
@@ -297,6 +300,7 @@ export default function SimpleChatInterface() {
         },
 
         onError: () => {
+            setAgentStatus(null);
             streamingMsgRef.current = null;
             setStreamingMsg(null);
         },
@@ -345,6 +349,23 @@ export default function SimpleChatInterface() {
                     result: toolEvent.result,
                 });
             }
+        },
+
+        onToolResult: (toolName, result) => {
+            // Immediately update matching tool card to 'done' during streaming
+            const parentId = streamingMsgIdRef.current;
+            setToolCallsByMsg((prev) => {
+                const calls = prev[parentId] ?? [];
+                const idx = calls.findIndex((tc) => tc.toolName === toolName && tc.status !== 'done');
+                if (idx === -1) return prev;
+                const updated = calls.slice();
+                updated[idx] = { ...updated[idx], status: 'done', result: result as ClientToolResult };
+                return { ...prev, [parentId]: updated };
+            });
+        },
+
+        onAgentStatus: (status) => {
+            setAgentStatus(status);
         },
     });
 
@@ -457,6 +478,8 @@ export default function SimpleChatInterface() {
                         documents={documents}
                         sessionId={currentSessionId}
                         toolCallsByMsg={toolCallsByMsg}
+                        agentStatus={agentStatus}
+                        pendingToolCalls={toolCallsByMsg[streamingMsgIdRef.current] ?? []}
                     />
                 )}
 

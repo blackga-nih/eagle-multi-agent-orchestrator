@@ -99,6 +99,10 @@ interface SimpleMessageListProps {
     sessionId?: string;
     /** Tool call state keyed by message ID — populated from SSE tool_use events. */
     toolCallsByMsg?: ToolCallsByMessageId;
+    /** Agent status text shown during model thinking / tool execution. */
+    agentStatus?: string | null;
+    /** Tool calls for the in-flight streaming message (shown during waiting phase). */
+    pendingToolCalls?: TrackedToolCall[];
 }
 
 /** Render code sandbox output below a code tool call card, if output exists. */
@@ -131,6 +135,8 @@ export default function SimpleMessageList({
     documents,
     sessionId,
     toolCallsByMsg = {},
+    agentStatus,
+    pendingToolCalls = [],
 }: SimpleMessageListProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -239,16 +245,45 @@ export default function SimpleMessageList({
                     );
                 })}
 
-                {/* Waiting for first token — shown only before any assistant text arrives */}
+                {/* Waiting for first token — show tool cards + status during the wait */}
                 {isWaitingForFirstToken && (
                     <div className="flex flex-col gap-1.5">
                         <span className="text-[10px] font-semibold text-[#003366] uppercase tracking-wider">
-                            🦅 Eagle
+                            Eagle
                         </span>
-                        <div className="flex items-center gap-1 h-5">
-                            <div className="typing-dot" />
-                            <div className="typing-dot" />
-                            <div className="typing-dot" />
+
+                        {/* Pending tool cards — rendered as they arrive from SSE */}
+                        {pendingToolCalls.length > 0 && (
+                            <div className="flex flex-col gap-1 mb-1">
+                                {pendingToolCalls.map((tc) => (
+                                    <div key={tc.toolUseId}>
+                                        <ToolUseDisplay
+                                            toolName={tc.toolName}
+                                            input={tc.input}
+                                            status={tc.status}
+                                            result={tc.result}
+                                            isClientSide={tc.isClientSide}
+                                            sessionId={sessionId}
+                                        />
+                                        <CodeOutput tc={tc} />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Status text or fallback dots */}
+                        <div className="flex items-center gap-2 h-5">
+                            {agentStatus ? (
+                                <span className="text-xs text-gray-500 animate-pulse">
+                                    {agentStatus}
+                                </span>
+                            ) : (
+                                <>
+                                    <div className="typing-dot" />
+                                    <div className="typing-dot" />
+                                    <div className="typing-dot" />
+                                </>
+                            )}
                         </div>
                     </div>
                 )}

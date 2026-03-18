@@ -43,6 +43,10 @@ export interface UseAgentStreamOptions {
    * a client-side tool finishes (result is populated).
    */
   onToolUse?: (event: ToolUseEvent) => void;
+  /** Called when a server-side tool_result arrives during streaming. */
+  onToolResult?: (toolName: string, result: { success: boolean; result: unknown }) => void;
+  /** Called when an agent_status event arrives (e.g. "Analyzing your request..."). */
+  onAgentStatus?: (status: string, detail?: string) => void;
   getToken?: () => Promise<string>;
   /** Active session ID — forwarded to client tools for localStorage namespacing. */
   sessionId?: string;
@@ -398,6 +402,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
       }
 
       // Handle tool_result events — accumulate for merge at onComplete
+      // AND immediately notify UI so tool cards update to 'done' during streaming
       if (event.type === 'tool_result' && event.tool_result) {
         const tr = event.tool_result;
 
@@ -407,6 +412,9 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
           result: { success: true, result: tr.result },
         });
 
+        // Immediately update tool card to 'done' during streaming
+        options.onToolResult?.(tr.name, { success: true, result: tr.result });
+
         // Extract document info for create_document
         const docInfo = parseDocumentToolResult(event);
         if (docInfo) {
@@ -415,6 +423,13 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
           setLastDocument(docInfo);
           options.onDocumentGenerated?.(docInfo);
         }
+      }
+
+      // Handle agent_status events — real-time progress indicators
+      if (event.type === 'agent_status') {
+        const status = event.metadata?.status ?? '';
+        const detail = event.metadata?.detail ?? '';
+        options.onAgentStatus?.(status, detail);
       }
 
       // Handle complete event — REST/fallback path
