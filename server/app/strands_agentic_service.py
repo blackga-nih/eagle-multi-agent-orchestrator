@@ -1190,10 +1190,13 @@ def _make_load_data_tool(
         config = _load_plugin_config()
         data_index = config.get("data", {})
 
+        # Handle legacy array format: convert ["far-database.json", ...] → dict
         if isinstance(data_index, list):
-            out = json.dumps({"error": "Data index not configured. Available files: " + str(data_index)})
-            _emit_tool_result("load_data", out, result_queue, loop)
-            return out
+            data_index = {
+                f.replace(".json", ""): {"file": f"data/{f}"}
+                for f in data_index
+                if isinstance(f, str)
+            }
 
         meta = data_index.get(name)
         if not meta:

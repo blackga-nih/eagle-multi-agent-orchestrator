@@ -55,7 +55,7 @@ export interface UseAgentStreamOptions {
 }
 
 export interface UseAgentStreamReturn {
-  sendQuery: (query: string, sessionId?: string, packageId?: string) => Promise<void>;
+  sendQuery: (query: string, sessionId?: string, packageId?: string, streamingMsgId?: string) => Promise<void>;
   isStreaming: boolean;
   logs: AuditLogEntry[];
   lastMessage: Message | null;
@@ -220,7 +220,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     eventCountRef.current = 0;
   }, []);
 
-  const sendQuery = useCallback(async (query: string, sessionId?: string, packageId?: string) => {
+  const sendQuery = useCallback(async (query: string, sessionId?: string, packageId?: string, overrideMsgId?: string) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -236,7 +236,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     // Stable ID used for the single streaming assistant message.
     // All text chunks for one response share this ID so the UI upserts
     // rather than appending a new bubble per chunk.
-    const streamingMsgId = `stream-${Date.now()}`;
+    const streamingMsgId = overrideMsgId || `stream-${Date.now()}`;
     let shouldFetchDocs = false;
     const emittedDocKeys = new Set<string>();
     // Accumulate server-side tool results during streaming — merged at onComplete

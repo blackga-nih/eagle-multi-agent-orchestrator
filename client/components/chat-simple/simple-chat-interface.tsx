@@ -441,7 +441,7 @@ export default function SimpleChatInterface() {
         const query = input;
         setInput('');
 
-        await sendQuery(query, currentSessionId);
+        await sendQuery(query, currentSessionId, undefined, streamingMsgIdRef.current);
     };
 
     const insertText = (text: string) => {

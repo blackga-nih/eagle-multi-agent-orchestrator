@@ -28,11 +28,12 @@
     "search",
     "status"
   ],
-  "data": [
-    "far-database.json",
-    "thresholds.json",
-    "contract-vehicles.json"
-  ],
+  "data": {
+    "far-database": { "file": "data/far-database.json" },
+    "thresholds": { "file": "data/thresholds.json" },
+    "contract-vehicles": { "file": "data/contract-vehicles.json" },
+    "matrix": { "file": "data/matrix.json" }
+  },
   "capabilities": {
     "streaming": true,
     "tools": true,
