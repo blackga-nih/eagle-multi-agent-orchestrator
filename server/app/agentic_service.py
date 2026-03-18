@@ -460,18 +460,31 @@ def _default_output_format_for_doc_type(doc_type: str) -> str:
 
 
 def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
-    """Detect boilerplate template previews that did not absorb user context."""
+    """Detect boilerplate template previews that did not absorb user context.
+
+    Uses schema-based completeness validation when available, falling back
+    to regex-based placeholder detection for unknown doc types.
+    """
     if not preview:
         return False
 
-    normalized = " ".join(preview.lower().split())
+    # Schema-based validation (preferred)
+    try:
+        from app.template_registry import validate_document_completeness
+        report = validate_document_completeness(doc_type, preview)
+        if report is not None:
+            # If less than 30% sections filled, it's an unfilled template
+            return report.completeness_pct < 30.0
+    except ImportError:
+        pass
 
-    # Generic check: remaining {{PLACEHOLDER}} tokens mean population failed
+    # Fallback: remaining {{PLACEHOLDER}} tokens mean population failed
     import re as _re
     if _re.search(r"\{\{[A-Z_]{3,}\}\}", preview):
         return True
 
-    # Per-doc-type heuristic markers (need >=2 hits to trigger)
+    # Fallback per-doc-type heuristic markers (need >=2 hits to trigger)
+    normalized = " ".join(preview.lower().split())
     _UNFILLED_MARKERS: dict[str, list[str]] = {
         "sow": [
             "this section should provide brief description of the project",

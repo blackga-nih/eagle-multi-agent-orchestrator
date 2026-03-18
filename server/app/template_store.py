@@ -34,9 +34,14 @@ logger = logging.getLogger("eagle.template_store")
 TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
-VALID_DOC_TYPES = frozenset(
-    {"sow", "igce", "acquisition-plan", "market-research", "justification"}
-)
+VALID_DOC_TYPES = frozenset({
+    "sow", "igce", "acquisition-plan", "market-research", "justification",
+    "cor-certification", "eval-criteria", "security-checklist", "section-508",
+    "contract-type-justification",
+    # New doc types from S3 inventory
+    "son-products", "son-services", "buy-american", "subk-plan",
+    "conference-request",
+})
 
 # ── DynamoDB singleton (lazy, same pattern as plugin_store.py) ────
 _dynamodb = None

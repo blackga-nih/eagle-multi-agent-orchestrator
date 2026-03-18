@@ -29,10 +29,11 @@ class TemplateMapping:
 
     doc_type: str
     s3_filename: str
-    file_type: str  # "docx" | "xlsx"
+    file_type: str  # "docx" | "xlsx" | "pdf" | "doc"
     placeholder_map: Dict[str, str] = field(default_factory=dict)
     alternates: List[str] = field(default_factory=list)
     description: str = ""
+    section_schema: Optional[Any] = field(default=None, repr=False)  # TemplateSchema
 
 
 # ── Template Registry ─────────────────────────────────────────────────
@@ -71,6 +72,8 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         alternates=[
             "02.D_IGCE_for_Educational_Institutions.xlsx",
             "03.D_IGCE_for_Nonprofit_Organizations.xlsx",
+            "4.a. IGE for Products.xlsx",
+            "4.b. IGE for Services based on Catalog Price.xlsx",
         ],
         description="Independent Government Cost Estimate spreadsheet",
     ),
@@ -86,7 +89,11 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "set_aside_recommendation": "{{SET_ASIDE_RECOMMENDATION}}",
             "conclusion": "{{CONCLUSION}}",
         },
-        alternates=["Market_Research_Report_Template.docx"],
+        alternates=[
+            "Market_Research_Report_Template.docx",
+            "Attachment 1 - HHS Market Research Template.docx",
+            "FY26 Streamlined Market Research Report.docx",
+        ],
         description="Market Research Report template",
     ),
     "justification": TemplateMapping(
@@ -104,6 +111,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         alternates=[
             "Justification_and_Approval_Under_350K_Template.docx",
             "Limited_Sources_J_and_A_Template.docx",
+            "6.a. Single Source J&A - up to SAT.docx",
         ],
         description="Justification & Approval (J&A) for sole source",
     ),
@@ -121,7 +129,14 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "set_aside": "{{SET_ASIDE}}",
             "funding_by_fy": "{{FUNDING_TABLE}}",
         },
-        alternates=["Acquisition_Plan_Full_Template.docx"],
+        alternates=[
+            "Acquisition_Plan_Full_Template.docx",
+            "01.C_NCI_OA_Task_Order_Acquisition_Plan.docx",
+            "1.a. AP Under SAT.docx",
+            "1.b AP Above SAT.docx",
+            "Streamlined Acquisition Plan (S-AP).docx",
+            "Attch #1 - HHS Streamlined Acquisition Plan MS WORD Template_fillable_ver 2025.05.07_FINAL VERSION.docx",
+        ],
         description="Streamlined Acquisition Plan template",
     ),
     "cor_certification": TemplateMapping(
@@ -139,6 +154,50 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         },
         alternates=["COR_Designation_Letter_Template.docx"],
         description="COR Appointment/Certification memorandum",
+    ),
+    # ── New doc types from S3 inventory ──
+    "son_products": TemplateMapping(
+        doc_type="son_products",
+        s3_filename="3.a. SON - Products (including Equipment and Supplies).docx",
+        file_type="docx",
+        placeholder_map={},
+        alternates=[],
+        description="Statement of Need — Products (Equipment and Supplies)",
+    ),
+    "son_services": TemplateMapping(
+        doc_type="son_services",
+        s3_filename="3.b. SON - Services based on Catalog Pricing.docx",
+        file_type="docx",
+        placeholder_map={},
+        alternates=[],
+        description="Statement of Need — Services based on Catalog Pricing",
+    ),
+    "buy_american": TemplateMapping(
+        doc_type="buy_american",
+        s3_filename="DF_Buy_American_Non_Availability_Template.docx",
+        file_type="docx",
+        placeholder_map={},
+        alternates=["DF_Buy_American_Other_Exceptions_Template.docx"],
+        description="Buy American Act Determination Form",
+    ),
+    "subk_plan": TemplateMapping(
+        doc_type="subk_plan",
+        s3_filename="HHS SubK Plan Template - updated March 2022.doc",
+        file_type="doc",
+        placeholder_map={},
+        alternates=["hhs_subk_review_form.docx"],
+        description="HHS Subcontracting Plan template",
+    ),
+    "conference_request": TemplateMapping(
+        doc_type="conference_request",
+        s3_filename="Attachment A - NIH Conference or Conference Grant Request and Approval 20151404_508.docx",
+        file_type="docx",
+        placeholder_map={},
+        alternates=[
+            "Attachment B - NIH Conference Request for Waiver 20151004_508.docx",
+            "Attachment D - Promotional Item Approval Form 20172112_508.docx",
+        ],
+        description="NIH Conference/Event Request forms",
     ),
 }
 
@@ -216,6 +275,44 @@ MARKDOWN_ONLY_DOC_TYPES = frozenset({
     "contract_type_justification",
 })
 
+# Form-only templates — official forms that don't need AI content generation
+FORM_TEMPLATES: Dict[str, str] = {
+    "exemption_determination": "Attachment G - Exemption Determination Template 20151305_508.docx",
+    "mandatory_use_waiver": "DF for Mandatory-Use Waiver Template - Draft.pdf",
+    "gfp_form": "GFP Form.pdf",
+    "bpa_call_order": "LSJ-GSA-BPA-CallOrders.docx",
+    "quotation_abstract": "Quotation Abstract.docx",
+    "receiving_report": "Receiving Report Template 20201002.docx",
+    "srb_request": "SRB Request form.docx",
+    "technical_questionnaire": "Project_Officers_Technical_Questionnare.pdf",
+}
+
+# Reference guides (not templates, but discoverable)
+REFERENCE_GUIDES: Dict[str, str] = {
+    "ap_structure_guide": "HHS_AP_Structure_Guide.txt",
+    "mr_template_guide": "HHS_Streamlined_MR_Template_FY26.txt",
+}
+
+
+# ── Schema Integration ────────────────────────────────────────────────
+
+def _attach_schemas() -> None:
+    """Attach template schemas to their registry mappings at module load."""
+    try:
+        from app.template_schema import load_template_schemas
+        schemas = load_template_schemas()
+        for doc_type, schema in schemas.items():
+            mapping = TEMPLATE_REGISTRY.get(doc_type)
+            if mapping:
+                mapping.section_schema = schema
+        logger.debug("Attached %d schemas to registry mappings", len(schemas))
+    except Exception as e:
+        logger.warning("Could not load template schemas: %s", e)
+
+
+# Attach schemas at import time (lazy — won't fail if files missing)
+_attach_schemas()
+
 
 def get_template_mapping(doc_type: str) -> Optional[TemplateMapping]:
     """Get template mapping for a document type.
@@ -262,9 +359,51 @@ def list_registered_doc_types() -> List[str]:
     return list(TEMPLATE_REGISTRY.keys())
 
 
+def list_all_doc_types() -> List[str]:
+    """List all known document types (templates + markdown-only + forms)."""
+    types = list(TEMPLATE_REGISTRY.keys())
+    types.extend(MARKDOWN_ONLY_DOC_TYPES)
+    types.extend(FORM_TEMPLATES.keys())
+    return sorted(set(types))
+
+
 def get_placeholder_map(doc_type: str) -> Dict[str, str]:
     """Get the data field to placeholder mapping for a doc_type."""
     mapping = get_template_mapping(doc_type)
     if mapping:
         return mapping.placeholder_map.copy()
     return {}
+
+
+# ── Schema Accessors ──
+
+def get_section_schema(doc_type: str):
+    """Get the TemplateSchema for a doc_type, if available."""
+    mapping = get_template_mapping(doc_type)
+    if mapping and mapping.section_schema:
+        return mapping.section_schema
+    # Fallback: check the schema module directly
+    try:
+        from app.template_schema import TEMPLATE_SCHEMAS, _ensure_schemas_loaded
+        _ensure_schemas_loaded()
+        return TEMPLATE_SCHEMAS.get(doc_type)
+    except ImportError:
+        return None
+
+
+def get_section_guidance(doc_type: str) -> str:
+    """Get AI prompt section guidance for a doc_type."""
+    try:
+        from app.template_schema import build_section_guidance
+        return build_section_guidance(doc_type)
+    except ImportError:
+        return ""
+
+
+def validate_document_completeness(doc_type: str, content: str):
+    """Validate document content completeness against schema."""
+    try:
+        from app.template_schema import validate_completeness
+        return validate_completeness(doc_type, content)
+    except ImportError:
+        return None

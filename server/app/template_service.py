@@ -82,6 +82,7 @@ class TemplateResult:
     source: str  # "s3_template" | "markdown_fallback"
     template_path: Optional[str] = None  # S3 key of template used
     error: Optional[str] = None
+    completeness: Optional[Any] = None  # CompletenessReport from template_schema
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -376,14 +377,20 @@ class TemplateService:
 
         # Try to fetch and populate the template
         try:
-            return self._generate_from_template(doc_type, title, data)
+            result = self._generate_from_template(doc_type, title, data)
         except Exception as e:
             logger.warning(
                 "Template generation failed for %s: %s, falling back to markdown",
                 doc_type,
                 str(e),
             )
-            return self._generate_markdown_fallback(doc_type, title, data)
+            result = self._generate_markdown_fallback(doc_type, title, data)
+
+        # Attach completeness report if schema available
+        if result.success and result.preview:
+            result.completeness = self._check_completeness(doc_type, result.preview)
+
+        return result
 
     def _generate_from_template(
         self,
@@ -517,6 +524,16 @@ class TemplateService:
                 source="markdown_fallback",
                 error=str(e),
             )
+
+
+    def _check_completeness(self, doc_type: str, preview: str) -> Optional[Any]:
+        """Run completeness validation against template schema."""
+        try:
+            from app.template_registry import validate_document_completeness
+            return validate_document_completeness(doc_type, preview)
+        except Exception as e:
+            logger.debug("Completeness check skipped for %s: %s", doc_type, e)
+            return None
 
 
 def create_template_service(
