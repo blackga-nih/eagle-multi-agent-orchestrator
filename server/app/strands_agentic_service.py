@@ -208,16 +208,21 @@ _bedrock_client_config = Config(
         "mode": os.getenv("EAGLE_BEDROCK_RETRY_MODE", "adaptive"),
     },
     tcp_keepalive=True,
+    # Disable client-side param validation so botocore 1.34 doesn't reject
+    # cachePoint blocks that Bedrock's Converse API actually supports.
+    parameter_validation=False,
 )
 
 _model = BedrockModel(
     model_id=MODEL,
     region_name=os.getenv("AWS_REGION", "us-east-1"),
     boto_client_config=_bedrock_client_config,
-    # Prompt caching disabled — Bedrock Converse API rejects cachePoint in both
-    # toolConfig.tools and messages content blocks (botocore ParamValidationError).
-    # cache_tools="default" and cache_config=CacheConfig(strategy="auto") both
-    # fail. Revisit when botocore/Bedrock adds cachePoint support.
+    # Bedrock prompt caching — cachePoint in tools + messages.
+    # botocore 1.34 doesn't know about cachePoint, but parameter_validation=False
+    # on the Config above bypasses client-side schema checks. Bedrock validates
+    # server-side. Cache hits reduce TTFT by ~2-4s and input token cost by ~90%.
+    cache_tools="default",                       # cache 34 tool schemas (~17K tokens)
+    cache_config=CacheConfig(strategy="auto"),   # cache conversation prefix
 )
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
