@@ -219,17 +219,21 @@ async def send_daily_summary() -> None:
 
 
 def notify_startup() -> None:
-    """Notify Teams when the container starts."""
+    """Notify Teams when the container starts (ECS only — skips local dev)."""
     hostname = platform.node()
+    is_ecs = os.getenv("ECS_CONTAINER_METADATA_URI") is not None
+    logger.info(
+        "Teams notifier configured: url=%s env=%s ecs=%s", WEBHOOK_URL[:60], ENVIRONMENT, is_ecs,
+    )
+    if not is_ecs:
+        logger.info("Teams notifier: skipping startup notification (local dev)")
+        return
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     text = (
         f"[EAGLE {ENVIRONMENT}] Service started\n"
         f"  Hostname: {hostname}\n"
         f"  Time: {timestamp}\n"
         f"  Webhook: enabled"
-    )
-    logger.info(
-        "Teams notifier configured: url=%s env=%s", WEBHOOK_URL[:60], ENVIRONMENT,
     )
     _fire(text, "deployment")
 
