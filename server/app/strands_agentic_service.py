@@ -214,7 +214,8 @@ _model = BedrockModel(
     model_id=MODEL,
     region_name=os.getenv("AWS_REGION", "us-east-1"),
     boto_client_config=_bedrock_client_config,
-    cache_tools="default",
+    # cache_tools="default" — disabled; Bedrock Converse API rejects cachePoint
+    # in toolConfig.tools (ValidationException). Revisit when Bedrock adds support.
     cache_config=CacheConfig(strategy="auto"),
 )
 
@@ -1635,6 +1636,27 @@ def _build_all_service_tools(
             ):
                 parsed.setdefault("package_id", package_context.package_id)
 
+            # Auto-detect existing document: if package_id + doc_type are known
+            # and no update_existing_key was provided, check for an existing doc
+            # and route to update mode instead of creating a duplicate.
+            _pkg_id = parsed.get("package_id")
+            _dt = parsed.get("doc_type", "").strip().lower()
+            _upd_key = parsed.get("update_existing_key", "").strip()
+            if _pkg_id and _dt and not _upd_key:
+                try:
+                    existing = TOOL_DISPATCH["get_latest_document"](
+                        {"package_id": _pkg_id, "doc_type": _dt}, tenant_id,
+                    )
+                    existing_s3_key = (existing.get("document") or {}).get("s3_key", "")
+                    if existing_s3_key:
+                        parsed["update_existing_key"] = existing_s3_key
+                        logger.info(
+                            "create_document: existing %s found in package %s — routing to update (%s)",
+                            _dt, _pkg_id, existing_s3_key,
+                        )
+                except Exception:
+                    pass  # No existing doc or lookup failed — create new
+
             result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
 
@@ -2256,6 +2278,15 @@ def _build_supervisor_prompt_body(
         "7) If a search_far result has empty s3_keys, the summary is the best available — "
         "note that no full-text source was available for that clause.\n\n"
         "Document Output Rules:\n"
+        "0) CHECK BEFORE CREATE: Before generating any document, call get_latest_document "
+        "with the package_id and doc_type to check if one already exists. If it does:\n"
+        "   - For CONTENT changes (add sections, rewrite, regenerate): call create_document "
+        "with update_existing_key set to the existing document's s3_key. Write the FULL "
+        "updated content incorporating the requested changes.\n"
+        "   - For TARGETED edits (fix a typo, change a name, toggle a checkbox): call "
+        "edit_docx_document with the document_key and specific edits.\n"
+        "   - Only create a brand-new document (no update_existing_key) if no existing "
+        "document was found for that doc_type.\n"
         "1) If the user asks to generate/draft/create a document, you MUST call create_document.\n"
         "1a) CRITICAL: Write the COMPLETE document content as the 'content' field (markdown with "
         "section headings, filled-in details from the conversation). Do NOT leave template "
