@@ -5,6 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import { Brain, Search, FileText, Cpu, ChevronDown, ChevronUp, ArrowRight, X, Copy, Check, Code, User, ClipboardCheck } from 'lucide-react';
 import { StreamEvent, AuditLogEntry } from '@/types/stream';
 import { getAgentColors, getAgentName, AgentColorScheme } from '@/lib/agent-colors';
+import { formatEventType, getEventTypeBadge, shouldFilterEvent } from '@/lib/agent-event-config';
+import { formatTime } from '@/lib/date-utils';
 
 interface MultiAgentLogsProps {
   logs: AuditLogEntry[];
@@ -92,7 +94,7 @@ export default function MultiAgentLogs({ logs }: MultiAgentLogsProps) {
 
                   {/* Timestamp */}
                   <span className="text-[9px] text-gray-400">
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    {formatTime(log.timestamp)}
                   </span>
                 </div>
 
@@ -201,7 +203,7 @@ export default function MultiAgentLogs({ logs }: MultiAgentLogsProps) {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500">
-                  {new Date(selectedLog.timestamp).toLocaleString()}
+                  {formatTime(selectedLog.timestamp)}
                 </span>
                 <button
                   onClick={closeDetail}
@@ -396,53 +398,7 @@ export default function MultiAgentLogs({ logs }: MultiAgentLogsProps) {
   );
 }
 
-// Helper functions
-
+// Helper function to filter logs using shared config
 function groupLogs(logs: AuditLogEntry[]): AuditLogEntry[] {
-  // Filter out reasoning logs - they clutter the stream without adding user value
-  return logs.filter(log => log.type !== 'reasoning');
-}
-
-function formatEventType(type: string, log: AuditLogEntry): string {
-  if (type === 'text') return 'Report (text)';
-  if (type === 'reasoning') return 'Report (reasoning)';
-  if (type === 'tool_use') return 'Tool Use';
-  if (type === 'tool_result') return 'Tool Result';
-  if (type === 'elicitation') return 'Elicitation';
-  if (type === 'metadata') return 'Metadata';
-  if (type === 'handoff') return 'Handoff';
-  if (type === 'complete') return 'Complete';
-  if (type === 'error') return 'Error';
-  if (type === 'user_input') return 'User Input';
-  if (type === 'form_submit') return 'Form Submit';
-  return type;
-}
-
-function getEventTypeBadge(type: string): string {
-  switch (type) {
-    case 'text':
-      return 'bg-blue-100 text-blue-700';
-    case 'reasoning':
-      return 'bg-purple-100 text-purple-700';
-    case 'tool_use':
-      return 'bg-yellow-100 text-yellow-700';
-    case 'tool_result':
-      return 'bg-orange-100 text-orange-700';
-    case 'elicitation':
-      return 'bg-green-100 text-green-700';
-    case 'metadata':
-      return 'bg-indigo-100 text-indigo-700';
-    case 'handoff':
-      return 'bg-pink-100 text-pink-700';
-    case 'complete':
-      return 'bg-gray-100 text-gray-700';
-    case 'error':
-      return 'bg-red-100 text-red-700';
-    case 'user_input':
-      return 'bg-cyan-100 text-cyan-700';
-    case 'form_submit':
-      return 'bg-teal-100 text-teal-700';
-    default:
-      return 'bg-gray-100 text-gray-700';
-  }
+  return logs.filter(log => !shouldFilterEvent(log.type));
 }

@@ -9,115 +9,36 @@ import {
 import { AuditLogEntry } from '@/types/stream';
 import { getAgentColors, getAgentName, getAgentIcon } from '@/lib/agent-colors';
 import { formatTime } from '@/lib/date-utils';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/** A display entry that may collapse multiple raw log entries. */
-interface DisplayEntry {
-  /** Primary log entry (or the last in a collapsed group). */
-  log: AuditLogEntry;
-  /** All raw log entries in this group (>1 when consecutive text events are collapsed). */
-  group: AuditLogEntry[];
-  /** Combined content for collapsed text groups. */
-  mergedContent?: string;
-}
+import {
+  formatEventType,
+  getEventTypeBadge,
+  getEventIconName,
+  buildDisplayEntries,
+  DisplayEntry,
+} from '@/lib/agent-event-config';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatEventType(type: string, log?: AuditLogEntry): string {
-  switch (type) {
-    case 'text':        return 'Report';
-    case 'reasoning':   return 'Reasoning';
-    case 'tool_use':    return `Tool: ${log?.tool_use?.name ?? 'Use'}`;
-    case 'tool_result': return `Result: ${log?.tool_result?.name ?? ''}`;
-    case 'handoff':     return 'Handoff';
-    case 'complete':    return 'Complete';
-    case 'error':       return 'Error';
-    case 'user_input':  return 'User Input';
-    case 'form_submit': return 'Form Submit';
-    case 'metadata':    return 'Metadata';
-    case 'elicitation': return 'Question';
-    default:            return type;
-  }
-}
-
-function getEventTypeBadge(type: string): string {
-  switch (type) {
-    case 'text':        return 'bg-blue-100 text-blue-700';
-    case 'reasoning':   return 'bg-purple-100 text-purple-700';
-    case 'tool_use':    return 'bg-yellow-100 text-yellow-800';
-    case 'tool_result': return 'bg-orange-100 text-orange-700';
-    case 'handoff':     return 'bg-pink-100 text-pink-700';
-    case 'complete':    return 'bg-gray-100 text-gray-600';
-    case 'error':       return 'bg-red-100 text-red-700';
-    case 'user_input':  return 'bg-cyan-100 text-cyan-700';
-    case 'form_submit': return 'bg-teal-100 text-teal-700';
-    case 'metadata':    return 'bg-indigo-100 text-indigo-700';
-    case 'elicitation': return 'bg-green-100 text-green-700';
-    default:            return 'bg-gray-100 text-gray-600';
-  }
-}
-
+/** Map icon names to JSX elements (icons can't be exported from shared config) */
 function getEventIcon(type: string) {
-  switch (type) {
-    case 'text':        return <MessageSquare className="w-3 h-3" />;
-    case 'reasoning':   return <Brain className="w-3 h-3" />;
-    case 'tool_use':    return <Cpu className="w-3 h-3" />;
-    case 'tool_result': return <FileText className="w-3 h-3" />;
-    case 'handoff':     return <ArrowRight className="w-3 h-3" />;
-    case 'complete':    return <CheckCircle2 className="w-3 h-3" />;
-    case 'error':       return <AlertCircle className="w-3 h-3" />;
-    case 'user_input':  return <User className="w-3 h-3" />;
-    case 'form_submit': return <ClipboardCheck className="w-3 h-3" />;
-    case 'metadata':    return <Code className="w-3 h-3" />;
-    case 'elicitation': return <Zap className="w-3 h-3" />;
-    default:            return <Code className="w-3 h-3" />;
+  const iconName = getEventIconName(type);
+  switch (iconName) {
+    case 'MessageSquare': return <MessageSquare className="w-3 h-3" />;
+    case 'Brain':         return <Brain className="w-3 h-3" />;
+    case 'Cpu':           return <Cpu className="w-3 h-3" />;
+    case 'FileText':      return <FileText className="w-3 h-3" />;
+    case 'ArrowRight':    return <ArrowRight className="w-3 h-3" />;
+    case 'CheckCircle2':  return <CheckCircle2 className="w-3 h-3" />;
+    case 'AlertCircle':   return <AlertCircle className="w-3 h-3" />;
+    case 'User':          return <User className="w-3 h-3" />;
+    case 'ClipboardCheck': return <ClipboardCheck className="w-3 h-3" />;
+    case 'Zap':           return <Zap className="w-3 h-3" />;
+    case 'Activity':      return <Cpu className="w-3 h-3" />;
+    case 'Code':
+    default:              return <Code className="w-3 h-3" />;
   }
-}
-
-/**
- * Collapse consecutive text events from the same agent into a single entry.
- * Filter out reasoning events. All other event types pass through 1:1.
- */
-function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
-  const entries: DisplayEntry[] = [];
-  let textBuffer: AuditLogEntry[] = [];
-  let textAgent: string | null = null;
-
-  function flushTextBuffer() {
-    if (textBuffer.length === 0) return;
-    const merged = textBuffer.map(l => l.content ?? '').join('');
-    entries.push({
-      log: textBuffer[textBuffer.length - 1],
-      group: [...textBuffer],
-      mergedContent: merged,
-    });
-    textBuffer = [];
-    textAgent = null;
-  }
-
-  for (const log of logs) {
-    // Skip reasoning events
-    if (log.type === 'reasoning') continue;
-
-    if (log.type === 'text') {
-      // Collapse consecutive text from same agent
-      if (textAgent && textAgent !== log.agent_id) {
-        flushTextBuffer();
-      }
-      textAgent = log.agent_id;
-      textBuffer.push(log);
-    } else {
-      flushTextBuffer();
-      entries.push({ log, group: [log] });
-    }
-  }
-  flushTextBuffer();
-  return entries;
 }
 
 // ---------------------------------------------------------------------------
