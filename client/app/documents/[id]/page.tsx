@@ -725,9 +725,11 @@ export default function DocumentViewerPage({ params }: PageProps) {
             }
         }
 
-        // Always fetch from API to get fresh content (even if we loaded from cache)
+        // Fetch from API for metadata (download URL, version, etc.)
+        // If we already loaded content from cache, only update metadata — don't
+        // overwrite the cached content, which may be richer AI-generated text
+        // vs the sparse DOCX template extraction from S3.
         async function fetchDocument() {
-            // Try backend API first
             try {
                 const token = await getToken();
                 const res = await fetch(`/api/documents/${encodeURIComponent(decodedId)}?content=true`, {
@@ -735,8 +737,10 @@ export default function DocumentViewerPage({ params }: PageProps) {
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    setDocumentTitle(data.title || 'Untitled Document');
-                    setDocumentType(data.document_type || '');
+
+                    // Always update metadata regardless of cache
+                    setDocumentTitle((prev) => data.title || prev || 'Untitled Document');
+                    setDocumentType((prev) => data.document_type || prev || '');
                     setPackageId(data.package_id || undefined);
                     setFileType(data.file_type || '');
                     setContentType(data.content_type || '');
@@ -745,16 +749,36 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     setS3Key(data.s3_key || data.key || data.document_id || null);
                     setCurrentDocumentId(data.document_id || data.key || null);
                     setCurrentVersion(typeof data.version === 'number' ? data.version : null);
-                    const nextPreviewBlocks = normalizeDocxPreviewBlocks(data.preview_blocks);
-                    const nextPreviewSheets = normalizeXlsxPreviewSheets(data.preview_sheets);
-                    setDocxPreviewMode(data.preview_mode ?? null);
-                    setDocxPreviewBlocks(nextPreviewBlocks);
-                    setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(nextPreviewBlocks));
-                    setXlsxPreviewSheets(nextPreviewSheets);
-                    setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
-                    setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
-                    setDocumentContent(data.content || '');
-                    setEditContent(data.content || '');
+
+                    if (loadedFromCache) {
+                        // Cache had good content — only update metadata above,
+                        // plus preview blocks/sheets for binary docs (for edit support).
+                        // Do NOT overwrite documentContent/editContent.
+                        const nextPreviewBlocks = normalizeDocxPreviewBlocks(data.preview_blocks);
+                        const nextPreviewSheets = normalizeXlsxPreviewSheets(data.preview_sheets);
+                        if (nextPreviewBlocks.length > 0) {
+                            setDocxPreviewMode(data.preview_mode ?? null);
+                            setDocxPreviewBlocks(nextPreviewBlocks);
+                            setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(nextPreviewBlocks));
+                        }
+                        if (nextPreviewSheets.length > 0) {
+                            setXlsxPreviewSheets(nextPreviewSheets);
+                            setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
+                            setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
+                        }
+                    } else {
+                        // No cache — use full API response as primary content
+                        const nextPreviewBlocks = normalizeDocxPreviewBlocks(data.preview_blocks);
+                        const nextPreviewSheets = normalizeXlsxPreviewSheets(data.preview_sheets);
+                        setDocxPreviewMode(data.preview_mode ?? null);
+                        setDocxPreviewBlocks(nextPreviewBlocks);
+                        setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(nextPreviewBlocks));
+                        setXlsxPreviewSheets(nextPreviewSheets);
+                        setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
+                        setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
+                        setDocumentContent(data.content || '');
+                        setEditContent(data.content || '');
+                    }
                     setIsLoading(false);
                     return;
                 }
@@ -1442,44 +1466,23 @@ ${docSnippet}`;
                                 <span className="text-xs text-red-600 mr-2">{exportError}</span>
                             )}
 
-                            {/* Download controls */}
+                            {/* Download controls — always generate from displayed
+                                content so download matches what the user sees */}
                             <div className="relative">
-                                {isBinaryDocument ? (
-                                    downloadUrl ? (
-                                        <a
-                                            href={downloadUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
-                                        >
-                                            <Download className="w-4 h-4" />
-                                            Download Current
-                                        </a>
+                                <button
+                                    onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+                                    disabled={isExporting}
+                                    className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                >
+                                    {isExporting ? (
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
                                     ) : (
-                                        <button
-                                            disabled
-                                            className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-500 rounded-xl text-sm font-medium"
-                                        >
-                                            <RefreshCw className="w-4 h-4 animate-spin" />
-                                            Preparing Download
-                                        </button>
-                                    )
-                                ) : (
-                                    <button
-                                        onClick={() => setShowDownloadMenu(!showDownloadMenu)}
-                                        disabled={isExporting}
-                                        className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
-                                    >
-                                        {isExporting ? (
-                                            <RefreshCw className="w-4 h-4 animate-spin" />
-                                        ) : (
-                                            <Download className="w-4 h-4" />
-                                        )}
-                                        Download
-                                        <ChevronDown className="w-3 h-3" />
-                                    </button>
-                                )}
-                                {showDownloadMenu && !isBinaryDocument && (
+                                        <Download className="w-4 h-4" />
+                                    )}
+                                    Download
+                                    <ChevronDown className="w-3 h-3" />
+                                </button>
+                                {showDownloadMenu && (
                                     <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden">
                                         <button
                                             onClick={() => handleDownload('docx')}

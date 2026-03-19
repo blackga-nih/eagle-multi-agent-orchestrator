@@ -108,7 +108,6 @@ from .document_service import (
 from .document_classification_service import (
     classify_document,
     extract_text_preview,
-    ClassificationResult,
 )
 from .document_ai_edit_service import extract_docx_preview_payload, save_docx_preview_edits
 from .spreadsheet_edit_service import extract_xlsx_preview_payload, save_xlsx_preview_edits
@@ -816,11 +815,20 @@ async def api_get_document(
         else:
             if include_content and _supports_binary_preview(doc_key):
                 raw_bytes = response["Body"].read()
-                preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
-                content = preview_payload.get("content")
-                preview_blocks = preview_payload.get("preview_blocks", [])
-                preview_sheets = preview_payload.get("preview_sheets", [])
-                preview_mode = preview_payload.get("preview_mode")
+                # Prefer markdown sidecar (rich display content) over DOCX
+                # text extraction, which can be sparse for template-generated docs.
+                sidecar_key = f"{doc_key}.content.md"
+                try:
+                    sidecar_resp = s3.get_object(Bucket=bucket, Key=sidecar_key)
+                    content = sidecar_resp["Body"].read().decode("utf-8", errors="replace")
+                    preview_mode = "markdown_sidecar"
+                except ClientError:
+                    # No sidecar — fall back to binary extraction
+                    preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
+                    content = preview_payload.get("content")
+                    preview_blocks = preview_payload.get("preview_blocks", [])
+                    preview_sheets = preview_payload.get("preview_sheets", [])
+                    preview_mode = preview_payload.get("preview_mode")
             download_url = s3.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": bucket, "Key": doc_key},
@@ -1047,17 +1055,49 @@ async def api_presign_document(
 
 # ── User document upload ─────────────────────────────────────────────
 
-_ALLOWED_UPLOAD_MIME = {
+ALLOWED_UPLOAD_MIME_TYPES = {
     "application/pdf", "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+    "application/vnd.ms-excel",  # .xls
     "text/plain", "text/markdown",
 }
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 
 
-# In-memory upload tracking (for package assignment flow)
-# In production, use DynamoDB or Redis for persistence
-_upload_registry: Dict[str, Dict[str, Any]] = {}
+# DynamoDB-backed upload tracking (1-hour TTL auto-deletes stale entries)
+def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> None:
+    """Store upload metadata in DynamoDB with 1-hour TTL."""
+    import boto3
+    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
+        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
+    )
+    item = {
+        "PK": f"UPLOAD#{tenant_id}",
+        "SK": f"UPLOAD#{upload_id}",
+        "ttl": int(time.time()) + 3600,
+        **metadata,
+    }
+    table.put_item(Item=item)
+
+
+def _get_upload(tenant_id: str, upload_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve upload metadata from DynamoDB. Returns None if expired/missing."""
+    import boto3
+    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
+        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
+    )
+    resp = table.get_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
+    return resp.get("Item")
+
+
+def _delete_upload(tenant_id: str, upload_id: str) -> None:
+    """Remove upload metadata from DynamoDB."""
+    import boto3
+    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
+        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
+    )
+    table.delete_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
 
 
 @app.post("/api/documents/upload")
@@ -1077,7 +1117,7 @@ async def api_upload_document(
 
     # Validate content type
     content_type = file.content_type or "application/octet-stream"
-    if content_type not in _ALLOWED_UPLOAD_MIME:
+    if content_type not in ALLOWED_UPLOAD_MIME_TYPES:
         raise HTTPException(
             status_code=415,
             detail=f"Unsupported file type: {content_type}. Accepted: PDF, Word, plain text, Markdown."
@@ -1119,7 +1159,7 @@ async def api_upload_document(
             package_context = {"mode": "package", "package_id": package_id}
 
     # Store upload metadata for later assignment
-    _upload_registry[upload_id] = {
+    _put_upload(tenant_id, upload_id, {
         "tenant_id": tenant_id,
         "user_id": user_id,
         "s3_bucket": bucket,
@@ -1131,7 +1171,7 @@ async def api_upload_document(
         "classification": classification.to_dict(),
         "session_id": session_id,
         "created_at": datetime.utcnow().isoformat(),
-    }
+    })
 
     logger.info(
         "Uploaded %s → s3://%s/%s (upload_id=%s, classified=%s)",
@@ -1170,7 +1210,7 @@ async def assign_upload_to_package(
     from botocore.exceptions import ClientError
 
     # Retrieve upload metadata
-    upload_meta = _upload_registry.get(upload_id)
+    upload_meta = _get_upload(user.tenant_id, upload_id)
     if not upload_meta:
         raise HTTPException(status_code=404, detail="Upload not found or expired")
 
@@ -1183,10 +1223,13 @@ async def assign_upload_to_package(
     if not pkg:
         raise HTTPException(status_code=404, detail=f"Package {body.package_id} not found")
 
-    # Determine doc_type (from request, classification, or default)
-    doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "sow")
+    # Determine doc_type (from request or classification)
+    doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
     if doc_type == "unknown":
-        doc_type = "sow"  # Default to SOW for unknown types
+        raise HTTPException(
+            status_code=400,
+            detail="Document type could not be determined. Please specify doc_type.",
+        )
 
     # Determine title
     title = body.title or upload_meta["classification"].get("suggested_title") or upload_meta["filename"]
@@ -1226,8 +1269,8 @@ async def assign_upload_to_package(
     if not result.success:
         raise HTTPException(status_code=500, detail=result.error or "Failed to create document")
 
-    # Clean up upload registry (optional — keep for debugging)
-    # del _upload_registry[upload_id]
+    # Clean up upload registry
+    _delete_upload(user.tenant_id, upload_id)
 
     logger.info(
         "Assigned upload %s to package %s as %s v%s",
@@ -2625,44 +2668,9 @@ async def list_templates_endpoint(
     return list_tenant_templates(user.tenant_id, doc_type)
 
 
-@app.get("/api/templates/{doc_type}")
-async def get_active_template(
-    doc_type: str,
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Return the resolved template for this user (4-layer fallback)."""
-    body, source = resolve_template(user.tenant_id, user.user_id, doc_type)
-    return {"doc_type": doc_type, "template_body": body, "source": source}
-
-
-@app.post("/api/templates/{doc_type}")
-async def create_template_endpoint(
-    doc_type: str,
-    body: Dict[str, Any],
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Create or update a user/tenant template override."""
-    return put_template(
-        tenant_id=user.tenant_id,
-        doc_type=doc_type,
-        user_id=body.get("user_id", user.user_id),
-        template_body=body.get("template_body", ""),
-        display_name=body.get("display_name", ""),
-        is_default=body.get("is_default", False),
-    )
-
-
-@app.delete("/api/templates/{doc_type}")
-async def delete_template_endpoint(
-    doc_type: str,
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Delete the current user's template override for a doc type."""
-    ok = delete_template(user.tenant_id, doc_type, user.user_id)
-    return {"deleted": ok}
-
-
 # ── S3 Template Library ────────────────────────────────────────────
+# NOTE: These must be declared before /api/templates/{doc_type} to avoid
+# FastAPI matching "s3" as a doc_type path parameter.
 
 @app.get("/api/templates/s3")
 async def list_s3_templates_endpoint(
@@ -2750,6 +2758,43 @@ async def copy_s3_template_to_package(
         "package_id": package_id,
         "source": "s3_template",
     }
+
+
+@app.get("/api/templates/{doc_type}")
+async def get_active_template(
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return the resolved template for this user (4-layer fallback)."""
+    body, source = resolve_template(user.tenant_id, user.user_id, doc_type)
+    return {"doc_type": doc_type, "template_body": body, "source": source}
+
+
+@app.post("/api/templates/{doc_type}")
+async def create_template_endpoint(
+    doc_type: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Create or update a user/tenant template override."""
+    return put_template(
+        tenant_id=user.tenant_id,
+        doc_type=doc_type,
+        user_id=body.get("user_id", user.user_id),
+        template_body=body.get("template_body", ""),
+        display_name=body.get("display_name", ""),
+        is_default=body.get("is_default", False),
+    )
+
+
+@app.delete("/api/templates/{doc_type}")
+async def delete_template_endpoint(
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete the current user's template override for a doc type."""
+    ok = delete_template(user.tenant_id, doc_type, user.user_id)
+    return {"deleted": ok}
 
 
 # ── User-Created Skills (SKILL#) ───────────────────────────────────

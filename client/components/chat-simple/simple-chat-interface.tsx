@@ -528,6 +528,8 @@ export default function SimpleChatInterface() {
             'application/pdf',
             'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-excel',
             'text/plain',
             'text/markdown',
         ];
@@ -536,7 +538,7 @@ export default function SimpleChatInterface() {
             const errorMsg: ChatMessage = {
                 id: `upload-error-${Date.now()}`,
                 role: 'assistant',
-                content: `Unsupported file type: ${file.type || 'unknown'}. Please upload PDF, Word, or text documents.`,
+                content: `Unsupported file type: ${file.type || 'unknown'}. Please upload PDF, Word, Excel, or text documents.`,
                 timestamp: new Date(),
             };
             setMessages((prev) => [...prev, errorMsg]);

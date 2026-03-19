@@ -62,6 +62,15 @@ def _build_s3_mock() -> MagicMock:
     }
 
     def get_object(*, Bucket, Key):
+        # Sidecar markdown requests (.content.md) should 404 so binary
+        # preview extraction runs instead.
+        if Key.endswith(".content.md"):
+            from botocore.exceptions import ClientError
+
+            raise ClientError(
+                {"Error": {"Code": "NoSuchKey", "Message": "Not found"}},
+                "GetObject",
+            )
         if Key.endswith(".docx"):
             return {
                 "Body": io.BytesIO(state["docx_bytes"]),

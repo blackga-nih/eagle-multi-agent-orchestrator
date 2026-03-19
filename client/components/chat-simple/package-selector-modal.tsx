@@ -160,6 +160,7 @@ export default function PackageSelectorModal({
                         type="text"
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
+                        maxLength={255}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
                         placeholder="Enter document title"
                     />
@@ -204,7 +205,7 @@ export default function PackageSelectorModal({
                             </label>
 
                             {/* Package options */}
-                            {packages.map((pkg) => (
+                            {packages.filter((pkg) => !pkg.status || !['closed', 'archived'].includes(pkg.status)).map((pkg) => (
                                 <label
                                     key={pkg.package_id}
                                     className={`
