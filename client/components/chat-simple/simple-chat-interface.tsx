@@ -473,28 +473,74 @@ export default function SimpleChatInterface() {
     const handlePackageAssignment = async (packageId: string | null, docType: string, title: string) => {
         if (!uploadResult) return;
 
+        const msgId = `upload-${Date.now()}`;
+        const token = await getToken();
+
         try {
-            const token = await getToken();
+            let docInfo: DocumentInfo;
+
             if (packageId) {
-                await assignToPackage(uploadResult.upload_id, packageId, docType, title, token);
-                // Add system message about assignment
+                // Assign to package - get back document details
+                const result = await assignToPackage(uploadResult.upload_id, packageId, docType, title, token);
+                docInfo = {
+                    document_id: result.document_id,
+                    package_id: result.package_id,
+                    document_type: result.doc_type || docType,
+                    doc_type: result.doc_type || docType,
+                    title: result.title || title,
+                    s3_key: result.s3_key || uploadResult.key,
+                    mode: 'package',
+                    status: result.status || 'draft',
+                    version: result.version || 1,
+                    content_type: uploadResult.content_type,
+                    is_binary: uploadResult.content_type !== 'text/plain' && uploadResult.content_type !== 'text/markdown',
+                    generated_at: new Date().toISOString(),
+                };
+
+                // Add system message
                 const systemMsg: ChatMessage = {
-                    id: `upload-${Date.now()}`,
+                    id: msgId,
                     role: 'assistant',
-                    content: `Document "${title}" has been uploaded and assigned to package **${packageId}** as a ${docType.replace('_', ' ')}.`,
+                    content: `Document uploaded and assigned to package **${packageId}**.`,
                     timestamp: new Date(),
                 };
                 setMessages((prev) => [...prev, systemMsg]);
             } else {
-                // Just saved to workspace
+                // Keep in workspace
+                docInfo = {
+                    document_type: docType,
+                    doc_type: docType,
+                    title: title,
+                    s3_key: uploadResult.key,
+                    mode: 'workspace',
+                    status: 'draft',
+                    version: 1,
+                    content_type: uploadResult.content_type,
+                    is_binary: uploadResult.content_type !== 'text/plain' && uploadResult.content_type !== 'text/markdown',
+                    generated_at: new Date().toISOString(),
+                };
+
+                // Add system message
                 const systemMsg: ChatMessage = {
-                    id: `upload-${Date.now()}`,
+                    id: msgId,
                     role: 'assistant',
-                    content: `Document "${title}" has been uploaded to your workspace.`,
+                    content: `Document uploaded to your workspace.`,
                     timestamp: new Date(),
                 };
                 setMessages((prev) => [...prev, systemMsg]);
             }
+
+            // Add document card to the message
+            setDocuments((prev) => ({
+                ...prev,
+                [msgId]: [...(prev[msgId] || []), docInfo],
+            }));
+
+            // Persist to localStorage
+            if (currentSessionId) {
+                saveGeneratedDocument(docInfo, currentSessionId, title);
+            }
+
             setUploadResult(null);
         } catch (err) {
             throw err;

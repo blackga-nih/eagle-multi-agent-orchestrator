@@ -134,6 +134,7 @@ export default function TemplatesPage() {
   const [showCopyModal, setShowCopyModal] = useState(false);
   const [copyTarget, setCopyTarget] = useState<TemplateCard | null>(null);
   const [selectedPackageId, setSelectedPackageId] = useState<string>('');
+  const [newPackageTitle, setNewPackageTitle] = useState<string>('');
 
   // Edit form state
   const [editBody, setEditBody] = useState('');
@@ -152,17 +153,23 @@ export default function TemplatesPage() {
     try {
       const token = await getToken();
       const [plugins, custom, s3Response, pkgs] = await Promise.all([
-        pluginApi.list(getToken, 'templates'),
-        templateApi.list(getToken).catch(() => [] as TemplateEntity[]),
-        templateApi.listS3(getToken, undefined, refresh),
-        listPackages(token),
+        pluginApi.list(getToken, 'templates').catch(() => []),
+        templateApi.list(getToken).catch(() => []),
+        templateApi.listS3(getToken, undefined, refresh).catch(() => ({
+          templates: [],
+          total: 0,
+          phases: {},
+          phase_counts: {},
+        })),
+        listPackages(token).catch(() => []),
       ]);
-      setPluginTemplates(plugins);
+      // Defensive: ensure arrays even if API returns unexpected shape
+      setPluginTemplates(Array.isArray(plugins) ? plugins : []);
       setCustomTemplates(Array.isArray(custom) ? custom : []);
-      setS3Templates(s3Response.templates);
-      setPhases(s3Response.phases);
-      setPhaseCounts(s3Response.phase_counts);
-      setPackages(pkgs);
+      setS3Templates(Array.isArray(s3Response?.templates) ? s3Response.templates : []);
+      setPhases(s3Response?.phases && typeof s3Response.phases === 'object' ? s3Response.phases as Record<string, string> : {});
+      setPhaseCounts(s3Response?.phase_counts && typeof s3Response.phase_counts === 'object' ? s3Response.phase_counts as Record<string, number> : {});
+      setPackages(Array.isArray(pkgs) ? pkgs : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load templates');
     } finally {
@@ -177,7 +184,7 @@ export default function TemplatesPage() {
   // -----------------------------------------------------------------------
 
   const cards: TemplateCard[] = useMemo(() => [
-    ...pluginTemplates.map((p): TemplateCard => ({
+    ...(pluginTemplates || []).map((p): TemplateCard => ({
       key: `plugin-${p.name}`,
       name: (p.metadata?.display_name as string) || p.name,
       description: (p.metadata?.description as string) || '',
@@ -188,7 +195,7 @@ export default function TemplatesPage() {
       updatedAt: p.updated_at,
       raw: p,
     })),
-    ...customTemplates.map((t): TemplateCard => ({
+    ...(customTemplates || []).map((t): TemplateCard => ({
       key: `custom-${t.doc_type}`,
       name: t.display_name || t.doc_type,
       description: '',
@@ -199,7 +206,7 @@ export default function TemplatesPage() {
       updatedAt: t.updated_at,
       raw: t,
     })),
-    ...s3Templates.map((s): TemplateCard => ({
+    ...(s3Templates || []).map((s): TemplateCard => ({
       key: `s3-${s.s3_key}`,
       name: s.display_name,
       description: s.filename,
@@ -244,7 +251,7 @@ export default function TemplatesPage() {
   // Get unique file types for filter
   const uniqueFileTypes = useMemo(() => {
     const types = new Set<string>();
-    s3Templates.forEach(t => types.add(t.file_type));
+    (s3Templates || []).forEach(t => types.add(t.file_type));
     return Array.from(types).sort();
   }, [s3Templates]);
 
@@ -331,16 +338,43 @@ export default function TemplatesPage() {
   }
 
   async function handleCopyToPackage() {
-    if (!copyTarget?.s3Key || !selectedPackageId) return;
+    if (!copyTarget?.s3Key) return;
+    // Require either an existing package OR a new package title
+    if (selectedPackageId !== '__new__' && !selectedPackageId) return;
+    if (selectedPackageId === '__new__' && !newPackageTitle.trim()) return;
+
     setSaving(true);
     try {
+      let targetPackageId = selectedPackageId;
+
+      // Create new package if needed
+      if (selectedPackageId === '__new__') {
+        const token = await getToken();
+        const response = await fetch('/api/packages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ title: newPackageTitle.trim() }),
+        });
+        if (!response.ok) {
+          throw new Error('Failed to create package');
+        }
+        const newPkg = await response.json();
+        targetPackageId = newPkg.package_id;
+        // Update packages list so it appears in dropdown
+        setPackages(prev => [newPkg, ...prev]);
+      }
+
       const result = await templateApi.copyToPackage(getToken, {
         s3_key: copyTarget.s3Key,
-        package_id: selectedPackageId,
+        package_id: targetPackageId,
       });
       setShowCopyModal(false);
       setCopyTarget(null);
       setSelectedPackageId('');
+      setNewPackageTitle('');
       setSuccessMessage(`Template copied to package. Document ID: ${result.document_id}`);
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err) {
@@ -832,6 +866,7 @@ export default function TemplatesPage() {
                 setShowCopyModal(false);
                 setCopyTarget(null);
                 setSelectedPackageId('');
+                setNewPackageTitle('');
               }}
               className="px-4 py-2 text-gray-600 hover:text-gray-800"
             >
@@ -839,11 +874,11 @@ export default function TemplatesPage() {
             </button>
             <button
               onClick={handleCopyToPackage}
-              disabled={saving || !selectedPackageId}
+              disabled={saving || (!selectedPackageId || (selectedPackageId === '__new__' && !newPackageTitle.trim()))}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               <Copy className="w-4 h-4" />
-              {saving ? 'Copying...' : 'Copy to Package'}
+              {saving ? (selectedPackageId === '__new__' ? 'Creating...' : 'Copying...') : 'Copy to Package'}
             </button>
           </div>
         }
@@ -874,24 +909,32 @@ export default function TemplatesPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Select Target Package *
               </label>
-              {packages.length === 0 ? (
-                <p className="text-sm text-gray-500 py-4 text-center bg-gray-50 rounded-xl">
-                  No packages available. Create a package first to use templates.
-                </p>
-              ) : (
-                <select
-                  value={selectedPackageId}
-                  onChange={(e) => setSelectedPackageId(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                >
-                  <option value="">Select a package...</option>
-                  {packages.map(pkg => (
-                    <option key={pkg.package_id} value={pkg.package_id}>
-                      {pkg.title || pkg.package_id}
-                      {pkg.status && ` (${pkg.status})`}
-                    </option>
-                  ))}
-                </select>
+              <select
+                value={selectedPackageId}
+                onChange={(e) => {
+                  setSelectedPackageId(e.target.value);
+                  if (e.target.value !== '__new__') setNewPackageTitle('');
+                }}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+              >
+                <option value="">Select a package...</option>
+                <option value="__new__">+ Create New Package</option>
+                {packages.map(pkg => (
+                  <option key={pkg.package_id} value={pkg.package_id}>
+                    {pkg.title || pkg.package_id}
+                    {pkg.status && ` (${pkg.status})`}
+                  </option>
+                ))}
+              </select>
+              {selectedPackageId === '__new__' && (
+                <input
+                  type="text"
+                  placeholder="Enter package title..."
+                  value={newPackageTitle}
+                  onChange={(e) => setNewPackageTitle(e.target.value)}
+                  className="mt-2 w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  autoFocus
+                />
               )}
             </div>
 

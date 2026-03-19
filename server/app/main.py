@@ -2625,43 +2625,6 @@ async def list_templates_endpoint(
     return list_tenant_templates(user.tenant_id, doc_type)
 
 
-@app.get("/api/templates/{doc_type}")
-async def get_active_template(
-    doc_type: str,
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Return the resolved template for this user (4-layer fallback)."""
-    body, source = resolve_template(user.tenant_id, user.user_id, doc_type)
-    return {"doc_type": doc_type, "template_body": body, "source": source}
-
-
-@app.post("/api/templates/{doc_type}")
-async def create_template_endpoint(
-    doc_type: str,
-    body: Dict[str, Any],
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Create or update a user/tenant template override."""
-    return put_template(
-        tenant_id=user.tenant_id,
-        doc_type=doc_type,
-        user_id=body.get("user_id", user.user_id),
-        template_body=body.get("template_body", ""),
-        display_name=body.get("display_name", ""),
-        is_default=body.get("is_default", False),
-    )
-
-
-@app.delete("/api/templates/{doc_type}")
-async def delete_template_endpoint(
-    doc_type: str,
-    user: UserContext = Depends(get_user_from_header),
-):
-    """Delete the current user's template override for a doc type."""
-    ok = delete_template(user.tenant_id, doc_type, user.user_id)
-    return {"deleted": ok}
-
-
 # ── S3 Template Library ────────────────────────────────────────────
 
 @app.get("/api/templates/s3")
@@ -2750,6 +2713,45 @@ async def copy_s3_template_to_package(
         "package_id": package_id,
         "source": "s3_template",
     }
+
+
+# ── Templates (Dynamic Routes) ─────────────────────────────────────
+
+@app.get("/api/templates/{doc_type}")
+async def get_active_template(
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return the resolved template for this user (4-layer fallback)."""
+    body, source = resolve_template(user.tenant_id, user.user_id, doc_type)
+    return {"doc_type": doc_type, "template_body": body, "source": source}
+
+
+@app.post("/api/templates/{doc_type}")
+async def create_template_endpoint(
+    doc_type: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Create or update a user/tenant template override."""
+    return put_template(
+        tenant_id=user.tenant_id,
+        doc_type=doc_type,
+        user_id=body.get("user_id", user.user_id),
+        template_body=body.get("template_body", ""),
+        display_name=body.get("display_name", ""),
+        is_default=body.get("is_default", False),
+    )
+
+
+@app.delete("/api/templates/{doc_type}")
+async def delete_template_endpoint(
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete the current user's template override for a doc type."""
+    ok = delete_template(user.tenant_id, doc_type, user.user_id)
+    return {"deleted": ok}
 
 
 # ── User-Created Skills (SKILL#) ───────────────────────────────────

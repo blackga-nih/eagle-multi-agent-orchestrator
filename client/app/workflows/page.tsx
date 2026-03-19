@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, Filter, ArrowUpDown, Eye, Edit2, CheckCircle2, Circle, FileText } from 'lucide-react';
+import { Plus, Search, Filter, ArrowUpDown, Eye, Edit2, CheckCircle2, Circle, FileText, X, Check } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
@@ -20,6 +20,7 @@ import {
 } from '@/lib/mock-data';
 import { getPackages, PackageData } from '@/lib/document-store';
 import { Workflow, WorkflowStatus } from '@/types/schema';
+import { useAuth } from '@/contexts/auth-context';
 
 const mockWorkflows = [CURRENT_WORKFLOW, ...PAST_WORKFLOWS];
 
@@ -42,10 +43,13 @@ function packageToWorkflow(pkg: PackageData): Workflow {
 
 export default function WorkflowsPage() {
   const router = useRouter();
+  const { getToken } = useAuth();
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
   const [selectedPackage, setSelectedPackage] = useState<PackageData | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editTitleValue, setEditTitleValue] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
   const [localPackages, setLocalPackages] = useState<PackageData[]>([]);
 
@@ -82,6 +86,66 @@ export default function WorkflowsPage() {
     } else {
       setSelectedWorkflow(workflow);
     }
+  };
+
+  const handleEditTitle = () => {
+    if (selectedPackage) {
+      setEditTitleValue(selectedPackage.title);
+      setEditingTitle(true);
+    }
+  };
+
+  const handleSaveTitle = async () => {
+    if (!selectedPackage || !editTitleValue.trim()) return;
+
+    try {
+      // Update localStorage
+      const packages = getPackages();
+      const updated = packages.map((pkg) =>
+        pkg.id === selectedPackage.id
+          ? { ...pkg, title: editTitleValue.trim(), updated_at: new Date().toISOString() }
+          : pkg
+      );
+
+      // Persist back to localStorage
+      const packagesMap = Object.fromEntries(
+        updated.map((pkg) => [pkg.id, pkg])
+      );
+      try {
+        localStorage.setItem('eagle_packages', JSON.stringify(packagesMap));
+      } catch {
+        // localStorage full or unavailable
+      }
+
+      // Update local packages state
+      setLocalPackages(updated);
+      const updatedPkg = updated.find((p) => p.id === selectedPackage.id);
+      if (updatedPkg) {
+        setSelectedPackage(updatedPkg);
+      }
+
+      // Optionally sync to backend if package has a package_id
+      if (selectedPackage.package_id) {
+        const token = await getToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        await fetch(`/api/packages/${selectedPackage.package_id}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ title: editTitleValue.trim() }),
+        });
+      }
+
+      setEditingTitle(false);
+    } catch (error) {
+      console.error('Failed to save package title:', error);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingTitle(false);
+    setEditTitleValue('');
   };
 
   return (
@@ -292,8 +356,10 @@ export default function WorkflowsPage() {
       {/* localStorage Package Detail Modal — Document Checklist */}
       <Modal
         isOpen={!!selectedPackage}
-        onClose={() => setSelectedPackage(null)}
-        title={selectedPackage?.title}
+        onClose={() => {
+          setSelectedPackage(null);
+          setEditingTitle(false);
+        }}
         size="lg"
         footer={
           <div className="flex justify-end">
@@ -308,6 +374,33 @@ export default function WorkflowsPage() {
       >
         {selectedPackage && (
           <div className="space-y-6">
+            {/* Editable title - double-click to edit */}
+            <div className="-mt-2 -mx-6 px-6 pb-4 border-b border-gray-100">
+              {editingTitle ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={editTitleValue}
+                    onChange={(e) => setEditTitleValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveTitle();
+                      if (e.key === 'Escape') handleCancelEdit();
+                    }}
+                    onBlur={handleSaveTitle}
+                    autoFocus
+                    className="flex-1 text-lg font-bold text-gray-900 px-2 py-1 -ml-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              ) : (
+                <h2
+                  className="text-lg font-bold text-gray-900 cursor-pointer hover:text-blue-600 transition-colors"
+                  onDoubleClick={handleEditTitle}
+                  title="Double-click to edit"
+                >
+                  {selectedPackage.title}
+                </h2>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-gray-500 uppercase tracking-wide">Status</label>
