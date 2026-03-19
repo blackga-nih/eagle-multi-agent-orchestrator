@@ -214,9 +214,10 @@ _model = BedrockModel(
     model_id=MODEL,
     region_name=os.getenv("AWS_REGION", "us-east-1"),
     boto_client_config=_bedrock_client_config,
-    # cache_tools="default" — disabled; Bedrock Converse API rejects cachePoint
-    # in toolConfig.tools (ValidationException). Revisit when Bedrock adds support.
-    cache_config=CacheConfig(strategy="auto"),
+    # Prompt caching disabled — Bedrock Converse API rejects cachePoint in both
+    # toolConfig.tools and messages content blocks (botocore ParamValidationError).
+    # cache_tools="default" and cache_config=CacheConfig(strategy="auto") both
+    # fail. Revisit when botocore/Bedrock adds cachePoint support.
 )
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
