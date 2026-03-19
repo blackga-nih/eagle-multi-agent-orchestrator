@@ -8,43 +8,16 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from decimal import Decimal
 
-import boto3
 from botocore.exceptions import ClientError, BotoCoreError
+
+from .db_client import get_table, item_to_dict
 
 logger = logging.getLogger("eagle.admin")
 
 # ── Configuration ────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
 # Cost per 1K tokens (Claude 3.5 Sonnet via Bedrock, approximate)
 COST_INPUT_PER_1K = float(os.getenv("COST_INPUT_PER_1K", "0.003"))
 COST_OUTPUT_PER_1K = float(os.getenv("COST_OUTPUT_PER_1K", "0.015"))
-
-# ── DynamoDB Client ──────────────────────────────────────────────────
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
-
-def _serialize_item(item: Dict) -> Dict:
-    """Convert DynamoDB item to JSON-serializable dict."""
-    result = {}
-    for k, v in item.items():
-        if isinstance(v, Decimal):
-            result[k] = float(v) if v % 1 else int(v)
-        else:
-            result[k] = v
-    return result
 
 
 # ── Cost Calculation ─────────────────────────────────────────────────
@@ -92,7 +65,7 @@ def record_request_cost(
     }
     
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=cost_record)
         
         # Update daily aggregate
@@ -105,7 +78,7 @@ def record_request_cost(
 def _update_daily_aggregate(tenant_id: str, date: str, input_tokens: int, output_tokens: int, cost: float):
     """Update daily aggregate counters."""
     try:
-        table = _get_table()
+        table = get_table()
         table.update_item(
             Key={
                 "PK": f"AGG#{tenant_id}",
@@ -141,7 +114,7 @@ def get_dashboard_stats(tenant_id: str = "default", days: int = 30) -> Dict[str,
     Returns summary stats and daily breakdowns.
     """
     try:
-        table = _get_table()
+        table = get_table()
         
         # Get daily aggregates
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -154,7 +127,7 @@ def get_dashboard_stats(tenant_id: str = "default", days: int = 30) -> Dict[str,
             }
         )
         
-        daily_data = [_serialize_item(i) for i in response.get("Items", [])]
+        daily_data = [item_to_dict(i) for i in response.get("Items", [])]
         
         # Calculate totals
         total_input = sum(d.get("input_tokens", 0) for d in daily_data)
@@ -225,7 +198,7 @@ def get_user_stats(tenant_id: str, user_id: str, days: int = 30) -> Dict[str, An
     Get usage statistics for a specific user.
     """
     try:
-        table = _get_table()
+        table = get_table()
         
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
         
@@ -240,7 +213,7 @@ def get_user_stats(tenant_id: str, user_id: str, days: int = 30) -> Dict[str, An
             }
         )
         
-        records = [_serialize_item(i) for i in response.get("Items", [])]
+        records = [item_to_dict(i) for i in response.get("Items", [])]
         
         total_input = sum(r.get("input_tokens", 0) for r in records)
         total_output = sum(r.get("output_tokens", 0) for r in records)
@@ -281,7 +254,7 @@ def get_top_users(tenant_id: str, days: int = 30, limit: int = 10) -> List[Dict[
     Get top users by usage for a tenant.
     """
     try:
-        table = _get_table()
+        table = get_table()
         
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
         
@@ -324,7 +297,7 @@ def get_tool_usage(tenant_id: str, days: int = 30) -> Dict[str, Any]:
     Get tool usage breakdown.
     """
     try:
-        table = _get_table()
+        table = get_table()
         
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
         
@@ -379,7 +352,7 @@ def check_rate_limit(tenant_id: str, user_id: str, tier: str = "free") -> Dict[s
     limits = RATE_LIMITS.get(tier.lower(), RATE_LIMITS["free"])
     
     try:
-        table = _get_table()
+        table = get_table()
         
         now = datetime.utcnow()
         hour_start = now.replace(minute=0, second=0, microsecond=0)

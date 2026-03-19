@@ -17,36 +17,17 @@ Resolution chain (highest → lowest priority):
   3. PROMPT#global / PROMPT#{agent_name}                        ← prompt_store (platform admin)
   4. PLUGIN#agents / PLUGIN#{name}                              ← plugin_store (canonical DynamoDB)
 """
-import os
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError, BotoCoreError
 
+from .db_client import get_table
 from .plugin_store import get_agent_content, get_skill_content
 
 logger = logging.getLogger("eagle.workspace_override_store")
-
-# ── Configuration ─────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-# ── DynamoDB Client (lazy singleton) ─────────────────────────────────
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────
@@ -91,7 +72,7 @@ def put_override(
     }
 
     try:
-        _get_table().put_item(Item=item)
+        get_table().put_item(Item=item)
         logger.debug("wspc_store.put_override: [%s/%s/%s] %s#%s v%s", tenant_id, user_id, workspace_id, entity_type, name, version)
 
         # Keep workspace override_count accurate
@@ -114,7 +95,7 @@ def get_override(
 ) -> Optional[Dict[str, Any]]:
     """Fetch a single workspace override.  Returns None if not set."""
     try:
-        resp = _get_table().get_item(
+        resp = get_table().get_item(
             Key={
                 "PK": f"WSPC#{tenant_id}#{user_id}#{workspace_id}",
                 "SK": f"{entity_type.upper()}#{name}",
@@ -141,13 +122,13 @@ def list_overrides(
     try:
         pk = f"WSPC#{tenant_id}#{user_id}#{workspace_id}"
         if entity_type:
-            resp = _get_table().query(
+            resp = get_table().query(
                 KeyConditionExpression=(
                     Key("PK").eq(pk) & Key("SK").begins_with(f"{entity_type.upper()}#")
                 )
             )
         else:
-            resp = _get_table().query(
+            resp = get_table().query(
                 KeyConditionExpression=Key("PK").eq(pk)
             )
         return [dict(i) for i in resp.get("Items", [])]
@@ -169,7 +150,7 @@ def delete_override(
         return False
 
     try:
-        _get_table().delete_item(
+        get_table().delete_item(
             Key={
                 "PK": f"WSPC#{tenant_id}#{user_id}#{workspace_id}",
                 "SK": f"{entity_type.upper()}#{name}",
@@ -194,7 +175,7 @@ def delete_all_overrides(
     Returns the count of deleted items.
     """
     overrides = list_overrides(tenant_id, user_id, workspace_id)
-    table = _get_table()
+    table = get_table()
     deleted = 0
     pk = f"WSPC#{tenant_id}#{user_id}#{workspace_id}"
 

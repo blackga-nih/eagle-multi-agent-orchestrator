@@ -11,21 +11,17 @@ Entity format:
     PK:  APPROVAL#{tenant_id}
     SK:  APPROVAL#{package_id}#{step:02d}
 """
-import os
 import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from boto3.dynamodb.conditions import Key
 
-logger = logging.getLogger('eagle.approval_store')
+from .db_client import get_table
 
-# -- Configuration --------------------------------------------------------
-TABLE_NAME = os.getenv('EAGLE_SESSIONS_TABLE', 'eagle')
-AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+logger = logging.getLogger('eagle.approval_store')
 
 # -- FAR Threshold Constants -----------------------------------------------
 _FAR_CHAIN_SMALL = [
@@ -44,26 +40,7 @@ _FAR_CHAIN_LARGE = [
 THRESHOLD_MID = Decimal('250000')
 THRESHOLD_LARGE = Decimal('750000')
 
-# -- DynamoDB Client (lazy singleton) -------------------------------------
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
-
 # -- Helpers ---------------------------------------------------------------
-
-def _item_to_dict(item) -> dict:
-    """Convert a raw DynamoDB item to a plain dict."""
-    return dict(item)
 
 
 def _sk(package_id: str, step: int) -> str:
@@ -91,7 +68,7 @@ def create_approval_chain(
     Determines the required steps from estimated_value thresholds, writes each
     step to DynamoDB with status='pending', and returns the list of created items.
     """
-    table = _get_table()
+    table = get_table()
     now = datetime.utcnow().isoformat()
     chain_definition = _far_chain(estimated_value)
 
@@ -132,7 +109,7 @@ def get_approval_step(
 ) -> Optional[dict]:
     """Fetch a single approval step item. Returns None if not found."""
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 'PK': f'APPROVAL#{tenant_id}',
@@ -140,7 +117,7 @@ def get_approval_step(
             }
         )
         raw = response.get('Item')
-        return _item_to_dict(raw) if raw else None
+        return dict(raw) if raw else None
     except (ClientError, BotoCoreError) as e:
         logger.error('approval_store.get_approval_step failed: %s', e)
         return None
@@ -148,7 +125,7 @@ def get_approval_step(
 
 def list_approval_chain(tenant_id: str, package_id: str) -> list[dict]:
     """Return all approval steps for a package, sorted by step number ascending."""
-    table = _get_table()
+    table = get_table()
     sk_prefix = f'APPROVAL#{package_id}#'
 
     try:
@@ -158,7 +135,7 @@ def list_approval_chain(tenant_id: str, package_id: str) -> list[dict]:
                 & Key('SK').begins_with(sk_prefix)
             ),
         )
-        items = [_item_to_dict(i) for i in response.get('Items', [])]
+        items = [dict(i) for i in response.get('Items', [])]
         return sorted(items, key=lambda s: s.get('step', 0))
     except (ClientError, BotoCoreError) as e:
         logger.error('approval_store.list_approval_chain failed: %s', e)
@@ -181,7 +158,7 @@ def record_decision(
     if status not in ('approved', 'rejected', 'returned'):
         raise ValueError(f'Invalid decision status: {status!r}')
 
-    table = _get_table()
+    table = get_table()
     now = datetime.utcnow().isoformat()
 
     try:
@@ -205,7 +182,7 @@ def record_decision(
             ReturnValues='ALL_NEW',
         )
         attrs = response.get('Attributes', {})
-        return _item_to_dict(attrs) if attrs else None
+        return dict(attrs) if attrs else None
     except ClientError as e:
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
             logger.warning(

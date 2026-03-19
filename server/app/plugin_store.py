@@ -10,40 +10,21 @@ Entity format:
 
 entity_type values: "agents" | "skills" | "templates" | "refdata" | "tools" | "manifest"
 """
-import os
 import time
 import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
-logger = logging.getLogger("eagle.plugin_store")
+from .db_client import get_table
 
-# ── Configuration ────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+logger = logging.getLogger("eagle.plugin_store")
 
 # Version string representing the bundled plugin files.
 # Increment this whenever eagle-plugin/ content changes to force a re-seed.
 BUNDLED_PLUGIN_VERSION = "1"
-
-# ── DynamoDB Client (lazy singleton — same pattern as session_store.py) ──
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # ── In-Process Cache (60-second TTL per entity_type) ─────────────────
 # Keys: entity_type str → {"ts": float, "items": list[dict]}
@@ -75,7 +56,7 @@ def get_plugin_item(entity_type: str, name: str) -> Optional[Dict[str, Any]]:
     Returns the item dict or None if not found.
     """
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 "PK": f"PLUGIN#{entity_type}",
@@ -123,7 +104,7 @@ def put_plugin_item(
     }
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=item)
         _cache_invalidate(entity_type)
         logger.debug("plugin_store.put_plugin_item: [%s/%s] v%s", entity_type, name, version)
@@ -143,7 +124,7 @@ def list_plugin_entities(entity_type: str) -> List[Dict[str, Any]]:
         return cached
 
     try:
-        table = _get_table()
+        table = get_table()
         response = table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
             ExpressionAttributeValues={

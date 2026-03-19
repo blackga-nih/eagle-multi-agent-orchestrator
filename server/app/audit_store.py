@@ -12,38 +12,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timedelta
 from typing import Any
 
-import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .db_client import get_table, now_iso, ttl_timestamp
+
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Lazy DynamoDB singletons (same pattern as plugin_store.py)
-# ---------------------------------------------------------------------------
-
-_dynamodb = None
-_table = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        region = os.environ.get("AWS_REGION", "us-east-1")
-        _dynamodb = boto3.resource("dynamodb", region_name=region)
-    return _dynamodb
-
-
-def _get_table():
-    global _table
-    if _table is None:
-        table_name = os.environ.get("TABLE_NAME", "eagle")
-        _table = _get_dynamodb().Table(table_name)
-    return _table
 
 
 # ---------------------------------------------------------------------------
@@ -52,11 +29,7 @@ def _get_table():
 
 def _seven_year_ttl() -> int:
     """Return Unix epoch seconds 7 years from now."""
-    return int((datetime.utcnow() + timedelta(days=365 * 7)).timestamp())
-
-
-def _now_iso() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    return ttl_timestamp(days=365 * 7)
 
 
 def _to_json_str(value: Any) -> str | None:
@@ -95,7 +68,7 @@ def write_audit(
     after:         Optional snapshot after the change (str or JSON-serialisable).
     metadata:      Arbitrary key/value dict for extra context.
     """
-    occurred_at = _now_iso()
+    occurred_at = now_iso()
     pk = f"AUDIT#{tenant_id}"
     sk = f"AUDIT#{occurred_at}#{entity_type}#{entity_name}"
 
@@ -120,7 +93,7 @@ def write_audit(
         item["after"] = after_str
 
     try:
-        _get_table().put_item(Item=item)
+        get_table().put_item(Item=item)
         logger.info(
             "audit_store: wrote %s event for %s/%s (tenant=%s actor=%s)",
             event_type,
@@ -161,7 +134,7 @@ def list_audit_events(
         query_kwargs["FilterExpression"] = Attr("entity_type").eq(entity_type)
 
     try:
-        response = _get_table().query(**query_kwargs)
+        response = get_table().query(**query_kwargs)
         items: list[dict] = response.get("Items", [])
         logger.debug(
             "audit_store: retrieved %d events for tenant=%s entity_type=%s",

@@ -7,19 +7,15 @@ Entity format:
 Preferences persist indefinitely (no TTL).
 No in-process cache — prefs are user-specific and low-volume.
 """
-import os
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-logger = logging.getLogger("eagle.pref_store")
+from .db_client import get_table
 
-# ── Configuration ─────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+logger = logging.getLogger("eagle.pref_store")
 
 # ── Default preferences ───────────────────────────────────────────────
 DEFAULT_PREFS: Dict[str, Any] = {
@@ -34,21 +30,6 @@ DEFAULT_PREFS: Dict[str, Any] = {
 
 # Keys callers are allowed to modify via update_prefs()
 _ALLOWED_KEYS = frozenset(DEFAULT_PREFS.keys())
-
-# ── DynamoDB lazy singleton ───────────────────────────────────────────
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -80,7 +61,7 @@ def get_prefs(tenant_id: str, user_id: str) -> Dict[str, Any]:
     present in the returned dict.  Never returns None.
     """
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 "PK": f"PREF#{tenant_id}",
@@ -132,7 +113,7 @@ def update_prefs(
     }
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=item)
         logger.debug(
             "pref_store.update_prefs: upserted prefs [%s/%s]",
@@ -159,7 +140,7 @@ def reset_prefs(tenant_id: str, user_id: str) -> Dict[str, Any]:
     Returns DEFAULT_PREFS (a fresh copy) after deletion.
     """
     try:
-        table = _get_table()
+        table = get_table()
         table.delete_item(
             Key={
                 "PK": f"PREF#{tenant_id}",

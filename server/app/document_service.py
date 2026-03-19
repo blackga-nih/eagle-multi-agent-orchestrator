@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Tuple
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .db_client import get_table, get_s3
 from .document_store import (
     get_document_history,
     get_document,
@@ -35,30 +35,6 @@ logger = logging.getLogger("eagle.document_service")
 
 # Configuration
 S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-
-# Lazy singletons
-_s3 = None
-_dynamodb = None
-
-
-def _get_s3():
-    global _s3
-    if _s3 is None:
-        _s3 = boto3.client("s3", region_name=AWS_REGION)
-    return _s3
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
 
 
 @dataclass
@@ -289,7 +265,7 @@ def get_document_download_url(
         return None
 
     try:
-        s3 = _get_s3()
+        s3 = get_s3()
         url = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": s3_bucket, "Key": s3_key},
@@ -401,7 +377,7 @@ def _create_document_record(
         item["template_id"] = template_id
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=item)
         return document_id, None
     except (ClientError, BotoCoreError) as e:
@@ -419,7 +395,7 @@ def _update_document_status(
 ) -> None:
     """Update the status of a document record."""
     try:
-        table = _get_table()
+        table = get_table()
 
         update_expr = "SET #s = :status"
         expr_names = {"#s": "status"}
@@ -457,7 +433,7 @@ def _upload_to_s3(s3_key: str, content: bytes, file_type: str) -> Optional[str]:
     content_type = content_types.get(file_type, "application/octet-stream")
 
     try:
-        s3 = _get_s3()
+        s3 = get_s3()
         s3.put_object(
             Bucket=S3_BUCKET,
             Key=s3_key,
@@ -478,7 +454,7 @@ def _supersede_prior_versions(
 ) -> None:
     """Mark all prior versions as superseded."""
     history = get_document_history(tenant_id, package_id, doc_type)
-    table = _get_table()
+    table = get_table()
 
     for doc in history:
         if doc["version"] < current_version and doc.get("status") != "superseded":

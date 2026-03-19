@@ -20,35 +20,16 @@ Attributes:
     updated_by  str     — principal that wrote the record (e.g. "admin", "api-key-xyz")
     ttl         int     — optional Unix epoch expiry (DynamoDB TTL attribute)
 """
-import os
 import time
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .db_client import get_table
+
 logger = logging.getLogger("eagle.prompt_store")
-
-# ── Configuration ─────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-# ── DynamoDB lazy singleton ───────────────────────────────────────────
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # ── In-Process Cache (60-second TTL per tenant_id#agent_name) ─────────
 # Keys: "{tenant_id}#{agent_name}" → {"ts": float, "item": dict | None}
@@ -116,7 +97,7 @@ def put_prompt(
         item["ttl"] = ttl_epoch
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=item)
         _cache_invalidate(tenant_id, agent_name)
         logger.debug(
@@ -145,7 +126,7 @@ def get_prompt(tenant_id: str, agent_name: str) -> Optional[Dict[str, Any]]:
         return cached["item"]
 
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 "PK": f"PROMPT#{tenant_id}",
@@ -191,7 +172,7 @@ def resolve_prompt(tenant_id: str, agent_name: str) -> Optional[str]:
 def delete_prompt(tenant_id: str, agent_name: str) -> bool:
     """Delete a PROMPT# item.  Returns True on success, False on error."""
     try:
-        table = _get_table()
+        table = get_table()
         table.delete_item(
             Key={
                 "PK": f"PROMPT#{tenant_id}",
@@ -217,7 +198,7 @@ def list_tenant_prompts(tenant_id: str) -> List[Dict[str, Any]]:
     is_append, version, updated_at, updated_by, and optionally ttl).
     """
     try:
-        table = _get_table()
+        table = get_table()
         response = table.query(
             KeyConditionExpression=(
                 "PK = :pk AND begins_with(SK, :sk_prefix)"
