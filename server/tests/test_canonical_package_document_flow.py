@@ -306,9 +306,9 @@ def test_extract_document_context_from_prompt():
     assert parsed["user_request"] == "change the scope. leave it blank"
 
 
-def test_make_service_tool_infers_doc_context_for_create_document(monkeypatch):
+def test_create_document_tool_infers_doc_context_from_prompt(monkeypatch):
     import app.agentic_service as agentic_service
-    from app.strands_agentic_service import _make_service_tool
+    from app.strands_agentic_service import _build_all_service_tools
 
     captured = {}
 
@@ -332,19 +332,21 @@ def test_make_service_tool_infers_doc_context_for_create_document(monkeypatch):
         "use create_document and return the updated draft."
     )
 
-    tool_fn = _make_service_tool(
-        tool_name="create_document",
-        description="test",
+    tools = _build_all_service_tools(
         tenant_id="test-tenant",
         user_id="test-user",
         session_id="sess-321",
+        prompt_context=prompt,
         package_context=None,
         result_queue=None,
         loop=None,
-        prompt_context=prompt,
     )
 
-    tool_fn("{}")
+    # Find the create_document tool by name
+    create_doc_tool = next(t for t in tools if t.tool_name == "create_document")
+
+    # Call with empty doc_type to trigger prompt-context inference
+    create_doc_tool(doc_type="")
 
     assert captured["tenant_id"] == "test-tenant"
     assert captured["params"]["doc_type"] == "sow"

@@ -5,13 +5,19 @@ from __future__ import annotations
 import asyncio
 import json
 
-from app.strands_agentic_service import EAGLE_TOOLS, _SERVICE_TOOL_DEFS, build_supervisor_prompt
+from app.strands_agentic_service import EAGLE_TOOLS, _build_all_service_tools, build_supervisor_prompt
 from app.streaming_routes import stream_generator
 
 
-def test_service_tool_registry_includes_kb_tools():
-    assert "knowledge_search" in _SERVICE_TOOL_DEFS
-    assert "knowledge_fetch" in _SERVICE_TOOL_DEFS
+def test_service_tools_have_named_params():
+    """All service tools should expose named parameters, not generic 'params: str'."""
+    tools = _build_all_service_tools("test-tenant", "test-user", "test-session")
+    for t in tools:
+        spec = t.tool_spec
+        assert spec is not None, f"Tool {t} missing tool_spec"
+        schema = spec.get("inputSchema", {}).get("json", {})
+        props = schema.get("properties", {})
+        assert "params" not in props, f"{t.tool_name} still uses generic 'params' field"
 
 
 def test_tool_schema_list_includes_kb_tools():
