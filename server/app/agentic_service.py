@@ -768,7 +768,8 @@ EAGLE_TOOLS = [
             "Search the Federal Acquisition Regulation (FAR) and Defense Federal "
             "Acquisition Regulation Supplement (DFARS) for relevant clauses, "
             "requirements, and guidance. Returns part numbers, sections, titles, "
-            "full text summaries, and applicability notes."
+            "summaries, and s3_keys for full document retrieval. After receiving "
+            "results, call knowledge_fetch on s3_keys to read the full document."
         ),
         "input_schema": {
             "type": "object",
@@ -1349,7 +1350,8 @@ def _exec_search_far(params: dict, tenant_id: str) -> dict:
         results = [
             {"part": "1", "section": "1.102", "title": "Statement of Guiding Principles",
              "summary": "Deliver best value to the Government, satisfy the customer, minimize administrative costs, conduct business with integrity.",
-             "applicability": "All federal acquisitions"},
+             "applicability": "All federal acquisitions",
+             "s3_keys": []},
         ]
 
     return {
@@ -1358,7 +1360,7 @@ def _exec_search_far(params: dict, tenant_id: str) -> dict:
         "results_count": len(results),
         "clauses": results[:15],
         "source": "FAR/DFARS/HHSAR reference database (eagle-plugin/data/far-database.json)",
-        "note": "Reference data — always verify against current FAR/DFARS at acquisition.gov",
+        "note": "Call knowledge_fetch on s3_keys to read the full FAR document before answering.",
     }
 
 
@@ -3490,6 +3492,31 @@ def _exec_get_latest_document(params: dict, tenant_id: str) -> dict:
     }
 
 
+def _exec_finalize_package(params: dict, tenant_id: str) -> dict:
+    """Validate acquisition package completeness and optionally submit."""
+    from app.package_store import validate_package_completeness, submit_package
+
+    package_id = params.get("package_id")
+    if not package_id:
+        return {"error": "package_id is required"}
+
+    result = validate_package_completeness(tenant_id, package_id)
+    if result.get("error"):
+        return result
+
+    auto_submit = params.get("auto_submit", False)
+    if auto_submit and result.get("ready"):
+        submitted = submit_package(tenant_id, package_id)
+        if submitted:
+            result["submitted"] = True
+            result["status"] = "review"
+        else:
+            result["submitted"] = False
+            result["submit_error"] = "Package could not be submitted (may not be in drafting status)"
+
+    return result
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -3513,6 +3540,8 @@ TOOL_DISPATCH = {
     # Document changelog tools
     "document_changelog_search": _exec_document_changelog_search,
     "get_latest_document": _exec_get_latest_document,
+    # Package validation
+    "finalize_package": _exec_finalize_package,
 }
 
 # Tools that need session_id for per-user scoping

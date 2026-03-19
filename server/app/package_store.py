@@ -7,6 +7,7 @@ SK:  PACKAGE#{package_id}
 GSI: GSI1PK = TENANT#{tenant_id}, GSI1SK = PACKAGE#{status}#{created_at}
 """
 import os
+import re
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -34,12 +35,35 @@ _REQUIRED_DOCS: dict[str, list[str]] = {
     "sole_source": ["sow", "igce", "justification"],
 }
 
+# -- Compliance matrix document name → package slug -------------------------
+_COMPLIANCE_DOC_TO_SLUG: dict[str, str] = {
+    "SOW / PWS": "sow",
+    "Statement of Need (SON)": "sow",
+    "IGCE": "igce",
+    "Market Research Report": "market-research",
+    "Market Research": "market-research",
+    "Acquisition Plan": "acquisition-plan",
+    "J&A / Justification": "justification",
+    "D&F (Determination & Findings)": "d-f",
+    "Source Selection Plan": "source-selection-plan",
+    "Subcontracting Plan": "subcontracting-plan",
+    "QASP": "qasp",
+    "HHS-653 Small Business Review": "sb-review",
+    "Purchase Request": "purchase-request",
+    "IT Security & Privacy Certification": "security-checklist",
+    "Section 508 ICT Evaluation": "section-508",
+    "Human Subjects Provisions": "human-subjects",
+}
+
 # -- Valid updatable fields --------------------------------------------------
 _UPDATABLE_FIELDS = {
     "title",
     "requirement_type",
     "estimated_value",
     "acquisition_pathway",
+    "acquisition_method",
+    "contract_type",
+    "flags",
     "contract_vehicle",
     "status",
     "notes",
@@ -86,6 +110,95 @@ def _pathway_from_value(estimated_value: Decimal) -> str:
 def _required_docs_for(pathway: str) -> list[str]:
     """Return list of required document types for the given pathway."""
     return list(_REQUIRED_DOCS.get(pathway, []))
+
+
+def compute_required_docs(
+    estimated_value: float,
+    acquisition_method: str,
+    contract_type: str,
+    flags: dict | None = None,
+) -> list[str]:
+    """Compute required document slugs via the compliance matrix.
+
+    Calls ``compliance_matrix.get_requirements()`` and maps the resulting
+    ``documents_required`` entries (where ``required=True``) to package slugs.
+    Falls back to the static ``_required_docs_for()`` on any error.
+    """
+    try:
+        from .compliance_matrix import get_requirements
+
+        result = get_requirements(
+            contract_value=estimated_value,
+            acquisition_method=acquisition_method,
+            contract_type=contract_type,
+            flags=flags,
+        )
+
+        if result.get("errors"):
+            # Compliance matrix returned validation errors — fall back
+            pathway = _pathway_from_value(Decimal(str(estimated_value)))
+            return _required_docs_for(pathway)
+
+        slugs: list[str] = []
+        seen: set[str] = set()
+        for doc in result.get("documents_required", []):
+            if not doc.get("required"):
+                continue
+            slug = _COMPLIANCE_DOC_TO_SLUG.get(doc["name"])
+            if slug and slug not in seen:
+                slugs.append(slug)
+                seen.add(slug)
+
+        return slugs
+    except Exception:
+        logger.exception("compute_required_docs failed, falling back to static")
+        pathway = _pathway_from_value(Decimal(str(estimated_value)))
+        return _required_docs_for(pathway)
+
+
+def _generate_descriptive_title(
+    title: str,
+    requirement_type: str | None = None,
+    estimated_value: Decimal | None = None,
+    contract_vehicle: str | None = None,
+) -> str:
+    """Build a descriptive package title from metadata.
+
+    Only replaces generic titles (< 30 chars or exactly "Acquisition Package").
+    Preserves user-provided specific titles.  Stores the original as
+    ``original_title`` on the item (handled by the caller).
+    """
+    if len(title) >= 30 and title != "Acquisition Package":
+        return title
+
+    parts: list[str] = []
+
+    # Type label
+    label = (requirement_type or "Acquisition").replace("_", " ").title()
+    parts.append(label)
+
+    # Formatted value
+    if estimated_value is not None:
+        val = float(estimated_value)
+        if val >= 1_000_000:
+            parts.append(f"${val / 1_000_000:.1f}M")
+        elif val >= 1_000:
+            parts.append(f"${val / 1_000:.0f}K")
+        elif val > 0:
+            parts.append(f"${val:,.0f}")
+
+    desc = " — ".join(parts)
+    if contract_vehicle:
+        desc += f" [{contract_vehicle}]"
+
+    return desc
+
+
+def _has_unfilled_markers(content: str) -> list[str]:
+    """Return list of unfilled ``{{PLACEHOLDER}}`` markers found in content."""
+    if not content:
+        return []
+    return re.findall(r"\{\{[A-Z_]{3,}\}\}", content)
 
 
 def _next_package_id(tenant_id: str) -> str:
@@ -148,18 +261,36 @@ def create_package(
     session_id: Optional[str] = None,
     notes: str = "",
     contract_vehicle: Optional[str] = None,
+    acquisition_method: Optional[str] = None,
+    contract_type: Optional[str] = None,
+    flags: Optional[dict] = None,
 ) -> dict:
     """Create a new acquisition package and persist it to DynamoDB.
 
-    Automatically determines acquisition_pathway and required_documents from
-    estimated_value using FAR thresholds.
+    When ``acquisition_method`` and ``contract_type`` are provided, uses the
+    compliance matrix to compute dynamic required documents.  Otherwise
+    falls back to the static FAR-threshold-based pathway.
 
     Returns the newly created package as a serialised dict.
     Raises ClientError / BotoCoreError on DynamoDB failure.
     """
     package_id = _next_package_id(tenant_id)
     pathway = _pathway_from_value(estimated_value)
-    required_docs = _required_docs_for(pathway)
+
+    # Dynamic docs via compliance matrix when method+type available
+    if acquisition_method and contract_type:
+        required_docs = compute_required_docs(
+            float(estimated_value), acquisition_method, contract_type, flags
+        )
+    else:
+        required_docs = _required_docs_for(pathway)
+
+    # Descriptive title
+    original_title = title
+    title = _generate_descriptive_title(
+        title, requirement_type, estimated_value, contract_vehicle
+    )
+
     now = _now_iso()
 
     item: dict = {
@@ -173,6 +304,7 @@ def create_package(
         "tenant_id": tenant_id,
         "owner_user_id": owner_user_id,
         "title": title,
+        "original_title": original_title,
         "requirement_type": requirement_type,
         "estimated_value": estimated_value,
         "acquisition_pathway": pathway,
@@ -189,6 +321,12 @@ def create_package(
         item["contract_vehicle"] = contract_vehicle
     if session_id is not None:
         item["session_id"] = session_id
+    if acquisition_method is not None:
+        item["acquisition_method"] = acquisition_method
+    if contract_type is not None:
+        item["contract_type"] = contract_type
+    if flags is not None:
+        item["flags"] = flags
 
     _get_table().put_item(Item=item)
     logger.info("Created package %s for tenant %s", package_id, tenant_id)
@@ -243,10 +381,14 @@ def update_package(
         )
         return existing
 
-    # Recalculate pathway / required_docs when estimated_value changes
-    if "estimated_value" in allowed:
-        new_value = Decimal(str(allowed["estimated_value"]))
-        allowed["estimated_value"] = new_value
+    # Recalculate pathway / required_docs when key fields change
+    recalc_triggers = {"estimated_value", "acquisition_method", "contract_type"}
+    if recalc_triggers & allowed.keys():
+        if "estimated_value" in allowed:
+            new_value = Decimal(str(allowed["estimated_value"]))
+            allowed["estimated_value"] = new_value
+        else:
+            new_value = Decimal(str(existing.get("estimated_value", 0)))
 
         explicit_pathway = allowed.get("acquisition_pathway")
         if explicit_pathway == "sole_source":
@@ -256,7 +398,16 @@ def update_package(
             allowed["acquisition_pathway"] = new_pathway
 
         if "required_documents" not in updates:
-            allowed["required_documents"] = _required_docs_for(new_pathway)
+            # Prefer dynamic calculation when method+type are available
+            method = allowed.get("acquisition_method") or existing.get("acquisition_method")
+            ctype = allowed.get("contract_type") or existing.get("contract_type")
+            flags = allowed.get("flags") or existing.get("flags")
+            if method and ctype:
+                allowed["required_documents"] = compute_required_docs(
+                    float(new_value), method, ctype, flags
+                )
+            else:
+                allowed["required_documents"] = _required_docs_for(new_pathway)
 
     now = _now_iso()
     allowed["updated_at"] = now
@@ -471,4 +622,90 @@ def close_package(tenant_id: str, package_id: str) -> Optional[dict]:
         return None
 
     return update_package(tenant_id, package_id, {"status": "closed"})
+
+
+def validate_package_completeness(tenant_id: str, package_id: str) -> dict:
+    """AI-powered completeness check for an acquisition package.
+
+    Returns a validation report with readiness status, missing documents,
+    draft documents, unfilled template markers, and compliance warnings.
+    """
+    from .document_store import list_package_documents
+
+    pkg = get_package(tenant_id, package_id)
+    if pkg is None:
+        return {"error": "Package not found", "ready": False}
+
+    # Fetch documents
+    docs = list_package_documents(tenant_id, package_id)
+    doc_map: dict[str, dict] = {d.get("doc_type", ""): d for d in docs}
+
+    required: list[str] = pkg.get("required_documents") or []
+    completed: list[str] = pkg.get("completed_documents") or []
+    completed_set = set(completed)
+
+    # 1. Missing documents — required but not present
+    missing_documents = [r for r in required if r not in completed_set]
+
+    # 2. Draft documents — present but not finalized
+    draft_documents: list[str] = []
+    for doc_type in required:
+        doc = doc_map.get(doc_type)
+        if doc and doc.get("status") not in ("final", "approved"):
+            draft_documents.append(doc_type)
+
+    # 3. Unfilled template markers
+    unfilled_templates: list[dict] = []
+    for doc_type, doc in doc_map.items():
+        content = doc.get("content") or doc.get("preview") or ""
+        markers = _has_unfilled_markers(content)
+        if markers:
+            unfilled_templates.append({
+                "doc_type": doc_type,
+                "markers": markers[:10],  # cap at 10
+            })
+
+    # 4. Compliance warnings via compliance matrix
+    compliance_warnings: list[str] = []
+    method = pkg.get("acquisition_method")
+    ctype = pkg.get("contract_type")
+    if method and ctype:
+        try:
+            from .compliance_matrix import get_requirements
+
+            result = get_requirements(
+                contract_value=float(pkg.get("estimated_value", 0)),
+                acquisition_method=method,
+                contract_type=ctype,
+                flags=pkg.get("flags"),
+            )
+            compliance_warnings = result.get("warnings", [])
+        except Exception:
+            logger.debug("Could not run compliance check for validation")
+
+    total_required = len(required)
+    total_completed = len(completed_set & set(required))
+    ready = (
+        len(missing_documents) == 0
+        and len(draft_documents) == 0
+        and len(unfilled_templates) == 0
+    )
+
+    recommendation = "Package is complete and ready for submission." if ready else (
+        "Package has outstanding items. "
+        + (f"{len(missing_documents)} missing document(s). " if missing_documents else "")
+        + (f"{len(draft_documents)} document(s) still in draft. " if draft_documents else "")
+        + (f"{len(unfilled_templates)} document(s) with unfilled placeholders." if unfilled_templates else "")
+    ).strip()
+
+    return {
+        "ready": ready,
+        "missing_documents": missing_documents,
+        "draft_documents": draft_documents,
+        "unfilled_templates": unfilled_templates,
+        "compliance_warnings": compliance_warnings,
+        "recommendation": recommendation,
+        "total_required": total_required,
+        "total_completed": total_completed,
+    }
 
