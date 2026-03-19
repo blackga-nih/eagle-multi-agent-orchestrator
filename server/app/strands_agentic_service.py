@@ -214,12 +214,12 @@ _model = BedrockModel(
     model_id=MODEL,
     region_name=os.getenv("AWS_REGION", "us-east-1"),
     boto_client_config=_bedrock_client_config,
-    # Prompt caching BLOCKED at two levels:
-    # 1. botocore 1.34 rejects cachePoint in requests (ParamValidationError)
-    #    → fixed with parameter_validation=False
-    # 2. Strands SDK response parser hits KeyError on 'cachePoint' in Bedrock
-    #    response content blocks — SDK doesn't handle cache metadata yet.
-    # Requires: upgrade strands-agents to version with cachePoint response support.
+    # Bedrock prompt caching — requires boto3>=1.37.24 (native cachePoint support).
+    # cache_tools: appends cachePoint to toolConfig, caching 34 tool schemas (~17K tokens).
+    # cache_config: auto-injects cachePoint at last user message for prefix caching.
+    # 5-min TTL, refreshes on hit. ~2-4s TTFT reduction, ~90% input token cost savings.
+    cache_tools="default",
+    cache_config=CacheConfig(strategy="auto"),
 )
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
