@@ -1,7 +1,9 @@
-"""WSPC Store — DynamoDB-backed WSPC# entity CRUD with 4-layer resolution chain.
+"""Workspace Override Store — DynamoDB-backed workspace entity CRUD with 4-layer resolution chain.
 
-WSPC# items are per-user, per-workspace overrides of any agent/skill/template/config.
+Workspace override items are per-user, per-workspace overrides of any agent/skill/template/config.
 Changes made in one user's workspace are completely invisible to all other users.
+
+Note: Renamed from wspc_store.py for clarity (2026-03-19).
 
 Entity format:
     PK:  WSPC#{tenant_id}#{user_id}#{workspace_id}
@@ -26,7 +28,7 @@ from botocore.exceptions import ClientError, BotoCoreError
 
 from .plugin_store import get_agent_content, get_skill_content
 
-logger = logging.getLogger("eagle.wspc_store")
+logger = logging.getLogger("eagle.workspace_override_store")
 
 # ── Configuration ─────────────────────────────────────────────────────
 TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")

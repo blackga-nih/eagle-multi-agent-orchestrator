@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { getAgentColors, getAgentName, getAgentIcon } from '@/lib/agent-colors';
+import { formatTime } from '@/lib/date-utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,14 +27,6 @@ interface DisplayEntry {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatTime(timestamp: string): string {
-  try {
-    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return '';
-  }
-}
 
 function formatEventType(type: string, log?: AuditLogEntry): string {
   switch (type) {

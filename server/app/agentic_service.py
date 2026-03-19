@@ -2,6 +2,20 @@
 EAGLE – NCI Acquisition Assistant
 Agentic Service using the Anthropic Python SDK directly.
 Real AWS tools (S3, DynamoDB, CloudWatch) scoped per-tenant.
+
+DEPRECATED (2026-03-19): This module is deprecated. The active orchestration path
+is strands_agentic_service.py which uses the Strands Agents SDK.
+
+DO NOT ADD NEW FEATURES to this file. It remains only because:
+  1. strands_agentic_service.py imports tool handlers (_exec_*) from here
+  2. eagle_tools_mcp.py delegates to execute_tool() from here
+
+Refactoring plan:
+  - Extract tool handlers to server/app/tools/handlers/
+  - Extract document generators to server/app/document_generators/
+  - Once imports are removed, archive this file to server/app/legacy/
+
+See docs/refactor_0319.md for full refactoring guide.
 """
 from __future__ import annotations
 

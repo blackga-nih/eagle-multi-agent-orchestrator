@@ -2124,10 +2124,10 @@ def build_skill_tools(
         prompt_body = ""
         if workspace_id:
             try:
-                from .wspc_store import resolve_skill
+                from .workspace_override_store import resolve_skill
                 prompt_body, _source = resolve_skill(tenant_id, user_id, workspace_id, name)
             except Exception as exc:
-                logger.warning("wspc_store.resolve_skill failed for %s: %s -- using bundled", name, exc)
+                logger.warning("workspace_override_store.resolve_skill failed for %s: %s -- using bundled", name, exc)
                 prompt_body = ""
 
         # Fall back to bundled PLUGIN_CONTENTS
@@ -2248,10 +2248,10 @@ def _build_supervisor_prompt_body(
     base_prompt = ""
     if workspace_id:
         try:
-            from .wspc_store import resolve_agent
+            from .workspace_override_store import resolve_agent
             base_prompt, _source = resolve_agent(tenant_id, user_id, workspace_id, "supervisor")
         except Exception as exc:
-            logger.warning("wspc_store.resolve_agent failed for supervisor: %s -- using bundled", exc)
+            logger.warning("workspace_override_store.resolve_agent failed for supervisor: %s -- using bundled", exc)
 
     if not base_prompt:
         supervisor_entry = AGENTS.get("supervisor")
