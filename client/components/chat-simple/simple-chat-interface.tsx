@@ -17,9 +17,11 @@ import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
 import ActivityPanel from './activity-panel';
+import { ChecklistPanel } from './checklist-panel';
 import ChatUploadButton from './chat-upload-button';
 import PackageSelectorModal from './package-selector-modal';
 import { UploadResult, assignToPackage } from '@/lib/document-api';
+import { usePackageState } from '@/hooks/use-package-state';
 
 // -----------------------------------------------------------------------
 // Types for per-message tool call tracking
@@ -121,6 +123,7 @@ export default function SimpleChatInterface() {
             setMessages([]);
             setDocuments({});
         }
+        resetPackageState();
         firstUserMsgRef.current = null;
         setIsLoadingSession(false);
     }, [currentSessionId, loadSession]);
@@ -198,6 +201,9 @@ export default function SimpleChatInterface() {
     /** Right panel state. */
     const [isPanelOpen, setIsPanelOpen] = useState(true);
 
+    /** Package state — driven by SSE state_update metadata events. */
+    const { state: packageState, handleMetadata: handlePackageMetadata, reset: resetPackageState } = usePackageState();
+
     // Agent stream
     const { sendQuery, isStreaming, error, logs, clearLogs, addUserInputLog } = useAgentStream({
         getToken,
@@ -218,8 +224,12 @@ export default function SimpleChatInterface() {
             setStreamingMsg(newMessage);
         },
 
-        onComplete: (toolResults?: ServerToolResult[]) => {
+        onComplete: (info) => {
             setAgentStatus(null);
+            const toolResults = info?.toolResults;
+            if (info?.durationMs) {
+                console.debug(`[EAGLE] Response completed in ${info.durationMs}ms`, info.toolTimings);
+            }
             const completedMsg = streamingMsgRef.current;
             if (completedMsg) {
                 lastAssistantIdRef.current = completedMsg.id;
@@ -374,6 +384,10 @@ export default function SimpleChatInterface() {
         onAgentStatus: (status) => {
             setAgentStatus(status);
         },
+
+        onStateUpdate: (metadata) => {
+            handlePackageMetadata(metadata);
+        },
     });
 
 
@@ -434,6 +448,8 @@ export default function SimpleChatInterface() {
             timestamp: new Date(),
         };
         lastAssistantIdRef.current = null;
+        // Clear stale status from previous turn so it doesn't flash briefly
+        setAgentStatus(null);
         // Capture first user message for AI title generation
         if (messages.length === 0) {
             firstUserMsgRef.current = input;
@@ -730,12 +746,16 @@ export default function SimpleChatInterface() {
                 </footer>
             </div>
 
+            {/* Right: package checklist panel (only when package state active) */}
+            <ChecklistPanel state={packageState} />
+
             {/* Right: activity panel */}
             <ActivityPanel
                 logs={logs}
                 clearLogs={clearLogs}
                 documents={documents}
                 sessionId={currentSessionId ?? ''}
+                packageState={packageState}
                 isStreaming={isStreaming}
                 isOpen={isPanelOpen}
                 onToggle={() => setIsPanelOpen(v => !v)}

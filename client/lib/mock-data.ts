@@ -680,6 +680,7 @@ export function getWorkflowStatusColor(status: WorkflowStatus): string {
     rejected: 'bg-red-100 text-red-700',
     completed: 'bg-green-100 text-green-700',
     cancelled: 'bg-gray-200 text-gray-500',
+    review: 'bg-amber-100 text-amber-700',
   };
   return colors[status] || colors.draft;
 }

@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
-import { FileText, Bell, Terminal, PanelRightClose, PanelRightOpen, History, Bot, User } from 'lucide-react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { FileText, Bell, Terminal, PanelRightClose, PanelRightOpen, History, Bot, User, Braces, Copy, Check } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
+import { PackageState } from '@/hooks/use-package-state';
 import AgentLogs from './agent-logs';
 
 // ---------------------------------------------------------------------------
@@ -28,12 +29,13 @@ interface ActivityPanelProps {
   documents: Record<string, DocumentInfo[]>;
   sessionId?: string;
   packageId?: string;
+  packageState?: PackageState;
   isStreaming: boolean;
   isOpen: boolean;
   onToggle: () => void;
 }
 
-type TabId = 'documents' | 'notifications' | 'logs' | 'changelog';
+type TabId = 'documents' | 'notifications' | 'logs' | 'changelog' | 'state';
 
 interface TabDef {
   id: TabId;
@@ -46,6 +48,7 @@ const TABS: TabDef[] = [
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'changelog',     label: 'Changelog',     icon: History },
   { id: 'logs',          label: 'Agent Logs',    icon: Terminal },
+  { id: 'state',         label: 'State',         icon: Braces },
 ];
 
 // ---------------------------------------------------------------------------
@@ -369,6 +372,65 @@ function ChangelogTab({ packageId }: { packageId?: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// State JSON Tab
+// ---------------------------------------------------------------------------
+
+/** JSON replacer that serialises Date objects to ISO strings. */
+function jsonReplacer(_key: string, value: unknown) {
+  if (value instanceof Date) return value.toISOString();
+  return value;
+}
+
+function StateTab({ packageState }: { packageState?: PackageState }) {
+  const [copied, setCopied] = useState(false);
+
+  const jsonText = useMemo(
+    () => JSON.stringify(packageState ?? null, jsonReplacer, 2),
+    [packageState],
+  );
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(jsonText).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [jsonText]);
+
+  const hasActivePackage = !!packageState?.packageId;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header with copy button */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">
+            Package State
+          </span>
+          {hasActivePackage && (
+            <span className="w-2 h-2 rounded-full bg-green-400" title="Active package" />
+          )}
+        </div>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-400 hover:text-gray-600 rounded transition"
+          title="Copy to clipboard"
+        >
+          {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+
+      {/* JSON viewer */}
+      <div className="flex-1 overflow-auto rounded-lg">
+        <pre className="text-xs font-mono bg-gray-900 text-green-400 p-3 rounded-lg whitespace-pre-wrap break-words min-h-[200px]">
+          {jsonText}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Panel
 // ---------------------------------------------------------------------------
 
@@ -378,6 +440,7 @@ export default function ActivityPanel({
   documents,
   sessionId,
   packageId,
+  packageState,
   isStreaming,
   isOpen,
   onToggle,
@@ -421,6 +484,7 @@ export default function ActivityPanel({
       <div className="flex items-center gap-1 p-2 bg-[#F5F7FA] border-b border-[#D8DEE6] overflow-x-auto">
         {TABS.map((tab) => {
           const Icon = tab.icon;
+          const hasActiveState = tab.id === 'state' && !!packageState?.packageId;
           const badge =
             tab.id === 'logs' && logs.length > 0 ? logs.length :
             tab.id === 'documents' && docCount > 0 ? docCount :
@@ -444,6 +508,9 @@ export default function ActivityPanel({
                 <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] bg-[#003366] text-white font-bold min-w-[18px] text-center">
                   {badge}
                 </span>
+              )}
+              {hasActiveState && (
+                <span className="ml-0.5 w-2 h-2 rounded-full bg-green-400" />
               )}
             </button>
           );
@@ -481,6 +548,7 @@ export default function ActivityPanel({
         {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
         {activeTab === 'changelog' && <ChangelogTab packageId={packageId} />}
         {activeTab === 'logs' && <AgentLogs logs={logs} />}
+        {activeTab === 'state' && <StateTab packageState={packageState} />}
       </div>
     </div>
   );

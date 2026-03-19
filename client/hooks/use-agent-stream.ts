@@ -30,11 +30,20 @@ export interface ServerToolResult {
   result: { success: boolean; result: unknown; error?: string };
 }
 
+/** Metadata passed to onComplete when the stream finishes. */
+export interface StreamCompleteInfo {
+  toolResults?: ServerToolResult[];
+  /** Total response time in milliseconds (from SSE complete event). */
+  durationMs?: number;
+  /** Per-tool timing breakdown (from SSE complete event). */
+  toolTimings?: Array<{ tool_name: string; duration_ms: number }>;
+}
+
 export interface UseAgentStreamOptions {
   onMessage?: (message: Message) => void;
   onEvent?: (event: StreamEvent) => void;
-  /** Called when the stream finishes. Includes accumulated server-side tool results. */
-  onComplete?: (toolResults?: ServerToolResult[]) => void;
+  /** Called when the stream finishes. Includes accumulated server-side tool results and timing. */
+  onComplete?: (info?: StreamCompleteInfo) => void;
   onError?: (error: string) => void;
   onDocumentGenerated?: (doc: DocumentInfo) => void;
   /**
@@ -47,6 +56,8 @@ export interface UseAgentStreamOptions {
   onToolResult?: (toolName: string, result: { success: boolean; result: unknown }) => void;
   /** Called when an agent_status event arrives (e.g. "Analyzing your request..."). */
   onAgentStatus?: (status: string, detail?: string) => void;
+  /** Called when a state_update metadata event arrives (package state). */
+  onStateUpdate?: (metadata: Record<string, unknown>) => void;
   getToken?: () => Promise<string>;
   /** Active session ID — forwarded to client tools for localStorage namespacing. */
   sessionId?: string;
@@ -241,6 +252,8 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     const emittedDocKeys = new Set<string>();
     // Accumulate server-side tool results during streaming — merged at onComplete
     const serverToolResults: ServerToolResult[] = [];
+    // Capture complete event metadata for timing info
+    let completeMetadata: Record<string, unknown> | undefined;
 
     // The session to use for client tool localStorage namespacing.
     // Prefer the sessionId passed to sendQuery; fall back to options.sessionId.
@@ -325,7 +338,11 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         await fetchCreatedDocuments(headers, queryStartTime, emittedDocKeys);
       }
 
-      options.onComplete?.(serverToolResults.length > 0 ? serverToolResults : undefined);
+      options.onComplete?.({
+        toolResults: serverToolResults.length > 0 ? serverToolResults : undefined,
+        durationMs: completeMetadata?.duration_ms as number | undefined,
+        toolTimings: completeMetadata?.tool_timings as Array<{ tool_name: string; duration_ms: number }> | undefined,
+      });
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         return;
@@ -432,10 +449,16 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         options.onAgentStatus?.(status, detail);
       }
 
+      // Handle metadata events with state_type — package state updates
+      if (event.type === 'metadata' && event.metadata?.state_type) {
+        options.onStateUpdate?.(event.metadata as Record<string, unknown>);
+      }
+
       // Handle complete event — REST/fallback path
       // When tool_result events were already received (streaming path), skip
       // text-based parsing to avoid duplicate document cards.
       if (event.type === 'complete') {
+        completeMetadata = event.metadata;
         const toolsCalled = event.metadata?.tools_called;
         if (Array.isArray(toolsCalled) && toolsCalled.includes('create_document')) {
           const expectedCount = toolsCalled.filter((t: string) => t === 'create_document').length;

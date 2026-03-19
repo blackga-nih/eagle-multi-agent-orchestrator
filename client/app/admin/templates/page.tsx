@@ -11,6 +11,7 @@ import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
 import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
+import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import { useAuth } from '@/contexts/auth-context';
 import { pluginApi, templateApi } from '@/lib/admin-api';
 import { listPackages, type PackageInfo } from '@/lib/document-api';
@@ -763,7 +764,7 @@ export default function TemplatesPage() {
         isOpen={showPreviewModal}
         onClose={() => setShowPreviewModal(false)}
         title={previewCard ? `Preview: ${previewCard.name}` : 'Template Preview'}
-        size="lg"
+        size="xl"
       >
         {previewCard && (
           <div className="space-y-4">
@@ -778,10 +779,8 @@ export default function TemplatesPage() {
 
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Template Content</h4>
-              <div className="bg-gray-900 rounded-xl p-4 overflow-x-auto max-h-96 overflow-y-auto">
-                <pre className="text-sm text-gray-100 whitespace-pre-wrap font-mono">
-                  {previewCard.content}
-                </pre>
+              <div className="max-h-[60vh] overflow-y-auto">
+                <CollapsibleMarkdown content={previewCard.content} />
               </div>
             </div>
           </div>

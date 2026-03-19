@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, memo } from 'react';
+import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChatMessage, DocumentInfo } from '@/types/chat';
@@ -126,6 +126,69 @@ function CodeOutput({ tc }: { tc: TrackedToolCall }) {
             source={String(tc.input.source ?? '')}
             result={codeResult}
         />
+    );
+}
+
+/**
+ * Phase-aware waiting indicator.
+ * Shows "Connecting..." before any SSE events, then server-driven status,
+ * with an elapsed-seconds counter after 2 s to prove the app is alive.
+ */
+function WaitingIndicator({
+    agentStatus,
+    hasToolCalls,
+    isActive,
+}: {
+    agentStatus?: string | null;
+    hasToolCalls: boolean;
+    isActive: boolean;
+}) {
+    const [elapsed, setElapsed] = useState(0);
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    useEffect(() => {
+        if (!isActive) {
+            setElapsed(0);
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            intervalRef.current = null;
+            return;
+        }
+        // Start counting immediately
+        const start = Date.now();
+        intervalRef.current = setInterval(() => {
+            setElapsed(Math.floor((Date.now() - start) / 1000));
+        }, 1000);
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, [isActive]);
+
+    // Determine display text based on phase
+    const hasServerStatus = Boolean(agentStatus) || hasToolCalls;
+    const statusText = agentStatus || (hasServerStatus ? null : 'Connecting...');
+
+    if (!statusText && !hasServerStatus) {
+        // Shouldn't happen when isActive, but guard anyway
+        return null;
+    }
+
+    // If we only have tool calls and no status text, show nothing (tool cards are enough)
+    if (!statusText) return null;
+
+    return (
+        <div className="flex items-center gap-2 h-5">
+            {/* Spinner dot */}
+            <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+            </span>
+            <span className="text-xs text-gray-500">
+                {statusText}
+                {elapsed >= 2 && (
+                    <span className="text-gray-400 ml-1">{elapsed}s</span>
+                )}
+            </span>
+        </div>
     );
 }
 
@@ -271,20 +334,12 @@ export default function SimpleMessageList({
                             </div>
                         )}
 
-                        {/* Status text or fallback dots */}
-                        <div className="flex items-center gap-2 h-5">
-                            {agentStatus ? (
-                                <span className="text-xs text-gray-500 animate-pulse">
-                                    {agentStatus}
-                                </span>
-                            ) : (
-                                <>
-                                    <div className="typing-dot" />
-                                    <div className="typing-dot" />
-                                    <div className="typing-dot" />
-                                </>
-                            )}
-                        </div>
+                        {/* Phase-aware status indicator */}
+                        <WaitingIndicator
+                            agentStatus={agentStatus}
+                            hasToolCalls={pendingToolCalls.length > 0}
+                            isActive={isWaitingForFirstToken}
+                        />
                     </div>
                 )}
 

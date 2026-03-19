@@ -10,6 +10,7 @@ import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
 import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
+import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import { Tabs, TabPanel } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/auth-context';
 import { pluginApi, promptApi, skillApi } from '@/lib/admin-api';
@@ -69,6 +70,7 @@ export default function SkillsPage() {
   // Prompt editing — single unified editor
   const [promptBody, setPromptBody] = useState('');
   const [promptDirty, setPromptDirty] = useState(false);
+  const [promptMode, setPromptMode] = useState<'edit' | 'preview'>('edit');
 
   // New skill form
   const [newSkill, setNewSkill] = useState({
@@ -168,6 +170,7 @@ export default function SkillsPage() {
     setSelectedAgent(agent);
     setPromptBody(getEffectivePrompt(agent));
     setPromptDirty(false);
+    setPromptMode('edit');
   }
 
   async function savePrompt() {
@@ -561,7 +564,7 @@ export default function SkillsPage() {
         isOpen={!!selectedPluginSkill}
         onClose={() => setSelectedPluginSkill(null)}
         title={selectedPluginSkill ? `Bundled Skill: ${selectedPluginSkill.name}` : ''}
-        size="lg"
+        size="xl"
       >
         {selectedPluginSkill && (
           <div className="space-y-4">
@@ -574,10 +577,8 @@ export default function SkillsPage() {
             )}
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Content</h4>
-              <div className="bg-gray-900 rounded-xl p-4 overflow-x-auto max-h-96 overflow-y-auto">
-                <pre className="text-sm text-gray-100 whitespace-pre-wrap font-mono">
-                  {selectedPluginSkill.content}
-                </pre>
+              <div className="max-h-[60vh] overflow-y-auto">
+                <CollapsibleMarkdown content={selectedPluginSkill.content} />
               </div>
             </div>
             {Object.keys(selectedPluginSkill.metadata || {}).length > 0 && (
@@ -603,7 +604,7 @@ export default function SkillsPage() {
         isOpen={!!selectedCustomSkill}
         onClose={() => setSelectedCustomSkill(null)}
         title={selectedCustomSkill ? `Custom Skill: ${selectedCustomSkill.display_name || selectedCustomSkill.name}` : ''}
-        size="lg"
+        size="xl"
         footer={selectedCustomSkill && (
           <div className="flex justify-between">
             {(selectedCustomSkill.status === 'draft' || selectedCustomSkill.status === 'disabled') && (
@@ -693,10 +694,8 @@ export default function SkillsPage() {
 
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Prompt Body</h4>
-              <div className="bg-gray-900 rounded-xl p-4 overflow-x-auto max-h-64 overflow-y-auto">
-                <pre className="text-sm text-gray-100 whitespace-pre-wrap font-mono">
-                  {selectedCustomSkill.prompt_body}
-                </pre>
+              <div className="max-h-[50vh] overflow-y-auto">
+                <CollapsibleMarkdown content={selectedCustomSkill.prompt_body} />
               </div>
             </div>
           </div>
@@ -777,18 +776,50 @@ export default function SkillsPage() {
                 )}
               </div>
 
-              {/* Single unified editor */}
+              {/* Edit / Preview toggle */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">System Prompt</label>
-                <textarea
-                  value={promptBody}
-                  onChange={(e) => {
-                    setPromptBody(e.target.value);
-                    setPromptDirty(true);
-                  }}
-                  rows={20}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-sm resize-y min-h-[300px]"
-                />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">System Prompt</label>
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setPromptMode('edit')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        promptMode === 'edit'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      <Edit2 className="w-3 h-3" />
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setPromptMode('preview')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        promptMode === 'preview'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      <Eye className="w-3 h-3" />
+                      Preview
+                    </button>
+                  </div>
+                </div>
+                {promptMode === 'edit' ? (
+                  <textarea
+                    value={promptBody}
+                    onChange={(e) => {
+                      setPromptBody(e.target.value);
+                      setPromptDirty(true);
+                    }}
+                    rows={20}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-sm resize-y min-h-[300px]"
+                  />
+                ) : (
+                  <div className="max-h-[60vh] overflow-y-auto">
+                    <CollapsibleMarkdown content={promptBody} />
+                  </div>
+                )}
               </div>
             </div>
           );

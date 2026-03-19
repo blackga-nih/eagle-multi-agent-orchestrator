@@ -18,7 +18,8 @@ export type WorkflowStatus =
   | 'approved'
   | 'rejected'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'review';
 
 export type AcquisitionType = 'micro_purchase' | 'simplified' | 'negotiated';
 
@@ -26,7 +27,7 @@ export type UrgencyLevel = 'standard' | 'urgent' | 'critical';
 
 export type DocumentStatus = 'not_started' | 'in_progress' | 'draft' | 'final' | 'approved';
 
-/** All 10 document types supported by the backend create_document tool. */
+/** All document types supported by the backend create_document tool. */
 export type DocumentType =
   | 'sow'
   | 'igce'
@@ -38,7 +39,14 @@ export type DocumentType =
   | 'security_checklist'
   | 'section_508'
   | 'cor_certification'
-  | 'contract_type_justification';
+  | 'contract_type_justification'
+  | 'd_f'
+  | 'qasp'
+  | 'source_selection_plan'
+  | 'subcontracting_plan'
+  | 'sb_review'
+  | 'purchase_request'
+  | 'human_subjects';
 
 export type ChecklistStepStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 
@@ -79,6 +87,13 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   section_508: 'Section 508 Compliance',
   cor_certification: 'COR Certification',
   contract_type_justification: 'Contract Type Justification',
+  d_f: 'Determination & Findings (D&F)',
+  qasp: 'Quality Assurance Surveillance Plan',
+  source_selection_plan: 'Source Selection Plan',
+  subcontracting_plan: 'Subcontracting Plan',
+  sb_review: 'Small Business Review (HHS-653)',
+  purchase_request: 'Purchase Request',
+  human_subjects: 'Human Subjects Provisions',
 };
 
 /** Emoji icons for each document type (used in activity panel, doc cards). */
@@ -94,6 +109,13 @@ export const DOCUMENT_TYPE_ICONS: Record<DocumentType, string> = {
   section_508: '\u{267F}',              // wheelchair
   cor_certification: '\u{1F3C5}',       // medal
   contract_type_justification: '\u{1F4C3}', // page with curl
+  d_f: '\u{1F4DC}',                     // scroll
+  qasp: '\u{1F50E}',                    // magnifying glass right
+  source_selection_plan: '\u{1F3AF}',   // target
+  subcontracting_plan: '\u{1F91D}',     // handshake
+  sb_review: '\u{1F3E2}',              // office building
+  purchase_request: '\u{1F4E5}',       // inbox tray
+  human_subjects: '\u{1F9EC}',         // dna
 };
 
 // =============================================================================
