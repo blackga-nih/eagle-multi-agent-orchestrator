@@ -72,6 +72,10 @@ class _TokenBucket:
 
 _rate_limiter = _TokenBucket(RATE_LIMIT)
 
+# Log configuration at import time so CloudWatch shows webhook is wired up
+if WEBHOOK_ENABLED:
+    logger.info("Error webhook configured: url=%s env=%s", WEBHOOK_URL[:60], ENVIRONMENT)
+
 # ── httpx.AsyncClient (lazy-init) ───────────────────────────────────
 
 _client: Optional[httpx.AsyncClient] = None
@@ -119,7 +123,10 @@ async def send_error_webhook(payload: dict) -> None:
     try:
         client = _get_client()
         resp = await client.post(WEBHOOK_URL, json=payload)
-        logger.debug("Error webhook sent: status=%d", resp.status_code)
+        if resp.status_code >= 300:
+            logger.warning("Error webhook non-2xx: status=%d body=%s", resp.status_code, resp.text[:200])
+        else:
+            logger.debug("Error webhook sent: status=%d", resp.status_code)
     except httpx.TimeoutException:
         logger.warning("Error webhook timed out")
     except Exception:

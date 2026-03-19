@@ -83,7 +83,7 @@ export default function ChatUploadButton({
         if (status === 'uploading') return progress;
         if (status === 'error') return error;
         if (status === 'success') return 'Upload complete';
-        return 'Upload document';
+        return 'Upload document (max 25 MB)';
     };
 
     return (
@@ -91,7 +91,7 @@ export default function ChatUploadButton({
             <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.doc,.docx,.txt,.md"
+                accept=".pdf,.doc,.docx,.txt,.md,.xlsx,.xls"
                 onChange={(e) => handleFileSelect(e.target.files)}
                 className="hidden"
             />

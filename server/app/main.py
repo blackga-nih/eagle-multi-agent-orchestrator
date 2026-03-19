@@ -108,7 +108,6 @@ from .document_service import (
 from .document_classification_service import (
     classify_document,
     extract_text_preview,
-    ClassificationResult,
 )
 from .document_ai_edit_service import extract_docx_preview_payload, save_docx_preview_edits
 from .spreadsheet_edit_service import extract_xlsx_preview_payload, save_xlsx_preview_edits
@@ -125,6 +124,8 @@ from .audit_store import write_audit
 from .feedback_store import list_feedback
 from .health_checks import check_knowledge_base_health
 from .error_webhook import notify_error, close_webhook_client
+from .teams_notifier import notify_feedback, notify_startup, notify_suspicious, close_notifier_client
+from .daily_scheduler import start_scheduler, stop_scheduler
 
 # ── Logging ──────────────────────────────────────────────────────────
 from .telemetry.log_context import configure_logging
@@ -149,15 +150,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Request Timing Middleware ─────────────────────────────────────────
+@app.middleware("http")
+async def request_timing_middleware(request: Request, call_next):
+    """Log every request with duration_ms for CloudWatch Insights queries."""
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    logger.info(
+        "request_completed",
+        extra={
+            "endpoint": request.url.path,
+            "method": request.method,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+        },
+    )
+    return response
+
+
 # ── Error Webhook Exception Handlers ─────────────────────────────────
 from fastapi.responses import JSONResponse
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Handle HTTPExceptions — send webhook on 5xx, return standard JSON."""
+    """Handle HTTPExceptions — send webhook on 5xx, notify suspicious 404s."""
     if exc.status_code >= 500:
         notify_error(request=request, status_code=exc.status_code, exception=exc)
+    elif exc.status_code == 404 and request.url.path not in ("/api/health", "/favicon.ico"):
+        notify_suspicious("404", f"{request.method} {request.url.path}")
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
@@ -170,9 +192,21 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+@app.on_event("startup")
+async def startup_teams_notifier():
+    notify_startup()
+    start_scheduler()
+
+
 @app.on_event("shutdown")
 async def shutdown_webhook_client():
     await close_webhook_client()
+
+
+@app.on_event("shutdown")
+async def shutdown_teams_notifier():
+    stop_scheduler()
+    await close_notifier_client()
 
 
 # ── Feature Flags ────────────────────────────────────────────────────
@@ -816,11 +850,20 @@ async def api_get_document(
         else:
             if include_content and _supports_binary_preview(doc_key):
                 raw_bytes = response["Body"].read()
-                preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
-                content = preview_payload.get("content")
-                preview_blocks = preview_payload.get("preview_blocks", [])
-                preview_sheets = preview_payload.get("preview_sheets", [])
-                preview_mode = preview_payload.get("preview_mode")
+                # Prefer markdown sidecar (rich display content) over DOCX
+                # text extraction, which can be sparse for template-generated docs.
+                sidecar_key = f"{doc_key}.content.md"
+                try:
+                    sidecar_resp = s3.get_object(Bucket=bucket, Key=sidecar_key)
+                    content = sidecar_resp["Body"].read().decode("utf-8", errors="replace")
+                    preview_mode = "markdown_sidecar"
+                except ClientError:
+                    # No sidecar — fall back to binary extraction
+                    preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
+                    content = preview_payload.get("content")
+                    preview_blocks = preview_payload.get("preview_blocks", [])
+                    preview_sheets = preview_payload.get("preview_sheets", [])
+                    preview_mode = preview_payload.get("preview_mode")
             download_url = s3.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": bucket, "Key": doc_key},
@@ -1047,17 +1090,49 @@ async def api_presign_document(
 
 # ── User document upload ─────────────────────────────────────────────
 
-_ALLOWED_UPLOAD_MIME = {
+ALLOWED_UPLOAD_MIME_TYPES = {
     "application/pdf", "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+    "application/vnd.ms-excel",  # .xls
     "text/plain", "text/markdown",
 }
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 
 
-# In-memory upload tracking (for package assignment flow)
-# In production, use DynamoDB or Redis for persistence
-_upload_registry: Dict[str, Dict[str, Any]] = {}
+# DynamoDB-backed upload tracking (1-hour TTL auto-deletes stale entries)
+def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> None:
+    """Store upload metadata in DynamoDB with 1-hour TTL."""
+    import boto3
+    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
+        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
+    )
+    item = {
+        "PK": f"UPLOAD#{tenant_id}",
+        "SK": f"UPLOAD#{upload_id}",
+        "ttl": int(time.time()) + 3600,
+        **metadata,
+    }
+    table.put_item(Item=item)
+
+
+def _get_upload(tenant_id: str, upload_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve upload metadata from DynamoDB. Returns None if expired/missing."""
+    import boto3
+    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
+        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
+    )
+    resp = table.get_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
+    return resp.get("Item")
+
+
+def _delete_upload(tenant_id: str, upload_id: str) -> None:
+    """Remove upload metadata from DynamoDB."""
+    import boto3
+    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
+        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
+    )
+    table.delete_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
 
 
 @app.post("/api/documents/upload")
@@ -1077,7 +1152,7 @@ async def api_upload_document(
 
     # Validate content type
     content_type = file.content_type or "application/octet-stream"
-    if content_type not in _ALLOWED_UPLOAD_MIME:
+    if content_type not in ALLOWED_UPLOAD_MIME_TYPES:
         raise HTTPException(
             status_code=415,
             detail=f"Unsupported file type: {content_type}. Accepted: PDF, Word, plain text, Markdown."
@@ -1119,7 +1194,7 @@ async def api_upload_document(
             package_context = {"mode": "package", "package_id": package_id}
 
     # Store upload metadata for later assignment
-    _upload_registry[upload_id] = {
+    _put_upload(tenant_id, upload_id, {
         "tenant_id": tenant_id,
         "user_id": user_id,
         "s3_bucket": bucket,
@@ -1131,7 +1206,7 @@ async def api_upload_document(
         "classification": classification.to_dict(),
         "session_id": session_id,
         "created_at": datetime.utcnow().isoformat(),
-    }
+    })
 
     logger.info(
         "Uploaded %s → s3://%s/%s (upload_id=%s, classified=%s)",
@@ -1170,7 +1245,7 @@ async def assign_upload_to_package(
     from botocore.exceptions import ClientError
 
     # Retrieve upload metadata
-    upload_meta = _upload_registry.get(upload_id)
+    upload_meta = _get_upload(user.tenant_id, upload_id)
     if not upload_meta:
         raise HTTPException(status_code=404, detail="Upload not found or expired")
 
@@ -1183,10 +1258,13 @@ async def assign_upload_to_package(
     if not pkg:
         raise HTTPException(status_code=404, detail=f"Package {body.package_id} not found")
 
-    # Determine doc_type (from request, classification, or default)
-    doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "sow")
+    # Determine doc_type (from request or classification)
+    doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
     if doc_type == "unknown":
-        doc_type = "sow"  # Default to SOW for unknown types
+        raise HTTPException(
+            status_code=400,
+            detail="Document type could not be determined. Please specify doc_type.",
+        )
 
     # Determine title
     title = body.title or upload_meta["classification"].get("suggested_title") or upload_meta["filename"]
@@ -1226,8 +1304,8 @@ async def assign_upload_to_package(
     if not result.success:
         raise HTTPException(status_code=500, detail=result.error or "Failed to create document")
 
-    # Clean up upload registry (optional — keep for debugging)
-    # del _upload_registry[upload_id]
+    # Clean up upload registry
+    _delete_upload(user.tenant_id, upload_id)
 
     logger.info(
         "Assigned upload %s to package %s as %s v%s",
@@ -1619,6 +1697,11 @@ async def api_submit_feedback(
         cloudwatch_logs=json.dumps(cloudwatch_logs, default=str),
         page=page,
         last_message_id=last_message_id,
+    )
+    notify_feedback(
+        tenant_id=user.tenant_id, user_id=user.user_id, tier=user.tier,
+        session_id=session_id, feedback_text=feedback_text,
+        feedback_type=body.get("feedback_type", "general"), page=page,
     )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 
@@ -2626,6 +2709,8 @@ async def list_templates_endpoint(
 
 
 # ── S3 Template Library ────────────────────────────────────────────
+# NOTE: These must be declared before /api/templates/{doc_type} to avoid
+# FastAPI matching "s3" as a doc_type path parameter.
 
 @app.get("/api/templates/s3")
 async def list_s3_templates_endpoint(
@@ -2714,9 +2799,7 @@ async def copy_s3_template_to_package(
         "source": "s3_template",
     }
 
-
 # ── Templates (Dynamic Routes) ─────────────────────────────────────
-
 @app.get("/api/templates/{doc_type}")
 async def get_active_template(
     doc_type: str,
@@ -2880,6 +2963,9 @@ async def create_package_endpoint(
         session_id=body.get("session_id"),
         notes=body.get("notes", ""),
         contract_vehicle=body.get("contract_vehicle"),
+        acquisition_method=body.get("acquisition_method"),
+        contract_type=body.get("contract_type"),
+        flags=body.get("flags"),
     )
 
 
@@ -2953,6 +3039,36 @@ async def approve_package_endpoint(
         actor_user_id=user.user_id,
     )
     return pkg
+
+
+@app.get("/api/packages/{package_id}/export/zip")
+async def export_package_zip_endpoint(
+    package_id: str,
+    format: str = "docx",
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Download all package documents as a ZIP archive."""
+    from starlette.responses import Response
+    from .document_export import export_package_zip
+
+    pkg = get_package(user.tenant_id, package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+
+    docs = list_package_documents(user.tenant_id, package_id)
+    docs_with_content = [d for d in docs if d.get("content")]
+    if not docs_with_content:
+        raise HTTPException(status_code=404, detail="No documents with content found")
+
+    result = export_package_zip(docs_with_content, pkg.get("title", "Package"), format)
+
+    return Response(
+        content=result["data"],
+        media_type=result["content_type"],
+        headers={
+            "Content-Disposition": f'attachment; filename="{result["filename"]}"',
+        },
+    )
 
 
 # ── Acquisition Documents (DOCUMENT#) ─────────────────────────────

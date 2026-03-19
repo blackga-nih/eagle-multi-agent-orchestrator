@@ -997,6 +997,52 @@ def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> st
 
 # -- @tool Factory ---------------------------------------------------
 
+def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
+    """Build knowledge-base tools that subagents can use to ground analysis.
+
+    Gives subagents access to knowledge_search, knowledge_fetch, and search_far
+    so they can retrieve actual documents instead of relying solely on
+    parametric knowledge.
+    """
+    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
+    from .agentic_service import _exec_search_far
+
+    @tool(name="knowledge_search")
+    def kb_search(params: str) -> str:
+        """Search the acquisition knowledge base for relevant documents, templates, and guidance. Pass a JSON string with 'query' (natural language) and optional 'topic', 'document_type', 'limit' fields.
+
+        Args:
+            params: JSON string with search parameters
+        """
+        parsed = json.loads(params) if isinstance(params, str) else params
+        result = exec_knowledge_search(parsed, tenant_id, session_id)
+        return json.dumps(result, indent=2, default=str)
+
+    @tool(name="knowledge_fetch")
+    def kb_fetch(params: str) -> str:
+        """Fetch full document content from the knowledge base by s3_key. Pass a JSON string with 's3_key' from knowledge_search results, or 'query' to auto-search.
+
+        Args:
+            params: JSON string with 's3_key' or 'query'
+        """
+        parsed = json.loads(params) if isinstance(params, str) else params
+        result = exec_knowledge_fetch(parsed, tenant_id, session_id)
+        return json.dumps(result, indent=2, default=str)
+
+    @tool(name="search_far")
+    def far_search(params: str) -> str:
+        """Search the FAR and DFARS for clauses, requirements, and guidance. Pass a JSON string with 'query' and optional 'parts' array.
+
+        Args:
+            params: JSON string with search parameters
+        """
+        parsed = json.loads(params) if isinstance(params, str) else params
+        result = _exec_search_far(parsed, tenant_id)
+        return json.dumps(result, indent=2, default=str)
+
+    return [kb_search, kb_fetch, far_search]
+
+
 def _make_subagent_tool(
     skill_name: str,
     description: str,
@@ -1012,6 +1058,8 @@ def _make_subagent_tool(
 
     Each invocation constructs a fresh Agent with the resolved prompt.
     The shared _model is reused (no per-request boto3 overhead).
+    Subagents receive knowledge_search, knowledge_fetch, and search_far
+    tools so they can ground analysis in actual documents.
     """
     safe_name = skill_name.replace("-", "_")
 
@@ -1024,9 +1072,14 @@ def _make_subagent_tool(
             f"You are the {skill_name} specialist.\n\n"
         )
         _ensure_langfuse_exporter()
+
+        # Give subagents KB tools so they can retrieve actual documents
+        kb_tools = _build_subagent_kb_tools(tenant_id, session_id)
+
         agent = Agent(
             model=_model,
             system_prompt=subagent_context + prompt_body,
+            tools=kb_tools,
             callback_handler=None,
             trace_attributes=_build_trace_attrs(
                 tenant_id=tenant_id,

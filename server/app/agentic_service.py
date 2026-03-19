@@ -221,7 +221,12 @@ def _normalize_context_text(text: str) -> str:
 
 
 def _load_recent_user_context(session_id: str | None = None) -> list[str]:
-    """Load recent user messages for contextualizing document generation."""
+    """Load recent conversation context for document generation.
+
+    Includes both user AND assistant messages so generated documents
+    reflect the full discussion — intake answers, tool results, agent
+    analysis — not just the user's raw prompts.
+    """
     leaf_session_id = _extract_leaf_session_id(session_id)
     if not leaf_session_id:
         return []
@@ -233,19 +238,17 @@ def _load_recent_user_context(session_id: str | None = None) -> list[str]:
         from .session_store import get_messages
 
         messages = get_messages(leaf_session_id, tenant_id, user_id, limit=30)
-        user_texts: list[str] = []
+        context_texts: list[str] = []
         for msg in messages:
-            if msg.get("role") != "user":
+            role = msg.get("role", "")
+            if role not in ("user", "assistant"):
                 continue
 
             content = msg.get("content", "")
+            text = ""
             if isinstance(content, str):
-                normalized = _normalize_context_text(content)
-                if normalized:
-                    user_texts.append(normalized)
-                continue
-
-            if isinstance(content, list):
+                text = _normalize_context_text(content)
+            elif isinstance(content, list):
                 text_parts: list[str] = []
                 for block in content:
                     if isinstance(block, dict):
@@ -253,11 +256,15 @@ def _load_recent_user_context(session_id: str | None = None) -> list[str]:
                         if isinstance(block_text, str) and block_text.strip():
                             text_parts.append(block_text.strip())
                 if text_parts:
-                    normalized = _normalize_context_text("\n".join(text_parts))
-                    if normalized:
-                        user_texts.append(normalized)
+                    text = _normalize_context_text("\n".join(text_parts))
 
-        return user_texts[-8:]
+            if text:
+                # Tag assistant messages so the context augmenter can
+                # distinguish analysis/recommendations from user requests
+                prefix = "" if role == "user" else "[ASSISTANT] "
+                context_texts.append(prefix + text)
+
+        return context_texts[-12:]
     except Exception as exc:
         logger.debug("Could not load session context for create_document: %s", exc)
         return []
@@ -332,16 +339,24 @@ def _augment_document_data_from_context(
     data: dict | None,
     session_id: str | None,
 ) -> dict:
-    """Fill missing create_document fields from recent user conversation context."""
+    """Fill missing create_document fields from full conversation context.
+
+    Loads both user AND assistant messages so documents reflect intake
+    answers, agent analysis, tool results — not just user prompts.
+    """
     merged = dict(data or {})
 
-    # If caller already passed meaningful inputs, preserve them and only fill gaps.
     context_messages = _load_recent_user_context(session_id)
     if not context_messages:
         return merged
 
-    last_user_text = context_messages[-1]
-    context_blob = " ".join(context_messages[-4:])
+    # Separate user messages from assistant analysis
+    user_msgs = [m for m in context_messages if not m.startswith("[ASSISTANT] ")]
+    assistant_msgs = [m.removeprefix("[ASSISTANT] ") for m in context_messages if m.startswith("[ASSISTANT] ")]
+
+    last_user_text = user_msgs[-1] if user_msgs else ""
+    # Build context from ALL messages (user + assistant) for richer documents
+    context_blob = " ".join(context_messages[-8:])
 
     # Prefer explicit recent user request; keep bounded.
     requirement = (last_user_text or context_blob).strip()
@@ -397,6 +412,14 @@ def _augment_document_data_from_context(
         if combined_tasks:
             merged.setdefault("tasks", combined_tasks)
         merged.setdefault("scope", requirement or title)
+
+    # Include assistant analysis as conversation context so templates
+    # and generators can reference intake answers, recommendations, and
+    # tool results from the conversation — not just user prompts.
+    if assistant_msgs:
+        # Use the most recent and substantial assistant message as context
+        best_context = max(assistant_msgs[-4:], key=len)
+        merged.setdefault("conversation_context", best_context[:3000])
 
     return merged
 
@@ -1931,13 +1954,12 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
                 else:
                     return {"error": f"No generator available for {doc_type}: {result.error}"}
             else:
-                content = result.preview  # For response display
                 file_type = result.file_type
                 source = result.source
                 template_path = result.template_path
 
                 # Detect unfilled templates and fall back to markdown
-                if _looks_like_unfilled_template_preview(doc_type, content):
+                if _looks_like_unfilled_template_preview(doc_type, result.preview or ""):
                     generator = markdown_generators.get(doc_type)
                     if generator:
                         content = generator(title, data)
@@ -1948,6 +1970,22 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
                             "Template preview unfilled for doc_type=%s; using markdown generator and saving markdown to S3",
                             doc_type,
                         )
+                else:
+                    # DOCX template succeeded — use markdown generator for the
+                    # display/cached content so the frontend always sees rich
+                    # structured markdown, while the DOCX binary goes to S3.
+                    generator = markdown_generators.get(doc_type)
+                    if generator and file_type in ("docx", "xlsx"):
+                        try:
+                            content = generator(title, data)
+                            logger.info(
+                                "Using markdown generator for display content (%s); DOCX saved to S3",
+                                doc_type,
+                            )
+                        except Exception:
+                            content = result.preview or ""
+                    else:
+                        content = result.preview or ""
 
         except ImportError as e:
             logger.warning("Template libraries unavailable: %s, using markdown fallback", e)
@@ -2025,6 +2063,18 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
                 if file_type == "docx"
                 else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+            # Save markdown sidecar so the viewer API can return rich display
+            # content instead of sparse DOCX text extraction on cold loads.
+            if content and isinstance(content, str):
+                try:
+                    s3.put_object(
+                        Bucket=bucket,
+                        Key=f"{s3_key}.content.md",
+                        Body=content.encode("utf-8"),
+                        ContentType="text/markdown",
+                    )
+                except Exception:
+                    logger.debug("Failed to save markdown sidecar for %s", s3_key)
         else:
             # Save markdown content
             s3.put_object(Bucket=bucket, Key=s3_key, Body=content_to_store.encode("utf-8"))
@@ -2076,6 +2126,7 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
 def _generate_sow(title: str, data: dict) -> str:
     desc = data.get("description", "the required supplies/services")
     pop = data.get("period_of_performance", "12 months from date of award")
+    conv_ctx = data.get("conversation_context", "")
     deliverables = data.get("deliverables", [
         "Project Management Plan — within 30 days of award",
         "Monthly Status Reports — NLT 5th business day of each month",
@@ -2098,8 +2149,33 @@ def _generate_sow(title: str, data: dict) -> str:
             f"services necessary to {desc}, as defined in this SOW."
         )
 
+    security_req = data.get("security_requirements", "")
+    place = data.get("place_of_performance", "")
+
     deliverables_text = "\n".join(f"   {i+1}. {d}" for i, d in enumerate(deliverables))
     tasks_text = "\n".join(f"   5.{i+1} Task {i+1}: {t}" for i, t in enumerate(tasks))
+
+    # Include conversation context as an appendix section when available
+    # so the document captures intake details, agent analysis, and recommendations
+    context_section = ""
+    if conv_ctx:
+        context_section = f"""
+
+## APPENDIX A: ACQUISITION CONTEXT
+
+The following context was captured during the intake and analysis phase
+and should be incorporated into the final document:
+
+{conv_ctx[:2500]}
+"""
+
+    security_section = security_req if security_req else "[To be determined based on data sensitivity and access requirements]"
+    place_section = place if place else (
+        "National Cancer Institute\n"
+        "National Institutes of Health\n"
+        "Bethesda, MD 20892\n\n"
+        "[Or as otherwise specified in the contract]"
+    )
 
     return f"""# STATEMENT OF WORK (SOW)
 ## {title}
@@ -2152,16 +2228,12 @@ will be defined for each major task area.
 
 ## 9. PLACE OF PERFORMANCE
 
-National Cancer Institute
-National Institutes of Health
-Bethesda, MD 20892
-
-[Or as otherwise specified in the contract]
+{place_section}
 
 ## 10. SECURITY REQUIREMENTS
 
-[To be determined based on data sensitivity and access requirements]
-
+{security_section}
+{context_section}
 ---
 *This document was generated by EAGLE — NCI Acquisition Assistant*
 """

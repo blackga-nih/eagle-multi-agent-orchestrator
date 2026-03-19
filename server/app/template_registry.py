@@ -465,7 +465,11 @@ def validate_document_completeness(doc_type: str, content: str):
 # ── S3 Template Listing ───────────────────────────────────────────────
 
 def _infer_doc_type_from_filename(filename: str) -> Optional[str]:
-    """Infer doc_type from filename by matching against registered templates."""
+    """Infer doc_type from filename by matching against registered templates.
+
+    Falls back to classify_document() for fuzzy matching when no exact
+    registry match is found.
+    """
     filename_lower = filename.lower()
 
     # Check if filename matches any registered template
@@ -480,6 +484,15 @@ def _infer_doc_type_from_filename(filename: str) -> Optional[str]:
     for doc_type, form_filename in FORM_TEMPLATES.items():
         if form_filename.lower() == filename_lower:
             return doc_type
+
+    # Fallback: fuzzy classification via document_classification_service
+    try:
+        from .document_classification_service import classify_document
+        result = classify_document(filename, None)
+        if result.confidence >= 0.7:
+            return result.doc_type
+    except ImportError:
+        pass
 
     return None
 
@@ -503,15 +516,16 @@ def _get_file_type(filename: str) -> str:
 
 
 def _build_display_name(filename: str) -> str:
-    """Build a human-readable display name from filename."""
-    # Remove extension
-    name = filename.rsplit(".", 1)[0] if "." in filename else filename
-    # Replace underscores and hyphens with spaces
-    name = name.replace("_", " ").replace("-", " ")
-    # Remove common prefixes like "01.D_" or "1.a."
+    """Build a human-readable display name from filename.
+
+    Delegates to _clean_filename_for_title for consistent naming,
+    then strips common template prefixes like '01.D_' or '1.a.'.
+    """
+    from .document_classification_service import _clean_filename_for_title
+    name = _clean_filename_for_title(filename)
+    # Also strip common template numbering prefixes (e.g., "01.D ", "1.A. ")
     name = re.sub(r"^\d+\.?[a-zA-Z]?\.?\s*", "", name)
-    # Title case
-    return name.strip().title()
+    return name.strip() or "Untitled Template"
 
 
 def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None) -> List[Dict[str, Any]]:

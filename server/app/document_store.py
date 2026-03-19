@@ -326,6 +326,15 @@ def create_document_from_s3(
     # Production would upload to S3 and store a reference
     content_b64 = base64.b64encode(content).decode('utf-8') if content else None
 
+    # Size guard: DynamoDB has a 400KB item limit. If content is too large,
+    # keep it in S3 and store just the reference.
+    if content_b64 and len(content_b64) > 350_000:
+        logger.info(
+            'document_store.create_document_from_s3: content too large for DynamoDB (%d bytes), storing S3 reference only',
+            len(content_b64),
+        )
+        content_b64 = None  # Will use source_s3_key as reference
+
     item: dict = {
         'PK': f'DOCUMENT#{tenant_id}',
         'SK': _sk(package_id, doc_type, next_version),
