@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 from typing import Any, AsyncGenerator, Optional
+from pydantic import BaseModel
 
 from .cognito_auth import extract_user_context
 from .stream_protocol import MultiAgentStreamWriter
@@ -33,6 +34,12 @@ import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
 
 logger = logging.getLogger(__name__)
+
+
+class GenerateTitleRequest(BaseModel):
+    """Request body for generating a session title."""
+    message: str
+    response_snippet: Optional[str] = None
 
 
 async def stream_generator(
@@ -348,6 +355,51 @@ def create_streaming_router(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    # ------------------------------------------------------------------
+    # POST /api/generate-title - Generate smart session title
+    # ------------------------------------------------------------------
+    @router.post("/api/generate-title")
+    async def generate_title(
+        req: GenerateTitleRequest,
+        authorization: Optional[str] = Header(None),
+    ):
+        """Generate a smart session title from the user's first message.
+
+        Uses Claude to extract key concepts (project name, document type, action)
+        and returns a concise, meaningful title.
+        """
+        try:
+            from anthropic import Anthropic
+
+            client = Anthropic()
+            prompt = f"""Given the user's first message in a conversation, generate a short, concise session title (3-6 words max).
+Extract key information like:
+- Project/initiative name
+- Document type (SOW, IGCE, etc.)
+- Main action or focus
+
+User message: "{req.message}"
+"""
+            if req.response_snippet:
+                prompt += f"\nInitial response preview: {req.response_snippet[:100]}"
+
+            prompt += "\n\nRespond with ONLY the title, no explanations."
+
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=50,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            title = response.content[0].text.strip()
+            # Ensure title is not empty and reasonable length
+            if title and len(title) < 100:
+                return {"title": title}
+        except Exception as e:
+            logger.warning(f"Failed to generate title: {e}")
+
+        return {"title": "New Session"}
 
     # ------------------------------------------------------------------
     # GET /api/health - Health check (no auth required)

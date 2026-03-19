@@ -2799,7 +2799,7 @@ async def copy_s3_template_to_package(
         "source": "s3_template",
     }
 
-
+# ── Templates (Dynamic Routes) ─────────────────────────────────────
 @app.get("/api/templates/{doc_type}")
 async def get_active_template(
     doc_type: str,
