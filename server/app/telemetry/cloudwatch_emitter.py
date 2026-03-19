@@ -54,6 +54,9 @@ def emit_telemetry_event(
         - trace.started
         - trace.completed
         - tool.completed
+        - tool.timing    — per-tool duration_ms (from streaming_routes)
+        - stream.timing  — total SSE stream duration_ms
+        - agent.timing   — supervisor agent duration_ms (from strands_agentic_service)
         - agent.delegated
         - agent.completed
         - error.occurred

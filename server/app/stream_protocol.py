@@ -163,6 +163,19 @@ class MultiAgentStreamWriter:
         )
         await queue.put(event.to_sse())
 
+    async def write_state_update(self, queue, state_type: str, payload: Dict[str, Any]):
+        """Emit a METADATA event carrying acquisition package state.
+
+        The frontend ``usePackageState`` hook processes these based on
+        ``state_type`` (e.g. ``checklist_update``, ``phase_change``,
+        ``document_ready``, ``compliance_alert``).
+        """
+        event = self._create_event(
+            StreamEventType.METADATA,
+            metadata={"state_type": state_type, **payload},
+        )
+        await queue.put(event.to_sse())
+
     async def write_error(self, queue, error_message: str):
         """Emit an ERROR event with a human-readable error description."""
         event = self._create_event(StreamEventType.ERROR, content=error_message)

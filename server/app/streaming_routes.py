@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import asyncio
 import json
 import logging
+import time
 from typing import Any, AsyncGenerator, Optional
 from pydantic import BaseModel
 
@@ -42,6 +43,44 @@ class GenerateTitleRequest(BaseModel):
     response_snippet: Optional[str] = None
 
 
+def _emit_tool_timings(
+    tool_timings: list[dict],
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    stream_duration_ms: int | None = None,
+):
+    """Emit tool.timing events to CloudWatch (fire-and-forget, never raises)."""
+    try:
+        from .telemetry.cloudwatch_emitter import emit_telemetry_event
+        for timing in tool_timings:
+            emit_telemetry_event(
+                event_type="tool.timing",
+                tenant_id=tenant_id,
+                data={
+                    "tool_name": timing["tool_name"],
+                    "duration_ms": timing["duration_ms"],
+                    "session_id": session_id or "",
+                },
+                session_id=session_id,
+                user_id=user_id,
+            )
+        if stream_duration_ms is not None:
+            emit_telemetry_event(
+                event_type="stream.timing",
+                tenant_id=tenant_id,
+                data={
+                    "duration_ms": stream_duration_ms,
+                    "tools_count": len(tool_timings),
+                    "session_id": session_id or "",
+                },
+                session_id=session_id,
+                user_id=user_id,
+            )
+    except Exception:
+        logger.debug("Failed to emit tool timing telemetry", exc_info=True)
+
+
 async def stream_generator(
     message: str,
     tenant_id: str,
@@ -61,9 +100,13 @@ async def stream_generator(
       4. tool_use events → TOOL_USE SSE events.
       5. complete/error → COMPLETE/ERROR SSE event.
     """
+    stream_start = time.perf_counter()
     writer = MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
     sse_queue: asyncio.Queue[str] = asyncio.Queue()
     full_response_parts: list[str] = []
+    # Tool timing: track start times when tool_use arrives, compute duration on tool_result
+    _tool_start_times: dict[str, float] = {}  # tool_name → perf_counter
+    _tool_timings: list[dict] = []  # collected {tool_name, duration_ms}
 
     # Persist user message to DynamoDB so conversation history works on next turn
     if session_id:
@@ -139,6 +182,7 @@ async def stream_generator(
                 yield await sse_queue.get()
 
             elif chunk_type == "tool_use":
+                tool_name = chunk.get("name", "")
                 tool_input = chunk.get("input", {})
                 # Parse stringified input if needed (Strands may send JSON string)
                 if isinstance(tool_input, str):
@@ -146,9 +190,12 @@ async def stream_generator(
                         tool_input = json.loads(tool_input)
                     except (json.JSONDecodeError, ValueError):
                         tool_input = {"raw": tool_input} if tool_input else {}
+                # Track tool start time for duration calculation
+                if tool_name:
+                    _tool_start_times[tool_name] = time.perf_counter()
                 await writer.write_tool_use(
                     sse_queue,
-                    chunk.get("name", ""),
+                    tool_name,
                     tool_input,
                     tool_use_id=chunk.get("tool_use_id", ""),
                 )
@@ -159,7 +206,22 @@ async def stream_generator(
                 if not tr_name:
                     logger.debug("Skipping empty-name tool_result: keys=%s", list(chunk.keys()))
                     continue
+                # Compute tool duration from start time
+                start_t = _tool_start_times.pop(tr_name, None)
+                if start_t is not None:
+                    _tool_timings.append({
+                        "tool_name": tr_name,
+                        "duration_ms": int((time.perf_counter() - start_t) * 1000),
+                    })
                 await writer.write_tool_result(sse_queue, tr_name, chunk.get("result", {}))
+                yield await sse_queue.get()
+
+            elif chunk_type == "state_update":
+                await writer.write_state_update(
+                    sse_queue,
+                    chunk.get("state_type", ""),
+                    {k: v for k, v in chunk.items() if k not in ("type", "state_type")},
+                )
                 yield await sse_queue.get()
 
             elif chunk_type == "agent_status":
@@ -177,7 +239,13 @@ async def stream_generator(
                     complete_metadata["tools_called"] = chunk.get("tools_called") or []
                 if "usage" in chunk:
                     complete_metadata["usage"] = chunk.get("usage") or {}
-                logger.debug("SSE complete: complete_text_len=%d full_parts=%d", len(complete_text), len(full_response_parts))
+                # Include total stream duration in complete event
+                duration_ms = int((time.perf_counter() - stream_start) * 1000)
+                complete_metadata["duration_ms"] = duration_ms
+                # Include per-tool timings for frontend visibility
+                if _tool_timings:
+                    complete_metadata["tool_timings"] = _tool_timings
+                logger.debug("SSE complete: complete_text_len=%d full_parts=%d duration_ms=%d", len(complete_text), len(full_response_parts), duration_ms)
                 if not full_response_parts and complete_text:
                     full_response_parts.append(complete_text)
                     await writer.write_text(sse_queue, complete_text)
@@ -203,6 +271,8 @@ async def stream_generator(
                     metadata=complete_metadata if complete_metadata else None,
                 )
                 yield await sse_queue.get()
+                # Emit tool timing telemetry to CloudWatch
+                _emit_tool_timings(_tool_timings, tenant_id, user_id, session_id, duration_ms)
                 return
 
             elif chunk_type == "error":
@@ -227,8 +297,10 @@ async def stream_generator(
                 await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
             except Exception:
                 logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
-        await writer.write_complete(sse_queue)
+        fallback_duration_ms = int((time.perf_counter() - stream_start) * 1000)
+        await writer.write_complete(sse_queue, metadata={"duration_ms": fallback_duration_ms})
         yield await sse_queue.get()
+        _emit_tool_timings(_tool_timings, tenant_id, user_id, session_id, fallback_duration_ms)
 
     except asyncio.CancelledError:
         logger.debug("Streaming client disconnected user=%s session=%s", user_id, session_id)
