@@ -2,7 +2,6 @@
 Admin Service
 Dashboard analytics, cost tracking, and user management.
 """
-import os
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
@@ -11,13 +10,13 @@ from decimal import Decimal
 from botocore.exceptions import ClientError, BotoCoreError
 
 from .db_client import get_table, item_to_dict
+from .config import cost as cost_config
 
 logger = logging.getLogger("eagle.admin")
 
-# ── Configuration ────────────────────────────────────────────────────
-# Cost per 1K tokens (Claude 3.5 Sonnet via Bedrock, approximate)
-COST_INPUT_PER_1K = float(os.getenv("COST_INPUT_PER_1K", "0.003"))
-COST_OUTPUT_PER_1K = float(os.getenv("COST_OUTPUT_PER_1K", "0.015"))
+# ── Configuration (from centralized config) ──────────────────────────
+COST_INPUT_PER_1K = cost_config.input_per_1k
+COST_OUTPUT_PER_1K = cost_config.output_per_1k
 
 
 # ── Cost Calculation ─────────────────────────────────────────────────

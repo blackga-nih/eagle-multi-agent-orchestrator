@@ -30,9 +30,9 @@ from .session_store import add_message
 from .package_context_service import resolve_context, set_active_package
 from .telemetry.log_context import set_log_context
 from .health_checks import check_knowledge_base_health
+from .config import auth as auth_config
 
-import os
-REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
+REQUIRE_AUTH = auth_config.require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -517,9 +517,9 @@ User message: "{req.message}"
             ],
             "tools": [tool["name"] for tool in EAGLE_TOOLS],
             "features": {
-                "persistent_sessions": os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true",
-                "auth_required": os.getenv("REQUIRE_AUTH", "false").lower() == "true",
-                "dev_mode": os.getenv("DEV_MODE", "false").lower() == "true",
+                "persistent_sessions": auth_config.require_auth,  # sessions require auth
+                "auth_required": auth_config.require_auth,
+                "dev_mode": auth_config.dev_mode,
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
