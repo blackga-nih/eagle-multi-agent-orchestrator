@@ -124,6 +124,8 @@ from .audit_store import write_audit
 from .feedback_store import list_feedback
 from .health_checks import check_knowledge_base_health
 from .error_webhook import notify_error, close_webhook_client
+from .teams_notifier import notify_feedback, notify_startup, notify_suspicious, close_notifier_client
+from .daily_scheduler import start_scheduler, stop_scheduler
 
 # ── Logging ──────────────────────────────────────────────────────────
 from .telemetry.log_context import configure_logging
@@ -148,15 +150,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Request Timing Middleware ─────────────────────────────────────────
+@app.middleware("http")
+async def request_timing_middleware(request: Request, call_next):
+    """Log every request with duration_ms for CloudWatch Insights queries."""
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    logger.info(
+        "request_completed",
+        extra={
+            "endpoint": request.url.path,
+            "method": request.method,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+        },
+    )
+    return response
+
+
 # ── Error Webhook Exception Handlers ─────────────────────────────────
 from fastapi.responses import JSONResponse
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Handle HTTPExceptions — send webhook on 5xx, return standard JSON."""
+    """Handle HTTPExceptions — send webhook on 5xx, notify suspicious 404s."""
     if exc.status_code >= 500:
         notify_error(request=request, status_code=exc.status_code, exception=exc)
+    elif exc.status_code == 404 and request.url.path not in ("/api/health", "/favicon.ico"):
+        notify_suspicious("404", f"{request.method} {request.url.path}")
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
@@ -169,9 +192,21 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+@app.on_event("startup")
+async def startup_teams_notifier():
+    notify_startup()
+    start_scheduler()
+
+
 @app.on_event("shutdown")
 async def shutdown_webhook_client():
     await close_webhook_client()
+
+
+@app.on_event("shutdown")
+async def shutdown_teams_notifier():
+    stop_scheduler()
+    await close_notifier_client()
 
 
 # ── Feature Flags ────────────────────────────────────────────────────
@@ -1663,6 +1698,11 @@ async def api_submit_feedback(
         page=page,
         last_message_id=last_message_id,
     )
+    notify_feedback(
+        tenant_id=user.tenant_id, user_id=user.user_id, tier=user.tier,
+        session_id=session_id, feedback_text=feedback_text,
+        feedback_type=body.get("feedback_type", "general"), page=page,
+    )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 
 
@@ -2923,6 +2963,9 @@ async def create_package_endpoint(
         session_id=body.get("session_id"),
         notes=body.get("notes", ""),
         contract_vehicle=body.get("contract_vehicle"),
+        acquisition_method=body.get("acquisition_method"),
+        contract_type=body.get("contract_type"),
+        flags=body.get("flags"),
     )
 
 
@@ -2996,6 +3039,36 @@ async def approve_package_endpoint(
         actor_user_id=user.user_id,
     )
     return pkg
+
+
+@app.get("/api/packages/{package_id}/export/zip")
+async def export_package_zip_endpoint(
+    package_id: str,
+    format: str = "docx",
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Download all package documents as a ZIP archive."""
+    from starlette.responses import Response
+    from .document_export import export_package_zip
+
+    pkg = get_package(user.tenant_id, package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+
+    docs = list_package_documents(user.tenant_id, package_id)
+    docs_with_content = [d for d in docs if d.get("content")]
+    if not docs_with_content:
+        raise HTTPException(status_code=404, detail="No documents with content found")
+
+    result = export_package_zip(docs_with_content, pkg.get("title", "Package"), format)
+
+    return Response(
+        content=result["data"],
+        media_type=result["content_type"],
+        headers={
+            "Content-Disposition": f'attachment; filename="{result["filename"]}"',
+        },
+    )
 
 
 # ── Acquisition Documents (DOCUMENT#) ─────────────────────────────
