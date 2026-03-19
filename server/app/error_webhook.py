@@ -146,29 +146,24 @@ def _build_payload(
     traceback_str: str = "",
     request_id: str = "",
 ) -> dict:
-    error_msg = str(exc) or type(exc).__name__
-    text = f"[EAGLE {ENVIRONMENT}] {status_code} {method} {path} — {error_msg}"
-    if tenant_id:
-        text += f" | tenant={tenant_id}"
+    from .teams_cards import error_card
 
-    payload = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "service": "eagle-backend",
-        "environment": ENVIRONMENT,
-        "request_id": request_id or str(uuid.uuid4()),
-        "endpoint_path": path,
-        "http_method": method,
-        "status_code": status_code,
-        "error_type": type(exc).__name__,
-        "error_message": error_msg,
-        "tenant_id": tenant_id,
-        "user_id": user_id,
-        "session_id": session_id,
-        "text": text,
-    }
-    if INCLUDE_TRACEBACK and traceback_str:
-        payload["traceback"] = traceback_str
-    return payload
+    error_msg = str(exc) or type(exc).__name__
+    ts = datetime.now(timezone.utc).isoformat()
+
+    return error_card(
+        environment=ENVIRONMENT,
+        status_code=status_code,
+        method=method,
+        path=path,
+        error_type=type(exc).__name__,
+        error_message=error_msg,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        request_id=request_id or str(uuid.uuid4()),
+        timestamp=ts,
+    )
 
 
 def notify_error(
