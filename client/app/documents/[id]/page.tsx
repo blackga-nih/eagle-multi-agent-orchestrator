@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import TopNav from '@/components/layout/top-nav';
-import MarkdownRenderer from '@/components/ui/markdown-renderer';
+import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import { useAgentStream } from '@/hooks/use-agent-stream';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
@@ -1734,9 +1734,7 @@ ${docSnippet}`;
                                                 </div>
                                             </div>
                                         ) : documentContent ? (
-                                            <div className="prose prose-sm max-w-none">
-                                                <MarkdownRenderer content={documentContent} />
-                                            </div>
+                                            <CollapsibleMarkdown content={documentContent} defaultExpanded />
                                         ) : (
                                             <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
                                                 Preview unavailable for this DOCX. You can still download the current file.
@@ -1841,9 +1839,7 @@ ${docSnippet}`;
                                                 </div>
                                             </div>
                                         ) : documentContent ? (
-                                            <div className="prose prose-sm max-w-none">
-                                                <MarkdownRenderer content={documentContent} />
-                                            </div>
+                                            <CollapsibleMarkdown content={documentContent} defaultExpanded />
                                         ) : (
                                             <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
                                                 Preview unavailable for this XLSX. You can still download the current file.
@@ -1887,9 +1883,7 @@ ${docSnippet}`;
                                         className="w-full min-h-[600px] p-4 border border-gray-200 rounded-xl font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-y"
                                     />
                                 ) : (
-                                    <div className="prose prose-sm max-w-none">
-                                        <MarkdownRenderer content={documentContent} />
-                                    </div>
+                                    <CollapsibleMarkdown content={documentContent} defaultExpanded />
                                 )}
                             </div>
                         </div>

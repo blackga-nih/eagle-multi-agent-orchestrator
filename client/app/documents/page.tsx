@@ -9,7 +9,7 @@ import PageHeader from '@/components/layout/page-header';
 import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
 import { Tabs } from '@/components/ui/tabs';
-import MarkdownRenderer from '@/components/ui/markdown-renderer';
+import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import {
   MOCK_DOCUMENTS,
   MOCK_DOCUMENT_TEMPLATES,
@@ -296,7 +296,7 @@ export default function DocumentsPage() {
               </div>
               <div className="p-6 bg-white rounded-xl border border-gray-200 max-h-[400px] overflow-y-auto">
                 {selectedDocument.content ? (
-                  <MarkdownRenderer content={selectedDocument.content} />
+                  <CollapsibleMarkdown content={selectedDocument.content} />
                 ) : (
                   <div className="text-center py-8">
                     <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
