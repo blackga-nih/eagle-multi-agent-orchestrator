@@ -180,15 +180,10 @@ async def test_send_daily_summary_with_mocked_stores():
         "total_cost_usd": 0.25, "by_date": {},
     }
 
-    mock_ss = MagicMock()
-    mock_ss.get_all_tenants.return_value = mock_tenants
-    mock_ss.get_usage_summary.return_value = mock_usage
-    mock_ss.list_tenant_sessions.return_value = [{"user_id": "user1"}]
-
-    mock_fs = MagicMock()
-    mock_fs.list_feedback.return_value = []
-
-    with patch.dict("sys.modules", {"app.session_store": mock_ss, "app.feedback_store": mock_fs}), \
+    with patch("app.session_store.get_all_tenants", return_value=mock_tenants), \
+         patch("app.session_store.get_usage_summary", return_value=mock_usage), \
+         patch("app.session_store.list_tenant_sessions", return_value=[{"user_id": "user1"}]), \
+         patch("app.feedback_store.list_feedback", return_value=[]), \
          patch("app.teams_notifier._send", new_callable=AsyncMock) as mock_send:
         await send_daily_summary()
 
