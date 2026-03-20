@@ -7,6 +7,7 @@ import { ChatMessage, DocumentInfo } from '@/types/chat';
 import DocumentCard from './document-card';
 import ToolUseDisplay from './tool-use-display';
 import CodeSandboxRenderer from './code-sandbox-renderer';
+import MessageFeedback from './message-feedback';
 import { ToolCallsByMessageId, TrackedToolCall } from './simple-chat-interface';
 import { CodeResult } from '@/lib/client-tools';
 
@@ -296,6 +297,11 @@ export default function SimpleMessageList({
                                 >
                                     {copiedId === message.id ? '✓ Copied' : '⎘ Copy'}
                                 </button>
+                            )}
+
+                            {/* Thumbs up/down feedback */}
+                            {!isStreamingThis && sessionId && (
+                                <MessageFeedback messageId={message.id} sessionId={sessionId} />
                             )}
 
                             {/* Document cards attached to this message */}

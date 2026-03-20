@@ -99,6 +99,7 @@ def _build_trace_attrs(
     tier: str,
     session_id: str = "",
     subagent: str = "",
+    username: str = "",
 ) -> dict:
     """Build trace_attributes dict for Langfuse/OTEL Agent() constructor.
 
@@ -121,7 +122,7 @@ def _build_trace_attrs(
         "eagle.session_id": session_id or "",
         "session.id": session_id or "",
         "langfuse.session.id": session_id or "",
-        "langfuse.user.id": user_id or "",
+        "langfuse.user.id": username or user_id or "",
     }
     if subagent:
         attrs["eagle.subagent"] = subagent
@@ -2378,6 +2379,7 @@ async def sdk_query(
     package_context: Any = None,
     max_turns: int = 15,
     messages: list[dict] | None = None,
+    username: str | None = None,
 ) -> AsyncGenerator[Any, None]:
     """Run a supervisor query with skill subagents (Strands implementation).
 
@@ -2480,6 +2482,7 @@ async def sdk_query(
             user_id=user_id,
             tier=tier,
             session_id=session_id or "",
+            username=username or "",
         ),
     )
 
@@ -2550,6 +2553,7 @@ async def sdk_query_streaming(
     package_context: Any = None,
     max_turns: int = 15,
     messages: list[dict] | None = None,
+    username: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream text deltas from the Strands supervisor agent.
 
@@ -2658,6 +2662,7 @@ async def sdk_query_streaming(
             user_id=user_id,
             tier=tier,
             session_id=session_id or "",
+            username=username or "",
         ),
     )
 

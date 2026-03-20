@@ -47,7 +47,7 @@ from .cognito_auth import (
     DEV_MODE
 )
 from .admin_service import (
-    get_dashboard_stats, get_user_stats, get_top_users, get_tool_usage,
+    get_dashboard_stats, get_user_stats, get_top_users,
     record_request_cost, check_rate_limit, calculate_cost
 )
 from . import feedback_store
@@ -121,7 +121,7 @@ from .approval_store import (
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
-from .feedback_store import list_feedback
+from .feedback_store import list_feedback, write_message_feedback, list_message_feedback, get_message_feedback_summary
 from .health_checks import check_knowledge_base_health
 from .error_webhook import notify_error, close_webhook_client
 from .teams_notifier import notify_feedback, notify_startup, notify_suspicious, close_notifier_client
@@ -333,6 +333,7 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
             session_id=session_id,
             messages=messages[:-1],  # History excluding current user message
             package_context=resolved_package_context,
+            username=user.username or user_id,
         ):
             _msg_type = type(_sdk_msg).__name__
             if _msg_type == "AssistantMessage":
@@ -1610,12 +1611,68 @@ async def api_admin_user_stats(
 
 @app.get("/api/admin/tools")
 async def api_admin_tools(
-    days: int = 30,
-    user: UserContext = Depends(get_user_from_header)
+    period: str = "24h",
+    admin_user: dict = Depends(get_admin_user),
 ):
-    """Get tool usage analytics."""
-    tenant_id = user.tenant_id
-    return get_tool_usage(tenant_id, days)
+    """Per-tool health metrics aggregated from recent Langfuse traces."""
+    from .telemetry.langfuse_client import list_traces, list_observations
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    from_ts = (now - timedelta(days=7 if period == "7d" else 1)).isoformat()
+
+    result = await list_traces(limit=100, from_timestamp=from_ts)
+    traces = result.get("data", [])
+
+    tool_stats: dict[str, dict] = {}
+    for t in traces:
+        # Get observations for each trace to find tool calls
+        trace_id = t.get("id", "")
+        if not trace_id:
+            continue
+        obs_result = await list_observations(trace_id=trace_id, limit=50, type="SPAN")
+        for obs in obs_result.get("data", []):
+            name = obs.get("name", "")
+            if not name or name in ("agent", "supervisor"):
+                continue
+            if name not in tool_stats:
+                tool_stats[name] = {"call_count": 0, "success_count": 0, "error_count": 0, "total_ms": 0, "recent_errors": []}
+            s = tool_stats[name]
+            s["call_count"] += 1
+            level = obs.get("level", "DEFAULT")
+            if level == "ERROR":
+                s["error_count"] += 1
+                msg = obs.get("statusMessage", "")
+                if msg and len(s["recent_errors"]) < 5:
+                    s["recent_errors"].append(msg[:200])
+            else:
+                s["success_count"] += 1
+            # Duration
+            start = obs.get("startTime")
+            end = obs.get("endTime")
+            if start and end:
+                try:
+                    from datetime import datetime as dt
+                    s_dt = dt.fromisoformat(start.replace("Z", "+00:00"))
+                    e_dt = dt.fromisoformat(end.replace("Z", "+00:00"))
+                    s["total_ms"] += int((e_dt - s_dt).total_seconds() * 1000)
+                except Exception:
+                    pass
+
+    tools = []
+    for name, s in sorted(tool_stats.items(), key=lambda x: x[1]["call_count"], reverse=True):
+        total = s["call_count"]
+        tools.append({
+            "name": name,
+            "call_count": total,
+            "success_count": s["success_count"],
+            "error_count": s["error_count"],
+            "success_rate": round(s["success_count"] / total * 100, 1) if total else 100,
+            "avg_duration_ms": round(s["total_ms"] / total) if total else 0,
+            "recent_errors": s["recent_errors"],
+        })
+
+    return {"tools": tools, "period": period}
 
 
 @app.get("/api/admin/rate-limit")
@@ -1704,6 +1761,60 @@ async def api_submit_feedback(
         feedback_type=body.get("feedback_type", "general"), page=page,
     )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
+
+
+class MessageFeedbackRequest(BaseModel):
+    session_id: str
+    message_id: str
+    feedback_type: str  # "thumbs_up" | "thumbs_down"
+    comment: Optional[str] = ""
+
+@app.post("/api/feedback/message")
+async def api_submit_message_feedback(
+    req: MessageFeedbackRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Record thumbs up/down feedback for a specific message."""
+    if req.feedback_type not in ("thumbs_up", "thumbs_down"):
+        raise HTTPException(status_code=400, detail="feedback_type must be 'thumbs_up' or 'thumbs_down'")
+
+    feedback_store.write_message_feedback(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        session_id=req.session_id,
+        message_id=req.message_id,
+        feedback_type=req.feedback_type,
+        comment=req.comment or "",
+    )
+    return {"status": "ok", "message": "Feedback recorded"}
+
+
+# ── Analytics ingestion endpoint ─────────────────────────────────────
+
+@app.post("/api/analytics/events")
+async def api_analytics_events(request: Request):
+    """Ingest batched analytics events — writes to CloudWatch."""
+    try:
+        body = await request.json()
+        events = body.get("events", [])
+        if not events:
+            return {"status": "ok", "ingested": 0}
+
+        from .telemetry.cloudwatch_emitter import emit_telemetry_event
+        for event in events[:100]:  # Cap at 100 per batch
+            emit_telemetry_event(
+                event_type=f"analytics.{event.get('event', 'unknown')}",
+                tenant_id="frontend",
+                data={
+                    "page": event.get("page", ""),
+                    "metadata": event.get("metadata", {}),
+                    "client_timestamp": event.get("timestamp", 0),
+                },
+            )
+        return {"status": "ok", "ingested": len(events)}
+    except Exception as e:
+        logger.warning("Analytics ingestion error: %s", e)
+        return {"status": "ok", "ingested": 0}
 
 
 # ── Telemetry endpoint ───────────────────────────────────────────────
@@ -2175,6 +2286,56 @@ async def get_admin_trace_detail(
         "output": trace.get("output"),
         "observations": observations,
         "langfuse_url": langfuse_trace_url(trace_id),
+    }
+
+
+@app.get("/api/admin/traces/summary")
+async def get_admin_traces_summary(
+    period: str = "24h",
+    admin_user: dict = Depends(get_admin_user),
+):
+    """Aggregated trace statistics for the admin dashboard."""
+    from .telemetry.langfuse_client import list_traces
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    if period == "7d":
+        from_ts = (now - timedelta(days=7)).isoformat()
+    else:
+        from_ts = (now - timedelta(hours=24)).isoformat()
+
+    result = await list_traces(limit=200, from_timestamp=from_ts)
+    data = result.get("data", [])
+
+    total = len(data)
+    errors = sum(1 for t in data if t.get("level") == "ERROR")
+    error_rate = (errors / total * 100) if total else 0
+
+    latencies = [_langfuse_latency_ms(t) for t in data]
+    avg_latency = sum(latencies) / len(latencies) if latencies else 0
+
+    total_cost = sum(
+        float(t.get("usage", {}).get("totalCost", 0) or 0)
+        for t in data if t.get("usage")
+    )
+
+    # Tool failure breakdown from tags
+    tool_failures: dict[str, int] = {}
+    for t in data:
+        tags = t.get("tags", [])
+        for tag in tags:
+            if tag.startswith("error:"):
+                category = tag.replace("error:", "")
+                tool_failures[category] = tool_failures.get(category, 0) + 1
+
+    return {
+        "period": period,
+        "total_traces": total,
+        "error_count": errors,
+        "error_rate_pct": round(error_rate, 1),
+        "avg_latency_ms": round(avg_latency),
+        "total_cost_usd": round(total_cost, 4),
+        "error_breakdown": tool_failures,
     }
 
 
@@ -3373,6 +3534,19 @@ async def get_feedback(limit: int = 50, user: UserContext = Depends(get_user_fro
     """List feedback for the current tenant (admin use)."""
     items = list_feedback(user.tenant_id, limit=limit)
     return {"feedback": items, "count": len(items)}
+
+
+@app.get("/api/feedback/messages")
+async def get_message_feedback(limit: int = 100, user: UserContext = Depends(get_user_from_header)):
+    """List per-message feedback for the current tenant."""
+    items = list_message_feedback(user.tenant_id, limit=limit)
+    return {"feedback": items, "count": len(items)}
+
+@app.get("/api/feedback/messages/summary")
+async def get_message_feedback_summary_endpoint(user: UserContext = Depends(get_user_from_header)):
+    """Get aggregate message feedback stats."""
+    summary = get_message_feedback_summary(user.tenant_id)
+    return summary
 
 
 

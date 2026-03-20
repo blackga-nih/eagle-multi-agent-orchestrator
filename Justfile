@@ -124,14 +124,33 @@ dev-local:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "=== Clearing ports 8000 + 3000 ==="
+    # Kill by port — netstat + powershell fallback for reliable PID capture
     for port in 8000 3000 3001; do
-        for pid in $(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $5}' | sort -u); do
+        for pid in $(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $NF}' | sort -u | grep -v '^0$'); do
+            echo "  Killing PID $pid (port $port)"
             taskkill /F /T /PID "$pid" 2>/dev/null || true
+        done
+        # Powershell fallback — catches IPv6 listeners netstat misses
+        for pid in $(powershell.exe -NoProfile -Command \
+          "(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess" 2>/dev/null | tr -d '\r' | sort -u); do
+            [ -n "$pid" ] && [ "$pid" != "0" ] && {
+                echo "  Killing PID $pid (port $port, ps fallback)"
+                taskkill /F /T /PID "$pid" 2>/dev/null || true
+            }
         done
     done
     # Kill any lingering node processes holding .next/trace
     taskkill /F /IM node.exe 2>/dev/null || true
-    sleep 3
+    # Wait for ports to actually free (taskkill is async on Windows)
+    for port in 3000 8000; do
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+            if ! netstat -ano 2>/dev/null | grep ":${port} " | grep -q LISTENING; then
+                break
+            fi
+            echo "  Waiting for port $port to free... ($i)"
+            sleep 1
+        done
+    done
     # Clear Next.js cache to purge stale env vars
     rm -rf client/.next 2>/dev/null || true
     unset FASTAPI_URL

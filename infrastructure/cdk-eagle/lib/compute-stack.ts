@@ -81,6 +81,10 @@ export class EagleComputeStack extends cdk.Stack {
         METADATA_TABLE: props.metadataTableName,
         APP_HOST: '0.0.0.0',
         APP_PORT: '8000',
+        LANGFUSE_PUBLIC_KEY: config.langfusePublicKey,
+        LANGFUSE_SECRET_KEY: config.langfuseSecretKey,
+        LANGFUSE_HOST: config.langfuseHost,
+        LANGFUSE_PROJECT_ID: config.langfuseProjectId,
       },
       logging: ecs.LogDrivers.awsLogs({
         logGroup: backendLogGroup,

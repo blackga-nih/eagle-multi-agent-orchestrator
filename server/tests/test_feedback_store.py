@@ -229,6 +229,233 @@ class TestListFeedback:
 
 
 # ---------------------------------------------------------------------------
+# TestWriteMessageFeedback
+# ---------------------------------------------------------------------------
+
+MESSAGE_ID = "msg-456"
+
+
+def _mock_write_message_feedback(mock_table, **kwargs):
+    """Call write_message_feedback with mocked table, uuid, and datetime."""
+    from app.feedback_store import write_message_feedback
+
+    defaults = dict(
+        tenant_id=TENANT,
+        user_id=USER,
+        session_id=SESSION,
+        message_id=MESSAGE_ID,
+        feedback_type="thumbs_up",
+    )
+    defaults.update(kwargs)
+
+    with mock.patch("app.feedback_store._get_table", return_value=mock_table), \
+         mock.patch("app.feedback_store.uuid.uuid4", return_value=FAKE_UUID), \
+         mock.patch("app.feedback_store.datetime", wraps=datetime,
+                    **{"utcnow.return_value": FAKE_NOW}):
+        return write_message_feedback(**defaults)
+
+
+class TestWriteMessageFeedback:
+    """Verify write_message_feedback writes correct PK/SK and handles fields."""
+
+    def test_creates_item_with_correct_pk_sk(self):
+        mock_table = mock.MagicMock()
+        _mock_write_message_feedback(mock_table)
+
+        mock_table.put_item.assert_called_once()
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert item["PK"] == f"FEEDBACK#{TENANT}"
+        assert item["SK"] == f"MSG_FEEDBACK#{SESSION}#{MESSAGE_ID}"
+
+    def test_gsi_keys_use_msg_feedback_prefix(self):
+        mock_table = mock.MagicMock()
+        _mock_write_message_feedback(mock_table)
+
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert item["GSI1PK"] == f"TENANT#{TENANT}"
+        assert item["GSI1SK"].startswith("MSG_FEEDBACK#")
+
+    def test_includes_required_fields(self):
+        mock_table = mock.MagicMock()
+        _mock_write_message_feedback(mock_table, comment="great answer")
+
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert item["tenant_id"] == TENANT
+        assert item["user_id"] == USER
+        assert item["session_id"] == SESSION
+        assert item["message_id"] == MESSAGE_ID
+        assert item["feedback_type"] == "thumbs_up"
+        assert item["comment"] == "great answer"
+        assert item["feedback_id"] == str(FAKE_UUID)
+        assert item["created_at"] == FAKE_ISO
+
+    def test_sets_7_year_ttl(self):
+        mock_table = mock.MagicMock()
+        _mock_write_message_feedback(mock_table)
+
+        item = mock_table.put_item.call_args[1]["Item"]
+        expected_ttl = int((FAKE_NOW + timedelta(days=365 * 7)).timestamp())
+        assert item["ttl"] == expected_ttl
+
+    def test_returns_created_item(self):
+        mock_table = mock.MagicMock()
+        result = _mock_write_message_feedback(mock_table)
+
+        assert isinstance(result, dict)
+        assert result["PK"] == f"FEEDBACK#{TENANT}"
+        assert result["feedback_type"] == "thumbs_up"
+
+    def test_thumbs_down_feedback_type(self):
+        mock_table = mock.MagicMock()
+        _mock_write_message_feedback(mock_table, feedback_type="thumbs_down")
+
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert item["feedback_type"] == "thumbs_down"
+
+    def test_raises_on_client_error(self):
+        mock_table = mock.MagicMock()
+        mock_table.put_item.side_effect = _make_client_error()
+        with pytest.raises(ClientError):
+            _mock_write_message_feedback(mock_table)
+
+
+# ---------------------------------------------------------------------------
+# TestListMessageFeedback
+# ---------------------------------------------------------------------------
+
+class TestListMessageFeedback:
+    """Verify list_message_feedback queries with MSG_FEEDBACK# prefix."""
+
+    def test_queries_with_msg_feedback_prefix(self):
+        from app.feedback_store import list_message_feedback
+
+        mock_table = mock.MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        with mock.patch("app.feedback_store._get_table", return_value=mock_table):
+            list_message_feedback(TENANT)
+
+        mock_table.query.assert_called_once()
+        call_kwargs = mock_table.query.call_args[1]
+        assert call_kwargs["ScanIndexForward"] is False
+
+    def test_returns_newest_first(self):
+        from app.feedback_store import list_message_feedback
+
+        mock_table = mock.MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        with mock.patch("app.feedback_store._get_table", return_value=mock_table):
+            list_message_feedback(TENANT)
+
+        call_kwargs = mock_table.query.call_args[1]
+        assert call_kwargs["ScanIndexForward"] is False
+
+    def test_respects_limit_parameter(self):
+        from app.feedback_store import list_message_feedback
+
+        mock_table = mock.MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        with mock.patch("app.feedback_store._get_table", return_value=mock_table):
+            list_message_feedback(TENANT, limit=25)
+
+        call_kwargs = mock_table.query.call_args[1]
+        assert call_kwargs["Limit"] == 25
+
+    def test_returns_items(self):
+        from app.feedback_store import list_message_feedback
+
+        fake_items = [
+            {"PK": f"FEEDBACK#{TENANT}", "SK": f"MSG_FEEDBACK#{SESSION}#msg1", "feedback_type": "thumbs_up"},
+            {"PK": f"FEEDBACK#{TENANT}", "SK": f"MSG_FEEDBACK#{SESSION}#msg2", "feedback_type": "thumbs_down"},
+        ]
+        mock_table = mock.MagicMock()
+        mock_table.query.return_value = {"Items": fake_items}
+        with mock.patch("app.feedback_store._get_table", return_value=mock_table):
+            result = list_message_feedback(TENANT)
+
+        assert len(result) == 2
+        assert result[0]["feedback_type"] == "thumbs_up"
+
+    def test_raises_on_error(self):
+        from app.feedback_store import list_message_feedback
+
+        mock_table = mock.MagicMock()
+        mock_table.query.side_effect = _make_client_error()
+        with mock.patch("app.feedback_store._get_table", return_value=mock_table):
+            with pytest.raises(ClientError):
+                list_message_feedback(TENANT)
+
+
+# ---------------------------------------------------------------------------
+# TestGetMessageFeedbackSummary
+# ---------------------------------------------------------------------------
+
+class TestGetMessageFeedbackSummary:
+    """Verify get_message_feedback_summary aggregation logic."""
+
+    def test_calculates_thumbs_up_pct(self):
+        from app.feedback_store import get_message_feedback_summary
+
+        fake_items = [
+            {"feedback_type": "thumbs_up"},
+            {"feedback_type": "thumbs_up"},
+            {"feedback_type": "thumbs_up"},
+            {"feedback_type": "thumbs_down"},
+        ]
+        with mock.patch("app.feedback_store.list_message_feedback", return_value=fake_items):
+            result = get_message_feedback_summary(TENANT)
+
+        assert result["total"] == 4
+        assert result["thumbs_up"] == 3
+        assert result["thumbs_down"] == 1
+        assert result["thumbs_up_pct"] == 75.0
+
+    def test_empty_feedback_returns_zero(self):
+        from app.feedback_store import get_message_feedback_summary
+
+        with mock.patch("app.feedback_store.list_message_feedback", return_value=[]):
+            result = get_message_feedback_summary(TENANT)
+
+        assert result["total"] == 0
+        assert result["thumbs_up"] == 0
+        assert result["thumbs_down"] == 0
+        assert result["thumbs_up_pct"] == 0
+
+    def test_all_thumbs_up(self):
+        from app.feedback_store import get_message_feedback_summary
+
+        fake_items = [{"feedback_type": "thumbs_up"}] * 5
+        with mock.patch("app.feedback_store.list_message_feedback", return_value=fake_items):
+            result = get_message_feedback_summary(TENANT)
+
+        assert result["thumbs_up_pct"] == 100.0
+        assert result["thumbs_down"] == 0
+
+    def test_all_thumbs_down(self):
+        from app.feedback_store import get_message_feedback_summary
+
+        fake_items = [{"feedback_type": "thumbs_down"}] * 3
+        with mock.patch("app.feedback_store.list_message_feedback", return_value=fake_items):
+            result = get_message_feedback_summary(TENANT)
+
+        assert result["thumbs_up_pct"] == 0
+        assert result["thumbs_up"] == 0
+        assert result["thumbs_down"] == 3
+
+    def test_rounds_to_one_decimal(self):
+        from app.feedback_store import get_message_feedback_summary
+
+        fake_items = [
+            {"feedback_type": "thumbs_up"},
+            {"feedback_type": "thumbs_up"},
+            {"feedback_type": "thumbs_down"},
+        ]
+        with mock.patch("app.feedback_store.list_message_feedback", return_value=fake_items):
+            result = get_message_feedback_summary(TENANT)
+
+        assert result["thumbs_up_pct"] == 66.7
+
+
+# ---------------------------------------------------------------------------
 # TestModuleLevel
 # ---------------------------------------------------------------------------
 
