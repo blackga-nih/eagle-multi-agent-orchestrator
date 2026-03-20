@@ -1793,36 +1793,57 @@ def _build_all_service_tools(
             if not parsed.get("package_id"):
                 try:
                     from decimal import Decimal as _Dec
-                    _data = parsed.get("data") or {}
-                    _est = _data.get("estimated_value") or _data.get("total_value") or 0
-                    _title = parsed.get("title") or "Acquisition Package"
-                    _req_type = _data.get("requirement_type") or "services"
+                    from app.package_store import list_packages as _list_pkgs, create_package as _create_pkg
+
+                    # Extract owner from session_id (format: tenant#tier#user#session)
                     _owner = ""
                     if session_id and "#" in session_id:
                         _parts = session_id.split("#")
                         if len(_parts) >= 3:
                             _owner = _parts[2]
-                    from app.package_store import create_package as _create_pkg
-                    _pkg = _create_pkg(
-                        tenant_id=tenant_id,
-                        owner_user_id=_owner,
-                        title=_title,
-                        requirement_type=_req_type,
-                        estimated_value=_Dec(str(_est)),
-                        session_id=session_id,
-                        acquisition_method=_data.get("acquisition_method") or None,
-                        contract_type=_data.get("contract_type") or None,
-                    )
-                    _auto_pkg_id = _pkg.get("package_id")
-                    if _auto_pkg_id:
-                        parsed["package_id"] = _auto_pkg_id
+
+                    # First: check if a package already exists for this session
+                    _session_pkg = None
+                    if session_id:
+                        _existing_pkgs = _list_pkgs(tenant_id, owner_user_id=_owner or None)
+                        for _p in _existing_pkgs:
+                            if _p.get("session_id") == session_id:
+                                _session_pkg = _p
+                                break
+
+                    if _session_pkg:
+                        # Reuse existing session package
+                        parsed["package_id"] = _session_pkg["package_id"]
                         logger.info(
-                            "create_document: auto-created package %s for first document",
-                            _auto_pkg_id,
+                            "create_document: reusing existing session package %s",
+                            _session_pkg["package_id"],
                         )
-                        # Emit initial package state
-                        if result_queue and loop:
-                            _emit_package_state(_pkg, "manage_package", tenant_id, result_queue, loop)
+                    else:
+                        # Create new package only if none exists for this session
+                        _data = parsed.get("data") or {}
+                        _est = _data.get("estimated_value") or _data.get("total_value") or 0
+                        _title = parsed.get("title") or "Acquisition Package"
+                        _req_type = _data.get("requirement_type") or "services"
+                        _pkg = _create_pkg(
+                            tenant_id=tenant_id,
+                            owner_user_id=_owner,
+                            title=_title,
+                            requirement_type=_req_type,
+                            estimated_value=_Dec(str(_est)),
+                            session_id=session_id,
+                            acquisition_method=_data.get("acquisition_method") or None,
+                            contract_type=_data.get("contract_type") or None,
+                        )
+                        _auto_pkg_id = _pkg.get("package_id")
+                        if _auto_pkg_id:
+                            parsed["package_id"] = _auto_pkg_id
+                            logger.info(
+                                "create_document: auto-created package %s for first document",
+                                _auto_pkg_id,
+                            )
+                            # Emit initial package state
+                            if result_queue and loop:
+                                _emit_package_state(_pkg, "manage_package", tenant_id, result_queue, loop)
                 except Exception:
                     logger.debug("Auto-create package in create_document failed (non-critical)", exc_info=True)
 
