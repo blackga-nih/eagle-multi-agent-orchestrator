@@ -121,7 +121,7 @@ from .approval_store import (
 )
 from .pref_store import get_prefs, update_prefs, reset_prefs
 from .audit_store import write_audit
-from .feedback_store import list_feedback, write_message_feedback, list_message_feedback, get_message_feedback_summary
+from .feedback_store import list_feedback, list_message_feedback, get_message_feedback_summary
 from .health_checks import check_knowledge_base_health
 from .error_webhook import notify_error, close_webhook_client
 from .teams_notifier import notify_feedback, notify_startup, notify_suspicious, close_notifier_client
