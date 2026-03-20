@@ -466,7 +466,33 @@ def _extract_context_data_from_prompt(prompt: str, doc_type: str) -> dict[str, A
 
 
 def _fast_path_title(prompt: str, doc_type: str) -> str:
-    return _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ").title())
+    """Generate a descriptive title from the user prompt and doc type.
+
+    Tries to extract the program/acquisition context that follows 'for', 'regarding',
+    or 'about' in the prompt. Falls back to the generic doc-type label.
+    """
+    base = _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ").title())
+    if not prompt:
+        return base
+
+    lowered = prompt.lower()
+    # Look for "for <context>" / "regarding <context>" / "about <context>"
+    for marker in ("for ", "regarding ", "about "):
+        idx = lowered.find(marker)
+        if idx == -1:
+            continue
+        tail = prompt[idx + len(marker):].strip()
+        # Take up to the first sentence end or 60 chars
+        for stop in (".", "\n", "?", "!", ";"):
+            stop_idx = tail.find(stop)
+            if 0 < stop_idx < 80:
+                tail = tail[:stop_idx]
+                break
+        tail = tail.strip().rstrip(",").strip()
+        if tail and len(tail) > 3:
+            return f"{base} - {tail[:80]}"
+
+    return base
 
 
 def _build_scoped_session_id(
@@ -798,7 +824,7 @@ EAGLE_TOOLS = [
                 },
                 "title": {
                     "type": "string",
-                    "description": "Title of the acquisition/document",
+                    "description": "Descriptive document title including the program or acquisition name (e.g. 'SOW - Cloud Computing Services for NCI Research Portal' or 'IGCE - IT Support Services FY2026'). Never use a generic type label alone.",
                 },
                 "content": {
                     "type": "string",
@@ -1579,7 +1605,7 @@ def _build_all_service_tools(
 
         Args:
             doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification)
-            title: Document title
+            title: Descriptive document title that includes the program or acquisition name — e.g. "SOW - Cloud Computing Services for NCI Research Portal" or "IGCE - IT Support Services FY2026". Never use a generic label like "Statement of Work" alone.
             content: Full document content in markdown with filled-in sections
             data: Structured data fields (description, estimated_value, period_of_performance, etc.)
             package_id: Acquisition package ID to associate document with
