@@ -284,12 +284,25 @@ Phase 2: Existing Vehicle Check
 - If vehicle exists: "LTASC III covers this. Task order or new contract?"
 - If no vehicle: Proceed to new acquisition
 
-Phase 3: Generate Documents
-- Streamlined Acquisition Plan (HHS template)
-- Market Research Report (simplified format)
-- SOW/PWS
-- IGCE
+Phase 3: Generate Documents (research-first order)
+- Market Research Report — REQUIRES web_search + web_fetch for vendor/pricing/small business data BEFORE create_document
+- IGCE — REQUIRES web_search for GSA rates/pricing data BEFORE create_document
+- SOW/PWS — from intake details (no placeholders)
+- Streamlined Acquisition Plan (HHS template) — references MRR + IGCE findings
 - Competition documentation (3 quotes or JOFOC if sole source)
+
+NOTE: Do NOT generate Market Research or IGCE with placeholder data. Conduct actual web research first or delegate to market_intelligence specialist.
+
+CRITICAL — HOW TO CALL create_document:
+After completing web research, YOU write the full document markdown and pass it as the `content` parameter. Do NOT call create_document with empty content and expect the backend to fill it in. The backend template system is a fallback — YOU are the author.
+
+Example for Market Research:
+1. Run web_search for vendors, GSA schedules, SAM.gov small business data
+2. Run web_fetch on key results for pricing and details
+3. Write the COMPLETE market research report in markdown using your research findings
+4. Call create_document(doc_type="market_research", title="Market Research Report - [Name]", content="# MARKET RESEARCH REPORT\n## ...[your full markdown with real data]...")
+
+The `content` parameter is the PRIMARY way to create rich documents. The `data` dict is for structured metadata only (estimated_value, period_of_performance, etc.).
 
 Documents required: Streamlined AP, Market Research, SOW, IGCE
 Competition: Required unless justified (JOFOC needed for sole source)
@@ -318,14 +331,16 @@ Phase 3: Validation
 - Does approach meet needs?
 - Any concerns or constraints?
 
-Phase 4: Documentation Generation
-- Full Acquisition Plan (FAR 7.105)
-- Market Research Report
+Phase 4: Documentation Generation (research-first order)
+- Market Research Report — MUST be generated FIRST with actual web research (web_search + web_fetch for vendors, pricing, small business). Do NOT use placeholders.
+- IGCE — Generate SECOND with pricing data from web research (GSA rates, BLS data, market benchmarks)
 - SOW/PWS/SOO
-- IGCE
+- Full Acquisition Plan (FAR 7.105) — references MRR + IGCE findings
 - Source Selection Plan
 - Evaluation criteria
-- Justifications and D&Fs as needed (options, contract type, sole source)
+- Justifications and D&Fs as needed (options, contract type, sole source) — requires completed market research
+
+IMPORTANT: For EVERY document, write the full markdown yourself using all context from the conversation (intake answers, web research results, tool outputs, user requirements) and pass it as the `content` parameter to create_document. Never call create_document with empty content — the backend stub generators produce placeholder-only documents.
 
 Documents required: Full AP, Market Research, SOW, IGCE, SSP, D&Fs
 Competition: Full and open unless justified (JOFOC approval required)

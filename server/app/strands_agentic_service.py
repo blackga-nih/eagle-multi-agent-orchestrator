@@ -43,6 +43,8 @@ if _server_dir not in sys.path:
 
 from eagle_skill_constants import AGENTS, SKILLS, PLUGIN_CONTENTS
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
+from .tools.web_fetch import exec_web_fetch
+from .tools.web_search import exec_web_search
 
 logger = logging.getLogger("eagle.strands_agent")
 
@@ -798,6 +800,43 @@ EAGLE_TOOLS = [
     KNOWLEDGE_SEARCH_TOOL,
     KNOWLEDGE_FETCH_TOOL,
     {
+        "name": "web_search",
+        "description": (
+            "Search the web for real-time information using Amazon Nova Web Grounding. "
+            "Use for current market data, vendor info, pricing, GSA schedule rates, "
+            "policy updates, regulatory changes, or any topic needing up-to-date info "
+            "beyond the knowledge base. Returns an answer with source citations."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language search query",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "web_fetch",
+        "description": (
+            "Fetch a web page and return its full content as clean markdown. "
+            "Use AFTER web_search to read the actual content of source URLs. "
+            "Returns the page title and markdown-formatted body text (max 15K chars)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to fetch (must be http or https)",
+                },
+            },
+            "required": ["url"],
+        },
+    },
+    {
         "name": "create_document",
         "description": (
             "Generate acquisition documents including SOW, IGCE, Market Research, "
@@ -1095,7 +1134,27 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
         result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
         return json.dumps(result, indent=2, default=str)
 
-    return [kb_search, kb_fetch, far_search]
+    @tool(name="web_search")
+    def web_search(query: str) -> str:
+        """Search the web for real-time information. Use for current market data, vendor info, pricing, policy updates, or any topic needing up-to-date info beyond the knowledge base.
+
+        Args:
+            query: Natural language search query
+        """
+        result = exec_web_search(query)
+        return json.dumps(result, indent=2, default=str)
+
+    @tool(name="web_fetch")
+    def web_fetch(url: str) -> str:
+        """Fetch a web page and return its content as clean markdown. Use AFTER web_search to read the full content of a source URL. Returns the page title and markdown-formatted body text.
+
+        Args:
+            url: The URL to fetch (must be http or https)
+        """
+        result = exec_web_fetch(url)
+        return json.dumps(result, indent=2, default=str)
+
+    return [kb_search, kb_fetch, far_search, web_search, web_fetch]
 
 
 def _make_subagent_tool(
@@ -1603,11 +1662,13 @@ def _build_all_service_tools(
     ) -> str:
         """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification). Documents are saved to S3.
 
+        CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
+
         Args:
             doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification)
             title: Descriptive document title that includes the program or acquisition name — e.g. "SOW - Cloud Computing Services for NCI Research Portal" or "IGCE - IT Support Services FY2026". Never use a generic label like "Statement of Work" alone.
-            content: Full document content in markdown with filled-in sections
-            data: Structured data fields (description, estimated_value, period_of_performance, etc.)
+            content: REQUIRED — Full document content in markdown with all sections filled using real data from conversation context, intake answers, and web research results. This is the primary document body.
+            data: Supplementary structured metadata (estimated_value, period_of_performance, naics_code, etc.) for template population. Not a substitute for content.
             package_id: Acquisition package ID to associate document with
             output_format: Output format override
             update_existing_key: S3 key of existing document to update/revise
@@ -2090,7 +2151,29 @@ def _build_kb_service_tools(
         _emit("knowledge_fetch", result)
         return json.dumps(result, indent=2, default=str)
 
-    return [search_far, knowledge_search, knowledge_fetch]
+    @tool(name="web_search")
+    def web_search_tool(query: str) -> str:
+        """Search the web for real-time information. Use for current market data, vendor info, pricing, policy updates, or any topic needing up-to-date info beyond the knowledge base.
+
+        Args:
+            query: Natural language search query
+        """
+        result = exec_web_search(query)
+        _emit("web_search", result)
+        return json.dumps(result, indent=2, default=str)
+
+    @tool(name="web_fetch")
+    def web_fetch_tool(url: str) -> str:
+        """Fetch a web page and return its content as clean markdown. Use AFTER web_search to read the full content of a source URL. Returns the page title and markdown-formatted body text.
+
+        Args:
+            url: The URL to fetch (must be http or https)
+        """
+        result = exec_web_fetch(url)
+        _emit("web_fetch", result)
+        return json.dumps(result, indent=2, default=str)
+
+    return [search_far, knowledge_search, knowledge_fetch, web_search_tool, web_fetch_tool]
 
 
 def _build_service_tools(
@@ -2301,12 +2384,49 @@ def _build_supervisor_prompt_body(
         "3) In final answer, include a Sources section with title + s3_key.\n"
         "4) If no results, explicitly say no KB match and ask a refinement question.\n"
         "5) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
+        "8) For current market conditions, recent policy changes, vendor info, pricing, "
+        "or any topic needing up-to-date info beyond the KB, use web_search.\n"
+        "9) After web_search, ALWAYS use web_fetch on the top 2-3 source URLs to read "
+        "the full page content before responding. web_search only returns snippets — "
+        "web_fetch reads the actual pages as markdown.\n"
         "6) When search_far returns results with non-empty s3_keys, you MUST call "
         "knowledge_fetch on the top result's s3_key to read the full FAR document "
         "BEFORE responding. Never answer from the summary alone — summaries are partial "
         "and may omit critical clauses, exceptions, or requirements.\n"
         "7) If a search_far result has empty s3_keys, the summary is the best available — "
         "note that no full-text source was available for that clause.\n\n"
+        "RESEARCH BEFORE DOCUMENT — Required steps before calling create_document:\n"
+        "  Do NOT generate any document with placeholder data. Gather real data first.\n\n"
+        "  market_research:\n"
+        "    1. web_search for vendor landscape ('{requirement} vendors government contract')\n"
+        "    2. web_search for pricing/rates ('{requirement} GSA schedule pricing')\n"
+        "    3. web_search for small business sources ('{requirement} small business SAM.gov')\n"
+        "    4. web_fetch on the top 2-3 URLs from EACH search to read full content\n"
+        "    5. 'content' MUST include: real vendor names, actual pricing ranges, specific contract vehicles, and a Sources section with URLs\n"
+        "    6. If web_search returns no useful results for a section, state 'No sources identified' — do NOT insert placeholder text\n"
+        "    ALTERNATIVE: Delegate to market_intelligence with a detailed query\n\n"
+        "  igce:\n"
+        "    1. web_search for current GSA schedule rates for the labor categories/products needed\n"
+        "    2. web_fetch on top pricing sources to get actual rate tables\n"
+        "    3. 'content' MUST include specific dollar amounts (not $[Amount]) with sourced rates\n"
+        "    4. If pricing from user-provided quote, still search for independent benchmarks\n\n"
+        "  justification:\n"
+        "    1. Market research must be completed first (document or in-conversation research)\n"
+        "    2. web_search to verify proposed contractor's unique qualifications\n"
+        "    3. search_far for the specific FAR 6.302 authority, then knowledge_fetch full text\n"
+        "    4. 'content' MUST reference specific market findings, named alternatives considered\n\n"
+        "  acquisition_plan:\n"
+        "    1. Market research findings must be available\n"
+        "    2. Cost/pricing data must be available\n"
+        "    3. search_far for FAR 7.105 (AP structure), 16.1 (contract type)\n\n"
+        "  sow:\n"
+        "    1. Gather requirements from conversation (tasks, deliverables, PoP)\n"
+        "    2. If user has not provided detailed tasks, ASK — do not invent requirements\n"
+        "    3. Do NOT generate with generic '[Task Name]' placeholders\n\n"
+        "  All other doc types:\n"
+        "    1. Gather specifics from intake discussion — no placeholders\n\n"
+        "  CITATION RULE — ALL documents with web research MUST include a Sources section:\n"
+        "    - Source description, URL, date accessed\n\n"
         "Document Output Rules:\n"
         "0) CHECK BEFORE CREATE: Before generating any document, call get_latest_document "
         "with the package_id and doc_type to check if one already exists. If it does:\n"
@@ -2321,6 +2441,11 @@ def _build_supervisor_prompt_body(
         "1a) CRITICAL: Write the COMPLETE document content as the 'content' field (markdown with "
         "section headings, filled-in details from the conversation). Do NOT leave template "
         "placeholders — fill every section with specifics from the intake discussion.\n"
+        "1a-i) NEVER pass content containing {{PLACEHOLDER}}, [TBD], [Insert...], [Amount], "
+        "[Vendor Name] or similar template markers. If data is missing, research it first "
+        "or write 'Information not yet gathered — requires [specific action]'.\n"
+        "1a-ii) For market_research and igce doc types: if you have NOT called web_search "
+        "at least once in this conversation, you MUST do so before calling create_document.\n"
         "1b) Also pass structured fields in 'data' (description, estimated_value, "
         "period_of_performance, competition, contract_type, deliverables, tasks, etc.) "
         "for template population.\n"
@@ -2337,6 +2462,7 @@ def _build_supervisor_prompt_body(
         "    - query_compliance_matrix for computed compliance decisions.\n"
         "    - search_far → knowledge_fetch(s3_key) for FAR/DFARS clause lookups (search, then read full doc).\n"
         "    - knowledge_search → knowledge_fetch for KB documents.\n"
+        "    - web_search → web_fetch(top URLs) for current market data, news, vendor info, pricing.\n"
         "    - load_skill(name) to read a workflow and follow it yourself.\n"
         "  DEEP (specialist): Delegate to specialist subagents only for complex analysis,\n"
         "    multi-factor evaluation, or expert reasoning — not simple factual lookups.\n"
