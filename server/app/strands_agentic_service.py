@@ -980,6 +980,67 @@ EAGLE_TOOLS = [
             "required": ["action"],
         },
     },
+    {
+        "name": "manage_package",
+        "description": (
+            "Create, read, update, or list acquisition packages. Packages track "
+            "the full acquisition lifecycle — required documents, completed documents, "
+            "checklist progress, and status (intake → drafting → review → approved). "
+            "Call with operation='create' after gathering intake info (title, estimated "
+            "value, requirement type) to activate the checklist panel."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["create", "get", "update", "list", "checklist"],
+                    "description": "Package operation to perform",
+                },
+                "package_id": {
+                    "type": "string",
+                    "description": "Package ID for get/update/checklist operations (e.g. PKG-2026-0001)",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Package title (for create)",
+                },
+                "requirement_type": {
+                    "type": "string",
+                    "description": "Requirement type: services, supplies, IT, construction, R&D (for create)",
+                },
+                "estimated_value": {
+                    "type": "number",
+                    "description": "Estimated contract dollar value (for create/update)",
+                },
+                "acquisition_method": {
+                    "type": "string",
+                    "description": "Acquisition method code: sap, sealed_bidding, negotiated, sole_source, 8a, micro_purchase (for create/update)",
+                },
+                "contract_type": {
+                    "type": "string",
+                    "description": "Contract type code: ffp, fpif, cpff, cpif, cpaf, cr, tm, idiq, bpa (for create/update)",
+                },
+                "contract_vehicle": {
+                    "type": "string",
+                    "description": "Contract vehicle if applicable: NITAAC, GSA, existing BPA (for create/update)",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Additional notes or context (for create/update)",
+                },
+                "updates": {
+                    "type": "object",
+                    "description": "Fields to update (for update operation)",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "Filter by status for list operation",
+                },
+            },
+            "required": ["operation"],
+        },
+    },
 ]
 
 # Max prompt size per subagent to avoid context overflow
@@ -1727,6 +1788,44 @@ def _build_all_service_tools(
             ):
                 parsed.setdefault("package_id", package_context.package_id)
 
+            # Auto-create package if none exists — ensures checklist activates
+            # even if the agent forgot to call manage_package first
+            if not parsed.get("package_id"):
+                try:
+                    from decimal import Decimal as _Dec
+                    _data = parsed.get("data") or {}
+                    _est = _data.get("estimated_value") or _data.get("total_value") or 0
+                    _title = parsed.get("title") or "Acquisition Package"
+                    _req_type = _data.get("requirement_type") or "services"
+                    _owner = ""
+                    if session_id and "#" in session_id:
+                        _parts = session_id.split("#")
+                        if len(_parts) >= 3:
+                            _owner = _parts[2]
+                    from app.package_store import create_package as _create_pkg
+                    _pkg = _create_pkg(
+                        tenant_id=tenant_id,
+                        owner_user_id=_owner,
+                        title=_title,
+                        requirement_type=_req_type,
+                        estimated_value=_Dec(str(_est)),
+                        session_id=session_id,
+                        acquisition_method=_data.get("acquisition_method") or None,
+                        contract_type=_data.get("contract_type") or None,
+                    )
+                    _auto_pkg_id = _pkg.get("package_id")
+                    if _auto_pkg_id:
+                        parsed["package_id"] = _auto_pkg_id
+                        logger.info(
+                            "create_document: auto-created package %s for first document",
+                            _auto_pkg_id,
+                        )
+                        # Emit initial package state
+                        if result_queue and loop:
+                            _emit_package_state(_pkg, "manage_package", tenant_id, result_queue, loop)
+                except Exception:
+                    logger.debug("Auto-create package in create_document failed (non-critical)", exc_info=True)
+
             # Auto-detect existing document: if package_id + doc_type are known
             # and no update_existing_key was provided, check for an existing doc
             # and route to update mode instead of creating a duplicate.
@@ -2053,6 +2152,83 @@ def _build_all_service_tools(
             logger.error("Service tool query_compliance_matrix failed: %s", exc, exc_info=True)
             return json.dumps({"error": str(exc), "tool": "query_compliance_matrix"})
 
+    # ---- 15. manage_package (emits package state) ----
+    @tool(name="manage_package")
+    def manage_package_tool(
+        operation: str,
+        package_id: str = "",
+        title: str = "",
+        requirement_type: str = "",
+        estimated_value: float = 0,
+        acquisition_method: str = "",
+        contract_type: str = "",
+        contract_vehicle: str = "",
+        notes: str = "",
+        updates: dict | None = None,
+        status: str = "",
+    ) -> str:
+        """Create, read, update, or list acquisition packages. Packages track required/completed documents, checklist progress, and lifecycle status. Call 'create' after gathering intake info to activate the checklist panel.
+
+        Args:
+            operation: Package operation — 'create', 'get', 'update', 'list', or 'checklist'
+            package_id: Package ID for get/update/checklist (e.g. PKG-2026-0001)
+            title: Package title (for create)
+            requirement_type: Requirement type — services, supplies, IT, construction, R&D (for create)
+            estimated_value: Estimated contract dollar value (for create/update)
+            acquisition_method: Acquisition method code (for create/update)
+            contract_type: Contract type code (for create/update)
+            contract_vehicle: Contract vehicle if applicable (for create/update)
+            notes: Additional notes (for create/update)
+            updates: Fields to update (for update operation)
+            status: Filter by status (for list operation)
+        """
+        parsed = {
+            "operation": operation, "package_id": package_id,
+            "title": title, "requirement_type": requirement_type,
+            "estimated_value": estimated_value,
+            "acquisition_method": acquisition_method,
+            "contract_type": contract_type,
+            "contract_vehicle": contract_vehicle,
+            "notes": notes, "updates": updates or {},
+            "status": status,
+        }
+        try:
+            result = TOOL_DISPATCH["manage_package"](parsed, tenant_id, scoped_session_id)
+            _emit("manage_package", result)
+
+            # Emit SSE state_update for create/update/checklist operations
+            if result_queue and loop and isinstance(result, dict):
+                pkg_id = result.get("package_id")
+                if pkg_id and operation in ("create", "update"):
+                    _emit_package_state(result, "manage_package", tenant_id, result_queue, loop)
+
+                    # Also emit initial package_created event for create
+                    if operation == "create":
+                        from app.package_store import get_package_checklist
+                        checklist = get_package_checklist(tenant_id, pkg_id)
+                        total = len(checklist.get("required", []))
+                        completed = len(checklist.get("completed", []))
+                        progress_pct = int((completed / total) * 100) if total > 0 else 0
+                        loop.call_soon_threadsafe(
+                            result_queue.put_nowait,
+                            {
+                                "type": "state_update",
+                                "state_type": "checklist_update",
+                                "package_id": pkg_id,
+                                "checklist": checklist,
+                                "progress_pct": progress_pct,
+                                "phase": result.get("status", "intake"),
+                                "title": result.get("title", ""),
+                                "acquisition_method": result.get("acquisition_method"),
+                                "contract_type": result.get("contract_type"),
+                            },
+                        )
+
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            logger.error("Service tool manage_package failed: %s", exc, exc_info=True)
+            return json.dumps({"error": str(exc), "tool": "manage_package"})
+
     return [
         s3_document_ops_tool,
         dynamodb_intake_tool,
@@ -2068,6 +2244,7 @@ def _build_all_service_tools(
         finalize_package_tool,
         cloudwatch_logs_tool,
         query_compliance_matrix_tool,
+        manage_package_tool,
     ]
 
 

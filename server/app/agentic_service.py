@@ -2328,7 +2328,7 @@ def _generate_market_research(title: str, data: dict) -> str:
         for v in vendors:
             vendor_text += f"- **{v.get('name', 'TBD')}** — {v.get('size', 'TBD')}, Contract vehicles: {', '.join(v.get('vehicles', ['TBD']))}\n"
     else:
-        vendor_text = "- [Market research in progress — vendors to be identified]\n"
+        vendor_text = "- **WARNING: No vendor data provided. Web research was not performed before document generation. This document requires revision with actual market data.**\n"
 
     return f"""# MARKET RESEARCH REPORT
 ## {title}
@@ -2359,15 +2359,15 @@ def _generate_market_research(title: str, data: dict) -> str:
 
 ## 4. SMALL BUSINESS ANALYSIS
 
-[Analysis of small business availability and potential for set-aside]
+**WARNING: Small business analysis not performed. Run web_search for SAM.gov data.**
 
 ## 5. COMMERCIAL AVAILABILITY
 
-[Analysis of whether commercial products/services meet requirements]
+**WARNING: Commercial availability not analyzed. Requires web research.**
 
 ## 6. RECOMMENDED ACQUISITION STRATEGY
 
-[Based on market research findings]
+**WARNING: No acquisition strategy data. Complete market research before finalizing.**
 
 ## 7. RECOMMENDED CONTRACT VEHICLE
 
@@ -3517,6 +3517,85 @@ def _exec_finalize_package(params: dict, tenant_id: str) -> dict:
     return result
 
 
+def _exec_manage_package(params: dict, tenant_id: str, session_id: str = None) -> dict:
+    """Create, read, update, list, or get checklist for acquisition packages."""
+    from app.package_store import (
+        create_package, get_package, update_package,
+        list_packages, get_package_checklist,
+    )
+    from decimal import Decimal
+
+    operation = params.get("operation", "").strip().lower()
+
+    if operation == "create":
+        title = params.get("title") or "Acquisition Package"
+        requirement_type = params.get("requirement_type") or "services"
+        estimated_value = Decimal(str(params.get("estimated_value", 0)))
+        # Extract owner from session_id (tenant#tier#user#session)
+        owner = ""
+        if session_id and "#" in session_id:
+            parts = session_id.split("#")
+            if len(parts) >= 3:
+                owner = parts[2]
+        result = create_package(
+            tenant_id=tenant_id,
+            owner_user_id=owner,
+            title=title,
+            requirement_type=requirement_type,
+            estimated_value=estimated_value,
+            session_id=session_id,
+            notes=params.get("notes", ""),
+            contract_vehicle=params.get("contract_vehicle") or None,
+            acquisition_method=params.get("acquisition_method") or None,
+            contract_type=params.get("contract_type") or None,
+        )
+        return result
+
+    elif operation == "get":
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for get operation"}
+        result = get_package(tenant_id, package_id)
+        if result is None:
+            return {"error": f"Package {package_id} not found"}
+        return result
+
+    elif operation == "update":
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for update operation"}
+        updates = params.get("updates", {})
+        # Also accept top-level fields as updates
+        for field in ("title", "requirement_type", "estimated_value",
+                      "acquisition_method", "contract_type", "contract_vehicle",
+                      "notes", "status"):
+            val = params.get(field)
+            if val and field not in updates:
+                updates[field] = val
+        if not updates:
+            return {"error": "No update fields provided"}
+        result = update_package(tenant_id, package_id, updates)
+        if result is None:
+            return {"error": f"Package {package_id} not found"}
+        return result
+
+    elif operation == "list":
+        status_filter = params.get("status") or None
+        packages = list_packages(tenant_id, status=status_filter)
+        return {"packages": packages, "count": len(packages)}
+
+    elif operation == "checklist":
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for checklist operation"}
+        checklist = get_package_checklist(tenant_id, package_id)
+        checklist["package_id"] = package_id
+        return checklist
+
+    else:
+        return {"error": f"Unknown operation: {operation}. Use create, get, update, list, or checklist."}
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -3542,10 +3621,12 @@ TOOL_DISPATCH = {
     "get_latest_document": _exec_get_latest_document,
     # Package validation
     "finalize_package": _exec_finalize_package,
+    # Package management
+    "manage_package": _exec_manage_package,
 }
 
 # Tools that need session_id for per-user scoping
-TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "edit_docx_document", "get_intake_status"}
+TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "edit_docx_document", "get_intake_status", "manage_package"}
 
 
 def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> str:

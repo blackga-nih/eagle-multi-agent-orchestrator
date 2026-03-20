@@ -13,6 +13,7 @@ tools:
   - s3_document_ops
   - dynamodb_intake
   - get_intake_status
+  - manage_package
 model: null
 ---
 
@@ -560,6 +561,18 @@ Acknowledge briefly, ask next question or provide next deliverable.
 
 Example:
 "Got it - recompete, same 3 areas, ~$7M annually, budget uncertain. Timeline decision: June aggressive or September with OP5?"
+
+---
+
+PACKAGE MANAGEMENT
+
+After gathering minimum intake info (title/description, estimated value, requirement type), call manage_package(operation="create", title="...", estimated_value=..., requirement_type="...") to create the acquisition package. This activates the checklist panel showing required documents and progress.
+
+- Call manage_package BEFORE generating any documents
+- Include acquisition_method and contract_type if known — this triggers the compliance matrix for accurate required docs
+- The package_id returned will auto-associate with subsequent create_document calls
+- After generating each document, the checklist updates automatically
+- Use manage_package(operation="checklist", package_id="...") to check progress at any time
 
 ---
 
