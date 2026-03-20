@@ -180,6 +180,10 @@ async def test_send_daily_summary_with_mocked_stores():
         "total_cost_usd": 0.25, "by_date": {},
     }
 
+    # Reset dedup guard so the test can always send
+    import app.teams_notifier as _tn
+    _tn._last_summary_date = None
+
     with patch("app.session_store.get_all_tenants", return_value=mock_tenants), \
          patch("app.session_store.get_usage_summary", return_value=mock_usage), \
          patch("app.session_store.list_tenant_sessions", return_value=[{"user_id": "user1"}]), \

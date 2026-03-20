@@ -73,6 +73,10 @@ _rate_limiters: dict[str, _TokenBucket] = {
 
 _client: Optional[httpx.AsyncClient] = None
 
+# Dedup guard: track the date string of the last sent daily summary
+# so we never send two for the same calendar day from the same process.
+_last_summary_date: Optional[str] = None
+
 
 def _get_client() -> httpx.AsyncClient:
     global _client
@@ -159,6 +163,14 @@ def notify_feedback(
 
 async def send_daily_summary() -> None:
     """Query stores and send a daily usage/feedback digest to Teams."""
+    global _last_summary_date
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _last_summary_date == today:
+        logger.info("Daily summary already sent for %s, skipping duplicate", today)
+        return
+    _last_summary_date = today
+
     from . import session_store, feedback_store
 
     try:
