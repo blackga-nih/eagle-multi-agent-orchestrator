@@ -1199,6 +1199,8 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
     def web_search(query: str) -> str:
         """Search the web for real-time information. Use for current market data, vendor info, pricing, policy updates, or any topic needing up-to-date info beyond the knowledge base.
 
+        IMPORTANT: After EVERY web_search call, you MUST call web_fetch on the top 5 source URLs returned. Search snippets are incomplete — they miss pricing tiers, licensing terms, compliance details, and contract vehicle numbers. Never cite a source you have not web_fetched.
+
         Args:
             query: Natural language search query
         """
@@ -1207,7 +1209,7 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
 
     @tool(name="web_fetch")
     def web_fetch(url: str) -> str:
-        """Fetch a web page and return its content as clean markdown. Use AFTER web_search to read the full content of a source URL. Returns the page title and markdown-formatted body text.
+        """Fetch a web page and return its content as clean markdown. MUST be called on top 5 source URLs after EVERY web_search. Search snippets alone are unreliable — always read the full page.
 
         Args:
             url: The URL to fetch (must be http or https)
@@ -1216,6 +1218,108 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
         return json.dumps(result, indent=2, default=str)
 
     return [kb_search, kb_fetch, far_search, web_search, web_fetch]
+
+
+def _build_subagent_doc_tools(
+    tenant_id: str,
+    user_id: str,
+    session_id: str,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> list:
+    """Build document tools (create_document, edit_docx_document) for subagents.
+
+    Gives subagents like market-intelligence the ability to create and modify
+    documents directly within their own context window, rather than relying
+    on the supervisor to do it after the subagent returns.
+
+    Simpler than the supervisor's versions — no prompt-context enrichment
+    since the subagent *is* the author and has full context.
+    Documents are always scoped to the user, never to tenant or system.
+    """
+    from .agentic_service import TOOL_DISPATCH
+
+    scoped_session_id = session_id
+    if not scoped_session_id or "#" not in scoped_session_id:
+        scoped_session_id = f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
+
+    def _emit(name: str, result) -> None:
+        if not result_queue or not loop:
+            return
+        emit_result = result
+        if name != "create_document" and isinstance(result, dict):
+            text_val = result.get("content") or result.get("text") or result.get("result")
+            if isinstance(text_val, str) and len(text_val) > 2000:
+                emit_result = {**result}
+                key = "content" if "content" in result else "text" if "text" in result else "result"
+                emit_result[key] = text_val[:2000] + "..."
+        loop.call_soon_threadsafe(
+            result_queue.put_nowait,
+            {"type": "tool_result", "name": name, "result": emit_result},
+        )
+
+    @tool(name="create_document")
+    def create_document_tool(
+        doc_type: str,
+        title: str = "",
+        content: str = "",
+        data: dict | None = None,
+        package_id: str = "",
+        output_format: str = "",
+        update_existing_key: str = "",
+        template_id: str = "",
+    ) -> str:
+        """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification). Documents are saved to S3.
+
+        CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
+
+        Args:
+            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification)
+            title: Descriptive document title that includes the program or acquisition name
+            content: REQUIRED — Full document content in markdown with all sections filled using real data
+            data: Supplementary structured metadata (estimated_value, period_of_performance, naics_code, etc.)
+            package_id: Acquisition package ID to associate document with
+            output_format: Output format override
+            update_existing_key: S3 key of existing document to update/revise
+            template_id: Template ID to use for generation
+        """
+        parsed = {
+            "doc_type": doc_type, "title": title, "content": content,
+            "data": data, "package_id": package_id,
+            "output_format": output_format, "update_existing_key": update_existing_key,
+            "template_id": template_id,
+        }
+        try:
+            result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
+            _emit("create_document", result)
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            logger.error("Subagent create_document failed: %s", exc, exc_info=True)
+            return json.dumps({"error": str(exc), "tool": "create_document"})
+
+    @tool(name="edit_docx_document")
+    def edit_docx_document_tool(
+        document_key: str,
+        edits: list | None = None,
+        checkbox_edits: list | None = None,
+    ) -> str:
+        """Apply targeted edits to an existing DOCX document. Use for text replacements or checkbox toggles.
+
+        Args:
+            document_key: S3 key of the DOCX document to edit
+            edits: List of edit objects, each with 'search_text' and 'replacement_text'
+            checkbox_edits: List of checkbox edit objects, each with 'label_text' and 'checked' (bool)
+        """
+        parsed = {"document_key": document_key, "edits": edits or [], "checkbox_edits": checkbox_edits or []}
+        try:
+            result = TOOL_DISPATCH["edit_docx_document"](parsed, tenant_id, scoped_session_id)
+            _emit("edit_docx_document", result)
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            logger.error("Subagent edit_docx_document failed: %s", exc, exc_info=True)
+            return json.dumps({"error": str(exc), "tool": "edit_docx_document"})
+
+    return [create_document_tool, edit_docx_document_tool]
 
 
 def _make_subagent_tool(
@@ -1228,6 +1332,7 @@ def _make_subagent_tool(
     user_id: str = "",
     tier: str = "",
     session_id: str = "",
+    extra_tools: list | None = None,
 ):
     """Create a @tool-wrapped subagent from skill registry entry.
 
@@ -1235,6 +1340,10 @@ def _make_subagent_tool(
     The shared _model is reused (no per-request boto3 overhead).
     Subagents receive knowledge_search, knowledge_fetch, and search_far
     tools so they can ground analysis in actual documents.
+
+    Args:
+        extra_tools: Additional tools to give this subagent beyond the
+            standard KB tools (e.g. create_document for market-intelligence).
     """
     safe_name = skill_name.replace("-", "_")
 
@@ -1250,11 +1359,12 @@ def _make_subagent_tool(
 
         # Give subagents KB tools so they can retrieve actual documents
         kb_tools = _build_subagent_kb_tools(tenant_id, session_id)
+        all_tools = kb_tools + (extra_tools or [])
 
         agent = Agent(
             model=_model,
             system_prompt=subagent_context + prompt_body,
-            tools=kb_tools,
+            tools=all_tools,
             callback_handler=None,
             trace_attributes=_build_trace_attrs(
                 tenant_id=tenant_id,
@@ -2353,6 +2463,8 @@ def _build_kb_service_tools(
     def web_search_tool(query: str) -> str:
         """Search the web for real-time information. Use for current market data, vendor info, pricing, policy updates, or any topic needing up-to-date info beyond the knowledge base.
 
+        IMPORTANT: After EVERY web_search call, you MUST call web_fetch on the top 5 source URLs returned. Search snippets are incomplete — they miss pricing tiers, licensing terms, compliance details, and contract vehicle numbers. Never cite a source you have not web_fetched.
+
         Args:
             query: Natural language search query
         """
@@ -2362,7 +2474,7 @@ def _build_kb_service_tools(
 
     @tool(name="web_fetch")
     def web_fetch_tool(url: str) -> str:
-        """Fetch a web page and return its content as clean markdown. Use AFTER web_search to read the full content of a source URL. Returns the page title and markdown-formatted body text.
+        """Fetch a web page and return its content as clean markdown. MUST be called on top 5 source URLs after EVERY web_search. Search snippets alone are unreliable — always read the full page.
 
         Args:
             url: The URL to fetch (must be http or https)
@@ -2424,6 +2536,11 @@ def build_skill_tools(
     """
     tools = []
 
+    # Build doc tools once — only given to subagents that need them
+    _doc_tools = _build_subagent_doc_tools(tenant_id, user_id, session_id, result_queue, loop)
+    # Subagents that get document creation/editing capabilities
+    _DOC_TOOL_AGENTS = {"market-intelligence"}
+
     for name, meta in SKILL_AGENT_REGISTRY.items():
         if skill_names and name not in skill_names:
             continue
@@ -2446,6 +2563,8 @@ def build_skill_tools(
                 continue
             prompt_body = entry["body"]
 
+        extra = _doc_tools if name in _DOC_TOOL_AGENTS else None
+
         tools.append(_make_subagent_tool(
             skill_name=name,
             description=meta["description"],
@@ -2456,6 +2575,7 @@ def build_skill_tools(
             user_id=user_id,
             tier=tier,
             session_id=session_id,
+            extra_tools=extra,
         ))
 
     # Merge active user-created SKILL# items
