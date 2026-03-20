@@ -134,13 +134,26 @@ def _load_app():
         ):
             import importlib
 
-            for _mod in ("app.main", "app.changelog_store", "app.document_ai_edit_service", "app.spreadsheet_edit_service"):
+            for _mod in ("app.main", "app.changelog_store", "app.cognito_auth", "app.document_ai_edit_service", "app.spreadsheet_edit_service"):
                 sys.modules.pop(_mod, None)
 
             import app.main as main_module
 
             importlib.reload(main_module)
+
+            # Force DEV_MODE=true on the reloaded cognito_auth module
+            # (.env loads with override=True during reload, clobbering the patch)
+            import app.cognito_auth as _auth
+            _auth.DEV_MODE = True
+
             return main_module
+
+
+def _auth_header() -> dict:
+    """Generate a Bearer token header for test requests."""
+    from app.cognito_auth import generate_test_token
+    token = generate_test_token(user_id="dev-user", tenant_id="dev-tenant")
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _load_app_without_docx_service():
@@ -181,12 +194,16 @@ def _load_app_without_docx_service():
         ):
             import importlib
 
-            for _mod in ("app.main", "app.changelog_store", "app.document_ai_edit_service", "app.spreadsheet_edit_service"):
+            for _mod in ("app.main", "app.changelog_store", "app.cognito_auth", "app.document_ai_edit_service", "app.spreadsheet_edit_service"):
                 sys.modules.pop(_mod, None)
 
             import app.main as main_module
 
             importlib.reload(main_module)
+
+            import app.cognito_auth as _auth
+            _auth.DEV_MODE = True
+
             return main_module
 
 
@@ -206,7 +223,7 @@ def test_get_document_returns_binary_metadata_for_canonical_package_doc():
         },
     ):
         with TestClient(app) as client:
-            resp = client.get("/api/documents/eagle/dev-tenant/packages/PKG-1/sow/v2/source.docx?content=true")
+            resp = client.get("/api/documents/eagle/dev-tenant/packages/PKG-1/sow/v2/source.docx?content=true", headers=_auth_header())
 
     assert resp.status_code == 200
     data = resp.json()
@@ -230,6 +247,7 @@ def test_put_document_rejects_binary_office_document():
         resp = client.put(
             "/api/documents/eagle/dev-tenant/packages/PKG-1/sow/v2/source.docx",
             json={"content": "replacement text"},
+            headers=_auth_header(),
         )
 
     assert resp.status_code == 415
@@ -243,7 +261,7 @@ def test_get_document_still_returns_inline_content_for_text_documents():
 
     with patch("boto3.client", return_value=s3):
         with TestClient(app) as client:
-            resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.md?content=true")
+            resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.md?content=true", headers=_auth_header())
 
     assert resp.status_code == 200
     data = resp.json()
@@ -260,7 +278,7 @@ def test_get_document_returns_read_only_preview_for_xlsx():
 
     with patch("boto3.client", return_value=s3):
         with TestClient(app) as client:
-            resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/igce_20260316_120000.xlsx?content=true")
+            resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/igce_20260316_120000.xlsx?content=true", headers=_auth_header())
 
     assert resp.status_code == 200
     data = resp.json()
@@ -282,8 +300,9 @@ def test_post_docx_edit_updates_workspace_docx_preview_blocks():
     with patch("boto3.client", return_value=s3), patch(
         "app.document_ai_edit_service.write_document_changelog_entry"
     ):
+        headers = _auth_header()
         with TestClient(app) as client:
-            get_resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.docx?content=true")
+            get_resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.docx?content=true", headers=headers)
             assert get_resp.status_code == 200
             blocks = get_resp.json()["preview_blocks"]
             paragraph_block = next(block for block in blocks if block["kind"] == "paragraph")
@@ -292,6 +311,7 @@ def test_post_docx_edit_updates_workspace_docx_preview_blocks():
             save_resp = client.post(
                 "/api/documents/docx-edit/eagle/dev-tenant/dev-user/documents/test.docx",
                 json={"preview_blocks": blocks, "preview_mode": "docx_blocks"},
+                headers=headers,
             )
 
     assert save_resp.status_code == 200
@@ -309,8 +329,9 @@ def test_post_xlsx_edit_updates_workspace_xlsx_preview_cells():
     with patch("boto3.client", return_value=s3), patch(
         "app.spreadsheet_edit_service.write_document_changelog_entry"
     ):
+        headers = _auth_header()
         with TestClient(app) as client:
-            get_resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.xlsx?content=true")
+            get_resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.xlsx?content=true", headers=headers)
             assert get_resp.status_code == 200
             sheet = get_resp.json()["preview_sheets"][0]
             editable_cell = next(
@@ -323,6 +344,7 @@ def test_post_xlsx_edit_updates_workspace_xlsx_preview_cells():
             save_resp = client.post(
                 "/api/documents/xlsx-edit/eagle/dev-tenant/dev-user/documents/test.xlsx",
                 json={"cell_edits": [{"sheet_id": sheet["sheet_id"], "cell_ref": editable_cell["cell_ref"], "value": "Updated CK2"}]},
+                headers=headers,
             )
 
     assert save_resp.status_code == 200
