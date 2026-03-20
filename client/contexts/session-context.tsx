@@ -11,7 +11,7 @@ interface SessionContextValue {
     sessions: ChatSession[];
     currentSessionId: string;
     isLoading: boolean;
-    saveSession: (messages: Message[], acquisitionData: AcquisitionData, documents?: Record<string, DocumentInfo[]>) => void;
+    saveSession: (sessionId: string, messages: Message[], acquisitionData: AcquisitionData, documents?: Record<string, DocumentInfo[]>) => void;
     loadSession: (sessionId: string) => {
         id: string;
         title: string;

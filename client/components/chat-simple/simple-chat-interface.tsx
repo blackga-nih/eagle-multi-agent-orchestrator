@@ -87,6 +87,10 @@ export default function SimpleChatInterface() {
     const titleGeneratedRef = useRef<Set<string>>(new Set());
     /** Store the first user message for title generation. */
     const firstUserMsgRef = useRef<string | null>(null);
+    /** Track the session ID that the active request belongs to. */
+    const activeRequestSessionIdRef = useRef<string | null>(null);
+    /** Track the unique request ID for the active stream. */
+    const activeRequestIdRef = useRef<string | null>(null);
     /** Ctrl+K command palette state. */
     const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
     /** Document upload state. */
@@ -112,6 +116,15 @@ export default function SimpleChatInterface() {
             setIsLoadingSession(false);
             return;
         }
+        // Clear transient state from previous session
+        setStreamingMsg(null);
+        streamingMsgRef.current = null;
+        setAgentStatus(null);
+        setToolCallsByMsg({});
+        lastAssistantIdRef.current = null;
+        activeRequestSessionIdRef.current = null;
+        activeRequestIdRef.current = null;
+
         const sessionData = loadSession(currentSessionId);
         if (sessionData) {
             setMessages(sessionData.messages);
@@ -131,10 +144,10 @@ export default function SimpleChatInterface() {
 
     // Auto-save session
     const saveSessionDebounced = useCallback(() => {
-        if (messages.length > 0) {
-            saveSession(messages, {}, documents);
+        if (messages.length > 0 && currentSessionId) {
+            saveSession(currentSessionId, messages, {}, documents);
         }
-    }, [messages, documents, saveSession]);
+    }, [currentSessionId, messages, documents, saveSession]);
 
     useEffect(() => {
         const timeoutId = setTimeout(saveSessionDebounced, 500);
@@ -213,6 +226,7 @@ export default function SimpleChatInterface() {
         sessionId: currentSessionId ?? undefined,
 
         onMessage: (msg) => {
+            if (!activeRequestIdRef.current) return;
             const newMessage: ChatMessage = {
                 id: msg.id,
                 role: 'assistant',
@@ -228,6 +242,7 @@ export default function SimpleChatInterface() {
         },
 
         onComplete: (info) => {
+            if (!activeRequestIdRef.current) return;
             setAgentStatus(null);
             const toolResults = info?.toolResults;
             if (info?.durationMs) {
@@ -294,7 +309,7 @@ export default function SimpleChatInterface() {
                 });
 
                 // AI title generation — fire-and-forget on first assistant response
-                const sid = currentSessionId;
+                const sid = activeRequestSessionIdRef.current;
                 const userMsg = firstUserMsgRef.current;
                 if (sid && userMsg && !titleGeneratedRef.current.has(sid)) {
                     titleGeneratedRef.current.add(sid);
@@ -320,12 +335,14 @@ export default function SimpleChatInterface() {
         },
 
         onError: () => {
+            if (!activeRequestIdRef.current) return;
             setAgentStatus(null);
             streamingMsgRef.current = null;
             setStreamingMsg(null);
         },
 
         onDocumentGenerated: (doc) => {
+            if (!activeRequestIdRef.current) return;
             // Attach to the active streaming message when tool_result arrives
             // before the first text chunk sets lastAssistantIdRef.
             const attachTo = lastAssistantIdRef.current ?? streamingMsgIdRef.current;
@@ -339,15 +356,17 @@ export default function SimpleChatInterface() {
             });
 
             // Persist to localStorage for Packages & Documents pages
-            if (currentSessionId) {
+            const sid = activeRequestSessionIdRef.current;
+            if (sid) {
                 const title =
                     messages.find((m) => m.role === 'user')?.content.slice(0, 80) ||
                     'Untitled Package';
-                saveGeneratedDocument(doc, currentSessionId, title);
+                saveGeneratedDocument(doc, sid, title);
             }
         },
 
         onToolUse: (toolEvent: ToolUseEvent) => {
+            if (!activeRequestIdRef.current) return;
             // Associate tool calls with the current streaming message ID.
             const parentId = streamingMsgIdRef.current;
 
@@ -372,6 +391,7 @@ export default function SimpleChatInterface() {
         },
 
         onToolResult: (toolName, result) => {
+            if (!activeRequestIdRef.current) return;
             // Immediately update matching tool card to 'done' during streaming
             const parentId = streamingMsgIdRef.current;
             setToolCallsByMsg((prev) => {
@@ -385,6 +405,7 @@ export default function SimpleChatInterface() {
         },
 
         onAgentStatus: (status) => {
+            if (!activeRequestIdRef.current) return;
             setAgentStatus(status);
         },
 
@@ -461,6 +482,9 @@ export default function SimpleChatInterface() {
         }
         // Reset streaming message ID for the new turn
         streamingMsgIdRef.current = `stream-${Date.now()}`;
+        // Capture session at send time so callbacks route to the correct thread
+        activeRequestSessionIdRef.current = currentSessionId;
+        activeRequestIdRef.current = crypto.randomUUID();
         setMessages((prev) => [...prev, userMessage]);
         // Log user input to agent logs panel
         addUserInputLog(input);
