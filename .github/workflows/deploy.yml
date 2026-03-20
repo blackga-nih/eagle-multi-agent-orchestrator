@@ -367,12 +367,12 @@ jobs:
 
   # ── Deploy CDK Infrastructure ──────────────────────────────
   deploy-infra:
-    needs: [changes, lint, eval]
+    needs: [changes, lint, unit-tests, integration, eval]
     runs-on: ubuntu-latest
     if: |
       always() &&
       needs.lint.result == 'success' &&
-      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || needs.eval.result == 'skipped') &&
+      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || (needs.eval.result == 'skipped' && needs.integration.result != 'failure' && needs.unit-tests.result != 'failure')) &&
       (
         (github.event_name == 'push' && needs.changes.outputs.infra == 'true') ||
         (github.event_name == 'workflow_dispatch' && inputs.deploy_infra == 'true')
@@ -406,12 +406,12 @@ jobs:
 
   # ── Build & Push Backend Container ─────────────────────────
   deploy-backend:
-    needs: [changes, lint, eval, deploy-infra]
+    needs: [changes, lint, unit-tests, integration, eval, deploy-infra]
     runs-on: ubuntu-latest
     if: |
       always() &&
       needs.lint.result == 'success' &&
-      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || needs.eval.result == 'skipped') &&
+      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || (needs.eval.result == 'skipped' && needs.integration.result != 'failure' && needs.unit-tests.result != 'failure')) &&
       needs.deploy-infra.result != 'failure' &&
       (
         (github.event_name == 'push' && needs.changes.outputs.backend == 'true') ||
@@ -508,12 +508,12 @@ jobs:
 
   # ── Build & Push Frontend Container ────────────────────────
   deploy-frontend:
-    needs: [changes, lint, eval, deploy-infra]
+    needs: [changes, lint, unit-tests, integration, eval, deploy-infra]
     runs-on: ubuntu-latest
     if: |
       always() &&
       needs.lint.result == 'success' &&
-      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || needs.eval.result == 'skipped') &&
+      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || (needs.eval.result == 'skipped' && needs.integration.result != 'failure' && needs.unit-tests.result != 'failure')) &&
       needs.deploy-infra.result != 'failure' &&
       (
         (github.event_name == 'push' && needs.changes.outputs.frontend == 'true') ||
