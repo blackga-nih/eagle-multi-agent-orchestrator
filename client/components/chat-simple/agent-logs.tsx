@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { getAgentColors, getAgentName, getAgentIcon } from '@/lib/agent-colors';
+import { ToolTimingSummary } from './tool-result-panels';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -333,12 +334,16 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
 
               {/* Complete */}
               {log.type === 'complete' && (
-                <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl text-center">
-                  <CheckCircle2 className="w-6 h-6 text-gray-400 mx-auto mb-2" />
-                  <p className="text-gray-600 font-medium text-sm">Stream Complete</p>
-                  {log.metadata && (
+                <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl">
+                  <div className="text-center mb-3">
+                    <CheckCircle2 className="w-6 h-6 text-gray-400 mx-auto mb-2" />
+                    <p className="text-gray-600 font-medium text-sm">Stream Complete</p>
+                  </div>
+                  {log.metadata?.tool_timings ? (
+                    <ToolTimingSummary metadata={log.metadata} />
+                  ) : log.metadata ? (
                     <pre className="text-xs text-gray-400 mt-2 font-mono">{JSON.stringify(log.metadata, null, 2)}</pre>
-                  )}
+                  ) : null}
                 </div>
               )}
 
@@ -517,9 +522,11 @@ function LogCard({ entry, onOpenDetail }: { entry: DisplayEntry; onOpenDetail: (
         )}
 
         {/* Complete */}
-        {log.type === 'complete' && (
+        {log.type === 'complete' && log.metadata?.tool_timings ? (
+          <ToolTimingSummary metadata={log.metadata} />
+        ) : log.type === 'complete' ? (
           <div className="text-[10px] text-gray-500">--- Stream Complete ---</div>
-        )}
+        ) : null}
 
         {/* Metadata */}
         {log.type === 'metadata' && log.metadata && (

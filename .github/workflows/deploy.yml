@@ -15,6 +15,15 @@ on:
         required: false
         default: 'true'
         type: string
+      deploy_mode:
+        description: 'Deploy mode (auto=detect from paths, full=all gates, mini=lint only)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - full
+          - mini
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -33,13 +42,15 @@ env:
   EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-sonnet-4-6
 
 jobs:
-  # ── Detect changed paths ────────────────────────────────────
+  # ── Detect changed paths + deploy mode ─────────────────────
   changes:
     runs-on: ubuntu-latest
     outputs:
       infra: ${{ steps.filter.outputs.infra }}
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      significant: ${{ steps.filter.outputs.significant }}
+      deploy_mode: ${{ steps.mode.outputs.deploy_mode }}
     steps:
     - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
     - uses: dorny/paths-filter@v3
@@ -55,14 +66,307 @@ jobs:
           frontend:
             - 'client/**'
             - 'deployment/docker/Dockerfile.frontend'
+          significant:
+            - 'server/app/**'
+            - 'server/tests/**'
+            - 'eagle-plugin/**'
+            - 'infrastructure/**'
+            - 'client/components/**'
+            - 'client/hooks/**'
+            - 'client/lib/**'
+            - 'client/app/api/**'
+            - 'deployment/**'
 
-  # ── Deploy CDK Infrastructure ───────────────────────────────
-  deploy-infra:
+    - name: Determine deploy mode
+      id: mode
+      run: |
+        INPUT_MODE="${{ inputs.deploy_mode }}"
+        if [ "$INPUT_MODE" = "full" ] || [ "$INPUT_MODE" = "mini" ]; then
+          echo "deploy_mode=$INPUT_MODE" >> $GITHUB_OUTPUT
+          echo "Deploy mode: $INPUT_MODE (manual override)"
+        elif [ "${{ steps.filter.outputs.significant }}" = "true" ]; then
+          echo "deploy_mode=full" >> $GITHUB_OUTPUT
+          echo "Deploy mode: full (significant changes detected)"
+        else
+          echo "deploy_mode=mini" >> $GITHUB_OUTPUT
+          echo "Deploy mode: mini (non-significant changes only)"
+        fi
+
+  # ── L1: Lint (both modes) ──────────────────────────────────
+  lint:
     needs: changes
     runs-on: ubuntu-latest
+    outputs:
+      ruff_result: ${{ steps.ruff.outcome }}
+      tsc_result: ${{ steps.tsc.outcome }}
+      detail: ${{ steps.summary.outputs.detail }}
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Setup Python 3.11
+      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      with:
+        python-version: '3.11'
+
+    - name: Install ruff
+      run: pip install ruff
+
+    - name: Ruff lint
+      id: ruff
+      run: cd server && ruff check app/ 2>&1
+
+    - name: Setup Node.js
+      uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8  # v4.0.2
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: client/package-lock.json
+
+    - name: Install client dependencies
+      run: cd client && npm ci
+
+    - name: TypeScript check
+      id: tsc
+      run: cd client && npx tsc --noEmit 2>&1
+
+    - name: Summarize
+      id: summary
+      if: always()
+      run: |
+        RUFF="${{ steps.ruff.outcome }}"
+        TSC="${{ steps.tsc.outcome }}"
+        echo "detail=ruff: $RUFF, tsc: $TSC" >> $GITHUB_OUTPUT
+
+  # ── L2: Unit Tests (full only) ─────────────────────────────
+  unit-tests:
+    needs: [changes, lint]
+    if: needs.changes.outputs.deploy_mode == 'full'
+    runs-on: ubuntu-latest
+    outputs:
+      test_result: ${{ steps.pytest.outcome }}
+      detail: ${{ steps.parse.outputs.detail }}
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Setup Python 3.11
+      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        cache-dependency-path: server/requirements.txt
+
+    - name: Install dependencies
+      run: pip install -r server/requirements.txt pytest pytest-asyncio
+
+    - name: Run unit tests
+      id: pytest
+      run: |
+        cd server
+        python -m pytest tests/ -v \
+          --ignore=tests/test_strands_eval.py \
+          --ignore=tests/test_eagle_sdk_eval.py \
+          --junitxml=test-results.xml \
+          2>&1 | tee pytest-output.txt
+
+    - name: Parse results
+      id: parse
+      if: always()
+      run: |
+        if [ -f server/pytest-output.txt ]; then
+          SUMMARY=$(tail -1 server/pytest-output.txt)
+          echo "detail=$SUMMARY" >> $GITHUB_OUTPUT
+        else
+          echo "detail=no output" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
+      with:
+        name: unit-test-results-${{ github.sha }}
+        path: server/test-results.xml
+        retention-days: 14
+        if-no-files-found: warn
+
+  # ── L4: CDK Synth (full only, parallel with L2) ────────────
+  cdk-synth:
+    needs: changes
+    if: needs.changes.outputs.deploy_mode == 'full'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Setup Node.js
+      uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8  # v4.0.2
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: infrastructure/cdk-eagle/package-lock.json
+
+    - name: Install CDK dependencies
+      run: cd ${{ env.CDK_DIR }} && npm ci
+
+    - name: CDK Synth
+      run: cd ${{ env.CDK_DIR }} && npx cdk synth --quiet
+
+  # ── L5: Integration — uvicorn health check (full only) ─────
+  integration:
+    needs: [changes, unit-tests, cdk-synth]
     if: |
-      (github.event_name == 'push' && needs.changes.outputs.infra == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.deploy_infra == 'true')
+      always() &&
+      needs.changes.outputs.deploy_mode == 'full' &&
+      needs.unit-tests.result == 'success' &&
+      needs.cdk-synth.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      with:
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Python 3.11
+      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        cache-dependency-path: server/requirements.txt
+
+    - name: Install dependencies
+      run: pip install -r server/requirements.txt
+
+    - name: Start uvicorn and health check
+      run: |
+        cd server
+        python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+        SERVER_PID=$!
+
+        echo "Waiting for backend (PID $SERVER_PID)..."
+        for i in $(seq 1 30); do
+          if curl -sf http://127.0.0.1:8000/api/health > /tmp/health.json 2>/dev/null; then
+            STATUS=$(python3 -c "import json; print(json.load(open('/tmp/health.json'))['status'])")
+            if [ "$STATUS" = "healthy" ]; then
+              echo "L5 PASS: backend healthy after ${i} attempts"
+              kill $SERVER_PID 2>/dev/null || true
+              exit 0
+            fi
+          fi
+          echo "  [$i/30] not ready..."
+          sleep 2
+        done
+
+        echo "L5 FAIL: backend did not become healthy"
+        kill $SERVER_PID 2>/dev/null || true
+        exit 1
+
+  # ── L6: Eval — Haiku lightweight gate (full only) ──────────
+  eval:
+    needs: [changes, integration]
+    if: |
+      always() &&
+      needs.changes.outputs.deploy_mode == 'full' &&
+      needs.integration.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      eval_detail: ${{ steps.parse.outputs.eval_detail }}
+      mvp1_detail: ${{ steps.parse.outputs.mvp1_detail }}
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      with:
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Python 3.11
+      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        cache-dependency-path: server/requirements.txt
+
+    - name: Install dependencies
+      run: pip install -r server/requirements.txt
+
+    - name: Derive S3 bucket names
+      id: s3
+      run: |
+        ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+        echo "document-bucket=eagle-documents-${ACCOUNT_ID}-dev" >> $GITHUB_OUTPUT
+        echo "eval-bucket=eagle-eval-artifacts-${ACCOUNT_ID}-dev" >> $GITHUB_OUTPUT
+
+    - name: Run general eval (tests 1-34)
+      id: general
+      env:
+        USE_BEDROCK: 'true'
+        CLAUDE_CODE_USE_BEDROCK: '1'
+        EAGLE_SESSIONS_TABLE: eagle
+        S3_BUCKET: ${{ steps.s3.outputs.document-bucket }}
+        EVAL_BUCKET: ${{ steps.s3.outputs.eval-bucket }}
+      run: |
+        cd server
+        python tests/test_strands_eval.py \
+          --tests 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34 \
+          --model us.anthropic.claude-3-5-haiku-20241022-v1:0 \
+          2>&1 | tee eval-general.txt
+
+    - name: Run MVP1 eval (tests 35-42)
+      id: mvp1
+      env:
+        USE_BEDROCK: 'true'
+        CLAUDE_CODE_USE_BEDROCK: '1'
+        EAGLE_SESSIONS_TABLE: eagle
+        S3_BUCKET: ${{ steps.s3.outputs.document-bucket }}
+        EVAL_BUCKET: ${{ steps.s3.outputs.eval-bucket }}
+      run: |
+        cd server
+        python tests/test_strands_eval.py \
+          --tests 35,36,37,38,39,40,41,42 \
+          --model us.anthropic.claude-3-5-haiku-20241022-v1:0 \
+          2>&1 | tee eval-mvp1.txt
+
+    - name: Parse eval results
+      id: parse
+      if: always()
+      run: |
+        GENERAL="unknown"
+        MVP1="unknown"
+        if [ -f server/eval-general.txt ]; then
+          GENERAL=$(tail -3 server/eval-general.txt | head -1)
+        fi
+        if [ -f server/eval-mvp1.txt ]; then
+          MVP1=$(tail -3 server/eval-mvp1.txt | head -1)
+        fi
+        echo "eval_detail=$GENERAL" >> $GITHUB_OUTPUT
+        echo "mvp1_detail=$MVP1" >> $GITHUB_OUTPUT
+
+    - name: Upload eval artifacts
+      if: always()
+      uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
+      with:
+        name: eval-results-${{ github.sha }}
+        path: |
+          server/eval-general.txt
+          server/eval-mvp1.txt
+        retention-days: 30
+        if-no-files-found: warn
+
+  # ── Deploy CDK Infrastructure ──────────────────────────────
+  deploy-infra:
+    needs: [changes, lint, eval]
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      needs.lint.result == 'success' &&
+      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || needs.eval.result == 'skipped') &&
+      (
+        (github.event_name == 'push' && needs.changes.outputs.infra == 'true') ||
+        (github.event_name == 'workflow_dispatch' && inputs.deploy_infra == 'true')
+      )
 
     steps:
     - name: Checkout code
@@ -90,12 +394,14 @@ jobs:
         npx cdk deploy EagleCoreStack EagleCiCdStack EagleStorageStack EagleEvalStack EagleBackupStack \
           --exclusively --require-approval never --outputs-file outputs.json
 
-  # ── Build & Push Backend Container ──────────────────────────
+  # ── Build & Push Backend Container ─────────────────────────
   deploy-backend:
-    needs: [changes, deploy-infra]
+    needs: [changes, lint, eval, deploy-infra]
     runs-on: ubuntu-latest
     if: |
       always() &&
+      needs.lint.result == 'success' &&
+      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || needs.eval.result == 'skipped') &&
       needs.deploy-infra.result != 'failure' &&
       (
         (github.event_name == 'push' && needs.changes.outputs.backend == 'true') ||
@@ -190,12 +496,14 @@ jobs:
           --region ${{ env.AWS_REGION }}
         echo "Backend deployment stable"
 
-  # ── Build & Push Frontend Container ─────────────────────────
+  # ── Build & Push Frontend Container ────────────────────────
   deploy-frontend:
-    needs: [changes, deploy-infra]
+    needs: [changes, lint, eval, deploy-infra]
     runs-on: ubuntu-latest
     if: |
       always() &&
+      needs.lint.result == 'success' &&
+      (needs.changes.outputs.deploy_mode == 'mini' || needs.eval.result == 'success' || needs.eval.result == 'skipped') &&
       needs.deploy-infra.result != 'failure' &&
       (
         (github.event_name == 'push' && needs.changes.outputs.frontend == 'true') ||
@@ -306,4 +614,40 @@ jobs:
 
         echo "EAGLE-DEV-ALB now targeting $NEW_IP:3000"
 
-  # Eval suite runs nightly via eval.yml — not on every deploy
+  # ── Report: Teams notification ─────────────────────────────
+  report:
+    needs: [changes, lint, unit-tests, cdk-synth, integration, eval, deploy-infra, deploy-backend, deploy-frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Setup Python 3.11
+      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      with:
+        python-version: '3.11'
+
+    - name: Install httpx
+      run: pip install httpx
+
+    - name: Send deploy report to Teams
+      env:
+        TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        DEPLOY_MODE: ${{ needs.changes.outputs.deploy_mode }}
+        COMMIT_SHA: ${{ github.sha }}
+        BRANCH: ${{ github.ref_name }}
+        AUTHOR: ${{ github.actor }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        RESULT_LINT: ${{ needs.lint.result }}
+        RESULT_UNIT_TESTS: ${{ needs.unit-tests.result }}
+        RESULT_CDK_SYNTH: ${{ needs.cdk-synth.result }}
+        RESULT_INTEGRATION: ${{ needs.integration.result }}
+        RESULT_EVAL: ${{ needs.eval.result }}
+        RESULT_DEPLOY_INFRA: ${{ needs.deploy-infra.result }}
+        RESULT_DEPLOY_BACKEND: ${{ needs.deploy-backend.result }}
+        RESULT_DEPLOY_FRONTEND: ${{ needs.deploy-frontend.result }}
+        DETAIL_LINT: ${{ needs.lint.outputs.detail }}
+        DETAIL_UNIT_TESTS: ${{ needs.unit-tests.outputs.detail }}
+        DETAIL_EVAL: ${{ needs.eval.outputs.eval_detail }}
+        DETAIL_MVP1: ${{ needs.eval.outputs.mvp1_detail }}
+      run: python scripts/deploy_report.py

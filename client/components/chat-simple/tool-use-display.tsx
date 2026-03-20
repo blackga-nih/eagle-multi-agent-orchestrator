@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { ClientToolResult } from '@/lib/client-tools';
 import { DocumentInfo } from '@/types/chat';
+import { resolveResultPanel } from './tool-result-panels';
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -384,18 +384,10 @@ export default function ToolUseDisplay({
   // Special handling for web_search — show web search result card
   const webSearchData = toolName === 'web_search' ? parseWebSearchResult(result) : null;
 
-  // Extract markdown report from subagent/tool results
-  // Subagent results arrive as { report: "markdown..." }, service tools as { content: "...", ... }
-  const reportText = hasResult && !docData && !webSearchData && result.result && typeof result.result === 'object'
-    ? (result.result as Record<string, unknown>).report as string | undefined
-    : undefined;
-
-  const resultText =
-    hasResult && !docData && !webSearchData && !reportText && result.result !== null && result.result !== undefined
-      ? JSON.stringify(result.result, null, 2)
-      : null;
-
-  const canExpand = (status === 'done' || status === 'error') && (resultText || reportText || errorText);
+  const hasExpandableResult = hasResult && !docData && !webSearchData && (
+    errorText || result.result !== null && result.result !== undefined
+  );
+  const canExpand = (status === 'done' || status === 'error') && hasExpandableResult;
   const showDocCard = status === 'done' && docData !== null;
   const showWebSearchCard = status === 'done' && webSearchData !== null;
 
@@ -454,29 +446,8 @@ export default function ToolUseDisplay({
         <WebSearchResultCard data={webSearchData} />
       )}
 
-      {/* Collapsible result panel (non-document tools) */}
-      {expanded && (
-        <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white max-h-64 overflow-y-auto">
-          {errorText ? (
-            <p className="text-red-600 font-mono text-[11px] whitespace-pre-wrap break-all">
-              {errorText}
-            </p>
-          ) : reportText ? (
-            <div className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
-                            [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1
-                            [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1
-                            [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5
-                            [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0
-                            [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded">
-              <ReactMarkdown>{reportText}</ReactMarkdown>
-            </div>
-          ) : resultText ? (
-            <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
-              {resultText}
-            </pre>
-          ) : null}
-        </div>
-      )}
+      {/* Collapsible result panel — type-specific rendering */}
+      {expanded && resolveResultPanel(toolName, input, result, errorText)}
     </div>
   );
 }

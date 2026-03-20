@@ -250,6 +250,91 @@ def morning_report_card(
     )
 
 
+def deploy_report_card(
+    environment: str,
+    deploy_mode: str,
+    commit_sha: str,
+    branch: str,
+    author: str,
+    results: list[dict],
+    mvp1_results: list[dict],
+    jira_summary: list[dict],
+    deploy_status: dict,
+    run_url: str = "",
+    pr_url: str = "",
+) -> dict:
+    """Build an Adaptive Card for deploy pipeline report.
+
+    results: [{"level": "L1", "name": "Lint", "status": "PASS", "detail": "ruff 0 errors"}]
+    mvp1_results: [{"test_id": 35, "uc": "UC-01", "name": "New Acquisition", "status": "PASS"}]
+    jira_summary: [{"key": "EAGLE-42", "action": "transitioned to Done"}]
+    deploy_status: {"infra": "PASS", "backend": "PASS", "frontend": "SKIP"}
+    """
+    all_pass = all(r["status"] in ("PASS", "SKIP") for r in results)
+    deploy_ok = all(v in ("PASS", "SKIP") for v in deploy_status.values())
+    style = "good" if (all_pass and deploy_ok) else "attention"
+
+    facts = [
+        {"title": "Commit", "value": commit_sha[:10]},
+        {"title": "Author", "value": author},
+        {"title": "Branch", "value": branch},
+        {"title": "Mode", "value": deploy_mode.upper()},
+    ]
+
+    # Validation ladder
+    ladder_lines = []
+    for r in results:
+        icon = "PASS" if r["status"] == "PASS" else ("SKIP" if r["status"] == "SKIP" else "FAIL")
+        detail = f" — {r['detail']}" if r.get("detail") else ""
+        ladder_lines.append(f"**{r['level']}** {r['name']}: {icon}{detail}")
+
+    # MVP1 eval section
+    mvp1_lines = []
+    if mvp1_results:
+        mvp1_pass = sum(1 for m in mvp1_results if m["status"] == "PASS")
+        mvp1_total = len(mvp1_results)
+        mvp1_lines.append(f"**MVP1 Eval** ({mvp1_pass}/{mvp1_total} pass)")
+        for m in mvp1_results:
+            icon = "PASS" if m["status"] == "PASS" else "FAIL"
+            mvp1_lines.append(f"  {m['uc']} {m['name']}: {icon}")
+
+    # Deploy status
+    deploy_lines = []
+    for component, status in deploy_status.items():
+        deploy_lines.append(f"**{component}**: {status}")
+
+    # Jira
+    jira_lines = []
+    for j in jira_summary:
+        jira_lines.append(f"[{j['key']}] {j['action']}")
+
+    sections = []
+    if ladder_lines:
+        sections.append("**Validation**\n\n" + "\n\n".join(ladder_lines))
+    if mvp1_lines:
+        sections.append("\n\n".join(mvp1_lines))
+    if deploy_lines:
+        sections.append("**Deploy**\n\n" + " | ".join(deploy_lines))
+    if jira_lines:
+        sections.append("**Jira**\n\n" + "\n\n".join(jira_lines))
+
+    body_text = "\n\n---\n\n".join(sections)
+
+    actions = []
+    if run_url:
+        actions.append({"type": "Action.OpenUrl", "title": "View Run on GitHub", "url": run_url})
+    if pr_url:
+        actions.append({"type": "Action.OpenUrl", "title": "View PR", "url": pr_url})
+
+    return _card(
+        title=f"EAGLE {environment} | Deploy Report — {deploy_mode.capitalize()}",
+        facts=facts,
+        body_text=body_text,
+        style=style,
+        actions=actions or None,
+    )
+
+
 def suspicious_card(
     environment: str,
     event_type: str,
