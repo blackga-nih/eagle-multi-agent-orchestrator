@@ -132,7 +132,7 @@ def write_message_feedback(
 ) -> dict:
     """Write per-message feedback (thumbs up/down) and return the stored item."""
     feedback_id = str(uuid.uuid4())
-    created_at = _now_iso()
+    created_at = now_iso()
     pk = f"FEEDBACK#{tenant_id}"
     sk = f"MSG_FEEDBACK#{session_id}#{message_id}"
 
@@ -153,7 +153,7 @@ def write_message_feedback(
     }
 
     try:
-        _get_table().put_item(Item=item)
+        get_table().put_item(Item=item)
         logger.info(
             "feedback_store: wrote message feedback %s (type=%s tenant=%s msg=%s)",
             feedback_id, feedback_type, tenant_id, message_id,
@@ -169,7 +169,7 @@ def list_message_feedback(tenant_id: str, limit: int = 100) -> list[dict]:
     """Query message-level feedback for a tenant, newest first."""
     pk = f"FEEDBACK#{tenant_id}"
     try:
-        response = _get_table().query(
+        response = get_table().query(
             KeyConditionExpression=Key("PK").eq(pk) & Key("SK").begins_with("MSG_FEEDBACK#"),
             ScanIndexForward=False,
             Limit=limit,
