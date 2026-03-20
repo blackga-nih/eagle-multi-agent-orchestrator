@@ -1,5 +1,6 @@
 """Tests for app.teams_notifier."""
 
+import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -28,6 +29,11 @@ def _reset_rate_limiters():
         bucket.tokens = float(bucket.capacity)
 
 
+def _card_text(payload: dict) -> str:
+    """Extract all text from an Adaptive Card payload for assertion."""
+    return json.dumps(payload)
+
+
 # ── _send tests ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -41,12 +47,13 @@ async def test_send_success(_reset_rate_limiters):
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_response)
 
+    payload = {"type": "message", "attachments": []}
     with patch("app.teams_notifier._get_client", return_value=mock_client):
-        await _send("test message", "feedback")
+        await _send(payload, "feedback")
 
     mock_client.post.assert_called_once()
-    payload = mock_client.post.call_args[1]["json"]
-    assert payload["text"] == "test message"
+    sent = mock_client.post.call_args[1]["json"]
+    assert sent["type"] == "message"
 
 
 @pytest.mark.asyncio
@@ -58,7 +65,7 @@ async def test_send_timeout(_reset_rate_limiters):
     mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
 
     with patch("app.teams_notifier._get_client", return_value=mock_client):
-        await _send("test", "feedback")
+        await _send({"type": "message"}, "feedback")
 
 
 @pytest.mark.asyncio
@@ -69,7 +76,7 @@ async def test_send_disabled():
     with patch("app.teams_notifier.WEBHOOK_ENABLED", False):
         mock_client = AsyncMock()
         with patch("app.teams_notifier._get_client", return_value=mock_client):
-            await _send("test", "feedback")
+            await _send({"type": "message"}, "feedback")
         mock_client.post.assert_not_called()
 
 
@@ -85,7 +92,7 @@ async def test_send_rate_limited():
 
     mock_client = AsyncMock()
     with patch("app.teams_notifier._get_client", return_value=mock_client):
-        await _send("test", "feedback")
+        await _send({"type": "message"}, "feedback")
 
     mock_client.post.assert_not_called()
 
@@ -104,7 +111,7 @@ async def test_send_non_2xx_logs_warning(_reset_rate_limiters):
 
     with patch("app.teams_notifier._get_client", return_value=mock_client), \
          patch("app.teams_notifier.logger") as mock_logger:
-        await _send("test", "feedback")
+        await _send({"type": "message"}, "feedback")
 
     mock_logger.warning.assert_called()
     assert "non-2xx" in str(mock_logger.warning.call_args)
@@ -112,8 +119,8 @@ async def test_send_non_2xx_logs_warning(_reset_rate_limiters):
 
 # ── notify_feedback tests ────────────────────────────────────────────
 
-def test_notify_feedback_builds_correct_text():
-    """notify_feedback formats message with user details and truncated text."""
+def test_notify_feedback_builds_adaptive_card():
+    """notify_feedback sends an Adaptive Card with user details."""
     from app.teams_notifier import notify_feedback
 
     with patch("app.teams_notifier._fire") as mock_fire:
@@ -128,13 +135,20 @@ def test_notify_feedback_builds_correct_text():
         )
 
     mock_fire.assert_called_once()
-    text = mock_fire.call_args[0][0]
-    assert "Feedback received" in text
-    assert "bug" in text
-    assert "john.doe" in text
-    assert "nci-oar" in text
-    assert "/chat" in text
-    assert "document generation failed" in text
+    payload = mock_fire.call_args[0][0]
+    card_json = _card_text(payload)
+
+    # Verify it's an Adaptive Card
+    assert payload["type"] == "message"
+    assert payload["attachments"][0]["contentType"] == "application/vnd.microsoft.card.adaptive"
+
+    # Verify content
+    assert "Feedback" in card_json
+    assert "bug" in card_json
+    assert "john.doe" in card_json
+    assert "nci-oar" in card_json
+    assert "/chat" in card_json
+    assert "document generation failed" in card_json
     assert mock_fire.call_args[0][1] == "feedback"
 
 
@@ -148,16 +162,16 @@ def test_notify_feedback_truncates_long_text():
             session_id="s", feedback_text="x" * 600,
         )
 
-    text = mock_fire.call_args[0][0]
-    assert "..." in text
-    assert "x" * 501 not in text
+    card_json = _card_text(mock_fire.call_args[0][0])
+    assert "..." in card_json
+    assert "x" * 501 not in card_json
 
 
 # ── send_daily_summary tests ────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_send_daily_summary_with_mocked_stores():
-    """send_daily_summary aggregates data from session_store and feedback_store."""
+    """send_daily_summary sends an Adaptive Card with aggregated data."""
     from app.teams_notifier import send_daily_summary
 
     mock_tenants = [{"tenant_id": "tenant-a"}, {"tenant_id": "tenant-b"}]
@@ -166,55 +180,59 @@ async def test_send_daily_summary_with_mocked_stores():
         "total_cost_usd": 0.25, "by_date": {},
     }
 
-    mock_ss = MagicMock()
-    mock_ss.get_all_tenants.return_value = mock_tenants
-    mock_ss.get_usage_summary.return_value = mock_usage
-    mock_ss.list_tenant_sessions.return_value = [{"user_id": "user1"}]
-
-    mock_fs = MagicMock()
-    mock_fs.list_feedback.return_value = []
-
-    with patch.dict("sys.modules", {"app.session_store": mock_ss, "app.feedback_store": mock_fs}), \
+    with patch("app.session_store.get_all_tenants", return_value=mock_tenants), \
+         patch("app.session_store.get_usage_summary", return_value=mock_usage), \
+         patch("app.session_store.list_tenant_sessions", return_value=[{"user_id": "user1"}]), \
+         patch("app.feedback_store.list_feedback", return_value=[]), \
          patch("app.teams_notifier._send", new_callable=AsyncMock) as mock_send:
         await send_daily_summary()
 
     mock_send.assert_called_once()
-    text = mock_send.call_args[0][0]
-    assert "Daily Summary" in text
-    assert "Requests: 100" in text  # 50 * 2 tenants
-    assert "$0.5000" in text
+    payload = mock_send.call_args[0][0]
+    card_json = _card_text(payload)
+    assert "Daily Summary" in card_json
+    assert "100" in card_json  # 50 * 2 tenants
+    assert "$0.5000" in card_json
 
 
 # ── notify_startup tests ────────────────────────────────────────────
 
-def test_notify_startup_includes_hostname():
-    """notify_startup message contains hostname and environment."""
+def test_notify_startup_sends_adaptive_card():
+    """notify_startup sends an Adaptive Card with hostname and environment."""
     from app.teams_notifier import notify_startup
 
     with patch("app.teams_notifier._fire") as mock_fire, \
+         patch("app.teams_notifier.os") as mock_os, \
          patch("app.teams_notifier.platform") as mock_platform:
         mock_platform.node.return_value = "eagle-backend-abc123"
+        # Simulate ECS environment
+        mock_os.getenv.side_effect = lambda k, *a: {
+            "ECS_CONTAINER_METADATA_URI": "http://169.254.170.2/v3",
+        }.get(k, a[0] if a else None)
         notify_startup()
 
-    text = mock_fire.call_args[0][0]
-    assert "Service started" in text
-    assert "eagle-backend-abc123" in text
+    payload = mock_fire.call_args[0][0]
+    card_json = _card_text(payload)
+    assert "Service Started" in card_json
+    assert "eagle-backend-abc123" in card_json
     assert mock_fire.call_args[0][1] == "deployment"
 
 
 # ── notify_suspicious tests ─────────────────────────────────────────
 
-def test_notify_suspicious_formats_correctly():
-    """notify_suspicious includes event type and detail."""
+def test_notify_suspicious_sends_adaptive_card():
+    """notify_suspicious sends an Adaptive Card with event details."""
     from app.teams_notifier import notify_suspicious
 
     with patch("app.teams_notifier._fire") as mock_fire:
         notify_suspicious("404", "GET /api/nonexistent", tenant_id="nci-oar")
 
-    text = mock_fire.call_args[0][0]
-    assert "Suspicious: 404" in text
-    assert "GET /api/nonexistent" in text
-    assert "nci-oar" in text
+    payload = mock_fire.call_args[0][0]
+    card_json = _card_text(payload)
+    assert "Suspicious" in card_json
+    assert "404" in card_json
+    assert "GET /api/nonexistent" in card_json
+    assert "nci-oar" in card_json
     assert mock_fire.call_args[0][1] == "suspicious"
 
 
@@ -255,3 +273,35 @@ async def test_close_notifier_client_noop_when_none():
     import app.teams_notifier as mod
     mod._client = None
     await mod.close_notifier_client()
+
+
+# ── teams_cards unit tests ───────────────────────────────────────────
+
+def test_error_card_structure():
+    """error_card returns a valid Adaptive Card envelope."""
+    from app.teams_cards import error_card
+
+    card = error_card("dev", 500, "POST", "/api/chat", "Exception", "boom")
+    assert card["type"] == "message"
+    content = card["attachments"][0]["content"]
+    assert content["type"] == "AdaptiveCard"
+    assert content["version"] == "1.4"
+    assert any(b["type"] == "FactSet" for b in content["body"])
+
+
+def test_error_card_attention_style():
+    """error_card uses attention style (red) for the header."""
+    from app.teams_cards import error_card
+
+    card = error_card("dev", 500, "POST", "/api/chat", "Exception", "boom")
+    container = card["attachments"][0]["content"]["body"][0]
+    assert container["style"] == "attention"
+
+
+def test_startup_card_good_style():
+    """startup_card uses good style (green) for the header."""
+    from app.teams_cards import startup_card
+
+    card = startup_card("dev", "host-1", "2026-03-19T18:00:00Z")
+    container = card["attachments"][0]["content"]["body"][0]
+    assert container["style"] == "good"

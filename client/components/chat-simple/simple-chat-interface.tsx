@@ -22,6 +22,7 @@ import ChatUploadButton from './chat-upload-button';
 import PackageSelectorModal from './package-selector-modal';
 import { UploadResult, assignToPackage } from '@/lib/document-api';
 import { usePackageState } from '@/hooks/use-package-state';
+import { useAnalytics } from '@/hooks/use-analytics';
 
 // -----------------------------------------------------------------------
 // Types for per-message tool call tracking
@@ -203,6 +204,8 @@ export default function SimpleChatInterface() {
 
     /** Package state — driven by SSE state_update metadata events. */
     const { state: packageState, handleMetadata: handlePackageMetadata, reset: resetPackageState } = usePackageState();
+
+    const { track } = useAnalytics();
 
     // Agent stream
     const { sendQuery, isStreaming, error, logs, clearLogs, addUserInputLog } = useAgentStream({
@@ -440,6 +443,8 @@ export default function SimpleChatInterface() {
             setTimeout(() => setFeedbackStatus('idle'), 4000);
             return;
         }
+
+        track('chat_send', { message_length: input.length });
 
         const userMessage: ChatMessage = {
             id: Date.now().toString(),

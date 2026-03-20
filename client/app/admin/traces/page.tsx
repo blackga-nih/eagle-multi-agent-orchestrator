@@ -148,7 +148,7 @@ export default function TracesPage() {
       try {
         const token = await getToken();
         const params = new URLSearchParams({ limit: '50', page: String(p) });
-        if (envFilter) params.set('tag', `env:${envFilter}`);
+        if (envFilter && envFilter !== 'errors') params.set('tag', `env:${envFilter}`);
         if (searchQuery) params.set('user_id', searchQuery);
 
         const res = await fetch(`/api/admin/traces?${params}`, {
@@ -160,7 +160,12 @@ export default function TracesPage() {
         if (!res.ok) throw new Error(`Backend error: ${res.status}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
-        setTraces(data.traces || []);
+
+        let filteredTraces = data.traces || [];
+        if (envFilter === 'errors') {
+          filteredTraces = filteredTraces.filter((t: TraceSummary) => t.status === 'error');
+        }
+        setTraces(filteredTraces);
         setMeta(data.meta || null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load traces');
@@ -220,6 +225,8 @@ export default function TracesPage() {
     traces.length > 0
       ? traces.reduce((sum, t) => sum + t.duration_ms, 0) / traces.length
       : 0;
+  const errorCount = traces.filter(t => t.status === 'error').length;
+  const errorRate = traces.length > 0 ? (errorCount / traces.length) * 100 : 0;
 
   // -----------------------------------------------------------------------
   // Render
@@ -254,7 +261,7 @@ export default function TracesPage() {
             />
 
             {/* Summary cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
               {[
                 {
                   icon: <Activity className="w-5 h-5" />,
@@ -279,6 +286,12 @@ export default function TracesPage() {
                   label: 'Page Cost',
                   value: `$${totalCost.toFixed(4)}`,
                   color: 'bg-green-500',
+                },
+                {
+                  icon: <AlertCircle className="w-5 h-5" />,
+                  label: 'Error Rate',
+                  value: `${errorRate.toFixed(1)}%`,
+                  color: errorRate > 10 ? 'bg-red-500' : 'bg-amber-500',
                 },
               ].map((card, i) => (
                 <div
@@ -320,6 +333,21 @@ export default function TracesPage() {
                   </button>
                 ))}
               </div>
+
+              <button
+                onClick={() => {
+                  setEnvFilter(envFilter === 'errors' ? '' : 'errors');
+                  setPage(1);
+                }}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  envFilter === 'errors'
+                    ? 'bg-red-500 text-white shadow-md'
+                    : 'text-gray-600 hover:bg-gray-100 border border-gray-200'
+                }`}
+              >
+                <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
+                Errors Only
+              </button>
 
               <div className="relative flex-1 min-w-[200px] max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />

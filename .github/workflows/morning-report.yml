@@ -1,0 +1,31 @@
+name: Morning Report
+
+on:
+  schedule:
+    # 13:00 UTC = 8:00 AM ET / 9:00 AM ET (DST)
+    - cron: '0 13 * * 1-5'  # weekdays only
+  workflow_dispatch:  # manual trigger for testing
+
+permissions:
+  contents: read
+
+jobs:
+  morning-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for git log
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Generate and send morning report
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/morning_report.py

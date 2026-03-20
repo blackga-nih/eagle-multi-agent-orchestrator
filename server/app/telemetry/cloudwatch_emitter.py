@@ -72,7 +72,7 @@ def emit_telemetry_event(
 
     try:
         client = _get_client()
-        stream_name = f"telemetry/{tenant_id}"
+        stream_name = f"telemetry/{session_id}" if session_id else f"telemetry/{tenant_id}"
 
         _ensure_log_group_and_stream(client, stream_name)
 
@@ -105,4 +105,50 @@ def emit_trace_completed(summary: dict):
             "tools_called": summary.get("tools_called", []),
             "agents_delegated": summary.get("agents_delegated", []),
         },
+    )
+
+
+def emit_trace_started(tenant_id: str, user_id: str, session_id: str, prompt: str):
+    """Emit a trace.started event when a new agent invocation begins."""
+    emit_telemetry_event(
+        event_type="trace.started",
+        tenant_id=tenant_id,
+        session_id=session_id,
+        user_id=user_id,
+        data={"prompt_preview": prompt[:200] if prompt else ""},
+    )
+
+
+def emit_tool_completed(
+    tenant_id: str,
+    user_id: str,
+    session_id: str,
+    tool_name: str,
+    duration_ms: int,
+    success: bool,
+):
+    """Emit a tool.completed event after a tool call finishes."""
+    emit_telemetry_event(
+        event_type="tool.completed",
+        tenant_id=tenant_id,
+        session_id=session_id,
+        user_id=user_id,
+        data={"tool_name": tool_name, "duration_ms": duration_ms, "success": success},
+    )
+
+
+def emit_feedback_submitted(
+    tenant_id: str,
+    user_id: str,
+    session_id: str,
+    feedback_type: str,
+    feedback_id: str,
+):
+    """Emit a feedback.submitted event when a user submits feedback."""
+    emit_telemetry_event(
+        event_type="feedback.submitted",
+        tenant_id=tenant_id,
+        session_id=session_id,
+        user_id=user_id,
+        data={"feedback_type": feedback_type, "feedback_id": feedback_id},
     )

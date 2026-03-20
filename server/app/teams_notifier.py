@@ -94,7 +94,7 @@ async def close_notifier_client() -> None:
 
 # ── Core send ────────────────────────────────────────────────────────
 
-async def _send(text: str, category: str) -> None:
+async def _send(payload: dict, category: str) -> None:
     """POST payload to webhook URL. Fire-and-forget — never raises."""
     if not WEBHOOK_ENABLED or not WEBHOOK_URL:
         return
@@ -104,7 +104,6 @@ async def _send(text: str, category: str) -> None:
         logger.warning("Teams notifier rate-limited (category=%s), skipping", category)
         return
 
-    payload = {"text": text}
     try:
         client = _get_client()
         resp = await client.post(WEBHOOK_URL, json=payload)
@@ -121,11 +120,11 @@ async def _send(text: str, category: str) -> None:
         logger.warning("Teams notifier failed (category=%s)", category, exc_info=True)
 
 
-def _fire(text: str, category: str) -> None:
+def _fire(payload: dict, category: str) -> None:
     """Schedule _send as a fire-and-forget asyncio task."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_send(text, category))
+        loop.create_task(_send(payload, category))
     except RuntimeError:
         # No running event loop — skip silently
         logger.debug("Teams notifier: no event loop, skipping %s notification", category)
@@ -143,18 +142,19 @@ def notify_feedback(
     page: str = "",
 ) -> None:
     """Notify Teams when a user submits Ctrl+J feedback."""
-    truncated = feedback_text[:500] + ("..." if len(feedback_text) > 500 else "")
-    text = (
-        f"[EAGLE {ENVIRONMENT}] Feedback received\n"
-        f"  Type: {feedback_type}\n"
-        f"  User: {user_id} ({tier})\n"
-        f"  Tenant: {tenant_id}\n"
-        f"  Page: {page or 'unknown'}\n"
-        f"  Session: {session_id[:36] if session_id else 'n/a'}\n"
-        f"  ---\n"
-        f"  {truncated}"
+    from .teams_cards import feedback_card
+
+    payload = feedback_card(
+        environment=ENVIRONMENT,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tier=tier,
+        session_id=session_id,
+        feedback_text=feedback_text,
+        feedback_type=feedback_type,
+        page=page,
     )
-    _fire(text, "feedback")
+    _fire(payload, "feedback")
 
 
 async def send_daily_summary() -> None:
@@ -205,15 +205,19 @@ async def send_daily_summary() -> None:
         yesterday = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         fb_breakdown = ", ".join(f"{c} {t}" for t, c in feedback_types.items()) if feedback_types else "none"
 
-        text = (
-            f"[EAGLE {ENVIRONMENT}] Daily Summary — {yesterday}\n"
-            f"  Requests: {total_requests:,}\n"
-            f"  Tokens: {total_tokens:,}\n"
-            f"  Cost: ${total_cost:.4f}\n"
-            f"  Active users: {len(active_users)}\n"
-            f"  Feedback: {feedback_count} new ({fb_breakdown})"
+        from .teams_cards import daily_summary_card
+
+        payload = daily_summary_card(
+            environment=ENVIRONMENT,
+            date=yesterday,
+            requests=total_requests,
+            tokens=total_tokens,
+            cost=total_cost,
+            active_users=len(active_users),
+            feedback_count=feedback_count,
+            feedback_breakdown=fb_breakdown,
         )
-        await _send(text, "daily_summary")
+        await _send(payload, "daily_summary")
     except Exception:
         logger.warning("Teams notifier: daily summary failed", exc_info=True)
 
@@ -228,14 +232,12 @@ def notify_startup() -> None:
     if not is_ecs:
         logger.info("Teams notifier: skipping startup notification (local dev)")
         return
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    text = (
-        f"[EAGLE {ENVIRONMENT}] Service started\n"
-        f"  Hostname: {hostname}\n"
-        f"  Time: {timestamp}\n"
-        f"  Webhook: enabled"
-    )
-    _fire(text, "deployment")
+
+    from .teams_cards import startup_card
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = startup_card(environment=ENVIRONMENT, hostname=hostname, timestamp=ts)
+    _fire(payload, "deployment")
 
 
 def notify_suspicious(
@@ -245,10 +247,13 @@ def notify_suspicious(
     user_id: str = "",
 ) -> None:
     """Notify Teams about suspicious request patterns (404s, auth issues)."""
-    parts = [f"[EAGLE {ENVIRONMENT}] Suspicious: {event_type}"]
-    parts.append(f"  Detail: {detail}")
-    if tenant_id:
-        parts.append(f"  Tenant: {tenant_id}")
-    if user_id:
-        parts.append(f"  User: {user_id}")
-    _fire("\n".join(parts), "suspicious")
+    from .teams_cards import suspicious_card
+
+    payload = suspicious_card(
+        environment=ENVIRONMENT,
+        event_type=event_type,
+        detail=detail,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    _fire(payload, "suspicious")

@@ -29,6 +29,12 @@ export interface EagleConfig {
   metadataLambdaMemory: number;
   metadataLambdaTimeout: number;
 
+  // Langfuse observability
+  langfusePublicKey: string;
+  langfuseSecretKey: string;
+  langfuseHost: string;
+  langfuseProjectId: string;
+
   // CI/CD
   githubOwner: string;
   githubRepo: string;
@@ -61,6 +67,11 @@ export const DEV_CONFIG: EagleConfig = {
   frontendMemory: 512,
   desiredCount: 1,
   maxCount: 4,
+
+  langfusePublicKey: 'pk-lf-47021a72-2b4e-4c38-8421-6ab06aef0f5c',
+  langfuseSecretKey: 'sk-lf-dbad2023-eede-420c-82e6-2ddec00fb7bb',
+  langfuseHost: 'https://us.cloud.langfuse.com',
+  langfuseProjectId: 'cmmsqvi2406aead071t0zhl7f',
 
   githubOwner: 'CBIIT',
   githubRepo: 'sm_eagle',

@@ -231,15 +231,17 @@ class TestNotifyError:
 
             mock_client.post.assert_called_once()
             payload = mock_client.post.call_args[1]["json"]
-            assert payload["status_code"] == 500
-            assert payload["endpoint_path"] == "/api/chat"
-            assert payload["http_method"] == "POST"
-            assert payload["error_type"] == "RuntimeError"
-            assert payload["tenant_id"] == "nci-acme"
-            assert payload["user_id"] == "user-123"
-            assert payload["session_id"] == "sess-abc"
-            assert payload["traceback"] == "tb here"
-            assert "EAGLE test" in payload["text"]
+            # Payload is now a Teams Adaptive Card envelope
+            assert payload["type"] == "message"
+            card_str = str(payload)
+            assert "500" in card_str
+            assert "/api/chat" in card_str
+            assert "POST" in card_str
+            assert "RuntimeError" in card_str
+            assert "nci-acme" in card_str
+            assert "user-123" in card_str
+            assert "sess-abc" in card_str
+            assert "EAGLE" in card_str
         finally:
             _tenant_id.reset(t1)
             _user_id.reset(t2)
@@ -296,10 +298,12 @@ class TestNotifyStreamingError:
 
         mock_client.post.assert_called_once()
         payload = mock_client.post.call_args[1]["json"]
-        assert payload["status_code"] == 500
-        assert payload["endpoint_path"] == "/api/chat/stream"
-        assert payload["error_type"] == "ValueError"
-        assert payload["tenant_id"] == "nci-acme"
+        assert payload["type"] == "message"
+        card_str = str(payload)
+        assert "500" in card_str
+        assert "/api/chat/stream" in card_str
+        assert "ValueError" in card_str
+        assert "nci-acme" in card_str
         mod._client = None
 
 
@@ -327,8 +331,8 @@ class TestExceptionHandlerIntegration:
 
         mock_client.post.assert_called_once()
         payload = mock_client.post.call_args[1]["json"]
-        assert payload["status_code"] == 500
-        assert "DB connection lost" in payload["text"]
+        assert payload["type"] == "message"
+        assert "DB connection lost" in str(payload)
         mod._client = None
 
     @pytest.mark.asyncio
@@ -382,19 +386,17 @@ class TestBuildPayload:
             session_id="sess-1",
             traceback_str="Traceback ...",
         )
-        required = [
-            "timestamp", "service", "environment", "request_id",
-            "endpoint_path", "http_method", "status_code",
-            "error_type", "error_message", "tenant_id", "user_id",
-            "session_id", "text", "traceback",
-        ]
-        for field in required:
-            assert field in payload, f"Missing field: {field}"
-
-        assert payload["service"] == "eagle-backend"
-        assert payload["environment"] == "test"
-        assert payload["error_type"] == "RuntimeError"
-        assert "nci-acme" in payload["text"]
+        # Payload is now a Teams Adaptive Card envelope
+        assert payload["type"] == "message"
+        assert "attachments" in payload
+        assert len(payload["attachments"]) == 1
+        card_str = str(payload)
+        # Key fields must appear somewhere in the card
+        assert "RuntimeError" in card_str
+        assert "nci-acme" in card_str
+        assert "500" in card_str
+        assert "/api/chat" in card_str
+        assert "EAGLE" in card_str
 
     def test_traceback_excluded_when_disabled(self):
         mod = _reload_module(ERROR_WEBHOOK_INCLUDE_TRACEBACK="false")
@@ -405,11 +407,15 @@ class TestBuildPayload:
         )
         assert "traceback" not in payload
 
-    def test_text_field_is_slack_compatible(self):
+    def test_payload_contains_status_and_path(self):
         mod = _reload_module()
         exc = RuntimeError("Internal server error")
         payload = mod._build_payload(
             path="/api/chat", method="POST", status_code=500, exc=exc,
             tenant_id="nci-acme",
         )
-        assert payload["text"].startswith("[EAGLE test] 500 POST /api/chat")
+        # Adaptive Card — status code and path must appear in the card
+        card_str = str(payload)
+        assert "500" in card_str
+        assert "/api/chat" in card_str
+        assert "nci-acme" in card_str

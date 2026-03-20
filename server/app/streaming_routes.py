@@ -81,6 +81,32 @@ def _emit_tool_timings(
         logger.debug("Failed to emit tool timing telemetry", exc_info=True)
 
 
+def _emit_tool_failures(
+    tool_failures: list[dict],
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+):
+    """Emit tool.error events to CloudWatch (fire-and-forget, never raises)."""
+    try:
+        from .telemetry.cloudwatch_emitter import emit_telemetry_event
+        for failure in tool_failures:
+            emit_telemetry_event(
+                event_type="tool.error",
+                tenant_id=tenant_id,
+                data={
+                    "tool_name": failure["tool_name"],
+                    "error_message": failure.get("error_message", ""),
+                    "duration_ms": failure.get("duration_ms", 0),
+                    "session_id": session_id or "",
+                },
+                session_id=session_id,
+                user_id=user_id,
+            )
+    except Exception:
+        logger.debug("Failed to emit tool failure telemetry", exc_info=True)
+
+
 async def stream_generator(
     message: str,
     tenant_id: str,
@@ -90,6 +116,7 @@ async def stream_generator(
     session_id: str | None = None,
     messages: list[dict] | None = None,
     package_context: Any = None,
+    username: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events from sdk_query_streaming() with real-time token streaming.
 
@@ -107,6 +134,7 @@ async def stream_generator(
     # Tool timing: track start times when tool_use arrives, compute duration on tool_result
     _tool_start_times: dict[str, float] = {}  # tool_name → perf_counter
     _tool_timings: list[dict] = []  # collected {tool_name, duration_ms}
+    _tool_failures: list[dict] = []  # collected {tool_name, error_message, duration_ms}
 
     # Persist user message to DynamoDB so conversation history works on next turn
     if session_id:
@@ -137,6 +165,7 @@ async def stream_generator(
             session_id=session_id,
             messages=messages,
             package_context=package_context,
+            username=username,
         )
         aiter = gen.__aiter__()
         pending_task = None
@@ -208,12 +237,26 @@ async def stream_generator(
                     continue
                 # Compute tool duration from start time
                 start_t = _tool_start_times.pop(tr_name, None)
-                if start_t is not None:
+                duration_ms = int((time.perf_counter() - start_t) * 1000) if start_t is not None else None
+                if duration_ms is not None:
                     _tool_timings.append({
                         "tool_name": tr_name,
-                        "duration_ms": int((time.perf_counter() - start_t) * 1000),
+                        "duration_ms": duration_ms,
                     })
-                await writer.write_tool_result(sse_queue, tr_name, chunk.get("result", {}))
+                # Detect tool failure from result content
+                result_data = chunk.get("result", {})
+                is_error = False
+                if isinstance(result_data, dict):
+                    is_error = result_data.get("is_error", False) or "error" in str(result_data.get("status", "")).lower()
+                elif isinstance(result_data, str):
+                    is_error = result_data.strip().lower().startswith("error")
+                if is_error:
+                    _tool_failures.append({
+                        "tool_name": tr_name,
+                        "error_message": str(result_data)[:500],
+                        "duration_ms": duration_ms,
+                    })
+                await writer.write_tool_result(sse_queue, tr_name, result_data)
                 yield await sse_queue.get()
 
             elif chunk_type == "state_update":
@@ -245,6 +288,9 @@ async def stream_generator(
                 # Include per-tool timings for frontend visibility
                 if _tool_timings:
                     complete_metadata["tool_timings"] = _tool_timings
+                # Include tool failures for frontend visibility
+                if _tool_failures:
+                    complete_metadata["tool_failures"] = _tool_failures
                 logger.debug("SSE complete: complete_text_len=%d full_parts=%d duration_ms=%d", len(complete_text), len(full_response_parts), duration_ms)
                 if not full_response_parts and complete_text:
                     full_response_parts.append(complete_text)
@@ -273,6 +319,35 @@ async def stream_generator(
                 yield await sse_queue.get()
                 # Emit tool timing telemetry to CloudWatch
                 _emit_tool_timings(_tool_timings, tenant_id, user_id, session_id, duration_ms)
+                _emit_tool_failures(_tool_failures, tenant_id, user_id, session_id)
+                # Score conversation quality
+                try:
+                    from .telemetry.conversation_scorer import score_conversation
+                    from .telemetry.cloudwatch_emitter import emit_telemetry_event
+                    quality = score_conversation(
+                        completed=True,
+                        error_count=0,
+                        tool_timings=_tool_timings,
+                        tool_failures=_tool_failures,
+                        response_text="".join(full_response_parts),
+                        tools_called=complete_metadata.get("tools_called", []),
+                        user_message=message,
+                        duration_ms=duration_ms,
+                    )
+                    emit_telemetry_event(
+                        event_type="conversation.quality",
+                        tenant_id=tenant_id,
+                        data={
+                            "score": quality["score"],
+                            "breakdown": quality["breakdown"],
+                            "flags": quality["flags"],
+                            "session_id": session_id or "",
+                        },
+                        session_id=session_id,
+                        user_id=user_id,
+                    )
+                except Exception:
+                    logger.debug("Failed to score conversation quality", exc_info=True)
                 return
 
             elif chunk_type == "error":
@@ -301,6 +376,7 @@ async def stream_generator(
         await writer.write_complete(sse_queue, metadata={"duration_ms": fallback_duration_ms})
         yield await sse_queue.get()
         _emit_tool_timings(_tool_timings, tenant_id, user_id, session_id, fallback_duration_ms)
+        _emit_tool_failures(_tool_failures, tenant_id, user_id, session_id)
 
     except asyncio.CancelledError:
         logger.debug("Streaming client disconnected user=%s session=%s", user_id, session_id)
@@ -363,6 +439,7 @@ def create_streaming_router(
 
         tenant_id = user.tenant_id
         user_id = user.user_id
+        username = user.username or user.user_id
 
         # Use tenant_context from message body if provided, else from auth
         if message.tenant_context:
@@ -419,6 +496,7 @@ def create_streaming_router(
                 session_id=message.session_id,
                 messages=history,
                 package_context=resolved_package_context,
+                username=username,
             ),
             media_type="text/event-stream",
             headers={
