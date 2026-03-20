@@ -86,6 +86,7 @@ class TemplateMapping:
     placeholder_map: Dict[str, str] = field(default_factory=dict)
     alternates: List[str] = field(default_factory=list)
     description: str = ""
+    display_name: str = ""  # Curated card title; falls back to auto-clean
     section_schema: Optional[Any] = field(default=None, repr=False)  # TemplateSchema
 
 
@@ -109,6 +110,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         },
         alternates=["SOW_Template_Standard.docx"],
         description="Statement of Work template",
+        display_name="Statement of Work (SOW)",
     ),
     "igce": TemplateMapping(
         doc_type="igce",
@@ -129,6 +131,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "4.b. IGE for Services based on Catalog Price.xlsx",
         ],
         description="Independent Government Cost Estimate spreadsheet",
+        display_name="IGCE — Commercial Organizations",
     ),
     "market_research": TemplateMapping(
         doc_type="market_research",
@@ -148,6 +151,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "FY26 Streamlined Market Research Report.docx",
         ],
         description="Market Research Report template",
+        display_name="Market Research Report",
     ),
     "justification": TemplateMapping(
         doc_type="justification",
@@ -167,6 +171,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "6.a. Single Source J&A - up to SAT.docx",
         ],
         description="Justification & Approval (J&A) for sole source",
+        display_name="Justification & Approval (J&A) — Over $350K",
     ),
     "acquisition_plan": TemplateMapping(
         doc_type="acquisition_plan",
@@ -191,6 +196,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "Attch #1 - HHS Streamlined Acquisition Plan MS WORD Template_fillable_ver 2025.05.07_FINAL VERSION.docx",
         ],
         description="Streamlined Acquisition Plan template",
+        display_name="Streamlined Acquisition Plan",
     ),
     "cor_certification": TemplateMapping(
         doc_type="cor_certification",
@@ -207,6 +213,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         },
         alternates=["COR_Designation_Letter_Template.docx"],
         description="COR Appointment/Certification memorandum",
+        display_name="COR Appointment Memorandum",
     ),
     # ── New doc types from S3 inventory ──
     "son_products": TemplateMapping(
@@ -216,6 +223,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         placeholder_map={},
         alternates=[],
         description="Statement of Need — Products (Equipment and Supplies)",
+        display_name="Statement of Need — Products",
     ),
     "son_services": TemplateMapping(
         doc_type="son_services",
@@ -224,6 +232,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         placeholder_map={},
         alternates=[],
         description="Statement of Need — Services based on Catalog Pricing",
+        display_name="Statement of Need — Services",
     ),
     "buy_american": TemplateMapping(
         doc_type="buy_american",
@@ -232,6 +241,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         placeholder_map={},
         alternates=["DF_Buy_American_Other_Exceptions_Template.docx"],
         description="Buy American Act Determination Form",
+        display_name="Buy American — Non-Availability",
     ),
     "subk_plan": TemplateMapping(
         doc_type="subk_plan",
@@ -240,6 +250,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         placeholder_map={},
         alternates=["hhs_subk_review_form.docx"],
         description="HHS Subcontracting Plan template",
+        display_name="Subcontracting Plan",
     ),
     "conference_request": TemplateMapping(
         doc_type="conference_request",
@@ -251,6 +262,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "Attachment D - Promotional Item Approval Form 20172112_508.docx",
         ],
         description="NIH Conference/Event Request forms",
+        display_name="Conference Request & Approval",
     ),
 }
 
@@ -515,17 +527,83 @@ def _get_file_type(filename: str) -> str:
     return "unknown"
 
 
+ALTERNATE_DISPLAY_NAMES: Dict[str, str] = {
+    # IGCE variants
+    "02.D_IGCE_for_Educational_Institutions.xlsx": "IGCE — Educational Institutions",
+    "03.D_IGCE_for_Nonprofit_Organizations.xlsx": "IGCE — Nonprofit Organizations",
+    "4.a. IGE for Products.xlsx": "IGE — Products",
+    "4.b. IGE for Services based on Catalog Price.xlsx": "IGE — Services (Catalog Price)",
+    # SOW
+    "SOW_Template_Standard.docx": "SOW — Standard Template",
+    # Market Research
+    "Market_Research_Report_Template.docx": "Market Research Report",
+    "Attachment 1 - HHS Market Research Template.docx": "HHS Market Research Template",
+    "FY26 Streamlined Market Research Report.docx": "Market Research Report (FY26)",
+    # J&A
+    "Justification_and_Approval_Under_350K_Template.docx": "J&A — Under $350K",
+    "Limited_Sources_J_and_A_Template.docx": "J&A — Limited Sources",
+    "6.a. Single Source J&A - up to SAT.docx": "J&A — Single Source (Under SAT)",
+    # Acquisition Plan
+    "Acquisition_Plan_Full_Template.docx": "Full Acquisition Plan",
+    "01.C_NCI_OA_Task_Order_Acquisition_Plan.docx": "NCI Task Order Acquisition Plan",
+    "1.a. AP Under SAT.docx": "Acquisition Plan — Under SAT",
+    "1.b AP Above SAT.docx": "Acquisition Plan — Above SAT",
+    "Streamlined Acquisition Plan (S-AP).docx": "Streamlined Acquisition Plan (S-AP)",
+    "Attch #1 - HHS Streamlined Acquisition Plan MS WORD Template_fillable_ver 2025.05.07_FINAL VERSION.docx": "HHS Streamlined Acquisition Plan (Fillable)",
+    # COR
+    "COR_Designation_Letter_Template.docx": "COR Designation Letter",
+    # Buy American
+    "DF_Buy_American_Other_Exceptions_Template.docx": "Buy American — Other Exceptions",
+    # SubK
+    "hhs_subk_review_form.docx": "HHS Subcontracting Review Form",
+    # Conference
+    "Attachment B - NIH Conference Request for Waiver 20151004_508.docx": "NIH Conference Waiver Request",
+    "Attachment D - Promotional Item Approval Form 20172112_508.docx": "Promotional Item Approval Form",
+}
+
+# Acronyms that .title() mangles — maps wrong form to correct form
+_ACRONYM_FIXES: Dict[str, str] = {
+    "Hhs": "HHS", "Nih": "NIH", "Nci": "NCI", "Igce": "IGCE",
+    "Ige": "IGE", "Cor": "COR", "Son": "SON", "Sat": "SAT",
+    "Sow": "SOW", "Oa": "OA", "Subk": "SubK", "Df": "DF",
+    "Fy26": "FY26", "Fy25": "FY25", "Fy24": "FY24",
+    "J&a": "J&A", "S-Ap": "S-AP", "Bpa": "BPA",
+}
+
+
 def _build_display_name(filename: str) -> str:
     """Build a human-readable display name from filename.
 
-    Delegates to _clean_filename_for_title for consistent naming,
-    then strips common template prefixes like '01.D_' or '1.a.'.
+    Priority: curated alternate names > registry display_name > auto-clean.
     """
+    # 1. Check curated alternate names
+    if filename in ALTERNATE_DISPLAY_NAMES:
+        return ALTERNATE_DISPLAY_NAMES[filename]
+
+    # 2. Check primary registry entries
+    for mapping in TEMPLATE_REGISTRY.values():
+        if mapping.s3_filename == filename and mapping.display_name:
+            return mapping.display_name
+
+    # 3. Auto-clean with improved logic
     from .document_classification_service import _clean_filename_for_title
     name = _clean_filename_for_title(filename)
-    # Also strip common template numbering prefixes (e.g., "01.D ", "1.A. ")
+
+    # Strip numbering prefixes (e.g., "01.D ", "1.A. ", "3.a. ")
     name = re.sub(r"^\d+\.?[a-zA-Z]?\.?\s*", "", name)
-    return name.strip() or "Untitled Template"
+
+    # Strip noise words
+    for pattern in [r"\bTemplate\b", r"\bEagle\b", r"\bAttachment\s+[A-Z]\b"]:
+        name = re.sub(pattern, "", name, flags=re.IGNORECASE)
+
+    # Restore acronyms that .title() mangled
+    for wrong, right in _ACRONYM_FIXES.items():
+        name = re.sub(rf"\b{re.escape(wrong)}\b", right, name)
+
+    # Clean trailing/leading whitespace, dashes, em-dashes
+    name = re.sub(r"\s+", " ", name).strip().strip("-— ")
+
+    return name or "Untitled Template"
 
 
 def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None) -> List[Dict[str, Any]]:
