@@ -297,22 +297,32 @@ def test_post_docx_edit_updates_workspace_docx_preview_blocks():
     app = main_module.app
     s3 = _build_s3_mock()
 
-    with patch("boto3.client", return_value=s3), patch(
-        "app.document_ai_edit_service.write_document_changelog_entry"
-    ):
-        headers = _auth_header()
-        with TestClient(app) as client:
-            get_resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.docx?content=true", headers=headers)
-            assert get_resp.status_code == 200
-            blocks = get_resp.json()["preview_blocks"]
-            paragraph_block = next(block for block in blocks if block["kind"] == "paragraph")
-            paragraph_block["text"] = "Updated scope paragraph"
+    # Patch _get_s3 via the function's own globals (module reload makes
+    # sys.modules["app.document_ai_edit_service"] stale, so string-based
+    # patch targets the wrong module object).
+    _save_fn = main_module.save_docx_preview_edits
+    _orig_get_s3 = _save_fn.__globals__["_get_s3"]
+    _save_fn.__globals__["_get_s3"] = lambda: s3
 
-            save_resp = client.post(
-                "/api/documents/docx-edit/eagle/dev-tenant/dev-user/documents/test.docx",
-                json={"preview_blocks": blocks, "preview_mode": "docx_blocks"},
-                headers=headers,
-            )
+    try:
+        with patch("boto3.client", return_value=s3), patch.dict(
+            _save_fn.__globals__, {"write_document_changelog_entry": lambda **kw: None}
+        ):
+            headers = _auth_header()
+            with TestClient(app) as client:
+                get_resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.docx?content=true", headers=headers)
+                assert get_resp.status_code == 200
+                blocks = get_resp.json()["preview_blocks"]
+                paragraph_block = next(block for block in blocks if block["kind"] == "paragraph")
+                paragraph_block["text"] = "Updated scope paragraph"
+
+                save_resp = client.post(
+                    "/api/documents/docx-edit/eagle/dev-tenant/dev-user/documents/test.docx",
+                    json={"preview_blocks": blocks, "preview_mode": "docx_blocks"},
+                    headers=headers,
+                )
+    finally:
+        _save_fn.__globals__["_get_s3"] = _orig_get_s3
 
     assert save_resp.status_code == 200
     data = save_resp.json()
@@ -326,26 +336,35 @@ def test_post_xlsx_edit_updates_workspace_xlsx_preview_cells():
     app = main_module.app
     s3 = _build_s3_mock()
 
-    with patch("boto3.client", return_value=s3), patch(
-        "app.spreadsheet_edit_service.write_document_changelog_entry"
-    ):
-        headers = _auth_header()
-        with TestClient(app) as client:
-            get_resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.xlsx?content=true", headers=headers)
-            assert get_resp.status_code == 200
-            sheet = get_resp.json()["preview_sheets"][0]
-            editable_cell = next(
-                cell
-                for row in sheet["rows"]
-                for cell in row["cells"]
-                if cell["editable"] and cell["cell_ref"] == "A2"
-            )
+    # Patch _get_s3 via the function's own globals (module reload makes
+    # sys.modules stale, so string-based patch targets the wrong object).
+    _save_fn = main_module.save_xlsx_preview_edits
+    _orig_get_s3 = _save_fn.__globals__["_get_s3"]
+    _save_fn.__globals__["_get_s3"] = lambda: s3
 
-            save_resp = client.post(
-                "/api/documents/xlsx-edit/eagle/dev-tenant/dev-user/documents/test.xlsx",
-                json={"cell_edits": [{"sheet_id": sheet["sheet_id"], "cell_ref": editable_cell["cell_ref"], "value": "Updated CK2"}]},
-                headers=headers,
-            )
+    try:
+        with patch("boto3.client", return_value=s3), patch.dict(
+            _save_fn.__globals__, {"write_document_changelog_entry": lambda **kw: None}
+        ):
+            headers = _auth_header()
+            with TestClient(app) as client:
+                get_resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.xlsx?content=true", headers=headers)
+                assert get_resp.status_code == 200
+                sheet = get_resp.json()["preview_sheets"][0]
+                editable_cell = next(
+                    cell
+                    for row in sheet["rows"]
+                    for cell in row["cells"]
+                    if cell["editable"] and cell["cell_ref"] == "A2"
+                )
+
+                save_resp = client.post(
+                    "/api/documents/xlsx-edit/eagle/dev-tenant/dev-user/documents/test.xlsx",
+                    json={"cell_edits": [{"sheet_id": sheet["sheet_id"], "cell_ref": editable_cell["cell_ref"], "value": "Updated CK2"}]},
+                    headers=headers,
+                )
+    finally:
+        _save_fn.__globals__["_get_s3"] = _orig_get_s3
 
     assert save_resp.status_code == 200
     data = save_resp.json()

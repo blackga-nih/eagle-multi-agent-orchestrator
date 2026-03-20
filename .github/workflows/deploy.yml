@@ -155,6 +155,12 @@ jobs:
         cache: 'pip'
         cache-dependency-path: server/requirements.txt
 
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      with:
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
     - name: Install dependencies
       run: pip install -r server/requirements.txt pytest pytest-asyncio
 
