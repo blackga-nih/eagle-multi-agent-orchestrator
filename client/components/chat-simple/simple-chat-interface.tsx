@@ -1,18 +1,21 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import SimpleMessageList from './simple-message-list';
 import SimpleWelcome from './simple-welcome';
 import SimpleQuickActions from './simple-quick-actions';
 import SlashCommandPicker from '@/components/chat/slash-command-picker';
 import CommandPalette from './command-palette';
-import { useAgentStream, ToolUseEvent, ServerToolResult } from '@/hooks/use-agent-stream';
 import { useSlashCommands } from '@/hooks/use-slash-commands';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
 import { useFeedback } from '@/contexts/feedback-context';
+import { useChatRuntimeContext } from '@/contexts/chat-runtime-context';
+import { useChatRuntime } from '@/hooks/use-chat-runtime';
+import { getChatStreamManager } from '@/lib/chat-stream-manager';
 import { SlashCommand } from '@/lib/slash-commands';
 import { ChatMessage, DocumentInfo } from '@/types/chat';
+import { AuditLogEntry } from '@/types/stream';
 import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
@@ -62,24 +65,27 @@ function dedupeDocuments(docs: DocumentInfo[]): DocumentInfo[] {
 
 export default function SimpleChatInterface() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
-    // In-flight streaming message kept separate — avoids React batching/duplicate-key issues.
-    const [streamingMsg, setStreamingMsg] = useState<ChatMessage | null>(null);
-    const streamingMsgRef = useRef<ChatMessage | null>(null);
     const [input, setInput] = useState('');
     const [isLoadingSession, setIsLoadingSession] = useState(true);
     const [documents, setDocuments] = useState<Record<string, DocumentInfo[]>>({});
-
-    // Tool calls grouped by message ID — populated as SSE tool_use events arrive.
-    const [toolCallsByMsg, setToolCallsByMsg] = useState<ToolCallsByMessageId>({});
-    // Agent status text shown during model thinking / tool execution
-    const [agentStatus, setAgentStatus] = useState<string | null>(null);
     const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
-    // Stable ID for the current streaming message — reset on each sendQuery call.
-    const streamingMsgIdRef = useRef<string>(`stream-${Date.now()}`);
+    // Agent logs for the activity panel
+    const [logs, setLogs] = useState<AuditLogEntry[]>([]);
 
     const { currentSessionId, saveSession, loadSession, writeMessageOptimistic, renameSession } = useSession();
     const { getToken } = useAuth();
     const { setSnapshot } = useFeedback();
+
+    // Chat runtime — per-session streaming state via reducer
+    const { dispatch } = useChatRuntimeContext();
+    const runtime = useChatRuntime(currentSessionId);
+    const streamManagerRef = useRef(getChatStreamManager());
+
+    // Derived streaming state from runtime
+    const streamingMsg = runtime.streamingMessage;
+    const toolCallsByMsg = runtime.toolCallsByMsg;
+    const agentStatus = runtime.agentStatus;
+    const isStreaming = runtime.isStreaming;
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const lastAssistantIdRef = useRef<string | null>(null);
@@ -87,10 +93,6 @@ export default function SimpleChatInterface() {
     const titleGeneratedRef = useRef<Set<string>>(new Set());
     /** Store the first user message for title generation. */
     const firstUserMsgRef = useRef<string | null>(null);
-    /** Track the session ID that the active request belongs to. */
-    const activeRequestSessionIdRef = useRef<string | null>(null);
-    /** Track the unique request ID for the active stream. */
-    const activeRequestIdRef = useRef<string | null>(null);
     /** Ctrl+K command palette state. */
     const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
     /** Document upload state. */
@@ -117,13 +119,8 @@ export default function SimpleChatInterface() {
             return;
         }
         // Clear transient state from previous session
-        setStreamingMsg(null);
-        streamingMsgRef.current = null;
-        setAgentStatus(null);
-        setToolCallsByMsg({});
         lastAssistantIdRef.current = null;
-        activeRequestSessionIdRef.current = null;
-        activeRequestIdRef.current = null;
+        setLogs([]);
 
         const sessionData = loadSession(currentSessionId);
         if (sessionData) {
@@ -183,35 +180,6 @@ export default function SimpleChatInterface() {
         closeCommandPicker,
     } = useSlashCommands({ onCommandSelect: handleCommandSelect });
 
-    // -----------------------------------------------------------------------
-    // Tool call tracking
-    // -----------------------------------------------------------------------
-
-    const upsertToolCall = useCallback((
-        msgId: string,
-        toolUseId: string,
-        patch: Partial<TrackedToolCall>,
-    ) => {
-        setToolCallsByMsg((prev) => {
-            const existing = prev[msgId] ?? [];
-            const idx = existing.findIndex((t) => t.toolUseId === toolUseId);
-            if (idx === -1) {
-                const newEntry: TrackedToolCall = {
-                    toolUseId,
-                    toolName: patch.toolName ?? '',
-                    input: patch.input ?? {},
-                    status: patch.status ?? 'pending',
-                    isClientSide: patch.isClientSide ?? false,
-                    result: patch.result,
-                };
-                return { ...prev, [msgId]: [...existing, newEntry] };
-            }
-            const updated = existing.slice();
-            updated[idx] = { ...updated[idx], ...patch };
-            return { ...prev, [msgId]: updated };
-        });
-    }, []);
-
     /** Right panel state. */
     const [isPanelOpen, setIsPanelOpen] = useState(true);
 
@@ -220,199 +188,90 @@ export default function SimpleChatInterface() {
 
     const { track } = useAnalytics();
 
-    // Agent stream
-    const { sendQuery, isStreaming, error, logs, clearLogs, addUserInputLog } = useAgentStream({
-        getToken,
-        sessionId: currentSessionId ?? undefined,
+    // Streaming error from runtime
+    const error = runtime.error;
 
-        onMessage: (msg) => {
-            if (!activeRequestIdRef.current) return;
-            const newMessage: ChatMessage = {
-                id: msg.id,
-                role: 'assistant',
-                content: msg.content,
-                timestamp: msg.timestamp,
-                reasoning: msg.reasoning,
-                agent_id: msg.agent_id,
-                agent_name: msg.agent_name,
-            };
-            lastAssistantIdRef.current = msg.id;
-            streamingMsgRef.current = newMessage;
-            setStreamingMsg(newMessage);
-        },
+    // Log helpers
+    const clearLogs = useCallback(() => setLogs([]), []);
+    const addUserInputLog = useCallback((content: string) => {
+        const entry: AuditLogEntry = {
+            id: `log-${Date.now()}`,
+            type: 'text',
+            agent_id: 'user',
+            agent_name: 'User',
+            content,
+            timestamp: new Date().toISOString(),
+        };
+        setLogs((prev) => [...prev, entry]);
+    }, []);
 
-        onComplete: (info) => {
-            if (!activeRequestIdRef.current) return;
-            setAgentStatus(null);
-            const toolResults = info?.toolResults;
-            if (info?.durationMs) {
-                console.debug(`[EAGLE] Response completed in ${info.durationMs}ms`, info.toolTimings);
+    // -----------------------------------------------------------------------
+    // Commit streaming message when generation completes
+    // -----------------------------------------------------------------------
+    const prevStatusRef = useRef(runtime.status);
+    useEffect(() => {
+        const wasStreaming = prevStatusRef.current === 'streaming' || prevStatusRef.current === 'stopping';
+        prevStatusRef.current = runtime.status;
+
+        if (wasStreaming && runtime.status === 'idle') {
+            // The stream manager dispatched generation/complete — commit the final message
+            const finalMsg = streamingMsg;
+            if (finalMsg) {
+                lastAssistantIdRef.current = finalMsg.id;
+                setMessages((prev) => [...prev, finalMsg]);
             }
-            const completedMsg = streamingMsgRef.current;
-            if (completedMsg) {
-                lastAssistantIdRef.current = completedMsg.id;
-                setMessages((prev) => [...prev, completedMsg]);
 
-                // Migrate tool calls from the streaming ID to the committed message ID,
-                // mark pending tools as "done", and merge any server-side tool results.
-                const streamId = streamingMsgIdRef.current;
-                setToolCallsByMsg((prev) => {
-                    const calls = prev[streamId] ?? prev[completedMsg.id] ?? [];
-                    if (calls.length === 0) return prev;
-
-                    // Build a lookup: toolName → result (FIFO — first result matches first call)
-                    const resultsByName = new Map<string, ServerToolResult[]>();
-                    if (toolResults) {
-                        for (const tr of toolResults) {
-                            const arr = resultsByName.get(tr.toolName) ?? [];
-                            arr.push(tr);
-                            resultsByName.set(tr.toolName, arr);
-                        }
-                    }
-
-                    const finalized = calls.map((tc) => {
-                        if (tc.isClientSide) return tc;
-                        // Try to match a server-side result by name
-                        const pending = resultsByName.get(tc.toolName);
-                        const matched = pending?.shift();
-                        if (matched) {
-                            return { ...tc, status: 'done' as const, result: matched.result as ClientToolResult };
-                        }
-                        // No result — just mark done
-                        if (tc.status === 'pending' || tc.status === 'running') {
-                            return { ...tc, status: 'done' as const };
-                        }
-                        return tc;
-                    });
-
-                    const next = { ...prev };
-                    delete next[streamId];
-                    next[completedMsg.id] = finalized;
-                    return next;
-                });
-
-                // Migrate any document cards attached to the temporary stream id
-                // onto the committed assistant message id.
+            // Merge runtime documents into local documents state
+            for (const [msgId, docs] of Object.entries(runtime.documentsByMsg)) {
                 setDocuments((prev) => {
-                    const streamDocs = prev[streamId] ?? [];
-                    const committedDocs = prev[completedMsg.id] ?? [];
-                    if (streamDocs.length === 0 && committedDocs.length === 0) {
-                        return prev;
-                    }
-
-                    const merged = dedupeDocuments([...committedDocs, ...streamDocs]);
-                    const next = { ...prev, [completedMsg.id]: merged };
-                    if (streamId !== completedMsg.id) {
-                        delete next[streamId];
-                    }
-                    return next;
+                    const existing = prev[msgId] ?? [];
+                    const merged = dedupeDocuments([...existing, ...docs]);
+                    if (merged.length === existing.length) return prev;
+                    return { ...prev, [msgId]: merged };
                 });
+            }
 
-                // AI title generation — fire-and-forget on first assistant response
-                const sid = activeRequestSessionIdRef.current;
-                const userMsg = firstUserMsgRef.current;
-                if (sid && userMsg && !titleGeneratedRef.current.has(sid)) {
-                    titleGeneratedRef.current.add(sid);
-                    fetch('/api/sessions/generate-title', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            message: userMsg,
-                            response_snippet: completedMsg.content.slice(0, 200),
-                        }),
+            // AI title generation — fire-and-forget on first assistant response
+            const sid = currentSessionId;
+            const userMsg = firstUserMsgRef.current;
+            if (sid && userMsg && finalMsg && !titleGeneratedRef.current.has(sid)) {
+                titleGeneratedRef.current.add(sid);
+                fetch('/api/sessions/generate-title', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: userMsg,
+                        response_snippet: finalMsg.content.slice(0, 200),
+                    }),
+                })
+                    .then((res) => res.json())
+                    .then((data) => {
+                        if (data.title && data.title !== 'New Session') {
+                            renameSession(sid, data.title);
+                        }
                     })
-                        .then((res) => res.json())
-                        .then((data) => {
-                            if (data.title && data.title !== 'New Session') {
-                                renameSession(sid, data.title);
-                            }
-                        })
-                        .catch(() => { /* title generation is best-effort */ });
-                }
+                    .catch(() => { /* title generation is best-effort */ });
             }
-            streamingMsgRef.current = null;
-            setStreamingMsg(null);
-        },
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [runtime.status]);
 
-        onError: () => {
-            if (!activeRequestIdRef.current) return;
-            setAgentStatus(null);
-            streamingMsgRef.current = null;
-            setStreamingMsg(null);
-        },
+    // Stop generation handler
+    const handleStopGeneration = useCallback(() => {
+        streamManagerRef.current.stopQuery(currentSessionId);
+        dispatch({ type: 'generation/stopping', sessionId: currentSessionId });
+    }, [currentSessionId, dispatch]);
 
-        onDocumentGenerated: (doc) => {
-            if (!activeRequestIdRef.current) return;
-            // Attach to the active streaming message when tool_result arrives
-            // before the first text chunk sets lastAssistantIdRef.
-            const attachTo = lastAssistantIdRef.current ?? streamingMsgIdRef.current;
-            setDocuments((prev) => {
-                const existing = prev[attachTo] ?? [];
-                const merged = dedupeDocuments([...existing, doc]);
-                return {
-                    ...prev,
-                    [attachTo]: merged,
-                };
-            });
-
-            // Persist to localStorage for Packages & Documents pages
-            const sid = activeRequestSessionIdRef.current;
-            if (sid) {
-                const title =
-                    messages.find((m) => m.role === 'user')?.content.slice(0, 80) ||
-                    'Untitled Package';
-                saveGeneratedDocument(doc, sid, title);
+    // Esc to stop — only for the visible session
+    useEffect(() => {
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && isStreaming) {
+                handleStopGeneration();
             }
-        },
-
-        onToolUse: (toolEvent: ToolUseEvent) => {
-            if (!activeRequestIdRef.current) return;
-            // Associate tool calls with the current streaming message ID.
-            const parentId = streamingMsgIdRef.current;
-
-            if (toolEvent.result === undefined) {
-                // Tool is starting — create entry with pending/running status.
-                upsertToolCall(parentId, toolEvent.toolUseId, {
-                    toolName: toolEvent.toolName,
-                    input: toolEvent.input,
-                    status: toolEvent.isClientSide ? 'running' : 'pending',
-                    isClientSide: toolEvent.isClientSide,
-                    result: undefined,
-                });
-            } else {
-                // Client-side tool finished — update by exact toolUseId.
-                // Server-side results are merged in onComplete via toolResults.
-                const status: ToolStatus = toolEvent.result.success ? 'done' : 'error';
-                upsertToolCall(parentId, toolEvent.toolUseId, {
-                    status,
-                    result: toolEvent.result,
-                });
-            }
-        },
-
-        onToolResult: (toolName, result) => {
-            if (!activeRequestIdRef.current) return;
-            // Immediately update matching tool card to 'done' during streaming
-            const parentId = streamingMsgIdRef.current;
-            setToolCallsByMsg((prev) => {
-                const calls = prev[parentId] ?? [];
-                const idx = calls.findIndex((tc) => tc.toolName === toolName && tc.status !== 'done');
-                if (idx === -1) return prev;
-                const updated = calls.slice();
-                updated[idx] = { ...updated[idx], status: 'done', result: result as ClientToolResult };
-                return { ...prev, [parentId]: updated };
-            });
-        },
-
-        onAgentStatus: (status) => {
-            if (!activeRequestIdRef.current) return;
-            setAgentStatus(status);
-        },
-
-        onStateUpdate: (metadata) => {
-            handlePackageMetadata(metadata);
-        },
-    });
+        };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [isStreaming, handleStopGeneration]);
 
 
     // Auto-resize textarea — show scrollbar only when content exceeds max height
@@ -474,17 +333,10 @@ export default function SimpleChatInterface() {
             timestamp: new Date(),
         };
         lastAssistantIdRef.current = null;
-        // Clear stale status from previous turn so it doesn't flash briefly
-        setAgentStatus(null);
         // Capture first user message for AI title generation
         if (messages.length === 0) {
             firstUserMsgRef.current = input;
         }
-        // Reset streaming message ID for the new turn
-        streamingMsgIdRef.current = `stream-${Date.now()}`;
-        // Capture session at send time so callbacks route to the correct thread
-        activeRequestSessionIdRef.current = currentSessionId;
-        activeRequestIdRef.current = crypto.randomUUID();
         setMessages((prev) => [...prev, userMessage]);
         // Log user input to agent logs panel
         addUserInputLog(input);
@@ -493,7 +345,24 @@ export default function SimpleChatInterface() {
         const query = input;
         setInput('');
 
-        await sendQuery(query, currentSessionId, packageState.packageId ?? undefined, streamingMsgIdRef.current);
+        // Start streaming via the ChatStreamManager — dispatches to runtime reducer
+        streamManagerRef.current.startQuery({
+            sessionId: currentSessionId,
+            query,
+            packageId: packageState.packageId ?? undefined,
+            getToken: async () => {
+                const t = await getToken();
+                return t ?? '';
+            },
+            dispatch,
+            onLog: (entry) => setLogs((prev) => [...prev, entry]),
+            onDocumentGenerated: (sid, doc) => {
+                const title =
+                    messages.find((m) => m.role === 'user')?.content.slice(0, 80) ||
+                    'Untitled Package';
+                saveGeneratedDocument(doc, sid, title);
+            },
+        });
     };
 
     const insertText = (text: string) => {
@@ -503,6 +372,16 @@ export default function SimpleChatInterface() {
 
     const displayMessages = streamingMsg ? [...messages, streamingMsg] : messages;
     const hasMessages = displayMessages.length > 0;
+
+    // Merge local documents (uploads) with runtime documents (streaming)
+    const mergedDocuments = useMemo(() => {
+        const result = { ...documents };
+        for (const [msgId, docs] of Object.entries(runtime.documentsByMsg)) {
+            const existing = result[msgId] ?? [];
+            result[msgId] = dedupeDocuments([...existing, ...docs]);
+        }
+        return result;
+    }, [documents, runtime.documentsByMsg]);
 
     const handlePaletteSelect = (cmd: SlashCommand) => {
         setInput(cmd.name + ' ');
@@ -686,11 +565,11 @@ export default function SimpleChatInterface() {
                     <SimpleMessageList
                         messages={displayMessages}
                         isTyping={isStreaming}
-                        documents={documents}
+                        documents={mergedDocuments}
                         sessionId={currentSessionId}
                         toolCallsByMsg={toolCallsByMsg}
                         agentStatus={agentStatus}
-                        pendingToolCalls={toolCallsByMsg[streamingMsgIdRef.current] ?? []}
+                        pendingToolCalls={runtime.streamingMessageId ? (toolCallsByMsg[runtime.streamingMessageId] ?? []) : []}
                     />
                 )}
 
@@ -760,13 +639,23 @@ export default function SimpleChatInterface() {
                                 disabled={isStreaming}
                                 getToken={getToken}
                             />
-                            <button
-                                onClick={handleSend}
-                                disabled={!input.trim() || isStreaming}
-                                className="p-3 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-all shadow-md shrink-0"
-                            >
-                                <span className="text-base">&#10148;</span>
-                            </button>
+                            {isStreaming ? (
+                                <button
+                                    onClick={handleStopGeneration}
+                                    className="p-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-md shrink-0"
+                                    title="Stop generating (Esc)"
+                                >
+                                    <span className="text-base">&#9632;</span>
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={handleSend}
+                                    disabled={!input.trim()}
+                                    className="p-3 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-all shadow-md shrink-0"
+                                >
+                                    <span className="text-base">&#10148;</span>
+                                </button>
+                            )}
                         </div>
                         <p className="text-center text-[10px] text-[#8896A6] mt-2">
                             EAGLE &middot; National Cancer Institute
@@ -782,7 +671,7 @@ export default function SimpleChatInterface() {
             <ActivityPanel
                 logs={logs}
                 clearLogs={clearLogs}
-                documents={documents}
+                documents={mergedDocuments}
                 sessionId={currentSessionId ?? ''}
                 packageState={packageState}
                 isStreaming={isStreaming}
