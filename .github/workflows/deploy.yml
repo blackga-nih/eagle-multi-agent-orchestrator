@@ -127,7 +127,6 @@ jobs:
 
     - name: TypeScript check
       id: tsc
-      continue-on-error: true
       run: cd client && npx tsc --noEmit 2>&1
 
     - name: Summarize
