@@ -35,7 +35,20 @@ Parse `FLAGS` to determine mode and options:
 
 ## Workflow
 
-### Step 0: Setup + Detect Changes
+### Step 0: Auth Check + Setup + Detect Changes
+
+**Auth check is mandatory before anything else.** Run both checks:
+
+```bash
+aws sts get-caller-identity --profile eagle 2>&1
+gh auth status 2>&1
+```
+
+If AWS SSO is expired: `AWS_PROFILE=eagle aws sso login` and re-check.
+If `gh` is not authenticated: `gh auth login` and re-check.
+**STOP** if either fails — nothing downstream will work without auth.
+
+Then:
 
 1. Get timestamp and commit SHA
 2. Run `git status` and `git diff --name-only` to classify changes:
