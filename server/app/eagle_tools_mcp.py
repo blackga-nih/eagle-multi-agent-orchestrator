@@ -32,10 +32,10 @@ from typing import Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-# Import execute_tool from the legacy agentic_service dispatcher
-# (this is the canonical tool dispatch table — sdk_agentic_service delegates here)
+# Import through a compatibility boundary so active code no longer depends on
+# the deprecated agentic_service module path directly.
 try:
-    from .agentic_service import execute_tool as _execute_tool
+    from .tools.legacy_dispatch import execute_tool as _execute_tool
 except ImportError:
     # Allow running outside the package (e.g., in tests)
     import sys
@@ -43,7 +43,7 @@ except ImportError:
     _app_dir = os.path.dirname(os.path.abspath(__file__))
     if _app_dir not in sys.path:
         sys.path.insert(0, _app_dir)
-    from agentic_service import execute_tool as _execute_tool
+    from tools.legacy_dispatch import execute_tool as _execute_tool
 
 logger = logging.getLogger("eagle.tools_mcp")
 

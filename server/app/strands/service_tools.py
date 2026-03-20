@@ -249,7 +249,7 @@ def build_kb_service_tools(
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
     """Build KB tools with proper named parameters so Bedrock models send structured args."""
-    from ..agentic_service import _exec_search_far
+    from ..tools.strands_tools import exec_search_far
     from ..tools.knowledge_tools import exec_knowledge_fetch, exec_knowledge_search
 
     def _emit(name: str, result: dict) -> None:
@@ -275,7 +275,7 @@ def build_kb_service_tools(
             query: Search query — topic, clause number, or keyword
             parts: Optional list of FAR part numbers to filter (e.g. ["6", "16"])
         """
-        result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
+        result = exec_search_far({"query": query, "parts": parts}, tenant_id)
         _emit("search_far", result)
         return json.dumps(result, indent=2, default=str)
 
@@ -341,7 +341,7 @@ def build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
     so they can retrieve actual documents instead of relying solely on
     parametric knowledge.
     """
-    from ..agentic_service import _exec_search_far
+    from ..tools.strands_tools import exec_search_far
     from ..tools.knowledge_tools import exec_knowledge_fetch, exec_knowledge_search
 
     @tool(name="knowledge_search")
@@ -399,7 +399,7 @@ def build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
             query: Search query — topic, clause number, or keyword
             parts: Optional list of FAR part numbers to filter (e.g. ["6", "16"])
         """
-        result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
+        result = exec_search_far({"query": query, "parts": parts}, tenant_id)
         return json.dumps(result, indent=2, default=str)
 
     return [kb_search, kb_fetch, far_search]
@@ -486,8 +486,9 @@ def build_all_service_tools(
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
     """Build 14 service @tool functions with proper named parameters."""
-    from ..agentic_service import TOOL_DISPATCH
+    from ..tools.strands_tools import get_tool_dispatch
     from ..compliance_matrix import execute_operation
+    tool_dispatch = get_tool_dispatch()
 
     # Compute scoped session id once for per-user S3 scoping
     scoped_session_id = session_id
@@ -525,7 +526,7 @@ def build_all_service_tools(
         """
         parsed = {"operation": operation, "bucket": bucket, "key": key, "content": content}
         try:
-            result = TOOL_DISPATCH["s3_document_ops"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["s3_document_ops"](parsed, tenant_id, scoped_session_id)
             _emit("s3_document_ops", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -547,7 +548,7 @@ def build_all_service_tools(
         """
         parsed = {"operation": operation, "table": table, "item_id": item_id, "data": data or {}}
         try:
-            result = TOOL_DISPATCH["dynamodb_intake"](parsed, tenant_id)
+            result = tool_dispatch["dynamodb_intake"](parsed, tenant_id)
             _emit("dynamodb_intake", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -641,7 +642,7 @@ def build_all_service_tools(
             _upd_key = parsed.get("update_existing_key", "").strip()
             if _pkg_id and _dt and not _upd_key:
                 try:
-                    existing = TOOL_DISPATCH["get_latest_document"](
+                    existing = tool_dispatch["get_latest_document"](
                         {"package_id": _pkg_id, "doc_type": _dt},
                         tenant_id,
                     )
@@ -657,7 +658,7 @@ def build_all_service_tools(
                 except Exception:
                     pass  # No existing doc or lookup failed — create new
 
-            result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
 
             if result_queue and loop and isinstance(result, dict):
@@ -688,7 +689,7 @@ def build_all_service_tools(
             "checkbox_edits": checkbox_edits or [],
         }
         try:
-            result = TOOL_DISPATCH["edit_docx_document"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["edit_docx_document"](parsed, tenant_id, scoped_session_id)
             _emit("edit_docx_document", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -705,7 +706,7 @@ def build_all_service_tools(
         """
         parsed = {"intake_id": intake_id}
         try:
-            result = TOOL_DISPATCH["get_intake_status"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["get_intake_status"](parsed, tenant_id, scoped_session_id)
             _emit("get_intake_status", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -724,7 +725,7 @@ def build_all_service_tools(
         """
         parsed = {"action": action, "intake_id": intake_id, "data": data or {}}
         try:
-            result = TOOL_DISPATCH["intake_workflow"](parsed, tenant_id)
+            result = tool_dispatch["intake_workflow"](parsed, tenant_id)
             _emit("intake_workflow", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -772,7 +773,7 @@ def build_all_service_tools(
             "visibility": visibility,
         }
         try:
-            result = TOOL_DISPATCH["manage_skills"](parsed, tenant_id)
+            result = tool_dispatch["manage_skills"](parsed, tenant_id)
             _emit("manage_skills", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -802,7 +803,7 @@ def build_all_service_tools(
             "is_append": is_append,
         }
         try:
-            result = TOOL_DISPATCH["manage_prompts"](parsed, tenant_id)
+            result = tool_dispatch["manage_prompts"](parsed, tenant_id)
             _emit("manage_prompts", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -835,7 +836,7 @@ def build_all_service_tools(
             "user_id": scope,
         }
         try:
-            result = TOOL_DISPATCH["manage_templates"](parsed, tenant_id)
+            result = tool_dispatch["manage_templates"](parsed, tenant_id)
             _emit("manage_templates", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -854,7 +855,7 @@ def build_all_service_tools(
         """
         parsed = {"package_id": package_id, "doc_type": doc_type, "limit": limit}
         try:
-            result = TOOL_DISPATCH["document_changelog_search"](parsed, tenant_id)
+            result = tool_dispatch["document_changelog_search"](parsed, tenant_id)
             _emit("document_changelog_search", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -872,7 +873,7 @@ def build_all_service_tools(
         """
         parsed = {"package_id": package_id, "doc_type": doc_type}
         try:
-            result = TOOL_DISPATCH["get_latest_document"](parsed, tenant_id)
+            result = tool_dispatch["get_latest_document"](parsed, tenant_id)
             _emit("get_latest_document", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -890,7 +891,7 @@ def build_all_service_tools(
         """
         parsed = {"package_id": package_id, "auto_submit": auto_submit}
         try:
-            result = TOOL_DISPATCH["finalize_package"](parsed, tenant_id)
+            result = tool_dispatch["finalize_package"](parsed, tenant_id)
             _emit("finalize_package", result)
             if result_queue and loop and isinstance(result, dict):
                 emit_package_state(result, "finalize_package", tenant_id, result_queue, loop)
@@ -929,7 +930,7 @@ def build_all_service_tools(
             "user_id": user_id,
         }
         try:
-            result = TOOL_DISPATCH["cloudwatch_logs"](parsed, tenant_id)
+            result = tool_dispatch["cloudwatch_logs"](parsed, tenant_id)
             _emit("cloudwatch_logs", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:

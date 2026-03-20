@@ -26,7 +26,6 @@ from .cognito_auth import extract_user_context
 from .stream_protocol import MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
-from .strands_agentic_service import sdk_query_streaming, MODEL, EAGLE_TOOLS
 from .session_store import add_message
 from .package_context_service import resolve_context, set_active_package
 from .telemetry.log_context import set_log_context
@@ -36,6 +35,12 @@ from .config import auth as auth_config
 REQUIRE_AUTH = auth_config.require_auth
 
 logger = logging.getLogger(__name__)
+
+
+def _get_strands_runtime():
+    from . import strands_agentic_service
+
+    return strands_agentic_service
 
 
 class GenerateTitleRequest(BaseModel):
@@ -158,7 +163,7 @@ async def stream_generator(
     KEEPALIVE_INTERVAL = 20.0
 
     async def _sdk_with_keepalive():
-        gen = sdk_query_streaming(
+        gen = _get_strands_runtime().sdk_query_streaming(
             prompt=message,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -567,7 +572,7 @@ User message: "{req.message}"
             "status": "healthy",
             "service": "EAGLE – NCI Acquisition Assistant",
             "version": "4.0.0",
-            "model": MODEL,
+            "model": _get_strands_runtime().MODEL,
             "services": {
                 "bedrock": True,
                 "dynamodb": True,
@@ -594,7 +599,7 @@ User message: "{req.message}"
                     "status": "online",
                 },
             ],
-            "tools": [tool["name"] for tool in EAGLE_TOOLS],
+            "tools": [tool["name"] for tool in _get_strands_runtime().EAGLE_TOOLS],
             "features": {
                 "persistent_sessions": auth_config.require_auth,  # sessions require auth
                 "auth_required": auth_config.require_auth,

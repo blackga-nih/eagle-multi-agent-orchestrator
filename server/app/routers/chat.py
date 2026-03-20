@@ -17,7 +17,6 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel
 
 from ..cognito_auth import UserContext, extract_user_context, DEV_MODE
-from ..strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
 from ..session_store import (
     create_session as eagle_create_session,
     get_session as eagle_get_session,
@@ -40,6 +39,12 @@ _SESSIONS: Dict[str, List[dict]] = {}
 
 # ── Telemetry ring buffer ────────────────────────────────────────────
 _TELEMETRY_LOG: deque = deque(maxlen=500)
+
+
+def _get_strands_runtime():
+    from .. import strands_agentic_service
+
+    return strands_agentic_service
 
 
 def set_sessions_ref(sessions_dict: Dict[str, List[dict]]):
@@ -141,7 +146,8 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         _tools_called: list[str] = []
         _final_text: str = ""
 
-        async for _sdk_msg in sdk_query(
+        strands_runtime = _get_strands_runtime()
+        async for _sdk_msg in strands_runtime.sdk_query(
             prompt=req.message,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -167,7 +173,12 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
                 _final_text = str(getattr(_sdk_msg, "result", "") or "")
 
         _response_text = "".join(_text_parts) or _final_text
-        result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": _tools_called}
+        result = {
+            "text": _response_text,
+            "usage": _usage,
+            "model": strands_runtime.MODEL,
+            "tools_called": _tools_called,
+        }
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
@@ -186,7 +197,7 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         record_request_cost(
             tenant_id, user_id, session_id,
             input_tokens, output_tokens,
-            model=result.get("model", MODEL),
+            model=result.get("model", strands_runtime.MODEL),
             tools_used=result.get("tools_called", []),
             response_time_ms=elapsed_ms
         )
@@ -261,7 +272,7 @@ async def api_telemetry(limit: int = 50):
 async def api_tools():
     """List available EAGLE tools."""
     tools = []
-    for tool in EAGLE_TOOLS:
+    for tool in _get_strands_runtime().EAGLE_TOOLS:
         tools.append({
             "name": tool["name"],
             "description": tool["description"],
@@ -364,7 +375,8 @@ async def websocket_chat(ws: WebSocket):
                 _usage: dict = {}
                 _final_text: str = ""
 
-                async for _sdk_msg in sdk_query(
+                strands_runtime = _get_strands_runtime()
+                async for _sdk_msg in strands_runtime.sdk_query(
                     prompt=user_message,
                     tenant_id=tenant_id,
                     user_id=user_id,
@@ -393,7 +405,12 @@ async def websocket_chat(ws: WebSocket):
                 _response_text = "".join(_text_parts) or _final_text
                 if _response_text and not _text_parts:
                     await on_text(_response_text)
-                result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": tools_called}
+                result = {
+                    "text": _response_text,
+                    "usage": _usage,
+                    "model": strands_runtime.MODEL,
+                    "tools_called": tools_called,
+                }
 
                 if USE_PERSISTENT_SESSIONS:
                     add_message(session_id, "assistant", result["text"], tenant_id, user_id)
@@ -410,7 +427,7 @@ async def websocket_chat(ws: WebSocket):
                 record_request_cost(
                     tenant_id, user_id, session_id,
                     input_tokens, output_tokens,
-                    model=result.get("model", MODEL),
+                    model=result.get("model", strands_runtime.MODEL),
                     tools_used=result.get("tools_called", []),
                     response_time_ms=elapsed_ms
                 )

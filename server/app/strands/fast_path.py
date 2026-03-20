@@ -39,7 +39,7 @@ async def maybe_fast_path_document_generation(
     if not should_fast_path or not doc_type:
         return None
 
-    from ..agentic_service import _exec_create_document
+    from ..tools.strands_tools import exec_create_document
 
     doc_ctx = extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
@@ -58,7 +58,7 @@ async def maybe_fast_path_document_generation(
 
     scoped_session_id = build_scoped_session_id(tenant_id, user_id, session_id)
     result = await asyncio.to_thread(
-        _exec_create_document,
+        exec_create_document,
         params,
         tenant_id,
         scoped_session_id,
@@ -86,7 +86,7 @@ async def ensure_create_document_for_direct_request(
     if not should_generate or not doc_type or "create_document" in tools_called:
         return None
 
-    from ..agentic_service import _exec_create_document
+    from ..tools.strands_tools import exec_create_document
 
     doc_ctx = extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
@@ -105,7 +105,7 @@ async def ensure_create_document_for_direct_request(
 
     scoped_session_id = build_scoped_session_id(tenant_id, user_id, session_id)
     result = await asyncio.to_thread(
-        _exec_create_document,
+        exec_create_document,
         params,
         tenant_id,
         scoped_session_id,

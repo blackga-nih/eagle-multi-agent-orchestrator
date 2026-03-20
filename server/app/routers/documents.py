@@ -28,8 +28,6 @@ from ..cognito_auth import UserContext
 from ..document_export import export_document, ExportDependencyError
 from ..document_store import get_document
 from ..document_service import create_package_document_version
-from ..document_ai_edit_service import extract_docx_preview_payload, save_docx_preview_edits
-from ..spreadsheet_edit_service import extract_xlsx_preview_payload, save_xlsx_preview_edits
 from ..document_classification_service import classify_document, extract_text_preview
 from ..package_store import get_package
 from ..session_store import get_messages
@@ -117,8 +115,12 @@ def _supports_binary_preview(name: str) -> bool:
 def _extract_binary_preview_payload(name: str, raw_bytes: bytes) -> dict[str, Any]:
     ext = _get_file_extension(name)
     if ext == "docx":
+        from ..document_ai_edit_service import extract_docx_preview_payload
+
         return extract_docx_preview_payload(raw_bytes)
     if ext == "xlsx":
+        from ..spreadsheet_edit_service import extract_xlsx_preview_payload
+
         return extract_xlsx_preview_payload(raw_bytes)
     return {"content": None, "preview_blocks": [], "preview_sheets": [], "preview_mode": "none"}
 
@@ -537,6 +539,8 @@ async def api_update_docx_preview_document(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Update a DOCX document through structured preview blocks."""
+    from ..document_ai_edit_service import save_docx_preview_edits
+
     result = save_docx_preview_edits(
         tenant_id=user.tenant_id,
         user_id=user.user_id,
@@ -557,6 +561,8 @@ async def api_update_xlsx_preview_document(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Update an XLSX document through structured cell edits."""
+    from ..spreadsheet_edit_service import save_xlsx_preview_edits
+
     result = save_xlsx_preview_edits(
         tenant_id=user.tenant_id,
         user_id=user.user_id,

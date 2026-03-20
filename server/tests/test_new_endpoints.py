@@ -49,24 +49,25 @@ _ENV_PATCH = {
     "COGNITO_CLIENT_ID": "test-client",
     "EAGLE_SESSIONS_TABLE": "eagle",
     "USE_PERSISTENT_SESSIONS": "false",
+    "EAGLE_APP_ROUTERS": "feedback",
 }
 
 
 @pytest.fixture(scope="module")
 def app_instance():
-    """FastAPI app with REQUIRE_AUTH=false, sdk_query mocked, and feedback_store mocked."""
+    """FastAPI app with REQUIRE_AUTH=false and feedback dependencies mocked."""
     with patch.dict(os.environ, _ENV_PATCH, clear=False):
-        with patch("app.strands_agentic_service.sdk_query", side_effect=_mock_sdk_query):
-            import importlib
-            import app.main as main_module
-            importlib.reload(main_module)
-            yield main_module
+        import importlib
+        import app.main as main_module
+
+        importlib.reload(main_module)
+        yield main_module.create_app(["feedback"])
 
 
 @pytest.fixture(scope="module")
 def client(app_instance):
     """TestClient scoped to the module."""
-    with TestClient(app_instance.app) as c:
+    with TestClient(app_instance) as c:
         yield c
 
 
@@ -80,7 +81,7 @@ class TestFeedbackEndpoints:
         """POST /api/feedback creates a feedback record and returns status ok."""
         fake_item = {"feedback_id": "fb-001", "tenant_id": "default", "feedback_text": "Great tool!"}
         with patch("app.feedback_store.write_feedback", return_value=fake_item), \
-             patch("app.main._fetch_cloudwatch_logs_for_session", return_value=[]):
+             patch("app.routers.feedback._fetch_cloudwatch_logs_for_session", return_value=[]):
             resp = client.post("/api/feedback", json={
                 "feedback_text": "Great tool!",
                 "page": "/chat",
@@ -102,7 +103,7 @@ class TestFeedbackEndpoints:
         """POST /api/feedback with feedback_text succeeds."""
         fake_item = {"feedback_id": "fb-002", "tenant_id": "default"}
         with patch("app.feedback_store.write_feedback", return_value=fake_item), \
-             patch("app.main._fetch_cloudwatch_logs_for_session", return_value=[]):
+             patch("app.routers.feedback._fetch_cloudwatch_logs_for_session", return_value=[]):
             resp = client.post("/api/feedback", json={
                 "feedback_text": "Needs improvement",
             })
@@ -115,7 +116,7 @@ class TestFeedbackEndpoints:
             {"feedback_id": "fb-001", "feedback_text": "good", "page": "/chat"},
             {"feedback_id": "fb-002", "feedback_text": "ok", "page": "/admin"},
         ]
-        with patch("app.main.list_feedback", return_value=fake_items):
+        with patch("app.routers.feedback.list_feedback", return_value=fake_items):
             resp = client.get("/api/feedback")
         assert resp.status_code == 200
         data = resp.json()
@@ -124,7 +125,7 @@ class TestFeedbackEndpoints:
 
     def test_get_feedback_empty(self, client):
         """GET /api/feedback returns empty list when no feedback exists."""
-        with patch("app.main.list_feedback", return_value=[]):
+        with patch("app.routers.feedback.list_feedback", return_value=[]):
             resp = client.get("/api/feedback")
         assert resp.status_code == 200
         data = resp.json()
