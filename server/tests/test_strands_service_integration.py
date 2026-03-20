@@ -18,6 +18,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
+_has_aws_creds = bool(
+    os.environ.get('AWS_ACCESS_KEY_ID')
+    or os.environ.get('AWS_PROFILE')
+    or os.environ.get('AWS_SESSION_TOKEN')
+)
+
 
 # -- Helpers ----------------------------------------------------------
 
@@ -31,6 +37,7 @@ async def _collect_messages(async_gen):
 
 # -- Tests ------------------------------------------------------------
 
+@pytest.mark.skipif(not _has_aws_creds, reason="AWS credentials required for Bedrock integration test")
 @pytest.mark.asyncio
 async def test_sdk_query_adapter_messages():
     """sdk_query() yields AssistantMessage then ResultMessage with correct interface."""
@@ -91,6 +98,7 @@ async def test_sdk_query_adapter_messages():
     print("  PASS")
 
 
+@pytest.mark.skipif(not _has_aws_creds, reason="AWS credentials required for Bedrock integration test")
 @pytest.mark.asyncio
 async def test_sdk_query_single_skill_adapter():
     """sdk_query_single_skill() yields correct adapter messages."""

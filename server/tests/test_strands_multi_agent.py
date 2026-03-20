@@ -19,6 +19,8 @@ import os
 import sys
 import time
 
+import pytest
+
 # Ensure server/ is on the path so eagle_skill_constants imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,8 +34,20 @@ from eagle_skill_constants import SKILL_CONSTANTS
 MODEL_ID = os.environ.get("STRANDS_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
 REGION = "us-east-1"
 
-# Shared model — created once, reused across all agents in this module
-_model = BedrockModel(model_id=MODEL_ID, region_name=REGION)
+# Lazy model — created on first use to avoid crashing at import time without AWS creds
+_model = None
+
+def _get_model():
+    global _model
+    if _model is None:
+        _model = BedrockModel(model_id=MODEL_ID, region_name=REGION)
+    return _model
+
+_has_aws_creds = bool(
+    os.environ.get('AWS_ACCESS_KEY_ID')
+    or os.environ.get('AWS_PROFILE')
+    or os.environ.get('AWS_SESSION_TOKEN')
+)
 
 
 # ── Subagent Tools ───────────────────────────────────────────────────
@@ -46,7 +60,7 @@ def oa_intake(query: str) -> str:
         query: The acquisition intake question or request
     """
     prompt = SKILL_CONSTANTS.get("oa-intake", "You are an intake specialist.")
-    agent = Agent(model=_model, system_prompt=prompt, callback_handler=None)
+    agent = Agent(model=_get_model(), system_prompt=prompt, callback_handler=None)
     return str(agent(query))
 
 
@@ -58,7 +72,7 @@ def legal_counsel(query: str) -> str:
         query: The legal question about an acquisition
     """
     prompt = SKILL_CONSTANTS.get("legal-counsel", "You are a legal specialist.")
-    agent = Agent(model=_model, system_prompt=prompt, callback_handler=None)
+    agent = Agent(model=_get_model(), system_prompt=prompt, callback_handler=None)
     return str(agent(query))
 
 
@@ -70,7 +84,7 @@ def market_intelligence(query: str) -> str:
         query: The market research question
     """
     prompt = SKILL_CONSTANTS.get("market-intelligence", "You are a market analyst.")
-    agent = Agent(model=_model, system_prompt=prompt, callback_handler=None)
+    agent = Agent(model=_get_model(), system_prompt=prompt, callback_handler=None)
     return str(agent(query))
 
 
@@ -79,7 +93,7 @@ def market_intelligence(query: str) -> str:
 def _build_supervisor() -> Agent:
     """Build the supervisor agent with 3 subagent tools."""
     return Agent(
-        model=_model,
+        model=_get_model(),
         system_prompt=(
             "You are the EAGLE supervisor for NCI Office of Acquisitions. "
             "You have three specialist tools available. ALWAYS delegate to the "
@@ -120,6 +134,7 @@ def _print_result(test_name: str, result_text: str, indicators: dict, elapsed: f
 
 # ── Tests ────────────────────────────────────────────────────────────
 
+@pytest.mark.skipif(not _has_aws_creds, reason="AWS credentials required for Bedrock integration test")
 def test_supervisor_routes_to_intake():
     """Supervisor delegates to oa_intake for a micro-purchase question."""
     supervisor = _build_supervisor()
@@ -151,6 +166,7 @@ def test_supervisor_routes_to_intake():
     assert found >= 2, f"Only {found}/4 intake indicators found (need >= 2)"
 
 
+@pytest.mark.skipif(not _has_aws_creds, reason="AWS credentials required for Bedrock integration test")
 def test_supervisor_routes_to_legal():
     """Supervisor delegates to legal_counsel for a FAR compliance question."""
     supervisor = _build_supervisor()
@@ -185,6 +201,7 @@ def test_supervisor_routes_to_legal():
     assert found >= 2, f"Only {found}/4 legal indicators found (need >= 2)"
 
 
+@pytest.mark.skipif(not _has_aws_creds, reason="AWS credentials required for Bedrock integration test")
 def test_supervisor_routes_to_market():
     """Supervisor delegates to market_intelligence for a vendor research question."""
     supervisor = _build_supervisor()

@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import time
 import logging
@@ -31,6 +31,7 @@ import os
 import uuid
 import io
 import re
+from contextlib import asynccontextmanager
 
 # EAGLE modules (new)
 from .strands_agentic_service import sdk_query, MODEL, EAGLE_TOOLS
@@ -135,10 +136,24 @@ logger = logging.getLogger("eagle")
 # ── S3 bucket (single source of truth) ───────────────────────────────
 _S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
 
+@asynccontextmanager
+async def _lifespan(app):
+    """FastAPI lifespan handler (replaces deprecated @app.on_event)."""
+    # Startup
+    notify_startup()
+    start_scheduler()
+    yield
+    # Shutdown
+    await close_webhook_client()
+    stop_scheduler()
+    await close_notifier_client()
+
+
 app = FastAPI(
     title="EAGLE – NCI Acquisition Assistant",
     version="4.0.0",
-    description="Multi-tenant acquisition intake system with Anthropic SDK, auth, persistence, and analytics"
+    description="Multi-tenant acquisition intake system with Anthropic SDK, auth, persistence, and analytics",
+    lifespan=_lifespan,
 )
 
 # ── CORS Middleware ──────────────────────────────────────────────────
@@ -192,21 +207,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
-@app.on_event("startup")
-async def startup_teams_notifier():
-    notify_startup()
-    start_scheduler()
 
-
-@app.on_event("shutdown")
-async def shutdown_webhook_client():
-    await close_webhook_client()
-
-
-@app.on_event("shutdown")
-async def shutdown_teams_notifier():
-    stop_scheduler()
-    await close_notifier_client()
 
 
 # ── Feature Flags ────────────────────────────────────────────────────
@@ -226,7 +227,7 @@ TELEMETRY_LOG: deque = deque(maxlen=500)
 
 
 def _log_telemetry(entry: dict):
-    entry.setdefault("timestamp", datetime.utcnow().isoformat())
+    entry.setdefault("timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     TELEMETRY_LOG.append(entry)
     logger.info(json.dumps(entry, default=str))
 
@@ -592,7 +593,7 @@ async def api_export_session(
             raise HTTPException(status_code=404, detail="Session not found")
         messages = SESSIONS[session_id]
 
-    content = f"# EAGLE Session Export\n\n**Session ID:** {session_id}\n**Exported:** {datetime.utcnow().isoformat()}\n\n---\n\n"
+    content = f"# EAGLE Session Export\n\n**Session ID:** {session_id}\n**Exported:** {datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}\n\n---\n\n"
 
     for msg in messages:
         role = msg.get("role", "unknown").upper()
@@ -1206,7 +1207,7 @@ async def api_upload_document(
         "size_bytes": len(body),
         "classification": classification.to_dict(),
         "session_id": session_id,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     })
 
     logger.info(
@@ -1382,7 +1383,7 @@ async def api_approve_kb_review(
         try:
             matrix = _json.loads(matrix_path.read_text(encoding="utf-8"))
             matrix = _apply_json_patch(matrix, proposed_diff)
-            matrix["version"] = datetime.utcnow().strftime("%Y-%m-%d")
+            matrix["version"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             matrix_path.write_text(_json.dumps(matrix, indent=2, ensure_ascii=False), encoding="utf-8")
             logger.info("matrix.json updated after KB review %s", review_id)
 
@@ -1404,7 +1405,7 @@ async def api_approve_kb_review(
             logger.warning("S3 move failed: %s", e)
 
     # Update DynamoDB record
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     table.update_item(
         Key={"PK": pk, "SK": "META"},
         UpdateExpression="SET #st = :s, reviewed_by = :u, reviewed_at = :t",
@@ -1451,7 +1452,7 @@ async def api_reject_kb_review(
         except ClientError as e:
             logger.warning("S3 move failed: %s", e)
 
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     table.update_item(
         Key={"PK": pk, "SK": "META"},
         UpdateExpression="SET #st = :s, reviewed_by = :u, reviewed_at = :t",
@@ -2544,7 +2545,7 @@ async def health_check():
             "knowledge_document_bucket": knowledge_base["document_bucket"]["ok"],
         },
         "knowledge_base": knowledge_base,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 

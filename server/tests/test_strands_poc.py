@@ -18,6 +18,14 @@ import os
 import sys
 import time
 
+import pytest
+
+_has_aws_creds = bool(
+    os.environ.get('AWS_ACCESS_KEY_ID')
+    or os.environ.get('AWS_PROFILE')
+    or os.environ.get('AWS_SESSION_TOKEN')
+)
+
 # Ensure server/ is on the path so eagle_skill_constants imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -28,12 +36,13 @@ from eagle_skill_constants import SKILL_CONSTANTS
 
 # ── Config ───────────────────────────────────────────────────────────
 
-MODEL_ID = os.environ.get("STRANDS_MODEL_ID", "us.meta.llama4-maverick-17b-instruct-v1:0")
+MODEL_ID = os.environ.get("STRANDS_MODEL_ID") or os.environ.get("EAGLE_BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
 REGION = "us-east-1"
 
 
 # ── Test ─────────────────────────────────────────────────────────────
 
+@pytest.mark.skipif(not _has_aws_creds, reason="AWS credentials required for Bedrock integration test")
 def test_strands_uc02_micro_purchase():
     """UC-02: Micro-purchase fast path via Strands Agent.
 

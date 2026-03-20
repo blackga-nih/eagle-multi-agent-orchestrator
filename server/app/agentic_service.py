@@ -1698,7 +1698,7 @@ def _update_document_content(
     if not doc_key:
         return {"error": "update_existing_key is required but empty"}
     if not content:
-        return {"error": "content is required for update"}
+        return {"error": "content is required for update. Provide the full document markdown in the content parameter."}
 
     user_id = _extract_user_id(session_id)
     bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")

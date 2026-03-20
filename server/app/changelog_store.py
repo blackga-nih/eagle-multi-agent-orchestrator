@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import boto3
@@ -52,11 +52,11 @@ def _get_table():
 
 def _seven_year_ttl() -> int:
     """Return Unix epoch seconds 7 years from now."""
-    return int((datetime.utcnow() + timedelta(days=365 * 7)).timestamp())
+    return int((datetime.now(timezone.utc) + timedelta(days=365 * 7)).timestamp())
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
 def _normalize_change_source(change_source: str) -> str:

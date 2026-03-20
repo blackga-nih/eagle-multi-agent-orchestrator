@@ -91,6 +91,7 @@ class TestBackendExceptionEmitsError:
 
         async def exploding_sdk(**kwargs):
             raise ValueError("bad input")
+            yield  # make it an async generator so callers can iterate it
 
         with patch("app.streaming_routes.sdk_query_streaming", exploding_sdk), \
              patch("app.streaming_routes.add_message"):
