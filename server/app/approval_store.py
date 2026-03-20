@@ -1,4 +1,3 @@
-
 """Approval Store -- DynamoDB-backed APPROVAL# multi-step review chain.
 
 Phase 3 Step 16. Implements FAR-driven approval chains for acquisition packages.
@@ -11,6 +10,8 @@ Entity format:
     PK:  APPROVAL#{tenant_id}
     SK:  APPROVAL#{package_id}#{step:02d}
 """
+from __future__ import annotations
+
 import logging
 from datetime import datetime
 from decimal import Decimal

@@ -18,6 +18,7 @@ Key difference from agentic_service.py:
   - agentic_service.py: skills = prompt text injected into one system prompt (shared context)
   - sdk_agentic_service.py: skills = AgentDefinitions with separate context windows per skill
 """
+from __future__ import annotations
 
 import json
 import logging

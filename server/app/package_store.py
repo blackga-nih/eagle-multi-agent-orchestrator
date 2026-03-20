@@ -6,8 +6,10 @@ PK:  PACKAGE#{tenant_id}
 SK:  PACKAGE#{package_id}
 GSI: GSI1PK = TENANT#{tenant_id}, GSI1SK = PACKAGE#{status}#{created_at}
 """
-import re
+from __future__ import annotations
+
 import logging
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional

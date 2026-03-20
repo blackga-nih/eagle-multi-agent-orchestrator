@@ -20,6 +20,8 @@ Attributes:
     updated_by  str     — principal that wrote the record (e.g. "admin", "api-key-xyz")
     ttl         int     — optional Unix epoch expiry (DynamoDB TTL attribute)
 """
+from __future__ import annotations
+
 import time
 import logging
 from datetime import datetime

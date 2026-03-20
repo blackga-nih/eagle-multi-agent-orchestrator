@@ -10,6 +10,7 @@ subagent delegation instead of the legacy stream_chat() prompt-injection path.
 #   streaming_router = create_streaming_router(store, subscription_service)
 #   app.include_router(streaming_router)
 """
+from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse

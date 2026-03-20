@@ -43,7 +43,7 @@ class TestWorkspaceCache:
         # Seed cache
         _ws_cache_set(TENANT, USER, FAKE_WORKSPACE)
 
-        with mock.patch("app.workspace_store._get_table") as mock_table:
+        with mock.patch("app.workspace_store.get_table") as mock_table:
             result = get_or_create_default(TENANT, USER)
 
         assert result["workspace_id"] == WORKSPACE_ID
@@ -67,7 +67,7 @@ class TestWorkspaceCache:
         mock_table.query.return_value = {"Items": [FAKE_WORKSPACE]}
         mock_table.get_item.return_value = {"Item": FAKE_WORKSPACE}
 
-        with mock.patch("app.workspace_store._get_table", return_value=mock_table):
+        with mock.patch("app.workspace_store.get_table", return_value=mock_table):
             result = get_or_create_default(TENANT, USER)
 
         assert result["workspace_id"] == WORKSPACE_ID
