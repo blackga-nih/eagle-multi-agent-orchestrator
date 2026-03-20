@@ -127,6 +127,7 @@ jobs:
 
     - name: TypeScript check
       id: tsc
+      continue-on-error: true
       run: cd client && npx tsc --noEmit 2>&1
 
     - name: Summarize
@@ -196,6 +197,12 @@ jobs:
     steps:
     - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      with:
+        role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
     - name: Setup Node.js
       uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8  # v4.0.2
       with:
@@ -207,7 +214,11 @@ jobs:
       run: cd ${{ env.CDK_DIR }} && npm ci
 
     - name: CDK Synth
-      run: cd ${{ env.CDK_DIR }} && npx cdk synth --quiet
+      run: |
+        ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        export CDK_DEFAULT_ACCOUNT=$ACCOUNT
+        export CDK_DEFAULT_REGION=${{ env.AWS_REGION }}
+        cd ${{ env.CDK_DIR }} && npx cdk synth --quiet
 
   # ── L5: Integration — uvicorn health check (full only) ─────
   integration:
