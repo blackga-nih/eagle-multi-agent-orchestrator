@@ -1553,14 +1553,28 @@ def _regenerate_html_arrays(matrix: dict) -> None:
 def _get_doc_type(name: str) -> str:
     """Infer document type from filename."""
     name_lower = name.lower()
-    if "sow" in name_lower:
-        return "sow"
-    elif "igce" in name_lower:
+    # Content-based matching first (order: specific before general)
+    if "igce" in name_lower or "ige" in name_lower:
         return "igce"
-    elif "market" in name_lower:
+    elif "sow" in name_lower or "statement-of-work" in name_lower or "statement_of_work" in name_lower:
+        return "sow"
+    elif "son" in name_lower and ("product" in name_lower or "service" in name_lower or "need" in name_lower):
+        return "son_products" if "product" in name_lower else "son_services"
+    elif "market" in name_lower and "research" in name_lower:
         return "market_research"
-    elif "justification" in name_lower or "j&a" in name_lower:
+    elif "justification" in name_lower or "j&a" in name_lower or "j_and_a" in name_lower:
         return "justification"
+    elif "acquisition" in name_lower and "plan" in name_lower:
+        return "acquisition_plan"
+    elif "cor" in name_lower and ("appointment" in name_lower or "designation" in name_lower or "certification" in name_lower):
+        return "cor_certification"
+    elif "buy" in name_lower and "american" in name_lower:
+        return "buy_american"
+    elif "subk" in name_lower or "subcontract" in name_lower:
+        return "subk_plan"
+    elif "conference" in name_lower:
+        return "conference_request"
+    # Extension-based fallback
     elif name_lower.endswith(".md"):
         return "markdown"
     elif name_lower.endswith(".pdf"):
@@ -2903,6 +2917,51 @@ async def list_s3_templates_endpoint(
         "phases": ACQUISITION_PHASES,
         "phase_counts": phase_counts,
     }
+
+
+@app.get("/api/templates/s3/preview")
+async def preview_s3_template(
+    s3_key: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Preview an S3 template — returns markdown text or a presigned PDF URL."""
+    import boto3
+    from app.template_registry import TEMPLATE_BUCKET, TEMPLATE_PREFIX, get_s3_template_by_key
+    from app.template_service import DOCXPopulator, XLSXPopulator
+
+    if not s3_key:
+        raise HTTPException(status_code=400, detail="s3_key is required")
+    if not s3_key.startswith(TEMPLATE_PREFIX):
+        raise HTTPException(status_code=403, detail="Access denied — invalid template key")
+
+    filename = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+    file_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if file_ext == "pdf":
+        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": TEMPLATE_BUCKET, "Key": s3_key},
+            ExpiresIn=3600,
+        )
+        return {"type": "pdf", "url": url, "filename": filename}
+
+    elif file_ext in ("docx", "doc"):
+        content_bytes = get_s3_template_by_key(s3_key)
+        if not content_bytes:
+            raise HTTPException(status_code=404, detail="Template not found in S3")
+        markdown = DOCXPopulator.extract_text(content_bytes)
+        return {"type": "markdown", "content": markdown, "filename": filename}
+
+    elif file_ext in ("xlsx", "xls"):
+        content_bytes = get_s3_template_by_key(s3_key)
+        if not content_bytes:
+            raise HTTPException(status_code=404, detail="Template not found in S3")
+        markdown = XLSXPopulator.extract_text(content_bytes)
+        return {"type": "markdown", "content": markdown, "filename": filename}
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
 
 
 @app.post("/api/templates/s3/copy")
