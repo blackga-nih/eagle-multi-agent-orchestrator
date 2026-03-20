@@ -61,6 +61,28 @@ function getDocIcon(type: string): string {
   return DOCUMENT_TYPE_ICONS[type as DocumentType] ?? '\u{1F4C4}';
 }
 
+/** Format-only types that should be replaced with a label inferred from title. */
+const FORMAT_TYPES = new Set(['markdown', 'docx', 'xlsx', 'pdf', 'txt', 'document']);
+
+function getDocTypeLabel(doc: DocumentInfo): string {
+  const raw = doc.document_type;
+  if (!FORMAT_TYPES.has(raw)) {
+    return raw.replace(/_/g, ' ');
+  }
+  const t = (doc.title || '').toLowerCase();
+  if (t.includes('sow') || t.includes('statement') && t.includes('work')) return 'Statement of Work';
+  if (t.includes('igce') || t.includes('ige') || t.includes('cost estimate')) return 'Cost Estimate';
+  if (t.includes('market') || t.startsWith('mr-') || t.startsWith('mr_')) return 'Market Research';
+  if (t.includes('acquisition') && t.includes('plan') || t.startsWith('ap-') || t.startsWith('ap_')) return 'Acquisition Plan';
+  if (t.includes('justification') || t.includes('j&a')) return 'Justification & Approval';
+  if (t.includes('son') || t.includes('statement') && t.includes('need')) return 'Statement of Need';
+  if (t.includes('cor')) return 'COR Appointment';
+  if (t.includes('subk') || t.includes('subcontract')) return 'Subcontracting Plan';
+  if (t.includes('conference')) return 'Conference Request';
+  if (t.includes('buy') && t.includes('american')) return 'Buy American';
+  return raw.replace(/_/g, ' ');
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -107,9 +129,9 @@ function DocumentsTab({
           <div className="flex items-start gap-2">
             <span className="text-lg shrink-0">{getDocIcon(doc.document_type)}</span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-[#003366] truncate">{doc.title}</p>
+              <p className="text-sm font-medium text-[#003366] truncate">{doc.title.replace(/\.md$/i, '')}</p>
               <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
-                <span className="uppercase font-medium">{doc.document_type.replace(/_/g, ' ')}</span>
+                <span className="uppercase font-medium">{getDocTypeLabel(doc)}</span>
                 {doc.word_count && <span>&middot; {doc.word_count.toLocaleString()} words</span>}
                 {doc.status && (
                   <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-medium ${

@@ -520,30 +520,35 @@ def create_streaming_router(
         and returns a concise, meaningful title.
         """
         try:
-            from anthropic import Anthropic
+            import boto3
+            from botocore.config import Config
 
-            client = Anthropic()
-            prompt = f"""Given the user's first message in a conversation, generate a short, concise session title (3-6 words max).
-Extract key information like:
-- Project/initiative name
-- Document type (SOW, IGCE, etc.)
-- Main action or focus
-
-User message: "{req.message}"
-"""
-            if req.response_snippet:
-                prompt += f"\nInitial response preview: {req.response_snippet[:100]}"
-
-            prompt += "\n\nRespond with ONLY the title, no explanations."
-
-            response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=50,
-                messages=[{"role": "user", "content": prompt}],
+            client = boto3.client(
+                "bedrock-runtime",
+                region_name=os.getenv("AWS_REGION", "us-east-1"),
+                config=Config(read_timeout=30, retries={"max_attempts": 2}),
             )
 
-            title = response.content[0].text.strip()
-            # Ensure title is not empty and reasonable length
+            prompt = (
+                "Given the user's first message in a conversation with an AI acquisition assistant, "
+                "generate a short, concise session title (3-6 words max).\n"
+                "Extract key information like:\n"
+                "- Project/initiative name\n"
+                "- Document type (SOW, IGCE, etc.)\n"
+                "- Main action or focus\n\n"
+                f'User message: "{req.message}"\n'
+            )
+            if req.response_snippet:
+                prompt += f"\nInitial response preview: {req.response_snippet[:100]}"
+            prompt += "\n\nRespond with ONLY the title, no explanations."
+
+            response = client.converse(
+                modelId="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 50, "temperature": 0},
+            )
+
+            title = response["output"]["message"]["content"][0]["text"].strip()
             if title and len(title) < 100:
                 return {"title": title}
         except Exception as e:

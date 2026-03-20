@@ -151,8 +151,21 @@ dev-local:
             sleep 1
         done
     done
-    # Clear Next.js cache to purge stale env vars
-    rm -rf client/.next 2>/dev/null || true
+    # Clear Next.js cache — retry loop because Windows holds file locks
+    # briefly after taskkill (NTFS handles are released asynchronously)
+    for attempt in 1 2 3 4 5; do
+        rm -rf client/.next 2>/dev/null || true
+        if [ ! -d client/.next ]; then
+            echo "  .next cache cleared"
+            break
+        fi
+        echo "  .next still locked, retrying ($attempt/5)..."
+        sleep 2
+    done
+    if [ -d client/.next ]; then
+        echo "  WARNING: could not fully delete .next — may see stale cache errors"
+        echo "  Try closing all terminals/editors accessing client/ and re-run"
+    fi
     unset FASTAPI_URL
     export FASTAPI_URL=http://127.0.0.1:8000
     echo "=== Starting backend (port 8000) ==="
@@ -189,6 +202,12 @@ dev-frontend:
         taskkill /F /T /PID "$pid" 2>/dev/null || true
     done
     sleep 1
+    # Clear stale .next cache (retry — Windows file lock delay)
+    for attempt in 1 2 3; do
+        rm -rf client/.next 2>/dev/null || true
+        [ ! -d client/.next ] && break
+        sleep 2
+    done
     unset FASTAPI_URL
     cd client && npm run dev
 

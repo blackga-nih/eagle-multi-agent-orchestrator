@@ -191,3 +191,10 @@ export interface CopyTemplateResponse {
   package_id: string;
   source: string;
 }
+
+export interface S3TemplatePreviewResponse {
+  type: 'pdf' | 'markdown';
+  url?: string;       // when type === 'pdf'
+  content?: string;   // when type === 'markdown'
+  filename: string;
+}

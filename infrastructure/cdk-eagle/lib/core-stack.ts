@@ -158,6 +158,26 @@ export class EagleCoreStack extends cdk.Stack {
       ],
     }));
 
+    // Nova Web Grounding: web search via nova_grounding systemTool
+    // Requires both InvokeModel (for the Nova model) and InvokeTool (for the system tool)
+    // See: https://docs.aws.amazon.com/nova/latest/nova2-userguide/web-grounding.html
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        // Nova 2 Lite foundation model (for web grounding searches)
+        'arn:aws:bedrock:*::foundation-model/amazon.nova-2-lite-v1:0',
+        // Nova 2 Lite cross-region inference profile
+        `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.amazon.nova-2-lite-v1:0`,
+      ],
+    }));
+    // nova_grounding system tool — separate permission per AWS docs
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeTool'],
+      resources: [
+        `arn:aws:bedrock::${this.account}:system-tool/amazon.nova_grounding`,
+      ],
+    }));
+
     // CloudWatch: App + eval logging
     this.appRole.addToPolicy(new iam.PolicyStatement({
       actions: [

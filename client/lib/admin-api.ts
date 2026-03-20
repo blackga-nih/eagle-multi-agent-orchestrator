@@ -20,6 +20,7 @@ import type {
   S3TemplateListResponse,
   CopyTemplateBody,
   CopyTemplateResponse,
+  S3TemplatePreviewResponse,
 } from '@/types/admin';
 
 type GetToken = () => Promise<string>;
@@ -201,4 +202,7 @@ export const templateApi = {
 
   copyToPackage: (getToken: GetToken, body: CopyTemplateBody) =>
     apiPost<CopyTemplateResponse>(getToken, '/api/templates/s3/copy', body),
+
+  previewS3: (getToken: GetToken, s3Key: string) =>
+    apiGet<S3TemplatePreviewResponse>(getToken, `/api/templates/s3/preview?s3_key=${encodeURIComponent(s3Key)}`),
 };
