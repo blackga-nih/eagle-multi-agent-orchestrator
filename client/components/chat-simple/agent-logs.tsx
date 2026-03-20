@@ -88,7 +88,7 @@ function getEventIcon(type: string) {
 
 /**
  * Collapse consecutive text events from the same agent into a single entry.
- * Filter out reasoning events. All other event types pass through 1:1.
+ * All other event types pass through 1:1.
  */
 function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
   const entries: DisplayEntry[] = [];
@@ -108,9 +108,6 @@ function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
   }
 
   for (const log of logs) {
-    // Skip reasoning events
-    if (log.type === 'reasoning') continue;
-
     if (log.type === 'text') {
       // Collapse consecutive text from same agent
       if (textAgent && textAgent !== log.agent_id) {
@@ -210,6 +207,16 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
                   <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Response Content</h4>
                   <div className="bg-gray-50 p-4 rounded-xl text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
                     {entry.mergedContent || log.content}
+                  </div>
+                </div>
+              )}
+
+              {/* Reasoning */}
+              {log.type === 'reasoning' && (
+                <div>
+                  <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Reasoning</h4>
+                  <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl">
+                    <p className="text-sm text-purple-800 whitespace-pre-wrap">{log.content}</p>
                   </div>
                 </div>
               )}
@@ -425,6 +432,14 @@ function LogCard({ entry, onOpenDetail }: { entry: DisplayEntry; onOpenDetail: (
             <Cpu className="w-3 h-3 shrink-0" />
             <span className="font-bold">{log.tool_use.name}</span>
             <span className="text-gray-500 truncate">({JSON.stringify(log.tool_use.input).slice(0, 60)})</span>
+          </div>
+        )}
+
+        {/* Reasoning — show content preview */}
+        {log.type === 'reasoning' && (
+          <div className="flex items-start gap-1 text-[10px]">
+            <Brain className="w-3 h-3 shrink-0 mt-0.5" />
+            <span className="text-purple-700 italic">{(log.content ?? '').slice(0, 120) || 'Reasoning...'}</span>
           </div>
         )}
 

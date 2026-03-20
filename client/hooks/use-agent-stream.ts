@@ -449,6 +449,22 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         options.onAgentStatus?.(status, detail);
       }
 
+      // Handle reasoning events — show status indicator in main chat
+      if (event.type === 'reasoning') {
+        options.onAgentStatus?.('Reasoning...', '');
+      }
+
+      // Handle handoff events — show agent transfer in main chat
+      if (event.type === 'handoff' && event.metadata) {
+        const target = String(event.metadata.target_agent ?? 'specialist');
+        options.onAgentStatus?.(`Handing off to ${target}`, String(event.metadata.reason ?? ''));
+      }
+
+      // Handle elicitation events — show question status in main chat
+      if (event.type === 'elicitation' && event.elicitation) {
+        options.onAgentStatus?.('Requesting input', String(event.elicitation.question ?? ''));
+      }
+
       // Handle metadata events with state_type — package state updates
       if (event.type === 'metadata' && event.metadata?.state_type) {
         options.onStateUpdate?.(event.metadata as Record<string, unknown>);
