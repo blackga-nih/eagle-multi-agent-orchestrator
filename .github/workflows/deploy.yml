@@ -34,7 +34,7 @@ on:
           - mini
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -77,7 +77,7 @@ jobs:
 
         if [ "$ENV" = "qa" ]; then
           echo "compute_stack=EagleComputeStackQA" >> $GITHUB_OUTPUT
-          echo "frontend_tg_arn=arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-QA-TG/cb91bcefa8472261" >> $GITHUB_OUTPUT
+          echo "frontend_tg_arn=arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-QA-FRONTEND-IP/152273fb8d5cd028" >> $GITHUB_OUTPUT
         else
           echo "compute_stack=EagleComputeStack" >> $GITHUB_OUTPUT
           echo "frontend_tg_arn=arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-DEV-FRONTEND-IP/0e76ba2b0ab49d0c" >> $GITHUB_OUTPUT
