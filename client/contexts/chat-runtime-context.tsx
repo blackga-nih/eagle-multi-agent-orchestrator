@@ -130,6 +130,7 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
                         status: action.patch.status ?? 'pending',
                         isClientSide: action.patch.isClientSide ?? false,
                         result: action.patch.result,
+                        textSnapshotLength: action.patch.textSnapshotLength,
                     },
                 ];
             } else {

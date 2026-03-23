@@ -869,22 +869,33 @@ function renderTimeline() {
       case 'text':
         summary = (evt.content || '').slice(0, 60) + ((evt.content || '').length > 60 ? '...' : '');
         break;
-      case 'tool_use':
+      case 'tool_use': {
         const tm = getToolMeta(evt.tool_use.name);
-        summary = tm.icon + ' ' + tm.label + (evt.tool_use.input?.query ? ' \u2014 ' + evt.tool_use.input.query.slice(0, 30) : '');
+        const tuInput = summarizeToolInput(evt.tool_use.name, evt.tool_use.input || {});
+        summary = tm.icon + ' ' + tm.label + (tuInput ? ' \u2014 "' + tuInput.slice(0, 40) + (tuInput.length > 40 ? '...' : '') + '"' : '');
         break;
-      case 'tool_result':
+      }
+      case 'tool_result': {
         const trm = getToolMeta(evt.tool_result.name);
         const res = evt.tool_result.result;
+        // Find the matching tool_use to show its input as the primary label
+        const matchingUse = state.visibleEvents.slice(0, i).reverse().find(
+          e => e.type === 'tool_use' && e.tool_use.name === evt.tool_result.name
+        );
+        const trInput = matchingUse ? summarizeToolInput(matchingUse.tool_use.name, matchingUse.tool_use.input || {}) : '';
         let detail = '';
         if (typeof res === 'object' && res) {
-          if (res.clauses) detail = res.clauses.length + ' clauses';
+          if (res.clauses) detail = res.results_count + ' results';
           else if (res.sources) detail = res.source_count + ' sources';
           else if (res.results) detail = res.results.length + ' results';
           else if (res.document_type) detail = res.document_type;
+        } else if (typeof res === 'string') {
+          detail = 'report';
         }
-        summary = (nested ? '\u2514 ' : '') + trm.icon + ' ' + trm.label + (detail ? ' \u2014 ' + detail : '');
+        const trLabel = trInput ? '"' + trInput.slice(0, 30) + (trInput.length > 30 ? '...' : '') + '"' : '';
+        summary = (nested ? '\u2514 ' : '') + trm.icon + ' ' + trm.label + (trLabel ? ' \u2014 ' + trLabel : '') + (detail ? ' (' + detail + ')' : '');
         break;
+      }
       case 'agent_status':
         summary = evt.metadata?.status || '';
         break;
@@ -991,7 +1002,14 @@ function renderToolUseCard(evt) {
 function renderToolResultCard(evt) {
   const tr = evt.tool_result;
   const meta = getToolMeta(tr.name);
-  const summary = summarizeToolResult(tr.name, tr.result);
+  // Find the matching tool_use to show its input query
+  const matchIdx = state.visibleEvents.indexOf(evt);
+  const matchingUse = state.visibleEvents.slice(0, matchIdx).reverse().find(
+    e => e.type === 'tool_use' && e.tool_use.name === tr.name
+  );
+  const inputSummary = matchingUse ? summarizeToolInput(matchingUse.tool_use.name, matchingUse.tool_use.input || {}) : '';
+  const resultSummary = summarizeToolResult(tr.name, tr.result);
+  const summary = inputSummary || resultSummary;
   const chevClass = state.cardExpanded ? ' open' : '';
 
   let resultHtml = '';
@@ -1157,13 +1175,19 @@ function renderCompletePreview(evt) {
 // ── Input summarizer (mirrors tool-use-display.tsx) ──
 function summarizeToolInput(name, input) {
   switch (name) {
-    case 'think': return (input.thought || '').slice(0, 60);
+    case 'think': { const t = input.thought || ''; return t.slice(0, 60) + (t.length > 60 ? '...' : ''); }
     case 'search_far': return input.query || '';
     case 'web_search': return input.query || '';
-    case 'web_fetch': return input.url || '';
+    case 'web_fetch': {
+      const u = input.url || '';
+      try { return new URL(u).hostname + new URL(u).pathname.slice(0, 30); } catch { return u.slice(0, 60); }
+    }
     case 'knowledge_search': return input.query || input.topic || '';
+    case 'knowledge_fetch': { const k = input.s3_key || ''; return k.split('/').pop() || k; }
     case 'create_document': { const dt = (input.doc_type || '').replace(/_/g, ' '); return input.title ? dt + ': ' + input.title : dt; }
-    default: return input.query || input.prompt || '';
+    case 'edit_docx_document': { const k = input.document_key || ''; return k.split('/').pop() || k; }
+    case 'load_skill': return input.name || '';
+    default: { const q = input.query || input.prompt || input.message || ''; return q.slice(0, 60) + (q.length > 60 ? '...' : ''); }
   }
 }
 
