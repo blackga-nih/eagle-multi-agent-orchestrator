@@ -103,8 +103,10 @@ def main():
     except json.JSONDecodeError:
         jira_summary = []
 
+    environment = os.getenv("EAGLE_ENV", "dev")
+
     card = deploy_report_card(
-        environment="dev",
+        environment=environment,
         deploy_mode=deploy_mode,
         commit_sha=commit_sha,
         branch=branch,
@@ -117,7 +119,7 @@ def main():
         pr_url=pr_url,
     )
 
-    print(f"[Deploy Report] Mode={deploy_mode} SHA={commit_sha[:10]} Branch={branch}")
+    print(f"[Deploy Report] Env={environment} Mode={deploy_mode} SHA={commit_sha[:10]} Branch={branch}")
     print(f"[Deploy Report] Sending to Teams...")
     resp = httpx.post(webhook_url, json=card, timeout=10)
     print(f"[Deploy Report] Status: {resp.status_code}")
