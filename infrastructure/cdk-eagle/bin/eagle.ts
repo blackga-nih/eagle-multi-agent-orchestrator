@@ -7,7 +7,8 @@ import { EagleStorageStack } from '../lib/storage-stack';
 import { EagleCiCdStack } from '../lib/cicd-stack';
 import { EagleEvalStack } from '../lib/eval-stack';
 import { EagleBackupStack } from '../lib/backup-stack';
-import { DEV_CONFIG } from '../config/environments';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import { DEV_CONFIG, QA_CONFIG } from '../config/environments';
 
 const app = new cdk.App();
 const env = { account: DEV_CONFIG.account, region: DEV_CONFIG.region };
@@ -85,11 +86,35 @@ const backup = new EagleBackupStack(app, 'EagleBackupStack', {
   description: 'EAGLE Backup — hourly DynamoDB snapshots + daily S3, 7/30-day retention',
 });
 
+// ── QA Compute Stack (separate VPC, shared Cognito/IAM/Storage) ──
+// VPC lookup needs a Stack scope — use a dedicated lightweight stack
+const qaLookup = new cdk.Stack(app, 'EagleQaLookup', { env, synthesizer });
+const qaVpc = ec2.Vpc.fromLookup(qaLookup, 'QaVpc', { vpcId: QA_CONFIG.vpcId });
+
+const qaCompute = new EagleComputeStack(app, 'EagleComputeStackQA', {
+  env,
+  synthesizer,
+  config: QA_CONFIG,
+  vpc: qaVpc,
+  appRole: core.appRole,
+  userPoolId: core.userPool.userPoolId,
+  userPoolClientId: core.userPoolClient.userPoolClientId,
+  documentBucketName: storage.documentBucket.bucketName,
+  metadataTableName: storage.metadataTable.tableName,
+  description: 'EAGLE QA Compute — ECS Fargate in QA VPC',
+});
+qaCompute.addDependency(core);
+qaCompute.addDependency(storage);
+
 // Tag all stacks
 for (const stack of [cicd, core, storage, compute, evalStack, backup]) {
   cdk.Tags.of(stack).add('Project', 'eagle');
   cdk.Tags.of(stack).add('ManagedBy', 'cdk');
   cdk.Tags.of(stack).add('Environment', DEV_CONFIG.env);
 }
+
+cdk.Tags.of(qaCompute).add('Project', 'eagle');
+cdk.Tags.of(qaCompute).add('ManagedBy', 'cdk');
+cdk.Tags.of(qaCompute).add('Environment', 'qa');
 
 app.synth();
