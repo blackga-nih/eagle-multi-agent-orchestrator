@@ -593,7 +593,8 @@ async def api_export_session(
             raise HTTPException(status_code=404, detail="Session not found")
         messages = SESSIONS[session_id]
 
-    content = f"# EAGLE Session Export\n\n**Session ID:** {session_id}\n**Exported:** {datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}\n\n---\n\n"
+    export_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    content = f"# EAGLE Session Export\n\n**Session ID:** {session_id}\n**Exported:** {export_ts}\n\n---\n\n"
 
     for msg in messages:
         role = msg.get("role", "unknown").upper()
