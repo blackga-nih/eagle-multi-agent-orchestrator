@@ -74,6 +74,18 @@ test.describe('Admin Templates Page', () => {
     }
   });
 
+  test('s3 template cards expose preview and download actions', async ({ page }) => {
+    await page.waitForSelector('text=Loading templates...', { state: 'hidden' }).catch(() => {});
+
+    const s3Badge = page.getByText('S3 Library', { exact: true }).first();
+    if (await s3Badge.isVisible().catch(() => false)) {
+      const s3Card = s3Badge.locator('xpath=ancestor::div[contains(@class, "group")]').first();
+      await s3Card.hover();
+      await expect(s3Card.getByTitle('Preview Template')).toBeVisible();
+      await expect(s3Card.getByTitle('Download Template')).toBeVisible();
+    }
+  });
+
   test('breadcrumb navigates back to admin dashboard', async ({ page }) => {
     await page.getByRole('link', { name: 'Admin' }).click();
     await expect(page).toHaveURL(/\/admin/);

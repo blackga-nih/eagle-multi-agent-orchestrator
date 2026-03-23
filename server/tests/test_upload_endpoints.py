@@ -10,6 +10,7 @@ Covers:
 import importlib
 
 import pytest
+from decimal import Decimal
 from unittest.mock import MagicMock, patch, ANY
 from fastapi.testclient import TestClient
 
@@ -167,6 +168,31 @@ class TestUploadEndpoint:
         assert metadata["tenant_id"] == "test-tenant"
         assert metadata["user_id"] == "test-user"
         assert "classification" in metadata
+
+    def test_put_upload_converts_float_metadata_to_decimal(self):
+        """Upload metadata written to DynamoDB must not contain raw floats."""
+        import app.main as _main
+
+        mock_table = MagicMock()
+        mock_resource = MagicMock()
+        mock_resource.Table.return_value = mock_table
+
+        with patch("boto3.resource", return_value=mock_resource):
+            _main._put_upload(
+                "test-tenant",
+                "upload-123",
+                {
+                    "classification": {
+                        "doc_type": "sow",
+                        "confidence": 0.85,
+                    },
+                    "size_bytes": 123,
+                },
+            )
+
+        mock_table.put_item.assert_called_once()
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        assert item["classification"]["confidence"] == Decimal("0.85")
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +365,7 @@ class TestAssignToPackage:
 
 
 class TestS3TemplateEndpoints:
-    """Tests for GET /api/templates/s3 and POST /api/templates/s3/copy."""
+    """Tests for GET /api/templates/s3, preview/download, and POST /api/templates/s3/copy."""
 
     def _sample_template(self, s3_key: str = "templates/sow_template.md", phase: str = "planning") -> dict:
         return {
@@ -432,6 +458,29 @@ class TestS3TemplateEndpoints:
         assert data["document_id"] == "doc-xyz-789"
         assert data["source"] == "s3_template"
         assert data["package_id"] == "pkg-abc"
+
+    def test_get_s3_template_download_url(self, client):
+        """GET /api/templates/s3/download-url returns a presigned URL for valid template keys."""
+        valid_key = "eagle-knowledge-base/approved/supervisor-core/essential-templates/1.a. AP Under SAT.docx"
+
+        with patch("boto3.client") as mock_boto3_client:
+            mock_s3 = MagicMock()
+            mock_s3.generate_presigned_url.return_value = "https://signed.example/template"
+            mock_boto3_client.return_value = mock_s3
+
+            response = client.get(f"/api/templates/s3/download-url?s3_key={valid_key}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["download_url"] == "https://signed.example/template"
+        assert data["filename"] == "1.a. AP Under SAT.docx"
+
+    def test_get_s3_template_download_url_rejects_invalid_prefix(self, client):
+        """GET /api/templates/s3/download-url blocks keys outside the configured template prefix."""
+        response = client.get("/api/templates/s3/download-url?s3_key=templates/bad.docx")
+
+        assert response.status_code == 403
+        assert "invalid template key" in response.json()["detail"].lower()
 
     def test_copy_template_returns_404_for_missing_key(self, client):
         """When get_s3_template_by_key returns None, the endpoint must raise HTTP 404."""

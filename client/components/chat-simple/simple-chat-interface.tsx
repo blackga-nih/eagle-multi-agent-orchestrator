@@ -102,6 +102,7 @@ export default function SimpleChatInterface() {
     const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
     const [isPackageSelectorOpen, setIsPackageSelectorOpen] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
+    const dragDepthRef = useRef(0);
 
     // Global Ctrl+K keyboard shortcut
     useEffect(() => {
@@ -276,6 +277,27 @@ export default function SimpleChatInterface() {
         window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
     }, [isStreaming, handleStopGeneration]);
+
+    const clearDragState = useCallback(() => {
+        dragDepthRef.current = 0;
+        setIsDragging(false);
+    }, []);
+
+    useEffect(() => {
+        const handleWindowDragEnd = () => clearDragState();
+        const handleWindowDrop = () => clearDragState();
+        const handleWindowBlur = () => clearDragState();
+
+        window.addEventListener('dragend', handleWindowDragEnd);
+        window.addEventListener('drop', handleWindowDrop);
+        window.addEventListener('blur', handleWindowBlur);
+
+        return () => {
+            window.removeEventListener('dragend', handleWindowDragEnd);
+            window.removeEventListener('drop', handleWindowDrop);
+            window.removeEventListener('blur', handleWindowBlur);
+        };
+    }, [clearDragState]);
 
 
     // Auto-resize textarea — show scrollbar only when content exceeds max height
@@ -475,23 +497,35 @@ export default function SimpleChatInterface() {
         }
     };
 
+    const isFileDrag = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
     // Drag-drop handlers
+    const handleDragEnter = (e: React.DragEvent) => {
+        e.preventDefault();
+        if (!isFileDrag(e)) return;
+        dragDepthRef.current += 1;
+        setIsDragging(true);
+    };
+
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
+        if (!isFileDrag(e)) return;
+        e.dataTransfer.dropEffect = 'copy';
         setIsDragging(true);
     };
 
     const handleDragLeave = (e: React.DragEvent) => {
         e.preventDefault();
-        // Only hide if leaving the main container
-        if (e.currentTarget === e.target) {
+        if (!isFileDrag(e)) return;
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (dragDepthRef.current === 0) {
             setIsDragging(false);
         }
     };
 
     const handleDrop = async (e: React.DragEvent) => {
         e.preventDefault();
-        setIsDragging(false);
+        clearDragState();
 
         const files = e.dataTransfer.files;
         if (files.length === 0) return;
@@ -523,7 +557,12 @@ export default function SimpleChatInterface() {
         try {
             const token = await getToken();
             const { uploadDocument } = await import('@/lib/document-api');
-            const result = await uploadDocument(file, currentSessionId || undefined, undefined, token);
+            const result = await uploadDocument(
+                file,
+                currentSessionId || undefined,
+                packageState.packageId ?? undefined,
+                token,
+            );
             handleUploadComplete(result);
         } catch (err) {
             const errorMsg: ChatMessage = {
@@ -541,6 +580,7 @@ export default function SimpleChatInterface() {
             {/* Left: main chat area */}
             <div
                 className="flex-1 flex flex-col min-w-0 relative"
+                onDragEnter={handleDragEnter}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}

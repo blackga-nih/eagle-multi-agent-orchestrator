@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Plus, Search, FileStack, Trash2, Eye, Code, Loader2, AlertCircle,
   RefreshCw, Package, FileText, FileSpreadsheet, File, Filter,
-  Copy, CheckCircle2, X, ChevronDown,
+  Copy, CheckCircle2, X, ChevronDown, Download,
 } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
@@ -136,6 +136,7 @@ export default function TemplatesPage() {
   const [copyTarget, setCopyTarget] = useState<TemplateCard | null>(null);
   const [s3PreviewLoading, setS3PreviewLoading] = useState(false);
   const [s3PreviewData, setS3PreviewData] = useState<S3TemplatePreviewResponse | null>(null);
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [selectedPackageId, setSelectedPackageId] = useState<string>('');
   const [newPackageTitle, setNewPackageTitle] = useState<string>('');
 
@@ -300,6 +301,28 @@ export default function TemplatesPage() {
       setS3PreviewData({ type: 'markdown', content: `Error loading preview: ${err}`, filename: card.name });
     } finally {
       setS3PreviewLoading(false);
+    }
+  }
+
+  async function handleS3Download(card: TemplateCard, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!card.s3Key) return;
+
+    setDownloadingKey(card.key);
+    setError(null);
+    try {
+      const data = await templateApi.getS3DownloadUrl(getToken, card.s3Key);
+      const link = document.createElement('a');
+      link.href = data.download_url;
+      link.download = data.filename;
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download template');
+    } finally {
+      setDownloadingKey(null);
     }
   }
 
@@ -677,6 +700,18 @@ export default function TemplatesPage() {
                             title="Preview Template"
                           >
                             <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => handleS3Download(card, e)}
+                            disabled={downloadingKey === card.key}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                            title="Download Template"
+                          >
+                            {downloadingKey === card.key ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
                           </button>
                           <button
                             onClick={(e) => {

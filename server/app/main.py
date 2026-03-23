@@ -1104,6 +1104,19 @@ _MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 
 
 # DynamoDB-backed upload tracking (1-hour TTL auto-deletes stale entries)
+def _coerce_dynamodb_value(value: Any) -> Any:
+    """Convert floats in nested upload metadata to Decimal for DynamoDB."""
+    from decimal import Decimal
+
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, list):
+        return [_coerce_dynamodb_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _coerce_dynamodb_value(item) for key, item in value.items()}
+    return value
+
+
 def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> None:
     """Store upload metadata in DynamoDB with 1-hour TTL."""
     import boto3
@@ -1114,7 +1127,7 @@ def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> Non
         "PK": f"UPLOAD#{tenant_id}",
         "SK": f"UPLOAD#{upload_id}",
         "ttl": int(time.time()) + 3600,
-        **metadata,
+        **_coerce_dynamodb_value(metadata),
     }
     table.put_item(Item=item)
 
@@ -2969,6 +2982,34 @@ async def preview_s3_template(
 
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
+
+
+@app.get("/api/templates/s3/download-url")
+async def get_s3_template_download_url(
+    s3_key: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return a presigned download URL for an S3 template."""
+    import boto3
+    from app.template_registry import TEMPLATE_BUCKET, TEMPLATE_PREFIX
+
+    if not s3_key:
+        raise HTTPException(status_code=400, detail="s3_key is required")
+    if not s3_key.startswith(TEMPLATE_PREFIX):
+        raise HTTPException(status_code=403, detail="Access denied — invalid template key")
+
+    filename = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": TEMPLATE_BUCKET,
+            "Key": s3_key,
+            "ResponseContentDisposition": f'attachment; filename="{filename}"',
+        },
+        ExpiresIn=3600,
+    )
+    return {"download_url": url, "filename": filename, "expires_in": 3600}
 
 
 @app.post("/api/templates/s3/copy")

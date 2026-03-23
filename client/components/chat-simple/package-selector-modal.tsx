@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Package, FileText, Folder, Loader2 } from 'lucide-react';
 import Modal from '@/components/ui/modal';
-import { UploadResult, assignToPackage, listPackages, PackageInfo } from '@/lib/document-api';
+import { UploadResult, listPackages, PackageInfo } from '@/lib/document-api';
 
 interface PackageSelectorModalProps {
     isOpen: boolean;
@@ -111,7 +111,7 @@ export default function PackageSelectorModal({
                         className="px-4 py-2 text-sm bg-[#003366] text-white rounded-lg hover:bg-[#004488] disabled:opacity-50 transition-colors flex items-center gap-2"
                     >
                         {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                        {selectedPackageId ? 'Assign to Package' : 'Save to Workspace'}
+                        {selectedPackageId ? 'Assign to Package' : 'Save Without Package'}
                     </button>
                 </div>
             }
@@ -198,9 +198,9 @@ export default function PackageSelectorModal({
                                 <Folder className={`w-5 h-5 ${selectedPackageId === null ? 'text-blue-500' : 'text-gray-400'}`} />
                                 <div className="flex-1">
                                     <p className={`font-medium ${selectedPackageId === null ? 'text-blue-700' : 'text-gray-700'}`}>
-                                        Keep as Workspace Document
+                                        Save Without Package Assignment
                                     </p>
-                                    <p className="text-xs text-gray-500">Save without package assignment</p>
+                                    <p className="text-xs text-gray-500">Keep this document in your personal uploads</p>
                                 </div>
                             </label>
 

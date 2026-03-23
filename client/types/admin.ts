@@ -198,3 +198,9 @@ export interface S3TemplatePreviewResponse {
   content?: string;   // when type === 'markdown'
   filename: string;
 }
+
+export interface S3TemplateDownloadResponse {
+  download_url: string;
+  filename: string;
+  expires_in: number;
+}
