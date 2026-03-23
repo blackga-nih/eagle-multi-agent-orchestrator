@@ -448,6 +448,162 @@ def _check_micropurchase_guardrail(parsed: dict) -> str | None:
     return None
 
 
+# ── Required-information prerequisites per doc type ─────────────────
+# Each entry maps doc_type → list of (field_name, human_label) tuples.
+# The guardrail checks both `data` dict fields AND scans `content` for evidence.
+
+_DOC_PREREQUISITES: dict[str, list[tuple[str, str]]] = {
+    "market_research": [
+        ("requirement_description", "description of the requirement (what is being acquired)"),
+        ("naics_code", "NAICS code or industry sector"),
+        ("estimated_value", "estimated value or budget range"),
+    ],
+    "igce": [
+        ("requirement_description", "description of the requirement"),
+        ("labor_categories", "labor categories, product list, or line items"),
+        ("period_of_performance", "period of performance"),
+        ("estimated_value", "estimated value or budget range"),
+    ],
+    "justification": [
+        ("requirement_description", "description of the requirement"),
+        ("proposed_contractor", "proposed contractor or vendor name"),
+        ("authority", "J&A authority (FAR 6.302 subsection)"),
+    ],
+    "acquisition_plan": [
+        ("requirement_description", "description of the requirement"),
+        ("estimated_value", "estimated value or budget range"),
+        ("contract_type", "planned contract type (FFP, T&M, CR, etc.)"),
+    ],
+}
+
+# Patterns that indicate unfilled template placeholders
+_PLACEHOLDER_PATTERNS = [
+    r"\{\{[A-Z_]+\}\}",           # {{VENDOR_NAME}}, {{PRICE_LOW}}
+    r"\[TBD\]",                    # [TBD]
+    r"\[Insert[^\]]*\]",           # [Insert vendor name here]
+    r"\[Amount\]",                 # [Amount]
+    r"\[Vendor\s*Name\]",          # [Vendor Name]
+    r"\[Contractor\s*Name\]",      # [Contractor Name]
+    r"\$\[",                       # $[Amount]
+    r"\[PLACEHOLDER\]",            # [PLACEHOLDER]
+]
+
+
+def _check_document_prerequisites(parsed: dict) -> str | None:
+    """Return a guardrail JSON string if required information is missing.
+
+    Checks two things:
+    1. Required structured fields in `data` for the doc type
+    2. Content for placeholder patterns that indicate unfilled templates
+
+    Returns None if all checks pass (proceed normally).
+    """
+    import re as _re_prereq
+
+    dt = str(parsed.get("doc_type", "")).strip().lower()
+    prereqs = _DOC_PREREQUISITES.get(dt)
+    if not prereqs:
+        return None  # No prerequisites defined for this doc type
+
+    data_raw = parsed.get("data") or {}
+    if isinstance(data_raw, str):
+        try:
+            data_raw = json.loads(data_raw)
+        except Exception:
+            data_raw = {}
+
+    content = str(parsed.get("content", ""))
+    title = str(parsed.get("title", ""))
+    scan_text = f"{title} {content}".lower()
+
+    # Check required fields — look in both data dict and content body
+    missing = []
+    for field_name, human_label in prereqs:
+        # Check data dict
+        val = str(data_raw.get(field_name, "")).strip()
+        if val and val.lower() not in ("", "none", "n/a", "unknown", "tbd"):
+            continue
+
+        # Check if the information appears somewhere in the content
+        # (agent may have embedded it in prose rather than structured data)
+        field_keywords = field_name.replace("_", " ").split()
+        found_in_content = False
+
+        if field_name == "estimated_value":
+            # Look for dollar amounts in content
+            if _re_prereq.search(r'\$[\d,]+', content):
+                found_in_content = True
+        elif field_name == "naics_code":
+            # Look for NAICS pattern (5-6 digits)
+            if _re_prereq.search(r'\b\d{5,6}\b', content):
+                found_in_content = True
+        elif field_name == "period_of_performance":
+            # Look for date ranges or duration mentions
+            if _re_prereq.search(r'(?:month|year|day|week|PoP|period of performance)', content, _re_prereq.IGNORECASE):
+                found_in_content = True
+        elif field_name == "labor_categories":
+            # Look for labor-related terms
+            if _re_prereq.search(r'(?:labor|categor|position|role|staff|engineer|analyst|developer|specialist)', content, _re_prereq.IGNORECASE):
+                found_in_content = True
+        elif field_name == "proposed_contractor":
+            # Must have a specific company name — hard to validate generically
+            # Accept if content is substantial (>200 chars suggests real data)
+            if len(content) > 200:
+                found_in_content = True
+        elif field_name == "requirement_description":
+            # Accept if content has meaningful length
+            if len(content) > 100:
+                found_in_content = True
+        elif field_name == "authority":
+            if _re_prereq.search(r'(?:FAR\s*6\.302|sole.source|limited.source|unusual.urgent)', content, _re_prereq.IGNORECASE):
+                found_in_content = True
+        elif field_name == "contract_type":
+            if _re_prereq.search(r'(?:firm.fixed|FFP|time.and.material|T&M|cost.reimburs|IDIQ|BPA)', content, _re_prereq.IGNORECASE):
+                found_in_content = True
+
+        if not found_in_content:
+            missing.append(human_label)
+
+    # Check content for placeholder patterns
+    placeholders_found = []
+    for pattern in _PLACEHOLDER_PATTERNS:
+        matches = _re_prereq.findall(pattern, content)
+        if matches:
+            placeholders_found.extend(matches[:3])  # Cap at 3 examples per pattern
+
+    # Build guardrail response if issues found
+    issues = []
+    if missing:
+        issues.append(
+            f"Missing required information: {', '.join(missing)}. "
+            "Ask the user to provide this information before generating the document."
+        )
+    if placeholders_found:
+        examples = ", ".join(dict.fromkeys(placeholders_found[:5]))  # Dedupe, cap at 5
+        issues.append(
+            f"Content contains placeholder markers ({examples}). "
+            "Replace all placeholders with real data from research or conversation."
+        )
+
+    if not issues:
+        return None
+
+    doc_label = dt.replace("_", " ").title()
+    return json.dumps({
+        "status": "guardrail",
+        "guardrail": "document_prerequisites",
+        "message": (
+            f"Cannot generate {doc_label} — prerequisites not met.\n\n"
+            + "\n".join(f"• {issue}" for issue in issues)
+            + "\n\nCollect the missing information from the user, then perform "
+            "web research (web_search + web_fetch) before calling create_document."
+        ),
+        "missing_fields": missing,
+        "placeholder_count": len(placeholders_found),
+        "word_count": 0,
+    })
+
+
 def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
     """Extract document viewer context blocks from wrapped prompts."""
     if not prompt:
@@ -1456,6 +1612,11 @@ def _build_subagent_doc_tools(
             if _mp_block:
                 return _mp_block
 
+            # -- Document prerequisites guardrail --
+            _prereq_block = _check_document_prerequisites(parsed)
+            if _prereq_block:
+                return _prereq_block
+
             result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
             return json.dumps(result, indent=2, default=str)
@@ -2022,6 +2183,11 @@ def _build_all_service_tools(
             _mp_block = _check_micropurchase_guardrail(parsed)
             if _mp_block:
                 return _mp_block
+
+            # -- Document prerequisites guardrail --
+            _prereq_block = _check_document_prerequisites(parsed)
+            if _prereq_block:
+                return _prereq_block
 
             # -- Prompt-context enrichment (same logic as prior factory) --
             prompt_doc_ctx = _extract_document_context_from_prompt(prompt_context or "")
@@ -2884,8 +3050,34 @@ def _build_supervisor_prompt_body(
         "and may omit critical clauses, exceptions, or requirements.\n"
         "7) If a search_far result has empty s3_keys, the summary is the best available — "
         "note that no full-text source was available for that clause.\n\n"
+        "COLLECT BEFORE RESEARCH — Before performing web research for any document, you MUST\n"
+        "first collect a minimum set of information from the user. If any item is missing,\n"
+        "ASK the user — do NOT assume or invent values.\n\n"
+        "  Required intake for market_research:\n"
+        "    - What is being acquired? (requirement description)\n"
+        "    - NAICS code or industry sector\n"
+        "    - Estimated value or budget range\n"
+        "  Required intake for igce:\n"
+        "    - What is being acquired? (requirement description)\n"
+        "    - Labor categories, products, or line items to price\n"
+        "    - Period of performance\n"
+        "    - Estimated value or budget range\n"
+        "  Required intake for justification (J&A):\n"
+        "    - What is being acquired? (requirement description)\n"
+        "    - Proposed contractor name\n"
+        "    - J&A authority (FAR 6.302 subsection)\n"
+        "  Required intake for acquisition_plan:\n"
+        "    - What is being acquired? (requirement description)\n"
+        "    - Estimated value or budget range\n"
+        "    - Planned contract type (FFP, T&M, CR, etc.)\n\n"
+        "  If the user says 'generate market research' without providing these details,\n"
+        "  respond: 'I need a few details before I can research and generate your document:'\n"
+        "  and list the missing items as a numbered checklist.\n\n"
         "RESEARCH BEFORE DOCUMENT — Required steps before calling create_document:\n"
-        "  Do NOT generate any document with placeholder data. Gather real data first.\n\n"
+        "  Do NOT generate any document with placeholder data. Gather real data first.\n"
+        "  NOTE: create_document has a code-level guardrail that will REJECT documents\n"
+        "  missing required fields or containing placeholder markers. Ensure you have\n"
+        "  collected the required intake AND completed research before calling it.\n\n"
         "  market_research:\n"
         "    1. web_search for vendor landscape ('{requirement} vendors government contract')\n"
         "    2. web_search for pricing/rates ('{requirement} GSA schedule pricing')\n"
@@ -3379,6 +3571,15 @@ async def sdk_query_streaming(
             for tool_result_chunk in _drain_tool_results():
                 yield tool_result_chunk
 
+            # --- Reasoning / extended thinking ---
+            raw_event = event.get("event", {})
+            if isinstance(raw_event, dict):
+                delta = raw_event.get("contentBlockDelta", {}).get("delta", {})
+                reasoning_text = delta.get("reasoningContent", {}).get("text", "")
+                if reasoning_text:
+                    yield {"type": "reasoning", "data": reasoning_text}
+                    continue
+
             # --- Text streaming ---
             data = event.get("data")
             if data and isinstance(data, str):
@@ -3395,6 +3596,11 @@ async def sdk_query_streaming(
                     tool_name = current_tool.get("name", "")
                     tool_input = current_tool.get("input", "")
                     tools_called.append(tool_name)
+                    # Emit handoff event for subagent tools
+                    from .telemetry.status_messages import is_subagent_tool, get_tool_status_message
+                    if is_subagent_tool(tool_name):
+                        display = tool_name.replace("_", " ").title()
+                        yield {"type": "handoff", "target": tool_name, "reason": f"Delegating to {display}"}
                     yield {
                         "type": "tool_use",
                         "name": tool_name,
@@ -3402,28 +3608,30 @@ async def sdk_query_streaming(
                         "tool_use_id": tool_id,
                     }
                     # Emit human-readable status for this tool
-                    from .telemetry.status_messages import get_tool_status_message
                     input_dict = tool_input if isinstance(tool_input, dict) else {}
                     status_msg = get_tool_status_message(tool_name, input_dict)
                     yield {"type": "agent_status", "status": status_msg, "detail": tool_name}
                 continue
 
             # --- Bedrock contentBlockStart fallback ---
-            tool_use = event.get("event", {})
-            if isinstance(tool_use, dict):
-                tool_use = tool_use.get("contentBlockStart", {}).get("start", {}).get("toolUse")
-                if tool_use:
-                    tool_id = tool_use.get("toolUseId", "")
+            cbs_event = event.get("event", {})
+            if isinstance(cbs_event, dict):
+                cbs_tool = cbs_event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
+                if cbs_tool:
+                    tool_id = cbs_tool.get("toolUseId", "")
                     if tool_id != _current_tool_id:
                         _current_tool_id = tool_id
-                        tool_name = tool_use.get("name", "")
+                        tool_name = cbs_tool.get("name", "")
                         tools_called.append(tool_name)
+                        from .telemetry.status_messages import is_subagent_tool, get_tool_status_message
+                        if is_subagent_tool(tool_name):
+                            display = tool_name.replace("_", " ").title()
+                            yield {"type": "handoff", "target": tool_name, "reason": f"Delegating to {display}"}
                         yield {
                             "type": "tool_use",
                             "name": tool_name,
                             "tool_use_id": tool_id,
                         }
-                        from .telemetry.status_messages import get_tool_status_message
                         status_msg = get_tool_status_message(tool_name)
                         yield {"type": "agent_status", "status": status_msg, "detail": tool_name}
                     continue
