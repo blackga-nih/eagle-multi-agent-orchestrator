@@ -80,6 +80,7 @@ export class EagleComputeStack extends cdk.Stack {
         USE_PERSISTENT_SESSIONS: 'true',
         DEV_MODE: 'false',
         EAGLE_ENV: config.env,
+        EAGLE_ENVIRONMENT: config.env,
         EAGLE_BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6',
         COGNITO_USER_POOL_ID: props.userPoolId,
         COGNITO_CLIENT_ID: props.userPoolClientId,
