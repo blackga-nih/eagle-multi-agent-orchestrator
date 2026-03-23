@@ -77,8 +77,7 @@ jobs:
 
         if [ "$ENV" = "qa" ]; then
           echo "compute_stack=EagleComputeStackQA" >> $GITHUB_OUTPUT
-          # QA TG ARN — resolved at deploy time by the frontend job
-          echo "frontend_tg_arn=RESOLVE_AT_DEPLOY" >> $GITHUB_OUTPUT
+          echo "frontend_tg_arn=arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-QA-TG/cb91bcefa8472261" >> $GITHUB_OUTPUT
         else
           echo "compute_stack=EagleComputeStack" >> $GITHUB_OUTPUT
           echo "frontend_tg_arn=arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-DEV-FRONTEND-IP/0e76ba2b0ab49d0c" >> $GITHUB_OUTPUT
@@ -681,14 +680,6 @@ jobs:
     - name: Sync ALB target group to new task IP
       run: |
         TG_ARN="${{ needs.setup.outputs.frontend_tg_arn }}"
-        # QA: resolve TG ARN dynamically (setup job has no AWS creds)
-        if [ "$TG_ARN" = "RESOLVE_AT_DEPLOY" ]; then
-          TG_ARN=$(aws elbv2 describe-target-groups \
-            --names EAGLE-QA-TG \
-            --region ${{ env.AWS_REGION }} \
-            --query 'TargetGroups[0].TargetGroupArn' --output text)
-          echo "Resolved QA TG ARN: $TG_ARN"
-        fi
 
         TASK_ARN=$(aws ecs list-tasks \
           --cluster ${{ needs.setup.outputs.cluster_name }} \
