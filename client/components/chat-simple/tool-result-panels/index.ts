@@ -11,6 +11,8 @@ import KnowledgeSearchPanel from './knowledge-search-panel';
 import IntakeWorkflowPanel from './intake-workflow-panel';
 import PackageStatusPanel from './package-status-panel';
 import ComplianceResultPanel from './compliance-result-panel';
+import KnowledgeFetchPanel from './knowledge-fetch-panel';
+import WebSearchPanel from './web-search-panel';
 
 export { default as ToolTimingSummary } from './tool-timing-summary';
 
@@ -82,6 +84,12 @@ export function resolveResultPanel(
 
     case 'query_compliance_matrix':
       return createElement(ComplianceResultPanel, { text: resultText });
+
+    case 'knowledge_fetch':
+      return createElement(KnowledgeFetchPanel, { text: resultText });
+
+    case 'web_search':
+      return createElement(WebSearchPanel, { text: resultText });
 
     default:
       return createElement(RawResultPanel, { text: resultText, errorText: null });

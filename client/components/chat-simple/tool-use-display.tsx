@@ -381,15 +381,11 @@ export default function ToolUseDisplay({
   // Special handling for create_document — show document card instead of raw JSON
   const docData = toolName === 'create_document' ? parseCreateDocumentResult(result) : null;
 
-  // Special handling for web_search — show web search result card
-  const webSearchData = toolName === 'web_search' ? parseWebSearchResult(result) : null;
-
-  const hasExpandableResult = hasResult && !docData && !webSearchData && (
+  const hasExpandableResult = hasResult && !docData && (
     errorText || result.result !== null && result.result !== undefined
   );
   const canExpand = (status === 'done' || status === 'error') && hasExpandableResult;
   const showDocCard = status === 'done' && docData !== null;
-  const showWebSearchCard = status === 'done' && webSearchData !== null;
 
   return (
     <div
@@ -439,11 +435,6 @@ export default function ToolUseDisplay({
       {/* Document result card — shown inline for create_document */}
       {showDocCard && (
         <DocumentResultCard data={docData} sessionId={sessionId} />
-      )}
-
-      {/* Web search result card — shown inline for web_search */}
-      {showWebSearchCard && (
-        <WebSearchResultCard data={webSearchData} />
       )}
 
       {/* Collapsible result panel — type-specific rendering */}

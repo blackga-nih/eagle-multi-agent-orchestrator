@@ -172,6 +172,8 @@ export class ChatStreamManager {
         const { sessionId, query, packageId, getToken, dispatch, onLog, onDocumentGenerated } = params;
         let accumulatedText = '';
         let eventCount = 0;
+        /** True after a tool_use/tool_result event — next text chunk needs a separator. */
+        let toolBoundarySeen = false;
         const emittedDocKeys = new Set<string>();
         let shouldFetchDocs = false;
         const queryStartTime = new Date();
@@ -211,7 +213,14 @@ export class ChatStreamManager {
 
             // --- Text ---
             if (event.type === 'text') {
-                accumulatedText += event.content || '';
+                const chunk = event.content || '';
+                if (!chunk && !accumulatedText) return;
+                // Insert paragraph break when text resumes after a tool boundary
+                if (chunk && toolBoundarySeen && accumulatedText && !/\s$/.test(accumulatedText)) {
+                    accumulatedText += '\n\n';
+                }
+                toolBoundarySeen = false;
+                accumulatedText += chunk;
                 if (!accumulatedText) return;
                 const message: Message = {
                     id: streamingMsgId,
@@ -233,6 +242,7 @@ export class ChatStreamManager {
                 const toolUseId = event.tool_use.tool_use_id ?? `tool-${Date.now()}`;
                 const isClientSide = CLIENT_SIDE_TOOLS.has(toolName);
                 const msgId = streamingMsgId;
+                toolBoundarySeen = true;
 
                 dispatch({
                     type: 'generation/toolUse',
@@ -242,6 +252,7 @@ export class ChatStreamManager {
                         input: toolInput,
                         status: isClientSide ? 'running' : 'pending',
                         isClientSide,
+                        textSnapshotLength: accumulatedText.length,
                     },
                 });
 
