@@ -270,9 +270,11 @@ def deploy_report_card(
     jira_summary: [{"key": "EAGLE-42", "action": "transitioned to Done"}]
     deploy_status: {"infra": "PASS", "backend": "PASS", "frontend": "SKIP"}
     """
-    all_pass = all(r["status"] in ("PASS", "SKIP") for r in results)
-    deploy_ok = all(v in ("PASS", "SKIP") for v in deploy_status.values())
-    style = "good" if (all_pass and deploy_ok) else "attention"
+    non_fail = ("PASS", "SKIP", "CANCEL")
+    all_pass = all(r["status"] in non_fail for r in results)
+    deploy_ok = all(v in non_fail for v in deploy_status.values())
+    cancelled = any(r["status"] == "CANCEL" for r in results) or any(v == "CANCEL" for v in deploy_status.values())
+    style = "warning" if cancelled else ("good" if (all_pass and deploy_ok) else "attention")
 
     facts = [
         {"title": "Commit", "value": commit_sha[:10]},
@@ -326,8 +328,9 @@ def deploy_report_card(
     if pr_url:
         actions.append({"type": "Action.OpenUrl", "title": "View PR", "url": pr_url})
 
+    suffix = "Cancelled" if cancelled else deploy_mode.capitalize()
     return _card(
-        title=f"EAGLE {environment} | Deploy Report — {deploy_mode.capitalize()}",
+        title=f"EAGLE {environment.upper()} | Deploy Report — {suffix}",
         facts=facts,
         body_text=body_text,
         style=style,

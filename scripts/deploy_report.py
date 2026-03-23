@@ -54,6 +54,8 @@ def _status(env_key: str) -> str:
         return "PASS"
     if val == "skipped":
         return "SKIP"
+    if val == "cancelled":
+        return "CANCEL"
     return "FAIL"
 
 
