@@ -72,8 +72,15 @@ export async function uploadDocument(
     });
 
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
-        throw new Error(error.detail || `Upload failed: ${response.status}`);
+        const error = await response.json().catch(() => ({ detail: 'Upload failed' })) as {
+            detail?: string;
+            details?: string;
+            error?: string;
+            message?: string;
+        };
+        throw new Error(
+            error.detail || error.details || error.error || error.message || `Upload failed: ${response.status}`
+        );
     }
 
     return response.json();
@@ -103,8 +110,15 @@ export async function assignToPackage(
     });
 
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ detail: 'Assignment failed' }));
-        throw new Error(error.detail || `Assignment failed: ${response.status}`);
+        const error = await response.json().catch(() => ({ detail: 'Assignment failed' })) as {
+            detail?: string;
+            details?: string;
+            error?: string;
+            message?: string;
+        };
+        throw new Error(
+            error.detail || error.details || error.error || error.message || `Assignment failed: ${response.status}`
+        );
     }
 
     return response.json();
