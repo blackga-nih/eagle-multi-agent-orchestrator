@@ -5,6 +5,14 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - qa
       deploy_infra:
         description: 'Deploy CDK infrastructure'
         required: false
@@ -36,14 +44,51 @@ permissions:
 env:
   AWS_REGION: us-east-1
   CDK_DIR: infrastructure/cdk-eagle
-  CLUSTER_NAME: eagle-dev
-  BACKEND_SERVICE: eagle-backend-dev
-  FRONTEND_SERVICE: eagle-frontend-dev
   EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-sonnet-4-6
 
 jobs:
+  # ── Resolve environment-specific variables ───────────────────
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      env_name: ${{ steps.vars.outputs.env_name }}
+      cluster_name: ${{ steps.vars.outputs.cluster_name }}
+      backend_service: ${{ steps.vars.outputs.backend_service }}
+      frontend_service: ${{ steps.vars.outputs.frontend_service }}
+      backend_ecr: ${{ steps.vars.outputs.backend_ecr }}
+      frontend_ecr: ${{ steps.vars.outputs.frontend_ecr }}
+      compute_stack: ${{ steps.vars.outputs.compute_stack }}
+      frontend_tg_arn: ${{ steps.vars.outputs.frontend_tg_arn }}
+    steps:
+    - name: Resolve environment variables
+      id: vars
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          ENV="${{ inputs.environment }}"
+        else
+          ENV="dev"
+        fi
+        echo "env_name=$ENV" >> $GITHUB_OUTPUT
+        echo "cluster_name=eagle-${ENV}" >> $GITHUB_OUTPUT
+        echo "backend_service=eagle-backend-${ENV}" >> $GITHUB_OUTPUT
+        echo "frontend_service=eagle-frontend-${ENV}" >> $GITHUB_OUTPUT
+        echo "backend_ecr=eagle-backend-${ENV}" >> $GITHUB_OUTPUT
+        echo "frontend_ecr=eagle-frontend-${ENV}" >> $GITHUB_OUTPUT
+
+        if [ "$ENV" = "qa" ]; then
+          echo "compute_stack=EagleComputeStackQA" >> $GITHUB_OUTPUT
+          # QA TG ARN — resolved at deploy time by the frontend job
+          echo "frontend_tg_arn=RESOLVE_AT_DEPLOY" >> $GITHUB_OUTPUT
+        else
+          echo "compute_stack=EagleComputeStack" >> $GITHUB_OUTPUT
+          echo "frontend_tg_arn=arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-DEV-FRONTEND-IP/0e76ba2b0ab49d0c" >> $GITHUB_OUTPUT
+        fi
+
+        echo "Environment: $ENV"
+
   # ── Detect changed paths + deploy mode ─────────────────────
   changes:
+    needs: setup
     runs-on: ubuntu-latest
     outputs:
       infra: ${{ steps.filter.outputs.infra }}
@@ -61,6 +106,7 @@ jobs:
             - 'infrastructure/**'
           backend:
             - 'server/**'
+            - 'eagle-plugin/**'
             - 'deployment/docker/Dockerfile.backend'
             - 'deployment/docker-compose*.yml'
           frontend:
@@ -80,8 +126,13 @@ jobs:
     - name: Determine deploy mode
       id: mode
       run: |
+        ENV="${{ needs.setup.outputs.env_name }}"
         INPUT_MODE="${{ inputs.deploy_mode }}"
-        if [ "$INPUT_MODE" = "full" ] || [ "$INPUT_MODE" = "mini" ]; then
+        # QA always uses mini — code was already tested on DEV
+        if [ "$ENV" = "qa" ]; then
+          echo "deploy_mode=mini" >> $GITHUB_OUTPUT
+          echo "Deploy mode: mini (QA — skip test gates)"
+        elif [ "$INPUT_MODE" = "full" ] || [ "$INPUT_MODE" = "mini" ]; then
           echo "deploy_mode=$INPUT_MODE" >> $GITHUB_OUTPUT
           echo "Deploy mode: $INPUT_MODE (manual override)"
         elif [ "${{ steps.filter.outputs.significant }}" = "true" ]; then
@@ -94,7 +145,7 @@ jobs:
 
   # ── L1: Lint (both modes) ──────────────────────────────────
   lint:
-    needs: changes
+    needs: [setup, changes]
     runs-on: ubuntu-latest
     outputs:
       ruff_result: ${{ steps.ruff.outcome }}
@@ -323,6 +374,9 @@ jobs:
         EAGLE_SESSIONS_TABLE: eagle
         S3_BUCKET: ${{ steps.s3.outputs.document-bucket }}
         EVAL_BUCKET: ${{ steps.s3.outputs.eval-bucket }}
+        LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+        LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+        LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
       run: |
         cd server
         python tests/test_strands_eval.py \
@@ -338,6 +392,9 @@ jobs:
         EAGLE_SESSIONS_TABLE: eagle
         S3_BUCKET: ${{ steps.s3.outputs.document-bucket }}
         EVAL_BUCKET: ${{ steps.s3.outputs.eval-bucket }}
+        LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+        LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+        LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
       run: |
         cd server
         python tests/test_strands_eval.py \
@@ -373,7 +430,7 @@ jobs:
 
   # ── Deploy CDK Infrastructure ──────────────────────────────
   deploy-infra:
-    needs: [changes, lint, unit-tests, integration, eval]
+    needs: [setup, changes, lint, unit-tests, integration, eval]
     runs-on: ubuntu-latest
     if: |
       always() &&
@@ -407,12 +464,16 @@ jobs:
     - name: CDK Deploy
       run: |
         cd ${{ env.CDK_DIR }}
-        npx cdk deploy EagleCoreStack EagleCiCdStack EagleStorageStack EagleEvalStack EagleBackupStack \
+        STACKS="EagleCoreStack EagleCiCdStack EagleStorageStack EagleEvalStack EagleBackupStack"
+        if [ "${{ needs.setup.outputs.env_name }}" = "qa" ]; then
+          STACKS="$STACKS EagleComputeStackQA"
+        fi
+        npx cdk deploy $STACKS \
           --exclusively --require-approval never --outputs-file outputs.json
 
   # ── Build & Push Backend Container ─────────────────────────
   deploy-backend:
-    needs: [changes, lint, unit-tests, integration, eval, deploy-infra]
+    needs: [setup, changes, lint, unit-tests, integration, eval, deploy-infra]
     runs-on: ubuntu-latest
     if: |
       always() &&
@@ -438,7 +499,7 @@ jobs:
       id: ecr
       run: |
         ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-        echo "uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-backend-dev" >> $GITHUB_OUTPUT
+        echo "uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/${{ needs.setup.outputs.backend_ecr }}" >> $GITHUB_OUTPUT
 
     - name: Login to ECR
       uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2.0.1
@@ -463,7 +524,7 @@ jobs:
       run: |
         # Fetch current task def, strip read-only fields, inject EAGLE_BEDROCK_MODEL_ID
         aws ecs describe-task-definition \
-          --task-definition ${{ env.BACKEND_SERVICE }} \
+          --task-definition ${{ needs.setup.outputs.backend_service }} \
           --region ${{ env.AWS_REGION }} \
           --query 'taskDefinition' --output json > /tmp/current_td.json
 
@@ -482,9 +543,12 @@ jobs:
         env.append({'name': 'EAGLE_BEDROCK_MODEL_ID', 'value': '${{ env.EAGLE_BEDROCK_MODEL_ID }}'})
         td['containerDefinitions'][0]['environment'] = env
 
+        # Pin image to this commit's SHA (not implicit :latest)
+        td['containerDefinitions'][0]['image'] = '${{ steps.ecr.outputs.uri }}:${{ github.sha }}'
+
         with open('/tmp/new_td.json', 'w') as f:
             json.dump(td, f)
-        print("Task def updated with EAGLE_BEDROCK_MODEL_ID=${{ env.EAGLE_BEDROCK_MODEL_ID }}")
+        print("Task def updated: image=${{ steps.ecr.outputs.uri }}:${{ github.sha }}, model=${{ env.EAGLE_BEDROCK_MODEL_ID }}")
         PYEOF
 
         NEW_TD_ARN=$(aws ecs register-task-definition \
@@ -498,8 +562,8 @@ jobs:
     - name: Update ECS backend service
       run: |
         aws ecs update-service \
-          --cluster ${{ env.CLUSTER_NAME }} \
-          --service ${{ env.BACKEND_SERVICE }} \
+          --cluster ${{ needs.setup.outputs.cluster_name }} \
+          --service ${{ needs.setup.outputs.backend_service }} \
           --task-definition ${{ steps.task-def.outputs.task-def-arn }} \
           --force-new-deployment \
           --region ${{ env.AWS_REGION }}
@@ -507,14 +571,14 @@ jobs:
     - name: Wait for backend deployment
       run: |
         aws ecs wait services-stable \
-          --cluster ${{ env.CLUSTER_NAME }} \
-          --services ${{ env.BACKEND_SERVICE }} \
+          --cluster ${{ needs.setup.outputs.cluster_name }} \
+          --services ${{ needs.setup.outputs.backend_service }} \
           --region ${{ env.AWS_REGION }}
         echo "Backend deployment stable"
 
   # ── Build & Push Frontend Container ────────────────────────
   deploy-frontend:
-    needs: [changes, lint, unit-tests, integration, eval, deploy-infra]
+    needs: [setup, changes, lint, unit-tests, integration, eval, deploy-infra]
     runs-on: ubuntu-latest
     if: |
       always() &&
@@ -540,7 +604,7 @@ jobs:
       id: config
       run: |
         ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-        echo "uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/eagle-frontend-dev" >> $GITHUB_OUTPUT
+        echo "uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/${{ needs.setup.outputs.frontend_ecr }}" >> $GITHUB_OUTPUT
 
         CORE=$(aws cloudformation describe-stacks --stack-name EagleCoreStack \
           --query "Stacks[0].Outputs" --output json)
@@ -569,35 +633,72 @@ jobs:
         cache-from: type=gha,scope=frontend
         cache-to: type=gha,mode=max,scope=frontend
 
+    - name: Update frontend task definition with new image
+      id: task-def
+      run: |
+        aws ecs describe-task-definition \
+          --task-definition ${{ needs.setup.outputs.frontend_service }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'taskDefinition' --output json > /tmp/current_td.json
+
+        python3 - <<'PYEOF'
+        import json
+        with open('/tmp/current_td.json') as f:
+            td = json.load(f)
+        for key in ['taskDefinitionArn','revision','status','requiresAttributes',
+                    'placementConstraints','compatibilities','registeredAt','registeredBy']:
+            td.pop(key, None)
+        td['containerDefinitions'][0]['image'] = '${{ steps.config.outputs.uri }}:${{ github.sha }}'
+        with open('/tmp/new_td.json', 'w') as f:
+            json.dump(td, f)
+        print("Frontend task def updated: image=${{ steps.config.outputs.uri }}:${{ github.sha }}")
+        PYEOF
+
+        NEW_TD_ARN=$(aws ecs register-task-definition \
+          --cli-input-json file:///tmp/new_td.json \
+          --region ${{ env.AWS_REGION }} \
+          --query 'taskDefinition.taskDefinitionArn' --output text)
+        echo "task-def-arn=$NEW_TD_ARN" >> $GITHUB_OUTPUT
+        echo "Registered: $NEW_TD_ARN"
+
     - name: Update ECS frontend service
       run: |
         aws ecs update-service \
-          --cluster ${{ env.CLUSTER_NAME }} \
-          --service ${{ env.FRONTEND_SERVICE }} \
+          --cluster ${{ needs.setup.outputs.cluster_name }} \
+          --service ${{ needs.setup.outputs.frontend_service }} \
+          --task-definition ${{ steps.task-def.outputs.task-def-arn }} \
           --force-new-deployment \
           --region ${{ env.AWS_REGION }}
 
     - name: Wait for frontend deployment
       run: |
         aws ecs wait services-stable \
-          --cluster ${{ env.CLUSTER_NAME }} \
-          --services ${{ env.FRONTEND_SERVICE }} \
+          --cluster ${{ needs.setup.outputs.cluster_name }} \
+          --services ${{ needs.setup.outputs.frontend_service }} \
           --region ${{ env.AWS_REGION }}
         echo "Frontend deployment stable"
 
-    - name: Sync EAGLE-DEV-ALB target group to new task IP
+    - name: Sync ALB target group to new task IP
       run: |
-        TG_ARN="arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-DEV-FRONTEND-IP/0e76ba2b0ab49d0c"
+        TG_ARN="${{ needs.setup.outputs.frontend_tg_arn }}"
+        # QA: resolve TG ARN dynamically (setup job has no AWS creds)
+        if [ "$TG_ARN" = "RESOLVE_AT_DEPLOY" ]; then
+          TG_ARN=$(aws elbv2 describe-target-groups \
+            --names EAGLE-QA-TG \
+            --region ${{ env.AWS_REGION }} \
+            --query 'TargetGroups[0].TargetGroupArn' --output text)
+          echo "Resolved QA TG ARN: $TG_ARN"
+        fi
 
         TASK_ARN=$(aws ecs list-tasks \
-          --cluster ${{ env.CLUSTER_NAME }} \
-          --service-name ${{ env.FRONTEND_SERVICE }} \
+          --cluster ${{ needs.setup.outputs.cluster_name }} \
+          --service-name ${{ needs.setup.outputs.frontend_service }} \
           --desired-status RUNNING \
           --region ${{ env.AWS_REGION }} \
           --query 'taskArns[0]' --output text)
 
         NEW_IP=$(aws ecs describe-tasks \
-          --cluster ${{ env.CLUSTER_NAME }} \
+          --cluster ${{ needs.setup.outputs.cluster_name }} \
           --tasks "$TASK_ARN" \
           --region ${{ env.AWS_REGION }} \
           --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' \
@@ -628,11 +729,11 @@ jobs:
           --targets Id="$NEW_IP",Port=3000 \
           --region ${{ env.AWS_REGION }}
 
-        echo "EAGLE-DEV-ALB now targeting $NEW_IP:3000"
+        echo "${{ needs.setup.outputs.env_name }} ALB now targeting $NEW_IP:3000"
 
   # ── Report: Teams notification ─────────────────────────────
   report:
-    needs: [changes, lint, unit-tests, cdk-synth, integration, eval, deploy-infra, deploy-backend, deploy-frontend]
+    needs: [setup, changes, lint, unit-tests, cdk-synth, integration, eval, deploy-infra, deploy-backend, deploy-frontend]
     if: always()
     runs-on: ubuntu-latest
     steps:

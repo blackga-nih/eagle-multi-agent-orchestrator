@@ -78,6 +78,8 @@ def _ensure_langfuse_exporter():
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     if not public_key or not secret_key:
+        logger.warning("[EAGLE] Langfuse credentials missing — traces will NOT be exported. "
+                       "Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY to enable.")
         return
     try:
         import base64
