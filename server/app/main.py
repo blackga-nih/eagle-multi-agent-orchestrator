@@ -133,6 +133,24 @@ from .telemetry.log_context import configure_logging
 configure_logging(level=logging.INFO)
 logger = logging.getLogger("eagle")
 
+GENERIC_EDIT_ERROR = "Unable to save document changes."
+GENERIC_ANALYTICS_ERROR = "Analytics data is temporarily unavailable."
+GENERIC_TRACE_ERROR = "Trace data is temporarily unavailable."
+
+
+def _get_result_error(result: Any) -> str | None:
+    if isinstance(result, dict):
+        error = result.get("error")
+        if isinstance(error, str) and error:
+            return error
+    return None
+
+
+def _sanitize_result_error(result: dict[str, Any], fallback_error: str) -> dict[str, Any]:
+    sanitized = dict(result)
+    sanitized["error"] = fallback_error
+    return sanitized
+
 # ── S3 bucket (single source of truth) ───────────────────────────────
 _S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
 
@@ -1035,9 +1053,22 @@ async def api_update_docx_preview_document(
         preview_mode=request.preview_mode,
         change_source=request.change_source,
     )
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    error = _get_result_error(result)
+    if error:
+        logger.warning("DOCX preview edit failed: %s", error)
+        raise HTTPException(status_code=400, detail=GENERIC_EDIT_ERROR)
+    return {
+        "success": True,
+        "mode": result.get("mode"),
+        "document_id": result.get("document_id"),
+        "key": result.get("key"),
+        "version": result.get("version"),
+        "file_type": result.get("file_type"),
+        "content": result.get("content"),
+        "preview_blocks": result.get("preview_blocks", []),
+        "preview_mode": result.get("preview_mode"),
+        "message": result.get("message"),
+    }
 
 
 @app.post("/api/documents/xlsx-edit/{doc_key:path}")
@@ -1054,9 +1085,23 @@ async def api_update_xlsx_preview_document(
         cell_edits=request.cell_edits,
         change_source=request.change_source,
     )
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    error = _get_result_error(result)
+    if error:
+        logger.warning("XLSX preview edit failed: %s", error)
+        raise HTTPException(status_code=400, detail=GENERIC_EDIT_ERROR)
+    return {
+        "success": True,
+        "mode": result.get("mode"),
+        "document_id": result.get("document_id"),
+        "key": result.get("key"),
+        "version": result.get("version"),
+        "file_type": result.get("file_type"),
+        "content": result.get("content"),
+        "preview_mode": result.get("preview_mode"),
+        "preview_sheets": result.get("preview_sheets", []),
+        "missing": result.get("missing", []),
+        "message": result.get("message"),
+    }
 
 
 # ── S3 Presigned URL ─────────────────────────────────────────────────
@@ -1613,7 +1658,9 @@ async def api_admin_dashboard(
 ):
     """Get admin dashboard statistics."""
     tenant_id = user.tenant_id
-    return get_dashboard_stats(tenant_id, days)
+    result = get_dashboard_stats(tenant_id, days)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 @app.get("/api/admin/users")
@@ -1635,7 +1682,9 @@ async def api_admin_user_stats(
 ):
     """Get stats for a specific user."""
     tenant_id = user.tenant_id
-    return get_user_stats(tenant_id, target_user_id, days)
+    result = get_user_stats(tenant_id, target_user_id, days)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 @app.get("/api/admin/tools")
@@ -1708,7 +1757,9 @@ async def api_admin_tools(
 async def api_check_rate_limit(user: UserContext = Depends(get_user_from_header)):
     """Check current rate limit status."""
     tenant_id, user_id, _ = get_session_context(user)
-    return check_rate_limit(tenant_id, user_id, user.tier)
+    result = check_rate_limit(tenant_id, user_id, user.tier)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 # ── User endpoints ───────────────────────────────────────────────────
@@ -1726,7 +1777,9 @@ async def api_user_usage(
 ):
     """Get usage summary for current user."""
     tenant_id = user.tenant_id
-    return get_usage_summary(tenant_id, days)
+    result = get_usage_summary(tenant_id, days)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 # ── Feedback endpoint ────────────────────────────────────────────────
@@ -2093,7 +2146,9 @@ async def get_tenant_usage(tenant_id: str, current_user: dict = Depends(get_curr
     """Get usage metrics for authenticated tenant"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    return get_tenant_usage_overview(tenant_id)
+    result = get_tenant_usage_overview(tenant_id)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 @app.get("/api/tenants/{tenant_id}/costs")
@@ -2153,6 +2208,8 @@ async def get_tenant_analytics(tenant_id: str, current_user: dict = Depends(get_
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
     usage_data = get_tenant_usage_overview(tenant_id)
+    if _get_result_error(usage_data):
+        usage_data = _sanitize_result_error(usage_data, GENERIC_ANALYTICS_ERROR)
     tier = current_user["subscription_tier"]
     analytics = {
         "tenant_id": tenant_id,
@@ -2171,8 +2228,10 @@ async def get_tenant_analytics(tenant_id: str, current_user: dict = Depends(get_
         "tier_specific_metrics": {
             "mcp_tools_available": subscription_service.get_tier_limits(tier).mcp_server_access,
             "usage_limits": subscription_service.get_tier_limits(tier).dict()
-        }
+        },
     }
+    if usage_data.get("error"):
+        analytics["error"] = GENERIC_ANALYTICS_ERROR
     return analytics
 
 
@@ -2257,11 +2316,14 @@ async def get_admin_traces(
             "observation_count": t.get("observationCount", 0),
             "langfuse_url": _langfuse_url(t.get("id", "")),
         })
-    return {
+    response = {
         "traces": traces,
         "meta": result.get("meta", {}),
         "error": result.get("error"),
     }
+    if _get_result_error(response):
+        response["error"] = GENERIC_TRACE_ERROR
+    return response
 
 
 @app.get("/api/admin/traces/{trace_id}")

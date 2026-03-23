@@ -610,21 +610,31 @@ def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
         return {}
 
     out: dict[str, str] = {}
+    lines = prompt.splitlines()
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("title:") and "title" not in out:
+            out["title"] = line.split(":", 1)[1].strip()
+            continue
+        if line.lower().startswith("type:") and "document_type" not in out:
+            doc_type = line.split(":", 1)[1].strip().lower().replace(" ", "_")
+            if doc_type:
+                out["document_type"] = doc_type
 
-    title_match = re.search(r"(?im)^\s*Title:\s*(.+?)\s*$", prompt)
-    if title_match:
-        out["title"] = title_match.group(1).strip()
-
-    type_match = re.search(r"(?im)^\s*Type:\s*([a-z0-9_ -]+)\s*$", prompt)
-    if type_match:
-        out["document_type"] = type_match.group(1).strip().lower().replace(" ", "_")
-
-    excerpt_match = re.search(
-        r"(?is)Current Content Excerpt:\s*(.+?)(?:\n\s*\[ORIGIN SESSION CONTEXT\]|\n\s*\[USER REQUEST\]|$)",
-        prompt,
-    )
-    if excerpt_match:
-        out["current_content"] = excerpt_match.group(1).strip()
+    excerpt_start = prompt.find("Current Content Excerpt:")
+    if excerpt_start != -1:
+        excerpt_body = prompt[excerpt_start + len("Current Content Excerpt:") :]
+        end_markers = ["\n[ORIGIN SESSION CONTEXT]", "\n[USER REQUEST]"]
+        excerpt_end = len(excerpt_body)
+        for marker in end_markers:
+            marker_index = excerpt_body.find(marker)
+            if marker_index != -1:
+                excerpt_end = min(excerpt_end, marker_index)
+        excerpt = excerpt_body[:excerpt_end].strip()
+        if excerpt:
+            out["current_content"] = excerpt
 
     user_request = _extract_user_request_from_prompt(prompt)
     if user_request:
