@@ -23,6 +23,7 @@ import Link from 'next/link';
 import { useCallback, useRef, useState } from 'react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
+import { generateUUID } from '@/lib/uuid';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
 import type { ExcalidrawCanvasRef, DiagramElement } from '@/components/diagrams/ExcalidrawCanvas';
@@ -169,7 +170,7 @@ export default function DiagramsPage() {
 
     const lastUserPrompt = text;
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       role: 'user',
       content: text,
     };
@@ -189,7 +190,7 @@ export default function DiagramsPage() {
         headers,
         body: JSON.stringify({
           message: text,
-          session_id: currentSessionId ?? crypto.randomUUID(),
+          session_id: currentSessionId ?? generateUUID(),
         }),
       });
 
@@ -231,7 +232,7 @@ export default function DiagramsPage() {
                     : m,
                 );
               }
-              const newId = crypto.randomUUID();
+              const newId = generateUUID();
               streamingIdRef.current = newId;
               return [
                 ...prev,

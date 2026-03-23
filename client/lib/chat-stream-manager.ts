@@ -122,7 +122,7 @@ export class ChatStreamManager {
             throw new Error(`Session ${sessionId} already has an active request`);
         }
 
-        const requestId = crypto.randomUUID();
+        const requestId = generateUUID();
         const streamingMsgId = `stream-${Date.now()}`;
         const abortController = new AbortController();
 
