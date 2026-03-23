@@ -297,6 +297,30 @@ def _extract_period(text: str) -> str | None:
     return None
 
 
+_GENERATION_TRIGGER_RE = re.compile(
+    r"^(generate|create|draft|write|produce|prepare|build|make)\s+"
+    r"(the|a|an|my|our)?\s*"
+    r"(statement of work|sow|igce|ige|cost estimate|market research|"
+    r"acquisition plan|justification|document|report)",
+    re.IGNORECASE,
+)
+
+
+def _is_generation_trigger(text: str) -> bool:
+    """Return True if *text* is a short command to generate a document.
+
+    These messages are user instructions to the agent (\"Generate the SOW for
+    this acquisition\") — they should NOT be used as requirement content in the
+    generated document.
+    """
+    t = text.strip()
+    # Short messages matching the pattern are triggers, not requirements.
+    # Longer messages (>200 chars) likely contain actual requirements inline.
+    if len(t) > 200:
+        return False
+    return bool(_GENERATION_TRIGGER_RE.search(t))
+
+
 def _extract_section_bullets(text: str) -> dict[str, list[str]]:
     """Extract bullet lists grouped by heading from free-form user prompts."""
     sections: dict[str, list[str]] = {}
@@ -354,7 +378,11 @@ def _augment_document_data_from_context(
     user_msgs = [m for m in context_messages if not m.startswith("[ASSISTANT] ")]
     assistant_msgs = [m.removeprefix("[ASSISTANT] ") for m in context_messages if m.startswith("[ASSISTANT] ")]
 
-    last_user_text = user_msgs[-1] if user_msgs else ""
+    # Filter out short generation trigger commands ("Generate the SOW...")
+    # so we use actual requirement content, not the trigger.
+    substantive_user_msgs = [m for m in user_msgs if not _is_generation_trigger(m)]
+    last_user_text = (substantive_user_msgs or user_msgs)[-1] if user_msgs else ""
+
     # Build context from ALL messages (user + assistant) for richer documents
     context_blob = " ".join(context_messages[-8:])
 
@@ -411,15 +439,50 @@ def _augment_document_data_from_context(
         combined_tasks = (scope_items + tech_items)[:20]
         if combined_tasks:
             merged.setdefault("tasks", combined_tasks)
-        merged.setdefault("scope", requirement or title)
+        # Build scope from structured bullets first, then substantive user
+        # messages. Never use a bare generation trigger as scope text.
+        if scope_items:
+            merged.setdefault("scope", "\n".join(f"- {s}" for s in scope_items[:10]))
+        elif substantive_user_msgs:
+            # Use the longest substantive user message (most likely contains
+            # the actual requirements) rather than just the last one.
+            best_req = max(substantive_user_msgs[-6:], key=len)[:500]
+            merged.setdefault("scope", best_req)
+        else:
+            # Fallback: leave scope empty so _generate_sow uses its template
+            pass
 
     # Include assistant analysis as conversation context so templates
     # and generators can reference intake answers, recommendations, and
     # tool results from the conversation — not just user prompts.
     if assistant_msgs:
-        # Use the most recent and substantial assistant message as context
-        best_context = max(assistant_msgs[-4:], key=len)
+        # Filter out messages that look like system prompt leakage
+        clean_assistant = [
+            m for m in assistant_msgs
+            if not re.search(
+                r"Your task is to create a detailed summary|"
+                r"You are an? .{0,30}(?:assistant|agent|specialist)|"
+                r"SYSTEM PROMPT|"
+                r"<instructions>",
+                m[:200], re.IGNORECASE,
+            )
+        ]
+        source = clean_assistant or assistant_msgs
+        best_context = max(source[-4:], key=len)
         merged.setdefault("conversation_context", best_context[:3000])
+
+    # Always inject full conversation history so generators (especially the
+    # markdown fallback) can produce contextual documents instead of stubs.
+    # This is the primary mechanism for getting conversation content into
+    # generated documents when the LLM doesn't pass full `content`.
+    all_msgs = []
+    for m in context_messages:
+        if m.startswith("[ASSISTANT] "):
+            all_msgs.append({"role": "assistant", "text": m[12:]})
+        else:
+            all_msgs.append({"role": "user", "text": m})
+    if all_msgs:
+        merged.setdefault("conversation_history", all_msgs)
 
     return merged
 
@@ -2125,6 +2188,77 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     return response
 
 
+def _extract_sow_sections_from_history(
+    history: list[dict],
+    description: str,
+) -> tuple[list[str], list[str]]:
+    """Extract scope and background content from conversation history.
+
+    Scans user and assistant messages for substantive requirement details
+    (technical specs, environment info, compliance needs, deliverables)
+    and returns them as formatted scope bullets and background sentences.
+
+    Returns (scope_parts, background_parts).
+    """
+    scope_parts: list[str] = []
+    bg_parts: list[str] = []
+
+    # Collect all substantive text (skip short trigger commands)
+    user_texts: list[str] = []
+    assistant_texts: list[str] = []
+    for msg in history:
+        text = msg.get("text", "").strip()
+        if not text:
+            continue
+        if msg["role"] == "user":
+            if not _is_generation_trigger(text):
+                user_texts.append(text)
+        else:
+            assistant_texts.append(text)
+
+    if not user_texts and not assistant_texts:
+        return scope_parts, bg_parts
+
+    # Build scope: use substantive user messages as the primary source.
+    # Format as a proper scope paragraph with contractor-shall language.
+    combined_reqs = " ".join(user_texts[-6:])[:2000]
+    if combined_reqs:
+        scope_parts.append(
+            "The contractor shall provide all personnel, equipment, "
+            "supplies, facilities, transportation, tools, materials, "
+            "supervision, and other items and non-personal services "
+            f"necessary to {description}, as defined in this SOW."
+        )
+        scope_parts.append("")
+        scope_parts.append(
+            "Specifically, the contractor shall address the following "
+            "requirements identified during the acquisition intake:"
+        )
+        scope_parts.append("")
+        # Extract bullet-worthy phrases from user input
+        for ut in user_texts[-6:]:
+            # Skip very short messages (greetings, "yes", "ok")
+            if len(ut) < 30:
+                continue
+            # Truncate long messages to a reasonable bullet
+            bullet = ut[:300].rstrip(".")
+            scope_parts.append(f"- {bullet}")
+
+    # Build background extra: use assistant analysis for richer context.
+    # Pick the longest assistant message (usually the most analytical).
+    if assistant_texts:
+        best = max(assistant_texts[-4:], key=len)
+        # Extract first meaningful paragraph (skip greetings)
+        paragraphs = [
+            p.strip() for p in best.split("\n\n")
+            if len(p.strip()) > 50
+        ]
+        if paragraphs:
+            bg_parts.append(paragraphs[0][:500])
+
+    return scope_parts, bg_parts
+
+
 def _generate_sow(title: str, data: dict) -> str:
     desc = data.get("description", "the required supplies/services")
     pop = data.get("period_of_performance", "12 months from date of award")
@@ -2141,7 +2275,24 @@ def _generate_sow(title: str, data: dict) -> str:
         "Training and Knowledge Transfer",
         "Ongoing Support and Maintenance",
     ])
+
+    # Build scope from conversation history when available, falling back
+    # to the explicit scope field or a standard template sentence.
+    conv_history = data.get("conversation_history", [])
     scope_override = str(data.get("scope", "") or "").strip()
+    background_extra = ""
+
+    if conv_history and not scope_override:
+        # Synthesize scope and background from the full conversation so the
+        # document reflects what was actually discussed, not a stub.
+        scope_parts, bg_parts = _extract_sow_sections_from_history(
+            conv_history, desc,
+        )
+        if scope_parts:
+            scope_override = "\n".join(scope_parts)
+        if bg_parts:
+            background_extra = "\n\n" + "\n".join(bg_parts)
+
     if scope_override:
         scope_text = scope_override
     else:
@@ -2191,7 +2342,7 @@ and should be incorporated into the final document:
 
 The National Cancer Institute (NCI), part of the National Institutes of Health (NIH),
 requires {desc}. This Statement of Work (SOW) describes the tasks, deliverables,
-and performance requirements for this acquisition.
+and performance requirements for this acquisition.{background_extra}
 
 ## 2. SCOPE
 

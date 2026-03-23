@@ -90,17 +90,6 @@ export default function SimpleChatInterface() {
     const agentStatus = runtime.agentStatus;
     const isStreaming = runtime.isStreaming;
 
-    // Track the last non-null streaming message so we can commit it after the
-    // reducer clears streamingMessage on generation/complete (same dispatch
-    // sets status='idle' AND streamingMessage=null, so the commit effect would
-    // otherwise read null).
-    const lastStreamingMsgRef = useRef<ChatMessage | null>(null);
-    useEffect(() => {
-        if (streamingMsg) {
-            lastStreamingMsgRef.current = streamingMsg;
-        }
-    }, [streamingMsg]);
-
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const lastAssistantIdRef = useRef<string | null>(null);
     /** Track whether AI title has been generated for this session. */
@@ -228,14 +217,12 @@ export default function SimpleChatInterface() {
         prevStatusRef.current = runtime.status;
 
         if (wasStreaming && runtime.status === 'idle') {
-            // The stream manager dispatched generation/complete — commit the final message.
-            // Read from the ref because the reducer already nulled streamingMessage
-            // in the same dispatch that set status='idle'.
-            const finalMsg = lastStreamingMsgRef.current;
+            // The reducer stores the final message in completedMessage (set
+            // atomically in the same dispatch that transitions status→idle).
+            const finalMsg = runtime.completedMessage;
             if (finalMsg) {
                 lastAssistantIdRef.current = finalMsg.id;
                 setMessages((prev) => [...prev, finalMsg]);
-                lastStreamingMsgRef.current = null;
             }
 
             // Merge runtime documents into local documents state

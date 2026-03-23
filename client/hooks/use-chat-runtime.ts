@@ -13,6 +13,7 @@ const IDLE_STATE: SessionGenerationState = {
     documentsByMsg: {},
     agentStatus: null,
     error: null,
+    completedMessage: null,
 };
 
 export interface ChatRuntimeView extends SessionGenerationState {

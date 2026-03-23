@@ -3,6 +3,10 @@
 Calls Nova 2 Lite via Bedrock Converse API with the nova_grounding system tool
 to perform real-time web searches. Returns structured results with source citations.
 
+After retrieving search results, auto-fetches the top N source pages in parallel
+so the calling agent receives full page content — not just snippets — without
+needing to make separate web_fetch calls.
+
 AWS docs: https://docs.aws.amazon.com/nova/latest/nova2-userguide/web-grounding.html
 
 Key implementation notes (from AWS docs):
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import boto3
@@ -80,6 +85,48 @@ def _extract_citations(block: dict, last_text: str) -> list[dict]:
     return results
 
 
+def _auto_fetch_pages(
+    urls: list[str],
+    max_chars: int = 3000,
+) -> dict[str, str]:
+    """Fetch multiple URLs in parallel, returning truncated page content.
+
+    Returns a dict of {url: page_content_string}. Failed fetches are
+    silently skipped.
+    """
+    if not urls:
+        return {}
+
+    from .web_fetch import exec_web_fetch
+
+    results: dict[str, str] = {}
+
+    def _fetch_one(url: str) -> tuple[str, str | None]:
+        try:
+            data = exec_web_fetch(url)
+            content = data.get("content", "")
+            if content and not data.get("error"):
+                truncated = content[:max_chars]
+                if len(content) > max_chars:
+                    truncated += "\n\n[... truncated — call web_fetch for full page]"
+                return url, truncated
+        except Exception:
+            pass
+        return url, None
+
+    with ThreadPoolExecutor(max_workers=min(len(urls), 5)) as pool:
+        futures = {pool.submit(_fetch_one, u): u for u in urls}
+        for future in as_completed(futures):
+            try:
+                url, content = future.result()
+                if content:
+                    results[url] = content
+            except Exception:
+                pass
+
+    return results
+
+
 def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
     """Call Nova 2 Lite with nova_grounding to perform a web search.
 
@@ -126,17 +173,40 @@ def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
 
         answer = "\n".join(answer_parts).strip()
 
-        # Build list of top URLs for easy web_fetch
-        fetch_urls = [s["url"] for s in sources[:5]]
+        # Auto-fetch top source pages so the agent gets full content
+        # without needing separate web_fetch calls.
+        auto_fetch_count = int(
+            os.environ.get("WEB_SEARCH_AUTO_FETCH", "3")
+        )
+        fetch_urls = [s["url"] for s in sources[:auto_fetch_count]]
+        fetched_pages = _auto_fetch_pages(fetch_urls)
 
-        return {
+        # Annotate sources with fetched content
+        for src in sources:
+            page = fetched_pages.get(src["url"])
+            if page:
+                src["page_content"] = page
+
+        # Build list of remaining URLs not yet fetched
+        unfetched = [
+            s["url"] for s in sources[auto_fetch_count:]
+        ]
+
+        result: dict[str, Any] = {
             "query": query,
             "answer": answer,
             "sources": sources,
             "source_count": len(sources),
-            "fetch_these_urls": fetch_urls,
-            "_instruction": "IMPORTANT: Call web_fetch on each URL in fetch_these_urls above. Search snippets are incomplete — read the full pages before citing.",
+            "pages_fetched": len(fetched_pages),
         }
+        if unfetched:
+            result["unfetched_urls"] = unfetched
+            result["_instruction"] = (
+                f"The top {auto_fetch_count} source pages were auto-fetched "
+                f"(see page_content in sources). Call web_fetch on the "
+                f"remaining URLs above if you need more detail."
+            )
+        return result
 
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "Unknown")

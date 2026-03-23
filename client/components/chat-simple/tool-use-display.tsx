@@ -414,10 +414,10 @@ export default function ToolUseDisplay({
           {status === 'done' && toolName === 'create_document' ? 'Document Created' : meta.label}
         </span>
 
-        {/* Summary */}
+        {/* Summary — shown as "Label — input params" */}
         {summary && (
           <span className="text-gray-400 truncate min-w-0 flex-1">
-            {summary}
+            — &ldquo;{summary}&rdquo;
           </span>
         )}
 

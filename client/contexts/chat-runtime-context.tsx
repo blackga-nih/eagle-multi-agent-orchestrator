@@ -18,6 +18,9 @@ export interface SessionGenerationState {
     documentsByMsg: Record<string, DocumentInfo[]>;
     agentStatus: string | null;
     error: string | null;
+    /** Set once on generation/complete — the final committed message.
+     *  Read by the component to commit the message + trigger title generation. */
+    completedMessage: ChatMessage | null;
 }
 
 export type ChatRuntimeState = Record<string, SessionGenerationState>;
@@ -31,6 +34,7 @@ const IDLE_SESSION: Omit<SessionGenerationState, 'sessionId'> = {
     documentsByMsg: {},
     agentStatus: null,
     error: null,
+    completedMessage: null,
 };
 
 function makeIdle(sessionId: string): SessionGenerationState {
@@ -182,6 +186,7 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
                     activeRequestId: null,
                     streamingMessage: null,
                     agentStatus: null,
+                    completedMessage: action.finalMessage ?? session.streamingMessage ?? null,
                 },
             };
 
