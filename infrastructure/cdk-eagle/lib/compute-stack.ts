@@ -27,6 +27,11 @@ export class EagleComputeStack extends cdk.Stack {
     super(scope, id, props);
     const { config, vpc, appRole } = props;
 
+    // Subnet selection: use explicit IDs if provided (QA VPC has mixed types CDK can't auto-detect)
+    const subnetSelection: ec2.SubnetSelection = config.privateSubnetIds
+      ? { subnets: config.privateSubnetIds.map((id, i) => ec2.Subnet.fromSubnetId(this, `PrivateSubnet${i}`, id)) }
+      : { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS };
+
     // ── ECR Repositories ─────────────────────────────────────
     this.backendRepo = new ecr.Repository(this, 'BackendRepo', {
       repositoryName: `eagle-backend-${config.env}`,
@@ -75,6 +80,7 @@ export class EagleComputeStack extends cdk.Stack {
         USE_PERSISTENT_SESSIONS: 'true',
         DEV_MODE: 'false',
         EAGLE_ENV: config.env,
+        EAGLE_ENVIRONMENT: config.env,
         EAGLE_BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6',
         COGNITO_USER_POOL_ID: props.userPoolId,
         COGNITO_CLIENT_ID: props.userPoolClientId,
@@ -133,7 +139,7 @@ export class EagleComputeStack extends cdk.Stack {
       vpc,
       internetFacing: false,
       securityGroup: backendLBSG,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: subnetSelection,
     });
 
     const backendTargetGroup = new elbv2.ApplicationTargetGroup(this, 'BackendTargetGroup', {
@@ -168,7 +174,7 @@ export class EagleComputeStack extends cdk.Stack {
       taskDefinition: backendTaskDef,
       desiredCount: config.desiredCount,
       securityGroups: [backendServiceSG],
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: subnetSelection,
       assignPublicIp: false,
     });
 
@@ -213,7 +219,7 @@ export class EagleComputeStack extends cdk.Stack {
       vpc,
       internetFacing: false,
       securityGroup: frontendLBSG,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: subnetSelection,
     });
 
     const frontendTargetGroup = new elbv2.ApplicationTargetGroup(this, 'FrontendTargetGroup', {
@@ -242,13 +248,21 @@ export class EagleComputeStack extends cdk.Stack {
     });
     frontendServiceSG.addIngressRule(frontendLBSG, ec2.Port.tcp(3000), 'from frontend ALB');
 
+    // Allow pre-provisioned external ALB (e.g. QA) to reach frontend tasks
+    if (config.externalAlbSecurityGroupId) {
+      const externalAlbSG = ec2.SecurityGroup.fromSecurityGroupId(
+        this, 'ExternalAlbSG', config.externalAlbSecurityGroupId,
+      );
+      frontendServiceSG.addIngressRule(externalAlbSG, ec2.Port.tcp(3000), 'from external ALB');
+    }
+
     const frontendService = new ecs.FargateService(this, 'FrontendService', {
       cluster: this.cluster,
       serviceName: `eagle-frontend-${config.env}`,
       taskDefinition: frontendTaskDef,
       desiredCount: config.desiredCount,
       securityGroups: [frontendServiceSG],
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: subnetSelection,
       assignPublicIp: false,
     });
 

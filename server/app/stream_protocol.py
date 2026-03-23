@@ -147,6 +147,14 @@ class MultiAgentStreamWriter:
         )
         await queue.put(event.to_sse())
 
+    async def write_elicitation(self, queue, question: str, options: list = None):
+        """Emit an ELICITATION event requesting user input."""
+        event = self._create_event(
+            StreamEventType.ELICITATION,
+            elicitation={"question": question, "options": options or []},
+        )
+        await queue.put(event.to_sse())
+
     async def write_complete(self, queue, metadata: Optional[Dict[str, Any]] = None):
         """Emit a COMPLETE event indicating the agent has finished."""
         event = self._create_event(

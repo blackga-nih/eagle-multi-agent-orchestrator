@@ -78,3 +78,15 @@ def get_agent_display_name(agent_name: str) -> str:
         or SKILL_DISPLAY_NAMES.get(agent_name)
         or agent_name.replace("-", " ").title()
     )
+
+
+# Subagent tool names use underscores (skill_name.replace("-", "_"))
+_SUBAGENT_TOOL_NAMES = {
+    name.replace("-", "_") for name in list(AGENT_DISPLAY_NAMES) + list(SKILL_DISPLAY_NAMES)
+    if name != "supervisor"
+}
+
+
+def is_subagent_tool(tool_name: str) -> bool:
+    """Return True if tool_name corresponds to a subagent/specialist."""
+    return tool_name in _SUBAGENT_TOOL_NAMES

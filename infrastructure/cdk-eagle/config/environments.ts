@@ -6,6 +6,12 @@ export interface EagleConfig {
   // Networking (import existing VPC)
   vpcId: string;
 
+  // External ALB (pre-provisioned, e.g. QA ALB in a different VPC)
+  externalAlbSecurityGroupId?: string;
+
+  // Explicit subnet IDs (when VPC has mixed subnet types CDK can't distinguish)
+  privateSubnetIds?: string[];
+
   // Storage (import existing)
   eagleTableName: string;
 
@@ -87,6 +93,16 @@ export const STAGING_CONFIG: EagleConfig = {
   natGateways: 2,
   desiredCount: 2,
   maxCount: 6,
+};
+
+export const QA_CONFIG: EagleConfig = {
+  ...DEV_CONFIG,
+  env: 'qa',
+  vpcId: 'vpc-0a3010977e2bca965',
+  externalAlbSecurityGroupId: 'sg-02970d6bd45fe8bd4',
+  privateSubnetIds: ['subnet-00efa33c26f620963', 'subnet-0c37ceaa073beb491'],
+  desiredCount: 1,
+  maxCount: 2,
 };
 
 export const PROD_CONFIG: EagleConfig = {

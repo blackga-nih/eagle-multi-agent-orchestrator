@@ -34,16 +34,80 @@ STRIP_TAGS = [
     "form", "iframe", "noscript", "svg", "button",
 ]
 
-# Common user-agent to avoid bot blocks
+# Browser-realistic headers to avoid bot detection.
+# Many sites check Sec-Fetch-* and Referer in addition to User-Agent.
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36"
+        "Chrome/131.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;"
+        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+    ),
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Upgrade-Insecure-Requests": "1",
+    "Cache-Control": "max-age=0",
 }
+
+
+def _try_cached_fallback(
+    client: httpx.Client, url: str
+) -> httpx.Response | None:
+    """Try Wayback Machine, then Google cache for a 403-blocked URL.
+
+    Returns a successful Response or None if all caches miss.
+    """
+    # 1. Check Wayback Machine availability (fast JSON check, avoids 404s)
+    try:
+        avail = client.get(
+            f"https://archive.org/wayback/available?url={url}",
+            timeout=5,
+        )
+        snapshots = avail.json().get("archived_snapshots", {})
+        closest = snapshots.get("closest", {})
+        if closest.get("available") and closest.get("url"):
+            wb_resp = client.get(closest["url"])
+            if wb_resp.status_code == 200:
+                ct = wb_resp.headers.get("content-type", "")
+                if "html" in ct:
+                    logger.info("web_fetch: Wayback hit for %s", url)
+                    return wb_resp
+    except Exception:
+        pass
+
+    # 2. Google webcache
+    try:
+        from urllib.parse import quote_plus
+        cache_url = (
+            "https://webcache.googleusercontent.com"
+            f"/search?q=cache:{quote_plus(url)}"
+        )
+        cache_resp = client.get(cache_url)
+        if cache_resp.status_code == 200:
+            ct = cache_resp.headers.get("content-type", "")
+            snippet = cache_resp.text[:1000]
+            is_real = (
+                "html" in ct
+                and "trouble accessing" not in snippet
+                and "<title>Google Search</title>" not in snippet
+            )
+            if is_real:
+                logger.info("web_fetch: Google cache hit for %s", url)
+                return cache_resp
+    except Exception:
+        pass
+
+    return None
 
 
 def _clean_markdown(text: str) -> str:
@@ -83,6 +147,24 @@ def exec_web_fetch(url: str) -> dict[str, Any]:
             max_redirects=5,
         ) as client:
             response = client.get(url)
+
+            # If 403, retry with Referer header (simulates click from search)
+            if response.status_code == 403:
+                logger.info("web_fetch 403, retrying with Referer: %s", url)
+                retry_headers = {
+                    **_HEADERS,
+                    "Referer": "https://www.google.com/",
+                    "Sec-Fetch-Site": "cross-site",
+                }
+                response = client.get(url, headers=retry_headers)
+
+            # If still 403 (Cloudflare/bot wall), try cached versions
+            if response.status_code == 403:
+                logger.info("web_fetch 403 persists, trying caches: %s", url)
+                cached = _try_cached_fallback(client, url)
+                if cached is not None:
+                    response = cached
+
             response.raise_for_status()
 
             # Check content type — only process HTML
@@ -102,8 +184,19 @@ def exec_web_fetch(url: str) -> dict[str, Any]:
         logger.warning("web_fetch timeout: %s", url)
         return {"error": "Request timed out.", "url": url}
     except httpx.HTTPStatusError as e:
-        logger.warning("web_fetch HTTP %d: %s", e.response.status_code, url)
-        return {"error": f"HTTP {e.response.status_code}", "url": url}
+        code = e.response.status_code
+        logger.warning("web_fetch HTTP %d: %s", code, url)
+        if code == 403:
+            return {
+                "error": (
+                    f"HTTP 403 — this site blocks automated access "
+                    f"(Cloudflare/bot protection) and no cached version "
+                    f"is available. Use the search snippet from web_search "
+                    f"instead, or try a different source."
+                ),
+                "url": url,
+            }
+        return {"error": f"HTTP {code}", "url": url}
     except httpx.RequestError as e:
         logger.warning("web_fetch request error: %s — %s", url, e)
         return {"error": f"Request failed: {type(e).__name__}", "url": url}

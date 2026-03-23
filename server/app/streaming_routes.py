@@ -275,6 +275,20 @@ async def stream_generator(
                 )
                 yield await sse_queue.get()
 
+            elif chunk_type == "reasoning":
+                reasoning_data = chunk.get("data", "")
+                if reasoning_data:
+                    await writer.write_reasoning(sse_queue, reasoning_data)
+                    yield await sse_queue.get()
+
+            elif chunk_type == "handoff":
+                await writer.write_handoff(
+                    sse_queue,
+                    chunk.get("target", ""),
+                    chunk.get("reason", ""),
+                )
+                yield await sse_queue.get()
+
             elif chunk_type == "complete":
                 complete_text = chunk.get("text", "")
                 complete_metadata = {}
