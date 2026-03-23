@@ -4,12 +4,13 @@ parent: "[[eval/_index]]"
 file-type: expertise
 human_reviewed: false
 tags: [expert-file, mental-model, eval, testing, eagle, aws, cloudwatch]
-last_updated: 2026-02-25T00:00:00
+last_updated: 2026-03-23T00:00:00
+tags: [expert-file, mental-model, eval, testing, eagle, strands, aws, cloudwatch, langfuse, self-improve]
 ---
 
 # Eval Expertise (Complete Mental Model)
 
-> **Sources**: server/tests/test_eagle_sdk_eval.py, server/app/agentic_service.py, server/eagle_skill_constants.py
+> **Sources**: server/tests/test_strands_eval.py, server/tests/eval_helpers.py, server/tests/eval_aws_publisher.py, server/app/strands_agentic_service.py, eagle-plugin/
 
 ---
 
@@ -18,54 +19,58 @@ last_updated: 2026-02-25T00:00:00
 ### File Layout
 
 ```
-server/tests/test_eagle_sdk_eval.py        # 38 tests, CLI entry point
+server/tests/test_strands_eval.py          # 98 tests, standalone CLI entry point (not pytest)
+server/tests/eval_helpers.py               # Validators: Langfuse, CloudWatch, ToolChain, SkillPrompt
 server/tests/eval_aws_publisher.py         # S3 archival + CloudWatch custom metrics
-server/eagle_skill_constants.py      # Embedded skill/prompt constants
-server/app/agentic_service.py        # execute_tool(), AWS tool implementations
-server/app/sdk_agentic_service.py    # sdk_query(), build_skill_agents(), build_supervisor_prompt()
-data/eval/results/                   # Per-run JSON results (run-<ts>.json, latest.json)
-data/eval/videos/                    # Browser recording videos (.webm/.mp4)
-data/eval/telemetry/                 # Local CloudWatch mirror (cw-<ts>.json)
+server/eagle_skill_constants.py            # Embedded skill/prompt constants
+server/app/strands_agentic_service.py      # sdk_query(), build_skill_tools(), build_supervisor_prompt()
+eagle-plugin/agents/*/agent.md             # Specialist agent prompts (source of truth)
+eagle-plugin/skills/*/SKILL.md             # Skill workflow definitions
+data/eval/results/                         # Per-run JSON results (run-<ts>.json, latest.json)
+data/eval/videos/                          # Browser recording videos (.webm/.mp4)
+data/eval/telemetry/                       # Local CloudWatch mirror (cw-<ts>.json)
 ```
 
-### Test Tiers
+### Test Categories (10 categories, 98 tests)
 
-| Tier | Tests | Type | LLM Cost | Dependencies |
-|------|-------|------|----------|-------------|
-| SDK Patterns | 1-6 | claude-agent-sdk query() | Yes (Bedrock) | AWS Bedrock |
-| Skill Validation | 7-15 | query() with skill system_prompt | Yes (Bedrock) | eagle_skill_constants |
-| Layer 1: AWS Infrastructure | 16-20 | execute_tool() direct | None | boto3, AWS services |
-| UC Workflow Validation | 21-27 | Multi-turn workflow queries via sdk_query() | Yes (Bedrock) | sdk_agentic_service |
-| SDK Architecture | 28 | sdk_agentic_service AgentDefinition | Yes (Bedrock) | sdk_agentic_service, SKILL_CONSTANTS |
-| Layer 2: Requirements Matrix | 29-33 | sdk_query() text assertions vs 5 canonical scenarios | Yes (Bedrock) | sdk_agentic_service |
-| Layer 3: SDK Path AWS Integration | 34-38 | sdk_query() + soft boto3 confirmations | Yes (Bedrock) | sdk_agentic_service, boto3 |
+| Category | Tests | Type | LLM Cost | Dependencies |
+|----------|-------|------|----------|-------------|
+| 1. SDK Patterns | 1-8 | Sessions, traces, subagents, cost, tools | Yes (Bedrock) | AWS Bedrock |
+| 2. Skill Validation | 9-15 | Skill system_prompt + specialist queries | Yes (Bedrock) | eagle_skill_constants |
+| 3. AWS Tools | 16-20 | execute_tool() direct + boto3 confirm | None | boto3, AWS services |
+| 4. UC Workflows | 21-27 | Multi-turn workflow queries via sdk_query() | Yes (Bedrock) | strands_agentic_service |
+| 5. SDK Architecture | 28-34 | Admin, workspace, CRUD, skill-subagent | Yes (Bedrock) | strands_agentic_service |
+| 6. Compliance Matrix | 35-48 | Requirements matrix + FAR + tool chains | Yes (Bedrock) | strands_agentic_service |
+| 7. Langfuse + CW | 49-55 | Trace validation, token counts, CW events | Partial | Langfuse API, CloudWatch |
+| 8. Context Loss | 56-60, 77-82 | KB integration, prompt truncation, empty responses | Yes (Bedrock) | strands_agentic_service |
+| 9. Handoff | 83-87 | Cross-agent context propagation | Yes (Bedrock) | strands_agentic_service |
+| 10. State + Budget | 88-98 | Session persistence, isolation, prompt size | Yes (Bedrock) | DynamoDB, Langfuse |
 
 ### CLI Interface
 
 ```bash
-# Run all 38 tests (sequential)
-python server/tests/test_eagle_sdk_eval.py --model haiku
+# Run all 98 tests (sequential)
+cd server && python tests/test_strands_eval.py --model us.anthropic.claude-3-5-haiku-20241022-v1:0
 
 # Run specific tests
-python server/tests/test_eagle_sdk_eval.py --model haiku --tests 16,17,18,19,20
+python tests/test_strands_eval.py --model us.anthropic.claude-3-5-haiku-20241022-v1:0 --tests 16,17,18,19,20
 
-# Run with async parallelism (tests 3-38)
-python server/tests/test_eagle_sdk_eval.py --model haiku --async
+# Run with trace validation and CloudWatch emission
+python tests/test_strands_eval.py --model us.anthropic.claude-3-5-haiku-20241022-v1:0 --validate-traces --emit-cloudwatch
 
-# Run just new layers
-python server/tests/test_eagle_sdk_eval.py --model haiku --tests 29,30,31,32,33
-python server/tests/test_eagle_sdk_eval.py --model haiku --tests 34,35,36,37,38
+# Run a category
+python tests/test_strands_eval.py --model us.anthropic.claude-3-5-haiku-20241022-v1:0 --tests 61,62,63,64,65,66,67,68,69,70,71,72
 ```
 
 ### Execution Flow
 
 ```
 main()
-  |-- Parse args (--model, --tests, --async)
+  |-- Parse args (--model, --tests, --async, --validate-traces, --emit-cloudwatch)
   |-- Phase A: Sequential tests 1-2 (session create/resume, linked)
-  |-- Phase B: Independent tests 3-38 (sequential or --async parallel)
-  |      selected_tests = list(range(1, 39))  # default: all 38
-  |-- Summary printout (grouped by tier)
+  |-- Phase B: Independent tests 3-98 (sequential or --async parallel)
+  |      selected_tests = list(range(1, 99))  # default: all 98
+  |-- Summary printout (grouped by category, 10 sections)
   |-- Write data/eval/results/run-<ts>.json + latest.json
   |-- emit_to_cloudwatch() -> /eagle/test-runs (structured log events)
   |-- if _HAS_AWS_PUBLISHER:
@@ -73,6 +78,29 @@ main()
   |     |-- archive_results_to_s3() -> s3://eagle-eval-artifacts/eval/results/
   |     |-- archive_videos_to_s3() -> s3://eagle-eval-artifacts/eval/videos/
 ```
+
+### Self-Improvement Levers
+
+The eval expert can modify these 5 levers to improve agent behavior based on test failures:
+
+| # | Lever | File(s) | Impact |
+|---|-------|---------|--------|
+| 1 | Agent prompts | `eagle-plugin/agents/*/agent.md` | Domain knowledge, output format |
+| 2 | Skill workflows | `eagle-plugin/skills/*/SKILL.md` | Tool usage patterns, step ordering |
+| 3 | Supervisor routing | `eagle-plugin/agents/supervisor/agent.md` | FAST vs DEEP delegation |
+| 4 | Trigger patterns | YAML frontmatter in agent/skill files | Keyword activation |
+| 5 | Context budget | `MAX_SKILL_PROMPT_CHARS` in strands_agentic_service.py | Truncation threshold (currently 4000) |
+
+### Root Cause Classification
+
+| Code | Root Cause | Fix Lever | Signal |
+|------|-----------|-----------|--------|
+| ROUTING | Wrong specialist or FAST when DEEP needed | 3 | Expected agent not invoked |
+| PROMPT | Missing domain knowledge in specialist | 1 | Right agent, wrong answer |
+| TOOL | Expected tool not called | 2 | Skill workflow missing tool step |
+| TRUNCATION | Skill prompt truncated, losing instructions | 5 | Skill > 4000 chars, lost section matters |
+| DATA | Test assertion too strict for model | Test file | Haiku can't hit threshold Sonnet can |
+| BUDGET | Total prompt exceeds context window | 5 + 1 | Token count errors |
 
 ---
 
@@ -376,7 +404,7 @@ Each Layer 3 test:
 {
   "type": "run_summary",
   "run_timestamp": "2026-02-09T...",
-  "total_tests": 38,
+  "total_tests": 98,
   "passed": 36,
   "skipped": 1,
   "failed": 1,
@@ -407,7 +435,7 @@ if _HAS_AWS_PUBLISHER:
 
 ### Timestamp Encoding
 - `test_result` events: `timestamp = now_ms + test_id` (unique per test)
-- `run_summary` event: `timestamp = now_ms + 100` (after all test IDs 1-38)
+- `run_summary` event: `timestamp = now_ms + 200` (after all test IDs 1-98)
 
 ### Custom Metrics (EAGLE/Eval Namespace)
 
@@ -421,7 +449,7 @@ Published by `eval_aws_publisher.publish_eval_metrics()`:
 | `TestsFailed` | Count | (none) | Aggregate fail count |
 | `TestsSkipped` | Count | (none) | Aggregate skip count |
 | `TotalCost` | None | (none) | USD cost if > 0 |
-| `TestStatus` (x38) | None | `TestName` | 1.0=pass, 0.0=fail per test |
+| `TestStatus` (x98) | None | `TestName` | 1.0=pass, 0.0=fail per test |
 
 ### S3 Artifact Archival
 
@@ -437,43 +465,52 @@ s3://eagle-eval-artifacts/
 
 ## Part 6: Registration Mappings
 
-Every test must be registered in **8 locations** across 4 files. Missing any causes silent data loss (test runs but results don't show in dashboards or CloudWatch).
+Every test must be registered in **3 backend locations** in `server/tests/test_strands_eval.py`. Missing any causes silent data loss (test runs but results don't show in CloudWatch).
 
-### Backend Registrations (server/tests/test_eagle_sdk_eval.py)
+### Backend Registrations (server/tests/test_strands_eval.py)
 
 | # | Location | Format | Purpose |
 |---|----------|--------|---------|
 | 1 | `TEST_REGISTRY` in `_run_test()` | `N: ("N_snake_name", test_N_snake_name)` | Dispatch: maps test ID to (result_key, function) |
 | 2 | `test_names` in `emit_to_cloudwatch()` | `N: "N_snake_name"` | CloudWatch event `test_name` field |
-| 3 | `result_key` dict in `main()` trace output loop | `N: "N_snake_name"` | trace_logs.json result key per test |
-| 4 | Summary `print()` line in `main()` | `print(f"    Label: {'Ready' if results.get(...)}")` | Terminal readiness output |
-| 5 | `selected_tests` default | `list(range(1, 39))` | Include test when `--tests` not specified |
+| 3 | Summary `print()` line in `main()` | `print(f"    Label: {_rdy(key)}")` | Terminal readiness output |
 
-### Frontend Registrations (3 files)
+Additional registrations:
+- `selected_tests` default: `list(range(1, 99))` -- include test when `--tests` not specified
+- `eval_aws_publisher.py` `_TEST_NAMES` dict: must match test_names for CloudWatch metric per-test emission
+
+### Frontend Registrations (optional, for dashboards)
 
 | # | File | Variable | Format |
 |---|------|----------|--------|
-| 6 | `test_results_dashboard.html` | `TEST_DEFS` | `{ id: N, name: "...", desc: "...", category: "..." }` |
-| 7 | `client/app/admin/tests/page.tsx` | `TEST_NAMES` | `'N': 'Human-Readable Name'` |
-| 8 | `client/app/admin/eval/page.tsx` | `SKILL_TEST_MAP` | `tool_key: [N]` (AWS tools only) |
+| 4 | `test_results_dashboard.html` | `TEST_DEFS` | `{ id: N, name: "...", desc: "...", category: "..." }` |
+| 5 | `client/app/admin/tests/page.tsx` | `TEST_NAMES` | `'N': 'Human-Readable Name'` |
+| 6 | `client/app/admin/eval/page.tsx` | `SKILL_TEST_MAP` | `tool_key: [N]` (AWS tools only) |
 
-### Category Tags (test_results_dashboard.html)
+### Category Tags
 
 | Category | Tests | Description |
 |----------|-------|-------------|
-| `core` | 1, 2, 5 | Session management, cost tracking |
-| `traces` | 3 | Frontend event type mapping |
-| `agents` | 4, 8 | Subagent orchestration and tracking |
-| `tools` | 6 | MCP tool access |
-| `skills` | 7, 10-14 | Skill loading and validation |
-| `workflow` | 9, 15 | Multi-turn and multi-skill workflows |
+| `sdk` | 1-8 | SDK patterns: sessions, traces, subagents, cost, tools |
+| `skills` | 9-15 | Skill loading, specialist validation, multi-skill chains |
 | `aws` | 16-20 | AWS tool integration with boto3 confirm |
-| `uc` | 21-27 | UC workflow validation |
-| `sdk-arch` | 28 | SDK skill-subagent architecture |
-| `matrix` | 29-33 | Requirements matrix correctness |
-| `sdk-aws` | 34-38 | SDK path AWS integration |
+| `uc` | 21-27 | UC workflow validation (UC-02 through UC-09) |
+| `arch` | 28-34 | SDK architecture: admin, workspace, CRUD, skill-subagent |
+| `matrix` | 35-48 | Compliance matrix, FAR/DFARS, tool chains |
+| `langfuse` | 49-55 | Langfuse trace validation + CloudWatch E2E |
+| `kb` | 56-60 | KB integration: FAR search, web search, thresholds |
+| `e2e` | 61-72 | MVP1 UC E2E workflows |
+| `docgen` | 73-76 | Document generation: SOW, IGCE, AP, market research |
+| `context` | 77-82 | Context loss detection: truncation, empty responses |
+| `handoff` | 83-87 | Cross-agent handoff: findings propagation, synthesis |
+| `state` | 88-94 | State persistence: sessions, messages, isolation |
+| `budget` | 95-98 | Context budget: prompt sizes, token counts, cache |
 
-### Full Test Name/Key Reference (all 38)
+### Full Test Name/Key Reference (1-38 shown; 39-98 in test file)
+
+> Tests 39-98 are registered in `test_strands_eval.py` `TEST_REGISTRY` and cover categories:
+> kb (56-60), e2e (61-72), docgen (73-76), context (77-82), handoff (83-87), state (88-94), budget (95-98).
+> Run `python tests/test_strands_eval.py --tests 39` (or any ID) to see the test name at runtime.
 
 | ID | Result Key | Summary Label |
 |----|------------|---------------|
@@ -537,11 +574,11 @@ Every test must be registered in **8 locations** across 4 files. Missing any cau
 
 ---
 
-## Part 7: Standard Operating Procedure — Adding a New Test
+## Part 7: Standard Operating Procedure -- Adding a New Test
 
 ### Pre-Flight
 
-1. **Pick the next test ID** — check `TEST_REGISTRY` for the highest current ID (currently 38), increment by 1
+1. **Pick the next test ID** -- check `TEST_REGISTRY` for the highest current ID (currently 98), increment by 1
 2. **Choose the tier** — SDK Pattern, Skill Validation, AWS Tool Integration, UC Workflow, SDK Architecture, Requirements Matrix, or SDK Path AWS
 3. **Choose a category** — core, traces, agents, tools, skills, workflow, aws, uc, sdk-arch, matrix, or sdk-aws
 4. **Name it** — snake_case for code (`N_descriptive_name`), Title Case for dashboards
@@ -652,7 +689,7 @@ print(f"    Descriptive Title: {'Ready' if results.get('N_descriptive_name') els
 
 **2e. `selected_tests` default range** — update to:
 ```python
-selected_tests = list(range(1, N+1))
+selected_tests = list(range(1, N+1))  # currently range(1, 99)
 ```
 
 ### Step 3: Register in Frontend (3 files)
@@ -835,14 +872,33 @@ All tests that create AWS resources MUST clean up:
 - Testing `sdk_agentic_service` functions (build_skill_agents, build_supervisor_prompt) deterministically before running live sdk_query() — catches import/config issues without LLM cost (discovered: 2026-02-10, component: test_28)
 - Limiting subagent skills in test (2 of 6) for cost control while still validating the delegation pattern (discovered: 2026-02-10, component: test_28)
 - sdk_query() shim defined locally in test file — delegates to sdk_agentic_service.sdk_query via lazy import, avoids circular dependency (discovered: 2026-02-25, component: tests 29-38)
-- NCI-specific knowledge (human subjects/IRB, HHS-653 form, SPE approval, FAR 16.601 T&M D&F) is testable via text assertion — validates domain knowledge is embedded in skill prompts (discovered: 2026-02-25, component: tests 29-33)
+- NCI-specific knowledge (human subjects/IRB, HHS-653 form, SPE approval, FAR 16.601 T&M D&F) is testable via text assertion -- validates domain knowledge is embedded in skill prompts (discovered: 2026-02-25, component: tests 29-33)
+- `_collect_sdk_query()` shared helper reduces boilerplate across tests 49-98 -- single function wraps sdk_query() call, error handling, and text accumulation (discovered: 2026-03-20, component: tests 49-98)
+- `_rdy(key)` helper for summary output -- returns "Ready" if results.get(key) else "Needs work", cleaner than inline ternary (discovered: 2026-03-20, component: summary output)
+- eval_helpers.py validators (LangfuseTraceValidator, CloudWatchEventValidator, ToolChainValidator, SkillPromptValidator) enable post-test assertions without modifying the test runner (discovered: 2026-03-20, component: eval_helpers)
+- 9 of 15 skills exceed MAX_SKILL_PROMPT_CHARS (4000) and get truncated by _truncate_skill() -- critical context loss point (discovered: 2026-03-20, component: strands_agentic_service)
+- Closed-loop self-improvement (DIAGNOSE -> PRIORITIZE -> FIX -> VALIDATE) is more effective than open-loop (just updating docs) -- the 5 levers (agent prompts, skill workflows, supervisor routing, trigger patterns, context budget) are the actual fix surfaces (discovered: 2026-03-20, component: self-improve)
 
 ### patterns_to_avoid
 - Don't rely on LLM output for deterministic assertions — use threshold-based keyword checks
 - Don't skip cleanup — leaves artifacts that confuse future runs
 - Don't test CloudWatch writes in same run as reads (eventual consistency)
 - Don't import eval_aws_publisher at module top-level without guard — breaks eval suite on machines without boto3 (discovered: 2026-02-10, component: eval_aws_publisher)
-- Don't make boto3 AWS checks in Layer 3 fatal — they will fail in local dev without AWS credentials
+- Don't make boto3 AWS checks in Layer 3 fatal -- they will fail in local dev without AWS credentials
+- Don't use Unicode characters (arrows, em-dashes, >=) in print statements -- Windows cp1252 encoding crashes stdout. Use ASCII equivalents: -> instead of U+2192, -- instead of U+2014, >= instead of U+2265 (discovered: 2026-03-20, component: Windows compatibility)
+- Don't update expertise.md without also fixing the actual agent/skill code -- open-loop self-improvement (docs only) doesn't close the feedback loop (discovered: 2026-03-20, component: self-improve pattern)
+- Don't batch multiple lever changes before re-running tests -- isolate one lever per fix to identify which change worked (discovered: 2026-03-20, component: self-improve)
+
+### pytest INTERNALERROR on test_strands_eval.py
+- `test_strands_eval.py` has a top-level `argparse.parse_args()` call — running with `pytest` causes `SystemExit: 2` during collection (INTERNALERROR)
+- **Fix**: Always run as `python tests/test_strands_eval.py --model <model>` directly, never with pytest
+- **Symptom**: `INTERNALERROR> SystemExit: 2` on `pytest tests/test_strands_eval.py`
+
+### Relative Import Failure in Standalone Mode
+- Tests that use `from .compliance_matrix import ...` (relative import) fail when running as standalone script
+- **Root cause**: Module not imported as a package when using `python tests/test_strands_eval.py`
+- **Symptom**: `ImportError: attempted relative import with no known parent package`
+- **Fix**: Use absolute import with `sys.path.insert(0, 'app')` pattern
 
 ### common_issues
 - AWS credentials not configured -> all tool tests (16-20) fail; Layer 3 soft checks show `_reachable=False`
@@ -867,3 +923,101 @@ All tests that create AWS resources MUST clean up:
 - Tests 29-38 also depend on `sdk_agentic_service.sdk_query` via the local shim — same path dependency
 - Layer 2 (29-33) and Layer 3 (34-38) use `tenant_id="nci-oa"` (not "demo-tenant") — matches production NCI tenant
 - When Layer 2 tests fail on text assertions, check if the skill prompts in `eagle-plugin/` contain the expected domain knowledge (human subjects, FAR citations, etc.)
+
+---
+
+## Part 10: mvp1-eval Skill Integration
+
+The `.claude/skills/mvp1-eval/SKILL.md` skill provides a structured 5-phase runner that wraps the test suite for interactive use.
+
+### Skill Location and Config
+
+```
+.claude/skills/mvp1-eval/SKILL.md      # 5-phase runner
+.claude/skills/mvp1-eval/config.json   # Repo-keyed config (sm_eagle key = aws_profile, s3_bucket, etc.)
+```
+
+### Phase Overview
+
+| Phase | What it does |
+|-------|-------------|
+| Step 0 | Load repo config from config.json (AWS_PROFILE, S3_BUCKET, SERVER_DIR, ENV_FILE) |
+| Pre-flight | `aws sts get-caller-identity --profile $AWS_PROFILE` — **HARD ABORT** if fails |
+| Tier 1 | `python -m pytest tests/test_*.py` (unit tests, no AWS) |
+| Tier 2 | `AWS_PROFILE=eagle python -m pytest tests/test_strands_*.py` (live Bedrock, 6 tests) |
+| Tier 3 | `AWS_PROFILE=eagle python tests/test_strands_eval.py --model <model>` (98 tests, ~30 min) |
+| Phase 4 | Langfuse trace query — tokens, costs, per-trace subagent breakdown |
+| Phase 5 | Teams webhook notification — Adaptive Card v1.4 to Azure Logic App |
+
+### Pre-flight Hard Abort
+
+If `aws sts get-caller-identity --profile eagle` exits non-zero:
+```
+PREFLIGHT FAILED: AWS profile 'eagle' is not authenticated.
+Run: aws sso login --profile eagle
+Aborting eval suite.
+```
+Do not proceed to any tier. This was added after the skill silently continued when unauthenticated.
+
+### Teams Webhook (Phase 5)
+
+- **Hardcoded fallback URL**: Azure Logic App at `prod-52.usgovtexas.logic.azure.us` — embedded in SKILL.md so Teams notification works even when `TEAMS_WEBHOOK_URL` is absent from `server/.env`
+- **Lookup order**: `env.get("TEAMS_WEBHOOK_URL") or env.get("ERROR_WEBHOOK_URL") or _DEFAULT_WEBHOOK`
+- **Card style**: `"good"` (green) if all tiers pass, `"attention"` (red) if any failures
+- **Cap**: max 10 failing test names in card body
+- **Actions**: Langfuse Traces link + CloudWatch Logs link
+- **Status 202**: Azure Logic App returns 202 (accepted async) — not 200
+
+### Tier 3 Execution Note
+
+`test_strands_eval.py` has top-level `argparse.parse_args()` — **never use pytest for Tier 3**.
+Always run as: `python tests/test_strands_eval.py --model us.anthropic.claude-3-5-haiku-20241022-v1:0`
+
+---
+
+## Part 11: Model Rules
+
+**CRITICAL: These rules apply to all eval expert work.**
+
+| Task | Model | Why |
+|------|-------|-----|
+| Running eval suite (any tier) | Haiku: `us.anthropic.claude-3-5-haiku-20241022-v1:0` | Cost control — 98 tests at ~$0.03/test |
+| Diagnosing failures | Opus: `claude-opus-4-6` | Needs deep reasoning to identify root cause |
+| Writing code fixes (levers 1-5) | Opus: `claude-opus-4-6` | Higher quality edits for agent prompts + code |
+| Langfuse/CloudWatch analysis | Opus: `claude-opus-4-6` | Complex trace analysis |
+| Re-running specific failing tests | Haiku | Even for validation after a fix |
+
+**Rule**: Never run eval tests with Sonnet or Opus — use Haiku exclusively for test execution.
+
+---
+
+## Part 12: Known Failure Patterns (as of 2026-03-22)
+
+Identified from Tier 3 run (98 tests, Haiku model).
+
+| Test | Root Cause | Details | Fix Lever |
+|------|-----------|---------|-----------|
+| 43 | DATA (FIXED) | Test checked `expected_tools=["oa_intake"]` but oa-intake skill calls `search_far` directly. Fixed to `expected_tools=["search_far"]` | Fixed in test_strands_eval.py:3493 |
+| 45 | DATA (FIXED) | Test checked `expected_tools=["market_intelligence"]` but skill calls `web_search` directly. Fixed to `expected_tools=["web_search"]` | Fixed in test_strands_eval.py:3655 |
+| 46 | DATA (FIXED) | Test checked `expected_tools=["document_generator"]` but skill calls `create_document` directly. Fixed to `expected_tools=["create_document"]` | Fixed in test_strands_eval.py:3735 |
+| 47 | DATA (FIXED) | `known_skills` set only contained subagent wrapper names; actual tools are direct. Updated to include all direct domain tool names | Fixed in test_strands_eval.py:3809 |
+| 52 | DATA | Langfuse session ID `eval-test-*` not found — session not propagated to Langfuse during eval run | Lever 1 — session tagging in sdk_query() |
+| 59 | BUG (FIXED) | Test called `exec_web_search({"query": "..."}, "test-tenant")` — dict instead of string. Fixed to `exec_web_search("...")` | Fixed in test_strands_eval.py:4447 |
+| 60 | BUG (FIXED) | Test used `"acquisition_method": "competitive"` — not a valid method ID. Fixed to `"negotiated"` (valid for $500K contracts) | Fixed in test_strands_eval.py:4474 |
+
+### Test 59 Fix (web_search.py)
+
+In `server/app/tools/web_search.py`, find the `converse()` call that passes the query param.
+The query argument must be a string, not a dict. Pattern:
+```python
+# BAD:
+query_param = {"query": user_query}
+# GOOD:
+query_param = user_query  # or str(user_query)
+```
+
+### Test 60 Fix (compliance_matrix.py)
+
+Add `"competitive"` as an accepted acquisition method alias. Check the accepted methods list
+and either add it directly or map it to `"competitive_acquisition"` / `"full_and_open"`.
+

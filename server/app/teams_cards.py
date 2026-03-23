@@ -335,6 +335,69 @@ def deploy_report_card(
     )
 
 
+def eval_report_card(
+    environment: str,
+    date: str,
+    tier1_pass: int,
+    tier1_total: int,
+    tier2_pass: int,
+    tier2_total: int,
+    tier3_pass: int,
+    tier3_total: int,
+    tier3_run: bool,
+    failed_tests: list[str],
+    elapsed_seconds: float,
+    langfuse_url: str = "",
+    cloudwatch_url: str = "",
+) -> dict:
+    """Build an Adaptive Card for the mvp1-eval suite results."""
+    all_pass = (
+        tier1_pass == tier1_total
+        and tier2_pass == tier2_total
+        and (not tier3_run or tier3_pass == tier3_total)
+    )
+    style = "good" if all_pass else "attention"
+
+    total_pass = tier1_pass + tier2_pass + (tier3_pass if tier3_run else 0)
+    total = tier1_total + tier2_total + (tier3_total if tier3_run else 0)
+    tier3_value = f"{tier3_pass}/{tier3_total}" if tier3_run else "SKIPPED"
+
+    facts = [
+        {"title": "Date", "value": date},
+        {"title": "Environment", "value": environment},
+        {"title": "Tier 1 — Unit", "value": f"{tier1_pass}/{tier1_total}"},
+        {"title": "Tier 2 — Integration", "value": f"{tier2_pass}/{tier2_total}"},
+        {"title": "Tier 3 — Full Eval", "value": tier3_value},
+        {"title": "Total", "value": f"{total_pass}/{total} passed"},
+        {"title": "Duration", "value": f"{elapsed_seconds:.0f}s"},
+    ]
+
+    if all_pass:
+        body_text = f"All {total} tests passed."
+    else:
+        lines = [f"**{len(failed_tests)} failing:**"]
+        for t in failed_tests[:10]:
+            lines.append(f"- {t}")
+        if len(failed_tests) > 10:
+            lines.append(f"*...and {len(failed_tests) - 10} more*")
+        body_text = "\n\n".join(lines)
+
+    actions = []
+    if langfuse_url:
+        actions.append({"type": "Action.OpenUrl", "title": "Langfuse Traces", "url": langfuse_url})
+    if cloudwatch_url:
+        actions.append({"type": "Action.OpenUrl", "title": "CloudWatch Logs", "url": cloudwatch_url})
+
+    status_label = "All Pass" if all_pass else f"{len(failed_tests)} Failed"
+    return _card(
+        title=f"EAGLE {environment} | Eval Report — {status_label}",
+        facts=facts,
+        body_text=body_text,
+        style=style,
+        actions=actions or None,
+    )
+
+
 def suspicious_card(
     environment: str,
     event_type: str,

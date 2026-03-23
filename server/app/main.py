@@ -1744,9 +1744,14 @@ def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
 @app.post("/api/feedback")
 async def api_submit_feedback(
     request: Request,
-    user: UserContext = Depends(get_user_from_header),
+    authorization: Optional[str] = Header(None),
 ):
     """Record user feedback with conversation snapshot and recent CloudWatch logs."""
+    user, auth_error = extract_user_context(authorization)
+    if REQUIRE_AUTH and user.user_id == "anonymous":
+        logger.warning("feedback: auth failed — %s (token present: %s)", auth_error, bool(authorization))
+        raise HTTPException(status_code=401, detail=auth_error or "Authentication required")
+
     body = await request.json()
     session_id = body.get("session_id", "")
     feedback_text = body.get("feedback_text", "").strip()

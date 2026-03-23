@@ -9,6 +9,7 @@
     "server_dir": "server",
     "env_file": "server/.env",
     "langfuse_host": "https://us.cloud.langfuse.com",
+    "langfuse_project_id": "cmmsqvi2406aead071t0zhl7f",
     "tier1_tests": [
       "tests/test_compliance_matrix.py",
       "tests/test_chat_kb_flow.py",

@@ -99,6 +99,54 @@ cursor-shortcuts.txt
 contract-requirements-matrix.html
 *.zip
 
+# Office lock files
+~$*
+
+# Stackdumps
+*.stackdump
+
+# Test reports / screenshots (generated artifacts)
+test-reports/
+screenshots/
+server/screenshots-tool-cards/
+client/screenshots/
+
+# Playwright CLI cache
+.playwright-cli/
+client/.playwright-cli/
+
+# Claude Code worktrees (ephemeral)
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.claude/diagram-update-queue.json
+
+# Pytest XML reports
+.pytest-tier*.xml
+server/.pytest-tier*.xml
+
+# Accidental npm artifacts
+=1.37.24
+
+# Ryan analysis files (scratch)
+_ryan_*.txt
+_ryan_*.json
+
+# Langfuse viewer (local dev tool)
+langfuse-trace-viewer.html
+
+# Far response scratch
+far-*-response.txt
+
+# Duplicate client dir (accidental copy)
+client/client/
+
+# Office documents (stored in SharePoint, not repo)
+*.docx
+*.xlsx
+
+# One-off reports at repo root
+20260320-refactor-0319-ah-report.md
+
 # Separate plugin projects (own repos)
 tac-experts-plugin/
 

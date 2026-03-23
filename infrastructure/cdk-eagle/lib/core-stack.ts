@@ -140,7 +140,7 @@ export class EagleCoreStack extends cdk.Stack {
     // Document bucket + metadata table: permissions granted by StorageStack
     // via appRole.addToPolicy() (Sids: DocumentBucketReadWrite, MetadataTableRead)
 
-    // Bedrock: Invoke models — restricted to Sonnet 4.6 only.
+    // Bedrock: Invoke models — Sonnet 4.6 (chat) + Haiku 4.5 (title generation).
     // To allow other models, add their ARNs here and re-deploy the core stack.
     this.appRole.addToPolicy(new iam.PolicyStatement({
       actions: [
@@ -153,6 +153,10 @@ export class EagleCoreStack extends cdk.Stack {
         'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6',
         // Sonnet 4.6 cross-region inference profile (us.* prefix used by SDK)
         `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-6`,
+        // Haiku 4.5 foundation model (title generation)
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0',
+        // Haiku 4.5 cross-region inference profile
+        `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0`,
         // Bedrock agents (routing, not model-specific)
         `arn:aws:bedrock:us-east-1:${this.account}:agent/*`,
       ],

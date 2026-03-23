@@ -4,7 +4,10 @@ interface KnowledgeResult {
   title?: string;
   summary?: string;
   topic?: string;
+  primary_topic?: string;
+  document_type?: string;
   confidence?: number;
+  confidence_score?: number;
   score?: number;
   s3_key?: string;
 }
@@ -17,7 +20,11 @@ export default function KnowledgeSearchPanel({ text }: { text: string }) {
       results = parsed;
     } else if (parsed.results && Array.isArray(parsed.results)) {
       results = parsed.results;
-    } else {
+    } else if (parsed.documents && Array.isArray(parsed.documents)) {
+      results = parsed.documents;
+    } else if (parsed.matches && Array.isArray(parsed.matches)) {
+      results = parsed.matches;
+    } else if (parsed.title || parsed.summary || parsed.document_id) {
       // Single result object
       results = [parsed];
     }
@@ -40,7 +47,8 @@ export default function KnowledgeSearchPanel({ text }: { text: string }) {
       </div>
       <div className="overflow-y-auto max-h-64 divide-y divide-gray-100">
         {results.map((item, idx) => {
-          const confidence = item.confidence ?? item.score;
+          const confidence = item.confidence_score ?? item.confidence ?? item.score;
+          const topic = item.primary_topic || item.topic || item.document_type || '';
           const summary = item.summary ?? '';
           const truncated = summary.length > 150 ? summary.slice(0, 150) + '...' : summary;
           return (
@@ -49,9 +57,9 @@ export default function KnowledgeSearchPanel({ text }: { text: string }) {
                 <p className="text-xs font-medium text-gray-800 truncate flex-1">
                   {item.title || `Result ${idx + 1}`}
                 </p>
-                {item.topic && (
+                {topic && (
                   <span className="text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full shrink-0">
-                    {item.topic}
+                    {topic}
                   </span>
                 )}
                 {confidence != null && (

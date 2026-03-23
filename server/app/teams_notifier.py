@@ -252,6 +252,47 @@ def notify_startup() -> None:
     _fire(payload, "deployment")
 
 
+async def send_eval_report(
+    tier1_pass: int,
+    tier1_total: int,
+    tier2_pass: int,
+    tier2_total: int,
+    tier3_pass: int,
+    tier3_total: int,
+    tier3_run: bool,
+    failed_tests: list,
+    elapsed_seconds: float,
+) -> None:
+    """Send an eval suite results card to Teams. Called from the mvp1-eval skill."""
+    from datetime import datetime, timezone
+    from .teams_cards import eval_report_card
+
+    project_id = os.getenv("LANGFUSE_PROJECT_ID", "")
+    langfuse_host = os.getenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
+    langfuse_url = f"{langfuse_host}/project/{project_id}/traces" if project_id else ""
+    cloudwatch_url = (
+        "https://console.aws.amazon.com/cloudwatch/home"
+        "?region=us-east-1#logsV2:log-groups/log-group/%2Feagle%2Ftest-runs"
+    )
+
+    payload = eval_report_card(
+        environment=ENVIRONMENT,
+        date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        tier1_pass=tier1_pass,
+        tier1_total=tier1_total,
+        tier2_pass=tier2_pass,
+        tier2_total=tier2_total,
+        tier3_pass=tier3_pass,
+        tier3_total=tier3_total,
+        tier3_run=tier3_run,
+        failed_tests=failed_tests,
+        elapsed_seconds=elapsed_seconds,
+        langfuse_url=langfuse_url,
+        cloudwatch_url=cloudwatch_url,
+    )
+    await _send(payload, "daily_summary")
+
+
 def notify_suspicious(
     event_type: str,
     detail: str,
