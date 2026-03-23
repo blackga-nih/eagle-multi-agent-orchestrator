@@ -41,6 +41,19 @@ _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
+# When imported directly (e.g. eval test runner), relative imports (.tools,
+# .agentic_service, etc.) fail because there's no parent package context.
+# Bootstrap the 'app' package so all `from .xxx` imports work everywhere.
+if __package__ is None or __package__ == "":
+    _app_dir = os.path.dirname(os.path.abspath(__file__))
+    _parent = os.path.dirname(_app_dir)
+    if _parent not in sys.path:
+        sys.path.insert(0, _parent)
+    import importlib
+    if "app" not in sys.modules:
+        importlib.import_module("app")
+    __package__ = "app"
+
 from eagle_skill_constants import AGENTS, SKILLS, PLUGIN_CONTENTS
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
 from .tools.web_fetch import exec_web_fetch
@@ -94,6 +107,62 @@ def _ensure_langfuse_exporter():
         logger.warning("[EAGLE] Langfuse exporter injection failed: %s", exc)
 
 
+async def _langfuse_set_session(
+    trace_id_hex: str,
+    session_id: str,
+    user_id: str = "",
+    tags: list | None = None,
+    name: str = "",
+) -> None:
+    """Explicitly set sessionId (and optional tags/name) on a Langfuse trace via REST API.
+
+    Called after sdk_query completes to ensure the OTEL trace's session ID
+    is visible in Langfuse's sessionId field (OTEL attribute mapping alone
+    is unreliable — this is the guaranteed path).
+
+    Args:
+        trace_id_hex: 32-char OTEL trace ID (from format_trace_id)
+        session_id:   Langfuse sessionId value (e.g. "eval-t21-UC02-abc123")
+        user_id:      Optional Langfuse userId
+        tags:         Optional list of tags (e.g. ["eval", "test-21", "UC-02", "MVP1"])
+        name:         Optional human-readable trace name override
+    """
+    pk = os.getenv("LANGFUSE_PUBLIC_KEY")
+    sk = os.getenv("LANGFUSE_SECRET_KEY")
+    host = os.getenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
+    if not pk or not sk or not trace_id_hex:
+        return
+    try:
+        import base64
+        import httpx
+        auth = "Basic " + base64.b64encode(f"{pk}:{sk}".encode()).decode()
+        payload: dict = {"id": trace_id_hex, "sessionId": session_id}
+        if user_id:
+            payload["userId"] = user_id
+        if tags:
+            payload["tags"] = tags
+        if name:
+            payload["name"] = name
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{host}/api/public/traces",
+                json=payload,
+                headers={"Authorization": auth},
+            )
+        if resp.status_code < 300:
+            logger.debug(
+                "[EAGLE] Langfuse trace patched: trace=%s session=%s tags=%s",
+                trace_id_hex[:16], session_id, tags,
+            )
+        else:
+            logger.debug(
+                "[EAGLE] Langfuse trace patch non-2xx: %d %s",
+                resp.status_code, resp.text[:100],
+            )
+    except Exception as exc:
+        logger.debug("[EAGLE] Langfuse trace patch failed: %s", exc)
+
+
 def _build_trace_attrs(
     *,
     tenant_id: str,
@@ -102,6 +171,9 @@ def _build_trace_attrs(
     session_id: str = "",
     subagent: str = "",
     username: str = "",
+    eval_test_id: str = "",
+    eval_uc_id: str = "",
+    eval_tags: list | None = None,
 ) -> dict:
     """Build trace_attributes dict for Langfuse/OTEL Agent() constructor.
 
@@ -111,12 +183,20 @@ def _build_trace_attrs(
     import socket
 
     hostname = socket.gethostname()
-    dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
-    environment = "local" if dev_mode else "live"
+    # EAGLE_ENV: local (dev machine), dev (ECS dev), staging, prod
+    # Falls back to DEV_MODE for backward compatibility
+    eagle_env = os.getenv("EAGLE_ENV", "")
+    if not eagle_env:
+        dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
+        eagle_env = "local" if dev_mode else "live"
+
+    # Tag eval runs: detect test-tenant/test-user from eval suite
+    is_eval = tenant_id == "test-tenant" or user_id == "test-user"
+    trace_env = "eval" if is_eval else eagle_env
 
     attrs = {
         "eagle.source": "sm-eagle",
-        "eagle.environment": environment,
+        "eagle.environment": trace_env,
         "eagle.hostname": hostname,
         "eagle.tenant_id": tenant_id,
         "eagle.user_id": user_id,
@@ -125,7 +205,16 @@ def _build_trace_attrs(
         "session.id": session_id or "",
         "langfuse.session.id": session_id or "",
         "langfuse.user.id": username or user_id or "",
+        "langfuse.metadata.environment": trace_env,
     }
+    if is_eval:
+        attrs["eagle.eval"] = "true"
+    if eval_test_id:
+        attrs["eagle.eval_test_id"] = eval_test_id
+    if eval_uc_id:
+        attrs["eagle.eval_uc_id"] = eval_uc_id
+    if eval_tags:
+        attrs["eagle.eval_tags"] = ",".join(eval_tags)
     if subagent:
         attrs["eagle.subagent"] = subagent
 
@@ -308,6 +397,53 @@ def _extract_user_request_from_prompt(prompt: str) -> str:
             tail = tail[:idx]
             break
     return tail.strip()
+
+
+def _check_micropurchase_guardrail(parsed: dict) -> str | None:
+    """Return a guardrail JSON string if the request is a micro-purchase (<$15K).
+
+    Checks estimated_value from data dict, then scans title/content for dollar amounts.
+    Returns None if no guardrail applies (proceed normally).
+    """
+    import re as _re_mp
+    _mp_doc_types = {"sow", "acquisition_plan", "igce"}
+    dt = str(parsed.get("doc_type", "")).strip().lower()
+    if dt not in _mp_doc_types:
+        return None
+
+    data_raw = parsed.get("data") or {}
+    if isinstance(data_raw, str):
+        try:
+            data_raw = json.loads(data_raw)
+        except Exception:
+            data_raw = {}
+
+    ev_raw = str(data_raw.get("estimated_value", "")).replace(",", "").replace("$", "")
+    ev_nums = _re_mp.findall(r'\d+\.?\d*', ev_raw)
+    ev = float(ev_nums[0]) if ev_nums else 0.0
+
+    if ev == 0.0:
+        scan_text = f"{parsed.get('title', '')} {str(parsed.get('content', ''))[:500]}"
+        dollar_matches = _re_mp.findall(r'\$\s*([\d,]+(?:\.\d+)?)', scan_text)
+        amounts = [float(m.replace(",", "")) for m in dollar_matches]
+        amounts_under = [a for a in amounts if 0 < a < 15000]
+        if amounts_under:
+            ev = min(amounts_under)
+
+    if 0 < ev < 15000:
+        return json.dumps({
+            "status": "guardrail",
+            "message": (
+                f"Micro-purchase guardrail (FAR 13.2): ${ev:,.0f} is below the "
+                f"$15,000 micro-purchase threshold. A formal {dt.upper()} is not required. "
+                f"Micro-purchases use simplified procedures — purchase card or micro-purchase "
+                f"order. No formal acquisition package is needed."
+            ),
+            "threshold": 15000,
+            "value": ev,
+            "word_count": 0,
+        })
+    return None
 
 
 def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
@@ -517,6 +653,29 @@ async def _maybe_fast_path_document_generation(
     should_fast_path, doc_type = _should_use_fast_document_path(prompt)
     if not should_fast_path or not doc_type:
         return None
+
+    # -- Micro-purchase guardrail (FAR 13.2) --
+    if doc_type in ("sow", "acquisition_plan", "igce"):
+        import re as _re_mp_fp
+        _dollar_matches = _re_mp_fp.findall(r'\$\s*([\d,]+(?:\.\d+)?)', prompt)
+        _amounts = [float(m.replace(",", "")) for m in _dollar_matches]
+        _amounts_under = [a for a in _amounts if 0 < a < 15000]
+        if _amounts_under:
+            _ev = min(_amounts_under)
+            return {
+                "doc_type": doc_type,
+                "result": {
+                    "status": "guardrail",
+                    "message": (
+                        f"Micro-purchase guardrail (FAR 13.2): ${_ev:,.0f} is below the "
+                        f"$15,000 micro-purchase threshold. A formal {doc_type.upper()} is "
+                        f"not required. Micro-purchases use simplified procedures — purchase "
+                        f"card or micro-purchase order. No formal acquisition package is needed."
+                    ),
+                    "word_count": 0,
+                },
+                "guardrail": True,
+            }
 
     from .agentic_service import _exec_create_document
 
@@ -1290,6 +1449,11 @@ def _build_subagent_doc_tools(
             "template_id": template_id,
         }
         try:
+            # -- Micro-purchase guardrail (FAR 13.2) --
+            _mp_block = _check_micropurchase_guardrail(parsed)
+            if _mp_block:
+                return _mp_block
+
             result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
             return json.dumps(result, indent=2, default=str)
@@ -1852,6 +2016,11 @@ def _build_all_service_tools(
             "template_id": template_id,
         }
         try:
+            # -- Micro-purchase guardrail (FAR 13.2) --
+            _mp_block = _check_micropurchase_guardrail(parsed)
+            if _mp_block:
+                return _mp_block
+
             # -- Prompt-context enrichment (same logic as prior factory) --
             prompt_doc_ctx = _extract_document_context_from_prompt(prompt_context or "")
 
@@ -2745,6 +2914,13 @@ def _build_supervisor_prompt_body(
         "    1. Gather specifics from intake discussion — no placeholders\n\n"
         "  CITATION RULE — ALL documents with web research MUST include a Sources section:\n"
         "    - Source description, URL, date accessed\n\n"
+        "MICRO-PURCHASE GUARDRAIL (FAR 13.2):\n"
+        "If the estimated value is under $15,000, do NOT generate a formal SOW, IGCE, or "
+        "Acquisition Plan — these are not required for micro-purchases. Respond with guidance "
+        "on simplified purchase procedures (purchase card, micro-purchase order) instead. "
+        "If the user explicitly asks for a SOW for a micro-purchase, redirect: 'For purchases "
+        "under $15K, a formal SOW is not required under FAR 13.2. You need a purchase "
+        "description or simple requirements document. Would you like help with that instead?'\n\n"
         "Document Output Rules:\n"
         "0) CHECK BEFORE CREATE: Before generating any document, call get_latest_document "
         "with the package_id and doc_type to check if one already exists. If it does:\n"
@@ -2755,7 +2931,9 @@ def _build_supervisor_prompt_body(
         "edit_docx_document with the document_key and specific edits.\n"
         "   - Only create a brand-new document (no update_existing_key) if no existing "
         "document was found for that doc_type.\n"
-        "1) If the user asks to generate/draft/create a document, you MUST call create_document.\n"
+        "1) If the user asks to generate/draft/create a document, you MUST call create_document — "
+        "EXCEPT when the value is under $15,000 (micro-purchase threshold per FAR 13.2). "
+        "For micro-purchases, do NOT generate a formal SOW/IGCE/AP — redirect to simplified purchase procedures.\n"
         "1a) CRITICAL: Write the COMPLETE document content as the 'content' field (markdown with "
         "section headings, filled-in details from the conversation). Do NOT leave template "
         "placeholders — fill every section with specifics from the intake discussion.\n"
@@ -2850,6 +3028,7 @@ async def sdk_query(
     max_turns: int = 15,
     messages: list[dict] | None = None,
     username: str | None = None,
+    tags: list[str] | None = None,
 ) -> AsyncGenerator[Any, None]:
     """Run a supervisor query with skill subagents (Strands implementation).
 
@@ -2880,6 +3059,10 @@ async def sdk_query(
     )
     if fast_path is not None:
         result = fast_path["result"]
+        if fast_path.get("guardrail"):
+            yield AssistantMessage(content=[TextBlock(text=result["message"])])
+            yield ResultMessage(result=result["message"], usage={})
+            return
         if "error" in result:
             yield AssistantMessage(content=[TextBlock(text=f"Document generation failed: {result['error']}")])
             yield ResultMessage(result=f"Document generation failed: {result['error']}", usage={})
@@ -2953,12 +3136,31 @@ async def sdk_query(
             tier=tier,
             session_id=session_id or "",
             username=username or "",
+            eval_tags=tags,
         ),
     )
 
     # Synchronous call -- Strands handles the agentic loop internally
     result = supervisor(prompt)
     result_text = str(result)
+
+    # Explicitly register sessionId (and tags) in Langfuse via REST API.
+    # OTEL span attribute langfuse.session.id is set, but Langfuse's OTEL
+    # receiver may not always propagate it to the sessionId field. This
+    # REST patch ensures the trace is always findable by session and tags.
+    if session_id and supervisor.trace_span:
+        try:
+            from opentelemetry.trace import format_trace_id
+            span_ctx = supervisor.trace_span.get_span_context()
+            if span_ctx and span_ctx.is_valid:
+                await _langfuse_set_session(
+                    format_trace_id(span_ctx.trace_id),
+                    session_id,
+                    user_id=user_id,
+                    tags=tags,
+                )
+        except Exception:
+            pass
 
     # Extract tool names called during execution from metrics.tool_metrics
     tools_called = []
@@ -3024,6 +3226,7 @@ async def sdk_query_streaming(
     max_turns: int = 15,
     messages: list[dict] | None = None,
     username: str | None = None,
+    tags: list[str] | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream text deltas from the Strands supervisor agent.
 
@@ -3044,6 +3247,10 @@ async def sdk_query_streaming(
     )
     if fast_path is not None:
         result = fast_path["result"]
+        if fast_path.get("guardrail"):
+            yield {"type": "text", "data": result["message"]}
+            yield {"type": "complete", "text": result["message"], "tools_called": [], "usage": {}}
+            return
         if "error" in result:
             yield {"type": "error", "error": result["error"]}
             return
@@ -3133,6 +3340,7 @@ async def sdk_query_streaming(
             tier=tier,
             session_id=session_id or "",
             username=username or "",
+            eval_tags=tags,
         ),
     )
 
@@ -3284,6 +3492,23 @@ async def sdk_query_streaming(
                 )
                 full_text_parts.append(summary)
                 yield {"type": "text", "data": summary}
+
+    # Explicitly register sessionId (and tags) in Langfuse via REST API
+    if session_id and supervisor.trace_span:
+        try:
+            from opentelemetry.trace import format_trace_id
+            span_ctx = supervisor.trace_span.get_span_context()
+            if span_ctx and span_ctx.is_valid:
+                asyncio.ensure_future(
+                    _langfuse_set_session(
+                        format_trace_id(span_ctx.trace_id),
+                        session_id,
+                        user_id=user_id,
+                        tags=tags,
+                    )
+                )
+        except Exception:
+            pass
 
     # Emit agent.timing telemetry to CloudWatch
     _agent_duration_ms = int((_time.perf_counter() - _agent_start) * 1000)

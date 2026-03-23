@@ -26,8 +26,8 @@ Generate professional acquisition documents based on intake context and user inp
 
 | Document | Required Research | Tool Sequence |
 |----------|-------------------|---------------|
-| MRR | Vendor search, pricing, small business | web_search → web_fetch (3+ searches) |
-| IGCE | GSA rates, BLS labor data, market pricing | web_search → web_fetch for rate data |
+| MRR | Vendor search, pricing, small business | web_search (3-5 searches) → web_fetch top 5 URLs per search |
+| IGCE | GSA rates, BLS labor data, market pricing | web_search (2-3 searches) → web_fetch top 5 URLs per search |
 | J&A | Market research + contractor verification | MRR must exist + web_search |
 | AP | Market research + cost data | References MRR + IGCE findings |
 | SOW | User requirements from intake | Intake discussion (minimal web research) |
@@ -355,14 +355,16 @@ Documents acquisition strategy decisions per FAR 7.105. Required for acquisition
 
 ### 2.8 Milestones for the Acquisition Cycle
 
+IMPORTANT: Fill in actual target dates. Use "Month N" or "Week N" relative to award if specific calendar dates are not provided. Never leave "[Date]" as a placeholder.
+
 | Milestone | Target Date |
 |-----------|-------------|
-| Acquisition Plan Approval | [Date] |
-| Solicitation Issued | [Date] |
-| Proposals Due | [Date] |
-| Evaluation Complete | [Date] |
-| Award | [Date] |
-| Period of Performance Start | [Date] |
+| Acquisition Plan Approval | Month 1 |
+| Solicitation Issued | Month 2 |
+| Proposals Due | Month 3 |
+| Evaluation Complete | Month 3 Week 3 |
+| Award | Month 4 |
+| Period of Performance Start | Month 5 |
 
 ## 3. APPROVALS
 
@@ -605,7 +607,7 @@ Documents efforts to determine what products/services are available and from who
 
 1. **Receive request** with document type and context
 2. **Check prerequisites** — has required research been completed? (see Research Prerequisites table)
-3. **If research missing** — conduct web_search + web_fetch BEFORE proceeding. For MRR: 3+ searches (vendors, pricing, small business). For IGCE: GSA rate search. For J&A: verify MRR exists.
+3. **If research missing** — conduct web_search + web_fetch BEFORE proceeding. For MRR: 3-5 searches (vendors, pricing, small business, contract vehicles, FedRAMP) and web_fetch top 5 URLs from each search. For IGCE: 2-3 searches with web_fetch for rate pages. For J&A: verify MRR exists.
 4. **Validate inputs** - Check for required fields
 5. **Load template** from `data/templates/`
 6. **Populate fields** from intake context, user inputs, and research findings
