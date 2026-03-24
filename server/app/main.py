@@ -3184,11 +3184,20 @@ async def preview_s3_template(
         return {"type": "markdown", "content": markdown, "filename": filename}
 
     elif file_ext in ("xlsx", "xls"):
+        from app.spreadsheet_edit_service import extract_xlsx_preview_payload
+
         content_bytes = get_s3_template_by_key(s3_key)
         if not content_bytes:
             raise HTTPException(status_code=404, detail="Template not found in S3")
-        markdown = XLSXPopulator.extract_text(content_bytes)
-        return {"type": "markdown", "content": markdown, "filename": filename}
+        # Return structured preview for proper grid rendering
+        preview_data = extract_xlsx_preview_payload(content_bytes)
+        return {
+            "type": "xlsx",
+            "content": preview_data.get("content", ""),
+            "preview_mode": preview_data.get("preview_mode"),
+            "preview_sheets": preview_data.get("preview_sheets", []),
+            "filename": filename,
+        }
 
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")

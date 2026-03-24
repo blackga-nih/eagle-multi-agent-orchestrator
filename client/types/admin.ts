@@ -206,10 +206,36 @@ export interface CopyTemplateResponse {
 }
 
 export interface S3TemplatePreviewResponse {
-  type: 'pdf' | 'markdown';
+  type: 'pdf' | 'markdown' | 'xlsx';
   url?: string;       // when type === 'pdf'
-  content?: string;   // when type === 'markdown'
+  content?: string;   // when type === 'markdown' or 'xlsx'
+  preview_mode?: string;  // when type === 'xlsx'
+  preview_sheets?: XlsxPreviewSheet[];  // when type === 'xlsx'
   filename: string;
+}
+
+export interface XlsxPreviewSheet {
+  sheet_id: string;
+  title: string;
+  max_row: number;
+  max_col: number;
+  truncated: boolean;
+  rows: XlsxPreviewRow[];
+}
+
+export interface XlsxPreviewRow {
+  row_index: number;
+  cells: XlsxPreviewCell[];
+}
+
+export interface XlsxPreviewCell {
+  cell_ref: string;
+  row: number;
+  col: number;
+  value: string;
+  display_value: string;
+  editable: boolean;
+  is_formula: boolean;
 }
 
 export interface S3TemplateDownloadResponse {

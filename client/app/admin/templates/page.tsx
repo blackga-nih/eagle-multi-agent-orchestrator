@@ -905,6 +905,62 @@ export default function TemplatesPage() {
                     className="w-full h-[60vh] rounded-lg border border-gray-200"
                     title={`PDF preview: ${s3PreviewData.filename}`}
                   />
+                ) : s3PreviewData?.type === 'xlsx' && s3PreviewData.preview_sheets?.length ? (
+                  <div className="space-y-4">
+                    {s3PreviewData.preview_sheets.map((sheet) => (
+                      <div key={sheet.sheet_id} className="space-y-2">
+                        <h5 className="text-sm font-medium text-gray-700">{sheet.title}</h5>
+                        {sheet.truncated && (
+                          <p className="text-xs text-amber-600">Preview limited to {sheet.max_row} rows x {sheet.max_col} columns</p>
+                        )}
+                        <div className="overflow-auto max-h-[50vh] rounded-lg border border-gray-200">
+                          <table className="min-w-full border-collapse text-sm">
+                            <thead className="bg-gray-100 sticky top-0 z-10">
+                              <tr>
+                                <th className="border-b border-r border-gray-300 px-2 py-1.5 text-center text-xs font-semibold text-gray-500 w-10"></th>
+                                {sheet.rows[0]?.cells.map((cell) => (
+                                  <th key={cell.cell_ref} className="border-b border-r border-gray-300 px-2 py-1.5 text-center text-xs font-semibold text-gray-600 min-w-[60px]">
+                                    {cell.cell_ref.replace(/\d+/g, '')}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sheet.rows.map((row) => (
+                                <tr key={row.row_index}>
+                                  <td className="border-b border-r border-gray-200 bg-gray-50 px-2 py-1 text-center text-xs font-medium text-gray-400 w-10">
+                                    {row.row_index}
+                                  </td>
+                                  {row.cells.map((cell) => (
+                                    <td
+                                      key={cell.cell_ref}
+                                      className={`border-b border-r border-gray-200 px-1.5 py-1 text-sm ${
+                                        cell.is_formula ? 'bg-sky-50 text-sky-700 font-medium' : 'bg-white text-gray-900'
+                                      }`}
+                                      title={cell.is_formula ? `Formula: ${cell.value}` : undefined}
+                                    >
+                                      <div className="truncate min-w-[60px]">{cell.display_value || (cell.is_formula ? '\u2014' : '')}</div>
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                    {/* Legend */}
+                    <div className="flex gap-4 text-xs text-gray-500 pt-2">
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-3 h-3 bg-white border border-gray-300 rounded-sm" />
+                        Data
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-3 h-3 bg-sky-50 border border-gray-300 rounded-sm" />
+                        Formula
+                      </span>
+                    </div>
+                  </div>
                 ) : s3PreviewData?.content ? (
                   <div className="max-h-[60vh] overflow-y-auto">
                     <CollapsibleMarkdown content={s3PreviewData.content} />
