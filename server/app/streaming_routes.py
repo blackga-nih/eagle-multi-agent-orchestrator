@@ -607,6 +607,7 @@ def create_streaming_router(
             "status": "healthy",
             "service": "EAGLE – NCI Acquisition Assistant",
             "version": "4.0.0",
+            "git_sha": os.getenv("GIT_SHA", "unknown"),
             "model": MODEL,
             "services": {
                 "bedrock": True,

@@ -2555,6 +2555,7 @@ async def health_check():
         "status": "healthy",
         "service": "eagle-backend",
         "version": "4.0.0",
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
         "services": {
             "bedrock": True,
             "dynamodb": True,
@@ -2892,6 +2893,116 @@ async def delete_config_key(
     return {"deleted": ok}
 
 
+# ── Tags ───────────────────────────────────────────────────────────
+
+@app.get("/api/documents/{doc_id}/tags")
+async def get_document_tags(
+    doc_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get all tags for a document."""
+    from app.tag_store import get_entity_tags
+    return get_entity_tags(user.tenant_id, "document", doc_id)
+
+
+@app.post("/api/documents/{doc_id}/tags")
+async def add_document_tags(
+    doc_id: str,
+    request: Request,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Add user tags to a document."""
+    body = await request.json()
+    tags = body.get("tags", [])
+    if isinstance(tags, list) and all(isinstance(t, str) for t in tags):
+        tags = [{"type": "user", "value": t} for t in tags]
+    from app.tag_store import add_tags, update_entity_tags
+    written = add_tags(user.tenant_id, "document", doc_id, tags)
+    # Also update the entity's user_tags list
+    current = get_entity_tags(user.tenant_id, "document", doc_id)
+    new_values = [t.get("value", t) if isinstance(t, dict) else t for t in tags]
+    merged = list(set(current.get("user_tags", []) + new_values))
+    update_entity_tags(user.tenant_id, "document", doc_id, user_tags=merged)
+    return {"added": written}
+
+
+@app.delete("/api/documents/{doc_id}/tags")
+async def remove_document_tags(
+    doc_id: str,
+    request: Request,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Remove tags from a document."""
+    body = await request.json()
+    tag_values = body.get("tags", [])
+    from app.tag_store import remove_tags, update_entity_tags, get_entity_tags
+    deleted = remove_tags(user.tenant_id, "document", doc_id, tag_values)
+    # Also update entity's user_tags list
+    current = get_entity_tags(user.tenant_id, "document", doc_id)
+    remaining = [t for t in current.get("user_tags", []) if t not in tag_values]
+    update_entity_tags(user.tenant_id, "document", doc_id, user_tags=remaining)
+    return {"removed": deleted}
+
+
+@app.get("/api/packages/{package_id}/tags")
+async def get_package_tags(
+    package_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get all tags for a package."""
+    from app.tag_store import get_entity_tags
+    return get_entity_tags(user.tenant_id, "package", package_id)
+
+
+@app.post("/api/packages/{package_id}/tags")
+async def add_package_tags(
+    package_id: str,
+    request: Request,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Add user tags to a package."""
+    body = await request.json()
+    tags = body.get("tags", [])
+    if isinstance(tags, list) and all(isinstance(t, str) for t in tags):
+        tags = [{"type": "user", "value": t} for t in tags]
+    from app.tag_store import add_tags, update_entity_tags, get_entity_tags
+    written = add_tags(user.tenant_id, "package", package_id, tags)
+    current = get_entity_tags(user.tenant_id, "package", package_id)
+    new_values = [t.get("value", t) if isinstance(t, dict) else t for t in tags]
+    merged = list(set(current.get("user_tags", []) + new_values))
+    update_entity_tags(user.tenant_id, "package", package_id, user_tags=merged)
+    return {"added": written}
+
+
+@app.delete("/api/packages/{package_id}/tags")
+async def remove_package_tags(
+    package_id: str,
+    request: Request,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Remove tags from a package."""
+    body = await request.json()
+    tag_values = body.get("tags", [])
+    from app.tag_store import remove_tags, update_entity_tags, get_entity_tags
+    deleted = remove_tags(user.tenant_id, "package", package_id, tag_values)
+    current = get_entity_tags(user.tenant_id, "package", package_id)
+    remaining = [t for t in current.get("user_tags", []) if t not in tag_values]
+    update_entity_tags(user.tenant_id, "package", package_id, user_tags=remaining)
+    return {"removed": deleted}
+
+
+@app.get("/api/tags/search")
+async def search_by_tag(
+    q: str,
+    type: Optional[str] = None,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Find documents and packages by tag value."""
+    from app.tag_store import find_entities_by_tag
+    results = find_entities_by_tag(user.tenant_id, q, entity_type=type)
+    return {"tag": q, "results": results, "total": len(results)}
+
+
 # ── Templates ──────────────────────────────────────────────────────
 
 @app.get("/api/templates")
@@ -3074,8 +3185,8 @@ async def get_active_template(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Return the resolved template for this user (4-layer fallback)."""
-    body, source = resolve_template(user.tenant_id, user.user_id, doc_type)
-    return {"doc_type": doc_type, "template_body": body, "source": source}
+    body, source, metadata = resolve_template(user.tenant_id, user.user_id, doc_type)
+    return {"doc_type": doc_type, "template_body": body, "source": source, "metadata": metadata}
 
 
 @app.post("/api/templates/{doc_type}")
@@ -3103,6 +3214,114 @@ async def delete_template_endpoint(
     """Delete the current user's template override for a doc type."""
     ok = delete_template(user.tenant_id, doc_type, user.user_id)
     return {"deleted": ok}
+
+
+# ── Template Clause References & Compliance Gap Analysis ───────────
+
+@app.get("/api/templates/{doc_type}/clauses")
+async def get_template_clauses(
+    doc_type: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return aggregated clause references for a doc_type (across all variants)."""
+    try:
+        from app.template_schema import load_clause_references_by_category
+        refs = load_clause_references_by_category(doc_type)
+        # Aggregate clauses across all variants
+        all_clauses = {}
+        for ref_data in refs:
+            for sec_num, sec_data in ref_data.get("section_clause_map", {}).items():
+                for clause in sec_data.get("clauses", []):
+                    cn = clause.get("clause_number", "")
+                    if cn and cn not in all_clauses:
+                        all_clauses[cn] = clause
+            for clause in ref_data.get("template_level_clauses", []):
+                cn = clause.get("clause_number", "")
+                if cn and cn not in all_clauses:
+                    all_clauses[cn] = clause
+        return {
+            "doc_type": doc_type,
+            "clauses": list(all_clauses.values()),
+            "total": len(all_clauses),
+            "variants": len(refs),
+        }
+    except Exception as e:
+        return {"doc_type": doc_type, "clauses": [], "total": 0, "error": str(e)}
+
+
+@app.get("/api/templates/clauses/summary")
+async def get_all_clause_summary(
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return clause counts and FAR parts covered for all 36 templates."""
+    try:
+        from app.template_schema import load_all_clause_references
+        all_refs = load_all_clause_references()
+        summary = []
+        for filename, ref_data in all_refs.items():
+            summary.append({
+                "template_filename": ref_data.get("template_filename", filename),
+                "category": ref_data.get("category", ""),
+                "total_clauses": ref_data.get("total_clauses", 0),
+                "far_parts_covered": ref_data.get("far_parts_covered", []),
+            })
+        return {"templates": summary, "total": len(summary)}
+    except Exception as e:
+        return {"templates": [], "total": 0, "error": str(e)}
+
+
+@app.get("/api/templates/clause-search")
+async def search_templates_by_clause(
+    clause: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Find all templates that reference a specific FAR clause."""
+    try:
+        from app.template_schema import load_all_clause_references
+        all_refs = load_all_clause_references()
+        matches = []
+        clause_lower = clause.lower()
+        for filename, ref_data in all_refs.items():
+            found_in = []
+            for sec_num, sec_data in ref_data.get("section_clause_map", {}).items():
+                for c in sec_data.get("clauses", []):
+                    if clause_lower in c.get("clause_number", "").lower():
+                        found_in.append({"section": sec_num, "section_title": sec_data.get("section_title", "")})
+            for c in ref_data.get("template_level_clauses", []):
+                if clause_lower in c.get("clause_number", "").lower():
+                    found_in.append({"section": "template_level", "section_title": "Template-level"})
+            if found_in:
+                matches.append({
+                    "template_filename": ref_data.get("template_filename", filename),
+                    "category": ref_data.get("category", ""),
+                    "sections": found_in,
+                })
+        return {"clause": clause, "matches": matches, "total": len(matches)}
+    except Exception as e:
+        return {"clause": clause, "matches": [], "total": 0, "error": str(e)}
+
+
+@app.get("/api/compliance/gap-analysis")
+async def compliance_gap_analysis(
+    value: float,
+    method: str,
+    type: str,
+    is_it: bool = False,
+    is_services: bool = True,
+    is_small_business: bool = False,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Analyze compliance gaps across templates for given package parameters."""
+    try:
+        from app.compliance_gap_service import analyze_compliance_gaps
+        flags = {
+            "is_it": is_it,
+            "is_services": is_services,
+            "is_small_business": is_small_business,
+        }
+        return analyze_compliance_gaps(value, method, type, flags)
+    except Exception as e:
+        return {"error": str(e), "covered": [], "gaps": [], "partial": [], "coverage_pct": 0}
 
 
 # ── User-Created Skills (SKILL#) ───────────────────────────────────

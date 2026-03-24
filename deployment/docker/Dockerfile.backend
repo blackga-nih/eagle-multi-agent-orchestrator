@@ -18,7 +18,9 @@ COPY eagle-plugin/ ../eagle-plugin/
 RUN useradd -m -u 1000 appuser \
     && chown -R appuser:appuser /app /eagle-plugin
 
+ARG GIT_SHA=unknown
 ENV HOME=/home/appuser
+ENV GIT_SHA=${GIT_SHA}
 USER appuser
 
 EXPOSE 8000
