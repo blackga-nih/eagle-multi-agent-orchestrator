@@ -72,7 +72,7 @@ from .workspace_store import (
     get_or_create_default, create_workspace, get_workspace,
     list_workspaces, activate_workspace, delete_workspace,
 )
-from .wspc_store import (
+from .workspace_override_store import (
     put_override, list_overrides,
     delete_override, delete_all_overrides,
 )
