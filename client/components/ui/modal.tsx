@@ -13,11 +13,11 @@ export interface ModalProps {
 }
 
 const sizeClasses = {
-  sm: 'max-w-md',
-  md: 'max-w-lg',
-  lg: 'max-w-2xl',
-  xl: 'max-w-4xl',
-  full: 'max-w-[90vw] max-h-[90vh]',
+  sm: 'w-[80vw]',
+  md: 'w-[80vw]',
+  lg: 'w-[85vw]',
+  xl: 'w-[88vw]',
+  full: 'w-[90vw] max-h-[90vh]',
 };
 
 export default function Modal({ isOpen, onClose, title, size = 'md', children, footer }: ModalProps) {
@@ -45,7 +45,7 @@ export default function Modal({ isOpen, onClose, title, size = 'md', children, f
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={(e) => e.target === overlayRef.current && onClose()}
     >
-      <div className={`${sizeClasses[size]} w-full bg-white rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200`}>
+      <div data-testid="modal-content" className={`${sizeClasses[size]} w-full bg-white rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200`}>
         {title && (
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 className="text-lg font-bold text-gray-900">{title}</h2>

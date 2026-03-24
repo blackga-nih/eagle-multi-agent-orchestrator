@@ -217,7 +217,8 @@ function DetailModal({
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
             <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[78vh] flex flex-col overflow-hidden"
+                data-testid="modal-agui-detail"
+                className="bg-white rounded-2xl shadow-2xl w-[80vw] max-h-[78vh] flex flex-col overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}

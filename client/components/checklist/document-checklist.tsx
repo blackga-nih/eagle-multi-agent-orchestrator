@@ -371,7 +371,7 @@ export default function DocumentChecklist({ messages, data, sessionId }: Documen
             {/* Document Viewer Modal */}
             {selectedDoc && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex overflow-hidden animate-in zoom-in-95 duration-300">
+                    <div data-testid="modal-document-viewer" className="bg-white rounded-2xl shadow-2xl w-[85vw] h-[85vh] flex overflow-hidden animate-in zoom-in-95 duration-300">
                         {/* Preview Area */}
                         <div className="flex-1 flex flex-col bg-white">
                             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">

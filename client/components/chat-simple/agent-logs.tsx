@@ -222,7 +222,8 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden border border-[#D8DEE6]"
+        data-testid="modal-agent-logs"
+        className="bg-white rounded-xl shadow-2xl w-[80vw] max-h-[80vh] flex flex-col overflow-hidden border border-[#D8DEE6]"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
