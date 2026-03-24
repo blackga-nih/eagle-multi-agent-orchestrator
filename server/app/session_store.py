@@ -21,6 +21,8 @@ logger = logging.getLogger("eagle.sessions")
 # ── Configuration ────────────────────────────────────────────────────
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 
+GENERIC_USAGE_ERROR = "Usage data is temporarily unavailable."
+
 
 # ── In-Memory Cache ──────────────────────────────────────────────────
 # Local cache for fast reads, with write-through to DynamoDB
@@ -538,7 +540,7 @@ def get_usage_summary(
             "total_cost_usd": 0,
             "total_requests": 0,
             "by_date": {},
-            "error": str(e),
+            "error": GENERIC_USAGE_ERROR,
         }
 
 
@@ -699,7 +701,7 @@ def get_tenant_usage_overview(tenant_id: str) -> Dict[str, Any]:
             "total_messages": 0,
             "sessions": 0,
             "metrics": [],
-            "error": str(e),
+            "error": GENERIC_USAGE_ERROR,
         }
 
 

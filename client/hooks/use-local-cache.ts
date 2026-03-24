@@ -577,6 +577,16 @@ export function useLocalCache(
     );
 
     // ---------------------------------------------------------------------------
+    // Auto-hydrate stale sessions from backend on session change
+    // ---------------------------------------------------------------------------
+
+    useEffect(() => {
+        if (!currentSessionId) return;
+        // Fire-and-forget: hydrateFromBackend checks staleness internally
+        void hydrateFromBackend(currentSessionId);
+    }, [currentSessionId, hydrateFromBackend]);
+
+    // ---------------------------------------------------------------------------
     // currentSession (synchronous read from localStorage)
     // ---------------------------------------------------------------------------
 

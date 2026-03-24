@@ -111,6 +111,7 @@ export interface TemplateEntity {
   source: string;
   created_at: string;
   updated_at: string;
+  far_clause_refs?: FarClauseRef[];
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +161,15 @@ export interface TemplateCategory {
   group: string;
 }
 
+export interface FarClauseRef {
+  clause_number: string;
+  clause_title: string;
+  section?: string | null;
+  applicability: 'required' | 'conditional' | 'recommended';
+  condition?: string | null;
+  note?: string | null;
+}
+
 export interface S3Template {
   s3_key: string;
   filename: string;
@@ -170,6 +180,9 @@ export interface S3Template {
   category: TemplateCategory | null;
   display_name: string;
   registered: boolean;
+  far_clause_refs?: FarClauseRef[];
+  clause_count?: number;
+  far_parts_covered?: string[];
 }
 
 export interface S3TemplateListResponse {
@@ -193,10 +206,36 @@ export interface CopyTemplateResponse {
 }
 
 export interface S3TemplatePreviewResponse {
-  type: 'pdf' | 'markdown';
+  type: 'pdf' | 'markdown' | 'xlsx';
   url?: string;       // when type === 'pdf'
-  content?: string;   // when type === 'markdown'
+  content?: string;   // when type === 'markdown' or 'xlsx'
+  preview_mode?: string;  // when type === 'xlsx'
+  preview_sheets?: XlsxPreviewSheet[];  // when type === 'xlsx'
   filename: string;
+}
+
+export interface XlsxPreviewSheet {
+  sheet_id: string;
+  title: string;
+  max_row: number;
+  max_col: number;
+  truncated: boolean;
+  rows: XlsxPreviewRow[];
+}
+
+export interface XlsxPreviewRow {
+  row_index: number;
+  cells: XlsxPreviewCell[];
+}
+
+export interface XlsxPreviewCell {
+  cell_ref: string;
+  row: number;
+  col: number;
+  value: string;
+  display_value: string;
+  editable: boolean;
+  is_formula: boolean;
 }
 
 export interface S3TemplateDownloadResponse {

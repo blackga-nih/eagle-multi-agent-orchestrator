@@ -154,7 +154,8 @@ def validate_token_simple(token: str) -> Tuple[bool, Optional[Dict[str, Any]], O
         claims = jwt.decode(token, options={"verify_signature": False})
         return True, claims, None
     except Exception as e:
-        return False, None, f"Invalid token format: {str(e)}"
+        logger.warning("Failed to decode dev-mode token: %s", e)
+        return False, None, "Invalid token format"
 
 
 # ── User Context Extraction ──────────────────────────────────────────

@@ -607,21 +607,31 @@ def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
         return {}
 
     out: dict[str, str] = {}
+    lines = prompt.splitlines()
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("title:") and "title" not in out:
+            out["title"] = line.split(":", 1)[1].strip()
+            continue
+        if line.lower().startswith("type:") and "document_type" not in out:
+            doc_type = line.split(":", 1)[1].strip().lower().replace(" ", "_")
+            if doc_type:
+                out["document_type"] = doc_type
 
-    title_match = re.search(r"(?im)^\s*Title:\s*(.+?)\s*$", prompt)
-    if title_match:
-        out["title"] = title_match.group(1).strip()
-
-    type_match = re.search(r"(?im)^\s*Type:\s*([a-z0-9_ -]+)\s*$", prompt)
-    if type_match:
-        out["document_type"] = type_match.group(1).strip().lower().replace(" ", "_")
-
-    excerpt_match = re.search(
-        r"(?is)Current Content Excerpt:\s*(.+?)(?:\n\s*\[ORIGIN SESSION CONTEXT\]|\n\s*\[USER REQUEST\]|$)",
-        prompt,
-    )
-    if excerpt_match:
-        out["current_content"] = excerpt_match.group(1).strip()
+    excerpt_start = prompt.find("Current Content Excerpt:")
+    if excerpt_start != -1:
+        excerpt_body = prompt[excerpt_start + len("Current Content Excerpt:") :]
+        end_markers = ["\n[ORIGIN SESSION CONTEXT]", "\n[USER REQUEST]"]
+        excerpt_end = len(excerpt_body)
+        for marker in end_markers:
+            marker_index = excerpt_body.find(marker)
+            if marker_index != -1:
+                excerpt_end = min(excerpt_end, marker_index)
+        excerpt = excerpt_body[:excerpt_end].strip()
+        if excerpt:
+            out["current_content"] = excerpt
 
     user_request = _extract_user_request_from_prompt(prompt)
     if user_request:
@@ -3131,23 +3141,38 @@ def _build_supervisor_prompt_body(
         "  Layer 3 — load_skill(name): Read full skill instructions/workflows to follow them yourself.\n"
         "  Layer 4 — load_data(name, section?): Fetch reference data (thresholds, vehicles, doc rules).\n"
         "  Only spawn a specialist subagent when you need expert reasoning, not for simple lookups.\n\n"
-        "KB Retrieval Rules:\n"
-        "1) For policy/regulation/procedure/template questions, call knowledge_search first.\n"
-        "2) If search returns results, call knowledge_fetch on the top 1-3 relevant docs.\n"
-        "3) In final answer, include a Sources section with title + s3_key.\n"
-        "4) If no results, explicitly say no KB match and ask a refinement question.\n"
-        "5) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
-        "8) For current market conditions, recent policy changes, vendor info, pricing, "
-        "or any topic needing up-to-date info beyond the KB, use web_search.\n"
-        "9) After web_search, ALWAYS use web_fetch on the top 2-3 source URLs to read "
-        "the full page content before responding. web_search only returns snippets — "
-        "web_fetch reads the actual pages as markdown.\n"
-        "6) When search_far returns results with non-empty s3_keys, you MUST call "
+        "RESEARCH CASCADE — INTERNAL SOURCES FIRST (applies to MOST responses):\n"
+        "Before answering any acquisition, compliance, regulation, threshold, document, or procedural "
+        "question, follow this mandatory order. Do NOT skip to web_search without checking internal "
+        "sources first.\n\n"
+        "  STEP 1 — Knowledge Base:\n"
+        "    a) Call knowledge_search with relevant query, topic, and/or keywords.\n"
+        "    b) If results found, call knowledge_fetch on the top 1-3 relevant s3_keys.\n"
+        "    c) The KB is your primary source of truth — approved FAR/DFARS text, NIH policies, "
+        "templates, precedents.\n"
+        "    d) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
+        "    e) When search_far returns results with non-empty s3_keys, you MUST call "
         "knowledge_fetch on the top result's s3_key to read the full FAR document "
-        "BEFORE responding. Never answer from the summary alone — summaries are partial "
-        "and may omit critical clauses, exceptions, or requirements.\n"
-        "7) If a search_far result has empty s3_keys, the summary is the best available — "
-        "note that no full-text source was available for that clause.\n\n"
+        "BEFORE responding. Never answer from the summary alone.\n"
+        "    f) If a search_far result has empty s3_keys, the summary is the best available.\n\n"
+        "  STEP 2 — Compliance Matrix:\n"
+        "    a) Call query_compliance_matrix when the question involves dollar thresholds, "
+        "required documents, contract types, acquisition methods, competition rules, "
+        "vehicle selection, or approval levels.\n"
+        "    b) The matrix encodes current FAR thresholds (FAC 2025-06), document requirements "
+        "by value tier, and NCI-specific rules — do NOT answer these from memory.\n"
+        "    c) For vehicle recommendations, use operation='suggest_vehicle'.\n"
+        "    d) For threshold/document checks, use operation='query' with contract_value.\n\n"
+        "  STEP 3 — Web Search (only when internal sources insufficient):\n"
+        "    a) Use web_search for current market data, vendor info, pricing, GSA rates, "
+        "recent policy changes, or any topic needing real-time info beyond the KB.\n"
+        "    b) After web_search, ALWAYS call web_fetch on the top 2-3 source URLs to read "
+        "the full page content. web_search only returns snippets.\n"
+        "    c) Never cite a source you have not web_fetched.\n\n"
+        "  EXCEPTIONS (skip cascade): Greetings, document edits, package management ops, "
+        "or when user explicitly requests web search.\n\n"
+        "  CITATION — In final answers, include a Sources section with title + s3_key for KB docs "
+        "and URL for web sources. If no KB results, explicitly say so.\n\n"
         "COLLECT BEFORE RESEARCH — Before performing web research for any document, you MUST\n"
         "first collect a minimum set of information from the user. If any item is missing,\n"
         "ASK the user — do NOT assume or invent values.\n\n"
@@ -3267,11 +3292,12 @@ def build_supervisor_prompt(
     tier: str = "advanced",
     agent_names: list[str] | None = None,
     workspace_id: str | None = None,
+    preloaded_context: str | None = None,
 ) -> str:
     """Build the supervisor system prompt with available subagent descriptions.
 
     Caches the prompt body per (tenant_id, workspace_id, tier) with 120s TTL.
-    Only the timestamp header is dynamic on every call.
+    Only the timestamp header and preloaded_context are dynamic on every call.
     """
     cache_key = (tenant_id, workspace_id or "", tier)
     now = _time.time()
@@ -3284,7 +3310,10 @@ def build_supervisor_prompt(
         _supervisor_prompt_cache[cache_key] = (now + _PROMPT_CACHE_TTL, body)
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S UTC")
-    return f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier} | Current datetime: {now_utc}\n\n{body}"
+    header = f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier} | Current datetime: {now_utc}"
+    if preloaded_context:
+        header = f"{header}\n\n{preloaded_context}"
+    return f"{header}\n\n{body}"
 
 
 # -- SDK Query Wrappers (same signatures as sdk_agentic_service.py) --
@@ -3386,6 +3415,13 @@ async def sdk_query(
         except Exception as exc:
             logger.warning("workspace_store.get_or_create_default failed: %s -- using bundled prompts", exc)
 
+    # Fire preload concurrently with sync tool-building
+    from .session_preloader import preload_session_context, format_context_for_prompt
+    _pkg_id = package_context.package_id if package_context and package_context.is_package_mode else None
+    _preload_task = asyncio.create_task(
+        preload_session_context(tenant_id, user_id, package_id=_pkg_id),
+    )
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -3404,12 +3440,16 @@ async def sdk_query(
         package_context=package_context,
     )
 
+    preloaded_ctx = await _preload_task
+    _ctx_str = format_context_for_prompt(preloaded_ctx)
+
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,
         user_id=user_id,
         tier=tier,
         agent_names=[t.__name__ for t in skill_tools],
         workspace_id=resolved_workspace_id,
+        preloaded_context=_ctx_str or None,
     )
 
     # Convert conversation history to Strands format (excludes current prompt)
@@ -3584,6 +3624,13 @@ async def sdk_query_streaming(
     result_queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
+    # Fire preload concurrently with sync tool-building
+    from .session_preloader import preload_session_context, format_context_for_prompt
+    _pkg_id = package_context.package_id if package_context and package_context.is_package_mode else None
+    _preload_task = asyncio.create_task(
+        preload_session_context(tenant_id, user_id, package_id=_pkg_id),
+    )
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -3606,12 +3653,16 @@ async def sdk_query_streaming(
         loop=loop,
     )
 
+    preloaded_ctx = await _preload_task
+    _ctx_str = format_context_for_prompt(preloaded_ctx)
+
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,
         user_id=user_id,
         tier=tier,
         agent_names=[t.__name__ for t in skill_tools],
         workspace_id=resolved_workspace_id,
+        preloaded_context=_ctx_str or None,
     )
 
     strands_history = _to_strands_messages(messages) if messages else None

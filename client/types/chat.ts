@@ -50,6 +50,14 @@ export interface XlsxPreviewSheet {
   rows: XlsxPreviewRow[];
 }
 
+export interface TemplateProvenance {
+  template_id: string;
+  template_source: 'user' | 'tenant' | 'global' | 'plugin' | 's3_template' | 'markdown_fallback';
+  template_version: number;
+  template_name: string;
+  doc_type: string;
+}
+
 export interface DocumentInfo {
   document_id?: string;
   package_id?: string;
@@ -71,4 +79,9 @@ export interface DocumentInfo {
   preview_mode?: 'docx_blocks' | 'xlsx_grid' | 'text_fallback' | 'none' | null;
   preview_blocks?: DocxPreviewBlock[];
   preview_sheets?: XlsxPreviewSheet[];
+  template_provenance?: TemplateProvenance;
+  system_tags?: string[];
+  user_tags?: string[];
+  far_tags?: string[];
+  completeness_pct?: number;
 }

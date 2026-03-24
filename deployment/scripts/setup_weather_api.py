@@ -6,7 +6,6 @@ Helps users configure real-time weather data for MCP tools
 
 import os
 import requests
-from typing import Optional
 
 def test_weather_api(api_key: str) -> bool:
     """Test if the OpenWeatherMap API key works"""
@@ -42,35 +41,10 @@ def setup_weather_api():
     
     print("\n🔍 Testing API key...")
     if test_weather_api(api_key):
-        print("✅ API key works! Setting up environment...")
-        
-        # Update .env file
-        env_file = ".env"
-        env_content = []
-        
-        # Read existing .env if it exists
-        if os.path.exists(env_file):
-            with open(env_file, 'r', encoding='utf-8') as f:
-                env_content = f.readlines()
-        
-        # Update or add OPENWEATHER_API_KEY
-        updated = False
-        for i, line in enumerate(env_content):
-            if line.startswith('OPENWEATHER_API_KEY='):
-                env_content[i] = f'OPENWEATHER_API_KEY={api_key}\n'
-                updated = True
-                break
-        
-        if not updated:
-            env_content.append(f'OPENWEATHER_API_KEY={api_key}\n')
-        
-        # Write back to .env with restricted permissions (owner read/write only)
-        import stat
-        with open(env_file, 'w', encoding='utf-8') as f:
-            f.writelines(env_content)
-        os.chmod(env_file, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
-        
-        print(f"✅ API key saved to {env_file}")
+        print("✅ API key works.")
+        print("\nSet it in your shell instead of writing it to disk:")
+        print("   export OPENWEATHER_API_KEY='<your-api-key>'")
+        print("   echo 'export OPENWEATHER_API_KEY=\"<your-api-key>\"' >> ~/.bashrc")
         print("\n🚀 Weather MCP tools are now ready!")
         print("\nTest weather queries:")
         print("   • 'What's the weather in London?'")

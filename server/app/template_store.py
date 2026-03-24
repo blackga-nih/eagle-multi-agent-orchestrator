@@ -30,14 +30,10 @@ from .db_client import get_table
 
 logger = logging.getLogger("eagle.template_store")
 
-VALID_DOC_TYPES = frozenset({
-    "sow", "igce", "acquisition-plan", "market-research", "justification",
-    "cor-certification", "eval-criteria", "security-checklist", "section-508",
-    "contract-type-justification",
-    # New doc types from S3 inventory
-    "son-products", "son-services", "buy-american", "subk-plan",
-    "conference-request",
-})
+from .doc_type_registry import ALL_DOC_TYPES  # noqa: E402
+
+# Accept both hyphenated and underscored forms via normalize_doc_type()
+VALID_DOC_TYPES = ALL_DOC_TYPES
 
 # ── In-Process Cache (60-second TTL) ─────────────────────
 # Key format: f"{tenant_id}#{doc_type}#{user_id}"
@@ -277,11 +273,30 @@ def list_tenant_templates(
 
 # ── Resolution ────────────────────────────────────────────────────────
 
+def _build_provenance_metadata(item: Optional[dict], source: str, doc_type: str) -> dict:
+    '''Build structured provenance metadata from a resolved template item.'''
+    if item is None:
+        return {
+            "version": 0,
+            "display_name": f"{doc_type} template",
+            "doc_type": doc_type,
+            "tenant_id": "",
+            "user_id": "",
+        }
+    return {
+        "version": item.get("version", 1),
+        "display_name": item.get("display_name") or item.get("name") or f"{doc_type} template",
+        "doc_type": doc_type,
+        "tenant_id": item.get("tenant_id", ""),
+        "user_id": item.get("owner_user_id", item.get("user_id", "")),
+    }
+
+
 def resolve_template(
     tenant_id: str,
     user_id: str,
     doc_type: str,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, dict]:
     '''Resolve the best available template body for a given (tenant, user, doc_type).
 
     Fallback chain — first non-empty match wins:
@@ -296,27 +311,28 @@ def resolve_template(
         doc_type:  Document type (e.g. "sow").
 
     Returns:
-        Tuple of (template_body, source) where source is one of:
+        Tuple of (template_body, source, metadata) where source is one of:
             "user"    — personal override
             "tenant"  — tenant shared default
             "global"  — system-wide global default
             "plugin"  — canonical PLUGIN#templates entry
             "missing" — no template found anywhere
+        metadata is a dict with keys: version, display_name, doc_type, tenant_id, user_id
     '''
     # 1. User personal override
     user_item = get_template(tenant_id, doc_type, user_id)
     if user_item and user_item.get("template_body"):
-        return user_item["template_body"], "user"
+        return user_item["template_body"], "user", _build_provenance_metadata(user_item, "user", doc_type)
 
     # 2. Tenant shared default
     shared_item = get_template(tenant_id, doc_type, "shared")
     if shared_item and shared_item.get("template_body"):
-        return shared_item["template_body"], "tenant"
+        return shared_item["template_body"], "tenant", _build_provenance_metadata(shared_item, "tenant", doc_type)
 
     # 3. Global system default
     global_item = get_template("global", doc_type, "shared")
     if global_item and global_item.get("template_body"):
-        return global_item["template_body"], "global"
+        return global_item["template_body"], "global", _build_provenance_metadata(global_item, "global", doc_type)
 
     # 4. PLUGIN#templates canonical fallback
     try:
@@ -324,7 +340,7 @@ def resolve_template(
 
         plugin_item = get_plugin_item("templates", doc_type)
         if plugin_item and plugin_item.get("content"):
-            return plugin_item["content"], "plugin"
+            return plugin_item["content"], "plugin", _build_provenance_metadata(plugin_item, "plugin", doc_type)
     except ImportError:
         logger.warning(
             "template_store.resolve_template: plugin_store not importable; "
@@ -340,4 +356,4 @@ def resolve_template(
             exc,
         )
 
-    return "", "missing"
+    return "", "missing", _build_provenance_metadata(None, "missing", doc_type)

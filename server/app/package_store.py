@@ -67,6 +67,13 @@ _UPDATABLE_FIELDS = {
     "notes",
     "completed_documents",
     "far_citations",
+    # Tag attributes
+    "system_tags",
+    "user_tags",
+    "far_tags",
+    "compliance_readiness",
+    "threshold_tier",
+    "approval_level",
 }
 
 # -- Internal helpers -------------------------------------------------------
@@ -305,6 +312,23 @@ def create_package(
         item["contract_type"] = contract_type
     if flags is not None:
         item["flags"] = flags
+
+    # Auto-compute system tags and compliance metadata
+    try:
+        from app.tag_computation import (
+            compute_package_tags,
+            compute_threshold_tier,
+            compute_approval_level,
+        )
+        item["system_tags"] = compute_package_tags(item)
+        item["threshold_tier"] = compute_threshold_tier(float(estimated_value))
+        item["approval_level"] = compute_approval_level(
+            float(estimated_value),
+            acquisition_method or "",
+            contract_type or "",
+        )
+    except Exception as e:
+        logger.debug("Auto-tag computation skipped during create_package: %s", e)
 
     get_table().put_item(Item=item)
     logger.info("Created package %s for tenant %s", package_id, tenant_id)
@@ -686,4 +710,59 @@ def validate_package_completeness(tenant_id: str, package_id: str) -> dict:
         "total_required": total_required,
         "total_completed": total_completed,
     }
+
+
+def recompute_package_metadata(tenant_id: str, package_id: str) -> Optional[dict]:
+    """Re-aggregate tags from child documents and recompute compliance readiness.
+
+    Called after document creation/update to keep package-level tags in sync.
+    Returns the updated package dict, or None on failure.
+    """
+    from .document_store import list_package_documents
+
+    pkg = get_package(tenant_id, package_id)
+    if not pkg:
+        return None
+
+    docs = list_package_documents(tenant_id, package_id)
+
+    # Aggregate FAR tags from child documents
+    aggregated_far_tags = set()
+    for doc in docs:
+        for tag in doc.get("far_tags", []):
+            aggregated_far_tags.add(tag)
+
+    # Compute system tags and compliance readiness
+    try:
+        from app.tag_computation import (
+            compute_package_tags,
+            compute_threshold_tier,
+            compute_approval_level,
+            compute_compliance_readiness,
+        )
+
+        system_tags = compute_package_tags(pkg)
+        threshold_tier = compute_threshold_tier(float(pkg.get("estimated_value", 0)))
+        approval_level = compute_approval_level(
+            float(pkg.get("estimated_value", 0)),
+            pkg.get("acquisition_method", ""),
+            pkg.get("contract_type", ""),
+        )
+        compliance_readiness = compute_compliance_readiness(pkg, docs)
+    except Exception as e:
+        logger.debug("recompute_package_metadata tag computation failed: %s", e)
+        system_tags = []
+        threshold_tier = ""
+        approval_level = ""
+        compliance_readiness = {}
+
+    updates = {
+        "system_tags": system_tags,
+        "far_tags": sorted(aggregated_far_tags),
+        "threshold_tier": threshold_tier,
+        "approval_level": approval_level,
+        "compliance_readiness": compliance_readiness,
+    }
+
+    return update_package(tenant_id, package_id, updates)
 

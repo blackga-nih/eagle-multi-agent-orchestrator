@@ -30,7 +30,6 @@ import logging
 import os
 import uuid
 import io
-import re
 from contextlib import asynccontextmanager
 
 # EAGLE modules (new)
@@ -52,6 +51,7 @@ from .admin_service import (
     record_request_cost, check_rate_limit, calculate_cost
 )
 from . import feedback_store
+from .document_key_utils import extract_package_document_ref, is_allowed_document_key
 
 # Existing multi-tenant modules (preserved)
 from .models import SubscriptionTier
@@ -106,6 +106,7 @@ from .document_service import (
     get_document_download_url,
     finalize_document as finalize_document_version,
 )
+from .doc_type_registry import normalize_doc_type
 from .document_classification_service import (
     classify_document,
     extract_text_preview,
@@ -133,6 +134,24 @@ from .telemetry.log_context import configure_logging
 configure_logging(level=logging.INFO)
 logger = logging.getLogger("eagle")
 
+GENERIC_EDIT_ERROR = "Unable to save document changes."
+GENERIC_ANALYTICS_ERROR = "Analytics data is temporarily unavailable."
+GENERIC_TRACE_ERROR = "Trace data is temporarily unavailable."
+
+
+def _get_result_error(result: Any) -> str | None:
+    if isinstance(result, dict):
+        error = result.get("error")
+        if isinstance(error, str) and error:
+            return error
+    return None
+
+
+def _sanitize_result_error(result: dict[str, Any], fallback_error: str) -> dict[str, Any]:
+    sanitized = dict(result)
+    sanitized["error"] = fallback_error
+    return sanitized
+
 # ── S3 bucket (single source of truth) ───────────────────────────────
 _S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
 
@@ -142,6 +161,12 @@ async def _lifespan(app):
     # Startup
     notify_startup()
     start_scheduler()
+    # Warm config cache so first request avoids cold-start DynamoDB read
+    try:
+        from .config_store import list_config
+        list_config()
+    except Exception:
+        pass
     yield
     # Shutdown
     await close_webhook_client()
@@ -544,6 +569,38 @@ async def api_get_messages(
     return {"session_id": session_id, "messages": messages}
 
 
+@app.get("/api/sessions/{session_id}/context")
+async def api_get_session_context(
+    session_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return preloaded context for a session — preferences, package state, feature flags."""
+    tenant_id, user_id, _ = get_session_context(user)
+
+    # Resolve active package_id from session metadata
+    package_id = None
+    if USE_PERSISTENT_SESSIONS:
+        session = eagle_get_session(session_id, tenant_id, user_id)
+        if session:
+            meta = session.get("metadata") or {}
+            package_id = meta.get("active_package_id")
+
+    from .session_preloader import preload_session_context
+    ctx = await preload_session_context(tenant_id, user_id, package_id=package_id)
+
+    result: dict = {"preferences": ctx.preferences, "feature_flags": ctx.feature_flags}
+    if ctx.package:
+        result["package"] = {
+            "package_id": ctx.package.get("package_id"),
+            "title": ctx.package.get("title"),
+            "status": ctx.package.get("status"),
+            "acquisition_pathway": ctx.package.get("acquisition_pathway"),
+            "estimated_value": str(ctx.package.get("estimated_value", "")),
+            "checklist": ctx.checklist,
+        }
+    return result
+
+
 # ── Document export endpoints ────────────────────────────────────────
 
 class ExportRequest(BaseModel):
@@ -683,51 +740,8 @@ def _extract_binary_preview_payload(name: str, raw_bytes: bytes) -> dict[str, An
     return {"content": None, "preview_blocks": [], "preview_sheets": [], "preview_mode": "none"}
 
 
-def _is_allowed_document_key(doc_key: str, tenant_id: str, user_id: str) -> bool:
-    return (
-        doc_key.startswith(f"eagle/{tenant_id}/{user_id}/")
-        or doc_key.startswith(f"eagle/{tenant_id}/packages/")
-    )
-
-
-def _extract_package_document_ref(doc_key: str) -> Optional[dict[str, Any]]:
-    canonical = re.match(
-        r"^eagle/(?P<tenant>[^/]+)/packages/(?P<package_id>[^/]+)/(?P<doc_type>[^/]+)/v(?P<version>\d+)/(?P<filename>[^/]+)$",
-        doc_key,
-    )
-    if canonical:
-        info = canonical.groupdict()
-        return {
-            "tenant_id": info["tenant"],
-            "package_id": info["package_id"],
-            "doc_type": info["doc_type"],
-            "version": int(info["version"]),
-            "filename": info["filename"],
-        }
-
-    legacy = re.match(
-        r"^eagle/(?P<tenant>[^/]+)/(?P<user>[^/]+)/packages/(?P<package_id>[^/]+)/(?P<filename>[^/]+)$",
-        doc_key,
-    )
-    if not legacy:
-        return None
-
-    info = legacy.groupdict()
-    filename = info["filename"]
-    stem = filename.rsplit(".", 1)[0]
-    doc_type = stem.split("_v", 1)[0] if "_v" in stem else stem
-    version = None
-    version_match = re.search(r"_v(\d+)", stem)
-    if version_match:
-        version = int(version_match.group(1))
-
-    return {
-        "tenant_id": info["tenant"],
-        "package_id": info["package_id"],
-        "doc_type": doc_type,
-        "version": version,
-        "filename": filename,
-    }
+_is_allowed_document_key = is_allowed_document_key
+_extract_package_document_ref = extract_package_document_ref
 
 
 def _build_document_response(
@@ -1035,9 +1049,22 @@ async def api_update_docx_preview_document(
         preview_mode=request.preview_mode,
         change_source=request.change_source,
     )
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    error = _get_result_error(result)
+    if error:
+        logger.warning("DOCX preview edit failed: %s", error)
+        raise HTTPException(status_code=400, detail=GENERIC_EDIT_ERROR)
+    return {
+        "success": True,
+        "mode": result.get("mode"),
+        "document_id": result.get("document_id"),
+        "key": result.get("key"),
+        "version": result.get("version"),
+        "file_type": result.get("file_type"),
+        "content": result.get("content"),
+        "preview_blocks": result.get("preview_blocks", []),
+        "preview_mode": result.get("preview_mode"),
+        "message": result.get("message"),
+    }
 
 
 @app.post("/api/documents/xlsx-edit/{doc_key:path}")
@@ -1054,9 +1081,23 @@ async def api_update_xlsx_preview_document(
         cell_edits=request.cell_edits,
         change_source=request.change_source,
     )
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    error = _get_result_error(result)
+    if error:
+        logger.warning("XLSX preview edit failed: %s", error)
+        raise HTTPException(status_code=400, detail=GENERIC_EDIT_ERROR)
+    return {
+        "success": True,
+        "mode": result.get("mode"),
+        "document_id": result.get("document_id"),
+        "key": result.get("key"),
+        "version": result.get("version"),
+        "file_type": result.get("file_type"),
+        "content": result.get("content"),
+        "preview_mode": result.get("preview_mode"),
+        "preview_sheets": result.get("preview_sheets", []),
+        "missing": result.get("missing", []),
+        "message": result.get("message"),
+    }
 
 
 # ── S3 Presigned URL ─────────────────────────────────────────────────
@@ -1118,7 +1159,7 @@ def _coerce_dynamodb_value(value: Any) -> Any:
 
 
 def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> None:
-    """Store upload metadata in DynamoDB with 1-hour TTL."""
+    """Store upload metadata in DynamoDB with 24-hour TTL."""
     import boto3
     table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
         os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
@@ -1126,7 +1167,7 @@ def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> Non
     item = {
         "PK": f"UPLOAD#{tenant_id}",
         "SK": f"UPLOAD#{upload_id}",
-        "ttl": int(time.time()) + 3600,
+        "ttl": int(time.time()) + 86400,
         **_coerce_dynamodb_value(metadata),
     }
     table.put_item(Item=item)
@@ -1202,6 +1243,21 @@ async def api_upload_document(
     # Classify document
     classification = classify_document(file.filename or safe_name, content_preview)
 
+    # Convert to markdown for persistence
+    from .document_markdown_service import convert_to_markdown
+    markdown_content = convert_to_markdown(body, content_type, file.filename or safe_name)
+
+    # Upload markdown sibling to S3 if conversion succeeded
+    markdown_s3_key = None
+    if markdown_content:
+        md_key = f"{key}.parsed.md"
+        try:
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            s3.put_object(Bucket=bucket, Key=md_key, Body=markdown_content.encode("utf-8"), ContentType="text/markdown")
+            markdown_s3_key = md_key
+        except ClientError as e:
+            logger.warning("Failed to upload markdown sibling: %s", e)
+
     # Determine package context
     package_context = {"mode": "workspace", "package_id": None}
     if package_id:
@@ -1221,6 +1277,7 @@ async def api_upload_document(
         "size_bytes": len(body),
         "classification": classification.to_dict(),
         "session_id": session_id,
+        "markdown_s3_key": markdown_s3_key,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     })
 
@@ -1274,9 +1331,10 @@ async def assign_upload_to_package(
     if not pkg:
         raise HTTPException(status_code=404, detail=f"Package {body.package_id} not found")
 
-    # Determine doc_type (from request or classification)
-    doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
-    if doc_type == "unknown":
+    # Determine doc_type (from request or classification) and normalize
+    raw_doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
+    doc_type = normalize_doc_type(raw_doc_type) if raw_doc_type != "unknown" else "unknown"
+    if doc_type == "unknown" or doc_type == "":
         raise HTTPException(
             status_code=400,
             detail="Document type could not be determined. Please specify doc_type.",
@@ -1293,6 +1351,25 @@ async def assign_upload_to_package(
     except ClientError as e:
         logger.error("S3 fetch error for upload %s: %s", upload_id, e)
         raise HTTPException(status_code=500, detail="Failed to retrieve uploaded file")
+
+    # Fetch markdown content if available
+    markdown_content = None
+    markdown_s3_key = upload_meta.get("markdown_s3_key")
+    if markdown_s3_key:
+        try:
+            md_response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=markdown_s3_key)
+            markdown_content = md_response["Body"].read().decode("utf-8", errors="replace")
+        except ClientError:
+            logger.debug("Could not fetch markdown sibling for upload %s", upload_id)
+
+    # Compute auto-tags from template metadata
+    from .tag_computation import compute_document_tags, compute_far_tags_from_template, compute_completeness_pct
+    doc_stub = {"doc_type": doc_type, "title": title}
+    system_tags = compute_document_tags(doc_stub, pkg)
+    far_tags = compute_far_tags_from_template(doc_type)
+    completeness_pct = None
+    if markdown_content:
+        completeness_pct = compute_completeness_pct(doc_type, markdown_content)
 
     # Determine file type from content_type
     content_type = upload_meta["content_type"]
@@ -1315,6 +1392,11 @@ async def assign_upload_to_package(
         created_by_user_id=user.user_id,
         session_id=upload_meta.get("session_id"),
         change_source="user_upload",
+        markdown_content=markdown_content,
+        system_tags=system_tags,
+        far_tags=far_tags,
+        completeness_pct=completeness_pct,
+        original_filename=upload_meta.get("original_filename"),
     )
 
     if not result.success:
@@ -1613,7 +1695,9 @@ async def api_admin_dashboard(
 ):
     """Get admin dashboard statistics."""
     tenant_id = user.tenant_id
-    return get_dashboard_stats(tenant_id, days)
+    result = get_dashboard_stats(tenant_id, days)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 @app.get("/api/admin/users")
@@ -1635,7 +1719,9 @@ async def api_admin_user_stats(
 ):
     """Get stats for a specific user."""
     tenant_id = user.tenant_id
-    return get_user_stats(tenant_id, target_user_id, days)
+    result = get_user_stats(tenant_id, target_user_id, days)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 @app.get("/api/admin/tools")
@@ -1708,7 +1794,9 @@ async def api_admin_tools(
 async def api_check_rate_limit(user: UserContext = Depends(get_user_from_header)):
     """Check current rate limit status."""
     tenant_id, user_id, _ = get_session_context(user)
-    return check_rate_limit(tenant_id, user_id, user.tier)
+    result = check_rate_limit(tenant_id, user_id, user.tier)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 # ── User endpoints ───────────────────────────────────────────────────
@@ -1726,7 +1814,9 @@ async def api_user_usage(
 ):
     """Get usage summary for current user."""
     tenant_id = user.tenant_id
-    return get_usage_summary(tenant_id, days)
+    result = get_usage_summary(tenant_id, days)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 # ── Feedback endpoint ────────────────────────────────────────────────
@@ -2093,7 +2183,9 @@ async def get_tenant_usage(tenant_id: str, current_user: dict = Depends(get_curr
     """Get usage metrics for authenticated tenant"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    return get_tenant_usage_overview(tenant_id)
+    result = get_tenant_usage_overview(tenant_id)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 @app.get("/api/tenants/{tenant_id}/costs")
@@ -2153,6 +2245,8 @@ async def get_tenant_analytics(tenant_id: str, current_user: dict = Depends(get_
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
     usage_data = get_tenant_usage_overview(tenant_id)
+    if _get_result_error(usage_data):
+        usage_data = _sanitize_result_error(usage_data, GENERIC_ANALYTICS_ERROR)
     tier = current_user["subscription_tier"]
     analytics = {
         "tenant_id": tenant_id,
@@ -2171,8 +2265,10 @@ async def get_tenant_analytics(tenant_id: str, current_user: dict = Depends(get_
         "tier_specific_metrics": {
             "mcp_tools_available": subscription_service.get_tier_limits(tier).mcp_server_access,
             "usage_limits": subscription_service.get_tier_limits(tier).dict()
-        }
+        },
     }
+    if usage_data.get("error"):
+        analytics["error"] = GENERIC_ANALYTICS_ERROR
     return analytics
 
 
@@ -2257,11 +2353,14 @@ async def get_admin_traces(
             "observation_count": t.get("observationCount", 0),
             "langfuse_url": _langfuse_url(t.get("id", "")),
         })
-    return {
+    response = {
         "traces": traces,
         "meta": result.get("meta", {}),
         "error": result.get("error"),
     }
+    if _get_result_error(response):
+        response["error"] = GENERIC_TRACE_ERROR
+    return response
 
 
 @app.get("/api/admin/traces/{trace_id}")
@@ -2916,7 +3015,7 @@ async def add_document_tags(
     tags = body.get("tags", [])
     if isinstance(tags, list) and all(isinstance(t, str) for t in tags):
         tags = [{"type": "user", "value": t} for t in tags]
-    from app.tag_store import add_tags, update_entity_tags
+    from app.tag_store import add_tags, update_entity_tags, get_entity_tags
     written = add_tags(user.tenant_id, "document", doc_id, tags)
     # Also update the entity's user_tags list
     current = get_entity_tags(user.tenant_id, "document", doc_id)
@@ -3085,11 +3184,20 @@ async def preview_s3_template(
         return {"type": "markdown", "content": markdown, "filename": filename}
 
     elif file_ext in ("xlsx", "xls"):
+        from app.spreadsheet_edit_service import extract_xlsx_preview_payload
+
         content_bytes = get_s3_template_by_key(s3_key)
         if not content_bytes:
             raise HTTPException(status_code=404, detail="Template not found in S3")
-        markdown = XLSXPopulator.extract_text(content_bytes)
-        return {"type": "markdown", "content": markdown, "filename": filename}
+        # Return structured preview for proper grid rendering
+        preview_data = extract_xlsx_preview_payload(content_bytes)
+        return {
+            "type": "xlsx",
+            "content": preview_data.get("content", ""),
+            "preview_mode": preview_data.get("preview_mode"),
+            "preview_sheets": preview_data.get("preview_sheets", []),
+            "filename": filename,
+        }
 
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")

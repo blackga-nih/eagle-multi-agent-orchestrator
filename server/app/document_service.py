@@ -87,6 +87,12 @@ def create_package_document_version(
     session_id: Optional[str] = None,
     change_source: str = "agent_tool",
     template_id: Optional[str] = None,
+    template_provenance: Optional[dict] = None,
+    markdown_content: Optional[str] = None,
+    system_tags: Optional[list] = None,
+    far_tags: Optional[list] = None,
+    completeness_pct: Optional[float] = None,
+    original_filename: Optional[str] = None,
 ) -> DocumentResult:
     """Create a new versioned document for a package.
 
@@ -169,6 +175,7 @@ def create_package_document_version(
         session_id=session_id,
         change_source=change_source,
         template_id=template_id,
+        template_provenance=template_provenance,
         status="pending",
         created_at=now,
     )
@@ -187,6 +194,27 @@ def create_package_document_version(
             document_id=document_id,
             error=f"S3 upload failed: {s3_error}"
         )
+
+    # Step 2b: Upload markdown sibling if available
+    markdown_s3_key = None
+    if markdown_content:
+        md_key = s3_key.rsplit(".", 1)[0] + ".parsed.md" if "." in s3_key else s3_key + ".parsed.md"
+        md_error = _upload_to_s3(md_key, markdown_content.encode("utf-8"), "md")
+        if not md_error:
+            markdown_s3_key = md_key
+            logger.debug("Uploaded markdown sibling at %s", md_key)
+        else:
+            logger.warning("Failed to upload markdown sibling: %s", md_error)
+
+    # Step 2c: Persist markdown_s3_key and tags to DynamoDB record
+    _update_document_metadata(
+        tenant_id, package_id, doc_type, next_version,
+        markdown_s3_key=markdown_s3_key,
+        system_tags=system_tags,
+        far_tags=far_tags,
+        completeness_pct=completeness_pct,
+        original_filename=original_filename,
+    )
 
     # Step 3: Update status to draft
     _update_document_status(tenant_id, package_id, doc_type, next_version, "draft")
@@ -338,8 +366,9 @@ def _create_document_record(
     session_id: Optional[str],
     change_source: str,
     template_id: Optional[str],
-    status: str,
-    created_at: str,
+    template_provenance: Optional[dict] = None,
+    status: str = "pending",
+    created_at: str = "",
 ) -> Tuple[Optional[str], Optional[str]]:
     """Create a DOCUMENT# record in DynamoDB.
 
@@ -375,6 +404,8 @@ def _create_document_record(
         item["session_id"] = session_id
     if template_id:
         item["template_id"] = template_id
+    if template_provenance:
+        item["template_provenance"] = template_provenance
 
     try:
         table = get_table()
@@ -444,6 +475,61 @@ def _upload_to_s3(s3_key: str, content: bytes, file_type: str) -> Optional[str]:
     except (ClientError, BotoCoreError) as e:
         logger.error("S3 upload failed for %s: %s", s3_key, e)
         return str(e)
+
+
+def _update_document_metadata(
+    tenant_id: str,
+    package_id: str,
+    doc_type: str,
+    version: int,
+    markdown_s3_key: Optional[str] = None,
+    system_tags: Optional[list] = None,
+    far_tags: Optional[list] = None,
+    completeness_pct: Optional[float] = None,
+    original_filename: Optional[str] = None,
+) -> None:
+    """Update optional metadata fields on a DOCUMENT# record."""
+    updates: list[str] = []
+    names: dict[str, str] = {}
+    values: dict[str, object] = {}
+
+    if markdown_s3_key is not None:
+        updates.append("#msk = :msk")
+        names["#msk"] = "markdown_s3_key"
+        values[":msk"] = markdown_s3_key
+    if system_tags:
+        updates.append("#st = :st")
+        names["#st"] = "system_tags"
+        values[":st"] = system_tags
+    if far_tags:
+        updates.append("#ft = :ft")
+        names["#ft"] = "far_tags"
+        values[":ft"] = far_tags
+    if completeness_pct is not None:
+        updates.append("#cp = :cp")
+        names["#cp"] = "completeness_pct"
+        values[":cp"] = str(completeness_pct)
+    if original_filename:
+        updates.append("#ofn = :ofn")
+        names["#ofn"] = "original_filename"
+        values[":ofn"] = original_filename
+
+    if not updates:
+        return
+
+    try:
+        table = _get_table()
+        table.update_item(
+            Key={
+                "PK": f"DOCUMENT#{tenant_id}",
+                "SK": f"DOCUMENT#{package_id}#{doc_type}#{version}",
+            },
+            UpdateExpression="SET " + ", ".join(updates),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+    except (ClientError, BotoCoreError) as e:
+        logger.warning("Failed to update document metadata: %s", e)
 
 
 def _supersede_prior_versions(

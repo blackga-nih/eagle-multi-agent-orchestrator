@@ -26,17 +26,58 @@ def test_tool_schema_list_includes_kb_tools():
     assert "knowledge_fetch" in tool_names
 
 
-def test_supervisor_prompt_includes_kb_retrieval_and_sources_rules():
+def test_supervisor_prompt_includes_research_cascade_rules():
     prompt = build_supervisor_prompt(
         tenant_id="dev-tenant",
         user_id="dev-user",
         tier="advanced",
         agent_names=[],
     )
-    assert "KB Retrieval Rules" in prompt
-    assert "knowledge_search first" in prompt
-    assert "knowledge_fetch on the top 1-3 relevant docs" in prompt
-    assert "Sources section with title + s3_key" in prompt
+    assert "RESEARCH CASCADE" in prompt
+    assert "STEP 1" in prompt
+    assert "STEP 2" in prompt
+    assert "STEP 3" in prompt
+    assert "knowledge_search" in prompt
+    assert "knowledge_fetch on the top 1-3 relevant s3_keys" in prompt
+    assert "Sources section" in prompt
+
+
+def test_supervisor_prompt_cascade_ordering():
+    """STEP 1 (KB) must appear before STEP 2 (matrix) before STEP 3 (web)."""
+    prompt = build_supervisor_prompt(
+        tenant_id="dev-tenant",
+        user_id="dev-user",
+        tier="advanced",
+        agent_names=[],
+    )
+    kb_pos = prompt.index("STEP 1")
+    matrix_pos = prompt.index("STEP 2")
+    web_pos = prompt.index("STEP 3")
+    assert kb_pos < matrix_pos < web_pos
+
+
+def test_supervisor_prompt_cascade_requires_kb_before_web():
+    """Prompt must instruct agent not to skip to web_search."""
+    prompt = build_supervisor_prompt(
+        tenant_id="dev-tenant",
+        user_id="dev-user",
+        tier="advanced",
+        agent_names=[],
+    )
+    assert "Do NOT skip to web_search without checking internal" in prompt
+
+
+def test_supervisor_prompt_compliance_matrix_before_web():
+    """query_compliance_matrix must be mentioned before web_search instructions."""
+    prompt = build_supervisor_prompt(
+        tenant_id="dev-tenant",
+        user_id="dev-user",
+        tier="advanced",
+        agent_names=[],
+    )
+    matrix_pos = prompt.index("query_compliance_matrix")
+    web_pos = prompt.index("STEP 3")
+    assert matrix_pos < web_pos
 
 
 def test_streaming_emits_text_when_complete_event_has_only_final_text(monkeypatch):
