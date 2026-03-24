@@ -513,8 +513,6 @@ def _check_document_prerequisites(parsed: dict) -> str | None:
             data_raw = {}
 
     content = str(parsed.get("content", ""))
-    title = str(parsed.get("title", ""))
-    scan_text = f"{title} {content}".lower()
 
     # Check required fields — look in both data dict and content body
     missing = []
@@ -526,7 +524,6 @@ def _check_document_prerequisites(parsed: dict) -> str | None:
 
         # Check if the information appears somewhere in the content
         # (agent may have embedded it in prose rather than structured data)
-        field_keywords = field_name.replace("_", " ").split()
         found_in_content = False
 
         if field_name == "estimated_value":
@@ -2184,6 +2181,14 @@ def _build_all_service_tools(
             result_queue.put_nowait,
             {"type": "tool_result", "name": name, "result": emit_result},
         )
+
+    def _emit_input(name: str, tool_input: dict) -> None:
+        """Push tool input so the stream loop can update the card."""
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "tool_input", "name": name, "input": tool_input},
+            )
 
     # ---- 1. s3_document_ops ----
     @tool(name="s3_document_ops")

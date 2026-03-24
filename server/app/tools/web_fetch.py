@@ -189,10 +189,10 @@ def exec_web_fetch(url: str) -> dict[str, Any]:
         if code == 403:
             return {
                 "error": (
-                    f"HTTP 403 — this site blocks automated access "
-                    f"(Cloudflare/bot protection) and no cached version "
-                    f"is available. Use the search snippet from web_search "
-                    f"instead, or try a different source."
+                    "HTTP 403 — this site blocks automated access "
+                    "(Cloudflare/bot protection) and no cached version "
+                    "is available. Use the search snippet from web_search "
+                    "instead, or try a different source."
                 ),
                 "url": url,
             }
