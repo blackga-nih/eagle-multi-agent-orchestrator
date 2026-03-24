@@ -485,12 +485,16 @@ def create_streaming_router(
         # Set structured logging context so all downstream logs include user/tenant
         set_log_context(tenant_id=tenant_id, user_id=user_id, session_id=message.session_id or "")
 
-        # Load conversation history for multi-turn context
+        # Load conversation history for multi-turn context (tier-based limits)
         history = []
         if message.session_id:
             try:
                 from .session_store import get_messages_for_anthropic
-                history = get_messages_for_anthropic(message.session_id, tenant_id, user_id)
+                from .strands_agentic_service import TIER_MESSAGE_LIMITS
+                msg_limit = TIER_MESSAGE_LIMITS.get(user.tier, 80)
+                history = get_messages_for_anthropic(
+                    message.session_id, tenant_id, user_id, limit=msg_limit,
+                )
             except Exception:
                 pass
 
