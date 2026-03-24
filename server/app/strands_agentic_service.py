@@ -63,8 +63,9 @@ from .tools.web_search import exec_web_search
 logger = logging.getLogger("eagle.strands_agent")
 
 
-# -- Langfuse OTEL exporter (lazy, one-shot) --------------------------
+# -- Langfuse OTEL exporter + parent-span client (lazy, one-shot) -----
 _langfuse_injected = False
+_langfuse_client = None  # Langfuse SDK client for parent span wrapping
 
 
 def _ensure_langfuse_exporter():
@@ -72,8 +73,12 @@ def _ensure_langfuse_exporter():
 
     Must be called **before** the first ``Agent()`` so that the Agent's cached
     tracer references the real SDKTracerProvider (with the Langfuse exporter).
+
+    Also initializes the Langfuse SDK client for creating parent spans that
+    keep child spans properly nested (works around Strands SDK OTel context
+    detach issue — strands-agents/sdk-python#1316).
     """
-    global _langfuse_injected
+    global _langfuse_injected, _langfuse_client
     if _langfuse_injected:
         return
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
@@ -106,6 +111,17 @@ def _ensure_langfuse_exporter():
         _langfuse_injected = True
         logger.info("[EAGLE] Langfuse OTEL exporter injected → %s", endpoint)
         logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
+
+        # Initialize Langfuse SDK client for parent span wrapping.
+        # start_as_current_observation() creates a stable parent OTel span
+        # so Strands child spans inherit the correct trace_id even when
+        # ContextVar tokens fail to detach across async boundaries.
+        try:
+            from langfuse import get_client
+            _langfuse_client = get_client()
+            logger.info("[EAGLE] Langfuse SDK client initialized for parent span wrapping")
+        except Exception as client_exc:
+            logger.warning("[EAGLE] Langfuse SDK client init failed (tracing still works via OTLP): %s", client_exc)
     except Exception as exc:
         logger.warning("[EAGLE] Langfuse exporter injection failed: %s", exc)
 
@@ -3565,9 +3581,48 @@ async def sdk_query(
         ),
     )
 
-    # Synchronous call -- Strands handles the agentic loop internally
-    result = supervisor(prompt)
-    result_text = str(result)
+    # Wrap invocation in a Langfuse parent span so child OTel spans
+    # (from Strands SDK) nest correctly — works around ContextVar detach
+    # issue (strands-agents/sdk-python#1316).
+    _lf_ctx = None
+    _root_span = None
+    trace_env = os.getenv("LANGFUSE_TRACE_ENV", "dev")
+    if _langfuse_client is not None and session_id:
+        try:
+            _lf_ctx = _langfuse_client.start_as_current_observation(
+                as_type="span",
+                name=f"eagle-query-{session_id[:8]}",
+            )
+            _root_span = _lf_ctx.__enter__()
+            _root_span.update(
+                metadata={"tenant_id": tenant_id, "tier": tier, "session_id": session_id},
+            )
+            _langfuse_client.propagate_attributes(
+                session_id=session_id,
+                user_id=username or user_id,
+                tags=[f"env:{trace_env}", f"tier:{tier}"],
+            )
+        except Exception as lf_exc:
+            logger.debug("Langfuse parent span setup failed (non-fatal): %s", lf_exc)
+            _lf_ctx = None
+            _root_span = None
+
+    try:
+        # Synchronous call -- Strands handles the agentic loop internally
+        result = supervisor(prompt)
+        result_text = str(result)
+
+        if _root_span is not None:
+            try:
+                _root_span.update(output=result_text[:500])
+            except Exception:
+                pass
+    finally:
+        if _lf_ctx is not None:
+            try:
+                _lf_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
 
     # Persist compaction state if summarization occurred
     if session_id:
@@ -3833,6 +3888,32 @@ async def sdk_query_streaming(
             except asyncio.QueueEmpty:
                 break
         return drained
+
+    # Wrap the entire streaming lifecycle in a Langfuse parent span so
+    # child OTel spans (from Strands SDK) nest correctly — works around
+    # ContextVar detach issue (strands-agents/sdk-python#1316).
+    _lf_ctx = None
+    _root_span = None
+    trace_env = os.getenv("LANGFUSE_TRACE_ENV", "dev")
+    if _langfuse_client is not None and session_id:
+        try:
+            _lf_ctx = _langfuse_client.start_as_current_observation(
+                as_type="span",
+                name=f"eagle-stream-{session_id[:8]}",
+            )
+            _root_span = _lf_ctx.__enter__()
+            _root_span.update(
+                metadata={"tenant_id": tenant_id, "tier": tier, "session_id": session_id},
+            )
+            _langfuse_client.propagate_attributes(
+                session_id=session_id,
+                user_id=username or user_id,
+                tags=[f"env:{trace_env}", f"tier:{tier}"],
+            )
+        except Exception as lf_exc:
+            logger.debug("Langfuse parent span setup failed (non-fatal): %s", lf_exc)
+            _lf_ctx = None
+            _root_span = None
 
     try:
         # Use a polling loop so we can drain result_queue every 0.5s
@@ -4105,6 +4186,18 @@ async def sdk_query_streaming(
             "tools_called": tools_called,
             "usage": usage,
         }
+
+    # Close Langfuse parent span after all yields are done
+    if _root_span is not None:
+        try:
+            _root_span.update(output="".join(full_text_parts)[:500])
+        except Exception:
+            pass
+    if _lf_ctx is not None:
+        try:
+            _lf_ctx.__exit__(None, None, None)
+        except Exception:
+            pass
 
 
 async def sdk_query_single_skill(
