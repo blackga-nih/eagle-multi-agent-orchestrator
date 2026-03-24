@@ -15,6 +15,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from .changelog_store import write_document_changelog_entry
 from .document_service import create_package_document_version
 from .document_store import get_document
+from .formula_evaluation import evaluate_workbook_formulas_safe
 from .template_service import XLSXPopulator
 
 logger = logging.getLogger("eagle.spreadsheet_edit")
@@ -114,8 +115,11 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
             "preview_sheets": [],
         }
 
-    wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
-    wb_values = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
+    # Evaluate formulas first so data_only=True gets calculated values
+    evaluated_bytes = evaluate_workbook_formulas_safe(xlsx_bytes)
+
+    wb = load_workbook(io.BytesIO(evaluated_bytes), data_only=False)
+    wb_values = load_workbook(io.BytesIO(evaluated_bytes), data_only=True)
     preview_sheets: list[dict[str, Any]] = []
 
     for sheet_index, ws in enumerate(wb.worksheets):
@@ -141,8 +145,15 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
                 cell = ws.cell(row=row_idx, column=col_idx)
                 value_cell = values_ws.cell(row=row_idx, column=col_idx)
                 raw_value = cell.value
-                display_value = value_cell.value if value_cell.value is not None else raw_value
                 is_formula = isinstance(raw_value, str) and raw_value.startswith("=")
+                # Determine display value: prefer cached calculation, avoid showing raw formulas
+                if value_cell.value is not None:
+                    display_value = value_cell.value
+                elif is_formula:
+                    # Formula with no cached value - show empty rather than "=A1+B1"
+                    display_value = ""
+                else:
+                    display_value = raw_value
                 is_hidden = cell.coordinate in hidden_cells
                 editable = not is_formula and not is_hidden
                 cell_payload = {
@@ -257,6 +268,9 @@ def save_xlsx_preview_edits(
 
     if applied_count == 0:
         return {"error": "No spreadsheet edits were applied.", "missing": missing}
+
+    # Re-evaluate formulas after edits so totals update
+    updated_bytes = evaluate_workbook_formulas_safe(updated_bytes)
 
     preview_payload = extract_xlsx_preview_payload(updated_bytes)
     package_ref = _extract_package_document_ref(doc_key)
