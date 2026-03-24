@@ -74,7 +74,7 @@ filter @message like /(?i)(error|ERROR|exception|Exception|FATAL|fatal|crash|fai
 
 | Pattern | Category | Severity |
 |---------|----------|----------|
-| `Failed to detach context` | OTel async generator bug | Noise |
+| `Failed to detach context` | OTel async context (handled — spans nest via Langfuse parent wrapper) | Noise |
 | `s3:PutObject` AccessDenied | IAM missing permission | ACTIONABLE |
 | `s3:GetObject` AccessDenied | IAM missing permission | ACTIONABLE |
 | `logs:CreateLogGroup` AccessDenied | IAM missing permission | ACTIONABLE |
