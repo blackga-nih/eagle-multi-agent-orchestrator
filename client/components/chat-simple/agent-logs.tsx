@@ -72,7 +72,7 @@ const SUBAGENT_TOOLS = new Set([
   'ingest_document', 'knowledge_retrieval',
 ]);
 
-function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
+export function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
   const entries: DisplayEntry[] = [];
   let textBuffer: AuditLogEntry[] = [];
   let textAgent: string | null = null;
@@ -443,13 +443,6 @@ export default function AgentLogs({ logs }: AgentLogsProps) {
 
   return (
     <>
-      {/* Event count header */}
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">
-          {entries.length} event{entries.length !== 1 ? 's' : ''}
-        </span>
-      </div>
-
       {/* Timeline */}
       <div
         ref={scrollRef}

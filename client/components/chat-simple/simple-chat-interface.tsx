@@ -222,7 +222,7 @@ export default function SimpleChatInterface() {
     const addUserInputLog = useCallback((content: string) => {
         const entry: AuditLogEntry = {
             id: `log-${Date.now()}`,
-            type: 'text',
+            type: 'user_input',
             agent_id: 'user',
             agent_name: 'User',
             content,

@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { FileText, Bell, Terminal, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
-import AgentLogs from './agent-logs';
+import AgentLogs, { buildDisplayEntries } from './agent-logs';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -263,6 +263,7 @@ export default function ActivityPanel({
   const [activeTab, setActiveTab] = useState<TabId>('logs');
 
   const docCount = Object.values(documents).flat().length;
+  const logDisplayCount = useMemo(() => buildDisplayEntries(logs).length, [logs]);
 
   const notifCount = docCount;
 
@@ -286,7 +287,7 @@ export default function ActivityPanel({
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const badge =
-            tab.id === 'logs' && logs.length > 0 ? logs.length :
+            tab.id === 'logs' && logDisplayCount > 0 ? logDisplayCount :
             tab.id === 'documents' && docCount > 0 ? docCount :
             tab.id === 'notifications' && notifCount > 0 ? notifCount :
             0;
@@ -323,10 +324,10 @@ export default function ActivityPanel({
       </div>
 
       {/* Tab-specific header (Agent Logs clear button) */}
-      {activeTab === 'logs' && logs.length > 0 && (
+      {activeTab === 'logs' && logDisplayCount > 0 && (
         <div className="flex items-center justify-between px-4 py-2 border-b border-[#D8DEE6]">
           <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">
-            {logs.length} event{logs.length !== 1 ? 's' : ''}
+            {logDisplayCount} event{logDisplayCount !== 1 ? 's' : ''}
             {isStreaming && <span className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
           </span>
           <button
