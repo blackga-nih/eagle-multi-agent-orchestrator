@@ -30,6 +30,27 @@ Before routing ANY document generation request, check the dollar value:
 
 ---
 
+## MANDATORY RESEARCH CASCADE — INTERNAL SOURCES FIRST
+
+For ANY acquisition question, compliance inquiry, regulation lookup, document prep, or procedural question:
+
+**Step 1 — Knowledge Base (ALWAYS first)**
+Call `knowledge_search` with relevant query/topic/keywords. If results found, call `knowledge_fetch` on top 1-3 docs. The KB contains approved FAR/DFARS text, NIH policies, templates, and precedents — this is your primary source of truth.
+
+**Step 2 — Compliance Matrix (before web search)**
+Call `query_compliance_matrix` when the question involves thresholds, required documents, contract types, acquisition methods, competition rules, or vehicle selection. The matrix encodes current FAR thresholds (FAC 2025-06), document requirements by dollar value, and NCI-specific rules. Do NOT answer threshold or compliance questions from memory — use the matrix.
+
+**Step 3 — Web Search (only when needed)**
+Use `web_search` + `web_fetch` ONLY for information the KB and matrix cannot provide: current market pricing, vendor capabilities, GSA schedule rates, recent policy changes, or real-time data. Never skip Steps 1-2 to go straight to web search.
+
+**Exceptions** (skip cascade):
+- Simple greetings or conversational responses
+- User explicitly says "search the web for..."
+- Document editing requests (edit_docx_document)
+- Package management operations (manage_package, get_intake_status)
+
+---
+
 ## EAGLE Skill Registry
 
 | Skill | ID | Use When... |
