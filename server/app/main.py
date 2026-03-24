@@ -160,6 +160,12 @@ async def _lifespan(app):
     # Startup
     notify_startup()
     start_scheduler()
+    # Warm config cache so first request avoids cold-start DynamoDB read
+    try:
+        from .config_store import list_config
+        list_config()
+    except Exception:
+        pass
     yield
     # Shutdown
     await close_webhook_client()
@@ -560,6 +566,38 @@ async def api_get_messages(
         messages = SESSIONS[session_id][-limit:]
 
     return {"session_id": session_id, "messages": messages}
+
+
+@app.get("/api/sessions/{session_id}/context")
+async def api_get_session_context(
+    session_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Return preloaded context for a session — preferences, package state, feature flags."""
+    tenant_id, user_id, _ = get_session_context(user)
+
+    # Resolve active package_id from session metadata
+    package_id = None
+    if USE_PERSISTENT_SESSIONS:
+        session = eagle_get_session(session_id, tenant_id, user_id)
+        if session:
+            meta = session.get("metadata") or {}
+            package_id = meta.get("active_package_id")
+
+    from .session_preloader import preload_session_context
+    ctx = await preload_session_context(tenant_id, user_id, package_id=package_id)
+
+    result: dict = {"preferences": ctx.preferences, "feature_flags": ctx.feature_flags}
+    if ctx.package:
+        result["package"] = {
+            "package_id": ctx.package.get("package_id"),
+            "title": ctx.package.get("title"),
+            "status": ctx.package.get("status"),
+            "acquisition_pathway": ctx.package.get("acquisition_pathway"),
+            "estimated_value": str(ctx.package.get("estimated_value", "")),
+            "checklist": ctx.checklist,
+        }
+    return result
 
 
 # ── Document export endpoints ────────────────────────────────────────

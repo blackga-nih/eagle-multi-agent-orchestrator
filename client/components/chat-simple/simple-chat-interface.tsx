@@ -141,6 +141,28 @@ export default function SimpleChatInterface() {
         resetPackageState();
         firstUserMsgRef.current = null;
         setIsLoadingSession(false);
+
+        // Background: preload context from backend (non-blocking)
+        void (async () => {
+            try {
+                const token = await getToken();
+                if (!token) return;
+                const resp = await fetch(
+                    `/api/sessions/${encodeURIComponent(currentSessionId)}/context`,
+                    { headers: { Authorization: `Bearer ${token}` } },
+                );
+                if (!resp.ok) return;
+                const ctx = await resp.json();
+                if (ctx.package) {
+                    handlePackageMetadata({
+                        state_type: 'package_update',
+                        ...ctx.package,
+                    });
+                }
+            } catch {
+                // Non-blocking — swallow errors
+            }
+        })();
     }, [currentSessionId, loadSession]);
 
     // Auto-save session

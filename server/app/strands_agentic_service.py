@@ -3277,11 +3277,12 @@ def build_supervisor_prompt(
     tier: str = "advanced",
     agent_names: list[str] | None = None,
     workspace_id: str | None = None,
+    preloaded_context: str | None = None,
 ) -> str:
     """Build the supervisor system prompt with available subagent descriptions.
 
     Caches the prompt body per (tenant_id, workspace_id, tier) with 120s TTL.
-    Only the timestamp header is dynamic on every call.
+    Only the timestamp header and preloaded_context are dynamic on every call.
     """
     cache_key = (tenant_id, workspace_id or "", tier)
     now = _time.time()
@@ -3294,7 +3295,10 @@ def build_supervisor_prompt(
         _supervisor_prompt_cache[cache_key] = (now + _PROMPT_CACHE_TTL, body)
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S UTC")
-    return f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier} | Current datetime: {now_utc}\n\n{body}"
+    header = f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier} | Current datetime: {now_utc}"
+    if preloaded_context:
+        header = f"{header}\n\n{preloaded_context}"
+    return f"{header}\n\n{body}"
 
 
 # -- SDK Query Wrappers (same signatures as sdk_agentic_service.py) --
@@ -3396,6 +3400,13 @@ async def sdk_query(
         except Exception as exc:
             logger.warning("workspace_store.get_or_create_default failed: %s -- using bundled prompts", exc)
 
+    # Fire preload concurrently with sync tool-building
+    from .session_preloader import preload_session_context, format_context_for_prompt
+    _pkg_id = package_context.package_id if package_context and package_context.is_package_mode else None
+    _preload_task = asyncio.create_task(
+        preload_session_context(tenant_id, user_id, package_id=_pkg_id),
+    )
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -3414,12 +3425,16 @@ async def sdk_query(
         package_context=package_context,
     )
 
+    preloaded_ctx = await _preload_task
+    _ctx_str = format_context_for_prompt(preloaded_ctx)
+
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,
         user_id=user_id,
         tier=tier,
         agent_names=[t.__name__ for t in skill_tools],
         workspace_id=resolved_workspace_id,
+        preloaded_context=_ctx_str or None,
     )
 
     # Convert conversation history to Strands format (excludes current prompt)
@@ -3594,6 +3609,13 @@ async def sdk_query_streaming(
     result_queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
+    # Fire preload concurrently with sync tool-building
+    from .session_preloader import preload_session_context, format_context_for_prompt
+    _pkg_id = package_context.package_id if package_context and package_context.is_package_mode else None
+    _preload_task = asyncio.create_task(
+        preload_session_context(tenant_id, user_id, package_id=_pkg_id),
+    )
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -3616,12 +3638,16 @@ async def sdk_query_streaming(
         loop=loop,
     )
 
+    preloaded_ctx = await _preload_task
+    _ctx_str = format_context_for_prompt(preloaded_ctx)
+
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,
         user_id=user_id,
         tier=tier,
         agent_names=[t.__name__ for t in skill_tools],
         workspace_id=resolved_workspace_id,
+        preloaded_context=_ctx_str or None,
     )
 
     strands_history = _to_strands_messages(messages) if messages else None

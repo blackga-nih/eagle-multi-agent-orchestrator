@@ -5,10 +5,12 @@ Entity format:
     SK:  PREF#{user_id}
 
 Preferences persist indefinitely (no TTL).
-No in-process cache — prefs are user-specific and low-volume.
+In-process cache with 60-second TTL to avoid repeated DynamoDB reads
+within the same session (e.g. preload + agent tool access).
 """
 import os
 import logging
+import time as _time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -34,6 +36,30 @@ DEFAULT_PREFS: Dict[str, Any] = {
 
 # Keys callers are allowed to modify via update_prefs()
 _ALLOWED_KEYS = frozenset(DEFAULT_PREFS.keys())
+
+# ── In-process cache (60-second TTL per user) ────────────────────────
+_pref_cache: Dict[str, Dict[str, Any]] = {}
+_CACHE_TTL = 60
+
+
+def _cache_key(tenant_id: str, user_id: str) -> str:
+    return f"{tenant_id}#{user_id}"
+
+
+def _cache_get(tenant_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    ck = _cache_key(tenant_id, user_id)
+    entry = _pref_cache.get(ck)
+    if entry and _time.time() < entry["_ts"] + _CACHE_TTL:
+        return {k: v for k, v in entry.items() if k != "_ts"}
+    return None
+
+
+def _cache_set(tenant_id: str, user_id: str, prefs: Dict[str, Any]) -> None:
+    _pref_cache[_cache_key(tenant_id, user_id)] = {**prefs, "_ts": _time.time()}
+
+
+def _cache_invalidate(tenant_id: str, user_id: str) -> None:
+    _pref_cache.pop(_cache_key(tenant_id, user_id), None)
 
 # ── DynamoDB lazy singleton ───────────────────────────────────────────
 _dynamodb = None
@@ -79,6 +105,10 @@ def get_prefs(tenant_id: str, user_id: str) -> Dict[str, Any]:
     Merges the stored item with DEFAULT_PREFS so every key is always
     present in the returned dict.  Never returns None.
     """
+    cached = _cache_get(tenant_id, user_id)
+    if cached is not None:
+        return cached
+
     try:
         table = _get_table()
         response = table.get_item(
@@ -88,7 +118,9 @@ def get_prefs(tenant_id: str, user_id: str) -> Dict[str, Any]:
             }
         )
         item = response.get("Item")
-        return _merge_with_defaults(dict(item) if item else None)
+        merged = _merge_with_defaults(dict(item) if item else None)
+        _cache_set(tenant_id, user_id, merged)
+        return merged
     except (ClientError, BotoCoreError) as exc:
         logger.error(
             "pref_store.get_prefs failed [%s/%s]: %s",
@@ -134,6 +166,7 @@ def update_prefs(
     try:
         table = _get_table()
         table.put_item(Item=item)
+        _cache_invalidate(tenant_id, user_id)
         logger.debug(
             "pref_store.update_prefs: upserted prefs [%s/%s]",
             tenant_id,
@@ -166,6 +199,7 @@ def reset_prefs(tenant_id: str, user_id: str) -> Dict[str, Any]:
                 "SK": f"PREF#{user_id}",
             }
         )
+        _cache_invalidate(tenant_id, user_id)
         logger.debug(
             "pref_store.reset_prefs: deleted prefs [%s/%s]",
             tenant_id,
