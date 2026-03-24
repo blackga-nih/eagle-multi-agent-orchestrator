@@ -717,7 +717,6 @@ export default function SimpleChatInterface() {
                 clearLogs={clearLogs}
                 documents={mergedDocuments}
                 sessionId={currentSessionId ?? ''}
-                packageState={packageState}
                 isStreaming={isStreaming}
                 isOpen={isPanelOpen}
                 onToggle={() => setIsPanelOpen(v => !v)}
