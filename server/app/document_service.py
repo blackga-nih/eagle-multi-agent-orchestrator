@@ -111,6 +111,7 @@ def create_package_document_version(
     session_id: Optional[str] = None,
     change_source: str = "agent_tool",
     template_id: Optional[str] = None,
+    template_provenance: Optional[dict] = None,
 ) -> DocumentResult:
     """Create a new versioned document for a package.
 
@@ -193,6 +194,7 @@ def create_package_document_version(
         session_id=session_id,
         change_source=change_source,
         template_id=template_id,
+        template_provenance=template_provenance,
         status="pending",
         created_at=now,
     )
@@ -362,8 +364,9 @@ def _create_document_record(
     session_id: Optional[str],
     change_source: str,
     template_id: Optional[str],
-    status: str,
-    created_at: str,
+    template_provenance: Optional[dict] = None,
+    status: str = "pending",
+    created_at: str = "",
 ) -> Tuple[Optional[str], Optional[str]]:
     """Create a DOCUMENT# record in DynamoDB.
 
@@ -399,6 +402,8 @@ def _create_document_record(
         item["session_id"] = session_id
     if template_id:
         item["template_id"] = template_id
+    if template_provenance:
+        item["template_provenance"] = template_provenance
 
     try:
         table = _get_table()

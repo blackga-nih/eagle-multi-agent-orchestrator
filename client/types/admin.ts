@@ -111,6 +111,7 @@ export interface TemplateEntity {
   source: string;
   created_at: string;
   updated_at: string;
+  far_clause_refs?: FarClauseRef[];
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +161,15 @@ export interface TemplateCategory {
   group: string;
 }
 
+export interface FarClauseRef {
+  clause_number: string;
+  clause_title: string;
+  section?: string | null;
+  applicability: 'required' | 'conditional' | 'recommended';
+  condition?: string | null;
+  note?: string | null;
+}
+
 export interface S3Template {
   s3_key: string;
   filename: string;
@@ -170,6 +180,9 @@ export interface S3Template {
   category: TemplateCategory | null;
   display_name: string;
   registered: boolean;
+  far_clause_refs?: FarClauseRef[];
+  clause_count?: number;
+  far_parts_covered?: string[];
 }
 
 export interface S3TemplateListResponse {

@@ -26,6 +26,7 @@ logger = logging.getLogger("eagle.template_schema")
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent / "eagle-plugin"
 TEMPLATES_DIR = _PLUGIN_ROOT / "data" / "templates"
 METADATA_DIR = _PLUGIN_ROOT / "data" / "template-metadata"
+CLAUSE_REFS_DIR = _PLUGIN_ROOT / "data" / "template-clause-references"
 
 # Markdown template filename → doc_type mapping
 _MD_FILENAME_TO_DOCTYPE = {
@@ -48,6 +49,16 @@ class SectionField:
 
 
 @dataclass
+class ClauseReference:
+    """A FAR/DFARS/HHSAR clause citation on a template or section."""
+    clause_number: str          # "FAR 52.219-9" or "FAR 19.702"
+    title: str                  # "Small Business Subcontracting Plan"
+    applicability: str = "required"  # "required" | "conditional" | "recommended"
+    condition: Optional[str] = None  # When conditional: "contract_value > 750000"
+    note: Optional[str] = None
+
+
+@dataclass
 class TemplateSection:
     """A section within a document template."""
     number: str           # "1", "1.1", "PART 1"
@@ -56,6 +67,7 @@ class TemplateSection:
     fields: list[SectionField] = field(default_factory=list)
     subsections: list[TemplateSection] = field(default_factory=list)
     has_table: bool = False
+    clause_references: list[ClauseReference] = field(default_factory=list)
 
 
 @dataclass
@@ -66,6 +78,8 @@ class TemplateSchema:
     sections: list[TemplateSection] = field(default_factory=list)
     total_fields: int = 0
     required_fields: int = 0
+    template_level_clauses: list[ClauseReference] = field(default_factory=list)
+    total_clause_references: int = 0
 
 
 @dataclass
@@ -77,6 +91,17 @@ class CompletenessReport:
     missing_sections: list[str] = field(default_factory=list)
     completeness_pct: float = 0.0
     is_complete: bool = False
+
+
+@dataclass
+class ClauseCoverageReport:
+    """Result of analyzing clause coverage for a template."""
+    doc_type: str
+    total_clauses_referenced: int
+    far_parts_covered: list[str]
+    sections_with_clauses: int
+    sections_without_clauses: int
+    clause_list: list[dict] = field(default_factory=list)
 
 
 # ── Markdown Parser ──
@@ -399,3 +424,204 @@ def _is_section_filled(section: TemplateSection, content: str, content_lower: st
             return False
 
     return True
+
+
+# ── Clause Reference Loading ──────────────────────────────────────────
+
+# In-memory cache for clause reference data
+_clause_refs_cache: dict[str, dict] = {}
+_clause_refs_loaded = False
+
+
+def _ensure_clause_refs_loaded() -> None:
+    """Load all clause reference sidecar files from disk on first access."""
+    global _clause_refs_loaded
+    if _clause_refs_loaded:
+        return
+
+    if not CLAUSE_REFS_DIR.exists():
+        logger.debug("Clause references dir not found: %s", CLAUSE_REFS_DIR)
+        _clause_refs_loaded = True
+        return
+
+    for path in CLAUSE_REFS_DIR.glob("*.json"):
+        if path.name == "_index.json":
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            _clause_refs_cache[path.stem] = data
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load clause refs from %s: %s", path.name, e)
+
+    _clause_refs_loaded = True
+    logger.info("Loaded %d clause reference files", len(_clause_refs_cache))
+
+
+def load_clause_references(template_filename: str) -> dict:
+    """Load clause references for a specific template by its metadata filename.
+
+    Args:
+        template_filename: The metadata filename stem (without .json extension)
+
+    Returns:
+        Clause reference dict or empty dict if not found
+    """
+    _ensure_clause_refs_loaded()
+    # Strip .json extension if present
+    stem = template_filename.replace(".json", "")
+    return _clause_refs_cache.get(stem, {})
+
+
+def load_clause_references_by_category(category: str) -> list[dict]:
+    """Load all clause reference sidecars for a given category.
+
+    Args:
+        category: Template category (e.g., "sow", "acquisition_plan", "igce")
+
+    Returns:
+        List of clause reference dicts for all templates in that category
+    """
+    _ensure_clause_refs_loaded()
+    results = []
+    # Normalize hyphens to underscores for matching
+    category_normalized = category.replace("-", "_")
+    for _stem, ref_data in _clause_refs_cache.items():
+        ref_cat = ref_data.get("category", "").replace("-", "_")
+        if ref_cat == category_normalized:
+            results.append(ref_data)
+    return results
+
+
+def load_all_clause_references() -> dict[str, dict]:
+    """Load all 36 clause reference sidecar files.
+
+    Returns:
+        Dict keyed by filename stem, values are clause reference dicts
+    """
+    _ensure_clause_refs_loaded()
+    return dict(_clause_refs_cache)
+
+
+def get_clause_coverage(template_filename: str) -> ClauseCoverageReport:
+    """Compute clause coverage for a single template.
+
+    Args:
+        template_filename: The metadata filename stem
+
+    Returns:
+        ClauseCoverageReport with coverage statistics
+    """
+    ref_data = load_clause_references(template_filename)
+    if not ref_data:
+        doc_type = template_filename.replace(".json", "")
+        return ClauseCoverageReport(
+            doc_type=doc_type,
+            total_clauses_referenced=0,
+            far_parts_covered=[],
+            sections_with_clauses=0,
+            sections_without_clauses=0,
+        )
+
+    clause_list = []
+    far_parts = set()
+    sections_with = 0
+    sections_without = 0
+
+    for sec_num, sec_data in ref_data.get("section_clause_map", {}).items():
+        clauses = sec_data.get("clauses", [])
+        if clauses:
+            sections_with += 1
+            for c in clauses:
+                clause_list.append({
+                    "clause_number": c.get("clause_number", ""),
+                    "title": c.get("title", ""),
+                    "section_number": sec_num,
+                    "applicability": c.get("applicability", "required"),
+                })
+                # Extract FAR part number
+                part = _extract_far_part(c.get("clause_number", ""))
+                if part:
+                    far_parts.add(part)
+        else:
+            sections_without += 1
+
+    for c in ref_data.get("template_level_clauses", []):
+        clause_list.append({
+            "clause_number": c.get("clause_number", ""),
+            "title": c.get("title", ""),
+            "section_number": "template_level",
+            "applicability": c.get("applicability", "required"),
+        })
+        part = _extract_far_part(c.get("clause_number", ""))
+        if part:
+            far_parts.add(part)
+
+    return ClauseCoverageReport(
+        doc_type=ref_data.get("category", ""),
+        total_clauses_referenced=len(clause_list),
+        far_parts_covered=sorted(far_parts),
+        sections_with_clauses=sections_with,
+        sections_without_clauses=sections_without,
+        clause_list=clause_list,
+    )
+
+
+def get_category_clause_coverage(category: str) -> ClauseCoverageReport:
+    """Aggregated clause coverage across all template variants in a category."""
+    refs = load_clause_references_by_category(category)
+    all_clauses = {}
+    far_parts = set()
+    total_sections_with = 0
+    total_sections_without = 0
+
+    for ref_data in refs:
+        for sec_num, sec_data in ref_data.get("section_clause_map", {}).items():
+            clauses = sec_data.get("clauses", [])
+            if clauses:
+                total_sections_with += 1
+                for c in clauses:
+                    cn = c.get("clause_number", "")
+                    if cn and cn not in all_clauses:
+                        all_clauses[cn] = {
+                            "clause_number": cn,
+                            "title": c.get("title", ""),
+                            "section_number": sec_num,
+                            "applicability": c.get("applicability", "required"),
+                        }
+                        part = _extract_far_part(cn)
+                        if part:
+                            far_parts.add(part)
+            else:
+                total_sections_without += 1
+
+        for c in ref_data.get("template_level_clauses", []):
+            cn = c.get("clause_number", "")
+            if cn and cn not in all_clauses:
+                all_clauses[cn] = {
+                    "clause_number": cn,
+                    "title": c.get("title", ""),
+                    "section_number": "template_level",
+                    "applicability": c.get("applicability", "required"),
+                }
+                part = _extract_far_part(cn)
+                if part:
+                    far_parts.add(part)
+
+    return ClauseCoverageReport(
+        doc_type=category,
+        total_clauses_referenced=len(all_clauses),
+        far_parts_covered=sorted(far_parts),
+        sections_with_clauses=total_sections_with,
+        sections_without_clauses=total_sections_without,
+        clause_list=list(all_clauses.values()),
+    )
+
+
+_FAR_PART_RE = re.compile(r"(?:FAR|DFARS|HHSAR)\s+(\d+)")
+
+
+def _extract_far_part(clause_number: str) -> str:
+    """Extract the FAR part number from a clause number string."""
+    match = _FAR_PART_RE.search(clause_number)
+    return match.group(1) if match else ""

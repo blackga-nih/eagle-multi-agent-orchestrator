@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Plus, Search, FileStack, Trash2, Eye, Code, Loader2, AlertCircle,
   RefreshCw, Package, FileText, FileSpreadsheet, File, Filter,
-  Copy, CheckCircle2, X, ChevronDown, Download,
+  Copy, CheckCircle2, X, ChevronDown, Download, Scale,
 } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
@@ -12,6 +12,7 @@ import PageHeader from '@/components/layout/page-header';
 import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
 import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
+import ComplianceGapPanel from '@/components/admin/compliance-gap-panel';
 import { useAuth } from '@/contexts/auth-context';
 import { pluginApi, templateApi } from '@/lib/admin-api';
 import { listPackages, type PackageInfo } from '@/lib/document-api';
@@ -21,7 +22,7 @@ import type { PluginEntity, TemplateEntity, S3Template, S3TemplatePreviewRespons
 // Constants & Helpers
 // ---------------------------------------------------------------------------
 
-type TabType = 'all' | 's3' | 'custom';
+type TabType = 'all' | 's3' | 'custom' | 'gap-analysis';
 
 const docTypeLabels: Record<string, string> = {
   sow: 'Statement of Work',
@@ -99,6 +100,8 @@ interface TemplateCard {
   phase?: string;
   useCase?: string;
   registered?: boolean;
+  clauseCount?: number;
+  farPartsCovered?: string[];
   raw: PluginEntity | TemplateEntity | S3Template;
 }
 
@@ -225,6 +228,8 @@ export default function TemplatesPage() {
       phase: s.category?.phase,
       useCase: s.category?.use_case,
       registered: s.registered,
+      clauseCount: s.clause_count,
+      farPartsCovered: s.far_parts_covered,
       raw: s,
     })),
   ], [pluginTemplates, customTemplates, s3Templates]);
@@ -491,7 +496,7 @@ export default function TemplatesPage() {
 
           {/* Tabs */}
           <div className="flex items-center gap-1 mb-6 bg-gray-100 rounded-xl p-1 w-fit">
-            {(['all', 's3', 'custom'] as TabType[]).map(tab => (
+            {(['all', 's3', 'custom'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -505,10 +510,26 @@ export default function TemplatesPage() {
                 <span className="ml-1.5 text-xs text-gray-400">({tabCounts[tab]})</span>
               </button>
             ))}
+            <button
+              onClick={() => setActiveTab('gap-analysis')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                activeTab === 'gap-analysis'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Scale className="w-3.5 h-3.5" />
+              Gap Analysis
+            </button>
           </div>
 
+          {/* Gap Analysis Tab Content */}
+          {activeTab === 'gap-analysis' && (
+            <ComplianceGapPanel token={null} />
+          )}
+
           {/* Filters (shown for S3 tab or All tab) */}
-          {(activeTab === 's3' || activeTab === 'all') && (
+          {activeTab !== 'gap-analysis' && (activeTab === 's3' || activeTab === 'all') && (
             <div className="flex flex-wrap items-center gap-3 mb-6">
               {/* Search */}
               <div className="relative">
@@ -587,6 +608,7 @@ export default function TemplatesPage() {
             </div>
           )}
 
+          {activeTab !== 'gap-analysis' && (<>
           {/* Success Message */}
           {successMessage && (
             <div className="mb-6 flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl text-green-700">
@@ -678,6 +700,19 @@ export default function TemplatesPage() {
                     </div>
                   )}
 
+                  {/* FAR clause coverage badge */}
+                  {card.clauseCount != null && card.clauseCount > 0 && (
+                    <div className="flex items-center gap-1.5 mb-3 text-xs text-amber-700">
+                      <Scale className="w-3 h-3 flex-shrink-0" />
+                      <span className="font-medium">{card.clauseCount} FAR clauses</span>
+                      {card.farPartsCovered && card.farPartsCovered.length > 0 && (
+                        <span className="text-amber-500">
+                          (Part {card.farPartsCovered.slice(0, 3).join(', ')}{card.farPartsCovered.length > 3 ? ` +${card.farPartsCovered.length - 3}` : ''})
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between pt-3 border-t border-gray-100">
                     <div className="flex items-center gap-2">
                       {/* Phase badge for S3 templates */}
@@ -745,6 +780,7 @@ export default function TemplatesPage() {
               <p className="text-gray-500">No templates found.</p>
             </div>
           )}
+          </>)}
         </div>
       </main>
 
@@ -838,7 +874,22 @@ export default function TemplatesPage() {
               <Badge variant={previewCard.source === 'bundled' ? 'default' : previewCard.source === 's3' ? 'info' : 'primary'} size="sm">
                 {previewCard.source === 'bundled' ? 'Bundled' : previewCard.source === 's3' ? 'S3 Library' : 'Custom'}
               </Badge>
+              {previewCard.clauseCount != null && previewCard.clauseCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-full bg-amber-100 text-amber-700">
+                  <Scale className="w-3 h-3" />
+                  {previewCard.clauseCount} FAR clauses
+                </span>
+              )}
             </div>
+            {previewCard.farPartsCovered && previewCard.farPartsCovered.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {previewCard.farPartsCovered.map((part) => (
+                  <span key={part} className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200">
+                    FAR Part {part}
+                  </span>
+                ))}
+              </div>
+            )}
 
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Template Content</h4>

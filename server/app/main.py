@@ -2978,7 +2978,7 @@ async def add_document_tags(
     tags = body.get("tags", [])
     if isinstance(tags, list) and all(isinstance(t, str) for t in tags):
         tags = [{"type": "user", "value": t} for t in tags]
-    from app.tag_store import add_tags, update_entity_tags
+    from app.tag_store import add_tags, update_entity_tags, get_entity_tags
     written = add_tags(user.tenant_id, "document", doc_id, tags)
     # Also update the entity's user_tags list
     current = get_entity_tags(user.tenant_id, "document", doc_id)

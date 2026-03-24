@@ -2072,6 +2072,21 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
         else content
     )
 
+    # Build template provenance from the generation path
+    _template_provenance = None
+    _effective_template_id = params.get("template_id") or template_path
+    if _effective_template_id:
+        _template_provenance = {
+            "template_id": _effective_template_id,
+            "template_source": source,
+            "template_version": 1,
+            "template_name": title,
+            "doc_type": doc_type,
+        }
+        # Enrich from TemplateResult if available
+        if result and hasattr(result, 'template_path') and result.template_path:
+            _template_provenance["template_id"] = result.template_path
+
     # Package mode: route through canonical package document service.
     if package_id:
         from app.document_service import create_package_document_version
@@ -2086,7 +2101,8 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
             created_by_user_id=user_id,
             session_id=session_id,
             change_source="agent_tool",
-            template_id=params.get("template_id") or template_path,
+            template_id=_effective_template_id,
+            template_provenance=_template_provenance,
         )
         if not canonical.success:
             return {"error": canonical.error or "Failed to create package document"}
@@ -3565,8 +3581,8 @@ def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
         doc_type = params.get("doc_type")
         if not doc_type:
             return {"error": "doc_type is required for resolve"}
-        body = resolve_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
-        return {"action": "resolve", "doc_type": doc_type, "resolved_body": body}
+        body, source, metadata = resolve_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        return {"action": "resolve", "doc_type": doc_type, "resolved_body": body, "source": source, "metadata": metadata}
 
     return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
 

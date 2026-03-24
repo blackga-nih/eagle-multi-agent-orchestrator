@@ -26,6 +26,15 @@ export interface UploadResult {
     package_context: PackageContext;
 }
 
+export interface ComplianceReadiness {
+    score: number;
+    missing_documents: string[];
+    draft_documents: string[];
+    finalized_count?: number;
+    total_required?: number;
+    last_computed?: string;
+}
+
 export interface PackageInfo {
     package_id: string;
     title: string;
@@ -33,6 +42,12 @@ export interface PackageInfo {
     requirement_type?: string;
     estimated_value?: string;
     created_at?: string;
+    system_tags?: string[];
+    user_tags?: string[];
+    far_tags?: string[];
+    compliance_readiness?: ComplianceReadiness;
+    threshold_tier?: string;
+    approval_level?: string;
 }
 
 export interface AssignResult {
@@ -137,4 +152,59 @@ export async function listPackages(token?: string | null): Promise<PackageInfo[]
     }
 
     return response.json();
+}
+
+// ── Tag API ────────────────────────────────────────────────────────
+
+export async function addDocumentTags(docId: string, tags: string[], token?: string | null): Promise<void> {
+    await fetch(`/api/documents/${docId}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ tags }),
+    });
+}
+
+export async function removeDocumentTags(docId: string, tags: string[], token?: string | null): Promise<void> {
+    await fetch(`/api/documents/${docId}/tags`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ tags }),
+    });
+}
+
+export async function addPackageTags(packageId: string, tags: string[], token?: string | null): Promise<void> {
+    await fetch(`/api/packages/${packageId}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ tags }),
+    });
+}
+
+export async function removePackageTags(packageId: string, tags: string[], token?: string | null): Promise<void> {
+    await fetch(`/api/packages/${packageId}/tags`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ tags }),
+    });
+}
+
+export interface TagSearchResult {
+    entity_type: string;
+    entity_id: string;
+    tag_type: string;
+    tag_value: string;
+    created_at: string;
+}
+
+export async function searchByTag(tagValue: string, entityType?: string, token?: string | null): Promise<TagSearchResult[]> {
+    const params = new URLSearchParams({ q: tagValue });
+    if (entityType) params.append('type', entityType);
+
+    const response = await fetch(`/api/tags/search?${params}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.results || [];
 }

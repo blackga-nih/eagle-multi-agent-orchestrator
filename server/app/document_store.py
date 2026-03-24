@@ -67,12 +67,25 @@ def create_document(
     generated_by: str,
     session_id: Optional[str] = None,
     template_id: Optional[str] = None,
+    template_provenance: Optional[dict] = None,
+    system_tags: Optional[list] = None,
+    user_tags: Optional[list] = None,
+    far_tags: Optional[list] = None,
+    completeness_pct: Optional[float] = None,
 ) -> dict:
     """Create a new versioned document, superseding all previous versions.
 
     Scans existing docs for this package + doc_type, takes the highest version
     found, writes new doc at version N+1 (or v1 if none exist), then marks all
     prior versions as superseded.
+
+    Args:
+        template_provenance: Structured provenance dict with keys:
+            template_id, template_source, template_version, template_name, doc_type
+        system_tags:  Auto-derived tags (e.g. ["phase:planning", "threshold:sat"])
+        user_tags:    Free-form user labels (e.g. ["priority", "needs-review"])
+        far_tags:     FAR clause references (e.g. ["FAR 52.219-8", "FAR 6.302"])
+        completeness_pct: 0-100 completeness percentage from template schema validation
 
     Returns the newly created document dict.
     """
@@ -102,6 +115,16 @@ def create_document(
         item['session_id'] = session_id
     if template_id is not None:
         item['template_id'] = template_id
+    if template_provenance is not None:
+        item['template_provenance'] = template_provenance
+    if system_tags:
+        item['system_tags'] = system_tags
+    if user_tags:
+        item['user_tags'] = user_tags
+    if far_tags:
+        item['far_tags'] = far_tags
+    if completeness_pct is not None:
+        item['completeness_pct'] = completeness_pct
 
     try:
         table.put_item(Item=item)

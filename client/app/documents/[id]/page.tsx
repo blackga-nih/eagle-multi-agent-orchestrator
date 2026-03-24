@@ -21,6 +21,8 @@ import {
 import ReactMarkdown from 'react-markdown';
 import TopNav from '@/components/layout/top-nav';
 import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
+import TemplateProvenanceBadge from '@/components/ui/template-provenance-badge';
+import TagEditor from '@/components/ui/tag-editor';
 import { useAgentStream } from '@/hooks/use-agent-stream';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
@@ -32,6 +34,7 @@ import {
     extractBackgroundFromMessages,
 } from '@/lib/template-hydration';
 import { getGeneratedDocument } from '@/lib/document-store';
+import { addDocumentTags, removeDocumentTags } from '@/lib/document-api';
 import { DOCUMENT_TYPE_LABELS } from '@/types/schema';
 
 interface PageProps {
@@ -464,6 +467,13 @@ export default function DocumentViewerPage({ params }: PageProps) {
     const [xlsxPreviewSheets, setXlsxPreviewSheets] = useState<XlsxPreviewSheet[]>([]);
     const [editXlsxPreviewSheets, setEditXlsxPreviewSheets] = useState<XlsxPreviewSheet[]>([]);
     const [activeXlsxSheetId, setActiveXlsxSheetId] = useState<string | null>(null);
+    const [templateProvenance, setTemplateProvenance] = useState<{
+        template_id: string; template_source: string; template_version: number;
+        template_name: string; doc_type: string;
+    } | null>(null);
+    const [systemTags, setSystemTags] = useState<string[]>([]);
+    const [userTags, setUserTags] = useState<string[]>([]);
+    const [farTags, setFarTags] = useState<string[]>([]);
     const [isEditing, setIsEditing] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [docUpdated, setDocUpdated] = useState(false);
@@ -749,6 +759,10 @@ export default function DocumentViewerPage({ params }: PageProps) {
                     setS3Key(data.s3_key || data.key || data.document_id || null);
                     setCurrentDocumentId(data.document_id || data.key || null);
                     setCurrentVersion(typeof data.version === 'number' ? data.version : null);
+                    if (data.template_provenance) setTemplateProvenance(data.template_provenance);
+                    if (Array.isArray(data.system_tags)) setSystemTags(data.system_tags);
+                    if (Array.isArray(data.user_tags)) setUserTags(data.user_tags);
+                    if (Array.isArray(data.far_tags)) setFarTags(data.far_tags);
 
                     if (loadedFromCache) {
                         // Cache had good content — only update metadata above,
@@ -1453,11 +1467,17 @@ ${docSnippet}`;
                                         </span>
                                     )}
                                 </div>
-                                {documentType && (
-                                    <span className="text-xs text-gray-500">
-                                        {DOC_TYPE_LABELS[documentType] || documentType}
-                                    </span>
-                                )}
+                                <div className="flex items-center gap-2">
+                                    {documentType && (
+                                        <span className="text-xs text-gray-500">
+                                            {DOC_TYPE_LABELS[documentType] || documentType}
+                                        </span>
+                                    )}
+                                    {currentVersion !== null && (
+                                        <span className="text-xs text-gray-400">v{currentVersion}</span>
+                                    )}
+                                    <TemplateProvenanceBadge provenance={templateProvenance ?? undefined} />
+                                </div>
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1582,6 +1602,31 @@ ${docSnippet}`;
                         >
                             Dismiss
                         </button>
+                    </div>
+                )}
+
+                {/* Tags Bar */}
+                {(systemTags.length > 0 || userTags.length > 0 || farTags.length > 0) && (
+                    <div className="border-b border-gray-200 px-6 py-2">
+                        <TagEditor
+                            systemTags={systemTags}
+                            userTags={userTags}
+                            farTags={farTags}
+                            onAddTag={async (tag) => {
+                                const token = await getToken();
+                                if (currentDocumentId) {
+                                    await addDocumentTags(currentDocumentId, [tag], token);
+                                    setUserTags((prev) => [...prev, tag]);
+                                }
+                            }}
+                            onRemoveTag={async (tag) => {
+                                const token = await getToken();
+                                if (currentDocumentId) {
+                                    await removeDocumentTags(currentDocumentId, [tag], token);
+                                    setUserTags((prev) => prev.filter((t) => t !== tag));
+                                }
+                            }}
+                        />
                     </div>
                 )}
 
