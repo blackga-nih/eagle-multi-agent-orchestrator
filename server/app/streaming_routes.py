@@ -10,7 +10,6 @@ subagent delegation instead of the legacy stream_chat() prompt-injection path.
 #   streaming_router = create_streaming_router(store, subscription_service)
 #   app.include_router(streaming_router)
 """
-from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse
@@ -26,21 +25,16 @@ from .cognito_auth import extract_user_context
 from .stream_protocol import MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
+from .strands_agentic_service import sdk_query_streaming, MODEL, EAGLE_TOOLS
 from .session_store import add_message
 from .package_context_service import resolve_context, set_active_package
 from .telemetry.log_context import set_log_context
 from .health_checks import check_knowledge_base_health
-from .config import auth as auth_config
 
-REQUIRE_AUTH = auth_config.require_auth
+import os
+REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
 
 logger = logging.getLogger(__name__)
-
-
-def _get_strands_runtime():
-    from . import strands_agentic_service
-
-    return strands_agentic_service
 
 
 class GenerateTitleRequest(BaseModel):
@@ -138,7 +132,8 @@ async def stream_generator(
     sse_queue: asyncio.Queue[str] = asyncio.Queue()
     full_response_parts: list[str] = []
     # Tool timing: track start times when tool_use arrives, compute duration on tool_result
-    _tool_start_times: dict[str, float] = {}  # tool_name → perf_counter
+    _tool_start_times: dict[str, list[float]] = {}  # tool_name → FIFO of perf_counter
+    _tool_name_to_ids: dict[str, list[str]] = {}  # tool_name → FIFO of tool_use_ids
     _tool_timings: list[dict] = []  # collected {tool_name, duration_ms}
     _tool_failures: list[dict] = []  # collected {tool_name, error_message, duration_ms}
 
@@ -154,7 +149,7 @@ async def stream_generator(
     yield await sse_queue.get()
 
     # Send initial agent status so the frontend shows progress immediately
-    await writer.write_agent_status(sse_queue, "Analyzing your request...")
+    await writer.write_agent_status(sse_queue, "Reasoning...")
     yield await sse_queue.get()
 
     # Wrap the SDK generator so we inject ": keepalive\n\n" SSE comments every
@@ -163,7 +158,7 @@ async def stream_generator(
     KEEPALIVE_INTERVAL = 20.0
 
     async def _sdk_with_keepalive():
-        gen = _get_strands_runtime().sdk_query_streaming(
+        gen = sdk_query_streaming(
             prompt=message,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -227,14 +222,34 @@ async def stream_generator(
                         tool_input = {"raw": tool_input} if tool_input else {}
                 # Track tool start time for duration calculation
                 if tool_name:
-                    _tool_start_times[tool_name] = time.perf_counter()
+                    _tool_start_times.setdefault(tool_name, []).append(time.perf_counter())
+                tool_use_id = chunk.get("tool_use_id", "")
+                # Remember id so tool_input updates can reference it (FIFO per name)
+                if tool_name and tool_use_id:
+                    _tool_name_to_ids.setdefault(tool_name, []).append(tool_use_id)
                 await writer.write_tool_use(
                     sse_queue,
                     tool_name,
                     tool_input,
-                    tool_use_id=chunk.get("tool_use_id", ""),
+                    tool_use_id=tool_use_id,
                 )
                 yield await sse_queue.get()
+
+            elif chunk_type == "tool_input":
+                # Retroactive input update: tool functions push
+                # real input via result_queue once they execute.
+                # Re-emit as tool_use with the same tool_use_id
+                # so the frontend patches the existing card.
+                ti_name = chunk.get("name", "")
+                ti_input = chunk.get("input", {})
+                id_queue = _tool_name_to_ids.get(ti_name, [])
+                ti_id = id_queue.pop(0) if id_queue else ""
+                if ti_name and ti_input:
+                    await writer.write_tool_use(
+                        sse_queue, ti_name, ti_input,
+                        tool_use_id=ti_id,
+                    )
+                    yield await sse_queue.get()
 
             elif chunk_type == "tool_result":
                 tr_name = chunk.get("name", "")
@@ -242,7 +257,8 @@ async def stream_generator(
                     logger.debug("Skipping empty-name tool_result: keys=%s", list(chunk.keys()))
                     continue
                 # Compute tool duration from start time
-                start_t = _tool_start_times.pop(tr_name, None)
+                start_queue = _tool_start_times.get(tr_name, [])
+                start_t = start_queue.pop(0) if start_queue else None
                 duration_ms = int((time.perf_counter() - start_t) * 1000) if start_t is not None else None
                 if duration_ms is not None:
                     _tool_timings.append({
@@ -278,6 +294,20 @@ async def stream_generator(
                     sse_queue,
                     chunk.get("status", ""),
                     chunk.get("detail", ""),
+                )
+                yield await sse_queue.get()
+
+            elif chunk_type == "reasoning":
+                reasoning_data = chunk.get("data", "")
+                if reasoning_data:
+                    await writer.write_reasoning(sse_queue, reasoning_data)
+                    yield await sse_queue.get()
+
+            elif chunk_type == "handoff":
+                await writer.write_handoff(
+                    sse_queue,
+                    chunk.get("target", ""),
+                    chunk.get("reason", ""),
                 )
                 yield await sse_queue.get()
 
@@ -526,30 +556,35 @@ def create_streaming_router(
         and returns a concise, meaningful title.
         """
         try:
-            from anthropic import Anthropic
+            import boto3
+            from botocore.config import Config
 
-            client = Anthropic()
-            prompt = f"""Given the user's first message in a conversation, generate a short, concise session title (3-6 words max).
-Extract key information like:
-- Project/initiative name
-- Document type (SOW, IGCE, etc.)
-- Main action or focus
-
-User message: "{req.message}"
-"""
-            if req.response_snippet:
-                prompt += f"\nInitial response preview: {req.response_snippet[:100]}"
-
-            prompt += "\n\nRespond with ONLY the title, no explanations."
-
-            response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=50,
-                messages=[{"role": "user", "content": prompt}],
+            client = boto3.client(
+                "bedrock-runtime",
+                region_name=os.getenv("AWS_REGION", "us-east-1"),
+                config=Config(read_timeout=30, retries={"max_attempts": 2}),
             )
 
-            title = response.content[0].text.strip()
-            # Ensure title is not empty and reasonable length
+            prompt = (
+                "Given the user's first message in a conversation with an AI acquisition assistant, "
+                "generate a short, concise session title (3-6 words max).\n"
+                "Extract key information like:\n"
+                "- Project/initiative name\n"
+                "- Document type (SOW, IGCE, etc.)\n"
+                "- Main action or focus\n\n"
+                f'User message: "{req.message}"\n'
+            )
+            if req.response_snippet:
+                prompt += f"\nInitial response preview: {req.response_snippet[:100]}"
+            prompt += "\n\nRespond with ONLY the title, no explanations."
+
+            response = client.converse(
+                modelId="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 50, "temperature": 0},
+            )
+
+            title = response["output"]["message"]["content"][0]["text"].strip()
             if title and len(title) < 100:
                 return {"title": title}
         except Exception as e:
@@ -572,7 +607,8 @@ User message: "{req.message}"
             "status": "healthy",
             "service": "EAGLE – NCI Acquisition Assistant",
             "version": "4.0.0",
-            "model": _get_strands_runtime().MODEL,
+            "git_sha": os.getenv("GIT_SHA", "unknown"),
+            "model": MODEL,
             "services": {
                 "bedrock": True,
                 "dynamodb": True,
@@ -599,11 +635,11 @@ User message: "{req.message}"
                     "status": "online",
                 },
             ],
-            "tools": [tool["name"] for tool in _get_strands_runtime().EAGLE_TOOLS],
+            "tools": [tool["name"] for tool in EAGLE_TOOLS],
             "features": {
-                "persistent_sessions": auth_config.require_auth,  # sessions require auth
-                "auth_required": auth_config.require_auth,
-                "dev_mode": auth_config.dev_mode,
+                "persistent_sessions": os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true",
+                "auth_required": os.getenv("REQUIRE_AUTH", "false").lower() == "true",
+                "dev_mode": os.getenv("DEV_MODE", "false").lower() == "true",
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }

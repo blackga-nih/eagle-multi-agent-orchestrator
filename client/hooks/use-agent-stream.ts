@@ -244,6 +244,8 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     const activePackageId = packageId || options.packageId;
     const queryStartTime = new Date();
     let accumulatedText = '';
+    /** True after a tool_use/tool_result event — next text chunk needs a separator. */
+    let toolBoundarySeen = false;
     // Stable ID used for the single streaming assistant message.
     // All text chunks for one response share this ID so the UI upserts
     // rather than appending a new bubble per chunk.
@@ -372,8 +374,15 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
       // connection handshake). We use a stable streamingMsgId so the UI can
       // upsert the same message rather than appending a new one each chunk.
       if (event.type === 'text') {
-        accumulatedText += event.content || '';
-        if (!accumulatedText) return; // skip empty handshake event
+        const chunk = event.content || '';
+        if (!chunk && !accumulatedText) return; // skip empty handshake event
+        // Insert paragraph break when text resumes after a tool boundary
+        if (chunk && toolBoundarySeen && accumulatedText && !/\s$/.test(accumulatedText)) {
+          accumulatedText += '\n\n';
+        }
+        toolBoundarySeen = false;
+        accumulatedText += chunk;
+        if (!accumulatedText) return;
         const message: Message = {
           id: streamingMsgId,
           role: 'assistant',
@@ -389,6 +398,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
 
       // Handle tool_use events — dispatch client-side tools or emit server notification.
       if (event.type === 'tool_use' && event.tool_use) {
+        toolBoundarySeen = true;
         const toolName = event.tool_use.name;
         const toolInput = (event.tool_use.input ?? {}) as Record<string, unknown>;
         const toolUseId = event.tool_use.tool_use_id ?? `tool-${Date.now()}`;
@@ -447,6 +457,22 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         const status = event.metadata?.status ?? '';
         const detail = event.metadata?.detail ?? '';
         options.onAgentStatus?.(status, detail);
+      }
+
+      // Handle reasoning events — show status indicator in main chat
+      if (event.type === 'reasoning') {
+        options.onAgentStatus?.('Reasoning...', '');
+      }
+
+      // Handle handoff events — show agent transfer in main chat
+      if (event.type === 'handoff' && event.metadata) {
+        const target = String(event.metadata.target_agent ?? 'specialist');
+        options.onAgentStatus?.(`Handing off to ${target}`, String(event.metadata.reason ?? ''));
+      }
+
+      // Handle elicitation events — show question status in main chat
+      if (event.type === 'elicitation' && event.elicitation) {
+        options.onAgentStatus?.('Requesting input', String(event.elicitation.question ?? ''));
       }
 
       // Handle metadata events with state_type — package state updates

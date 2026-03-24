@@ -65,6 +65,10 @@ export default function ChatInterface() {
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    /** Track the session ID that the active request belongs to. */
+    const activeRequestSessionIdRef = useRef<string | null>(null);
+    /** Track the unique request ID for the active stream. */
+    const activeRequestIdRef = useRef<string | null>(null);
 
     // Load session data when session changes
     useEffect(() => {
@@ -72,6 +76,11 @@ export default function ChatInterface() {
             setIsLoadingSession(false);
             return;
         }
+        // Clear transient state from previous session
+        setStreamingMsg(null);
+        streamingMsgRef.current = null;
+        activeRequestSessionIdRef.current = null;
+        activeRequestIdRef.current = null;
 
         const sessionData = loadSession(currentSessionId);
         if (sessionData) {
@@ -89,10 +98,10 @@ export default function ChatInterface() {
 
     // Auto-save session when messages or acquisition data change
     const saveSessionDebounced = useCallback(() => {
-        if (messages.length > 0 || Object.keys(acquisitionData).length > 0) {
-            saveSession(messages, acquisitionData);
+        if ((messages.length > 0 || Object.keys(acquisitionData).length > 0) && currentSessionId) {
+            saveSession(currentSessionId, messages, acquisitionData);
         }
-    }, [messages, acquisitionData, saveSession]);
+    }, [currentSessionId, messages, acquisitionData, saveSession]);
 
     useEffect(() => {
         // Debounce saves to avoid too many writes
@@ -130,6 +139,7 @@ export default function ChatInterface() {
     const { sendQuery, isStreaming, logs, lastMessage, clearLogs, error, addUserInputLog, addFormSubmitLog } = useAgentStream({
         getToken,
         onMessage: (msg) => {
+            if (!activeRequestIdRef.current) return;
             // Keep the in-flight message in a ref + state — no upsert needed.
             // React replaces setStreamingMsg on each chunk (last-write-wins).
             const newMessage: Message = {
@@ -146,6 +156,7 @@ export default function ChatInterface() {
             parseAcquisitionData(msg.content);
         },
         onComplete: () => {
+            if (!activeRequestIdRef.current) return;
             // Commit the final streaming message to the persistent list.
             if (streamingMsgRef.current) {
                 setMessages(prev => [...prev, streamingMsgRef.current!]);
@@ -154,6 +165,7 @@ export default function ChatInterface() {
             setStreamingMsg(null);
         },
         onError: (err) => {
+            if (!activeRequestIdRef.current) return;
             console.error('Stream error:', err);
             streamingMsgRef.current = null;
             setStreamingMsg(null);
@@ -259,6 +271,8 @@ export default function ChatInterface() {
             timestamp: new Date(),
         };
         setMessages([userMsg]);
+        activeRequestSessionIdRef.current = currentSessionId;
+        activeRequestIdRef.current = crypto.randomUUID();
 
         // Log user input
         addUserInputLog(data.requirement);
@@ -303,6 +317,8 @@ export default function ChatInterface() {
             timestamp: new Date(),
         };
         setMessages((prev) => [...prev, userMsg]);
+        activeRequestSessionIdRef.current = currentSessionId;
+        activeRequestIdRef.current = crypto.randomUUID();
 
         // Log user input
         addUserInputLog(messageContent);
@@ -333,6 +349,8 @@ export default function ChatInterface() {
             timestamp: new Date(),
         };
         setMessages((prev) => [...prev, userMsg]);
+        activeRequestSessionIdRef.current = currentSessionId;
+        activeRequestIdRef.current = crypto.randomUUID();
 
         // Log user input
         addUserInputLog(messageContent);
@@ -355,6 +373,9 @@ export default function ChatInterface() {
         };
 
         setMessages((prev) => [...prev, userMessage]);
+        // Capture session at send time so callbacks route to the correct thread
+        activeRequestSessionIdRef.current = currentSessionId;
+        activeRequestIdRef.current = crypto.randomUUID();
         const query = input;
         setInput('');
 

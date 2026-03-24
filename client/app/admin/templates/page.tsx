@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Plus, Search, FileStack, Trash2, Eye, Code, Loader2, AlertCircle,
   RefreshCw, Package, FileText, FileSpreadsheet, File, Filter,
-  Copy, CheckCircle2, X, ChevronDown,
+  Copy, CheckCircle2, X, ChevronDown, Download,
 } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
@@ -15,7 +15,7 @@ import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import { useAuth } from '@/contexts/auth-context';
 import { pluginApi, templateApi } from '@/lib/admin-api';
 import { listPackages, type PackageInfo } from '@/lib/document-api';
-import type { PluginEntity, TemplateEntity, S3Template } from '@/types/admin';
+import type { PluginEntity, TemplateEntity, S3Template, S3TemplatePreviewResponse } from '@/types/admin';
 
 // ---------------------------------------------------------------------------
 // Constants & Helpers
@@ -134,6 +134,9 @@ export default function TemplatesPage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [showCopyModal, setShowCopyModal] = useState(false);
   const [copyTarget, setCopyTarget] = useState<TemplateCard | null>(null);
+  const [s3PreviewLoading, setS3PreviewLoading] = useState(false);
+  const [s3PreviewData, setS3PreviewData] = useState<S3TemplatePreviewResponse | null>(null);
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [selectedPackageId, setSelectedPackageId] = useState<string>('');
   const [newPackageTitle, setNewPackageTitle] = useState<string>('');
 
@@ -282,6 +285,45 @@ export default function TemplatesPage() {
     e.stopPropagation();
     setPreviewCard(card);
     setShowPreviewModal(true);
+  }
+
+  async function openS3Preview(card: TemplateCard, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!card.s3Key) return;
+    setPreviewCard(card);
+    setS3PreviewData(null);
+    setS3PreviewLoading(true);
+    setShowPreviewModal(true);
+    try {
+      const data = await templateApi.previewS3(getToken, card.s3Key);
+      setS3PreviewData(data);
+    } catch (err) {
+      setS3PreviewData({ type: 'markdown', content: `Error loading preview: ${err}`, filename: card.name });
+    } finally {
+      setS3PreviewLoading(false);
+    }
+  }
+
+  async function handleS3Download(card: TemplateCard, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!card.s3Key) return;
+
+    setDownloadingKey(card.key);
+    setError(null);
+    try {
+      const data = await templateApi.getS3DownloadUrl(getToken, card.s3Key);
+      const link = document.createElement('a');
+      link.href = data.download_url;
+      link.download = data.filename;
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download template');
+    } finally {
+      setDownloadingKey(null);
+    }
   }
 
   function openCopyModal(card: TemplateCard) {
@@ -651,16 +693,37 @@ export default function TemplatesPage() {
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       {card.source === 's3' ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openCopyModal(card);
-                          }}
-                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Use Template"
-                        >
-                          <Copy className="w-4 h-4" />
-                        </button>
+                        <>
+                          <button
+                            onClick={(e) => openS3Preview(card, e)}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Preview Template"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => handleS3Download(card, e)}
+                            disabled={downloadingKey === card.key}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                            title="Download Template"
+                          >
+                            {downloadingKey === card.key ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCopyModal(card);
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Use Template"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                        </>
                       ) : (
                         <button
                           onClick={(e) => openPreview(card, e)}
@@ -762,7 +825,7 @@ export default function TemplatesPage() {
       {/* Template Preview Modal */}
       <Modal
         isOpen={showPreviewModal}
-        onClose={() => setShowPreviewModal(false)}
+        onClose={() => { setShowPreviewModal(false); setS3PreviewData(null); setS3PreviewLoading(false); }}
         title={previewCard ? `Preview: ${previewCard.name}` : 'Template Preview'}
         size="xl"
       >
@@ -772,16 +835,37 @@ export default function TemplatesPage() {
               <span className={`text-xs font-bold uppercase px-2 py-1 rounded-full ${docTypeColors[previewCard.docType] || 'bg-gray-100 text-gray-600'}`}>
                 {docTypeLabels[previewCard.docType] || previewCard.docType}
               </span>
-              <Badge variant={previewCard.source === 'bundled' ? 'default' : 'primary'} size="sm">
-                {previewCard.source === 'bundled' ? 'Bundled' : 'Custom'}
+              <Badge variant={previewCard.source === 'bundled' ? 'default' : previewCard.source === 's3' ? 'info' : 'primary'} size="sm">
+                {previewCard.source === 'bundled' ? 'Bundled' : previewCard.source === 's3' ? 'S3 Library' : 'Custom'}
               </Badge>
             </div>
 
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Template Content</h4>
-              <div className="max-h-[60vh] overflow-y-auto">
-                <CollapsibleMarkdown content={previewCard.content} />
-              </div>
+              {previewCard.source === 's3' ? (
+                s3PreviewLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+                    <span className="ml-2 text-gray-500">Loading preview...</span>
+                  </div>
+                ) : s3PreviewData?.type === 'pdf' && s3PreviewData.url ? (
+                  <iframe
+                    src={s3PreviewData.url}
+                    className="w-full h-[60vh] rounded-lg border border-gray-200"
+                    title={`PDF preview: ${s3PreviewData.filename}`}
+                  />
+                ) : s3PreviewData?.content ? (
+                  <div className="max-h-[60vh] overflow-y-auto">
+                    <CollapsibleMarkdown content={s3PreviewData.content} />
+                  </div>
+                ) : (
+                  <p className="text-gray-400 py-8 text-center">No preview available.</p>
+                )
+              ) : (
+                <div className="max-h-[60vh] overflow-y-auto">
+                  <CollapsibleMarkdown content={previewCard.content} />
+                </div>
+              )}
             </div>
           </div>
         )}

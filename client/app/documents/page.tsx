@@ -4,20 +4,20 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Search, Filter, FileText, Eye, Download, Edit2, Clock, Copy } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
+import { useAuth } from '@/contexts/auth-context';
 import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
 import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
 import { Tabs } from '@/components/ui/tabs';
-import MarkdownRenderer from '@/components/ui/markdown-renderer';
+import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import {
-  MOCK_DOCUMENTS,
   MOCK_DOCUMENT_TEMPLATES,
   getDocumentStatusColor,
   formatDate,
 } from '@/lib/mock-data';
 import { getGeneratedDocuments, StoredDocument } from '@/lib/document-store';
-import { Document, DocumentTemplate, DocumentType, DocumentStatus, DOCUMENT_TYPE_LABELS } from '@/types/schema';
+import { DocumentTemplate, DocumentType, DOCUMENT_TYPE_LABELS } from '@/types/schema';
 
 const documentTypeLabels = DOCUMENT_TYPE_LABELS as Record<string, string>;
 
@@ -35,8 +35,44 @@ const documentTypeIcons: Record<string, string> = {
   contract_type_justification: 'T',
 };
 
-/** Convert a StoredDocument from localStorage into the Document shape used by the UI. */
-function storedToDocument(sd: StoredDocument): Document {
+interface DocumentListItem {
+  id: string;
+  workflow_id: string;
+  document_type: string;
+  title: string;
+  status: string;
+  content?: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  source: 'local' | 'server' | 'mock';
+  s3_key?: string;
+}
+
+interface ServerDocumentMetadata {
+  key: string;
+  name: string;
+  size_bytes: number;
+  last_modified: string;
+  type: string;
+}
+
+function getReadableDocumentType(type: string): string {
+  if (documentTypeLabels[type]) return type;
+  if (type === 'pdf' || type === 'docx' || type === 'xlsx' || type === 'markdown' || type === 'txt') return type;
+  return 'document';
+}
+
+function getStatusClass(status: string): string {
+  const supportedStatuses = new Set(['not_started', 'in_progress', 'draft', 'final', 'approved']);
+  if (supportedStatuses.has(status)) {
+    return getDocumentStatusColor(status as 'not_started' | 'in_progress' | 'draft' | 'final' | 'approved');
+  }
+  return 'bg-gray-100 text-gray-600';
+}
+
+/** Convert a StoredDocument from localStorage into the UI shape used by the page. */
+function storedToDocument(sd: StoredDocument): DocumentListItem {
   return {
     id: sd.id,
     workflow_id: sd.session_id,
@@ -47,26 +83,89 @@ function storedToDocument(sd: StoredDocument): Document {
     version: sd.version,
     created_at: sd.created_at,
     updated_at: sd.updated_at,
+    source: 'local',
+    s3_key: sd.s3_key,
+  };
+}
+
+function serverDocToDocument(doc: ServerDocumentMetadata): DocumentListItem {
+  return {
+    id: encodeURIComponent(doc.key),
+    workflow_id: 'uploaded',
+    document_type: getReadableDocumentType(doc.type),
+    title: doc.name,
+    status: 'draft',
+    version: 1,
+    created_at: doc.last_modified,
+    updated_at: doc.last_modified,
+    source: 'server',
+    s3_key: doc.key,
   };
 }
 
 export default function DocumentsPage() {
   const router = useRouter();
+  const { getToken } = useAuth();
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
+  const [selectedDocument, setSelectedDocument] = useState<DocumentListItem | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
-  const [localDocs, setLocalDocs] = useState<Document[]>([]);
+  const [localDocs, setLocalDocs] = useState<DocumentListItem[]>([]);
+  const [serverDocs, setServerDocs] = useState<DocumentListItem[]>([]);
 
   // Load localStorage docs on mount
   useEffect(() => {
     setLocalDocs(getGeneratedDocuments().map(storedToDocument));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUploadedDocuments() {
+      try {
+        const token = await getToken();
+        const response = await fetch('/api/documents', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!response.ok) return;
+
+        const data = await response.json() as { documents?: ServerDocumentMetadata[] };
+        if (cancelled) return;
+
+        const uploadedDocs = (data.documents || []).map(serverDocToDocument);
+
+        setServerDocs(uploadedDocs);
+      } catch {
+        if (!cancelled) {
+          setServerDocs([]);
+        }
+      }
+    }
+
+    loadUploadedDocuments();
+    return () => {
+      cancelled = true;
+    };
+  }, [getToken]);
+
   const allDocuments = useMemo(() => {
-    return [...localDocs, ...MOCK_DOCUMENTS];
-  }, [localDocs]);
+    const deduped = new Map<string, DocumentListItem>();
+
+    for (const doc of localDocs) {
+      const key = doc.s3_key || doc.id;
+      deduped.set(key, doc);
+    }
+
+    for (const doc of serverDocs) {
+      const key = doc.s3_key || doc.id;
+      deduped.set(key, doc);
+    }
+
+    return Array.from(deduped.values()).sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    );
+  }, [localDocs, serverDocs]);
 
   const statusTabs = useMemo(() => [
     { id: 'all', label: 'All Documents', badge: allDocuments.length },
@@ -82,7 +181,7 @@ export default function DocumentsPage() {
     return matchesSearch && matchesStatus;
   });
 
-  const handleDocumentClick = (doc: Document) => {
+  const handleDocumentClick = (doc: DocumentListItem) => {
     // For localStorage docs, populate sessionStorage so the viewer can load them
     const isLocal = localDocs.some((ld) => ld.id === doc.id);
     if (isLocal && doc.content) {
@@ -178,12 +277,12 @@ export default function DocumentsPage() {
                       <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors truncate">
                         {doc.title}
                       </h3>
-                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${getDocumentStatusColor(doc.status)}`}>
+                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${getStatusClass(doc.status)}`}>
                         {doc.status.replace('_', ' ')}
                       </span>
                     </div>
                     <div className="flex items-center gap-4 text-xs text-gray-500">
-                      <span>{documentTypeLabels[doc.document_type]}</span>
+                      <span>{documentTypeLabels[doc.document_type] || doc.document_type.toUpperCase()}</span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         {formatDate(doc.updated_at)}
@@ -258,12 +357,12 @@ export default function DocumentsPage() {
             <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl">
               <div>
                 <label className="text-xs text-gray-500 uppercase tracking-wide">Type</label>
-                <p className="mt-1 text-sm font-medium">{documentTypeLabels[selectedDocument.document_type]}</p>
+                <p className="mt-1 text-sm font-medium">{documentTypeLabels[selectedDocument.document_type] || selectedDocument.document_type.toUpperCase()}</p>
               </div>
               <div>
                 <label className="text-xs text-gray-500 uppercase tracking-wide">Status</label>
                 <p className="mt-1">
-                  <span className={`inline-block text-xs font-bold uppercase px-2 py-1 rounded-full ${getDocumentStatusColor(selectedDocument.status)}`}>
+                  <span className={`inline-block text-xs font-bold uppercase px-2 py-1 rounded-full ${getStatusClass(selectedDocument.status)}`}>
                     {selectedDocument.status.replace('_', ' ')}
                   </span>
                 </p>
@@ -296,7 +395,7 @@ export default function DocumentsPage() {
               </div>
               <div className="p-6 bg-white rounded-xl border border-gray-200 max-h-[400px] overflow-y-auto">
                 {selectedDocument.content ? (
-                  <MarkdownRenderer content={selectedDocument.content} />
+                  <CollapsibleMarkdown content={selectedDocument.content} />
                 ) : (
                   <div className="text-center py-8">
                     <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
@@ -319,7 +418,7 @@ export default function DocumentsPage() {
         size="lg"
       >
         <div className="space-y-4">
-          {MOCK_DOCUMENT_TEMPLATES.map((template) => (
+          {MOCK_DOCUMENT_TEMPLATES.map((template: DocumentTemplate) => (
             <div
               key={template.id}
               className="p-4 border border-gray-200 rounded-xl hover:border-blue-300 hover:bg-blue-50/50 transition-all cursor-pointer"

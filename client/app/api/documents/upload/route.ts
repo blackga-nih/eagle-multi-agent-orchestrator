@@ -13,6 +13,7 @@ const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
+    const queryString = request.nextUrl.searchParams.toString();
 
     // Forward multipart body directly — don't parse, just pipe
     const formData = await request.formData();
@@ -21,7 +22,11 @@ export async function POST(request: NextRequest) {
     if (authHeader) headers['Authorization'] = authHeader;
     // Do NOT set Content-Type — let fetch set the multipart boundary automatically
 
-    const response = await fetch(`${FASTAPI_URL}/api/documents/upload`, {
+    const url = queryString
+      ? `${FASTAPI_URL}/api/documents/upload?${queryString}`
+      : `${FASTAPI_URL}/api/documents/upload`;
+
+    const response = await fetch(url, {
       method: 'POST',
       headers,
       body: formData,
@@ -40,8 +45,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(data);
   } catch (error) {
     console.error('Document upload error:', error);
+
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      return NextResponse.json(
+        {
+          error: 'Cannot connect to backend',
+          detail: `Ensure FastAPI is running at ${FASTAPI_URL}`,
+          details: String(error),
+        },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Internal server error', details: String(error) },
+      {
+        error: 'Internal server error',
+        detail: error instanceof Error ? error.message : 'Unexpected upload proxy error',
+        details: String(error),
+      },
       { status: 500 }
     );
   }

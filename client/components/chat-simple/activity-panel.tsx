@@ -1,42 +1,26 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
-import { FileText, Bell, Terminal, PanelRightClose, PanelRightOpen, History, Bot, User, Braces, Copy, Check } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { FileText, Bell, Terminal, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
-import { PackageState } from '@/hooks/use-package-state';
-import { formatRelativeTime } from '@/lib/date-utils';
 import AgentLogs from './agent-logs';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Changelog entry from the API */
-interface ChangelogEntry {
-  changelog_id: string;
-  change_type: 'create' | 'update' | 'finalize';
-  change_source: 'agent_tool' | 'user_edit';
-  change_summary: string;
-  doc_type: string;
-  version: number;
-  actor_user_id: string;
-  created_at: string;
-}
-
 interface ActivityPanelProps {
   logs: AuditLogEntry[];
   clearLogs: () => void;
   documents: Record<string, DocumentInfo[]>;
   sessionId?: string;
-  packageId?: string;
-  packageState?: PackageState;
   isStreaming: boolean;
   isOpen: boolean;
   onToggle: () => void;
 }
 
-type TabId = 'documents' | 'notifications' | 'logs' | 'changelog' | 'state';
+type TabId = 'documents' | 'notifications' | 'logs';
 
 interface TabDef {
   id: TabId;
@@ -47,9 +31,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'documents',     label: 'Documents',     icon: FileText },
   { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'changelog',     label: 'Changelog',     icon: History },
   { id: 'logs',          label: 'Agent Logs',    icon: Terminal },
-  { id: 'state',         label: 'State',         icon: Braces },
 ];
 
 // ---------------------------------------------------------------------------
@@ -60,6 +42,28 @@ import { DOCUMENT_TYPE_ICONS, type DocumentType } from '@/types/schema';
 
 function getDocIcon(type: string): string {
   return DOCUMENT_TYPE_ICONS[type as DocumentType] ?? '\u{1F4C4}';
+}
+
+/** Format-only types that should be replaced with a label inferred from title. */
+const FORMAT_TYPES = new Set(['markdown', 'docx', 'xlsx', 'pdf', 'txt', 'document']);
+
+function getDocTypeLabel(doc: DocumentInfo): string {
+  const raw = doc.document_type;
+  if (!FORMAT_TYPES.has(raw)) {
+    return raw.replace(/_/g, ' ');
+  }
+  const t = (doc.title || '').toLowerCase();
+  if (t.includes('sow') || t.includes('statement') && t.includes('work')) return 'Statement of Work';
+  if (t.includes('igce') || t.includes('ige') || t.includes('cost estimate')) return 'Cost Estimate';
+  if (t.includes('market') || t.startsWith('mr-') || t.startsWith('mr_')) return 'Market Research';
+  if (t.includes('acquisition') && t.includes('plan') || t.startsWith('ap-') || t.startsWith('ap_')) return 'Acquisition Plan';
+  if (t.includes('justification') || t.includes('j&a')) return 'Justification & Approval';
+  if (t.includes('son') || t.includes('statement') && t.includes('need')) return 'Statement of Need';
+  if (t.includes('cor')) return 'COR Appointment';
+  if (t.includes('subk') || t.includes('subcontract')) return 'Subcontracting Plan';
+  if (t.includes('conference')) return 'Conference Request';
+  if (t.includes('buy') && t.includes('american')) return 'Buy American';
+  return raw.replace(/_/g, ' ');
 }
 
 // ---------------------------------------------------------------------------
@@ -108,9 +112,9 @@ function DocumentsTab({
           <div className="flex items-start gap-2">
             <span className="text-lg shrink-0">{getDocIcon(doc.document_type)}</span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-[#003366] truncate">{doc.title}</p>
+              <p className="text-sm font-medium text-[#003366] truncate">{doc.title.replace(/\.md$/i, '')}</p>
               <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
-                <span className="uppercase font-medium">{doc.document_type.replace(/_/g, ' ')}</span>
+                <span className="uppercase font-medium">{getDocTypeLabel(doc)}</span>
                 {doc.word_count && <span>&middot; {doc.word_count.toLocaleString()} words</span>}
                 {doc.status && (
                   <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-medium ${
@@ -243,179 +247,6 @@ function NotificationsTab({ documents }: {
   );
 }
 
-
-function ChangelogTab({ packageId }: { packageId?: string }) {
-  const [entries, setEntries] = useState<ChangelogEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!packageId) return;
-
-    const fetchChangelog = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/packages/${packageId}/changelog?limit=50`);
-        if (!res.ok) throw new Error('Failed to fetch changelog');
-        const data = await res.json();
-        setEntries(data.entries || []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load changelog');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchChangelog();
-  }, [packageId]);
-
-  if (!packageId) {
-    return (
-      <div className="flex flex-col items-center justify-center h-48 text-center px-4">
-        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-          <History className="w-5 h-5 text-gray-400" />
-        </div>
-        <p className="text-sm text-gray-500">No package selected.</p>
-        <p className="text-xs text-gray-400 mt-1">Select a package to view its changelog.</p>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-48">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#003366]" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center h-48 text-center px-4">
-        <p className="text-sm text-red-500">{error}</p>
-      </div>
-    );
-  }
-
-  if (entries.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-48 text-center px-4">
-        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-          <History className="w-5 h-5 text-gray-400" />
-        </div>
-        <p className="text-sm text-gray-500">No changelog entries yet.</p>
-        <p className="text-xs text-gray-400 mt-1">Document changes will appear here.</p>
-      </div>
-    );
-  }
-
-  const changeTypeStyles: Record<string, { bg: string; text: string }> = {
-    create: { bg: 'bg-green-100', text: 'text-green-700' },
-    update: { bg: 'bg-blue-100', text: 'text-blue-700' },
-    finalize: { bg: 'bg-purple-100', text: 'text-purple-700' },
-  };
-
-  return (
-    <div className="space-y-1.5">
-      {entries.map((entry) => {
-        const style = changeTypeStyles[entry.change_type] || { bg: 'bg-gray-100', text: 'text-gray-700' };
-        const isAgent = entry.change_source === 'agent_tool';
-
-        return (
-          <div
-            key={entry.changelog_id || `${entry.created_at}-${entry.doc_type}`}
-            className="flex items-start gap-2.5 rounded-lg border border-[#D8DEE6] bg-white px-3 py-2.5 hover:shadow-sm transition"
-          >
-            <span className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center bg-gray-100">
-              {isAgent ? (
-                <Bot className="w-4 h-4 text-[#003366]" />
-              ) : (
-                <User className="w-4 h-4 text-gray-600" />
-              )}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium uppercase ${style.bg} ${style.text}`}>
-                  {entry.change_type}
-                </span>
-                <span className="text-[10px] text-gray-400 uppercase">
-                  {entry.doc_type.replace(/_/g, ' ')} v{entry.version}
-                </span>
-              </div>
-              <p className="text-xs text-[#003366] mt-1">{entry.change_summary}</p>
-              <div className="flex items-center gap-2 mt-1">
-                <p className="text-[10px] text-gray-400">
-                  {formatRelativeTime(entry.created_at)} by {entry.actor_user_id}
-                </p>
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// State JSON Tab
-// ---------------------------------------------------------------------------
-
-/** JSON replacer that serialises Date objects to ISO strings. */
-function jsonReplacer(_key: string, value: unknown) {
-  if (value instanceof Date) return value.toISOString();
-  return value;
-}
-
-function StateTab({ packageState }: { packageState?: PackageState }) {
-  const [copied, setCopied] = useState(false);
-
-  const jsonText = useMemo(
-    () => JSON.stringify(packageState ?? null, jsonReplacer, 2),
-    [packageState],
-  );
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(jsonText).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }, [jsonText]);
-
-  const hasActivePackage = !!packageState?.packageId;
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Header with copy button */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">
-            Package State
-          </span>
-          {hasActivePackage && (
-            <span className="w-2 h-2 rounded-full bg-green-400" title="Active package" />
-          )}
-        </div>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-400 hover:text-gray-600 rounded transition"
-          title="Copy to clipboard"
-        >
-          {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-
-      {/* JSON viewer */}
-      <div className="flex-1 overflow-auto rounded-lg">
-        <pre className="text-xs font-mono bg-gray-900 text-green-400 p-3 rounded-lg whitespace-pre-wrap break-words min-h-[200px]">
-          {jsonText}
-        </pre>
-      </div>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Main Panel
 // ---------------------------------------------------------------------------
@@ -425,27 +256,11 @@ export default function ActivityPanel({
   clearLogs,
   documents,
   sessionId,
-  packageId,
-  packageState,
   isStreaming,
   isOpen,
   onToggle,
 }: ActivityPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('logs');
-  const [changelogCount, setChangelogCount] = useState(0);
-
-  // Fetch changelog count when packageId changes
-  useEffect(() => {
-    if (!packageId) {
-      setChangelogCount(0);
-      return;
-    }
-
-    fetch(`/api/packages/${packageId}/changelog?limit=1`)
-      .then(res => res.ok ? res.json() : { count: 0 })
-      .then(data => setChangelogCount(data.count || 0))
-      .catch(() => setChangelogCount(0));
-  }, [packageId]);
 
   const docCount = Object.values(documents).flat().length;
 
@@ -470,12 +285,10 @@ export default function ActivityPanel({
       <div className="flex items-center gap-1 p-2 bg-[#F5F7FA] border-b border-[#D8DEE6] overflow-x-auto">
         {TABS.map((tab) => {
           const Icon = tab.icon;
-          const hasActiveState = tab.id === 'state' && !!packageState?.packageId;
           const badge =
             tab.id === 'logs' && logs.length > 0 ? logs.length :
             tab.id === 'documents' && docCount > 0 ? docCount :
             tab.id === 'notifications' && notifCount > 0 ? notifCount :
-            tab.id === 'changelog' && changelogCount > 0 ? changelogCount :
             0;
 
           return (
@@ -494,9 +307,6 @@ export default function ActivityPanel({
                 <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] bg-[#003366] text-white font-bold min-w-[18px] text-center">
                   {badge}
                 </span>
-              )}
-              {hasActiveState && (
-                <span className="ml-0.5 w-2 h-2 rounded-full bg-green-400" />
               )}
             </button>
           );
@@ -532,9 +342,7 @@ export default function ActivityPanel({
       <div className="flex-1 overflow-y-auto p-4">
         {activeTab === 'documents' && <DocumentsTab documents={documents} sessionId={sessionId} />}
         {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
-        {activeTab === 'changelog' && <ChangelogTab packageId={packageId} />}
         {activeTab === 'logs' && <AgentLogs logs={logs} />}
-        {activeTab === 'state' && <StateTab packageState={packageState} />}
       </div>
     </div>
   );

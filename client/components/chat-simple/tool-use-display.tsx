@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { ClientToolResult } from '@/lib/client-tools';
 import { DocumentInfo } from '@/types/chat';
+import { resolveResultPanel } from './tool-result-panels';
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -18,7 +18,7 @@ interface ToolUseDisplayProps {
 
 // ── Tool metadata: icon + human-friendly label ──────────────────────
 
-const TOOL_META: Record<string, { icon: string; label: string }> = {
+export const TOOL_META: Record<string, { icon: string; label: string }> = {
   // Specialist subagents
   oa_intake:            { icon: '📋', label: 'Intake Assessment' },
   legal_counsel:        { icon: '⚖️', label: 'Legal Analysis' },
@@ -40,7 +40,25 @@ const TOOL_META: Record<string, { icon: string; label: string }> = {
   get_intake_status:    { icon: '📊', label: 'Intake Status' },
   intake_workflow:      { icon: '🔄', label: 'Intake Workflow' },
   search_far:           { icon: '📖', label: 'Searching FAR/DFARS' },
+  web_search:           { icon: '🌐', label: 'Web Search' },
+  web_fetch:            { icon: '📄', label: 'Reading Page' },
   query_compliance_matrix: { icon: '✅', label: 'Compliance Matrix' },
+  // Knowledge & reference tools
+  knowledge_search:           { icon: '🔍', label: 'Knowledge Search' },
+  knowledge_fetch:            { icon: '📄', label: 'Reading Document' },
+  load_skill:                 { icon: '📋', label: 'Loading Skill' },
+  list_skills:                { icon: '📑', label: 'Listing Skills' },
+  load_data:                  { icon: '📊', label: 'Loading Data' },
+  // Document management tools
+  edit_docx_document:         { icon: '✏️', label: 'Editing Document' },
+  get_latest_document:        { icon: '📄', label: 'Checking Document' },
+  finalize_package:           { icon: '📦', label: 'Finalizing Package' },
+  document_changelog_search:  { icon: '📜', label: 'Changelog Search' },
+  // Admin tools
+  manage_skills:              { icon: '⚙️', label: 'Managing Skills' },
+  manage_prompts:             { icon: '💬', label: 'Managing Prompts' },
+  manage_templates:           { icon: '📋', label: 'Managing Templates' },
+  cloudwatch_logs:            { icon: '🔎', label: 'CloudWatch Logs' },
   // Client-side tools
   think:                { icon: '💭', label: 'Reasoning' },
   code:                 { icon: '💻', label: 'Running Code' },
@@ -79,6 +97,17 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
     case 'search_far': {
       return String(input.query ?? '');
     }
+    case 'web_search': {
+      return String(input.query ?? '');
+    }
+    case 'web_fetch': {
+      const fetchUrl = String(input.url ?? '');
+      try {
+        return new URL(fetchUrl).hostname;
+      } catch {
+        return fetchUrl.length > 60 ? fetchUrl.slice(0, 60) + '...' : fetchUrl;
+      }
+    }
     case 'query_compliance_matrix': {
       const params = typeof input.params === 'string' ? input.params : JSON.stringify(input);
       try {
@@ -96,6 +125,36 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
     }
     case 'intake_workflow': {
       return String(input.action ?? '');
+    }
+    case 'knowledge_search': {
+      return String(input.query ?? input.topic ?? '');
+    }
+    case 'knowledge_fetch': {
+      const key = String(input.s3_key ?? '');
+      return key.split('/').pop() || key;
+    }
+    case 'load_skill': {
+      return String(input.name ?? '');
+    }
+    case 'load_data': {
+      const name = String(input.name ?? '');
+      const section = input.section ? ` / ${input.section}` : '';
+      return name + section;
+    }
+    case 'edit_docx_document': {
+      const key = String(input.document_key ?? '');
+      return key.split('/').pop() || key;
+    }
+    case 'get_latest_document': {
+      return String(input.doc_type ?? '').replace(/_/g, ' ');
+    }
+    case 'finalize_package': {
+      return String(input.package_id ?? '');
+    }
+    case 'document_changelog_search': {
+      const pkg = String(input.package_id ?? '');
+      const dt = input.doc_type ? ` / ${input.doc_type}` : '';
+      return pkg + dt;
     }
     default: {
       // Subagent delegation — show the query
@@ -209,6 +268,78 @@ function DocumentResultCard({
   );
 }
 
+// ── Web search result card ───────────────────────────────────────────
+
+function parseWebSearchResult(result: ClientToolResult | null | undefined): Record<string, unknown> | null {
+  if (!result || !result.result) return null;
+
+  let data = result.result as Record<string, unknown>;
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+
+  if (data && typeof data === 'object' && !data.error && data.sources) {
+    return data;
+  }
+  return null;
+}
+
+function WebSearchResultCard({ data }: { data: Record<string, unknown> }) {
+  const answer = String(data.answer ?? '');
+  const sources = (data.sources as Array<Record<string, string>>) ?? [];
+  const sourceCount = (data.source_count as number) ?? sources.length;
+  const displaySources = sources.slice(0, 5);
+  const truncatedAnswer = answer.length > 300 ? answer.slice(0, 300) + '...' : answer;
+
+  return (
+    <div className="border-t border-[#E5E9F0] px-3 py-2.5 bg-white space-y-2">
+      {/* Answer preview */}
+      {truncatedAnswer && (
+        <p className="text-xs text-gray-700 leading-relaxed">{truncatedAnswer}</p>
+      )}
+
+      {/* Sources */}
+      {displaySources.length > 0 && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">
+              Sources
+            </span>
+            <span className="text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
+              {sourceCount}
+            </span>
+          </div>
+          <ol className="space-y-0.5">
+            {displaySources.map((source, i) => (
+              <li key={i} className="flex items-baseline gap-1.5 text-[11px]">
+                <span className="text-gray-400 shrink-0">{i + 1}.</span>
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-800 hover:underline truncate min-w-0"
+                  title={source.url}
+                >
+                  {source.domain || new URL(source.url).hostname}
+                </a>
+              </li>
+            ))}
+          </ol>
+          {sourceCount > 5 && (
+            <p className="text-[10px] text-gray-400">
+              +{sourceCount - 5} more sources
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Parse create_document result from tool result data ───────────────
 
 function parseCreateDocumentResult(result: ClientToolResult | null | undefined): Record<string, unknown> | null {
@@ -250,18 +381,10 @@ export default function ToolUseDisplay({
   // Special handling for create_document — show document card instead of raw JSON
   const docData = toolName === 'create_document' ? parseCreateDocumentResult(result) : null;
 
-  // Extract markdown report from subagent/tool results
-  // Subagent results arrive as { report: "markdown..." }, service tools as { content: "...", ... }
-  const reportText = hasResult && !docData && result.result && typeof result.result === 'object'
-    ? (result.result as Record<string, unknown>).report as string | undefined
-    : undefined;
-
-  const resultText =
-    hasResult && !docData && !reportText && result.result !== null && result.result !== undefined
-      ? JSON.stringify(result.result, null, 2)
-      : null;
-
-  const canExpand = (status === 'done' || status === 'error') && (resultText || reportText || errorText);
+  const hasExpandableResult = hasResult && !docData && (
+    errorText || result.result !== null && result.result !== undefined
+  );
+  const canExpand = (status === 'done' || status === 'error') && hasExpandableResult;
   const showDocCard = status === 'done' && docData !== null;
 
   return (
@@ -291,10 +414,10 @@ export default function ToolUseDisplay({
           {status === 'done' && toolName === 'create_document' ? 'Document Created' : meta.label}
         </span>
 
-        {/* Summary */}
+        {/* Summary — shown as "Label — input params" */}
         {summary && (
           <span className="text-gray-400 truncate min-w-0 flex-1">
-            {summary}
+            — &ldquo;{summary}&rdquo;
           </span>
         )}
 
@@ -314,29 +437,8 @@ export default function ToolUseDisplay({
         <DocumentResultCard data={docData} sessionId={sessionId} />
       )}
 
-      {/* Collapsible result panel (non-document tools) */}
-      {expanded && (
-        <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white max-h-64 overflow-y-auto">
-          {errorText ? (
-            <p className="text-red-600 font-mono text-[11px] whitespace-pre-wrap break-all">
-              {errorText}
-            </p>
-          ) : reportText ? (
-            <div className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
-                            [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1
-                            [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1
-                            [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5
-                            [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0
-                            [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded">
-              <ReactMarkdown>{reportText}</ReactMarkdown>
-            </div>
-          ) : resultText ? (
-            <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
-              {resultText}
-            </pre>
-          ) : null}
-        </div>
-      )}
+      {/* Collapsible result panel — type-specific rendering */}
+      {expanded && resolveResultPanel(toolName, input, result, errorText)}
     </div>
   );
 }

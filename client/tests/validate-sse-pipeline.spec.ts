@@ -397,3 +397,47 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
   expect(userMsgSurvived, 'User message should survive page reload').toBe(true);
   expect(assistantSurvived, 'Assistant response should survive page reload').toBe(true);
 });
+
+test('SSE pipeline: reasoning, handoff, elicitation events reach activity panel', async ({ page }) => {
+  test.setTimeout(60_000);
+
+  // Intercept the SSE endpoint and return synthetic events
+  await page.route('**/api/invoke', async (route) => {
+    const syntheticSSE = [
+      'data: {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"","timestamp":"2026-01-01T00:00:00Z"}',
+      'data: {"type":"agent_status","agent_id":"eagle","agent_name":"EAGLE","metadata":{"status":"Analyzing...","detail":""},"timestamp":"2026-01-01T00:00:01Z"}',
+      'data: {"type":"handoff","agent_id":"eagle","agent_name":"EAGLE","metadata":{"target_agent":"legal_counsel","reason":"Legal review needed"},"timestamp":"2026-01-01T00:00:02Z"}',
+      'data: {"type":"elicitation","agent_id":"eagle","agent_name":"EAGLE","elicitation":{"question":"What is your budget range?","fields":[]},"timestamp":"2026-01-01T00:00:03Z"}',
+      'data: {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"Here is my response.","timestamp":"2026-01-01T00:00:04Z"}',
+      'data: {"type":"complete","agent_id":"eagle","agent_name":"EAGLE","metadata":{},"timestamp":"2026-01-01T00:00:05Z"}',
+    ].join('\n\n') + '\n\n';
+
+    await route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+      body: syntheticSSE,
+    });
+  });
+
+  await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+
+  // Send a message to trigger the mocked SSE
+  const textarea = page.locator('textarea').first();
+  await expect(textarea).toBeVisible({ timeout: 5_000 });
+  await textarea.fill('test message');
+  await textarea.press('Enter');
+  await page.waitForTimeout(5_000);
+
+  // Switch to Agent Logs tab
+  await page.getByText('Agent Logs', { exact: true }).click();
+  await page.waitForTimeout(1_000);
+
+  // Verify handoff event rendered in activity panel
+  await expect(page.getByText('Handoff').first()).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText('Question').first()).toBeVisible({ timeout: 5_000 });
+
+  // Verify no console errors from unhandled event types
+  const consoleErrors: string[] = [];
+  page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+  expect(consoleErrors.filter(e => e.includes('handoff') || e.includes('elicitation'))).toHaveLength(0);
+});

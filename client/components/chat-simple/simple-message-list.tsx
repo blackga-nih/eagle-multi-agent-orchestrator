@@ -131,6 +131,90 @@ function CodeOutput({ tc }: { tc: TrackedToolCall }) {
 }
 
 /**
+ * Renders text and tool cards interleaved in stream order.
+ * Uses textSnapshotLength on each TrackedToolCall to split the accumulated
+ * text into segments that appear before/between/after tool cards.
+ */
+function InterleavedContent({
+    content,
+    toolCalls,
+    isStreaming,
+    sessionId,
+}: {
+    content: string;
+    toolCalls: TrackedToolCall[];
+    isStreaming: boolean;
+    sessionId?: string;
+}) {
+    // Sort tool calls by their text snapshot position (stream order)
+    const sorted = [...toolCalls].sort(
+        (a, b) => (a.textSnapshotLength ?? 0) - (b.textSnapshotLength ?? 0)
+    );
+
+    const segments: React.ReactNode[] = [];
+    let cursor = 0;
+
+    for (const tc of sorted) {
+        const snapLen = tc.textSnapshotLength ?? 0;
+
+        // Text segment before this tool (if any new text since last cursor)
+        if (snapLen > cursor) {
+            const textSlice = content.slice(cursor, snapLen).trim();
+            if (textSlice) {
+                segments.push(
+                    <div key={`text-${cursor}`} className="text-sm text-gray-800 leading-relaxed">
+                        <MemoizedMarkdown content={textSlice} />
+                    </div>
+                );
+            }
+            cursor = snapLen;
+        }
+
+        // Tool card
+        segments.push(
+            <div key={tc.toolUseId} className="my-1">
+                <ToolUseDisplay
+                    toolName={tc.toolName}
+                    input={tc.input}
+                    status={tc.status}
+                    result={tc.result}
+                    isClientSide={tc.isClientSide}
+                    sessionId={sessionId}
+                />
+                <CodeOutput tc={tc} />
+            </div>
+        );
+    }
+
+    // Remaining text after all tools
+    const remaining = content.slice(cursor).trim();
+    if (remaining) {
+        segments.push(
+            <div key="text-final" className="text-sm text-gray-800 leading-relaxed">
+                {isStreaming ? (
+                    <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
+                        {remaining + ' ...'}
+                    </ReactMarkdown>
+                ) : (
+                    <MemoizedMarkdown content={remaining} />
+                )}
+            </div>
+        );
+    } else if (isStreaming) {
+        // Still streaming but no text after last tool yet — show cursor
+        segments.push(
+            <div key="text-streaming" className="text-sm text-gray-800 leading-relaxed">
+                <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
+                    {' ...'}
+                </ReactMarkdown>
+            </div>
+        );
+    }
+
+    return <>{segments}</>;
+}
+
+/**
  * Phase-aware waiting indicator.
  * Shows "Connecting..." before any SSE events, then server-driven status,
  * with an elapsed-seconds counter after 2 s to prove the app is alive.
@@ -251,42 +335,57 @@ export default function SimpleMessageList({
                     // Retrieve tool calls associated with this assistant message
                     const toolCalls = toolCallsByMsg[message.id] ?? [];
 
+                    // Build interleaved content: text segments and tool cards in stream order.
+                    // Each tool records textSnapshotLength — how much text existed when
+                    // the tool was invoked, letting us split text around tool calls.
+                    const hasSnapshots = toolCalls.length > 0 && toolCalls.some(tc => tc.textSnapshotLength != null);
+
                     return (
                         <div key={message.id} className="group flex flex-col gap-1.5">
                             <span className="text-[10px] font-semibold text-[#003366] uppercase tracking-wider">
                                 🦅 Eagle
                             </span>
 
-                            {/* Tool call indicators rendered above the text response */}
-                            {toolCalls.length > 0 && (
-                                <div className="flex flex-col gap-1 mb-1">
-                                    {toolCalls.map((tc) => (
-                                        <div key={tc.toolUseId}>
-                                            <ToolUseDisplay
-                                                toolName={tc.toolName}
-                                                input={tc.input}
-                                                status={tc.status}
-                                                result={tc.result}
-                                                isClientSide={tc.isClientSide}
-                                                sessionId={sessionId}
-                                            />
-                                            <CodeOutput tc={tc} />
+                            {hasSnapshots ? (
+                                // Interleaved rendering: text → tool → text → tool → text
+                                <InterleavedContent
+                                    content={message.content}
+                                    toolCalls={toolCalls}
+                                    isStreaming={isStreamingThis}
+                                    sessionId={sessionId}
+                                />
+                            ) : (
+                                <>
+                                    {/* Legacy: tool cards above text (no snapshot data) */}
+                                    {toolCalls.length > 0 && (
+                                        <div className="flex flex-col gap-1 mb-1">
+                                            {toolCalls.map((tc) => (
+                                                <div key={tc.toolUseId}>
+                                                    <ToolUseDisplay
+                                                        toolName={tc.toolName}
+                                                        input={tc.input}
+                                                        status={tc.status}
+                                                        result={tc.result}
+                                                        isClientSide={tc.isClientSide}
+                                                        sessionId={sessionId}
+                                                    />
+                                                    <CodeOutput tc={tc} />
+                                                </div>
+                                            ))}
                                         </div>
-                                    ))}
-                                </div>
-                            )}
+                                    )}
 
-                            <div className="text-sm text-gray-800 leading-relaxed">
-                                {isStreamingThis ? (
-                                    // Streaming: use inline ReactMarkdown (content changes every token)
-                                    <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
-                                        {message.content + ' ...'}
-                                    </ReactMarkdown>
-                                ) : (
-                                    // Completed: memoized — won't re-render when other messages update
-                                    <MemoizedMarkdown content={message.content} />
-                                )}
-                            </div>
+                                    <div className="text-sm text-gray-800 leading-relaxed">
+                                        {isStreamingThis ? (
+                                            <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
+                                                {message.content + ' ...'}
+                                            </ReactMarkdown>
+                                        ) : (
+                                            <MemoizedMarkdown content={message.content} />
+                                        )}
+                                    </div>
+                                </>
+                            )}
 
                             {/* Copy button — visible on hover after streaming completes */}
                             {!isStreamingThis && (

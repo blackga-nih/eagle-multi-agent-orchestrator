@@ -13,7 +13,7 @@ import os
 import sys
 import socket
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path as _Path
 
 from dotenv import load_dotenv
@@ -125,7 +125,7 @@ def pytest_sessionfinish(session, exitstatus):
         return
 
     duration_s = round(time.time() - _session_start, 2)
-    timestamp = datetime.utcnow().isoformat() + "Z"
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     run_id = timestamp.replace(":", "-").replace(".", "-")
 
     passed = sum(1 for r in _results.values() if r["status"] == "passed")

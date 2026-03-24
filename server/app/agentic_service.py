@@ -311,6 +311,30 @@ def _extract_period(text: str) -> str | None:
     return None
 
 
+_GENERATION_TRIGGER_RE = re.compile(
+    r"^(generate|create|draft|write|produce|prepare|build|make)\s+"
+    r"(the|a|an|my|our)?\s*"
+    r"(statement of work|sow|igce|ige|cost estimate|market research|"
+    r"acquisition plan|justification|document|report)",
+    re.IGNORECASE,
+)
+
+
+def _is_generation_trigger(text: str) -> bool:
+    """Return True if *text* is a short command to generate a document.
+
+    These messages are user instructions to the agent (\"Generate the SOW for
+    this acquisition\") — they should NOT be used as requirement content in the
+    generated document.
+    """
+    t = text.strip()
+    # Short messages matching the pattern are triggers, not requirements.
+    # Longer messages (>200 chars) likely contain actual requirements inline.
+    if len(t) > 200:
+        return False
+    return bool(_GENERATION_TRIGGER_RE.search(t))
+
+
 def _extract_section_bullets(text: str) -> dict[str, list[str]]:
     """Extract bullet lists grouped by heading from free-form user prompts."""
     sections: dict[str, list[str]] = {}
@@ -368,7 +392,11 @@ def _augment_document_data_from_context(
     user_msgs = [m for m in context_messages if not m.startswith("[ASSISTANT] ")]
     assistant_msgs = [m.removeprefix("[ASSISTANT] ") for m in context_messages if m.startswith("[ASSISTANT] ")]
 
-    last_user_text = user_msgs[-1] if user_msgs else ""
+    # Filter out short generation trigger commands ("Generate the SOW...")
+    # so we use actual requirement content, not the trigger.
+    substantive_user_msgs = [m for m in user_msgs if not _is_generation_trigger(m)]
+    last_user_text = (substantive_user_msgs or user_msgs)[-1] if user_msgs else ""
+
     # Build context from ALL messages (user + assistant) for richer documents
     context_blob = " ".join(context_messages[-8:])
 
@@ -425,15 +453,50 @@ def _augment_document_data_from_context(
         combined_tasks = (scope_items + tech_items)[:20]
         if combined_tasks:
             merged.setdefault("tasks", combined_tasks)
-        merged.setdefault("scope", requirement or title)
+        # Build scope from structured bullets first, then substantive user
+        # messages. Never use a bare generation trigger as scope text.
+        if scope_items:
+            merged.setdefault("scope", "\n".join(f"- {s}" for s in scope_items[:10]))
+        elif substantive_user_msgs:
+            # Use the longest substantive user message (most likely contains
+            # the actual requirements) rather than just the last one.
+            best_req = max(substantive_user_msgs[-6:], key=len)[:500]
+            merged.setdefault("scope", best_req)
+        else:
+            # Fallback: leave scope empty so _generate_sow uses its template
+            pass
 
     # Include assistant analysis as conversation context so templates
     # and generators can reference intake answers, recommendations, and
     # tool results from the conversation — not just user prompts.
     if assistant_msgs:
-        # Use the most recent and substantial assistant message as context
-        best_context = max(assistant_msgs[-4:], key=len)
+        # Filter out messages that look like system prompt leakage
+        clean_assistant = [
+            m for m in assistant_msgs
+            if not re.search(
+                r"Your task is to create a detailed summary|"
+                r"You are an? .{0,30}(?:assistant|agent|specialist)|"
+                r"SYSTEM PROMPT|"
+                r"<instructions>",
+                m[:200], re.IGNORECASE,
+            )
+        ]
+        source = clean_assistant or assistant_msgs
+        best_context = max(source[-4:], key=len)
         merged.setdefault("conversation_context", best_context[:3000])
+
+    # Always inject full conversation history so generators (especially the
+    # markdown fallback) can produce contextual documents instead of stubs.
+    # This is the primary mechanism for getting conversation content into
+    # generated documents when the LLM doesn't pass full `content`.
+    all_msgs = []
+    for m in context_messages:
+        if m.startswith("[ASSISTANT] "):
+            all_msgs.append({"role": "assistant", "text": m[12:]})
+        else:
+            all_msgs.append({"role": "user", "text": m})
+    if all_msgs:
+        merged.setdefault("conversation_history", all_msgs)
 
     return merged
 
@@ -1712,7 +1775,7 @@ def _update_document_content(
     if not doc_key:
         return {"error": "update_existing_key is required but empty"}
     if not content:
-        return {"error": "content is required for update"}
+        return {"error": "content is required for update. Provide the full document markdown in the content parameter."}
 
     user_id = _extract_user_id(session_id)
     bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
@@ -2139,6 +2202,77 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     return response
 
 
+def _extract_sow_sections_from_history(
+    history: list[dict],
+    description: str,
+) -> tuple[list[str], list[str]]:
+    """Extract scope and background content from conversation history.
+
+    Scans user and assistant messages for substantive requirement details
+    (technical specs, environment info, compliance needs, deliverables)
+    and returns them as formatted scope bullets and background sentences.
+
+    Returns (scope_parts, background_parts).
+    """
+    scope_parts: list[str] = []
+    bg_parts: list[str] = []
+
+    # Collect all substantive text (skip short trigger commands)
+    user_texts: list[str] = []
+    assistant_texts: list[str] = []
+    for msg in history:
+        text = msg.get("text", "").strip()
+        if not text:
+            continue
+        if msg["role"] == "user":
+            if not _is_generation_trigger(text):
+                user_texts.append(text)
+        else:
+            assistant_texts.append(text)
+
+    if not user_texts and not assistant_texts:
+        return scope_parts, bg_parts
+
+    # Build scope: use substantive user messages as the primary source.
+    # Format as a proper scope paragraph with contractor-shall language.
+    combined_reqs = " ".join(user_texts[-6:])[:2000]
+    if combined_reqs:
+        scope_parts.append(
+            "The contractor shall provide all personnel, equipment, "
+            "supplies, facilities, transportation, tools, materials, "
+            "supervision, and other items and non-personal services "
+            f"necessary to {description}, as defined in this SOW."
+        )
+        scope_parts.append("")
+        scope_parts.append(
+            "Specifically, the contractor shall address the following "
+            "requirements identified during the acquisition intake:"
+        )
+        scope_parts.append("")
+        # Extract bullet-worthy phrases from user input
+        for ut in user_texts[-6:]:
+            # Skip very short messages (greetings, "yes", "ok")
+            if len(ut) < 30:
+                continue
+            # Truncate long messages to a reasonable bullet
+            bullet = ut[:300].rstrip(".")
+            scope_parts.append(f"- {bullet}")
+
+    # Build background extra: use assistant analysis for richer context.
+    # Pick the longest assistant message (usually the most analytical).
+    if assistant_texts:
+        best = max(assistant_texts[-4:], key=len)
+        # Extract first meaningful paragraph (skip greetings)
+        paragraphs = [
+            p.strip() for p in best.split("\n\n")
+            if len(p.strip()) > 50
+        ]
+        if paragraphs:
+            bg_parts.append(paragraphs[0][:500])
+
+    return scope_parts, bg_parts
+
+
 def _generate_sow(title: str, data: dict) -> str:
     desc = data.get("description", "the required supplies/services")
     pop = data.get("period_of_performance", "12 months from date of award")
@@ -2155,7 +2289,24 @@ def _generate_sow(title: str, data: dict) -> str:
         "Training and Knowledge Transfer",
         "Ongoing Support and Maintenance",
     ])
+
+    # Build scope from conversation history when available, falling back
+    # to the explicit scope field or a standard template sentence.
+    conv_history = data.get("conversation_history", [])
     scope_override = str(data.get("scope", "") or "").strip()
+    background_extra = ""
+
+    if conv_history and not scope_override:
+        # Synthesize scope and background from the full conversation so the
+        # document reflects what was actually discussed, not a stub.
+        scope_parts, bg_parts = _extract_sow_sections_from_history(
+            conv_history, desc,
+        )
+        if scope_parts:
+            scope_override = "\n".join(scope_parts)
+        if bg_parts:
+            background_extra = "\n\n" + "\n".join(bg_parts)
+
     if scope_override:
         scope_text = scope_override
     else:
@@ -2205,7 +2356,7 @@ and should be incorporated into the final document:
 
 The National Cancer Institute (NCI), part of the National Institutes of Health (NIH),
 requires {desc}. This Statement of Work (SOW) describes the tasks, deliverables,
-and performance requirements for this acquisition.
+and performance requirements for this acquisition.{background_extra}
 
 ## 2. SCOPE
 
@@ -2342,7 +2493,7 @@ def _generate_market_research(title: str, data: dict) -> str:
         for v in vendors:
             vendor_text += f"- **{v.get('name', 'TBD')}** — {v.get('size', 'TBD')}, Contract vehicles: {', '.join(v.get('vehicles', ['TBD']))}\n"
     else:
-        vendor_text = "- [Market research in progress — vendors to be identified]\n"
+        vendor_text = "- **WARNING: No vendor data provided. Web research was not performed before document generation. This document requires revision with actual market data.**\n"
 
     return f"""# MARKET RESEARCH REPORT
 ## {title}
@@ -2373,15 +2524,15 @@ def _generate_market_research(title: str, data: dict) -> str:
 
 ## 4. SMALL BUSINESS ANALYSIS
 
-[Analysis of small business availability and potential for set-aside]
+**WARNING: Small business analysis not performed. Run web_search for SAM.gov data.**
 
 ## 5. COMMERCIAL AVAILABILITY
 
-[Analysis of whether commercial products/services meet requirements]
+**WARNING: Commercial availability not analyzed. Requires web research.**
 
 ## 6. RECOMMENDED ACQUISITION STRATEGY
 
-[Based on market research findings]
+**WARNING: No acquisition strategy data. Complete market research before finalizing.**
 
 ## 7. RECOMMENDED CONTRACT VEHICLE
 
@@ -3531,6 +3682,85 @@ def _exec_finalize_package(params: dict, tenant_id: str) -> dict:
     return result
 
 
+def _exec_manage_package(params: dict, tenant_id: str, session_id: str = None) -> dict:
+    """Create, read, update, list, or get checklist for acquisition packages."""
+    from app.package_store import (
+        create_package, get_package, update_package,
+        list_packages, get_package_checklist,
+    )
+    from decimal import Decimal
+
+    operation = params.get("operation", "").strip().lower()
+
+    if operation == "create":
+        title = params.get("title") or "Acquisition Package"
+        requirement_type = params.get("requirement_type") or "services"
+        estimated_value = Decimal(str(params.get("estimated_value", 0)))
+        # Extract owner from session_id (tenant#tier#user#session)
+        owner = ""
+        if session_id and "#" in session_id:
+            parts = session_id.split("#")
+            if len(parts) >= 3:
+                owner = parts[2]
+        result = create_package(
+            tenant_id=tenant_id,
+            owner_user_id=owner,
+            title=title,
+            requirement_type=requirement_type,
+            estimated_value=estimated_value,
+            session_id=session_id,
+            notes=params.get("notes", ""),
+            contract_vehicle=params.get("contract_vehicle") or None,
+            acquisition_method=params.get("acquisition_method") or None,
+            contract_type=params.get("contract_type") or None,
+        )
+        return result
+
+    elif operation == "get":
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for get operation"}
+        result = get_package(tenant_id, package_id)
+        if result is None:
+            return {"error": f"Package {package_id} not found"}
+        return result
+
+    elif operation == "update":
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for update operation"}
+        updates = params.get("updates", {})
+        # Also accept top-level fields as updates
+        for field in ("title", "requirement_type", "estimated_value",
+                      "acquisition_method", "contract_type", "contract_vehicle",
+                      "notes", "status"):
+            val = params.get(field)
+            if val and field not in updates:
+                updates[field] = val
+        if not updates:
+            return {"error": "No update fields provided"}
+        result = update_package(tenant_id, package_id, updates)
+        if result is None:
+            return {"error": f"Package {package_id} not found"}
+        return result
+
+    elif operation == "list":
+        status_filter = params.get("status") or None
+        packages = list_packages(tenant_id, status=status_filter)
+        return {"packages": packages, "count": len(packages)}
+
+    elif operation == "checklist":
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for checklist operation"}
+        checklist = get_package_checklist(tenant_id, package_id)
+        checklist["package_id"] = package_id
+        return checklist
+
+    else:
+        return {"error": f"Unknown operation: {operation}. Use create, get, update, list, or checklist."}
+
+
 # ── Tool Dispatch ────────────────────────────────────────────────────
 
 # Map of tool name → handler function
@@ -3556,10 +3786,12 @@ TOOL_DISPATCH = {
     "get_latest_document": _exec_get_latest_document,
     # Package validation
     "finalize_package": _exec_finalize_package,
+    # Package management
+    "manage_package": _exec_manage_package,
 }
 
 # Tools that need session_id for per-user scoping
-TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "edit_docx_document", "get_intake_status"}
+TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "edit_docx_document", "get_intake_status", "manage_package"}
 
 
 def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> str:

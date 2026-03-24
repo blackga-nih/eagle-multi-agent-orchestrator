@@ -1,6 +1,6 @@
 'use client';
 
-import { FileText, ExternalLink, FileSpreadsheet, ClipboardList, Scale, BarChart3 } from 'lucide-react';
+import { FileText, ExternalLink, FileSpreadsheet, ClipboardList, Scale, BarChart3, ShieldCheck, Landmark, BookOpen, Users, CalendarCheck } from 'lucide-react';
 import { DocumentInfo } from '@/types/chat';
 
 interface DocumentCardProps {
@@ -14,7 +14,29 @@ const DOC_TYPE_CONFIG: Record<string, { label: string; icon: typeof FileText; co
     market_research: { label: 'Market Research', icon: BarChart3, color: 'text-purple-700', bg: 'bg-purple-50 border-purple-200' },
     acquisition_plan: { label: 'Acquisition Plan', icon: FileText, color: 'text-indigo-700', bg: 'bg-indigo-50 border-indigo-200' },
     justification: { label: 'Justification & Approval', icon: Scale, color: 'text-amber-700', bg: 'bg-amber-50 border-amber-200' },
+    cor_certification: { label: 'COR Appointment', icon: Users, color: 'text-teal-700', bg: 'bg-teal-50 border-teal-200' },
+    son_products: { label: 'Statement of Need', icon: BookOpen, color: 'text-cyan-700', bg: 'bg-cyan-50 border-cyan-200' },
+    son_services: { label: 'Statement of Need', icon: BookOpen, color: 'text-cyan-700', bg: 'bg-cyan-50 border-cyan-200' },
+    buy_american: { label: 'Buy American', icon: ShieldCheck, color: 'text-red-700', bg: 'bg-red-50 border-red-200' },
+    subk_plan: { label: 'Subcontracting Plan', icon: Users, color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200' },
+    conference_request: { label: 'Conference Request', icon: CalendarCheck, color: 'text-pink-700', bg: 'bg-pink-50 border-pink-200' },
 };
+
+/** Infer a readable label from filename when doc_type is generic (e.g. "markdown"). */
+function _inferLabelFromTitle(title: string): string | null {
+    const t = title.toLowerCase();
+    if (t.includes('ap') && (t.includes('acquisition') || t.startsWith('ap-') || t.startsWith('ap_'))) return 'Acquisition Plan';
+    if (t.includes('mr') && (t.includes('market') || t.startsWith('mr-') || t.startsWith('mr_'))) return 'Market Research';
+    if (t.includes('sow')) return 'Statement of Work';
+    if (t.includes('igce') || t.includes('ige')) return 'Cost Estimate (IGCE)';
+    if (t.includes('son')) return 'Statement of Need';
+    if (t.includes('justification') || t.includes('j&a')) return 'Justification & Approval';
+    if (t.includes('cor')) return 'COR Appointment';
+    if (t.includes('subk') || t.includes('subcontract')) return 'Subcontracting Plan';
+    if (t.includes('conference')) return 'Conference Request';
+    if (t.includes('buy') && t.includes('american')) return 'Buy American';
+    return null;
+}
 
 function getDocId(doc: DocumentInfo): string {
     const raw = doc.s3_key || doc.document_id || doc.title;
@@ -23,7 +45,7 @@ function getDocId(doc: DocumentInfo): string {
 
 export default function DocumentCard({ document, sessionId }: DocumentCardProps) {
     const config = DOC_TYPE_CONFIG[document.document_type] || {
-        label: document.document_type,
+        label: _inferLabelFromTitle(document.title) || document.document_type,
         icon: FileText,
         color: 'text-gray-700',
         bg: 'bg-gray-50 border-gray-200',

@@ -250,6 +250,157 @@ def morning_report_card(
     )
 
 
+def deploy_report_card(
+    environment: str,
+    deploy_mode: str,
+    commit_sha: str,
+    branch: str,
+    author: str,
+    results: list[dict],
+    mvp1_results: list[dict],
+    jira_summary: list[dict],
+    deploy_status: dict,
+    run_url: str = "",
+    pr_url: str = "",
+) -> dict:
+    """Build an Adaptive Card for deploy pipeline report.
+
+    results: [{"level": "L1", "name": "Lint", "status": "PASS", "detail": "ruff 0 errors"}]
+    mvp1_results: [{"test_id": 35, "uc": "UC-01", "name": "New Acquisition", "status": "PASS"}]
+    jira_summary: [{"key": "EAGLE-42", "action": "transitioned to Done"}]
+    deploy_status: {"infra": "PASS", "backend": "PASS", "frontend": "SKIP"}
+    """
+    non_fail = ("PASS", "SKIP", "CANCEL")
+    all_pass = all(r["status"] in non_fail for r in results)
+    deploy_ok = all(v in non_fail for v in deploy_status.values())
+    cancelled = any(r["status"] == "CANCEL" for r in results) or any(v == "CANCEL" for v in deploy_status.values())
+    style = "warning" if cancelled else ("good" if (all_pass and deploy_ok) else "attention")
+
+    facts = [
+        {"title": "Commit", "value": commit_sha[:10]},
+        {"title": "Author", "value": author},
+        {"title": "Branch", "value": branch},
+        {"title": "Mode", "value": deploy_mode.upper()},
+    ]
+
+    # Validation ladder
+    ladder_lines = []
+    for r in results:
+        icon = "PASS" if r["status"] == "PASS" else ("SKIP" if r["status"] == "SKIP" else "FAIL")
+        detail = f" — {r['detail']}" if r.get("detail") else ""
+        ladder_lines.append(f"**{r['level']}** {r['name']}: {icon}{detail}")
+
+    # MVP1 eval section
+    mvp1_lines = []
+    if mvp1_results:
+        mvp1_pass = sum(1 for m in mvp1_results if m["status"] == "PASS")
+        mvp1_total = len(mvp1_results)
+        mvp1_lines.append(f"**MVP1 Eval** ({mvp1_pass}/{mvp1_total} pass)")
+        for m in mvp1_results:
+            icon = "PASS" if m["status"] == "PASS" else "FAIL"
+            mvp1_lines.append(f"  {m['uc']} {m['name']}: {icon}")
+
+    # Deploy status
+    deploy_lines = []
+    for component, status in deploy_status.items():
+        deploy_lines.append(f"**{component}**: {status}")
+
+    # Jira
+    jira_lines = []
+    for j in jira_summary:
+        jira_lines.append(f"[{j['key']}] {j['action']}")
+
+    sections = []
+    if ladder_lines:
+        sections.append("**Validation**\n\n" + "\n\n".join(ladder_lines))
+    if mvp1_lines:
+        sections.append("\n\n".join(mvp1_lines))
+    if deploy_lines:
+        sections.append("**Deploy**\n\n" + " | ".join(deploy_lines))
+    if jira_lines:
+        sections.append("**Jira**\n\n" + "\n\n".join(jira_lines))
+
+    body_text = "\n\n---\n\n".join(sections)
+
+    actions = []
+    if run_url:
+        actions.append({"type": "Action.OpenUrl", "title": "View Run on GitHub", "url": run_url})
+    if pr_url:
+        actions.append({"type": "Action.OpenUrl", "title": "View PR", "url": pr_url})
+
+    suffix = "Cancelled" if cancelled else deploy_mode.capitalize()
+    return _card(
+        title=f"EAGLE {environment.upper()} | Deploy Report — {suffix}",
+        facts=facts,
+        body_text=body_text,
+        style=style,
+        actions=actions or None,
+    )
+
+
+def eval_report_card(
+    environment: str,
+    date: str,
+    tier1_pass: int,
+    tier1_total: int,
+    tier2_pass: int,
+    tier2_total: int,
+    tier3_pass: int,
+    tier3_total: int,
+    tier3_run: bool,
+    failed_tests: list[str],
+    elapsed_seconds: float,
+    langfuse_url: str = "",
+    cloudwatch_url: str = "",
+) -> dict:
+    """Build an Adaptive Card for the mvp1-eval suite results."""
+    all_pass = (
+        tier1_pass == tier1_total
+        and tier2_pass == tier2_total
+        and (not tier3_run or tier3_pass == tier3_total)
+    )
+    style = "good" if all_pass else "attention"
+
+    total_pass = tier1_pass + tier2_pass + (tier3_pass if tier3_run else 0)
+    total = tier1_total + tier2_total + (tier3_total if tier3_run else 0)
+    tier3_value = f"{tier3_pass}/{tier3_total}" if tier3_run else "SKIPPED"
+
+    facts = [
+        {"title": "Date", "value": date},
+        {"title": "Environment", "value": environment},
+        {"title": "Tier 1 — Unit", "value": f"{tier1_pass}/{tier1_total}"},
+        {"title": "Tier 2 — Integration", "value": f"{tier2_pass}/{tier2_total}"},
+        {"title": "Tier 3 — Full Eval", "value": tier3_value},
+        {"title": "Total", "value": f"{total_pass}/{total} passed"},
+        {"title": "Duration", "value": f"{elapsed_seconds:.0f}s"},
+    ]
+
+    if all_pass:
+        body_text = f"All {total} tests passed."
+    else:
+        lines = [f"**{len(failed_tests)} failing:**"]
+        for t in failed_tests[:10]:
+            lines.append(f"- {t}")
+        if len(failed_tests) > 10:
+            lines.append(f"*...and {len(failed_tests) - 10} more*")
+        body_text = "\n\n".join(lines)
+
+    actions = []
+    if langfuse_url:
+        actions.append({"type": "Action.OpenUrl", "title": "Langfuse Traces", "url": langfuse_url})
+    if cloudwatch_url:
+        actions.append({"type": "Action.OpenUrl", "title": "CloudWatch Logs", "url": cloudwatch_url})
+
+    status_label = "All Pass" if all_pass else f"{len(failed_tests)} Failed"
+    return _card(
+        title=f"EAGLE {environment} | Eval Report — {status_label}",
+        facts=facts,
+        body_text=body_text,
+        style=style,
+        actions=actions or None,
+    )
+
+
 def suspicious_card(
     environment: str,
     event_type: str,

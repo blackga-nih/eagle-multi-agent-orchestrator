@@ -1,0 +1,102 @@
+{
+  "domains": [
+    "backend",
+    "frontend",
+    "sse",
+    "strands"
+  ],
+  "last_updated": "2026-03-12",
+  "history": [
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "domains": [
+        "backend",
+        "frontend",
+        "sse",
+        "strands"
+      ]
+    }
+  ],
+  "instructions": "Run /parallel_expert_self_improve to update expertise for queued domains. Domains are cleared from this file once self-improve has run for them."
+}

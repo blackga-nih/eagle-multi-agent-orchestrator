@@ -9,7 +9,7 @@ scenarios including handoffs, tool use, and reasoning transparency.
 import json
 from datetime import datetime, timezone
 from typing import Optional, Any, Dict
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -51,15 +51,23 @@ class StreamEvent:
             self.timestamp = datetime.now(timezone.utc).isoformat()
 
     def to_dict(self) -> dict:
-        """Convert to a dictionary, omitting None-valued fields."""
-        data = asdict(self)
-        data = {k: v for k, v in data.items() if v is not None}
+        """Convert to a dictionary, omitting None-valued fields.
+
+        Uses shallow field access instead of ``dataclasses.asdict`` to avoid
+        ``copy.deepcopy`` — Strands SDK tool-use dicts may contain objects
+        with ``_thread.lock`` that cannot be deep-copied.
+        """
+        data: dict[str, Any] = {}
+        for f in self.__dataclass_fields__:
+            val = getattr(self, f)
+            if val is not None:
+                data[f] = val
         data["type"] = self.type.value
         return data
 
     def to_json(self) -> str:
         """Serialize to a JSON string."""
-        return json.dumps(self.to_dict())
+        return json.dumps(self.to_dict(), default=str)
 
     def to_sse(self) -> str:
         """Format as a Server-Sent Events data line."""
@@ -144,6 +152,14 @@ class MultiAgentStreamWriter:
         event = self._create_event(
             StreamEventType.HANDOFF,
             metadata={"target_agent": target_agent_id, "reason": reason},
+        )
+        await queue.put(event.to_sse())
+
+    async def write_elicitation(self, queue, question: str, options: list = None):
+        """Emit an ELICITATION event requesting user input."""
+        event = self._create_event(
+            StreamEventType.ELICITATION,
+            elicitation={"question": question, "options": options or []},
         )
         await queue.put(event.to_sse())
 

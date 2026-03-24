@@ -73,6 +73,7 @@ export interface UseLocalCacheReturn {
     currentSession: SessionData | null;
     isLoading: boolean;
     saveSession: (
+        sessionId: string,
         messages: Message[],
         acquisitionData: AcquisitionData,
         documents?: Record<string, DocumentInfo[]>,
@@ -273,11 +274,12 @@ export function useLocalCache(
 
     const saveSession = useCallback(
         (
+            sessionId: string,
             messages: Message[],
             acquisitionData: AcquisitionData,
             documents?: Record<string, DocumentInfo[]>,
         ): void => {
-            if (!currentSessionId || messages.length === 0) return;
+            if (!sessionId || messages.length === 0) return;
 
             try {
                 const stored = localStorage.getItem(STORAGE_KEY);
@@ -285,7 +287,7 @@ export function useLocalCache(
                     ? JSON.parse(stored)
                     : {};
 
-                const existing = allSessions[currentSessionId];
+                const existing = allSessions[sessionId];
                 const now = new Date().toISOString();
 
                 let strippedDocs: Record<string, DocumentInfo[]> | undefined;
@@ -300,7 +302,7 @@ export function useLocalCache(
                 }
 
                 const sessionData: SessionData = {
-                    id: currentSessionId,
+                    id: sessionId,
                     title:
                         existing?.title ??
                         `Session ${new Date().toLocaleDateString()}`,
@@ -319,11 +321,11 @@ export function useLocalCache(
                     status: existing?.status ?? 'in_progress',
                 };
 
-                allSessions[currentSessionId] = sessionData;
+                allSessions[sessionId] = sessionData;
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(allSessions));
 
                 setSessions((prev) => {
-                    const filtered = prev.filter((s) => s.id !== currentSessionId);
+                    const filtered = prev.filter((s) => s.id !== sessionId);
                     return [
                         {
                             id: sessionData.id,
@@ -344,7 +346,7 @@ export function useLocalCache(
                     if (!db) return;
 
                     const idbSession: IDBSession = {
-                        id: currentSessionId,
+                        id: sessionId,
                         tenantId,
                         userId,
                         title: sessionData.title,
@@ -370,13 +372,13 @@ export function useLocalCache(
                         agent_id: m.agent_id,
                         agent_name: m.agent_name,
                     }));
-                    await idbPutMessages(db, currentSessionId, chatMessages, 'pending');
+                    await idbPutMessages(db, sessionId, chatMessages, 'pending');
                 })();
             } catch (err) {
                 console.error('[use-local-cache] saveSession error:', err);
             }
         },
-        [currentSessionId, userId, tenantId],
+        [userId, tenantId],
     );
 
     // ---------------------------------------------------------------------------

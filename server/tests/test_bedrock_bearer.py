@@ -12,6 +12,8 @@ import os
 import json
 import sys
 
+import pytest
+
 try:
     import requests
 except ImportError:
@@ -52,7 +54,7 @@ def test_bearer_auth():
         print("  1. Go to AWS Console > Bedrock > Model access > Short-term API keys")
         print("  2. Copy the API key")
         print("  3. Run: export AWS_BEARER_TOKEN_BEDROCK='bedrock-api-key-...'")
-        return False
+        pytest.skip("AWS_BEARER_TOKEN_BEDROCK not set")
 
     print(f"  API Key: [set, {len(api_key)} chars]")
     print(f"  Endpoint: {ENDPOINT}")
@@ -85,7 +87,7 @@ def test_bearer_auth():
             print(f"  Response: {text}")
             print(f"  Tokens: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out")
             print("\n  PASS - Bearer token authentication works!")
-            return True
+            assert True
         else:
             print(f"  Status: {response.status_code}")
             print(f"  Error: {response.text}")
@@ -95,17 +97,19 @@ def test_bearer_auth():
             elif response.status_code == 401:
                 print("\n  HINT: Invalid token format - ensure you copied the full key")
 
-            print("\n  FAIL")
-            return False
+            pytest.fail(f"HTTP {response.status_code}: {response.text}")
 
     except requests.exceptions.RequestException as e:
         print(f"  Request failed: {e}")
-        print("\n  FAIL")
-        return False
+        pytest.fail(f"Request failed: {e}")
 
 
 def main():
-    success = test_bearer_auth()
+    success = True
+    try:
+        test_bearer_auth()
+    except SystemExit:
+        success = False
     sys.exit(0 if success else 1)
 
 

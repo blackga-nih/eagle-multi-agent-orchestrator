@@ -72,7 +72,15 @@ export default function FeedbackModal() {
     setError(null);
 
     try {
-      const token = await getToken();
+      let token: string | null = null;
+      try {
+        token = await getToken();
+      } catch {
+        setError('Session expired. Please sign in again to submit feedback.');
+        setSubmitting(false);
+        return;
+      }
+
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
@@ -97,15 +105,23 @@ export default function FeedbackModal() {
         }),
       });
 
-      if (!res.ok) throw new Error('Submit failed');
+      if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error('auth');
+        }
+        throw new Error('Submit failed');
+      }
 
       setSuccess(true);
       setTimeout(() => {
         setIsOpen(false);
         resetForm();
       }, 1500);
-    } catch {
-      setError('Could not submit feedback. Please try again.');
+    } catch (err) {
+      const msg = err instanceof Error && err.message === 'auth'
+        ? 'Session expired. Please sign in again.'
+        : 'Could not submit feedback. Please try again.';
+      setError(msg);
     } finally {
       setSubmitting(false);
     }

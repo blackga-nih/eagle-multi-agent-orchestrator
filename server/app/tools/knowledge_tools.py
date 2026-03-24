@@ -16,7 +16,7 @@ import os
 from typing import Any
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from functools import lru_cache
 
 from ..db_client import get_dynamodb, get_s3, AWS_REGION
@@ -200,7 +200,7 @@ def _ai_rank_documents(
         )
         return ranked
 
-    except (ClientError, json.JSONDecodeError, KeyError, IndexError) as e:
+    except (ClientError, BotoCoreError, json.JSONDecodeError, KeyError, IndexError, Exception) as e:
         logger.warning("knowledge_search AI ranking failed, falling back: %s", e)
         return []
 

@@ -22,6 +22,35 @@ Generate professional acquisition documents based on intake context and user inp
 | Justification & Approval | J&A | Sole source or limited competition |
 | Market Research Report | MRR | All acquisitions above micro-purchase |
 
+## Research Prerequisites
+
+| Document | Required Research | Tool Sequence |
+|----------|-------------------|---------------|
+| MRR | Vendor search, pricing, small business | web_search (3-5 searches) → web_fetch top 5 URLs per search |
+| IGCE | GSA rates, BLS labor data, market pricing | web_search (2-3 searches) → web_fetch top 5 URLs per search |
+| J&A | Market research + contractor verification | MRR must exist + web_search |
+| AP | Market research + cost data | References MRR + IGCE findings |
+| SOW | User requirements from intake | Intake discussion (minimal web research) |
+
+## CRITICAL — Document Generation Pattern
+
+For ALL documents, follow this pattern:
+
+1. **Gather context** — intake answers, user requirements, web research results (all available in your conversation history)
+2. **Write the FULL document** — use the templates below as structure, but fill EVERY section with real data from your context
+3. **Call create_document** with `content` = your complete markdown document
+
+```
+create_document(
+  doc_type="market_research",
+  title="Market Research Report - Cloud Hosting Services for NCI Research Data Platform",
+  content="# MARKET RESEARCH REPORT\n## Cloud Hosting Services...\n\n### 1. DESCRIPTION OF NEED\n[filled with actual requirement]...\n\n### 3. POTENTIAL SOURCES\n- **AWS** — FedRAMP High, GSA Schedule...\n[etc]",
+  data={"estimated_value": "$750,000", "period_of_performance": "3 years base + 2 option years"}
+)
+```
+
+**NEVER** call create_document with empty `content`. The backend fallback generator produces stub documents with WARNING placeholders. YOU are the author — the `content` you provide IS the document.
+
 ---
 
 ## Document 1: Statement of Work (SOW)
@@ -326,14 +355,16 @@ Documents acquisition strategy decisions per FAR 7.105. Required for acquisition
 
 ### 2.8 Milestones for the Acquisition Cycle
 
+IMPORTANT: Fill in actual target dates. Use "Month N" or "Week N" relative to award if specific calendar dates are not provided. Never leave "[Date]" as a placeholder.
+
 | Milestone | Target Date |
 |-----------|-------------|
-| Acquisition Plan Approval | [Date] |
-| Solicitation Issued | [Date] |
-| Proposals Due | [Date] |
-| Evaluation Complete | [Date] |
-| Award | [Date] |
-| Period of Performance Start | [Date] |
+| Acquisition Plan Approval | Month 1 |
+| Solicitation Issued | Month 2 |
+| Proposals Due | Month 3 |
+| Evaluation Complete | Month 3 Week 3 |
+| Award | Month 4 |
+| Period of Performance Start | Month 5 |
 
 ## 3. APPROVALS
 
@@ -575,13 +606,15 @@ Documents efforts to determine what products/services are available and from who
 ## Generation Workflow
 
 1. **Receive request** with document type and context
-2. **Validate inputs** - Check for required fields
-3. **Load template** from `data/templates/`
-4. **Populate fields** from intake context and user inputs
-5. **Apply business logic** - Thresholds, requirements, calculations
-6. **Generate document** with proper formatting
-7. **Save to S3** - `eagle/{tenant}/generated/{intake_id}/{doc_type}.md`
-8. **Return confirmation** with document preview
+2. **Check prerequisites** — has required research been completed? (see Research Prerequisites table)
+3. **If research missing** — conduct web_search + web_fetch BEFORE proceeding. For MRR: 3-5 searches (vendors, pricing, small business, contract vehicles, FedRAMP) and web_fetch top 5 URLs from each search. For IGCE: 2-3 searches with web_fetch for rate pages. For J&A: verify MRR exists.
+4. **Validate inputs** - Check for required fields
+5. **Load template** from `data/templates/`
+6. **Populate fields** from intake context, user inputs, and research findings
+7. **Apply business logic** - Thresholds, requirements, calculations
+8. **Generate document** with proper formatting — no placeholders allowed
+9. **Save to S3** - `eagle/{tenant}/generated/{intake_id}/{doc_type}.md`
+10. **Return confirmation** with document preview
 
 ---
 

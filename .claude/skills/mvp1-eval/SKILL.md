@@ -111,10 +111,17 @@ If `$REPO_NAME` is not found in the config, print a warning and use fallback val
 
 ## Pre-flight
 
-1. Ensure AWS credentials are active (using `AWS_PROFILE` from config):
+1. Verify AWS credentials are active. **If this fails, STOP immediately — do not run any tests.**
 ```bash
-aws sts get-caller-identity --profile $AWS_PROFILE 2>/dev/null || echo "AWS_PROFILE=$AWS_PROFILE not authenticated — run: AWS_PROFILE=$AWS_PROFILE aws sso login"
+aws sts get-caller-identity --profile $AWS_PROFILE 2>&1
 ```
+If the command exits non-zero or prints an error, output:
+```
+❌ PREFLIGHT FAILED: AWS profile '$AWS_PROFILE' is not authenticated.
+Run: aws sso login --profile $AWS_PROFILE
+Aborting eval suite.
+```
+Then stop. Do not proceed to Tier 1 or any subsequent step.
 
 2. Set working directory (using `SERVER_DIR` from config):
 ```bash
@@ -254,6 +261,17 @@ After each tier, report:
 - Wall-clock time
 - Score (if eval tests report scoring)
 
+**Accumulate these variables across tiers for Phase 5:**
+
+| Variable | Source |
+|----------|--------|
+| `tier1_pass`, `tier1_total` | pytest output for Tier 1 |
+| `tier2_pass`, `tier2_total` | pytest output for Tier 2 |
+| `tier3_pass`, `tier3_total` | pytest output for Tier 3 (0/0 if skipped) |
+| `tier3_run` | `True` if `--full` or `--tier 3` was passed |
+| `failed_tests` | List of all failing test names across all tiers |
+| `elapsed_seconds` | Total wall-clock time across all tiers that ran |
+
 ---
 
 ## Phase 4: Langfuse Trace Report
@@ -264,15 +282,22 @@ After Tier 2+ tests complete (any tier that hits live Bedrock), query Langfuse f
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_HOST=https://us.cloud.langfuse.com  (default)
+LANGFUSE_PROJECT_ID=cmmsqvi2406aead071t0zhl7f   (required for clickable trace URLs)
 ```
+
+> **Local environment tag**: By default, local traces show `environment: "live"` because `DEV_MODE=false`.
+> To tag local traces as `"local"`, add `EAGLE_ENV=local` to `server/.env`. ECS containers
+> automatically get `EAGLE_ENV=dev` or `EAGLE_ENV=prod` from the CDK compute stack.
 
 ### 4a. Collect Traces
 
-Load env vars from `server/.env`, then query recent traces (last 30 min window covers the test run):
+Load env vars from `server/.env`, then query using the UTC timestamps bracketing the eval run.
+**Important**: `date +"%Y-%m-%dT%H:%M:%SZ"` returns LOCAL time — run `date -u` or check the
+Langfuse trace timestamps to find the actual UTC window.
 
 ```python
-import base64, json, os, urllib.request
-from datetime import datetime, timedelta, timezone
+import base64, json, httpx
+from datetime import datetime, timezone
 
 # Load from server/.env
 env = {}
@@ -281,33 +306,62 @@ with open(ENV_FILE) as f:  # ENV_FILE from config (e.g. "server/.env")
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
-            env[k.strip()] = v.strip()
+            env[k.strip()] = v.strip().strip('"').strip("'")
 
 pk = env["LANGFUSE_PUBLIC_KEY"]
 sk = env["LANGFUSE_SECRET_KEY"]
 host = env.get("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
-auth = base64.b64encode(f"{pk}:{sk}".encode()).decode()
+project_id = env.get("LANGFUSE_PROJECT_ID", "")
+auth = "Basic " + base64.b64encode(f"{pk}:{sk}".encode()).decode()
 
-def lf_get(path):
-    req = urllib.request.Request(f"{host}{path}", headers={"Authorization": f"Basic {auth}"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
+def lf_get(path, params=None):
+    with httpx.Client(timeout=30) as client:
+        resp = client.get(f"{host}{path}", params=params or {}, headers={"Authorization": auth})
+        resp.raise_for_status()
+        return resp.json()
 
-traces = lf_get("/api/public/traces?limit=20")["data"]
+def trace_url(tid):
+    """Build clickable Langfuse UI link for a trace."""
+    if project_id:
+        return f"{host}/project/{project_id}/traces/{tid}"
+    return f"{host}/traces/{tid}"
+
+# Use fromTimestamp/toTimestamp in UTC (milliseconds precision required)
+# Window: pad 5 min before tier1 start through 5 min after tier2 end
+traces = lf_get("/api/public/traces", params={
+    "limit": 50,
+    "fromTimestamp": "2026-03-20T16:00:00.000Z",  # replace with actual UTC window
+    "toTimestamp":   "2026-03-20T17:00:00.000Z",
+    "order": "ASC",
+})["data"]
+```
+
+To get token counts, fetch observations per trace (token data lives at the GENERATION level, not the trace level):
+
+```python
+for t in traces:
+    tid = t["id"]
+    obs = lf_get("/api/public/observations", params={"traceId": tid, "limit": 100})["data"]
+    gens = [o for o in obs if o.get("type") == "GENERATION"]
+    tin  = sum((o.get("usage") or {}).get("input", 0) or 0 for o in gens)
+    tout = sum((o.get("usage") or {}).get("output", 0) or 0 for o in gens)
+    # eagle.subagent is in metadata.attributes
+    subagent = ((t.get("metadata") or {}).get("attributes") or {}).get("eagle.subagent", "supervisor")
+    env_tag  = (t.get("metadata") or {}).get("environment", "—")
+    url = trace_url(tid)
 ```
 
 ### 4b. Per-Trace Analysis
 
 For each trace from the test run, fetch observations and extract:
 
-1. **Trace ID** and Langfuse URL (`{host}/trace/{trace_id}`)
-2. **Session ID** — links to the test that created it
-3. **Tool call chain** — ordered list of every TOOL observation name
-4. **Tool success/failure** — check each TOOL output for `"error"` keys
-5. **Subagent invocations** — AGENT observations nested under TOOL spans
-6. **Token usage** — sum `promptTokens` + `completionTokens` from GENERATION observations
-7. **Documents created** — any TOOL output containing `s3_key`
-8. **S3 resource URLs** — if `s3_key` found, construct:
+1. **Trace ID** and Langfuse URL — format: `{host}/project/{project_id}/traces/{trace_id}`
+2. **Subagent** — from `metadata.attributes["eagle.subagent"]` (e.g. `"legal-counsel"`, `"supervisor"`)
+3. **Environment** — from `metadata["environment"]` (`"local"`, `"dev"`, `"prod"`, or `"live"` legacy)
+4. **Token usage** — sum `input`/`output` from GENERATION observations (not from trace-level `usage`)
+5. **Session ID** — `metadata.attributes["eagle.session_id"]` — links to the test that created it
+6. **Documents created** — any TOOL observation output containing `s3_key`
+7. **S3 resource URLs** — if `s3_key` found, construct:
    `https://s3.console.aws.amazon.com/s3/object/{bucket}?prefix={s3_key}`
    where bucket = `$S3_BUCKET` (from config, e.g. `eagle-documents-695681773636-dev`)
 
@@ -337,10 +391,10 @@ Output the final report in this format:
 
 ### Agent Trace Summary
 
-| # | Session | Tools | Subagents | Tokens (in/out) | Errors | Docs | Langfuse |
-|---|---------|-------|-----------|-----------------|--------|------|----------|
-| 1 | {session_id_short} | tool1, tool2, ... | legal_counsel | 150K/3K | 1 | 0 | [View]({url}) |
-| 2 | ... | ... | ... | ... | ... | ... | [View]({url}) |
+| # | Agent | Env | Tokens (in/out) | Errors | Docs | Langfuse |
+|---|-------|-----|-----------------|--------|------|----------|
+| 1 | supervisor | local | 8,455/63 | 0 | 0 | [View]({host}/project/{project_id}/traces/{tid}) |
+| 2 | legal-counsel | local | 298/1,376 | 0 | 0 | [View]({url}) |
 
 **Total traces**: N | **Total tokens**: N in / N out | **Est. cost**: $N.NN
 
@@ -370,14 +424,136 @@ Output the final report in this format:
 
 ### Langfuse Dashboard
 
-- Project: {host}/project (open to see all sessions, traces, cost dashboard)
-- Recent sessions: {host}/sessions
+- Traces: {host}/project/{project_id}/traces
+- Sessions: {host}/project/{project_id}/sessions
+- Cost dashboard: {host}/project/{project_id}/dashboard
 ```
 
 ### 4d. Report Rules
 
-- Always include Langfuse URLs as clickable links — these are the "drill down" for every row
+- Always include Langfuse URLs as clickable links — format `{host}/project/{project_id}/traces/{trace_id}`
+- Token counts come from GENERATION observations, NOT from the trace-level `usage` field (which is often 0)
+- Subagent name is in `metadata.attributes["eagle.subagent"]` (missing = supervisor)
+- Environment flag is in `metadata["environment"]` — `local` / `dev` / `prod` (or `live` for legacy pre-EAGLE_ENV traces)
 - If a tool had an error but the agent recovered (used fallback tools), note it as **recovered** not **failed**
-- Group traces by test name when possible (match session_id to test output)
-- If no Langfuse credentials are configured, skip Phase 4 with: "Langfuse not configured — set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in server/.env for trace reporting"
+- Group traces by test name when possible (match `eagle.session_id` to test output)
+- If no Langfuse credentials are configured, skip Phase 4 with: "Langfuse not configured — set LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_PROJECT_ID in server/.env for trace reporting"
 - S3 console URLs use region `us-east-1` and bucket from `S3_BUCKET` env var or default `eagle-documents-695681773636-dev`
+
+---
+
+## Phase 5: Teams Notification
+
+After Phases 3 and 4 complete (or after the highest tier that ran), send the eval summary to the Teams QA channel via the webhook. Use the variables accumulated during Reporting.
+
+```python
+import httpx, sys
+from datetime import datetime, timezone
+
+# Reuse env dict loaded in Phase 4 (or reload from ENV_FILE)
+_DEFAULT_WEBHOOK = (
+    "https://prod-52.usgovtexas.logic.azure.us:443/workflows/"
+    "8705df58d766420d8847222b1b12d7a0/triggers/manual/paths/invoke"
+    "?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0"
+    "&sig=Xo4vpYNBYWWdyreboIYnBJtGlO3cNRLSEakEcNGWBoM"
+)
+webhook_url = env.get("TEAMS_WEBHOOK_URL") or env.get("ERROR_WEBHOOK_URL") or _DEFAULT_WEBHOOK
+
+environment = env.get("EAGLE_ENV", env.get("ENVIRONMENT", "dev"))
+date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+# --- Fill from accumulated tier variables ---
+# tier1_pass, tier1_total, tier2_pass, tier2_total
+# tier3_pass, tier3_total, tier3_run (bool)
+# failed_tests (list of str), elapsed_seconds (float)
+
+all_pass = (
+    tier1_pass == tier1_total
+    and tier2_pass == tier2_total
+    and (not tier3_run or tier3_pass == tier3_total)
+)
+style = "good" if all_pass else "attention"
+total_pass = tier1_pass + tier2_pass + (tier3_pass if tier3_run else 0)
+total = tier1_total + tier2_total + (tier3_total if tier3_run else 0)
+tier3_value = f"{tier3_pass}/{tier3_total}" if tier3_run else "SKIPPED"
+status_label = "All Pass" if all_pass else f"{len(failed_tests)} Failed"
+
+facts = [
+    {"title": "Date", "value": date},
+    {"title": "Environment", "value": environment},
+    {"title": "Tier 1 — Unit", "value": f"{tier1_pass}/{tier1_total}"},
+    {"title": "Tier 2 — Integration", "value": f"{tier2_pass}/{tier2_total}"},
+    {"title": "Tier 3 — Full Eval", "value": tier3_value},
+    {"title": "Total", "value": f"{total_pass}/{total} passed"},
+    {"title": "Duration", "value": f"{elapsed_seconds:.0f}s"},
+]
+
+if all_pass:
+    body_text = f"All {total} tests passed."
+else:
+    lines = [f"**{len(failed_tests)} failing:**"]
+    for t in failed_tests[:10]:
+        lines.append(f"- {t}")
+    if len(failed_tests) > 10:
+        lines.append(f"*...and {len(failed_tests) - 10} more*")
+    body_text = "\n\n".join(lines)
+
+langfuse_host = env.get("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
+langfuse_project_id = env.get("LANGFUSE_PROJECT_ID", "")
+langfuse_url = f"{langfuse_host}/project/{langfuse_project_id}/traces" if langfuse_project_id else ""
+cloudwatch_url = (
+    "https://console.aws.amazon.com/cloudwatch/home"
+    "?region=us-east-1#logsV2:log-groups/log-group/%2Feagle%2Ftest-runs"
+)
+
+actions = []
+if langfuse_url:
+    actions.append({"type": "Action.OpenUrl", "title": "Langfuse Traces", "url": langfuse_url})
+actions.append({"type": "Action.OpenUrl", "title": "CloudWatch Logs", "url": cloudwatch_url})
+
+card = {
+    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+    "type": "AdaptiveCard",
+    "version": "1.4",
+    "msteams": {"width": "Full"},
+    "body": [
+        {
+            "type": "Container",
+            "style": style,
+            "bleed": True,
+            "items": [{
+                "type": "TextBlock",
+                "text": f"EAGLE {environment} | Eval Report — {status_label}",
+                "weight": "Bolder",
+                "size": "Medium",
+                "wrap": True,
+            }],
+        },
+        {"type": "FactSet", "facts": facts},
+        {"type": "TextBlock", "text": body_text, "wrap": True, "spacing": "Medium"},
+    ],
+    "actions": actions,
+}
+
+payload = {
+    "type": "message",
+    "attachments": [{
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "contentUrl": None,
+        "content": card,
+    }],
+}
+
+resp = httpx.post(webhook_url, json=payload, timeout=10)
+print(f"[Eval Report] Teams notification sent: status={resp.status_code}")
+if resp.status_code >= 300:
+    print(f"[Eval Report] Response: {resp.text[:200]}")
+```
+
+### 5. Phase 5 Rules
+
+- Always run Phase 5, even if tests failed — the card is the QA team's signal either way
+- If `TEAMS_WEBHOOK_URL` is absent from `server/.env`, skip silently with a printed message (do not error)
+- Green card (`style: good`) = all tiers fully passed; red card (`style: attention`) = any failures
+- Cap failing test names at 10 in the card body — full list is in the Phase 4 Langfuse report
+- The `elapsed_seconds` value should be the sum of all tier wall-clock times that actually ran

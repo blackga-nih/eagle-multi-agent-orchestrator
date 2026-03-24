@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
+import { useChatRuntime } from '@/hooks/use-chat-runtime';
 
 interface NavItem {
   href: string;
@@ -28,6 +29,15 @@ const toolNavItems: NavItem[] = [
   { href: '/admin/tests', label: 'Test Results', icon: <FlaskConical className="w-5 h-5" /> },
   { href: '/admin/eval', label: 'Eval Viewer', icon: <GitBranch className="w-5 h-5" /> },
 ];
+
+/** Tiny component so we can call useChatRuntime per session row. */
+function SessionStreamingDot({ sessionId }: { sessionId: string }) {
+    const runtime = useChatRuntime(sessionId);
+    if (!runtime.isStreaming) return null;
+    return (
+        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shrink-0" title="Generating..." />
+    );
+}
 
 export default function SidebarNav() {
   const pathname = usePathname();
@@ -168,6 +178,7 @@ export default function SidebarNav() {
                         : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >
+                    <SessionStreamingDot sessionId={session.id} />
                     <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${
                       session.id === currentSessionId ? 'text-blue-500' : 'text-gray-300'
                     }`} />

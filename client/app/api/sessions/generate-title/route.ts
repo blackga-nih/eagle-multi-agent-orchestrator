@@ -8,7 +8,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
+// Use 127.0.0.1 instead of localhost — Node on Windows resolves localhost to [::1] (IPv6)
+// while uvicorn binds IPv4 only, causing the fetch to hang until timeout.
+const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 
 export async function POST(request: NextRequest) {
   try {

@@ -9,7 +9,7 @@ Non-fatal: all writes are best-effort so test runs never fail due to persistence
 """
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 from decimal import Decimal
 
@@ -47,7 +47,7 @@ def save_test_run(run_id: str, summary: Dict[str, Any]) -> bool:
             "PK": "TESTRUN#system",
             "SK": f"RUN#{run_id}",
             "run_id": run_id,
-            "timestamp": summary.get("timestamp", datetime.utcnow().isoformat()),
+            "timestamp": summary.get("timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")),
             "total": summary.get("total", 0),
             "passed": summary.get("passed", 0),
             "failed": summary.get("failed", 0),

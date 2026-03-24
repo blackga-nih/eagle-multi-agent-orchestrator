@@ -7,12 +7,14 @@ set dotenv-load := false
 set positional-arguments := true
 
 # ── Constants ───────────────────────────────────────────────
+# Override with: EAGLE_ENV=qa just <recipe>
+ENV             := env("EAGLE_ENV", "dev")
 REGION          := "us-east-1"
-CLUSTER         := "eagle-dev"
-BACKEND_SERVICE := "eagle-backend-dev"
-FRONTEND_SERVICE := "eagle-frontend-dev"
-BACKEND_REPO    := "eagle-backend-dev"
-FRONTEND_REPO   := "eagle-frontend-dev"
+CLUSTER         := "eagle-" + ENV
+BACKEND_SERVICE := "eagle-backend-" + ENV
+FRONTEND_SERVICE := "eagle-frontend-" + ENV
+BACKEND_REPO    := "eagle-backend-" + ENV
+FRONTEND_REPO   := "eagle-frontend-" + ENV
 CDK_DIR         := "infrastructure/cdk-eagle"
 COMPOSE_FILE    := "deployment/docker-compose.dev.yml"
 
@@ -151,8 +153,21 @@ dev-local:
             sleep 1
         done
     done
-    # Clear Next.js cache to purge stale env vars
-    rm -rf client/.next 2>/dev/null || true
+    # Clear Next.js cache — retry loop because Windows holds file locks
+    # briefly after taskkill (NTFS handles are released asynchronously)
+    for attempt in 1 2 3 4 5; do
+        rm -rf client/.next 2>/dev/null || true
+        if [ ! -d client/.next ]; then
+            echo "  .next cache cleared"
+            break
+        fi
+        echo "  .next still locked, retrying ($attempt/5)..."
+        sleep 2
+    done
+    if [ -d client/.next ]; then
+        echo "  WARNING: could not fully delete .next — may see stale cache errors"
+        echo "  Try closing all terminals/editors accessing client/ and re-run"
+    fi
     unset FASTAPI_URL
     export FASTAPI_URL=http://127.0.0.1:8000
     echo "=== Starting backend (port 8000) ==="
@@ -189,6 +204,12 @@ dev-frontend:
         taskkill /F /T /PID "$pid" 2>/dev/null || true
     done
     sleep 1
+    # Clear stale .next cache (retry — Windows file lock delay)
+    for attempt in 1 2 3; do
+        rm -rf client/.next 2>/dev/null || true
+        [ ! -d client/.next ] && break
+        sleep 2
+    done
     unset FASTAPI_URL
     cd client && npm run dev
 
@@ -437,8 +458,8 @@ status:
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     elb = boto3.client('elbv2', region_name='us-east-1'); \
-    resp = ecs.describe_services(cluster='eagle-dev', services=['eagle-backend-dev','eagle-frontend-dev']); \
-    print('=== EAGLE Platform Status ==='); \
+    resp = ecs.describe_services(cluster='{{CLUSTER}}', services=['{{BACKEND_SERVICE}}','{{FRONTEND_SERVICE}}']); \
+    print('=== EAGLE Platform Status ({{ENV}}) ==='); \
     print(); \
     print(f'{\"Service\":<25s} {\"Status\":<10s} {\"Running\":>7s} {\"Desired\":>7s}'); \
     print('-' * 52); \
@@ -455,7 +476,7 @@ logs SERVICE="backend":
     python3 -c "\
     import boto3, sys, time; \
     svc = '{{SERVICE}}'; \
-    lg = f'/eagle/ecs/{svc}-dev'; \
+    lg = f'/eagle/ecs/{svc}-{{ENV}}'; \
     client = boto3.client('logs', region_name='us-east-1'); \
     import datetime; \
     start = int((datetime.datetime.now() - datetime.timedelta(minutes=30)).timestamp() * 1000); \
@@ -609,23 +630,23 @@ _ecs-update-all:
     python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
-    ecs.update_service(cluster='eagle-dev', service='eagle-backend-dev', forceNewDeployment=True); \
+    ecs.update_service(cluster='{{CLUSTER}}', service='{{BACKEND_SERVICE}}', forceNewDeployment=True); \
     print('Backend: force new deployment'); \
-    ecs.update_service(cluster='eagle-dev', service='eagle-frontend-dev', forceNewDeployment=True); \
+    ecs.update_service(cluster='{{CLUSTER}}', service='{{FRONTEND_SERVICE}}', forceNewDeployment=True); \
     print('Frontend: force new deployment')"
 
 _ecs-update-backend:
     python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
-    ecs.update_service(cluster='eagle-dev', service='eagle-backend-dev', forceNewDeployment=True); \
+    ecs.update_service(cluster='{{CLUSTER}}', service='{{BACKEND_SERVICE}}', forceNewDeployment=True); \
     print('Backend: force new deployment')"
 
 _ecs-update-frontend:
     python3 -c "\
     import boto3; \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
-    ecs.update_service(cluster='eagle-dev', service='eagle-frontend-dev', forceNewDeployment=True); \
+    ecs.update_service(cluster='{{CLUSTER}}', service='{{FRONTEND_SERVICE}}', forceNewDeployment=True); \
     print('Frontend: force new deployment')"
 
 _ecs-wait-all:
@@ -634,7 +655,7 @@ _ecs-wait-all:
     print('Waiting for services to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     waiter = ecs.get_waiter('services_stable'); \
-    waiter.wait(cluster='eagle-dev', services=['eagle-backend-dev','eagle-frontend-dev']); \
+    waiter.wait(cluster='{{CLUSTER}}', services=['{{BACKEND_SERVICE}}','{{FRONTEND_SERVICE}}']); \
     print('All services stable.')"
 
 _ecs-wait-backend:
@@ -643,7 +664,7 @@ _ecs-wait-backend:
     print('Waiting for backend to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     waiter = ecs.get_waiter('services_stable'); \
-    waiter.wait(cluster='eagle-dev', services=['eagle-backend-dev']); \
+    waiter.wait(cluster='{{CLUSTER}}', services=['{{BACKEND_SERVICE}}']); \
     print('Backend stable.')"
 
 _ecs-wait-frontend:
@@ -652,5 +673,33 @@ _ecs-wait-frontend:
     print('Waiting for frontend to stabilize...'); \
     ecs = boto3.client('ecs', region_name='us-east-1'); \
     waiter = ecs.get_waiter('services_stable'); \
-    waiter.wait(cluster='eagle-dev', services=['eagle-frontend-dev']); \
+    waiter.wait(cluster='{{CLUSTER}}', services=['{{FRONTEND_SERVICE}}']); \
     print('Frontend stable.')"
+
+# ── QA Shortcuts ────────────────────────────────────────────
+# All recipes support QA via: EAGLE_ENV=qa just <recipe>
+# These aliases save typing for the most common QA operations.
+
+# Deploy to QA environment
+deploy-qa:
+    EAGLE_ENV=qa just deploy
+
+# Deploy backend to QA only
+deploy-backend-qa:
+    EAGLE_ENV=qa just deploy-backend
+
+# Deploy frontend to QA only
+deploy-frontend-qa:
+    EAGLE_ENV=qa just deploy-frontend
+
+# QA service status
+status-qa:
+    EAGLE_ENV=qa just status
+
+# QA service logs (default: backend)
+logs-qa SERVICE="backend":
+    EAGLE_ENV=qa just logs {{SERVICE}}
+
+# QA live URLs
+urls-qa:
+    EAGLE_ENV=qa just urls
