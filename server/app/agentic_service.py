@@ -17,6 +17,7 @@ from typing import Any, List
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
+from app.document_key_utils import is_tenant_scoped_key
 from app.tools.knowledge_tools import (
     KNOWLEDGE_SEARCH_TOOL,
     KNOWLEDGE_FETCH_TOOL,
@@ -1095,8 +1096,10 @@ def _exec_s3_document_ops(params: dict, tenant_id: str, session_id: str = None) 
         elif operation == "read":
             if not key:
                 return {"error": "Missing 'key' parameter for read operation"}
-            # Ensure key is within tenant scope
-            if not key.startswith(prefix):
+            # If the key is already tenant-scoped (e.g. package docs at
+            # eagle/{tenant}/packages/...) use it as-is; otherwise prepend
+            # the per-user prefix for workspace files.
+            if not is_tenant_scoped_key(key, tenant_id):
                 key = prefix + key
             resp = s3.get_object(Bucket=bucket, Key=key)
             body = resp["Body"].read().decode("utf-8", errors="replace")
@@ -1113,8 +1116,8 @@ def _exec_s3_document_ops(params: dict, tenant_id: str, session_id: str = None) 
                 return {"error": "Missing 'key' parameter for write operation"}
             if not content:
                 return {"error": "Missing 'content' parameter for write operation"}
-            # Ensure key is within tenant scope
-            if not key.startswith(prefix):
+            # Same tenant-scoping logic as read — don't double-prefix
+            if not is_tenant_scoped_key(key, tenant_id):
                 key = prefix + key
             s3.put_object(Bucket=bucket, Key=key, Body=content.encode("utf-8"))
             return {

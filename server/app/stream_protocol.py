@@ -8,9 +8,27 @@ scenarios including handoffs, tool use, and reasoning transparency.
 """
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional, Any, Dict
 from dataclasses import dataclass
 from enum import Enum
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively convert Decimal and other non-JSON-serializable types.
+
+    DynamoDB returns numeric values as ``decimal.Decimal``; this helper
+    converts them to ``int`` or ``float`` so ``json.dumps`` succeeds
+    without falling back to ``default=str`` (which would turn numbers
+    into strings).
+    """
+    if isinstance(obj, Decimal):
+        return int(obj) if obj == obj.to_integral_value() else float(obj)
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
 
 
 class StreamEventType(str, Enum):
@@ -55,13 +73,14 @@ class StreamEvent:
 
         Uses shallow field access instead of ``dataclasses.asdict`` to avoid
         ``copy.deepcopy`` — Strands SDK tool-use dicts may contain objects
-        with ``_thread.lock`` that cannot be deep-copied.
+        with ``_thread.lock`` that cannot be deep-copied.  Dict/list values
+        are sanitized to convert ``Decimal`` → ``int``/``float``.
         """
         data: dict[str, Any] = {}
         for f in self.__dataclass_fields__:
             val = getattr(self, f)
             if val is not None:
-                data[f] = val
+                data[f] = _sanitize_for_json(val) if isinstance(val, (dict, list)) else val
         data["type"] = self.type.value
         return data
 

@@ -13,6 +13,11 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .changelog_store import write_document_changelog_entry
+from .document_key_utils import (
+    extract_package_document_ref,
+    extract_workspace_document_ref,
+    is_allowed_document_key,
+)
 from .document_service import create_package_document_version
 from .document_store import get_document
 from .template_service import XLSXPopulator
@@ -36,39 +41,6 @@ def _get_s3():
     return boto3.client("s3", region_name=AWS_REGION)
 
 
-def _extract_package_document_ref(doc_key: str) -> Optional[dict[str, object]]:
-    canonical = re.match(
-        r"^eagle/(?P<tenant>[^/]+)/packages/(?P<package_id>[^/]+)/(?P<doc_type>[^/]+)/v(?P<version>\d+)/(?P<filename>[^/]+)$",
-        doc_key,
-    )
-    if canonical:
-        info = canonical.groupdict()
-        return {
-            "tenant_id": info["tenant"],
-            "package_id": info["package_id"],
-            "doc_type": info["doc_type"],
-            "version": int(info["version"]),
-            "filename": info["filename"],
-        }
-    return None
-
-
-def _extract_workspace_document_ref(doc_key: str) -> Optional[dict[str, str]]:
-    match = re.match(
-        r"^eagle/(?P<tenant>[^/]+)/(?P<user>[^/]+)/documents/(?P<filename>[^/]+)$",
-        doc_key,
-    )
-    if not match:
-        return None
-    return match.groupdict()
-
-
-def _is_allowed_document_key(doc_key: str, tenant_id: str, user_id: Optional[str]) -> bool:
-    if doc_key.startswith(f"eagle/{tenant_id}/packages/"):
-        return True
-    if user_id and doc_key.startswith(f"eagle/{tenant_id}/{user_id}/documents/"):
-        return True
-    return False
 
 
 def _serialize_cell_value(value: Any) -> str:
@@ -223,7 +195,7 @@ def save_xlsx_preview_edits(
         return {"error": "document_key is required"}
     if not cell_edits:
         return {"error": "cell_edits are required"}
-    if not _is_allowed_document_key(doc_key, tenant_id, user_id):
+    if not is_allowed_document_key(doc_key, tenant_id, user_id):
         return {"error": "Access denied for document key"}
     if not doc_key.lower().endswith(".xlsx"):
         return {"error": "Structured spreadsheet editing only supports .xlsx documents"}
@@ -259,7 +231,7 @@ def save_xlsx_preview_edits(
         return {"error": "No spreadsheet edits were applied.", "missing": missing}
 
     preview_payload = extract_xlsx_preview_payload(updated_bytes)
-    package_ref = _extract_package_document_ref(doc_key)
+    package_ref = extract_package_document_ref(doc_key)
     if package_ref:
         if package_ref["tenant_id"] != tenant_id:
             return {"error": "Access denied for package document"}
@@ -296,7 +268,7 @@ def save_xlsx_preview_edits(
             "message": f"Saved spreadsheet version {result.version}.",
         }
 
-    workspace_ref = _extract_workspace_document_ref(doc_key)
+    workspace_ref = extract_workspace_document_ref(doc_key)
     if not workspace_ref:
         return {"error": "Unsupported XLSX key format"}
     if workspace_ref["tenant"] != tenant_id or workspace_ref["user"] != user_id:

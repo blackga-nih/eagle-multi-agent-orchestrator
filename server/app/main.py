@@ -30,7 +30,6 @@ import logging
 import os
 import uuid
 import io
-import re
 from contextlib import asynccontextmanager
 
 # EAGLE modules (new)
@@ -52,6 +51,7 @@ from .admin_service import (
     record_request_cost, check_rate_limit, calculate_cost
 )
 from . import feedback_store
+from .document_key_utils import extract_package_document_ref, is_allowed_document_key
 
 # Existing multi-tenant modules (preserved)
 from .models import SubscriptionTier
@@ -739,51 +739,8 @@ def _extract_binary_preview_payload(name: str, raw_bytes: bytes) -> dict[str, An
     return {"content": None, "preview_blocks": [], "preview_sheets": [], "preview_mode": "none"}
 
 
-def _is_allowed_document_key(doc_key: str, tenant_id: str, user_id: str) -> bool:
-    return (
-        doc_key.startswith(f"eagle/{tenant_id}/{user_id}/")
-        or doc_key.startswith(f"eagle/{tenant_id}/packages/")
-    )
-
-
-def _extract_package_document_ref(doc_key: str) -> Optional[dict[str, Any]]:
-    canonical = re.match(
-        r"^eagle/(?P<tenant>[^/]+)/packages/(?P<package_id>[^/]+)/(?P<doc_type>[^/]+)/v(?P<version>\d+)/(?P<filename>[^/]+)$",
-        doc_key,
-    )
-    if canonical:
-        info = canonical.groupdict()
-        return {
-            "tenant_id": info["tenant"],
-            "package_id": info["package_id"],
-            "doc_type": info["doc_type"],
-            "version": int(info["version"]),
-            "filename": info["filename"],
-        }
-
-    legacy = re.match(
-        r"^eagle/(?P<tenant>[^/]+)/(?P<user>[^/]+)/packages/(?P<package_id>[^/]+)/(?P<filename>[^/]+)$",
-        doc_key,
-    )
-    if not legacy:
-        return None
-
-    info = legacy.groupdict()
-    filename = info["filename"]
-    stem = filename.rsplit(".", 1)[0]
-    doc_type = stem.split("_v", 1)[0] if "_v" in stem else stem
-    version = None
-    version_match = re.search(r"_v(\d+)", stem)
-    if version_match:
-        version = int(version_match.group(1))
-
-    return {
-        "tenant_id": info["tenant"],
-        "package_id": info["package_id"],
-        "doc_type": doc_type,
-        "version": version,
-        "filename": filename,
-    }
+_is_allowed_document_key = is_allowed_document_key
+_extract_package_document_ref = extract_package_document_ref
 
 
 def _build_document_response(
