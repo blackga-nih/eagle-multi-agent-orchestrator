@@ -1449,7 +1449,12 @@ def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> st
 
 # -- @tool Factory ---------------------------------------------------
 
-def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
+def _build_subagent_kb_tools(
+    tenant_id: str,
+    session_id: str,
+    result_queue: asyncio.Queue | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> list:
     """Build knowledge-base tools that subagents can use to ground analysis.
 
     Gives subagents access to knowledge_search, knowledge_fetch, and search_far
@@ -1461,6 +1466,14 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
     """
     from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
     from .agentic_service import _exec_search_far
+
+    def _emit_input(name: str, tool_input: dict) -> None:
+        """Push tool input so the stream can update the card with real params."""
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "tool_input", "name": name, "input": tool_input},
+            )
 
     @tool(name="knowledge_search")
     def kb_search(
@@ -1488,6 +1501,7 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
             "agent": agent, "authority_level": authority_level,
             "keywords": keywords, "limit": limit,
         }.items() if v}
+        _emit_input("knowledge_search", params)
         result = exec_knowledge_search(params, tenant_id, session_id)
         return json.dumps(result, indent=2, default=str)
 
@@ -1498,6 +1512,7 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
         Args:
             s3_key: S3 key path from a knowledge_search or search_far result
         """
+        _emit_input("knowledge_fetch", {"s3_key": s3_key})
         result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
         return json.dumps(result, indent=2, default=str)
 
@@ -1509,6 +1524,7 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
             query: Search query — topic, clause number, or keyword
             parts: Optional list of FAR part numbers to filter (e.g. ["6", "16"])
         """
+        _emit_input("search_far", {"query": query, "parts": parts})
         result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
         return json.dumps(result, indent=2, default=str)
 
@@ -1521,6 +1537,7 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
         Args:
             query: Natural language search query
         """
+        _emit_input("web_search", {"query": query})
         result = exec_web_search(query)
         return json.dumps(result, indent=2, default=str)
 
@@ -1531,6 +1548,7 @@ def _build_subagent_kb_tools(tenant_id: str, session_id: str) -> list:
         Args:
             url: The URL to fetch (must be http or https)
         """
+        _emit_input("web_fetch", {"url": url})
         result = exec_web_fetch(url)
         return json.dumps(result, indent=2, default=str)
 
@@ -1649,6 +1667,58 @@ def _build_subagent_doc_tools(
     return [create_document_tool, edit_docx_document_tool]
 
 
+class _SubagentEventForwarder:
+    """Strands CallbackHandler that forwards subagent internal events to the parent stream.
+
+    Pushes tool_use, agent_status, and reasoning events from a subagent's
+    execution into the parent result_queue so they appear in the SSE stream
+    in real-time (instead of the frontend showing only loading dots).
+    """
+
+    def __init__(self, parent_name: str, rq: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+        self.parent_name = parent_name
+        self.rq = rq
+        self.loop = loop
+        self._seen_tool_ids: set[str] = set()
+
+    def _push(self, event: dict) -> None:
+        self.loop.call_soon_threadsafe(self.rq.put_nowait, event)
+
+    def __call__(self, **kwargs: Any) -> None:
+        # --- Tool use start (from contentBlockStart) ---
+        event = kwargs.get("event", {})
+        if isinstance(event, dict):
+            tool_use = (
+                event.get("contentBlockStart", {})
+                .get("start", {})
+                .get("toolUse")
+            )
+            if tool_use:
+                tid = tool_use.get("toolUseId", "")
+                tname = tool_use.get("name", "")
+                if tid and tid not in self._seen_tool_ids:
+                    self._seen_tool_ids.add(tid)
+                    self._push({
+                        "type": "tool_use",
+                        "name": tname,
+                        "input": {},
+                        "tool_use_id": tid,
+                    })
+                    display_parent = self.parent_name.replace("_", " ").title()
+                    from .telemetry.status_messages import get_tool_status_message
+                    status = get_tool_status_message(tname, {})
+                    self._push({
+                        "type": "agent_status",
+                        "status": f"{display_parent}: {status}",
+                        "detail": tname,
+                    })
+
+        # --- Reasoning / extended thinking ---
+        reasoning = kwargs.get("reasoningText")
+        if reasoning and isinstance(reasoning, str):
+            self._push({"type": "reasoning", "data": reasoning})
+
+
 def _make_subagent_tool(
     skill_name: str,
     description: str,
@@ -1677,6 +1747,12 @@ def _make_subagent_tool(
     @tool(name=safe_name)
     def subagent_tool(query: str) -> str:
         """Placeholder docstring replaced below."""
+        # Push real input so frontend can update the tool card
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "tool_input", "name": safe_name, "input": {"query": query}},
+            )
         now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S UTC")
         subagent_context = (
             f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier} | Current datetime: {now_utc}\n"
@@ -1685,14 +1761,17 @@ def _make_subagent_tool(
         _ensure_langfuse_exporter()
 
         # Give subagents KB tools so they can retrieve actual documents
-        kb_tools = _build_subagent_kb_tools(tenant_id, session_id)
+        kb_tools = _build_subagent_kb_tools(tenant_id, session_id, result_queue, loop)
         all_tools = kb_tools + (extra_tools or [])
 
         agent = Agent(
             model=_model,
             system_prompt=subagent_context + prompt_body,
             tools=all_tools,
-            callback_handler=None,
+            callback_handler=(
+                _SubagentEventForwarder(safe_name, result_queue, loop)
+                if result_queue and loop else None
+            ),
             trace_attributes=_build_trace_attrs(
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -2612,6 +2691,7 @@ def _build_all_service_tools(
             "is_services": is_services, "keyword": keyword,
         }
         try:
+            _emit_input("query_compliance_matrix", parsed)
             result = execute_operation(parsed)
             out = json.dumps(result, indent=2, default=str)
             _emit("query_compliance_matrix", result if isinstance(result, dict) else {"result": result})
@@ -2734,6 +2814,14 @@ def _build_kb_service_tools(
     from .agentic_service import _exec_search_far
     from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
 
+    def _emit_input(name: str, tool_input: dict) -> None:
+        """Push tool input so the stream loop can update the card."""
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {"type": "tool_input", "name": name, "input": tool_input},
+            )
+
     def _emit(name: str, result: dict) -> None:
         if result_queue and loop:
             truncated_result = {k: (v[:3000] + "..." if isinstance(v, str) and len(v) > 3000 else v)
@@ -2751,6 +2839,7 @@ def _build_kb_service_tools(
             query: Search query — topic, clause number, or keyword
             parts: Optional list of FAR part numbers to filter (e.g. ["6", "16"])
         """
+        _emit_input("search_far", {"query": query, "parts": parts})
         result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
         _emit("search_far", result)
         return json.dumps(result, indent=2, default=str)
@@ -2781,6 +2870,7 @@ def _build_kb_service_tools(
             "agent": agent, "authority_level": authority_level,
             "keywords": keywords, "limit": limit,
         }.items() if v}
+        _emit_input("knowledge_search", params)
         result = exec_knowledge_search(params, tenant_id, session_id)
         _emit("knowledge_search", result)
         return json.dumps(result, indent=2, default=str)
@@ -2792,6 +2882,7 @@ def _build_kb_service_tools(
         Args:
             s3_key: S3 key path from a knowledge_search or search_far result
         """
+        _emit_input("knowledge_fetch", {"s3_key": s3_key})
         result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
         _emit("knowledge_fetch", result)
         return json.dumps(result, indent=2, default=str)
@@ -2805,6 +2896,7 @@ def _build_kb_service_tools(
         Args:
             query: Natural language search query
         """
+        _emit_input("web_search", {"query": query})
         result = exec_web_search(query)
         _emit("web_search", result)
         return json.dumps(result, indent=2, default=str)
@@ -2816,6 +2908,7 @@ def _build_kb_service_tools(
         Args:
             url: The URL to fetch (must be http or https)
         """
+        _emit_input("web_fetch", {"url": url})
         result = exec_web_fetch(url)
         _emit("web_fetch", result)
         return json.dumps(result, indent=2, default=str)
@@ -3518,9 +3611,6 @@ async def sdk_query_streaming(
 
     strands_history = _to_strands_messages(messages) if messages else None
 
-    # Let the frontend know tools are ready and agent is being constructed
-    yield {"type": "agent_status", "status": "Preparing tools...", "detail": "setup"}
-
     _ensure_langfuse_exporter()
     supervisor = Agent(
         model=_model,
@@ -3548,28 +3638,48 @@ async def sdk_query_streaming(
     agent_result = None
 
     def _drain_tool_results() -> list[dict]:
-        """Drain tool results that were pushed by factory tools via result_queue."""
+        """Drain events pushed by factory tools / subagent callbacks via result_queue."""
         drained: list[dict] = []
         while True:
             try:
                 item = result_queue.get_nowait()
+                # Items with a name are tool events — track them
                 name = item.get("name")
-                if not name:
-                    continue
-                tools_called.append(name)
+                if name:
+                    tools_called.append(name)
+                # Forward all items (tool_use, tool_result, agent_status, reasoning, etc.)
                 drained.append(item)
             except asyncio.QueueEmpty:
                 break
         return drained
 
-    # Signal that agent setup is done and we're waiting on Bedrock inference
-    yield {"type": "agent_status", "status": "Waiting for model...", "detail": "inference"}
-
     try:
-        async for event in supervisor.stream_async(prompt):
-            # Drain tool results that may have been pushed by factory tools
+        # Use a polling loop so we can drain result_queue every 0.5s
+        # even while stream_async is blocked (e.g., during subagent execution).
+        # This makes subagent internal events appear in real-time.
+        _stream_iter = supervisor.stream_async(prompt).__aiter__()
+        _pending_next: asyncio.Task | None = None
+        _stream_done = False
+
+        while not _stream_done:
+            if _pending_next is None:
+                _pending_next = asyncio.ensure_future(_stream_iter.__anext__())
+
+            done, _ = await asyncio.wait({_pending_next}, timeout=0.5)
+
+            # Always drain queue (subagent callback events may have arrived)
             for tool_result_chunk in _drain_tool_results():
                 yield tool_result_chunk
+
+            if not done:
+                continue  # Timeout — loop back to drain again
+
+            try:
+                event = _pending_next.result()
+            except StopAsyncIteration:
+                _stream_done = True
+                break
+            _pending_next = None
 
             # --- Reasoning / extended thinking ---
             raw_event = event.get("event", {})
@@ -3587,53 +3697,79 @@ async def sdk_query_streaming(
                 yield {"type": "text", "data": data}
                 continue
 
-            # --- Tool use start (ToolUseStreamEvent) ---
+            # --- Tool use start ---
+            # Emit immediately for fast UX. Input is empty at this
+            # point (Strands hasn't finished streaming it). The real
+            # input arrives later via tool_input events pushed by the
+            # tool functions themselves through result_queue.
             current_tool = event.get("current_tool_use")
             if current_tool and isinstance(current_tool, dict):
                 tool_id = current_tool.get("toolUseId", "")
                 if tool_id and tool_id != _current_tool_id:
                     _current_tool_id = tool_id
                     tool_name = current_tool.get("name", "")
-                    tool_input = current_tool.get("input", "")
                     tools_called.append(tool_name)
-                    # Emit handoff event for subagent tools
-                    from .telemetry.status_messages import is_subagent_tool, get_tool_status_message
+                    from .telemetry.status_messages import (
+                        is_subagent_tool, get_tool_status_message,
+                    )
                     if is_subagent_tool(tool_name):
                         display = tool_name.replace("_", " ").title()
-                        yield {"type": "handoff", "target": tool_name, "reason": f"Delegating to {display}"}
+                        yield {
+                            "type": "handoff",
+                            "target": tool_name,
+                            "reason": f"Delegating to {display}",
+                        }
                     yield {
                         "type": "tool_use",
                         "name": tool_name,
-                        "input": tool_input,
+                        "input": {},
                         "tool_use_id": tool_id,
                     }
-                    # Emit human-readable status for this tool
-                    input_dict = tool_input if isinstance(tool_input, dict) else {}
-                    status_msg = get_tool_status_message(tool_name, input_dict)
-                    yield {"type": "agent_status", "status": status_msg, "detail": tool_name}
+                    status_msg = get_tool_status_message(tool_name, {})
+                    yield {
+                        "type": "agent_status",
+                        "status": status_msg,
+                        "detail": tool_name,
+                    }
                 continue
 
             # --- Bedrock contentBlockStart fallback ---
             cbs_event = event.get("event", {})
             if isinstance(cbs_event, dict):
-                cbs_tool = cbs_event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
+                cbs_tool = (
+                    cbs_event
+                    .get("contentBlockStart", {})
+                    .get("start", {})
+                    .get("toolUse")
+                )
                 if cbs_tool:
                     tool_id = cbs_tool.get("toolUseId", "")
                     if tool_id != _current_tool_id:
                         _current_tool_id = tool_id
                         tool_name = cbs_tool.get("name", "")
                         tools_called.append(tool_name)
-                        from .telemetry.status_messages import is_subagent_tool, get_tool_status_message
+                        from .telemetry.status_messages import (
+                            is_subagent_tool, get_tool_status_message,
+                        )
                         if is_subagent_tool(tool_name):
                             display = tool_name.replace("_", " ").title()
-                            yield {"type": "handoff", "target": tool_name, "reason": f"Delegating to {display}"}
+                            yield {
+                                "type": "handoff",
+                                "target": tool_name,
+                                "reason": f"Delegating to {display}",
+                            }
                         yield {
                             "type": "tool_use",
                             "name": tool_name,
+                            "input": {},
                             "tool_use_id": tool_id,
                         }
-                        status_msg = get_tool_status_message(tool_name)
-                        yield {"type": "agent_status", "status": status_msg, "detail": tool_name}
+                        status_msg = get_tool_status_message(tool_name, {})
+                        yield {
+                            "type": "agent_status",
+                            "status": status_msg,
+                            "detail": tool_name,
+                        }
                     continue
 
             # --- Agent result (final event) ---

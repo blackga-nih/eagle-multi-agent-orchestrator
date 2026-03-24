@@ -132,7 +132,8 @@ async def stream_generator(
     sse_queue: asyncio.Queue[str] = asyncio.Queue()
     full_response_parts: list[str] = []
     # Tool timing: track start times when tool_use arrives, compute duration on tool_result
-    _tool_start_times: dict[str, float] = {}  # tool_name → perf_counter
+    _tool_start_times: dict[str, list[float]] = {}  # tool_name → FIFO of perf_counter
+    _tool_name_to_ids: dict[str, list[str]] = {}  # tool_name → FIFO of tool_use_ids
     _tool_timings: list[dict] = []  # collected {tool_name, duration_ms}
     _tool_failures: list[dict] = []  # collected {tool_name, error_message, duration_ms}
 
@@ -148,7 +149,7 @@ async def stream_generator(
     yield await sse_queue.get()
 
     # Send initial agent status so the frontend shows progress immediately
-    await writer.write_agent_status(sse_queue, "Analyzing your request...")
+    await writer.write_agent_status(sse_queue, "Reasoning...")
     yield await sse_queue.get()
 
     # Wrap the SDK generator so we inject ": keepalive\n\n" SSE comments every
@@ -221,14 +222,34 @@ async def stream_generator(
                         tool_input = {"raw": tool_input} if tool_input else {}
                 # Track tool start time for duration calculation
                 if tool_name:
-                    _tool_start_times[tool_name] = time.perf_counter()
+                    _tool_start_times.setdefault(tool_name, []).append(time.perf_counter())
+                tool_use_id = chunk.get("tool_use_id", "")
+                # Remember id so tool_input updates can reference it (FIFO per name)
+                if tool_name and tool_use_id:
+                    _tool_name_to_ids.setdefault(tool_name, []).append(tool_use_id)
                 await writer.write_tool_use(
                     sse_queue,
                     tool_name,
                     tool_input,
-                    tool_use_id=chunk.get("tool_use_id", ""),
+                    tool_use_id=tool_use_id,
                 )
                 yield await sse_queue.get()
+
+            elif chunk_type == "tool_input":
+                # Retroactive input update: tool functions push
+                # real input via result_queue once they execute.
+                # Re-emit as tool_use with the same tool_use_id
+                # so the frontend patches the existing card.
+                ti_name = chunk.get("name", "")
+                ti_input = chunk.get("input", {})
+                id_queue = _tool_name_to_ids.get(ti_name, [])
+                ti_id = id_queue.pop(0) if id_queue else ""
+                if ti_name and ti_input:
+                    await writer.write_tool_use(
+                        sse_queue, ti_name, ti_input,
+                        tool_use_id=ti_id,
+                    )
+                    yield await sse_queue.get()
 
             elif chunk_type == "tool_result":
                 tr_name = chunk.get("name", "")
@@ -236,7 +257,8 @@ async def stream_generator(
                     logger.debug("Skipping empty-name tool_result: keys=%s", list(chunk.keys()))
                     continue
                 # Compute tool duration from start time
-                start_t = _tool_start_times.pop(tr_name, None)
+                start_queue = _tool_start_times.get(tr_name, [])
+                start_t = start_queue.pop(0) if start_queue else None
                 duration_ms = int((time.perf_counter() - start_t) * 1000) if start_t is not None else None
                 if duration_ms is not None:
                     _tool_timings.append({
