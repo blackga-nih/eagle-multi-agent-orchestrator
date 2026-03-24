@@ -17,7 +17,7 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
+from fastapi import BackgroundTasks, FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -1247,6 +1247,20 @@ async def api_upload_document(
     from .document_markdown_service import convert_to_markdown
     markdown_content = convert_to_markdown(body, content_type, file.filename or safe_name)
 
+    # Auto-standardize markdown via Bedrock AI
+    quality_score = None
+    if markdown_content and classification.doc_type not in ("unknown", None):
+        try:
+            from .template_standardizer import standardize_template as _standardize
+            std_result = _standardize(
+                body, file.filename or safe_name, content_type, classification.doc_type,
+            )
+            if std_result.success and std_result.quality_score > 50:
+                markdown_content = std_result.markdown
+            quality_score = std_result.quality_score
+        except Exception as e:
+            logger.warning("Auto-standardize failed for %s: %s", safe_name, e)
+
     # Upload markdown sibling to S3 if conversion succeeded
     markdown_s3_key = None
     if markdown_content:
@@ -1294,6 +1308,7 @@ async def api_upload_document(
         "content_type": content_type,
         "classification": classification.to_dict(),
         "package_context": package_context,
+        "quality_score": quality_score,
     }
 
 
@@ -3276,6 +3291,257 @@ async def copy_s3_template_to_package(
         "package_id": package_id,
         "source": "s3_template",
     }
+
+
+# ── Template Standardization Endpoints ─────────────────────────────
+
+
+class StandardizeBatchRequest(BaseModel):
+    """Request body for batch template standardization."""
+    doc_types: Optional[List[str]] = None
+    dry_run: bool = False
+    write_to_plugin: bool = False
+
+
+class StandardizeSingleRequest(BaseModel):
+    """Request body for single template standardization."""
+    s3_key: str
+
+
+@app.post("/api/templates/standardize")
+async def batch_standardize_templates(
+    body: StandardizeBatchRequest,
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Batch standardize S3 templates to gold-standard markdown.
+
+    Processes asynchronously — returns a job_id to poll for status.
+    """
+    from app.template_registry import list_s3_templates, get_s3_template_by_key, TEMPLATE_BUCKET
+    from app.template_standardizer import (
+        standardize_template as run_standardize,
+        create_batch_job, update_batch_job,
+        BatchJobResult,
+    )
+
+    # List templates to process
+    templates = list_s3_templates(refresh=True)
+
+    # Filter out XLSX and optionally filter by doc_type
+    templates = [t for t in templates if t.get("file_type") not in ("xlsx", "xls")]
+    if body.doc_types:
+        templates = [t for t in templates if t.get("doc_type") in body.doc_types]
+
+    if not templates:
+        return {"job_id": None, "status": "complete", "message": "No templates to process"}
+
+    job_id = create_batch_job(len(templates))
+
+    async def _run_batch():
+        import asyncio
+        import boto3 as _boto3
+
+        s3 = _boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+        for tmpl in templates:
+            try:
+                s3_key = tmpl["s3_key"]
+                filename = tmpl["filename"]
+                file_type = tmpl.get("file_type", "docx")
+                doc_type = tmpl.get("doc_type") or "unknown"
+
+                # Fetch template bytes from S3
+                template_bytes = get_s3_template_by_key(s3_key)
+                if template_bytes is None:
+                    update_batch_job(job_id, BatchJobResult(
+                        filename=filename, doc_type=doc_type,
+                        quality_score=0, success=False,
+                        issues=["Template not found in S3"],
+                    ))
+                    continue
+
+                # Determine content type from file extension
+                content_type_map = {
+                    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "doc": "application/msword",
+                    "pdf": "application/pdf",
+                    "txt": "text/plain",
+                    "md": "text/markdown",
+                }
+                content_type = content_type_map.get(file_type, "application/octet-stream")
+
+                # Run standardization (in thread to avoid blocking)
+                result = await asyncio.to_thread(
+                    run_standardize, template_bytes, filename, content_type, doc_type,
+                )
+
+                # Write .standardized.md to S3 if not dry_run
+                if result.success and not body.dry_run:
+                    md_key = s3_key.rsplit(".", 1)[0] + ".standardized.md"
+                    try:
+                        s3.put_object(
+                            Bucket=TEMPLATE_BUCKET,
+                            Key=md_key,
+                            Body=result.markdown.encode("utf-8"),
+                            ContentType="text/markdown",
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to write standardized md to S3: %s", e)
+
+                update_batch_job(job_id, BatchJobResult(
+                    filename=filename,
+                    doc_type=doc_type,
+                    quality_score=result.quality_score,
+                    success=result.success,
+                    issues=result.issues,
+                    placeholders_found=result.placeholders_found,
+                    sections_found=result.sections_found,
+                ))
+
+            except Exception as e:
+                logger.error("Batch standardization error for %s: %s", tmpl.get("filename"), e)
+                update_batch_job(job_id, BatchJobResult(
+                    filename=tmpl.get("filename", "unknown"),
+                    doc_type=tmpl.get("doc_type", "unknown"),
+                    quality_score=0, success=False,
+                    issues=[str(e)],
+                ))
+
+    background_tasks.add_task(_run_batch)
+
+    return {"job_id": job_id, "status": "processing", "total": len(templates)}
+
+
+@app.get("/api/templates/standardize/{job_id}")
+async def get_standardization_status(
+    job_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Poll batch standardization job status."""
+    from app.template_standardizer import get_batch_job
+
+    job = get_batch_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "progress": {"completed": job["completed"], "total": job["total"]},
+        "results": job["results"],
+        "summary": job.get("summary"),
+        "error": job.get("error"),
+    }
+
+
+@app.post("/api/templates/standardize-single")
+async def standardize_single_template(
+    body: StandardizeSingleRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Standardize a single S3 template (synchronous).
+
+    Returns the standardized markdown and quality metrics.
+    """
+    from app.template_registry import get_s3_template_by_key, _infer_doc_type_from_filename
+    from app.template_standardizer import standardize_template as run_standardize
+
+    s3_key = body.s3_key
+    template_bytes = get_s3_template_by_key(s3_key)
+    if template_bytes is None:
+        raise HTTPException(status_code=404, detail="Template not found in S3")
+
+    filename = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+    file_type = filename.rsplit(".", 1)[-1].lower() if "." in filename else "unknown"
+    doc_type = _infer_doc_type_from_filename(filename) or "unknown"
+
+    content_type_map = {
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "doc": "application/msword",
+        "pdf": "application/pdf",
+        "txt": "text/plain",
+        "md": "text/markdown",
+    }
+    content_type = content_type_map.get(file_type, "application/octet-stream")
+
+    result = run_standardize(template_bytes, filename, content_type, doc_type)
+
+    return {
+        "result": result.to_dict(),
+        "preview": result.markdown[:1000] if result.markdown else "",
+    }
+
+
+@app.get("/api/templates/quality-report")
+async def get_templates_quality_report(
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get quality assessment for all S3 templates.
+
+    Returns quality scores per template for the admin dashboard.
+    """
+    from app.template_registry import list_s3_templates, get_s3_template_by_key
+    from app.template_standardizer import assess_quality
+    from app.document_markdown_service import convert_to_markdown
+
+    templates = list_s3_templates(refresh=True)
+    # Exclude XLSX
+    templates = [t for t in templates if t.get("file_type") not in ("xlsx", "xls")]
+
+    results = []
+    for tmpl in templates:
+        filename = tmpl["filename"]
+        doc_type = tmpl.get("doc_type") or "unknown"
+        file_type = tmpl.get("file_type", "unknown")
+
+        try:
+            template_bytes = get_s3_template_by_key(tmpl["s3_key"])
+            if template_bytes is None:
+                results.append({
+                    "filename": filename, "doc_type": doc_type,
+                    "quality": {"score": 0, "issues": ["Template not found"]},
+                })
+                continue
+
+            content_type_map = {
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "doc": "application/msword",
+                "pdf": "application/pdf",
+                "txt": "text/plain",
+                "md": "text/markdown",
+            }
+            content_type = content_type_map.get(file_type, "application/octet-stream")
+
+            # Convert to markdown for quality check
+            md = convert_to_markdown(template_bytes, content_type, filename)
+            quality = assess_quality(md or "", doc_type)
+
+            results.append({
+                "filename": filename,
+                "doc_type": doc_type,
+                "display_name": tmpl.get("display_name", filename),
+                "file_type": file_type,
+                "quality": quality.to_dict(),
+            })
+        except Exception as e:
+            results.append({
+                "filename": filename, "doc_type": doc_type,
+                "quality": {"score": 0, "issues": [str(e)]},
+            })
+
+    # Sort by quality score (worst first)
+    results.sort(key=lambda r: r.get("quality", {}).get("score", 0))
+
+    total = len(results)
+    avg_score = sum(r.get("quality", {}).get("score", 0) for r in results) / total if total else 0
+
+    return {
+        "total": total,
+        "avg_quality_score": round(avg_score, 1),
+        "templates": results,
+    }
+
 
 # ── Templates (Dynamic Routes) ─────────────────────────────────────
 @app.get("/api/templates/{doc_type}")
