@@ -2,7 +2,7 @@
 Document Classification Service — Classify uploaded documents by type.
 
 Provides filename-based heuristics with optional content-based AI fallback
-for ambiguous cases. Supports text extraction from PDF, DOCX, and plain text.
+for ambiguous cases. Supports text extraction from PDF, DOCX, XLSX, and plain text.
 """
 
 from __future__ import annotations
@@ -13,19 +13,17 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from .doc_type_registry import ALL_DOC_TYPES
+
 logger = logging.getLogger("eagle.document_classification")
 
-# Valid document types for the EAGLE system
-VALID_DOC_TYPES = {
-    "sow",
-    "igce",
-    "market_research",
-    "justification",
-    "acquisition_plan",
-}
+# Valid document types — imported from the centralized registry
+VALID_DOC_TYPES = ALL_DOC_TYPES
 
-# Filename patterns for quick classification (most specific first)
+# Filename patterns for quick classification (most specific first).
+# Original 5 core types kept at top for fast-path matching.
 FILENAME_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # ── Core 5 (highest traffic) ──────────────────────────────────────
     # Statement of Work
     (re.compile(r"\b(sow|statement[-_\s]?of[-_\s]?work)\b", re.IGNORECASE), "sow"),
     # IGCE / Cost Estimate
@@ -47,11 +45,65 @@ FILENAME_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "justification",
     ),
     # Acquisition Plan
-    (re.compile(r"\b(ap|acquisition[-_\s]?plan)\b", re.IGNORECASE), "acquisition_plan"),
+    (re.compile(r"\b(acquisition[-_\s]?plan|streamlined[-_\s]?acquisition[-_\s]?plan)\b", re.IGNORECASE), "acquisition_plan"),
+
+    # ── Extended types (17 additional categories) ─────────────────────
+    # NOTE: Use (?:^|[\W_]) instead of \b for patterns that appear in
+    # filenames with underscore separators, since Python's \b treats _ as
+    # a word character and won't match at _X boundaries.
+    # Statement of Need — Products (must come before generic SON match)
+    (re.compile(r"(?:^|[\W_])son[-_\s.].*product", re.IGNORECASE), "son_products"),
+    (re.compile(r"statement[-_\s]?of[-_\s]?need[-_\s.].*product", re.IGNORECASE), "son_products"),
+    # Statement of Need — Services
+    (re.compile(r"(?:^|[\W_])son[-_\s.].*service", re.IGNORECASE), "son_services"),
+    (re.compile(r"statement[-_\s]?of[-_\s]?need[-_\s.].*service", re.IGNORECASE), "son_services"),
+    # COR Certification / Appointment
+    (re.compile(r"(?:^|[\W_])cor[-_\s]?(?:appointment|certification|memorandum)", re.IGNORECASE), "cor_certification"),
+    (re.compile(r"appointment[-_\s]?memorandum", re.IGNORECASE), "cor_certification"),
+    # Buy American Act
+    (re.compile(r"buy[-_\s]?american", re.IGNORECASE), "buy_american"),
+    # Subcontracting Plan
+    (re.compile(r"sub[-_\s]?k[-_\s.].*plan", re.IGNORECASE), "subk_plan"),
+    (re.compile(r"subcontracting[-_\s]?plan", re.IGNORECASE), "subk_plan"),
+    # Subcontracting Review
+    (re.compile(r"sub[-_\s]?k[-_\s.].*review", re.IGNORECASE), "subk_review"),
+    (re.compile(r"subcontracting[-_\s]?review", re.IGNORECASE), "subk_review"),
+    # Conference Waiver (must precede conference_request — "Request for Waiver" matches both)
+    (re.compile(r"conference[-_\s.].*waiver", re.IGNORECASE), "conference_waiver"),
+    # Conference Request
+    (re.compile(r"conference[-_\s.].*request", re.IGNORECASE), "conference_request"),
+    (re.compile(r"conference[-_\s.].*grant[-_\s]?request", re.IGNORECASE), "conference_request"),
+    (re.compile(r"conference[-_\s.].*approval", re.IGNORECASE), "conference_request"),
+    # Promotional Item
+    (re.compile(r"promotional[-_\s]?item", re.IGNORECASE), "promotional_item"),
+    # Exemption Determination
+    (re.compile(r"exemption[-_\s]?determination", re.IGNORECASE), "exemption_determination"),
+    # Mandatory Use Waiver
+    (re.compile(r"mandatory[-_\s]?use[-_\s]?waiver", re.IGNORECASE), "mandatory_use_waiver"),
+    # GFP Form
+    (re.compile(r"(?:^|[\W_])gfp[-_\s]?form", re.IGNORECASE), "gfp_form"),
+    (re.compile(r"government[-_\s]?furnished[-_\s]?property", re.IGNORECASE), "gfp_form"),
+    # BPA Call Order
+    (re.compile(r"(?:^|[\W_])bpa[-_\s]?call[-_\s]?order", re.IGNORECASE), "bpa_call_order"),
+    (re.compile(r"blanket[-_\s]?purchase[-_\s]?agreement", re.IGNORECASE), "bpa_call_order"),
+    (re.compile(r"(?:^|[\W_])bpa[-_\s]?callorder", re.IGNORECASE), "bpa_call_order"),
+    # Technical Questionnaire (handles common misspelling "questionnare")
+    (re.compile(r"technical[-_\s]?questionnai?r?e", re.IGNORECASE), "technical_questionnaire"),
+    (re.compile(r"project[-_\s]?officer.*questionnai?r?e", re.IGNORECASE), "technical_questionnaire"),
+    # Quotation Abstract
+    (re.compile(r"quotation[-_\s]?abstract", re.IGNORECASE), "quotation_abstract"),
+    # Receiving Report
+    (re.compile(r"receiving[-_\s]?report", re.IGNORECASE), "receiving_report"),
+    # SRB Request
+    (re.compile(r"(?:^|[\W_])srb[-_\s]?request", re.IGNORECASE), "srb_request"),
+    (re.compile(r"source[-_\s]?review[-_\s]?board", re.IGNORECASE), "srb_request"),
+    # Reference Guide (lowest priority — generic terms)
+    (re.compile(r"structure[-_\s]?guide", re.IGNORECASE), "reference_guide"),
 ]
 
 # Content patterns for AI fallback (keywords found in document body)
 CONTENT_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
+    # ── Core 5 ────────────────────────────────────────────────────────
     # SOW indicators
     (re.compile(r"\bstatement\s+of\s+work\b", re.IGNORECASE), "sow", 0.9),
     (re.compile(r"\bperiod\s+of\s+performance\b", re.IGNORECASE), "sow", 0.7),
@@ -74,6 +126,54 @@ CONTENT_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     (re.compile(r"\bacquisition\s+plan\b", re.IGNORECASE), "acquisition_plan", 0.9),
     (re.compile(r"\bacquisition\s+strategy\b", re.IGNORECASE), "acquisition_plan", 0.85),
     (re.compile(r"\bcontract\s+type\s+selection\b", re.IGNORECASE), "acquisition_plan", 0.75),
+
+    # ── Extended types ────────────────────────────────────────────────
+    # SON Products
+    (re.compile(r"\bstatement\s+of\s+need\b.*\bproduct", re.IGNORECASE | re.DOTALL), "son_products", 0.9),
+    (re.compile(r"\bequipment\s+and\s+supplies\b", re.IGNORECASE), "son_products", 0.8),
+    # SON Services
+    (re.compile(r"\bstatement\s+of\s+need\b.*\bservice", re.IGNORECASE | re.DOTALL), "son_services", 0.9),
+    (re.compile(r"\bcatalog\s+pricing\b", re.IGNORECASE), "son_services", 0.75),
+    # COR Certification
+    (re.compile(r"\bcor\s+appointment\b", re.IGNORECASE), "cor_certification", 0.95),
+    (re.compile(r"\bcontracting\s+officer\s+representative\b", re.IGNORECASE), "cor_certification", 0.9),
+    (re.compile(r"\bfac[-\s]?cor\s+level\b", re.IGNORECASE), "cor_certification", 0.85),
+    # Buy American
+    (re.compile(r"\bbuy\s+american\b", re.IGNORECASE), "buy_american", 0.9),
+    (re.compile(r"\bnon[-\s]?availability\s+determination\b", re.IGNORECASE), "buy_american", 0.85),
+    # Subcontracting Plan
+    (re.compile(r"\bsubcontracting\s+plan\b", re.IGNORECASE), "subk_plan", 0.9),
+    (re.compile(r"\bsmall\s+business\s+subcontracting\b", re.IGNORECASE), "subk_plan", 0.85),
+    # Subcontracting Review
+    (re.compile(r"\bsubcontracting\s+review\b", re.IGNORECASE), "subk_review", 0.9),
+    # Conference Request
+    (re.compile(r"\bconference\s+request\b", re.IGNORECASE), "conference_request", 0.9),
+    (re.compile(r"\bnih\s+conference\b", re.IGNORECASE), "conference_request", 0.8),
+    # Conference Waiver
+    (re.compile(r"\bconference\s+waiver\b", re.IGNORECASE), "conference_waiver", 0.9),
+    (re.compile(r"\brequest\s+for\s+waiver\b.*\bconference\b", re.IGNORECASE | re.DOTALL), "conference_waiver", 0.85),
+    # Promotional Item
+    (re.compile(r"\bpromotional\s+item\b", re.IGNORECASE), "promotional_item", 0.9),
+    # Exemption Determination
+    (re.compile(r"\bexemption\s+determination\b", re.IGNORECASE), "exemption_determination", 0.9),
+    # Mandatory Use Waiver
+    (re.compile(r"\bmandatory[-\s]?use\s+waiver\b", re.IGNORECASE), "mandatory_use_waiver", 0.9),
+    # GFP Form
+    (re.compile(r"\bgovernment\s+furnished\s+property\b", re.IGNORECASE), "gfp_form", 0.9),
+    (re.compile(r"\bgfp\b", re.IGNORECASE), "gfp_form", 0.7),
+    # BPA Call Order
+    (re.compile(r"\bbpa\s+call\s+order\b", re.IGNORECASE), "bpa_call_order", 0.9),
+    (re.compile(r"\bblanket\s+purchase\s+agreement\b", re.IGNORECASE), "bpa_call_order", 0.85),
+    # Technical Questionnaire
+    (re.compile(r"\btechnical\s+questionnai?r?e\b", re.IGNORECASE), "technical_questionnaire", 0.9),
+    (re.compile(r"\bproject\s+officer\b", re.IGNORECASE), "technical_questionnaire", 0.6),
+    # Quotation Abstract
+    (re.compile(r"\bquotation\s+abstract\b", re.IGNORECASE), "quotation_abstract", 0.9),
+    # Receiving Report
+    (re.compile(r"\breceiving\s+report\b", re.IGNORECASE), "receiving_report", 0.9),
+    # SRB Request
+    (re.compile(r"\bsrb\s+request\b", re.IGNORECASE), "srb_request", 0.9),
+    (re.compile(r"\bsource\s+review\s+board\b", re.IGNORECASE), "srb_request", 0.85),
 ]
 
 
@@ -207,6 +307,13 @@ def extract_text_preview(
         if content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             return _extract_docx_text(body, max_chars)
 
+        # XLSX
+        if content_type in (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-excel",
+        ):
+            return _extract_xlsx_text(body, max_chars)
+
         # MS Word (legacy .doc)
         if content_type == "application/msword":
             # Legacy .doc format is harder to parse; skip for now
@@ -271,6 +378,43 @@ def _extract_docx_text(body: bytes, max_chars: int) -> Optional[str]:
 
     except Exception as e:
         logger.warning("DOCX text extraction failed: %s", e)
+        return None
+
+
+def _extract_xlsx_text(body: bytes, max_chars: int) -> Optional[str]:
+    """Extract text from XLSX using openpyxl."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        logger.warning("openpyxl not installed, skipping XLSX extraction")
+        return None
+
+    try:
+        wb = load_workbook(io.BytesIO(body), data_only=True, read_only=True)
+        text_parts: list[str] = []
+        char_count = 0
+
+        for ws in wb.worksheets:
+            if hasattr(ws, "sheet_state") and ws.sheet_state != "visible":
+                continue
+            text_parts.append(f"Sheet: {ws.title}")
+            for row in ws.iter_rows(max_row=50, values_only=True):
+                cell_values = [str(c) for c in row if c is not None]
+                if cell_values:
+                    line = " | ".join(cell_values)
+                    text_parts.append(line)
+                    char_count += len(line)
+                    if char_count >= max_chars:
+                        break
+            if char_count >= max_chars:
+                break
+
+        wb.close()
+        full_text = "\n".join(text_parts)
+        return full_text[:max_chars]
+
+    except Exception as e:
+        logger.warning("XLSX text extraction failed: %s", e)
         return None
 
 

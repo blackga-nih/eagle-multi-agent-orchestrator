@@ -9,7 +9,12 @@ is a common real-world convention and is correctly matched by the patterns.
 
 from __future__ import annotations
 
+import io
+import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.document_classification_service import (
     ClassificationResult,
@@ -197,3 +202,153 @@ class TestCleanFilenameForTitle:
     def test_title_cases(self):
         result = _clean_filename_for_title("market_research_report.pdf")
         assert result == "Market Research Report"
+
+
+# ---------------------------------------------------------------------------
+# TestClassifyExtendedTypes — 17 new categories
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyExtendedTypesByFilename:
+    """Test filename classification for all 17 new doc types."""
+
+    @pytest.mark.parametrize("filename,expected", [
+        ("3.a. SON - Products (including Equipment and Supplies).docx", "son_products"),
+        ("SON-Products-FY26.docx", "son_products"),
+        ("3.b. SON - Services based on Catalog Pricing.docx", "son_services"),
+        ("SON-Services-IT.docx", "son_services"),
+        ("NIH COR Appointment Memorandum.docx", "cor_certification"),
+        ("COR-Certification-2026.docx", "cor_certification"),
+        ("DF_Buy_American_Non_Availability_Template.docx", "buy_american"),
+        ("Buy-American-Exception.docx", "buy_american"),
+        ("HHS SubK Plan Template - updated March 2022.doc", "subk_plan"),
+        ("Subcontracting-Plan-v2.docx", "subk_plan"),
+        ("hhs_subk_review_form.docx", "subk_review"),
+        ("Subcontracting-Review-Report.docx", "subk_review"),
+        ("Attachment A - NIH Conference or Conference Grant Request and Approval 20151404_508.docx", "conference_request"),
+        ("Conference-Request-FY26.docx", "conference_request"),
+        ("Attachment B - NIH Conference Request for Waiver 20151004_508.docx", "conference_waiver"),
+        ("Conference-Waiver-2026.docx", "conference_waiver"),
+        ("Attachment D - Promotional Item Approval Form 20172112_508.docx", "promotional_item"),
+        ("Promotional-Item-Request.docx", "promotional_item"),
+        ("Attachment G - Exemption Determination Template 20151305_508.docx", "exemption_determination"),
+        ("Exemption-Determination-IT.docx", "exemption_determination"),
+        ("DF for Mandatory-Use Waiver Template - Draft.pdf", "mandatory_use_waiver"),
+        ("Mandatory-Use-Waiver.pdf", "mandatory_use_waiver"),
+        ("GFP Form.pdf", "gfp_form"),
+        ("GFP-Form-FY26.pdf", "gfp_form"),
+        ("LSJ-GSA-BPA-CallOrders.docx", "bpa_call_order"),
+        ("BPA-Call-Order-2026.docx", "bpa_call_order"),
+        ("Project_Officers_Technical_Questionnare.pdf", "technical_questionnaire"),
+        ("Technical-Questionnaire-v2.pdf", "technical_questionnaire"),
+        ("Quotation Abstract.docx", "quotation_abstract"),
+        ("Quotation-Abstract-FY26.docx", "quotation_abstract"),
+        ("Receiving Report Template 20201002.docx", "receiving_report"),
+        ("Receiving-Report-Q3.docx", "receiving_report"),
+        ("SRB Request form.docx", "srb_request"),
+        ("SRB-Request-2026.docx", "srb_request"),
+    ])
+    def test_extended_filename_classification(self, filename, expected):
+        result = classify_by_filename(filename)
+        assert result is not None, f"Failed to classify: {filename}"
+        assert result.doc_type == expected, f"Expected {expected} for {filename}, got {result.doc_type}"
+        assert result.confidence >= 0.9
+
+
+class TestClassifyExtendedTypesByContent:
+    """Test content-based classification for extended doc types."""
+
+    @pytest.mark.parametrize("content,expected", [
+        ("This statement of need covers products including equipment and supplies for the lab.", "son_products"),
+        ("Statement of need for IT services including catalog pricing and maintenance.", "son_services"),
+        ("COR appointment memorandum for the contracting officer representative.", "cor_certification"),
+        ("Buy American Act determination. Non-availability of domestic products.", "buy_american"),
+        ("Small business subcontracting plan required under FAR 19.705.", "subk_plan"),
+        ("Annual subcontracting review of contractor performance.", "subk_review"),
+        ("NIH conference request for the annual research symposium.", "conference_request"),
+        ("Request for conference waiver due to exceptional circumstances.", "conference_waiver"),
+        ("This is a promotional item approval form for branded materials and merchandise for the event.", "promotional_item"),
+        ("Exemption determination for the acquisition requirement.", "exemption_determination"),
+        ("Mandatory-use waiver request for alternative sourcing.", "mandatory_use_waiver"),
+        ("Government furnished property form for lab equipment.", "gfp_form"),
+        ("BPA call order under the blanket purchase agreement.", "bpa_call_order"),
+        ("Technical questionnaire for the project officer assessment.", "technical_questionnaire"),
+        ("This quotation abstract document summarizes the vendor proposals received for the acquisition requirement.", "quotation_abstract"),
+        ("Receiving report for delivered equipment and materials.", "receiving_report"),
+        ("This SRB request is submitted for source review board evaluation of the proposed acquisition strategy.", "srb_request"),
+    ])
+    def test_extended_content_classification(self, content, expected):
+        result = classify_by_content(content)
+        assert result is not None, f"Failed to classify content for {expected}"
+        assert result.doc_type == expected, f"Expected {expected}, got {result.doc_type}"
+
+
+class TestClassificationBackwardCompatible:
+    """Ensure original 5 types still work at high confidence."""
+
+    @pytest.mark.parametrize("filename,expected", [
+        ("SOW-Alpha.docx", "sow"),
+        ("IGCE-FY26.xlsx", "igce"),
+        ("Market-Research-Report.pdf", "market_research"),
+        ("J&A Sole Source.docx", "justification"),
+        ("Acquisition-Plan-v2.docx", "acquisition_plan"),
+    ])
+    def test_core_5_filename_still_work(self, filename, expected):
+        result = classify_by_filename(filename)
+        assert result is not None
+        assert result.doc_type == expected
+        assert result.confidence >= 0.95
+
+    def test_classify_document_integration(self):
+        """Full classify_document path for a core type."""
+        result = classify_document("SOW-Project.docx")
+        assert result.doc_type == "sow"
+        assert result.method == "filename"
+
+
+class TestClassifyAllIndexCategories:
+    """Verify every category in _index.json has at least one filename match."""
+
+    def test_all_index_filenames_classified(self):
+        index_path = Path(__file__).resolve().parent.parent.parent / "eagle-plugin" / "data" / "template-metadata" / "_index.json"
+        with open(index_path, encoding="utf-8") as f:
+            index = json.load(f)
+
+        unclassified = []
+        for category, filenames in index["by_category"].items():
+            classified = False
+            for fn in filenames:
+                result = classify_by_filename(fn)
+                if result and result.doc_type == category:
+                    classified = True
+                    break
+            if not classified:
+                # Try content-based as fallback (use category name as content)
+                unclassified.append((category, filenames))
+
+        # reference_guide is intentionally low-priority and may not match all filenames
+        allowed_misses = {"reference_guide"}
+        actual_misses = {cat for cat, _ in unclassified} - allowed_misses
+        assert not actual_misses, f"Categories with no filename match: {actual_misses}"
+
+
+class TestXlsxTextExtraction:
+    """Test XLSX text extraction for classification."""
+
+    def test_xlsx_extraction(self):
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "IGCE"
+        ws.append(["Item", "Cost"])
+        ws.append(["Labor", "8500"])
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        result = extract_text_preview(
+            buf.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        assert result is not None
+        assert "Labor" in result
+        assert "8500" in result

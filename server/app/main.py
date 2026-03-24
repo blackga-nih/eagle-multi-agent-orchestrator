@@ -106,6 +106,7 @@ from .document_service import (
     get_document_download_url,
     finalize_document as finalize_document_version,
 )
+from .doc_type_registry import normalize_doc_type
 from .document_classification_service import (
     classify_document,
     extract_text_preview,
@@ -1158,7 +1159,7 @@ def _coerce_dynamodb_value(value: Any) -> Any:
 
 
 def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> None:
-    """Store upload metadata in DynamoDB with 1-hour TTL."""
+    """Store upload metadata in DynamoDB with 24-hour TTL."""
     import boto3
     table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
         os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
@@ -1166,7 +1167,7 @@ def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> Non
     item = {
         "PK": f"UPLOAD#{tenant_id}",
         "SK": f"UPLOAD#{upload_id}",
-        "ttl": int(time.time()) + 3600,
+        "ttl": int(time.time()) + 86400,
         **_coerce_dynamodb_value(metadata),
     }
     table.put_item(Item=item)
@@ -1242,6 +1243,21 @@ async def api_upload_document(
     # Classify document
     classification = classify_document(file.filename or safe_name, content_preview)
 
+    # Convert to markdown for persistence
+    from .document_markdown_service import convert_to_markdown
+    markdown_content = convert_to_markdown(body, content_type, file.filename or safe_name)
+
+    # Upload markdown sibling to S3 if conversion succeeded
+    markdown_s3_key = None
+    if markdown_content:
+        md_key = f"{key}.parsed.md"
+        try:
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            s3.put_object(Bucket=bucket, Key=md_key, Body=markdown_content.encode("utf-8"), ContentType="text/markdown")
+            markdown_s3_key = md_key
+        except ClientError as e:
+            logger.warning("Failed to upload markdown sibling: %s", e)
+
     # Determine package context
     package_context = {"mode": "workspace", "package_id": None}
     if package_id:
@@ -1261,6 +1277,7 @@ async def api_upload_document(
         "size_bytes": len(body),
         "classification": classification.to_dict(),
         "session_id": session_id,
+        "markdown_s3_key": markdown_s3_key,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     })
 
@@ -1314,9 +1331,10 @@ async def assign_upload_to_package(
     if not pkg:
         raise HTTPException(status_code=404, detail=f"Package {body.package_id} not found")
 
-    # Determine doc_type (from request or classification)
-    doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
-    if doc_type == "unknown":
+    # Determine doc_type (from request or classification) and normalize
+    raw_doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
+    doc_type = normalize_doc_type(raw_doc_type) if raw_doc_type != "unknown" else "unknown"
+    if doc_type == "unknown" or doc_type == "":
         raise HTTPException(
             status_code=400,
             detail="Document type could not be determined. Please specify doc_type.",
@@ -1333,6 +1351,25 @@ async def assign_upload_to_package(
     except ClientError as e:
         logger.error("S3 fetch error for upload %s: %s", upload_id, e)
         raise HTTPException(status_code=500, detail="Failed to retrieve uploaded file")
+
+    # Fetch markdown content if available
+    markdown_content = None
+    markdown_s3_key = upload_meta.get("markdown_s3_key")
+    if markdown_s3_key:
+        try:
+            md_response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=markdown_s3_key)
+            markdown_content = md_response["Body"].read().decode("utf-8", errors="replace")
+        except ClientError:
+            logger.debug("Could not fetch markdown sibling for upload %s", upload_id)
+
+    # Compute auto-tags from template metadata
+    from .tag_computation import compute_document_tags, compute_far_tags_from_template, compute_completeness_pct
+    doc_stub = {"doc_type": doc_type, "title": title}
+    system_tags = compute_document_tags(doc_stub, pkg)
+    far_tags = compute_far_tags_from_template(doc_type)
+    completeness_pct = None
+    if markdown_content:
+        completeness_pct = compute_completeness_pct(doc_type, markdown_content)
 
     # Determine file type from content_type
     content_type = upload_meta["content_type"]
@@ -1355,6 +1392,11 @@ async def assign_upload_to_package(
         created_by_user_id=user.user_id,
         session_id=upload_meta.get("session_id"),
         change_source="user_upload",
+        markdown_content=markdown_content,
+        system_tags=system_tags,
+        far_tags=far_tags,
+        completeness_pct=completeness_pct,
+        original_filename=upload_meta.get("original_filename"),
     )
 
     if not result.success:
