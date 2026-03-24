@@ -279,6 +279,8 @@ def _clean_filename_for_title(filename: str) -> str:
     if not filename:
         return "Uploaded Document"
 
+    filename = filename[:255]
+
     # Remove extension
     name = filename.rsplit(".", 1)[0] if "." in filename else filename
 
@@ -286,7 +288,8 @@ def _clean_filename_for_title(filename: str) -> str:
     name = re.sub(r"[-_]+", " ", name)
 
     # Remove version numbers like v1, v2, _v3
-    name = re.sub(r"\s*v\d+\s*", " ", name, flags=re.IGNORECASE)
+    parts = [part for part in name.split() if not re.fullmatch(r"(?i)v\d+", part)]
+    name = " ".join(parts)
 
     # Clean up multiple spaces
     name = re.sub(r"\s+", " ", name).strip()

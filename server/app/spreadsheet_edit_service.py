@@ -247,13 +247,13 @@ def save_xlsx_preview_edits(
         content_type = response.get("ContentType") or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     except (ClientError, BotoCoreError) as exc:
         logger.error("Failed to load XLSX preview artifact: %s", exc, exc_info=True)
-        return {"error": f"Failed to load document: {exc}"}
+        return {"error": "Failed to load document."}
 
     try:
         updated_bytes, applied_count, missing = apply_xlsx_cell_edits(original_bytes, edits)
     except Exception as exc:
         logger.error("Failed to apply structured XLSX edits: %s", exc, exc_info=True)
-        return {"error": f"Failed to apply spreadsheet edits: {exc}"}
+        return {"error": "Failed to apply spreadsheet edits."}
 
     if applied_count == 0:
         return {"error": "No spreadsheet edits were applied.", "missing": missing}
@@ -319,7 +319,7 @@ def save_xlsx_preview_edits(
         )
     except Exception as exc:
         logger.error("Failed to save workspace XLSX preview edits: %s", exc, exc_info=True)
-        return {"error": f"Failed to save spreadsheet: {exc}"}
+        return {"error": "Failed to save spreadsheet."}
 
     return {
         "success": True,

@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 import httpx
 
@@ -30,6 +31,23 @@ def _git(args: list[str]) -> str:
         capture_output=True, text=True, timeout=30,
     )
     return result.stdout.strip()
+
+
+def _extract_repo_from_remote(remote: str) -> str:
+    """Return org/repo for canonical GitHub remotes only."""
+    remote = remote.strip()
+    if not remote:
+        return ""
+
+    if remote.startswith("git@github.com:"):
+        path = remote.split("git@github.com:", 1)[1]
+    else:
+        parsed = urlparse(remote)
+        if parsed.scheme not in {"http", "https"} or parsed.hostname != "github.com":
+            return ""
+        path = parsed.path
+
+    return path.strip("/").removesuffix(".git")
 
 
 def get_commits(since: str) -> list[dict]:
@@ -184,9 +202,7 @@ def main():
     if not repo:
         # Try to get from git remote
         remote = _git(["remote", "get-url", "origin"])
-        if "github.com" in remote:
-            # Extract org/repo from URL
-            repo = remote.split("github.com")[-1].strip("/").replace(".git", "").lstrip(":")
+        repo = _extract_repo_from_remote(remote)
 
     branch = _git(["rev-parse", "--abbrev-ref", "HEAD"])
 

@@ -221,7 +221,7 @@ function DetailModal({
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
-                <div className={`px-4 py-3 border-b flex items-center justify-between shrink-0 ${active.bg.replace('bg-', 'bg-')}/10`}>
+                    <div className={`px-4 py-3 border-b flex items-center justify-between shrink-0 ${active.bg}/10`}>
                     <div className="flex items-center gap-2">
                         <span className={`w-6 h-6 rounded-full flex items-center justify-center text-white ${active.bg}`}>
                             <active.icon className="w-3 h-3" />

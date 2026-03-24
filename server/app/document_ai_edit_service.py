@@ -623,13 +623,13 @@ def save_docx_preview_edits(
         content_type = response.get("ContentType") or "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     except (ClientError, BotoCoreError) as exc:
         logger.error("Failed to load DOCX preview artifact: %s", exc, exc_info=True)
-        return {"error": f"Failed to load document: {exc}"}
+        return {"error": "Failed to load document."}
 
     try:
         updated_bytes, applied_count = apply_docx_block_edits(original_bytes, preview_blocks, preview_mode)
     except Exception as exc:
         logger.error("Failed to apply structured DOCX preview edits: %s", exc, exc_info=True)
-        return {"error": f"Failed to apply preview edits: {exc}"}
+        return {"error": "Failed to apply preview edits."}
 
     if applied_count == 0:
         return {"error": "No preview edits were applied."}
@@ -694,7 +694,7 @@ def save_docx_preview_edits(
         )
     except Exception as exc:
         logger.error("Failed to save workspace DOCX preview edits: %s", exc, exc_info=True)
-        return {"error": f"Failed to save document: {exc}"}
+        return {"error": "Failed to save document."}
 
     return {
         "success": True,

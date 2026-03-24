@@ -24,6 +24,9 @@ COST_OUTPUT_PER_1K = float(os.getenv("COST_OUTPUT_PER_1K", "0.015"))
 # ── DynamoDB Client ──────────────────────────────────────────────────
 _dynamodb = None
 
+GENERIC_ANALYTICS_ERROR = "Analytics data is temporarily unavailable."
+GENERIC_RATE_LIMIT_ERROR = "Rate limit status is temporarily unavailable."
+
 
 def _get_dynamodb():
     global _dynamodb
@@ -216,7 +219,7 @@ def get_dashboard_stats(tenant_id: str = "default", days: int = 30) -> Dict[str,
                 "active_sessions": 0,
             },
             "daily": [],
-            "error": str(e),
+            "error": GENERIC_ANALYTICS_ERROR,
         }
 
 
@@ -273,7 +276,7 @@ def get_user_stats(tenant_id: str, user_id: str, days: int = 30) -> Dict[str, An
         
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to get user stats: %s", e)
-        return {"error": str(e)}
+        return {"error": GENERIC_ANALYTICS_ERROR}
 
 
 def get_top_users(tenant_id: str, days: int = 30, limit: int = 10) -> List[Dict[str, Any]]:
@@ -355,7 +358,7 @@ def get_tool_usage(tenant_id: str, days: int = 30) -> Dict[str, Any]:
         
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to get tool usage: %s", e)
-        return {"error": str(e)}
+        return {"error": GENERIC_ANALYTICS_ERROR}
 
 
 # ── Rate Limiting ────────────────────────────────────────────────────
@@ -447,5 +450,5 @@ def check_rate_limit(tenant_id: str, user_id: str, tier: str = "free") -> Dict[s
         return {
             "allowed": True,
             "reason": "Rate limit check failed, allowing request",
-            "error": str(e),
+            "error": GENERIC_RATE_LIMIT_ERROR,
         }
