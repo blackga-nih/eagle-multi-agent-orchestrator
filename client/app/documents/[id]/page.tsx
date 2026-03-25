@@ -1797,7 +1797,7 @@ ${docSnippet}`;
                                                 This spreadsheet remains stored as a native `.xlsx` file. The pane below shows worksheet data extracted with `openpyxl` so you can review and edit input cells without leaving the browser.
                                             </p>
                                             <p className="mt-3 leading-6">
-                                                Formula cells stay read-only. Changes are written back to the workbook with `openpyxl`, which preserves formulas, formatting, and sheet structure.
+                                                Formula cells (highlighted in blue) are read-only and auto-calculate when you edit input cells. Changes are written back to the workbook preserving formulas, formatting, and sheet structure.
                                             </p>
                                             {downloadUrl && (
                                                 <a
@@ -1813,12 +1813,13 @@ ${docSnippet}`;
                                         </div>
                                         {activeXlsxSheet ? (
                                             <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5">
+                                                {/* Sheet tabs */}
                                                 <div className="flex flex-wrap gap-2">
                                                     {displayedXlsxSheets.map((sheet) => (
                                                         <button
                                                             key={sheet.sheet_id}
                                                             onClick={() => setActiveXlsxSheetId(sheet.sheet_id)}
-                                                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                                                            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
                                                                 activeXlsxSheet.sheet_id === sheet.sheet_id
                                                                     ? 'bg-[#003366] text-white'
                                                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -1828,20 +1829,26 @@ ${docSnippet}`;
                                                         </button>
                                                     ))}
                                                 </div>
+
+                                                {/* Truncation warning */}
                                                 {activeXlsxSheet.truncated && (
-                                                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                                        Preview truncated for large worksheet dimensions. Download the current workbook for the full view.
+                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                                        Preview limited to {activeXlsxSheet.max_row} rows x {activeXlsxSheet.max_col} columns. Download for full view.
                                                     </div>
                                                 )}
-                                                <div className="overflow-x-auto rounded-xl border border-gray-200">
+
+                                                {/* Scrollable table with sticky headers */}
+                                                <div className="overflow-auto max-h-[500px] rounded-lg border border-gray-200 bg-white">
                                                     <table className="min-w-full border-collapse text-sm">
-                                                        <thead className="bg-gray-50">
+                                                        <thead className="bg-gray-100 sticky top-0 z-10">
                                                             <tr>
-                                                                <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold text-gray-600">Row</th>
+                                                                <th className="border-b border-r border-gray-300 px-2 py-2 text-center font-semibold text-gray-500 w-10 text-xs">
+
+                                                                </th>
                                                                 {activeXlsxSheet.rows[0]?.cells.map((cell) => (
                                                                     <th
                                                                         key={cell.cell_ref}
-                                                                        className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold text-gray-600"
+                                                                        className="border-b border-r border-gray-300 px-2 py-2 text-center font-semibold text-gray-600 min-w-[70px] text-xs"
                                                                     >
                                                                         {cell.cell_ref.replace(/\d+/g, '')}
                                                                     </th>
@@ -1849,30 +1856,41 @@ ${docSnippet}`;
                                                             </tr>
                                                         </thead>
                                                         <tbody>
-                                                            {activeXlsxSheet.rows.map((row) => (
-                                                                <tr key={row.row_index} className="align-top">
-                                                                    <td className="border-b border-r border-gray-200 bg-gray-50 px-3 py-2 font-medium text-gray-500">
+                                                            {activeXlsxSheet.rows.map((row, rowIdx) => (
+                                                                <tr key={row.row_index} className={rowIdx === 0 ? 'bg-gray-50' : ''}>
+                                                                    <td className="border-b border-r border-gray-200 bg-gray-50 px-2 py-1.5 text-center text-xs font-medium text-gray-400 w-10">
                                                                         {row.row_index}
                                                                     </td>
                                                                     {row.cells.map((cell) => (
                                                                         <td
                                                                             key={cell.cell_ref}
-                                                                            className={`border-b border-r border-gray-200 px-2 py-2 ${
-                                                                                cell.editable ? 'bg-white' : 'bg-gray-50'
+                                                                            className={`border-b border-r border-gray-200 px-1.5 py-1 ${
+                                                                                cell.is_formula
+                                                                                    ? 'bg-sky-50'
+                                                                                    : cell.editable
+                                                                                        ? 'bg-white'
+                                                                                        : 'bg-gray-50'
                                                                             }`}
+                                                                            title={cell.is_formula ? `Formula: ${cell.value}` : undefined}
                                                                         >
                                                                             {isEditing && cell.editable ? (
                                                                                 <input
                                                                                     type="text"
                                                                                     value={cell.value}
                                                                                     onChange={(e) => updateXlsxPreviewCell(activeXlsxSheet.sheet_id, cell.cell_ref, e.target.value)}
-                                                                                    className="w-full min-w-[110px] rounded-md border border-gray-200 px-2 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                                                                    className="w-full min-w-[60px] rounded border border-gray-300 px-1.5 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                                                                 />
                                                                             ) : (
-                                                                                <div className={`min-w-[110px] whitespace-pre-wrap break-words text-sm ${
-                                                                                    cell.editable ? 'text-gray-900' : 'text-gray-500'
-                                                                                }`}>
-                                                                                    {cell.display_value || ''}
+                                                                                <div
+                                                                                    className={`min-w-[60px] truncate text-sm ${
+                                                                                        cell.is_formula
+                                                                                            ? 'text-sky-700 font-medium'
+                                                                                            : cell.editable
+                                                                                                ? 'text-gray-900'
+                                                                                                : 'text-gray-500'
+                                                                                    }`}
+                                                                                >
+                                                                                    {cell.display_value || (cell.is_formula ? '\u2014' : '')}
                                                                                 </div>
                                                                             )}
                                                                         </td>
@@ -1881,6 +1899,22 @@ ${docSnippet}`;
                                                             ))}
                                                         </tbody>
                                                     </table>
+                                                </div>
+
+                                                {/* Legend */}
+                                                <div className="flex flex-wrap gap-4 text-xs text-gray-500">
+                                                    <span className="flex items-center gap-1.5">
+                                                        <span className="inline-block w-3 h-3 bg-white border border-gray-300 rounded-sm" />
+                                                        Editable
+                                                    </span>
+                                                    <span className="flex items-center gap-1.5">
+                                                        <span className="inline-block w-3 h-3 bg-sky-50 border border-gray-300 rounded-sm" />
+                                                        Formula (auto-calculated)
+                                                    </span>
+                                                    <span className="flex items-center gap-1.5">
+                                                        <span className="inline-block w-3 h-3 bg-gray-50 border border-gray-300 rounded-sm" />
+                                                        Read-only
+                                                    </span>
                                                 </div>
                                             </div>
                                         ) : documentContent ? (

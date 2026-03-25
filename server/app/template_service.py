@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from app.formula_evaluation import evaluate_workbook_formulas_safe
 from app.template_registry import (
     TEMPLATE_BUCKET,
     get_alternate_s3_keys,
@@ -283,7 +284,10 @@ class XLSXPopulator:
         # Save to bytes
         output = io.BytesIO()
         wb.save(output)
-        return output.getvalue()
+        populated_bytes = output.getvalue()
+
+        # Evaluate formulas so preview shows calculated values
+        return evaluate_workbook_formulas_safe(populated_bytes)
 
     @staticmethod
     def _insert_line_items(sheet, start_row: int, items: List[Dict]) -> None:
