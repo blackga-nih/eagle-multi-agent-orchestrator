@@ -430,6 +430,43 @@ def get_messages_for_anthropic(
     return anthropic_messages
 
 
+# ── Compaction State Persistence ─────────────────────────────────────
+# Stores/restores SummarizingConversationManager state so summaries
+# survive across requests within a session.
+
+def save_compaction_state(
+    session_id: str,
+    tenant_id: str,
+    user_id: str,
+    state: Dict[str, Any],
+) -> None:
+    """Persist conversation manager compaction state to the session record."""
+    update_session(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        updates={"compaction_state": json.dumps(state, default=str)},
+    )
+
+
+def load_compaction_state(
+    session_id: str,
+    tenant_id: str,
+    user_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Load conversation manager compaction state from the session record."""
+    session = get_session(session_id, tenant_id, user_id)
+    if not session:
+        return None
+    raw = session.get("compaction_state")
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
 # ── Usage Tracking ───────────────────────────────────────────────────
 
 def record_usage(

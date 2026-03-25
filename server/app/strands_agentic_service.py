@@ -33,6 +33,7 @@ from typing import Any, AsyncGenerator
 
 from botocore.config import Config
 from strands import Agent, tool
+from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models import BedrockModel
 from strands.models.model import CacheConfig
 
@@ -62,8 +63,9 @@ from .tools.web_search import exec_web_search
 logger = logging.getLogger("eagle.strands_agent")
 
 
-# -- Langfuse OTEL exporter (lazy, one-shot) --------------------------
+# -- Langfuse OTEL exporter + parent-span client (lazy, one-shot) -----
 _langfuse_injected = False
+_langfuse_client = None  # Langfuse SDK client for parent span wrapping
 
 
 def _ensure_langfuse_exporter():
@@ -71,8 +73,12 @@ def _ensure_langfuse_exporter():
 
     Must be called **before** the first ``Agent()`` so that the Agent's cached
     tracer references the real SDKTracerProvider (with the Langfuse exporter).
+
+    Also initializes the Langfuse SDK client for creating parent spans that
+    keep child spans properly nested (works around Strands SDK OTel context
+    detach issue — strands-agents/sdk-python#1316).
     """
-    global _langfuse_injected
+    global _langfuse_injected, _langfuse_client
     if _langfuse_injected:
         return
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
@@ -105,6 +111,17 @@ def _ensure_langfuse_exporter():
         _langfuse_injected = True
         logger.info("[EAGLE] Langfuse OTEL exporter injected → %s", endpoint)
         logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
+
+        # Initialize Langfuse SDK client for parent span wrapping.
+        # start_as_current_observation() creates a stable parent OTel span
+        # so Strands child spans inherit the correct trace_id even when
+        # ContextVar tokens fail to detach across async boundaries.
+        try:
+            from langfuse import get_client
+            _langfuse_client = get_client()
+            logger.info("[EAGLE] Langfuse SDK client initialized for parent span wrapping")
+        except Exception as client_exc:
+            logger.warning("[EAGLE] Langfuse SDK client init failed (tracing still works via OTLP): %s", client_exc)
     except Exception as exc:
         logger.warning("[EAGLE] Langfuse exporter injection failed: %s", exc)
 
@@ -331,6 +348,82 @@ TIER_BUDGETS = {
     "advanced": 0.25,
     "premium": 0.75,
 }
+
+# -- Conversation Compaction ------------------------------------------------
+# Uses Strands SDK's SummarizingConversationManager to summarize older context
+# on ContextWindowOverflowException instead of silently dropping it.
+# Bedrock native compaction (compact-2026-01-12) is InvokeModel-only, not Converse API.
+# See: https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html
+
+EAGLE_SUMMARIZATION_PROMPT = (
+    "You are a conversation summarizer for EAGLE, an AI acquisition assistant "
+    "for the NCI Office of Acquisitions. Provide a concise, structured summary "
+    "preserving all acquisition-critical context.\n\n"
+    "Format Requirements:\n"
+    "- You MUST create a structured summary in the format below.\n"
+    "- You MUST NOT respond conversationally or address the user.\n"
+    "- You MUST preserve ALL specific values (dollar amounts, FAR/DFARS references, "
+    "dates, names, NAICS codes, contract types).\n\n"
+    "## Acquisition Context\n"
+    "* Package ID: [if discussed]\n"
+    "* Requirement description: [what is being acquired]\n"
+    "* Estimated value: [dollar amount if mentioned]\n"
+    "* Contract type: [FFP, T&M, CR, CPFF, etc. if discussed]\n"
+    "* NAICS code: [if mentioned]\n"
+    "* Period of performance: [if discussed]\n\n"
+    "## Documents Generated or Discussed\n"
+    "* [doc_type]: [status - draft/final/revised] [key details]\n\n"
+    "## FAR/DFARS References Cited\n"
+    "* [FAR/DFARS clause numbers and their relevance]\n\n"
+    "## Research & Findings\n"
+    "* [Key market research findings, vendor names, pricing data]\n"
+    "* [Compliance decisions, threshold determinations]\n\n"
+    "## Key Decisions & Action Items\n"
+    "* [Decisions made during the conversation]\n"
+    "* [Outstanding items the user needs to address]\n\n"
+    "## Tools Executed\n"
+    "* [Tool name]: [Brief result summary]\n"
+)
+
+# Haiku model for low-cost summarization (used by SummarizingConversationManager).
+# Summarization is a straightforward text task — no need for Sonnet.
+_summarization_model = BedrockModel(
+    model_id=_HAIKU,
+    region_name=os.getenv("AWS_REGION", "us-east-1"),
+    boto_client_config=_bedrock_client_config,
+)
+
+_summarization_agent = Agent(
+    model=_summarization_model,
+    system_prompt=EAGLE_SUMMARIZATION_PROMPT,
+    tools=[],
+    callback_handler=None,
+)
+
+# Per-tier compaction aggressiveness and DynamoDB message load limits.
+# Basic: aggressive (lower budget). Premium: gentle (full context).
+_TIER_COMPACTION = {
+    "basic":    {"summary_ratio": 0.5, "preserve_recent": 8},
+    "advanced": {"summary_ratio": 0.4, "preserve_recent": 12},
+    "premium":  {"summary_ratio": 0.3, "preserve_recent": 15},
+}
+
+TIER_MESSAGE_LIMITS = {
+    "basic": 40,
+    "advanced": 80,
+    "premium": 100,
+}
+
+
+def _build_conversation_manager(tier: str) -> SummarizingConversationManager:
+    """Build a SummarizingConversationManager configured for the given tier."""
+    cfg = _TIER_COMPACTION.get(tier, _TIER_COMPACTION["advanced"])
+    return SummarizingConversationManager(
+        summary_ratio=cfg["summary_ratio"],
+        preserve_recent_messages=cfg["preserve_recent"],
+        summarization_agent=_summarization_agent,
+    )
+
 
 # Fast-path document generation for explicit "generate document" requests.
 # This avoids long multi-tool loops for straightforward document creation asks.
@@ -3453,7 +3546,22 @@ async def sdk_query(
     )
 
     # Convert conversation history to Strands format (excludes current prompt)
-    strands_history = _to_strands_messages(messages) if messages else None
+    strands_history = _to_strands_messages(messages) if messages else []
+
+    # Build conversation manager with compaction support
+    conv_manager = _build_conversation_manager(tier)
+
+    # Restore compaction state from prior requests (summary survives page reloads)
+    if session_id:
+        try:
+            from .session_store import load_compaction_state
+            compaction_state = load_compaction_state(session_id, tenant_id, user_id)
+            if compaction_state:
+                summary_prefix = conv_manager.restore_from_session(compaction_state) or []
+                if summary_prefix:
+                    strands_history = summary_prefix + strands_history
+        except Exception:
+            logger.warning("Failed to restore compaction state for session=%s, starting fresh", session_id)
 
     _ensure_langfuse_exporter()
     supervisor = Agent(
@@ -3461,7 +3569,8 @@ async def sdk_query(
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,
-        messages=strands_history,
+        messages=strands_history or None,
+        conversation_manager=conv_manager,
         trace_attributes=_build_trace_attrs(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -3472,9 +3581,64 @@ async def sdk_query(
         ),
     )
 
-    # Synchronous call -- Strands handles the agentic loop internally
-    result = supervisor(prompt)
-    result_text = str(result)
+    # Wrap invocation in a Langfuse parent span so child OTel spans
+    # (from Strands SDK) nest correctly — works around ContextVar detach
+    # issue (strands-agents/sdk-python#1316).
+    _lf_ctx = None
+    _root_span = None
+    trace_env = os.getenv("LANGFUSE_TRACE_ENV", "dev")
+    if _langfuse_client is not None and session_id:
+        try:
+            _lf_ctx = _langfuse_client.start_as_current_observation(
+                as_type="span",
+                name=f"eagle-query-{session_id[:8]}",
+            )
+            _root_span = _lf_ctx.__enter__()
+            _root_span.update(
+                metadata={"tenant_id": tenant_id, "tier": tier, "session_id": session_id},
+            )
+            _langfuse_client.propagate_attributes(
+                session_id=session_id,
+                user_id=username or user_id,
+                tags=[f"env:{trace_env}", f"tier:{tier}"],
+            )
+        except Exception as lf_exc:
+            logger.debug("Langfuse parent span setup failed (non-fatal): %s", lf_exc)
+            _lf_ctx = None
+            _root_span = None
+
+    try:
+        # Synchronous call -- Strands handles the agentic loop internally
+        result = supervisor(prompt)
+        result_text = str(result)
+
+        if _root_span is not None:
+            try:
+                _root_span.update(output=result_text[:500])
+            except Exception:
+                pass
+    finally:
+        if _lf_ctx is not None:
+            try:
+                _lf_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
+
+    # Persist compaction state if summarization occurred
+    if session_id:
+        try:
+            cm_state = conv_manager.get_state()
+            if cm_state.get("summary_message"):
+                from .session_store import save_compaction_state
+                await asyncio.to_thread(
+                    save_compaction_state, session_id, tenant_id, user_id, cm_state
+                )
+                logger.info(
+                    "Compaction: summarized %d messages for session=%s",
+                    conv_manager.removed_message_count, session_id,
+                )
+        except Exception:
+            logger.warning("Failed to persist compaction state for session=%s", session_id)
 
     # Explicitly register sessionId (and tags) in Langfuse via REST API.
     # OTEL span attribute langfuse.session.id is set, but Langfuse's OTEL
@@ -3665,7 +3829,22 @@ async def sdk_query_streaming(
         preloaded_context=_ctx_str or None,
     )
 
-    strands_history = _to_strands_messages(messages) if messages else None
+    strands_history = _to_strands_messages(messages) if messages else []
+
+    # Build conversation manager with compaction support
+    conv_manager = _build_conversation_manager(tier)
+
+    # Restore compaction state from prior requests (summary survives page reloads)
+    if session_id:
+        try:
+            from .session_store import load_compaction_state
+            compaction_state = load_compaction_state(session_id, tenant_id, user_id)
+            if compaction_state:
+                summary_prefix = conv_manager.restore_from_session(compaction_state) or []
+                if summary_prefix:
+                    strands_history = summary_prefix + strands_history
+        except Exception:
+            logger.warning("Failed to restore compaction state for session=%s, starting fresh", session_id)
 
     _ensure_langfuse_exporter()
     supervisor = Agent(
@@ -3673,7 +3852,8 @@ async def sdk_query_streaming(
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,  # stream_async yields events directly
-        messages=strands_history,
+        messages=strands_history or None,
+        conversation_manager=conv_manager,
         trace_attributes=_build_trace_attrs(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -3708,6 +3888,32 @@ async def sdk_query_streaming(
             except asyncio.QueueEmpty:
                 break
         return drained
+
+    # Wrap the entire streaming lifecycle in a Langfuse parent span so
+    # child OTel spans (from Strands SDK) nest correctly — works around
+    # ContextVar detach issue (strands-agents/sdk-python#1316).
+    _lf_ctx = None
+    _root_span = None
+    trace_env = os.getenv("LANGFUSE_TRACE_ENV", "dev")
+    if _langfuse_client is not None and session_id:
+        try:
+            _lf_ctx = _langfuse_client.start_as_current_observation(
+                as_type="span",
+                name=f"eagle-stream-{session_id[:8]}",
+            )
+            _root_span = _lf_ctx.__enter__()
+            _root_span.update(
+                metadata={"tenant_id": tenant_id, "tier": tier, "session_id": session_id},
+            )
+            _langfuse_client.propagate_attributes(
+                session_id=session_id,
+                user_id=username or user_id,
+                tags=[f"env:{trace_env}", f"tier:{tier}"],
+            )
+        except Exception as lf_exc:
+            logger.debug("Langfuse parent span setup failed (non-fatal): %s", lf_exc)
+            _lf_ctx = None
+            _root_span = None
 
     try:
         # Use a polling loop so we can drain result_queue every 0.5s
@@ -3833,8 +4039,21 @@ async def sdk_query_streaming(
                 agent_result = event["result"]
 
     except Exception as exc:
-        error_holder.append(exc)
-        logger.error("stream_async error: %s", exc)
+        from strands.types.exceptions import ContextWindowOverflowException
+        if isinstance(exc, ContextWindowOverflowException):
+            logger.error("Context window overflow unrecoverable for session=%s: %s", session_id, exc)
+            error_holder.append(exc)
+            yield {
+                "type": "text",
+                "data": (
+                    "This conversation has become very long. I've tried to summarize "
+                    "the earlier context but it's still too large. Please start a new "
+                    "session and I can continue helping you there."
+                ),
+            }
+        else:
+            error_holder.append(exc)
+            logger.error("stream_async error: %s", exc)
         # Classify and tag the Langfuse trace for filtering
         from .telemetry.langfuse_client import notify_trace_error
         notify_trace_error(session_id or "", str(exc))
@@ -3842,6 +4061,22 @@ async def sdk_query_streaming(
     # Final drain of any remaining tool results
     for tool_result_chunk in _drain_tool_results():
         yield tool_result_chunk
+
+    # Persist compaction state if summarization occurred during this request
+    if session_id:
+        try:
+            cm_state = conv_manager.get_state()
+            if cm_state.get("summary_message"):
+                from .session_store import save_compaction_state
+                await asyncio.to_thread(
+                    save_compaction_state, session_id, tenant_id, user_id, cm_state
+                )
+                logger.info(
+                    "Compaction: summarized %d messages for session=%s",
+                    conv_manager.removed_message_count, session_id,
+                )
+        except Exception:
+            logger.warning("Failed to persist compaction state for session=%s", session_id)
 
     # Extract usage from result
     usage = {}
@@ -3951,6 +4186,18 @@ async def sdk_query_streaming(
             "tools_called": tools_called,
             "usage": usage,
         }
+
+    # Close Langfuse parent span after all yields are done
+    if _root_span is not None:
+        try:
+            _root_span.update(output="".join(full_text_parts)[:500])
+        except Exception:
+            pass
+    if _lf_ctx is not None:
+        try:
+            _lf_ctx.__exit__(None, None, None)
+        except Exception:
+            pass
 
 
 async def sdk_query_single_skill(

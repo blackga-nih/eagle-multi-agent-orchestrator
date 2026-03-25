@@ -70,6 +70,13 @@
   animation-delay: 0.4s;
 }
 
+/* ── Message layout containment — isolates reflow per message ── */
+.msg-contain {
+  contain: content;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+
 /* ── Streaming cursor ── */
 .streaming-cursor::after {
   content: '▊';

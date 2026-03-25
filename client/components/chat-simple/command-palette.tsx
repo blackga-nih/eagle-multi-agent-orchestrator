@@ -100,7 +100,7 @@ export default function CommandPalette({ isOpen, onClose, onSelect }: CommandPal
             onClick={handleOverlayClick}
             className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] bg-black/30 backdrop-blur-sm animate-in fade-in duration-150"
         >
-            <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-200">
+            <div data-testid="modal-command-palette" className="w-[80vw] bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-200">
                 {/* Header */}
                 <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
                     <Command className="w-4 h-4 text-gray-400 shrink-0" />

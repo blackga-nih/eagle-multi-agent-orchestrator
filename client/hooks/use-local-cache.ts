@@ -22,7 +22,7 @@
  * code that reads from it directly (e.g., use-session-persistence.ts).
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
     getEagleDB,
     idbGetSession,
@@ -590,21 +590,43 @@ export function useLocalCache(
     // currentSession (synchronous read from localStorage)
     // ---------------------------------------------------------------------------
 
-    const currentSession = currentSessionId ? loadSession(currentSessionId) : null;
+    const currentSession = useMemo(
+        () => (currentSessionId ? loadSession(currentSessionId) : null),
+        // Re-derive when session list changes (title/status/message updates call setSessions)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [currentSessionId, sessions],
+    );
 
-    return {
-        sessions,
-        currentSessionId,
-        currentSession,
-        isLoading,
-        saveSession,
-        loadSession,
-        createNewSession,
-        deleteSession,
-        setCurrentSession,
-        markSessionComplete,
-        renameSession,
-        writeMessageOptimistic,
-        hydrateFromBackend,
-    };
+    return useMemo(
+        () => ({
+            sessions,
+            currentSessionId,
+            currentSession,
+            isLoading,
+            saveSession,
+            loadSession,
+            createNewSession,
+            deleteSession,
+            setCurrentSession,
+            markSessionComplete,
+            renameSession,
+            writeMessageOptimistic,
+            hydrateFromBackend,
+        }),
+        [
+            sessions,
+            currentSessionId,
+            currentSession,
+            isLoading,
+            saveSession,
+            loadSession,
+            createNewSession,
+            deleteSession,
+            setCurrentSession,
+            markSessionComplete,
+            renameSession,
+            writeMessageOptimistic,
+            hydrateFromBackend,
+        ],
+    );
 }

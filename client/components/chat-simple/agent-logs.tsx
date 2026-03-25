@@ -72,7 +72,7 @@ const SUBAGENT_TOOLS = new Set([
   'ingest_document', 'knowledge_retrieval',
 ]);
 
-function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
+export function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
   const entries: DisplayEntry[] = [];
   let textBuffer: AuditLogEntry[] = [];
   let textAgent: string | null = null;
@@ -222,7 +222,8 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden border border-[#D8DEE6]"
+        data-testid="modal-agent-logs"
+        className="bg-white rounded-xl shadow-2xl w-[80vw] max-h-[80vh] flex flex-col overflow-hidden border border-[#D8DEE6]"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -442,13 +443,6 @@ export default function AgentLogs({ logs }: AgentLogsProps) {
 
   return (
     <>
-      {/* Event count header */}
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">
-          {entries.length} event{entries.length !== 1 ? 's' : ''}
-        </span>
-      </div>
-
       {/* Timeline */}
       <div
         ref={scrollRef}

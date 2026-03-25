@@ -1,0 +1,200 @@
+# ─────────────────────────────────────────────────────────────
+# Nightly Triage
+# ─────────────────────────────────────────────────────────────
+#
+# Runs /triage full at 1 AM PST nightly via Claude Code CLI.
+# Scans BOTH dev and qa environments (matrix strategy).
+# Cross-references DynamoDB feedback, CloudWatch errors, and
+# Langfuse trace failures. Commits reports + fix plans to
+# docs/development/ and .claude/specs/.
+#
+# Codebase: always checks out main — fix plans reference
+# main-branch file paths so they're immediately actionable.
+#
+# Requirements:
+#   - CLAUDE_CODE_OAUTH_TOKEN  (Claude Code auth)
+#   - DEPLOY_ROLE_ARN          (AWS OIDC for CloudWatch + DynamoDB)
+#   - LANGFUSE_PUBLIC_KEY      (optional — skips Langfuse if unset)
+#   - LANGFUSE_SECRET_KEY      (optional)
+#   - LANGFUSE_PROJECT_ID      (optional)
+#
+# ─────────────────────────────────────────────────────────────
+
+name: Nightly Triage
+
+on:
+  schedule:
+    # 09:00 UTC = 1:00 AM PST / 2:00 AM PDT
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Environment (blank = both dev and qa)'
+        default: ''
+        type: choice
+        options:
+          - ''
+          - dev
+          - qa
+      time_window:
+        description: 'Time window to scan'
+        default: '24h'
+        type: choice
+        options:
+          - 1h
+          - 4h
+          - 24h
+          - 7d
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Schedule always scans both; workflow_dispatch can target one or both
+        env: ${{ github.event_name == 'schedule' && fromJSON('["dev","qa"]') || (inputs.env == '' && fromJSON('["dev","qa"]') || fromJSON(format('["{0}"]', inputs.env))) }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install Python dependencies
+        run: pip install boto3 httpx python-dotenv awslabs.cloudwatch-mcp-server
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Create server/.env for Langfuse + DynamoDB
+        run: |
+          cat > server/.env << EOF
+          LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PROJECT_ID=${{ secrets.LANGFUSE_PROJECT_ID }}
+          LANGFUSE_HOST=https://us.cloud.langfuse.com
+          TABLE_NAME=eagle
+          AWS_REGION=us-east-1
+          EOF
+
+      - name: Configure CloudWatch MCP server for CI
+        run: |
+          cat > .mcp.json << 'MCPEOF'
+          {
+            "mcpServers": {
+              "cloudwatch-mcp-server": {
+                "type": "stdio",
+                "command": "awslabs.cloudwatch-mcp-server",
+                "env": {
+                  "AWS_REGION": "us-east-1"
+                }
+              }
+            }
+          }
+          MCPEOF
+
+      - name: Run Claude Code Triage (${{ matrix.env }})
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          TRIAGE_ENV="${{ matrix.env }}"
+          TRIAGE_WINDOW="${{ inputs.time_window || '24h' }}"
+
+          claude -p --model claude-opus-4-6 --dangerously-skip-permissions << PROMPT
+          You are running in CI (GitHub Actions). Read .claude/commands/triage.md and follow its
+          Phase 1 through Phase 4 instructions to produce a FULL triage report.
+
+          Parameters:
+          - MODE: full
+          - TIME_WINDOW: ${TRIAGE_WINDOW}
+          - ENV: ${TRIAGE_ENV}
+          - TENANT_ID: default
+          - RESOLVED_TENANT: default-${TRIAGE_ENV}
+
+          IMPORTANT CI-specific notes:
+          1. AWS credentials are configured via OIDC — do NOT use --profile eagle.
+             boto3 and awscli will use environment credentials automatically.
+          2. For CloudWatch queries, use the MCP tool mcp__cloudwatch-mcp-server__execute_log_insights_query.
+             The MCP server is configured in .mcp.json. Pass region="us-east-1" (no profile_name).
+          3. For DynamoDB queries, use boto3 directly without profile.
+          4. For Langfuse, read server/.env for credentials. If keys are empty, skip Langfuse
+             and note the gap — continue with DynamoDB + CloudWatch only.
+          5. Write the triage report to docs/development/ and fix plan to .claude/specs/
+             using the naming conventions from CLAUDE.md.
+          6. Include "${TRIAGE_ENV}" in the report filename so dev and qa reports are distinct.
+          7. After generating files, print the filenames so CI can commit them.
+
+          Query log groups for ENV=${TRIAGE_ENV}:
+          - /eagle/ecs/backend-${TRIAGE_ENV}
+          - /eagle/ecs/frontend-${TRIAGE_ENV}
+          - /eagle/app
+
+          The fix plan should reference file paths from this checkout (main branch).
+          This ensures fixes are immediately actionable against the production codebase.
+          PROMPT
+
+      - name: Commit and push triage report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Stage any generated triage files
+          git add docs/development/*-report-triage-*.md 2>/dev/null || true
+          git add .claude/specs/*-plan-triage-*.md 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "::notice::No triage files generated — nothing to commit"
+          else
+            git commit -m "$(cat <<EOF
+          chore: nightly triage report — ${{ matrix.env }} ($(date -u +%Y-%m-%d))
+
+          Auto-generated by /triage full via GitHub Actions.
+          Environment: ${{ matrix.env }}
+          Cross-references DynamoDB feedback, CloudWatch errors, and Langfuse traces.
+
+          Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+          EOF
+          )"
+            git push
+            echo "::notice::Triage report committed and pushed"
+          fi
+
+      - name: Upload triage artifacts
+        if: always()
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
+        with:
+          name: triage-report-${{ matrix.env }}-${{ github.run_id }}
+          path: |
+            docs/development/*-report-triage-*.md
+            .claude/specs/*-plan-triage-*.md
+          retention-days: 30
+          if-no-files-found: warn

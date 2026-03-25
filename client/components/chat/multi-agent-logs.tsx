@@ -188,7 +188,8 @@ export default function MultiAgentLogs({ logs }: MultiAgentLogsProps) {
       {selectedLog && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeDetail}>
           <div
-            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+            data-testid="modal-multi-agent-logs"
+            className="bg-white rounded-2xl shadow-2xl w-[80vw] max-h-[80vh] overflow-hidden flex flex-col"
             onClick={e => e.stopPropagation()}
           >
             {/* Modal Header */}

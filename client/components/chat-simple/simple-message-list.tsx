@@ -93,6 +93,28 @@ const MemoizedMarkdown = memo(function MemoizedMarkdown({ content }: { content: 
     );
 });
 
+/**
+ * Streaming-optimized markdown: splits on paragraph boundaries so only the
+ * last (actively growing) block re-renders. Completed blocks are memoized.
+ */
+const StreamingMarkdown = memo(function StreamingMarkdown({ content }: { content: string }) {
+    const blocks = content.split(/\n\n+/);
+    return (
+        <>
+            {blocks.map((block, i) => {
+                const isLast = i === blocks.length - 1;
+                return isLast ? (
+                    <ReactMarkdown key={`sblock-${i}`} remarkPlugins={remarkPlugins} components={mdComponents}>
+                        {block + ' ...'}
+                    </ReactMarkdown>
+                ) : (
+                    <MemoizedMarkdown key={`sblock-${i}`} content={block} />
+                );
+            })}
+        </>
+    );
+});
+
 interface SimpleMessageListProps {
     messages: ChatMessage[];
     isTyping: boolean;
@@ -151,14 +173,33 @@ function InterleavedContent({
         (a, b) => (a.textSnapshotLength ?? 0) - (b.textSnapshotLength ?? 0)
     );
 
+    // Build segments: text blocks and groups of consecutive tool chips
     const segments: React.ReactNode[] = [];
     let cursor = 0;
+    let chipGroup: React.ReactNode[] = [];
+    let codeOutputs: React.ReactNode[] = [];
+
+    const flushChips = () => {
+        if (chipGroup.length > 0) {
+            segments.push(
+                <div key={`chips-${segments.length}`} className="flex flex-wrap gap-1.5 my-2">
+                    {chipGroup}
+                </div>
+            );
+            if (codeOutputs.length > 0) {
+                segments.push(...codeOutputs);
+                codeOutputs = [];
+            }
+            chipGroup = [];
+        }
+    };
 
     for (const tc of sorted) {
         const snapLen = tc.textSnapshotLength ?? 0;
 
-        // Text segment before this tool (if any new text since last cursor)
+        // Text segment before this tool — flush any pending chips first
         if (snapLen > cursor) {
+            flushChips();
             const textSlice = content.slice(cursor, snapLen).trim();
             if (textSlice) {
                 segments.push(
@@ -170,21 +211,25 @@ function InterleavedContent({
             cursor = snapLen;
         }
 
-        // Tool card
-        segments.push(
-            <div key={tc.toolUseId} className="my-1">
-                <ToolUseDisplay
-                    toolName={tc.toolName}
-                    input={tc.input}
-                    status={tc.status}
-                    result={tc.result}
-                    isClientSide={tc.isClientSide}
-                    sessionId={sessionId}
-                />
-                <CodeOutput tc={tc} />
-            </div>
+        // Accumulate tool chip into current group
+        chipGroup.push(
+            <ToolUseDisplay
+                key={tc.toolUseId}
+                toolName={tc.toolName}
+                input={tc.input}
+                status={tc.status}
+                result={tc.result}
+                isClientSide={tc.isClientSide}
+                sessionId={sessionId}
+            />
         );
+        // CodeOutput renders as a block below the chip group
+        const co = <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />;
+        if (tc.toolName === 'code') codeOutputs.push(co);
     }
+
+    // Flush remaining chips
+    flushChips();
 
     // Remaining text after all tools
     const remaining = content.slice(cursor).trim();
@@ -192,16 +237,13 @@ function InterleavedContent({
         segments.push(
             <div key="text-final" className="text-sm text-gray-800 leading-relaxed">
                 {isStreaming ? (
-                    <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
-                        {remaining + ' ...'}
-                    </ReactMarkdown>
+                    <StreamingMarkdown content={remaining} />
                 ) : (
                     <MemoizedMarkdown content={remaining} />
                 )}
             </div>
         );
     } else if (isStreaming) {
-        // Still streaming but no text after last tool yet — show cursor
         segments.push(
             <div key="text-streaming" className="text-sm text-gray-800 leading-relaxed">
                 <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
@@ -288,10 +330,21 @@ export default function SimpleMessageList({
 }: SimpleMessageListProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const prevCountRef = useRef(messages.length);
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, [messages, isTyping]);
+        const countChanged = messages.length !== prevCountRef.current;
+        prevCountRef.current = messages.length;
+        // Scroll on new message or when streaming finishes; skip mid-stream content updates
+        if (countChanged || !isTyping) {
+            requestAnimationFrame(() => {
+                messagesEndRef.current?.scrollIntoView({
+                    behavior: isTyping ? 'instant' : 'smooth',
+                    block: 'end',
+                });
+            });
+        }
+    }, [messages.length, isTyping]);
 
     const copyToClipboard = async (text: string, id: string) => {
         try {
@@ -313,7 +366,7 @@ export default function SimpleMessageList({
 
     return (
         <div className="flex-1 overflow-y-auto">
-            <div className="max-w-2xl mx-auto px-6 py-8 flex flex-col gap-8">
+            <div className="max-w-3xl mx-auto px-6 py-8 flex flex-col gap-8">
                 {messages.map((message, index) => {
                     const isLastMessage = index === lastIdx;
                     const isStreamingThis =
@@ -321,7 +374,7 @@ export default function SimpleMessageList({
 
                     if (message.role === 'user') {
                         return (
-                            <div key={message.id} className="flex flex-col items-end gap-0.5">
+                            <div key={message.id} className="msg-contain flex flex-col items-end gap-0.5">
                                 <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">
                                     You
                                 </span>
@@ -341,7 +394,7 @@ export default function SimpleMessageList({
                     const hasSnapshots = toolCalls.length > 0 && toolCalls.some(tc => tc.textSnapshotLength != null);
 
                     return (
-                        <div key={message.id} className="group flex flex-col gap-1.5">
+                        <div key={message.id} className="msg-contain group flex flex-col gap-1.5">
                             <span className="text-[10px] font-semibold text-[#003366] uppercase tracking-wider">
                                 🦅 Eagle
                             </span>
@@ -356,12 +409,13 @@ export default function SimpleMessageList({
                                 />
                             ) : (
                                 <>
-                                    {/* Legacy: tool cards above text (no snapshot data) */}
+                                    {/* Legacy: tool chips above text (no snapshot data) */}
                                     {toolCalls.length > 0 && (
-                                        <div className="flex flex-col gap-1 mb-1">
-                                            {toolCalls.map((tc) => (
-                                                <div key={tc.toolUseId}>
+                                        <>
+                                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                                {toolCalls.map((tc) => (
                                                     <ToolUseDisplay
+                                                        key={tc.toolUseId}
                                                         toolName={tc.toolName}
                                                         input={tc.input}
                                                         status={tc.status}
@@ -369,17 +423,17 @@ export default function SimpleMessageList({
                                                         isClientSide={tc.isClientSide}
                                                         sessionId={sessionId}
                                                     />
-                                                    <CodeOutput tc={tc} />
-                                                </div>
+                                                ))}
+                                            </div>
+                                            {toolCalls.filter(tc => tc.toolName === 'code').map(tc => (
+                                                <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />
                                             ))}
-                                        </div>
+                                        </>
                                     )}
 
                                     <div className="text-sm text-gray-800 leading-relaxed">
                                         {isStreamingThis ? (
-                                            <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
-                                                {message.content + ' ...'}
-                                            </ReactMarkdown>
+                                            <StreamingMarkdown content={message.content} />
                                         ) : (
                                             <MemoizedMarkdown content={message.content} />
                                         )}
@@ -420,12 +474,13 @@ export default function SimpleMessageList({
                             Eagle
                         </span>
 
-                        {/* Pending tool cards — rendered as they arrive from SSE */}
+                        {/* Pending tool chips — rendered as they arrive from SSE */}
                         {pendingToolCalls.length > 0 && (
-                            <div className="flex flex-col gap-1 mb-1">
-                                {pendingToolCalls.map((tc) => (
-                                    <div key={tc.toolUseId}>
+                            <>
+                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                    {pendingToolCalls.map((tc) => (
                                         <ToolUseDisplay
+                                            key={tc.toolUseId}
                                             toolName={tc.toolName}
                                             input={tc.input}
                                             status={tc.status}
@@ -433,10 +488,12 @@ export default function SimpleMessageList({
                                             isClientSide={tc.isClientSide}
                                             sessionId={sessionId}
                                         />
-                                        <CodeOutput tc={tc} />
-                                    </div>
+                                    ))}
+                                </div>
+                                {pendingToolCalls.filter(tc => tc.toolName === 'code').map(tc => (
+                                    <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />
                                 ))}
-                            </div>
+                            </>
                         )}
 
                         {/* Phase-aware status indicator */}

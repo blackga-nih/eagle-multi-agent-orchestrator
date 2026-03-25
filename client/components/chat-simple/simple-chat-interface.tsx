@@ -222,7 +222,7 @@ export default function SimpleChatInterface() {
     const addUserInputLog = useCallback((content: string) => {
         const entry: AuditLogEntry = {
             id: `log-${Date.now()}`,
-            type: 'text',
+            type: 'user_input',
             agent_id: 'user',
             agent_name: 'User',
             content,
@@ -418,7 +418,10 @@ export default function SimpleChatInterface() {
         textareaRef.current?.focus();
     };
 
-    const displayMessages = streamingMsg ? [...messages, streamingMsg] : messages;
+    const displayMessages = useMemo(
+        () => (streamingMsg ? [...messages, streamingMsg] : messages),
+        [messages, streamingMsg]
+    );
     const hasMessages = displayMessages.length > 0;
 
     // Merge local documents (uploads) with runtime documents (streaming)
@@ -641,7 +644,7 @@ export default function SimpleChatInterface() {
 
                 {/* Input footer */}
                 <footer className="bg-white border-t border-[#D8DEE6] px-6 py-3 shrink-0">
-                    <div className="max-w-3xl mx-auto">
+                    <div className="max-w-4xl mx-auto">
                         {error && (
                             <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
                                 {error}

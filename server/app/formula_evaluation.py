@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import io
 import logging
+import tempfile
+import os
 from typing import Tuple
 
 logger = logging.getLogger("eagle.formula_evaluation")
@@ -36,22 +38,57 @@ def evaluate_workbook_formulas(xlsx_bytes: bytes) -> Tuple[bytes, bool]:
         logger.warning("formulas library not installed, skipping evaluation")
         return xlsx_bytes, False
 
+    tmp_path = None
     try:
-        # Load workbook into formulas engine
-        xl_model = formulas.ExcelModel().loads(io.BytesIO(xlsx_bytes))
+        from openpyxl import load_workbook
+        import numpy as np
 
-        # Calculate all formulas
-        xl_model.calculate()
+        # formulas.ExcelModel requires a file path, not BytesIO
+        fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+        os.write(fd, xlsx_bytes)
+        os.close(fd)
 
-        # Save back to bytes with calculated values cached
+        # Load workbook into formulas engine and calculate
+        xl_model = formulas.ExcelModel().loads(tmp_path).finish()
+        solution = xl_model.calculate()
+
+        # Build a lookup from UPPER sheet name -> actual openpyxl sheet name
+        wb = load_workbook(tmp_path)
+        sheet_lookup = {name.upper(): name for name in wb.sheetnames}
+
+        # Write calculated values into the openpyxl workbook
+        for ref, value in solution.items():
+            # ref looks like "'[tmp.xlsx]CALCULATIONS'!C1"
+            try:
+                sheet_part, cell_ref = str(ref).rsplit("!", 1)
+                # Strip quotes and book name
+                sheet_name = sheet_part.strip("'")
+                if "]" in sheet_name:
+                    sheet_name = sheet_name.split("]", 1)[1]
+
+                actual_name = sheet_lookup.get(sheet_name.upper())
+                if not actual_name:
+                    continue
+
+                # Extract scalar from Ranges object
+                val = value.value[0, 0] if hasattr(value, "value") else value
+                # Convert numpy types to native Python
+                if isinstance(val, (np.integer,)):
+                    val = int(val)
+                elif isinstance(val, (np.floating,)):
+                    val = float(val)
+                elif isinstance(val, np.ndarray):
+                    val = val.item()
+
+                cell = wb[actual_name][cell_ref.upper()]
+                # Only overwrite formula cells with their computed value
+                if isinstance(cell.value, str) and cell.value.startswith("="):
+                    cell.value = val
+            except Exception:
+                continue  # skip unparseable refs
+
         output = io.BytesIO()
-
-        # The formulas library stores workbooks; get the first one
-        for book in xl_model.books.values():
-            book.save(output)
-            break  # Single workbook expected
-
-        output.seek(0)
+        wb.save(output)
         result_bytes = output.getvalue()
 
         # Validate we got valid output
@@ -64,6 +101,9 @@ def evaluate_workbook_formulas(xlsx_bytes: bytes) -> Tuple[bytes, bool]:
     except Exception as exc:
         logger.warning("Formula evaluation failed: %s", exc, exc_info=True)
         return xlsx_bytes, False
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def evaluate_workbook_formulas_safe(xlsx_bytes: bytes) -> bytes:
