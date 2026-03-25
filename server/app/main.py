@@ -218,18 +218,31 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTPExceptions — send webhook on 5xx, notify suspicious 404s on unknown routes."""
     if exc.status_code >= 500:
         notify_error(request=request, status_code=exc.status_code, exception=exc)
-    elif (
-        exc.status_code == 404
-        and request.url.path.startswith("/api/")
-        and exc.detail == "Not Found"  # Starlette default — unmatched route
-    ):
-        from .telemetry.log_context import _tenant_id, _user_id
-        notify_suspicious(
-            "404",
-            f"{request.method} {request.url.path}",
-            tenant_id=_tenant_id.get(""),
-            user_id=_user_id.get(""),
+    elif exc.status_code == 404:
+        # Only alert on truly unknown routes — Starlette uses exactly "Not Found"
+        # for unmatched paths. App-level 404s use specific messages like
+        # "Document not found", "Session not found", etc.
+        is_unknown_route = (
+            request.url.path.startswith("/api/")
+            and exc.detail == "Not Found"
         )
+        logger.info(
+            "http_404",
+            extra={
+                "path": request.url.path,
+                "method": request.method,
+                "detail": exc.detail,
+                "is_unknown_route": is_unknown_route,
+            },
+        )
+        if is_unknown_route:
+            from .telemetry.log_context import _tenant_id, _user_id
+            notify_suspicious(
+                "404",
+                f"{request.method} {request.url.path}",
+                tenant_id=_tenant_id.get(""),
+                user_id=_user_id.get(""),
+            )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
