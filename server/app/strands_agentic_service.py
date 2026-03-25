@@ -1724,6 +1724,10 @@ def _build_subagent_doc_tools(
             "output_format": output_format, "update_existing_key": update_existing_key,
             "template_id": template_id,
         }
+        logger.info(
+            "create_document_tool ENTRY (subagent): doc_type=%s title=%.80s package_id=%s content_len=%d",
+            doc_type, title, package_id, len(content or ""),
+        )
         try:
             # -- Micro-purchase guardrail (FAR 13.2) --
             _mp_block = _check_micropurchase_guardrail(parsed)
@@ -1737,6 +1741,7 @@ def _build_subagent_doc_tools(
 
             result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
+            logger.info("create_document_tool DONE (subagent): doc_type=%s", doc_type)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
             logger.error("Subagent create_document failed: %s", exc, exc_info=True)
@@ -2365,6 +2370,10 @@ def _build_all_service_tools(
             "output_format": output_format, "update_existing_key": update_existing_key,
             "template_id": template_id,
         }
+        logger.info(
+            "create_document_tool ENTRY (service): doc_type=%s title=%.80s package_id=%s content_len=%d session=%s",
+            doc_type, title, package_id, len(content or ""), session_id or "",
+        )
         try:
             # -- Micro-purchase guardrail (FAR 13.2) --
             _mp_block = _check_micropurchase_guardrail(parsed)
@@ -2504,6 +2513,11 @@ def _build_all_service_tools(
 
             result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
+            logger.info(
+                "create_document_tool DONE (service): doc_type=%s package_id=%s success=%s",
+                parsed.get("doc_type"), parsed.get("package_id"),
+                "error" not in (result if isinstance(result, dict) else {}),
+            )
 
             if result_queue and loop and isinstance(result, dict):
                 _emit_package_state(result, "create_document", tenant_id, result_queue, loop)
@@ -3922,6 +3936,11 @@ async def sdk_query_streaming(
         _stream_iter = supervisor.stream_async(prompt).__aiter__()
         _pending_next: asyncio.Task | None = None
         _stream_done = False
+        # Track when the last visible event was yielded so we can emit
+        # periodic "still working" status events during long tool input
+        # generation (prevents the UI from appearing hung).
+        _last_visible_yield = _time.perf_counter()
+        _STALE_STATUS_INTERVAL = 8.0  # seconds
 
         while not _stream_done:
             if _pending_next is None:
@@ -3932,8 +3951,16 @@ async def sdk_query_streaming(
             # Always drain queue (subagent callback events may have arrived)
             for tool_result_chunk in _drain_tool_results():
                 yield tool_result_chunk
+                _last_visible_yield = _time.perf_counter()
 
             if not done:
+                # Emit periodic status while waiting for model output
+                if (_time.perf_counter() - _last_visible_yield) > _STALE_STATUS_INTERVAL:
+                    _stale_detail = "Preparing documents..." if any(
+                        "create_document" in str(tc) for tc in tools_called
+                    ) else "Working..."
+                    yield {"type": "agent_status", "status": _stale_detail, "detail": "model_generating"}
+                    _last_visible_yield = _time.perf_counter()
                 continue  # Timeout — loop back to drain again
 
             try:
@@ -3957,6 +3984,7 @@ async def sdk_query_streaming(
             if data and isinstance(data, str):
                 full_text_parts.append(data)
                 yield {"type": "text", "data": data}
+                _last_visible_yield = _time.perf_counter()
                 continue
 
             # --- Tool use start ---
@@ -3993,6 +4021,7 @@ async def sdk_query_streaming(
                         "status": status_msg,
                         "detail": tool_name,
                     }
+                    _last_visible_yield = _time.perf_counter()
                 continue
 
             # --- Bedrock contentBlockStart fallback ---
@@ -4038,6 +4067,13 @@ async def sdk_query_streaming(
             if "result" in event and hasattr(event.get("result"), "metrics"):
                 agent_result = event["result"]
 
+    except GeneratorExit:
+        _elapsed = int((_time.perf_counter() - _agent_start) * 1000)
+        logger.warning(
+            "stream_async GeneratorExit (client disconnect): session=%s elapsed_ms=%d tools_called=%s",
+            session_id, _elapsed, tools_called,
+        )
+        return  # Stream was abandoned — skip cleanup yields
     except Exception as exc:
         from strands.types.exceptions import ContextWindowOverflowException
         if isinstance(exc, ContextWindowOverflowException):
