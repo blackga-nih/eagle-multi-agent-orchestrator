@@ -2661,6 +2661,12 @@ app.include_router(streaming_router)
 # HEALTH CHECK (frontend now served by Next.js on port 3000)
 # ══════════════════════════════════════════════════════════════════════
 
+@app.get("/api/ping")
+async def ping():
+    """Lightweight liveness probe — no I/O, no dependencies."""
+    return {"status": "healthy"}
+
+
 @app.get("/api/health")
 async def health_check():
     """Backend health check endpoint."""

@@ -154,13 +154,14 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Health check - pings FastAPI backend
+ * Health check - pings FastAPI backend via lightweight /api/ping endpoint.
+ * Uses a 10s timeout (single-worker dev uvicorn can stall under load).
  */
 export async function GET() {
   try {
-    const response = await fetch(`${FASTAPI_URL}/api/tools`, {
+    const response = await fetch(`${FASTAPI_URL}/api/ping`, {
       method: 'GET',
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(10000),
     });
 
     if (response.ok) {

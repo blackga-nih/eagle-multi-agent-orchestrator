@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { MessageSquare, FolderKanban, FileText, Layers, LayoutDashboard } from 'lucide-react';
 import { checkBackendHealth } from '@/hooks/use-agent-stream';
+import { useAuth } from '@/contexts/auth-context';
 
 const navLinks = [
     { href: '/chat', label: 'Chat', icon: <MessageSquare className="w-4 h-4" /> },
@@ -14,15 +15,29 @@ const navLinks = [
     { href: '/admin', label: 'Admin', icon: <LayoutDashboard className="w-4 h-4" /> },
 ];
 
+const CONSECUTIVE_FAILURES_THRESHOLD = 2;
+
 export default function SimpleHeader() {
     const pathname = usePathname();
+    const { isAuthenticated, user } = useAuth();
     const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
+    const failCount = useRef(0);
 
     useEffect(() => {
-        checkBackendHealth().then(setBackendConnected);
-        const interval = setInterval(() => {
-            checkBackendHealth().then(setBackendConnected);
-        }, 30000);
+        const check = async () => {
+            const ok = await checkBackendHealth();
+            if (ok) {
+                failCount.current = 0;
+                setBackendConnected(true);
+            } else {
+                failCount.current += 1;
+                if (failCount.current >= CONSECUTIVE_FAILURES_THRESHOLD) {
+                    setBackendConnected(false);
+                }
+            }
+        };
+        check();
+        const interval = setInterval(check, 30000);
         return () => clearInterval(interval);
     }, []);
 
@@ -49,20 +64,31 @@ export default function SimpleHeader() {
                         <p className="text-[11px] text-white/70 tracking-wide">Acquisition Assistant</p>
                     </div>
                 </div>
-                <div className="flex items-center justify-end gap-1.5">
-                    <span
-                        className={`inline-block w-2 h-2 rounded-full ${
-                            backendConnected === null
-                                ? 'bg-[#D4A843] animate-pulse'
-                                : backendConnected
-                                    ? 'bg-[#4CAF50]'
-                                    : 'bg-[#E53935]'
-                        }`}
-                        style={backendConnected ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
-                    />
-                    <span className="text-xs text-white/85">
-                        {backendConnected === null ? 'Connecting\u2026' : backendConnected ? 'Connected' : 'Offline'}
-                    </span>
+                <div className="flex items-center justify-end gap-3">
+                    {/* Backend status */}
+                    <div className="flex items-center gap-1" title={backendConnected === null ? 'Connecting to backend…' : backendConnected ? 'Backend connected' : 'Backend offline'}>
+                        <span
+                            className={`inline-block w-2 h-2 rounded-full ${
+                                backendConnected === null
+                                    ? 'bg-[#D4A843] animate-pulse'
+                                    : backendConnected
+                                        ? 'bg-[#4CAF50]'
+                                        : 'bg-[#E53935]'
+                            }`}
+                            style={backendConnected ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
+                        />
+                        <span className="text-xs text-white/85">API</span>
+                    </div>
+                    {/* Auth status */}
+                    <div className="flex items-center gap-1" title={isAuthenticated ? `Authenticated as ${user?.email}` : 'Not authenticated'}>
+                        <span
+                            className={`inline-block w-2 h-2 rounded-full ${
+                                isAuthenticated ? 'bg-[#4CAF50]' : 'bg-[#E53935]'
+                            }`}
+                            style={isAuthenticated ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
+                        />
+                        <span className="text-xs text-white/85">Auth</span>
+                    </div>
                 </div>
             </div>
 

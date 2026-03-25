@@ -17,7 +17,7 @@ const navLinks = [
 export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, isAuthenticated, signOut } = useAuth();
   const { backendConnected } = useBackendStatus();
 
   const isActive = (href: string) => {
@@ -69,20 +69,33 @@ export default function TopNav() {
 
       {/* Right: status + user + sign out */}
       <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5">
-          <span
-            className={`inline-block w-2 h-2 rounded-full ${
-              backendConnected === null
-                ? 'bg-[#D4A843] animate-pulse'
-                : backendConnected
-                  ? 'bg-[#4CAF50]'
-                  : 'bg-[#E53935]'
-            }`}
-            style={backendConnected ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
-          />
-          <span className="text-xs text-white/85">
-            {backendConnected === null ? 'Connecting\u2026' : backendConnected ? 'Connected' : 'Offline'}
-          </span>
+        <div className="flex items-center gap-2.5">
+          {/* Backend status */}
+          <div className="flex items-center gap-1" title={backendConnected === null ? 'Connecting to backend…' : backendConnected ? 'Backend connected' : 'Backend offline'}>
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                backendConnected === null
+                  ? 'bg-[#D4A843] animate-pulse'
+                  : backendConnected
+                    ? 'bg-[#4CAF50]'
+                    : 'bg-[#E53935]'
+              }`}
+              style={backendConnected ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
+            />
+            <span className="text-xs text-white/85">
+              {backendConnected === null ? 'API…' : backendConnected ? 'API' : 'API'}
+            </span>
+          </div>
+          {/* Auth status */}
+          <div className="flex items-center gap-1" title={isAuthenticated ? `Authenticated as ${user?.email}` : 'Not authenticated'}>
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                isAuthenticated ? 'bg-[#4CAF50]' : 'bg-[#E53935]'
+              }`}
+              style={isAuthenticated ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
+            />
+            <span className="text-xs text-white/85">Auth</span>
+          </div>
         </div>
 
         <span className="text-sm text-white/85">{displayName}</span>
