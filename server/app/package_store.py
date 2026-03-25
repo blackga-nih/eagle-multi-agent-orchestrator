@@ -569,8 +569,33 @@ def get_package_checklist(tenant_id: str, package_id: str) -> dict:
     }
 
 
+def start_finalization(tenant_id: str, package_id: str) -> Optional[dict]:
+    """Advance package status from drafting to finalizing.
+
+    Returns the updated package dict, or None if not found or in an
+    incompatible state.
+    """
+    pkg = get_package(tenant_id, package_id)
+    if pkg is None:
+        logger.warning(
+            "start_finalization: not found (tenant=%s, pkg=%s)", tenant_id, package_id
+        )
+        return None
+
+    if pkg.get("status") != "drafting":
+        logger.warning(
+            "start_finalization: invalid transition from %r (tenant=%s, pkg=%s)",
+            pkg.get("status"),
+            tenant_id,
+            package_id,
+        )
+        return None
+
+    return update_package(tenant_id, package_id, {"status": "finalizing"})
+
+
 def submit_package(tenant_id: str, package_id: str) -> Optional[dict]:
-    """Advance package status from drafting to review.
+    """Advance package status from drafting or finalizing to review.
 
     Returns the updated package dict, or None if not found or in an
     incompatible state.
@@ -582,7 +607,7 @@ def submit_package(tenant_id: str, package_id: str) -> Optional[dict]:
         )
         return None
 
-    if pkg.get("status") != "drafting":
+    if pkg.get("status") not in ("drafting", "finalizing"):
         logger.warning(
             "submit_package: invalid transition from %r (tenant=%s, pkg=%s)",
             pkg.get("status"),

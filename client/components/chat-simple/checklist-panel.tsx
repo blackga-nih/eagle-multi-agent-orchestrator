@@ -21,6 +21,16 @@ const DOC_LABELS: Record<string, string> = {
   'purchase-request': 'Purchase Request',
   eval_criteria: 'Evaluation Criteria',
   cor_certification: 'COR Certification',
+  'transmittal-memo': 'Transmittal Memo',
+};
+
+/** Phase-specific badge colors. */
+const PHASE_STYLES: Record<string, string> = {
+  intake: 'bg-blue-100 text-blue-800',
+  drafting: 'bg-amber-100 text-amber-800',
+  finalizing: 'bg-purple-100 text-purple-800',
+  review: 'bg-green-100 text-green-800',
+  approved: 'bg-emerald-100 text-emerald-800',
 };
 
 function docLabel(docType: string): string {
@@ -94,7 +104,7 @@ export function ChecklistTabContent({ state }: ChecklistPanelProps) {
           </p>
         )}
         {phase && (
-          <span className="inline-block mt-1 px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-800 font-medium">
+          <span className={`inline-block mt-1 px-2 py-0.5 text-[10px] rounded-full font-medium ${PHASE_STYLES[phase] || 'bg-blue-100 text-blue-800'}`}>
             {phase}
           </span>
         )}

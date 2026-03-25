@@ -67,6 +67,7 @@ function getDocTypeLabel(doc: DocumentInfo): string {
   if (t.includes('subk') || t.includes('subcontract')) return 'Subcontracting Plan';
   if (t.includes('conference')) return 'Conference Request';
   if (t.includes('buy') && t.includes('american')) return 'Buy American';
+  if (t.includes('transmittal') || t.includes('cover memo')) return 'Transmittal Memo';
   return raw.replace(/_/g, ' ');
 }
 
