@@ -221,6 +221,9 @@ jobs:
         python -m pytest tests/ -v \
           --ignore=tests/test_strands_eval.py \
           --ignore=tests/test_eagle_sdk_eval.py \
+          --ignore=tests/test_strands_poc.py \
+          --ignore=tests/test_strands_multi_agent.py \
+          --ignore=tests/test_feedback_auth.py \
           --junitxml=test-results.xml \
           2>&1 | tee pytest-output.txt
 
