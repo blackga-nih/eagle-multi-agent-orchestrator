@@ -93,6 +93,28 @@ const MemoizedMarkdown = memo(function MemoizedMarkdown({ content }: { content: 
     );
 });
 
+/**
+ * Streaming-optimized markdown: splits on paragraph boundaries so only the
+ * last (actively growing) block re-renders. Completed blocks are memoized.
+ */
+const StreamingMarkdown = memo(function StreamingMarkdown({ content }: { content: string }) {
+    const blocks = content.split(/\n\n+/);
+    return (
+        <>
+            {blocks.map((block, i) => {
+                const isLast = i === blocks.length - 1;
+                return isLast ? (
+                    <ReactMarkdown key={`sblock-${i}`} remarkPlugins={remarkPlugins} components={mdComponents}>
+                        {block + ' ...'}
+                    </ReactMarkdown>
+                ) : (
+                    <MemoizedMarkdown key={`sblock-${i}`} content={block} />
+                );
+            })}
+        </>
+    );
+});
+
 interface SimpleMessageListProps {
     messages: ChatMessage[];
     isTyping: boolean;
@@ -192,9 +214,7 @@ function InterleavedContent({
         segments.push(
             <div key="text-final" className="text-sm text-gray-800 leading-relaxed">
                 {isStreaming ? (
-                    <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
-                        {remaining + ' ...'}
-                    </ReactMarkdown>
+                    <StreamingMarkdown content={remaining} />
                 ) : (
                     <MemoizedMarkdown content={remaining} />
                 )}
@@ -288,10 +308,21 @@ export default function SimpleMessageList({
 }: SimpleMessageListProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const prevCountRef = useRef(messages.length);
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, [messages, isTyping]);
+        const countChanged = messages.length !== prevCountRef.current;
+        prevCountRef.current = messages.length;
+        // Scroll on new message or when streaming finishes; skip mid-stream content updates
+        if (countChanged || !isTyping) {
+            requestAnimationFrame(() => {
+                messagesEndRef.current?.scrollIntoView({
+                    behavior: isTyping ? 'instant' : 'smooth',
+                    block: 'end',
+                });
+            });
+        }
+    }, [messages.length, isTyping]);
 
     const copyToClipboard = async (text: string, id: string) => {
         try {
@@ -321,7 +352,7 @@ export default function SimpleMessageList({
 
                     if (message.role === 'user') {
                         return (
-                            <div key={message.id} className="flex flex-col items-end gap-0.5">
+                            <div key={message.id} className="msg-contain flex flex-col items-end gap-0.5">
                                 <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">
                                     You
                                 </span>
@@ -341,7 +372,7 @@ export default function SimpleMessageList({
                     const hasSnapshots = toolCalls.length > 0 && toolCalls.some(tc => tc.textSnapshotLength != null);
 
                     return (
-                        <div key={message.id} className="group flex flex-col gap-1.5">
+                        <div key={message.id} className="msg-contain group flex flex-col gap-1.5">
                             <span className="text-[10px] font-semibold text-[#003366] uppercase tracking-wider">
                                 🦅 Eagle
                             </span>
@@ -377,9 +408,7 @@ export default function SimpleMessageList({
 
                                     <div className="text-sm text-gray-800 leading-relaxed">
                                         {isStreamingThis ? (
-                                            <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
-                                                {message.content + ' ...'}
-                                            </ReactMarkdown>
+                                            <StreamingMarkdown content={message.content} />
                                         ) : (
                                             <MemoizedMarkdown content={message.content} />
                                         )}

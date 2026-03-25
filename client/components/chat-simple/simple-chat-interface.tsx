@@ -418,7 +418,10 @@ export default function SimpleChatInterface() {
         textareaRef.current?.focus();
     };
 
-    const displayMessages = streamingMsg ? [...messages, streamingMsg] : messages;
+    const displayMessages = useMemo(
+        () => (streamingMsg ? [...messages, streamingMsg] : messages),
+        [messages, streamingMsg]
+    );
     const hasMessages = displayMessages.length > 0;
 
     // Merge local documents (uploads) with runtime documents (streaming)

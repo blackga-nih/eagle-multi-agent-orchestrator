@@ -174,6 +174,9 @@ export class ChatStreamManager {
         let eventCount = 0;
         /** True after a tool_use/tool_result event — next text chunk needs a separator. */
         let toolBoundarySeen = false;
+        /** RAF-based batching: coalesce rapid text chunks into fewer React state updates. */
+        let pendingTextFlush = false;
+        let latestTextEvent: { reasoning?: string; agent_id?: string; agent_name?: string; timestamp: string } | null = null;
         const emittedDocKeys = new Set<string>();
         let shouldFetchDocs = false;
         const queryStartTime = new Date();
@@ -222,17 +225,27 @@ export class ChatStreamManager {
                 toolBoundarySeen = false;
                 accumulatedText += chunk;
                 if (!accumulatedText) return;
-                const message: Message = {
-                    id: streamingMsgId,
-                    role: 'assistant',
-                    content: accumulatedText,
-                    timestamp: new Date(event.timestamp),
-                    reasoning: event.reasoning,
-                    agent_id: event.agent_id,
-                    agent_name: event.agent_name,
-                };
-                lastAssistantMsgId = message.id;
-                dispatch({ type: 'generation/message', sessionId, requestId, message });
+                lastAssistantMsgId = streamingMsgId;
+                latestTextEvent = event;
+                // Batch rapid text chunks into a single React state update per animation frame
+                if (!pendingTextFlush) {
+                    pendingTextFlush = true;
+                    requestAnimationFrame(() => {
+                        pendingTextFlush = false;
+                        const ev = latestTextEvent;
+                        if (!ev) return;
+                        const message: Message = {
+                            id: streamingMsgId,
+                            role: 'assistant',
+                            content: accumulatedText,
+                            timestamp: new Date(ev.timestamp),
+                            reasoning: ev.reasoning,
+                            agent_id: ev.agent_id,
+                            agent_name: ev.agent_name,
+                        };
+                        dispatch({ type: 'generation/message', sessionId, requestId, message });
+                    });
+                }
             }
 
             // --- Tool use ---
