@@ -230,7 +230,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     if exc.status_code >= 500:
         notify_error(request=request, status_code=exc.status_code, exception=exc)
     elif exc.status_code == 404 and not _is_registered_route(request.url.path, request.method):
-        notify_suspicious("404", f"{request.method} {request.url.path}")
+        from .telemetry.log_context import _tenant_id, _user_id
+        notify_suspicious(
+            "404",
+            f"{request.method} {request.url.path}",
+            tenant_id=_tenant_id.get(""),
+            user_id=_user_id.get(""),
+        )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
