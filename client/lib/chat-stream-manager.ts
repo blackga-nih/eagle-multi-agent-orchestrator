@@ -17,6 +17,9 @@ import {
 } from '@/lib/client-tools';
 import { generateUUID } from '@/lib/uuid';
 import { saveGeneratedDocument } from '@/lib/document-store';
+import { saveCheckpoint, clearCheckpoint, type StreamingCheckpoint } from '@/lib/streaming-checkpoint';
+import type { TrackedToolCall } from '@/components/chat-simple/simple-chat-interface';
+import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 
 const API_URL = '/api/invoke';
 
@@ -185,6 +188,13 @@ export class ChatStreamManager {
         /** ID of the last committed assistant message (set in generation/message). */
         let lastAssistantMsgId: string | null = null;
 
+        // --- Streaming checkpoint tracking ---
+        const cpToolCalls = new Map<string, TrackedToolCall>();
+        const cpStateChanges: StateChangeEntry[] = [];
+        const cpDocuments: DocumentInfo[] = [];
+        let lastCheckpointTime = 0;
+        const CHECKPOINT_INTERVAL_MS = 2_000;
+
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         const token = await getToken();
         if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -202,6 +212,24 @@ export class ChatStreamManager {
         }
 
         const contentType = response.headers.get('content-type');
+
+        /** Write a checkpoint if enough time has elapsed. */
+        const maybeCheckpoint = () => {
+            const now = Date.now();
+            if (now - lastCheckpointTime < CHECKPOINT_INTERVAL_MS) return;
+            lastCheckpointTime = now;
+            const cp: StreamingCheckpoint = {
+                sessionId,
+                requestId,
+                streamingMsgId,
+                text: accumulatedText,
+                toolCalls: Array.from(cpToolCalls.values()),
+                stateChanges: cpStateChanges,
+                documents: cpDocuments,
+                updatedAt: now,
+            };
+            saveCheckpoint(cp);
+        };
 
         const processEvent = async (data: string) => {
             const event = parseStreamEvent(data);
@@ -229,6 +257,7 @@ export class ChatStreamManager {
                 if (!accumulatedText) return;
                 lastAssistantMsgId = streamingMsgId;
                 latestTextEvent = event;
+                maybeCheckpoint();
                 // Batch rapid text chunks into a single React state update per animation frame
                 if (!pendingTextFlush) {
                     pendingTextFlush = true;
@@ -271,6 +300,17 @@ export class ChatStreamManager {
                     },
                 });
 
+                // Track for checkpoint
+                cpToolCalls.set(toolUseId, {
+                    toolUseId,
+                    toolName,
+                    input: toolInput,
+                    status: isClientSide ? 'running' : 'pending',
+                    isClientSide,
+                    textSnapshotLength: accumulatedText.length,
+                });
+                maybeCheckpoint();
+
                 if (isClientSide) {
                     const result = await executeClientTool(toolName, toolInput, sessionId);
                     dispatch({
@@ -278,6 +318,12 @@ export class ChatStreamManager {
                         sessionId, requestId, msgId, toolUseId,
                         patch: { status: result.success ? 'done' : 'error', result },
                     });
+                    // Update checkpoint tracking
+                    const tracked = cpToolCalls.get(toolUseId);
+                    if (tracked) {
+                        tracked.status = result.success ? 'done' : 'error';
+                        tracked.result = result;
+                    }
                 }
             }
 
@@ -293,6 +339,16 @@ export class ChatStreamManager {
                     result: { success: true, result: tr.result },
                 });
 
+                // Update checkpoint: mark matching tool as done
+                for (const [id, tc] of cpToolCalls) {
+                    if (tc.toolName === tr.name && tc.status !== 'done') {
+                        tc.status = 'done';
+                        tc.result = { success: true, result: tr.result };
+                        break;
+                    }
+                }
+                maybeCheckpoint();
+
                 // Extract document info
                 const docInfo = parseDocumentToolResult(event);
                 if (docInfo) {
@@ -301,6 +357,7 @@ export class ChatStreamManager {
                     const attachTo = lastAssistantMsgId ?? streamingMsgId;
                     dispatch({ type: 'generation/document', sessionId, requestId, msgId: attachTo, document: docInfo });
                     onDocumentGenerated?.(sessionId, docInfo);
+                    cpDocuments.push(docInfo);
                 }
             }
 
@@ -319,29 +376,35 @@ export class ChatStreamManager {
             // --- State update metadata ---
             if (event.type === 'metadata' && event.metadata?.state_type) {
                 onStateUpdate?.(event.metadata as Record<string, unknown>);
+                const scEntry: StateChangeEntry = {
+                    stateType: String(event.metadata.state_type),
+                    packageId: event.metadata.package_id as string | undefined,
+                    phase: event.metadata.phase as string | undefined,
+                    title: event.metadata.title as string | undefined,
+                    acquisitionMethod: event.metadata.acquisition_method as string | undefined,
+                    contractType: event.metadata.contract_type as string | undefined,
+                    contractVehicle: event.metadata.contract_vehicle as string | undefined,
+                    checklist: event.metadata.checklist as { required: string[]; completed: string[] } | undefined,
+                    progressPct: event.metadata.progress_pct as number | undefined,
+                    textSnapshotLength: accumulatedText.length,
+                    timestamp: Date.now(),
+                };
                 dispatch({
                     type: 'generation/stateChange',
                     sessionId,
                     requestId,
                     msgId: streamingMsgId,
-                    stateChange: {
-                        stateType: String(event.metadata.state_type),
-                        packageId: event.metadata.package_id as string | undefined,
-                        phase: event.metadata.phase as string | undefined,
-                        title: event.metadata.title as string | undefined,
-                        acquisitionMethod: event.metadata.acquisition_method as string | undefined,
-                        contractType: event.metadata.contract_type as string | undefined,
-                        contractVehicle: event.metadata.contract_vehicle as string | undefined,
-                        checklist: event.metadata.checklist as { required: string[]; completed: string[] } | undefined,
-                        progressPct: event.metadata.progress_pct as number | undefined,
-                        textSnapshotLength: accumulatedText.length,
-                        timestamp: Date.now(),
-                    },
+                    stateChange: scEntry,
                 });
+                cpStateChanges.push(scEntry);
+                maybeCheckpoint();
             }
 
             // --- Complete ---
             if (event.type === 'complete') {
+                // Clear checkpoint — normal save path takes over
+                clearCheckpoint(sessionId);
+
                 const toolsCalled = event.metadata?.tools_called;
                 if (Array.isArray(toolsCalled) && toolsCalled.includes('create_document')) {
                     const expectedCount = toolsCalled.filter((t: string) => t === 'create_document').length;
@@ -365,6 +428,8 @@ export class ChatStreamManager {
 
             // --- Error ---
             if (event.type === 'error') {
+                // Keep checkpoint on error — partial text survives for recovery
+                maybeCheckpoint();
                 dispatch({ type: 'generation/error', sessionId, requestId, error: event.content || 'Unknown error' });
             }
         };

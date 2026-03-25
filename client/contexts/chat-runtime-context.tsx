@@ -76,7 +76,14 @@ export type ChatRuntimeAction =
     | { type: 'generation/complete'; sessionId: string; requestId: string; finalMessage?: ChatMessage }
     | { type: 'generation/error'; sessionId: string; requestId: string; error: string }
     | { type: 'generation/stopping'; sessionId: string }
-    | { type: 'generation/reset'; sessionId: string };
+    | { type: 'generation/reset'; sessionId: string }
+    | {
+        type: 'generation/restore';
+        sessionId: string;
+        toolCallsByMsg: ToolCallsByMessageId;
+        stateChangesByMsg: Record<string, StateChangeEntry[]>;
+        documentsByMsg: Record<string, DocumentInfo[]>;
+      };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -252,6 +259,33 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
                 ...state,
                 [sessionId]: makeIdle(sessionId),
             };
+
+        case 'generation/restore': {
+            // Bulk-load persisted tool calls, state changes, and documents
+            // without changing session status (stays idle). Bypasses stale-request
+            // guard since it has no requestId.
+            const mergedTools = { ...session.toolCallsByMsg };
+            for (const [msgId, calls] of Object.entries(action.toolCallsByMsg)) {
+                mergedTools[msgId] = [...(mergedTools[msgId] ?? []), ...calls];
+            }
+            const mergedStateChanges = { ...session.stateChangesByMsg };
+            for (const [msgId, entries] of Object.entries(action.stateChangesByMsg)) {
+                mergedStateChanges[msgId] = [...(mergedStateChanges[msgId] ?? []), ...entries];
+            }
+            const mergedDocs = { ...session.documentsByMsg };
+            for (const [msgId, docs] of Object.entries(action.documentsByMsg)) {
+                mergedDocs[msgId] = dedupeDocuments([...(mergedDocs[msgId] ?? []), ...docs]);
+            }
+            return {
+                ...state,
+                [sessionId]: {
+                    ...session,
+                    toolCallsByMsg: mergedTools,
+                    stateChangesByMsg: mergedStateChanges,
+                    documentsByMsg: mergedDocs,
+                },
+            };
+        }
 
         default:
             return state;

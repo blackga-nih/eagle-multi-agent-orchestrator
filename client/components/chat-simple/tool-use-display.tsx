@@ -6,7 +6,7 @@ import { DocumentInfo } from '@/types/chat';
 import { resolveResultPanel } from './tool-result-panels';
 import Modal from '@/components/ui/modal';
 
-export type ToolStatus = 'pending' | 'running' | 'done' | 'error';
+export type ToolStatus = 'pending' | 'running' | 'done' | 'error' | 'interrupted';
 
 interface ToolUseDisplayProps {
   toolName: string;
@@ -182,6 +182,9 @@ function StatusDot({ status }: { status: ToolStatus }) {
   if (status === 'error') {
     return <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />;
   }
+  if (status === 'interrupted') {
+    return <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />;
+  }
   return <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />;
 }
 
@@ -190,6 +193,7 @@ const STATUS_TEXT: Record<ToolStatus, string> = {
   running: 'Running…',
   done: 'Completed',
   error: 'Error',
+  interrupted: 'Interrupted',
 };
 
 // ── Chip border/bg by status ─────────────────────────────────────────
@@ -201,6 +205,8 @@ function chipClasses(status: ToolStatus): string {
       return 'border-blue-300 bg-blue-50 hover:bg-blue-100';
     case 'error':
       return 'border-red-300 bg-red-50 hover:bg-red-100';
+    case 'interrupted':
+      return 'border-amber-300 bg-amber-50 hover:bg-amber-100';
     case 'done':
       return 'border-[#D1D9E0] bg-[#F8FAFC] hover:bg-gray-100';
   }
@@ -351,6 +357,7 @@ export default function ToolUseDisplay({
       {/* ── Compact chip ── */}
       <button
         type="button"
+        data-testid="tool-chip"
         onClick={() => setModalOpen(true)}
         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs
                     cursor-pointer transition-colors select-none ${chipClasses(status)}`}
