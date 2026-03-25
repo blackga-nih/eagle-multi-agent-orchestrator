@@ -229,7 +229,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTPExceptions — send webhook on 5xx, notify suspicious 404s on unknown routes."""
     if exc.status_code >= 500:
         notify_error(request=request, status_code=exc.status_code, exception=exc)
-    elif exc.status_code == 404 and not _is_registered_route(request.url.path, request.method):
+    elif (
+        exc.status_code == 404
+        and request.url.path.startswith("/api/")
+        and not _is_registered_route(request.url.path, request.method)
+    ):
         from .telemetry.log_context import _tenant_id, _user_id
         notify_suspicious(
             "404",
