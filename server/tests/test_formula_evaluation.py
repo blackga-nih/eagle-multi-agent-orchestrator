@@ -102,8 +102,8 @@ class TestEvaluateWorkbookFormulas:
         # Note: B2 is a formula that evaluates to 10
         assert ws["C2"].value == 45
 
-    def test_preserves_original_formulas(self):
-        """Original formulas should still exist after evaluation."""
+    def test_replaces_formulas_with_computed_values(self):
+        """After evaluation, formula cells contain computed values."""
         xlsx_bytes = _build_formula_xlsx()
         result_bytes, _ = evaluate_workbook_formulas(xlsx_bytes)
 
@@ -112,10 +112,10 @@ class TestEvaluateWorkbookFormulas:
         wb = load_workbook(io.BytesIO(result_bytes), data_only=False)
         ws = wb.active
 
-        # Formulas should be preserved
-        assert ws["C1"].value == "=A1+B1"
-        assert ws["B2"].value == "=A2*2"
-        assert ws["C2"].value == "=SUM(A1:B2)"
+        # Formulas are replaced with their calculated values
+        assert ws["C1"].value == 30
+        assert ws["B2"].value == 10
+        assert ws["C2"].value == 45
 
     def test_handles_workbook_without_formulas(self):
         """Workbooks without formulas should pass through unchanged."""
