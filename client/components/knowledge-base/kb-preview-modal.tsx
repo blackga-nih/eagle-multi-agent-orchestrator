@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Loader2, ExternalLink } from 'lucide-react';
 import Badge, { BadgeVariant } from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
+import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import { useAuth } from '@/contexts/auth-context';
 import type { KBDocument } from './kb-document-list';
 
@@ -131,9 +132,9 @@ export default function KBPreviewModal({ document: doc, onClose }: KBPreviewModa
           </div>
         ) : content !== null ? (
           <>
-            <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-gray-50 rounded-lg p-4 max-h-[400px] overflow-y-auto font-mono leading-relaxed">
-              {content}
-            </pre>
+            <div className="bg-white rounded-xl border border-gray-200 p-6 max-h-[400px] overflow-y-auto">
+              <CollapsibleMarkdown content={content} />
+            </div>
             {truncated && (
               <p className="text-xs text-amber-600 mt-2">Content truncated (50KB limit)</p>
             )}
