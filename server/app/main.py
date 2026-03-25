@@ -213,12 +213,23 @@ async def request_timing_middleware(request: Request, call_next):
 from fastapi.responses import JSONResponse
 
 
+def _is_registered_route(path: str, method: str) -> bool:
+    """Return True if path matches a registered FastAPI endpoint."""
+    from fastapi.routing import APIRoute
+
+    for route in app.routes:
+        if isinstance(route, APIRoute) and route.path_regex.match(path):
+            if method.upper() in route.methods:
+                return True
+    return False
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Handle HTTPExceptions — send webhook on 5xx, notify suspicious 404s."""
+    """Handle HTTPExceptions — send webhook on 5xx, notify suspicious 404s on unknown routes."""
     if exc.status_code >= 500:
         notify_error(request=request, status_code=exc.status_code, exception=exc)
-    elif exc.status_code == 404 and request.url.path not in ("/api/health", "/favicon.ico"):
+    elif exc.status_code == 404 and not _is_registered_route(request.url.path, request.method):
         notify_suspicious("404", f"{request.method} {request.url.path}")
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
