@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { FileText, Bell, Terminal, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { FileText, Bell, Terminal, ClipboardCheck, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
 import AgentLogs, { buildDisplayEntries } from './agent-logs';
+import { ChecklistTabContent } from './checklist-panel';
+import type { PackageState } from '@/hooks/use-package-state';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,9 +20,10 @@ interface ActivityPanelProps {
   isStreaming: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  packageState?: PackageState;
 }
 
-type TabId = 'documents' | 'notifications' | 'logs';
+type TabId = 'package' | 'documents' | 'notifications' | 'logs';
 
 interface TabDef {
   id: TabId;
@@ -29,6 +32,7 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
+  { id: 'package',       label: 'Package',       icon: ClipboardCheck },
   { id: 'documents',     label: 'Documents',     icon: FileText },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'logs',          label: 'Agent Logs',    icon: Terminal },
@@ -259,13 +263,15 @@ export default function ActivityPanel({
   isStreaming,
   isOpen,
   onToggle,
+  packageState,
 }: ActivityPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('logs');
+  const [activeTab, setActiveTab] = useState<TabId>('package');
 
   const docCount = Object.values(documents).flat().length;
   const logDisplayCount = useMemo(() => buildDisplayEntries(logs).length, [logs]);
-
   const notifCount = docCount;
+  const packageRequired = packageState?.checklist?.required?.length ?? 0;
+  const packageCompleted = packageState?.checklist?.completed?.length ?? 0;
 
   // Collapsed strip
   if (!isOpen) {
@@ -287,6 +293,7 @@ export default function ActivityPanel({
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const badge =
+            tab.id === 'package' && packageRequired > 0 ? `${packageCompleted}/${packageRequired}` :
             tab.id === 'logs' && logDisplayCount > 0 ? logDisplayCount :
             tab.id === 'documents' && docCount > 0 ? docCount :
             tab.id === 'notifications' && notifCount > 0 ? notifCount :
@@ -304,7 +311,7 @@ export default function ActivityPanel({
             >
               <Icon className="w-3.5 h-3.5" />
               {tab.label}
-              {badge > 0 && (
+              {(typeof badge === 'string' || badge > 0) && (
                 <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] bg-[#003366] text-white font-bold min-w-[18px] text-center">
                   {badge}
                 </span>
@@ -341,6 +348,16 @@ export default function ActivityPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
+        {activeTab === 'package' && packageState && <ChecklistTabContent state={packageState} />}
+        {activeTab === 'package' && !packageState && (
+          <div className="flex flex-col items-center justify-center h-48 text-center px-4">
+            <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+              <ClipboardCheck className="w-5 h-5 text-gray-400" />
+            </div>
+            <p className="text-sm text-gray-500">No active package.</p>
+            <p className="text-xs text-gray-400 mt-1">Start an acquisition intake to track required documents here.</p>
+          </div>
+        )}
         {activeTab === 'documents' && <DocumentsTab documents={documents} sessionId={sessionId} />}
         {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
         {activeTab === 'logs' && <AgentLogs logs={logs} />}

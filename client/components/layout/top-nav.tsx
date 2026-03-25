@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, MessageSquare, FolderKanban, FileText, LayoutDashboard, Layers, Settings } from 'lucide-react';
+import { LogOut, MessageSquare, FolderKanban, FileText, BookOpen, LayoutDashboard, Layers, Settings } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useBackendStatus } from '@/contexts/backend-status-context';
 import { useSettings } from '@/contexts/settings-context';
@@ -12,6 +12,7 @@ const allNavLinks = [
   { href: '/chat', label: 'Chat', icon: <MessageSquare className="w-4 h-4" />, admin: false },
   { href: '/workflows', label: 'Packages', icon: <FolderKanban className="w-4 h-4" />, admin: false },
   { href: '/documents', label: 'Documents', icon: <FileText className="w-4 h-4" />, admin: false },
+  { href: '/knowledge-base', label: 'Knowledge Base', icon: <BookOpen className="w-4 h-4" />, admin: false },
   { href: '/admin/workspaces', label: 'Workspaces', icon: <Layers className="w-4 h-4" />, admin: true },
   { href: '/admin', label: 'Admin', icon: <LayoutDashboard className="w-4 h-4" />, admin: true },
 ];

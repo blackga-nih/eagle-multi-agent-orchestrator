@@ -20,7 +20,6 @@ import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
 import ActivityPanel from './activity-panel';
-import { ChecklistPanel } from './checklist-panel';
 import ChatUploadButton from './chat-upload-button';
 import PackageSelectorModal from './package-selector-modal';
 import { UploadResult, assignToPackage } from '@/lib/document-api';
@@ -733,10 +732,7 @@ export default function SimpleChatInterface() {
                 </footer>
             </div>
 
-            {/* Right: package checklist panel (only when package state active) */}
-            <ChecklistPanel state={packageState} />
-
-            {/* Right: activity panel */}
+            {/* Right: activity panel (includes package checklist as default tab) */}
             <ActivityPanel
                 logs={logs}
                 clearLogs={clearLogs}
@@ -745,6 +741,7 @@ export default function SimpleChatInterface() {
                 isStreaming={isStreaming}
                 isOpen={isPanelOpen}
                 onToggle={() => setIsPanelOpen(v => !v)}
+                packageState={packageState}
             />
 
             {/* Package selector modal for uploaded documents */}

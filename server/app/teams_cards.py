@@ -409,9 +409,12 @@ def suspicious_card(
     user_id: str = "",
 ) -> dict:
     """Build an Adaptive Card for suspicious activity."""
+    from datetime import datetime, timezone
+
     facts = [
         {"title": "Event", "value": event_type},
-        {"title": "Detail", "value": detail},
+        {"title": "Detail", "value": detail or "(no path)"},
+        {"title": "Time", "value": datetime.now(timezone.utc).strftime("%H:%M:%S UTC")},
     ]
     if tenant_id:
         facts.append({"title": "Tenant", "value": tenant_id})
