@@ -119,6 +119,33 @@ class TestSkillToolsBuild:
 
         assert len(result) >= 1
 
+    def test_workspace_override_store_is_used_for_skill_prompts(self):
+        """Workspace overrides should be resolved from workspace_override_store."""
+        from app.strands_agentic_service import build_skill_tools
+
+        fake_registry = {
+            "test-skill": {
+                "skill_key": "skills/test-skill/SKILL.md",
+                "description": "Test specialist",
+            }
+        }
+        fake_contents = {
+            "skills/test-skill/SKILL.md": {"body": "Bundled prompt"}
+        }
+
+        with mock.patch("app.strands_agentic_service.SKILL_AGENT_REGISTRY", fake_registry), \
+             mock.patch("app.strands_agentic_service.PLUGIN_CONTENTS", fake_contents), \
+             mock.patch(
+                 "app.workspace_override_store.resolve_skill",
+                 return_value=("Workspace override prompt", "workspace"),
+             ) as mock_resolve:
+            result = build_skill_tools(
+                tier=TIER, tenant_id=TENANT, user_id=USER, workspace_id=WORKSPACE_ID,
+            )
+
+        assert len(result) == 1
+        mock_resolve.assert_called_once_with(TENANT, USER, WORKSPACE_ID, "test-skill")
+
 
 # ---------------------------------------------------------------------------
 # 3. Supervisor Direct Handling
@@ -136,6 +163,24 @@ class TestSupervisorDirectHandling:
         prompt = self._get_prompt()
         assert "delegate" in prompt.lower() or "specialist" in prompt.lower()
 
+    def test_workspace_override_store_is_used_for_supervisor_prompt(self):
+        from app.strands_agentic_service import _build_supervisor_prompt_body
+
+        with mock.patch(
+            "app.workspace_override_store.resolve_agent",
+            return_value=("Workspace supervisor prompt", "workspace"),
+        ) as mock_resolve:
+            prompt = _build_supervisor_prompt_body(
+                tenant_id=TENANT,
+                user_id=USER,
+                tier=TIER,
+                agent_names=[],
+                workspace_id=WORKSPACE_ID,
+            )
+
+        assert prompt.startswith("Workspace supervisor prompt")
+        mock_resolve.assert_called_once_with(TENANT, USER, WORKSPACE_ID, "supervisor")
+
     @staticmethod
     def _get_prompt() -> str:
         from app.strands_agentic_service import build_supervisor_prompt
@@ -145,7 +190,108 @@ class TestSupervisorDirectHandling:
 
 
 # ---------------------------------------------------------------------------
-# 4. Async Generator Pattern
+# 4. Package / Document Tool Extraction
+# ---------------------------------------------------------------------------
+
+class TestPackageDocumentTools:
+    """Verify extracted package/document handlers keep expected behaviour."""
+
+    def test_get_latest_document_returns_document_and_recent_changes(self):
+        from app.tools.package_document_tools import exec_get_latest_document
+
+        fake_document = {
+            "doc_type": "sow",
+            "version": 3,
+            "title": "Test SOW",
+            "status": "draft",
+            "created_at": "2026-03-25T00:00:00Z",
+            "s3_key": "eagle/test/pkg/sow_v3.md",
+        }
+        fake_changes = [
+            {
+                "change_type": "update",
+                "change_summary": "Updated scope",
+                "actor_user_id": USER,
+                "created_at": "2026-03-25T01:00:00Z",
+            }
+        ]
+
+        with mock.patch("app.document_store.get_document", return_value=fake_document), \
+             mock.patch("app.changelog_store.list_changelog_entries", return_value=fake_changes):
+            result = exec_get_latest_document(
+                {"package_id": "pkg-1", "doc_type": "sow"},
+                TENANT,
+            )
+
+        assert result["document"]["version"] == 3
+        assert result["recent_changes"][0]["change_summary"] == "Updated scope"
+
+    def test_manage_package_create_extracts_owner_from_session(self):
+        from app.tools.package_document_tools import exec_manage_package
+
+        with mock.patch("app.package_store.create_package", return_value={"package_id": "pkg-1"}) as mock_create:
+            result = exec_manage_package(
+                {
+                    "operation": "create",
+                    "title": "Test Package",
+                    "requirement_type": "services",
+                    "estimated_value": 1000,
+                },
+                TENANT,
+                f"{TENANT}#{TIER}#{USER}#session-1",
+            )
+
+        assert result["package_id"] == "pkg-1"
+        assert mock_create.call_args.kwargs["owner_user_id"] == USER
+
+
+class TestFarSearchTool:
+    """Verify extracted FAR search handler keeps expected fallback behaviour."""
+
+    def test_search_far_returns_default_clause_when_no_results(self):
+        from app.tools.far_search import exec_search_far
+
+        with mock.patch("app.compliance_matrix.search_far", return_value=[]):
+            result = exec_search_far({"query": "nonexistent"}, TENANT)
+
+        assert result["results_count"] == 1
+        assert result["clauses"][0]["section"] == "1.102"
+
+
+class TestLegacyDispatchExtraction:
+    """Verify legacy dispatch now prefers active tool modules for migrated tools."""
+
+    def test_dispatch_uses_active_package_document_handler(self):
+        from app.tools.legacy_dispatch import get_tool_dispatch
+        from app.tools.package_document_tools import exec_get_latest_document
+
+        dispatch = get_tool_dispatch()
+        assert dispatch["get_latest_document"] is exec_get_latest_document
+
+    def test_dispatch_uses_active_far_search_handler(self):
+        from app.tools.legacy_dispatch import get_tool_dispatch
+        from app.tools.far_search import exec_search_far
+
+        dispatch = get_tool_dispatch()
+        assert dispatch["search_far"] is exec_search_far
+
+    def test_dispatch_uses_active_admin_handler(self):
+        from app.tools.admin_tools import exec_manage_prompts
+        from app.tools.legacy_dispatch import get_tool_dispatch
+
+        dispatch = get_tool_dispatch()
+        assert dispatch["manage_prompts"] is exec_manage_prompts
+
+    def test_dispatch_uses_active_docx_edit_handler(self):
+        from app.tools.docx_edit_tool import exec_edit_docx_document
+        from app.tools.legacy_dispatch import get_tool_dispatch
+
+        dispatch = get_tool_dispatch()
+        assert dispatch["edit_docx_document"] is exec_edit_docx_document
+
+
+# ---------------------------------------------------------------------------
+# 5. Async Generator Pattern
 # ---------------------------------------------------------------------------
 
 class TestAsyncGenerator:
@@ -159,7 +305,7 @@ class TestAsyncGenerator:
 
 
 # ---------------------------------------------------------------------------
-# 5. Cache Reload Wiring
+# 6. Cache Reload Wiring
 # ---------------------------------------------------------------------------
 
 class TestCacheReload:

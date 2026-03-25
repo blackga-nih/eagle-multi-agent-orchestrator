@@ -13,7 +13,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import boto3
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..admin_auth import get_admin_user, verify_tenant_admin
@@ -23,6 +22,7 @@ from ..audit_store import write_audit
 from ..cognito_auth import UserContext
 from ..config_store import delete_config, list_config, put_config, _config_cache
 from ..cost_attribution import CostAttributionService
+from ..db_client import get_dynamodb, get_s3
 from ..models import SubscriptionTier
 from ..plugin_store import (
     _entity_cache as _plugin_cache,
@@ -41,6 +41,8 @@ logger = logging.getLogger("eagle")
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
+GENERIC_ANALYTICS_ERROR = "Analytics data is temporarily unavailable."
+
 # Service instances
 cost_service = CostAttributionService()
 admin_cost_service = AdminCostService()
@@ -55,7 +57,7 @@ _S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
 
 
 def _get_dynamo():
-    return boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+    return get_dynamodb()
 
 
 def _apply_json_patch(obj: dict, patch: list) -> dict:
@@ -189,6 +191,20 @@ def _langfuse_url(trace_id: str) -> str:
     return langfuse_trace_url(trace_id)
 
 
+def _get_result_error(result: Any) -> Optional[str]:
+    if isinstance(result, dict):
+        error = result.get("error")
+        if isinstance(error, str) and error:
+            return error
+    return None
+
+
+def _sanitize_result_error(result: Dict[str, Any], fallback_error: str) -> Dict[str, Any]:
+    sanitized = dict(result)
+    sanitized["error"] = fallback_error
+    return sanitized
+
+
 # ══════════════════════════════════════════════════════════════════════
 # KB REVIEW ENDPOINTS
 # ══════════════════════════════════════════════════════════════════════
@@ -231,7 +247,7 @@ async def api_approve_kb_review(
     bucket = _S3_BUCKET
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
-    s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+    s3 = get_s3()
 
     pk = f"KB_REVIEW#{review_id}"
     try:
@@ -295,7 +311,7 @@ async def api_reject_kb_review(
     bucket = _S3_BUCKET
     ddb = _get_dynamo()
     table = ddb.Table(table_name)
-    s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+    s3 = get_s3()
 
     pk = f"KB_REVIEW#{review_id}"
     try:
@@ -436,7 +452,9 @@ async def api_admin_tools(
 async def api_check_rate_limit(user: UserContext = Depends(get_user_from_header)):
     """Check current rate limit status."""
     tenant_id, user_id, _ = get_session_context(user)
-    return check_rate_limit(tenant_id, user_id, user.tier)
+    result = check_rate_limit(tenant_id, user_id, user.tier)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 # ══════════════════════════════════════════════════════════════════════

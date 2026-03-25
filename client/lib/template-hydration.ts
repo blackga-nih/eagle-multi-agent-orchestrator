@@ -7,7 +7,7 @@
  * context so documents are always context-aware.
  */
 
-import { AcquisitionData } from '@/components/chat/chat-interface';
+import { AcquisitionData } from '@/types/schema';
 
 export interface HydrationContext {
     requirement?: string;

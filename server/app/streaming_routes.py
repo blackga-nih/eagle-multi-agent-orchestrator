@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import time
+from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Optional
 from pydantic import BaseModel
 
@@ -25,7 +26,7 @@ from .cognito_auth import extract_user_context
 from .stream_protocol import MultiAgentStreamWriter
 from .models import ChatMessage
 from .subscription_service import SubscriptionService
-from .strands_agentic_service import sdk_query_streaming, MODEL, EAGLE_TOOLS
+from . import strands_agentic_service
 from .session_store import add_message
 from .package_context_service import resolve_context, set_active_package
 from .telemetry.log_context import set_log_context
@@ -35,6 +36,20 @@ import os
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
 
 logger = logging.getLogger(__name__)
+
+# Compatibility aliases retained for tests that patch module-level runtime symbols.
+sdk_query_streaming = strands_agentic_service.sdk_query_streaming
+MODEL = strands_agentic_service.MODEL
+EAGLE_TOOLS = strands_agentic_service.EAGLE_TOOLS
+
+
+def _get_strands_runtime():
+    """Compatibility accessor for tests that patch the streaming runtime."""
+    return SimpleNamespace(
+        sdk_query_streaming=sdk_query_streaming,
+        MODEL=MODEL,
+        EAGLE_TOOLS=EAGLE_TOOLS,
+    )
 
 
 class GenerateTitleRequest(BaseModel):
@@ -158,7 +173,8 @@ async def stream_generator(
     KEEPALIVE_INTERVAL = 20.0
 
     async def _sdk_with_keepalive():
-        gen = sdk_query_streaming(
+        runtime = _get_strands_runtime()
+        gen = runtime.sdk_query_streaming(
             prompt=message,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -612,7 +628,7 @@ def create_streaming_router(
             "service": "EAGLE – NCI Acquisition Assistant",
             "version": "4.0.0",
             "git_sha": os.getenv("GIT_SHA", "unknown"),
-            "model": MODEL,
+            "model": _get_strands_runtime().MODEL,
             "services": {
                 "bedrock": True,
                 "dynamodb": True,
@@ -639,7 +655,7 @@ def create_streaming_router(
                     "status": "online",
                 },
             ],
-            "tools": [tool["name"] for tool in EAGLE_TOOLS],
+            "tools": [tool["name"] for tool in _get_strands_runtime().EAGLE_TOOLS],
             "features": {
                 "persistent_sessions": os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true",
                 "auth_required": os.getenv("REQUIRE_AUTH", "false").lower() == "true",

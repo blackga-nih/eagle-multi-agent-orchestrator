@@ -73,7 +73,7 @@ def put_override(
 
     try:
         get_table().put_item(Item=item)
-        logger.debug("wspc_store.put_override: [%s/%s/%s] %s#%s v%s", tenant_id, user_id, workspace_id, entity_type, name, version)
+        logger.debug("workspace_override_store.put_override: [%s/%s/%s] %s#%s v%s", tenant_id, user_id, workspace_id, entity_type, name, version)
 
         # Keep workspace override_count accurate
         if not existing:
@@ -81,7 +81,7 @@ def put_override(
             increment_override_count(tenant_id, user_id, workspace_id, delta=1)
 
     except (ClientError, BotoCoreError) as e:
-        logger.error("wspc_store.put_override failed [%s#%s]: %s", entity_type, name, e)
+        logger.error("workspace_override_store.put_override failed [%s#%s]: %s", entity_type, name, e)
 
     return item
 
@@ -104,7 +104,7 @@ def get_override(
         item = resp.get("Item")
         return dict(item) if item else None
     except (ClientError, BotoCoreError) as e:
-        logger.error("wspc_store.get_override failed [%s#%s]: %s", entity_type, name, e)
+        logger.error("workspace_override_store.get_override failed [%s#%s]: %s", entity_type, name, e)
         return None
 
 
@@ -133,7 +133,7 @@ def list_overrides(
             )
         return [dict(i) for i in resp.get("Items", [])]
     except (ClientError, BotoCoreError) as e:
-        logger.error("wspc_store.list_overrides failed [%s/%s/%s]: %s", tenant_id, user_id, workspace_id, e)
+        logger.error("workspace_override_store.list_overrides failed [%s/%s/%s]: %s", tenant_id, user_id, workspace_id, e)
         return []
 
 
@@ -158,10 +158,10 @@ def delete_override(
         )
         from .workspace_store import increment_override_count
         increment_override_count(tenant_id, user_id, workspace_id, delta=-1)
-        logger.debug("wspc_store.delete_override: [%s#%s] — reset to default", entity_type, name)
+        logger.debug("workspace_override_store.delete_override: [%s#%s] — reset to default", entity_type, name)
         return True
     except (ClientError, BotoCoreError) as e:
-        logger.error("wspc_store.delete_override failed [%s#%s]: %s", entity_type, name, e)
+        logger.error("workspace_override_store.delete_override failed [%s#%s]: %s", entity_type, name, e)
         return False
 
 
@@ -187,7 +187,7 @@ def delete_all_overrides(
     if deleted:
         from .workspace_store import update_workspace
         update_workspace(tenant_id, user_id, workspace_id, {"override_count": 0})
-        logger.info("wspc_store.delete_all_overrides: cleared %d overrides for [%s/%s/%s]", deleted, tenant_id, user_id, workspace_id)
+        logger.info("workspace_override_store.delete_all_overrides: cleared %d overrides for [%s/%s/%s]", deleted, tenant_id, user_id, workspace_id)
 
     return deleted
 

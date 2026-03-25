@@ -35,14 +35,16 @@ client/
 ├── app/                 # Next.js App Router pages and API routes
 │   ├── admin/          # Admin dashboard pages
 │   ├── api/            # Next.js API route handlers
-│   ├── chat-advanced/  # Advanced chat interface
+│   ├── chat/           # Supported chat interface
+│   ├── chat-advanced/  # Compatibility redirect to /chat
 │   ├── documents/      # Document management pages
 │   ├── login/          # Authentication pages
 │   └── workflows/      # Workflow management
 ├── components/         # React components
 │   ├── agents/        # Agent-related components
 │   ├── auth/          # Authentication components
-│   ├── chat/          # Chat interface components
+│   ├── chat/          # Shared chat controls retained for the active UI
+│   ├── chat-simple/   # Primary chat runtime and message rendering
 │   ├── documents/     # Document components
 │   ├── forms/         # Form components
 │   ├── layout/        # Layout components

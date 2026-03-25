@@ -1,7 +1,7 @@
 """Template Schema — Parse, guide, and validate document template sections.
 
 Extracts structured section metadata from both:
-  - Plugin markdown templates (eagle-plugin/data/templates/*.md)
+  - Legacy markdown schema templates (eagle-plugin/data/templates/*.md)
   - Extracted JSON metadata (eagle-plugin/data/template-metadata/*.json)
 
 Provides:
@@ -262,14 +262,14 @@ def load_template_schemas() -> dict[str, TemplateSchema]:
     """Auto-discover and load all template schemas.
 
     Sources:
-      1. eagle-plugin/data/templates/*-template.md (existing 5 markdown templates)
+      1. eagle-plugin/data/templates/*-template.md (legacy markdown schema inputs)
       2. eagle-plugin/data/template-metadata/*.json (extracted S3 metadata)
 
     Returns dict keyed by doc_type.
     """
     schemas: dict[str, TemplateSchema] = {}
 
-    # 1. Markdown templates (higher priority — richer structure)
+    # 1. Legacy markdown schema templates (higher priority — richer structure)
     if TEMPLATES_DIR.exists():
         for md_file in sorted(TEMPLATES_DIR.glob("*-template.md")):
             doc_type = _MD_FILENAME_TO_DOCTYPE.get(md_file.name)

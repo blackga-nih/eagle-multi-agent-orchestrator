@@ -176,7 +176,7 @@ def build_skill_agents(
     Each skill becomes a subagent with its own fresh context window.
     The skill markdown content becomes the subagent's system prompt.
 
-    When workspace_id is provided, skill prompts are resolved via wspc_store
+    When workspace_id is provided, skill prompts are resolved via workspace_override_store
     using the 4-layer chain (workspace override → PLUGIN# canonical).
 
     Args:

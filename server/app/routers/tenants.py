@@ -10,6 +10,7 @@ Provides endpoints for tenant-level operations:
 """
 
 from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -24,6 +25,22 @@ router = APIRouter(prefix="/api/tenants", tags=["tenants"])
 _subscription_service = SubscriptionService()
 _cost_service = CostAttributionService()
 
+GENERIC_ANALYTICS_ERROR = "Analytics data is temporarily unavailable."
+
+
+def _get_result_error(result: Any) -> Optional[str]:
+    if isinstance(result, dict):
+        error = result.get("error")
+        if isinstance(error, str) and error:
+            return error
+    return None
+
+
+def _sanitize_result_error(result: Dict[str, Any], fallback_error: str) -> Dict[str, Any]:
+    sanitized = dict(result)
+    sanitized["error"] = fallback_error
+    return sanitized
+
 
 @router.get("/{tenant_id}/usage")
 async def get_tenant_usage(
@@ -33,7 +50,9 @@ async def get_tenant_usage(
     """Get usage metrics for authenticated tenant."""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    return get_tenant_usage_overview(tenant_id)
+    result = get_tenant_usage_overview(tenant_id)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 @router.get("/{tenant_id}/costs")
@@ -111,6 +130,8 @@ async def get_tenant_analytics(
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
     usage_data = get_tenant_usage_overview(tenant_id)
+    if _get_result_error(usage_data):
+        usage_data = _sanitize_result_error(usage_data, GENERIC_ANALYTICS_ERROR)
     tier = current_user["subscription_tier"]
     analytics = {
         "tenant_id": tenant_id,
@@ -137,4 +158,6 @@ async def get_tenant_analytics(
             "usage_limits": _subscription_service.get_tier_limits(tier).dict(),
         },
     }
+    if usage_data.get("error"):
+        analytics["error"] = GENERIC_ANALYTICS_ERROR
     return analytics

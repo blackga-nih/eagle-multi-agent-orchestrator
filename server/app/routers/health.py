@@ -4,7 +4,8 @@ Health Check API Router
 Provides backend health check endpoint for monitoring and load balancers.
 """
 
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
@@ -21,6 +22,7 @@ async def health_check():
         "status": "healthy",
         "service": "eagle-backend",
         "version": "4.0.0",
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
         "services": {
             "bedrock": True,
             "dynamodb": True,
@@ -30,5 +32,5 @@ async def health_check():
             "knowledge_document_bucket": knowledge_base["document_bucket"]["ok"],
         },
         "knowledge_base": knowledge_base,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }

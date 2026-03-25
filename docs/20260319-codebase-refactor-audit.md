@@ -1,5 +1,7 @@
 # Codebase Refactor Audit
 
+Status: Historical analysis. Use [`20260325-refactor-completion-plan.md`](/Users/hoquemi/Desktop/sm_eagle/docs/20260325-refactor-completion-plan.md) for current execution status and [`refactor-status-index.md`](/Users/hoquemi/Desktop/sm_eagle/docs/refactor-status-index.md) for document routing.
+
 Date: 2026-03-19
 Scope: repository structure, active runtime paths, frontend state layers, backend service boundaries, infrastructure overlap, documentation duplication, and source-control hygiene.
 

@@ -3,9 +3,9 @@
 import { createContext, useContext, ReactNode } from 'react';
 import { useLocalCache } from '@/hooks/use-local-cache';
 import { useAuth } from '@/contexts/auth-context';
-import { Message, AcquisitionData } from '@/components/chat/chat-interface';
 import { ChatSession } from '@/components/layout/chat-history-dropdown';
-import { ChatMessage, DocumentInfo } from '@/types/chat';
+import { ChatMessage, DocumentInfo, Message } from '@/types/chat';
+import { AcquisitionData } from '@/types/schema';
 
 interface SessionContextValue {
     sessions: ChatSession[];

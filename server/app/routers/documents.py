@@ -14,10 +14,10 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import uuid
-from datetime import datetime
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -25,9 +25,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..cognito_auth import UserContext
+from ..db_client import get_s3, get_table
 from ..document_export import export_document, ExportDependencyError
 from ..document_store import get_document
 from ..document_service import create_package_document_version
+from ..doc_type_registry import normalize_doc_type
 from ..document_classification_service import classify_document, extract_text_preview
 from ..package_store import get_package
 from ..session_store import get_messages
@@ -36,6 +38,8 @@ from .dependencies import get_user_from_header, get_session_context
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+
+GENERIC_EDIT_ERROR = "Unable to save document changes."
 
 # ── Constants ────────────────────────────────────────────────────────
 
@@ -60,6 +64,31 @@ def set_sessions_ref(sessions_dict: Dict[str, List[dict]]):
     """Set reference to sessions dict from main.py for session export."""
     global _SESSIONS
     _SESSIONS = sessions_dict
+
+
+def _resolve_main_override(name: str, default: Any) -> Any:
+    """Use app.main compatibility aliases when older tests patch them."""
+    main_module = sys.modules.get("app.main")
+    if main_module is None:
+        try:
+            from .. import main as main_module
+        except Exception:
+            return default
+    return getattr(main_module, name, default)
+
+
+def _get_document_metadata(
+    tenant_id: str,
+    package_id: str,
+    doc_type: str,
+    version: int,
+) -> Optional[Dict[str, Any]]:
+    """Read package-document metadata through the compatibility alias when patched."""
+    main_module = sys.modules.get("app.main")
+    override = getattr(main_module, "get_document", None) if main_module is not None else None
+    if callable(override) and override is not get_document:
+        return override(tenant_id, package_id, doc_type, version)
+    return get_document(tenant_id, package_id, doc_type, version)
 
 
 # ── Helper Functions ─────────────────────────────────────────────────
@@ -188,7 +217,12 @@ def _build_document_response(
     title = None
     document_id = doc_key
     if package_ref and version is not None:
-        metadata = get_document(package_ref["tenant_id"], package_ref["package_id"], package_ref["doc_type"], version)
+        metadata = _get_document_metadata(
+            package_ref["tenant_id"],
+            package_ref["package_id"],
+            package_ref["doc_type"],
+            version,
+        )
         if metadata:
             title = metadata.get("title")
             document_id = metadata.get("document_id", document_id)
@@ -220,29 +254,38 @@ def _build_document_response(
 # ── Upload tracking (DynamoDB) ───────────────────────────────────────
 
 
+def _coerce_dynamodb_value(value: Any) -> Any:
+    """Convert floats in nested upload metadata to Decimal for DynamoDB."""
+    from decimal import Decimal
+
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, list):
+        return [_coerce_dynamodb_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _coerce_dynamodb_value(item) for key, item in value.items()}
+    return value
+
+
 def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> None:
-    import boto3
-    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
-        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-    )
-    item = {"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}", "ttl": int(time.time()) + 3600, **metadata}
+    table = get_table()
+    item = {
+        "PK": f"UPLOAD#{tenant_id}",
+        "SK": f"UPLOAD#{upload_id}",
+        "ttl": int(time.time()) + 86400,
+        **_coerce_dynamodb_value(metadata),
+    }
     table.put_item(Item=item)
 
 
 def _get_upload(tenant_id: str, upload_id: str) -> Optional[Dict[str, Any]]:
-    import boto3
-    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
-        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-    )
+    table = get_table()
     resp = table.get_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
     return resp.get("Item")
 
 
 def _delete_upload(tenant_id: str, upload_id: str) -> None:
-    import boto3
-    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
-        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-    )
+    table = get_table()
     table.delete_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
 
 
@@ -319,7 +362,8 @@ async def api_export_session(
             raise HTTPException(status_code=404, detail="Session not found")
         messages = _SESSIONS[session_id]
 
-    content = f"# EAGLE Session Export\n\n**Session ID:** {session_id}\n**Exported:** {datetime.utcnow().isoformat()}\n\n---\n\n"
+    export_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    content = f"# EAGLE Session Export\n\n**Session ID:** {session_id}\n**Exported:** {export_ts}\n\n---\n\n"
     for msg in messages:
         role = msg.get("role", "unknown").upper()
         text = msg.get("content", "")
@@ -345,7 +389,6 @@ async def api_export_session(
 @router.get("")
 async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
     """List documents in S3 for the current user."""
-    import boto3
     from botocore.exceptions import ClientError
 
     tenant_id = user.tenant_id
@@ -354,7 +397,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
     prefix = f"eagle/{tenant_id}/{user_id}/"
 
     try:
-        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        s3 = get_s3()
         response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=100)
         documents = []
         for obj in response.get("Contents", []):
@@ -378,7 +421,6 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 @router.get("/presign")
 async def api_presign_document(key: str, user: UserContext = Depends(get_user_from_header)):
     """Generate a time-limited presigned URL for an S3 document."""
-    import boto3
     from botocore.exceptions import ClientError
 
     tenant_id = user.tenant_id
@@ -388,7 +430,7 @@ async def api_presign_document(key: str, user: UserContext = Depends(get_user_fr
 
     bucket = _S3_BUCKET
     try:
-        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        s3 = get_s3()
         url = s3.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600)
         return {"url": url, "key": key, "expires_in": 3600}
     except ClientError as e:
@@ -404,7 +446,6 @@ async def api_upload_document(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Upload a document to the user's S3 workspace with automatic classification."""
-    import boto3
     from botocore.exceptions import ClientError
 
     content_type = file.content_type or "application/octet-stream"
@@ -426,14 +467,51 @@ async def api_upload_document(
     key = f"eagle/{tenant_id}/{user_id}/uploads/{upload_id}/{safe_name}"
 
     try:
-        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        s3 = get_s3()
         s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
     except ClientError as e:
         logger.error("S3 upload error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to upload document")
 
-    content_preview = extract_text_preview(body, content_type)
-    classification = classify_document(file.filename or safe_name, content_preview)
+    extract_preview = _resolve_main_override("extract_text_preview", extract_text_preview)
+    classify = _resolve_main_override("classify_document", classify_document)
+    persist_upload = _resolve_main_override("_put_upload", _put_upload)
+
+    content_preview = extract_preview(body, content_type)
+    classification = classify(file.filename or safe_name, content_preview)
+
+    from ..document_markdown_service import convert_to_markdown
+
+    markdown_content = convert_to_markdown(body, content_type, file.filename or safe_name)
+
+    quality_score = None
+    if markdown_content and classification.doc_type not in ("unknown", None):
+        try:
+            from ..template_standardizer import standardize_template as _standardize
+
+            std_result = _standardize(
+                body, file.filename or safe_name, content_type, classification.doc_type,
+            )
+            if std_result.success and std_result.quality_score > 50:
+                markdown_content = std_result.markdown
+            quality_score = std_result.quality_score
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Auto-standardize failed for %s: %s", safe_name, e)
+
+    markdown_s3_key = None
+    if markdown_content:
+        md_key = f"{key}.parsed.md"
+        try:
+            s3 = get_s3()
+            s3.put_object(
+                Bucket=bucket,
+                Key=md_key,
+                Body=markdown_content.encode("utf-8"),
+                ContentType="text/markdown",
+            )
+            markdown_s3_key = md_key
+        except ClientError as e:
+            logger.warning("Failed to upload markdown sibling: %s", e)
 
     package_context = {"mode": "workspace", "package_id": None}
     if package_id:
@@ -441,7 +519,7 @@ async def api_upload_document(
         if pkg:
             package_context = {"mode": "package", "package_id": package_id}
 
-    _put_upload(tenant_id, upload_id, {
+    persist_upload(tenant_id, upload_id, {
         "tenant_id": tenant_id,
         "user_id": user_id,
         "s3_bucket": bucket,
@@ -452,10 +530,14 @@ async def api_upload_document(
         "size_bytes": len(body),
         "classification": classification.to_dict(),
         "session_id": session_id,
-        "created_at": datetime.utcnow().isoformat(),
+        "markdown_s3_key": markdown_s3_key,
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     })
 
-    logger.info("Uploaded %s -> s3://%s/%s (upload_id=%s, classified=%s)", safe_name, bucket, key, upload_id, classification.doc_type)
+    logger.info(
+        "Uploaded %s -> s3://%s/%s (upload_id=%s, classified=%s)",
+        safe_name, bucket, key, upload_id, classification.doc_type,
+    )
 
     return {
         "key": key,
@@ -465,6 +547,7 @@ async def api_upload_document(
         "content_type": content_type,
         "classification": classification.to_dict(),
         "package_context": package_context,
+        "quality_score": quality_score,
     }
 
 
@@ -478,30 +561,64 @@ async def assign_upload_to_package(
     import boto3
     from botocore.exceptions import ClientError
 
-    upload_meta = _get_upload(user.tenant_id, upload_id)
+    get_upload = _resolve_main_override("_get_upload", _get_upload)
+    lookup_package = _resolve_main_override("get_package", get_package)
+    create_document_version = _resolve_main_override(
+        "create_package_document_version",
+        create_package_document_version,
+    )
+    delete_upload = _resolve_main_override("_delete_upload", _delete_upload)
+
+    upload_meta = get_upload(user.tenant_id, upload_id)
     if not upload_meta:
         raise HTTPException(status_code=404, detail="Upload not found or expired")
 
     if upload_meta["tenant_id"] != user.tenant_id or upload_meta["user_id"] != user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    pkg = get_package(user.tenant_id, body.package_id)
+    pkg = lookup_package(user.tenant_id, body.package_id)
     if not pkg:
         raise HTTPException(status_code=404, detail=f"Package {body.package_id} not found")
 
-    doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
-    if doc_type == "unknown":
-        raise HTTPException(status_code=400, detail="Document type could not be determined. Please specify doc_type.")
+    raw_doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
+    doc_type = normalize_doc_type(raw_doc_type) if raw_doc_type != "unknown" else "unknown"
+    if doc_type == "unknown" or doc_type == "":
+        raise HTTPException(
+            status_code=400,
+            detail="Document type could not be determined. Please specify doc_type.",
+        )
 
     title = body.title or upload_meta["classification"].get("suggested_title") or upload_meta["filename"]
 
     try:
-        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        s3 = get_s3()
         response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=upload_meta["s3_key"])
         content = response["Body"].read()
     except ClientError as e:
         logger.error("S3 fetch error for upload %s: %s", upload_id, e)
         raise HTTPException(status_code=500, detail="Failed to retrieve uploaded file")
+
+    markdown_content = None
+    markdown_s3_key = upload_meta.get("markdown_s3_key")
+    if markdown_s3_key:
+        try:
+            md_response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=markdown_s3_key)
+            markdown_content = md_response["Body"].read().decode("utf-8", errors="replace")
+        except ClientError:
+            logger.debug("Could not fetch markdown sibling for upload %s", upload_id)
+
+    from ..tag_computation import (
+        compute_completeness_pct,
+        compute_document_tags,
+        compute_far_tags_from_template,
+    )
+
+    doc_stub = {"doc_type": doc_type, "title": title}
+    system_tags = compute_document_tags(doc_stub, pkg)
+    far_tags = compute_far_tags_from_template(doc_type)
+    completeness_pct = None
+    if markdown_content:
+        completeness_pct = compute_completeness_pct(doc_type, markdown_content)
 
     content_type = upload_meta["content_type"]
     file_type = "md"
@@ -512,7 +629,7 @@ async def assign_upload_to_package(
     elif "spreadsheet" in content_type or "excel" in content_type:
         file_type = "xlsx"
 
-    result = create_package_document_version(
+    result = create_document_version(
         tenant_id=user.tenant_id,
         package_id=body.package_id,
         doc_type=doc_type,
@@ -522,12 +639,17 @@ async def assign_upload_to_package(
         created_by_user_id=user.user_id,
         session_id=upload_meta.get("session_id"),
         change_source="user_upload",
+        markdown_content=markdown_content,
+        system_tags=system_tags,
+        far_tags=far_tags,
+        completeness_pct=completeness_pct,
+        original_filename=upload_meta.get("original_filename"),
     )
 
     if not result.success:
         raise HTTPException(status_code=500, detail=result.error or "Failed to create document")
 
-    _delete_upload(user.tenant_id, upload_id)
+    delete_upload(user.tenant_id, upload_id)
     logger.info("Assigned upload %s to package %s as %s v%s", upload_id, body.package_id, doc_type, result.version)
     return result.to_dict()
 
@@ -549,9 +671,22 @@ async def api_update_docx_preview_document(
         preview_mode=request.preview_mode,
         change_source=request.change_source,
     )
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    error = result.get("error")
+    if error:
+        logger.warning("DOCX preview edit failed: %s", error)
+        raise HTTPException(status_code=400, detail=GENERIC_EDIT_ERROR)
+    return {
+        "success": True,
+        "mode": result.get("mode"),
+        "document_id": result.get("document_id"),
+        "key": result.get("key"),
+        "version": result.get("version"),
+        "file_type": result.get("file_type"),
+        "content": result.get("content"),
+        "preview_blocks": result.get("preview_blocks", []),
+        "preview_mode": result.get("preview_mode"),
+        "message": result.get("message"),
+    }
 
 
 @router.post("/xlsx-edit/{doc_key:path}")
@@ -570,9 +705,23 @@ async def api_update_xlsx_preview_document(
         cell_edits=request.cell_edits,
         change_source=request.change_source,
     )
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    error = result.get("error")
+    if error:
+        logger.warning("XLSX preview edit failed: %s", error)
+        raise HTTPException(status_code=400, detail=GENERIC_EDIT_ERROR)
+    return {
+        "success": True,
+        "mode": result.get("mode"),
+        "document_id": result.get("document_id"),
+        "key": result.get("key"),
+        "version": result.get("version"),
+        "file_type": result.get("file_type"),
+        "content": result.get("content"),
+        "preview_mode": result.get("preview_mode"),
+        "preview_sheets": result.get("preview_sheets", []),
+        "missing": result.get("missing", []),
+        "message": result.get("message"),
+    }
 
 
 # ── Get/Update Single Document ────────────────────────────────────────
@@ -585,7 +734,6 @@ async def api_get_document(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Get document content from S3."""
-    import boto3
     from botocore.exceptions import ClientError
 
     tenant_id = user.tenant_id
@@ -597,7 +745,7 @@ async def api_get_document(
         raise HTTPException(status_code=403, detail="Access denied")
 
     try:
-        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        s3 = get_s3()
         response = s3.get_object(Bucket=bucket, Key=doc_key)
         content_type = response.get("ContentType") or _guess_content_type(doc_key)
         is_binary = _is_binary_document(doc_key, content_type)
@@ -629,7 +777,7 @@ async def api_get_document(
                 ExpiresIn=3600,
             )
 
-        return _build_document_response(
+        result = _build_document_response(
             doc_key=doc_key,
             response=response,
             content=content,
@@ -638,6 +786,20 @@ async def api_get_document(
             preview_sheets=preview_sheets,
             preview_mode=preview_mode,
         )
+        package_ref = _extract_package_document_ref(doc_key)
+        if package_ref and package_ref.get("version") is not None:
+            metadata = _get_document_metadata(
+                package_ref["tenant_id"],
+                package_ref["package_id"],
+                package_ref["doc_type"],
+                package_ref["version"],
+            )
+            if metadata:
+                result["document_id"] = metadata.get("document_id", result["document_id"])
+                result["title"] = metadata.get("title", result.get("title"))
+                result["file_type"] = metadata.get("file_type", result["file_type"])
+                result["version"] = metadata.get("version", result["version"])
+        return result
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchKey":
             raise HTTPException(status_code=404, detail="Document not found")
@@ -656,7 +818,6 @@ async def api_update_document(
     For package documents (eagle/{tenant}/packages/...), creates a new version.
     For workspace documents, performs a direct overwrite.
     """
-    import boto3
     from botocore.exceptions import ClientError
 
     tenant_id = user.tenant_id
@@ -712,7 +873,7 @@ async def api_update_document(
         }
     else:
         try:
-            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            s3 = get_s3()
             s3.put_object(
                 Bucket=bucket,
                 Key=doc_key,

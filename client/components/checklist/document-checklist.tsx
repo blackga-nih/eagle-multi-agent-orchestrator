@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { Message, AcquisitionData } from '../chat/chat-interface';
 import { CheckCircle2, FileText, Download, Eye, ChevronDown, X, Send, Loader2, Clock, ExternalLink } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { getPackage, PackageChecklist } from '@/lib/document-store';
-import { DocumentType } from '@/types/schema';
+import { Message } from '@/types/chat';
+import { AcquisitionData, DocumentType } from '@/types/schema';
 import { useAuth } from '@/contexts/auth-context';
 
 interface DocumentChecklistProps {

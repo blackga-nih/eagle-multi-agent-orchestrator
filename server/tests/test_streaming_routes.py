@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import sys
+from functools import wraps
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -47,12 +48,20 @@ async def _collect_stream(gen) -> list[str]:
     return lines
 
 
+def async_test(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(fn(*args, **kwargs))
+
+    return wrapper
+
+
 # ── Tests ────────────────────────────────────────────────────────────
 
 
 class TestSSEFormat:
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_all_output_is_valid_sse_or_keepalive(self):
         """Every yielded string must be 'data: {...}\\n\\n' or ': keepalive\\n\\n'."""
         from app.streaming_routes import stream_generator
@@ -79,7 +88,7 @@ class TestSSEFormat:
             assert stripped.startswith("data: ") or stripped.startswith(": keepalive"), \
                 f"Invalid SSE line: {stripped[:100]}"
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_events_have_agent_id_and_timestamp(self):
         from app.streaming_routes import stream_generator
 
@@ -106,7 +115,7 @@ class TestSSEFormat:
 
 class TestEmptyNameFilter:
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_empty_name_tool_result_filtered(self):
         """tool_result with empty name should be silently dropped."""
         from app.streaming_routes import stream_generator
@@ -138,7 +147,7 @@ class TestEmptyNameFilter:
 
 class TestToolInputParsing:
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_string_input_parsed_to_json(self):
         from app.streaming_routes import stream_generator
 
@@ -163,7 +172,7 @@ class TestToolInputParsing:
         assert len(tool_uses) == 1
         assert tool_uses[0]["tool_use"]["input"] == {"query": "FAR 13"}
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_invalid_json_input_wrapped(self):
         from app.streaming_routes import stream_generator
 
@@ -191,7 +200,7 @@ class TestToolInputParsing:
 
 class TestFallbackText:
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_no_text_emits_fallback(self):
         """When SDK yields complete with no prior text, a fallback message appears."""
         from app.streaming_routes import stream_generator
@@ -219,7 +228,7 @@ class TestFallbackText:
 
 class TestToolUsePassthrough:
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_tool_use_id_passed_through(self):
         from app.streaming_routes import stream_generator
 

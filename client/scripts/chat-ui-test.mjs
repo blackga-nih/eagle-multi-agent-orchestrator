@@ -26,10 +26,10 @@ function ss(name) {
     console.log(`[PAGE ERROR] ${err.message}`);
   });
 
-  // === STEP 1: Navigate to chat-advanced ===
-  console.log('\n=== Step 1: Navigate to http://localhost:3000/chat-advanced ===');
+  // === STEP 1: Navigate to chat ===
+  console.log('\n=== Step 1: Navigate to http://localhost:3000/chat ===');
   try {
-    await page.goto('http://localhost:3000/chat-advanced', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto('http://localhost:3000/chat', { waitUntil: 'networkidle', timeout: 30000 });
   } catch (e) {
     console.log(`Navigation warning: ${e.message}`);
     // Try to continue even if networkidle times out
@@ -39,8 +39,8 @@ function ss(name) {
 
   // === STEP 2: Full page screenshot ===
   console.log('\n=== Step 2: Full page screenshot ===');
-  await page.screenshot({ path: ss('chat-advanced-full.png'), fullPage: true });
-  console.log('Saved: chat-advanced-full.png');
+  await page.screenshot({ path: ss('chat-full.png'), fullPage: true });
+  console.log('Saved: chat-full.png');
 
   // === STEP 3: Snapshot interactive elements ===
   console.log('\n=== Step 3: Interactive elements snapshot ===');
@@ -89,11 +89,11 @@ function ss(name) {
     console.log('Found "Current" tab - clicking it');
     await currentTab.click();
     await page.waitForTimeout(1000);
-    await page.screenshot({ path: ss('chat-advanced-right-panel.png'), fullPage: true });
-    console.log('Saved: chat-advanced-right-panel.png');
+    await page.screenshot({ path: ss('chat-right-panel.png'), fullPage: true });
+    console.log('Saved: chat-right-panel.png');
   } else {
     console.log('"Current" tab not found. Taking screenshot of whatever right panel exists.');
-    await page.screenshot({ path: ss('chat-advanced-right-panel.png'), fullPage: true });
+    await page.screenshot({ path: ss('chat-right-panel.png'), fullPage: true });
   }
 
   // Try "History" tab
@@ -103,8 +103,8 @@ function ss(name) {
     console.log('Found "History" tab - clicking it');
     await historyTab.click();
     await page.waitForTimeout(1000);
-    await page.screenshot({ path: ss('chat-advanced-history-tab.png'), fullPage: true });
-    console.log('Saved: chat-advanced-history-tab.png');
+    await page.screenshot({ path: ss('chat-history-tab.png'), fullPage: true });
+    console.log('Saved: chat-history-tab.png');
   } else {
     console.log('"History" tab not found');
   }
@@ -116,8 +116,8 @@ function ss(name) {
     console.log('Found "Logs" tab - clicking it');
     await logsTab.click();
     await page.waitForTimeout(1000);
-    await page.screenshot({ path: ss('chat-advanced-logs-tab.png'), fullPage: true });
-    console.log('Saved: chat-advanced-logs-tab.png');
+    await page.screenshot({ path: ss('chat-logs-tab.png'), fullPage: true });
+    console.log('Saved: chat-logs-tab.png');
   } else {
     console.log('"Logs" tab not found');
   }
@@ -129,8 +129,8 @@ function ss(name) {
     await currentTab.click().catch(() => {});
     await page.waitForTimeout(500);
   }
-  await page.screenshot({ path: ss('chat-advanced-welcome.png'), fullPage: true });
-  console.log('Saved: chat-advanced-welcome.png');
+  await page.screenshot({ path: ss('chat-welcome.png'), fullPage: true });
+  console.log('Saved: chat-welcome.png');
 
   // Look for suggested prompts
   const suggestElements = await page.locator('[class*="suggest"], [class*="prompt"], [class*="quick"], [class*="starter"]').all();
@@ -172,7 +172,7 @@ function ss(name) {
   // Take a screenshot at 15s to show streaming
   await page.waitForTimeout(15000);
   console.log('15s elapsed - checking for streaming...');
-  await page.screenshot({ path: ss('chat-advanced-streaming.png'), fullPage: true });
+  await page.screenshot({ path: ss('chat-streaming.png'), fullPage: true });
 
   // Wait remaining time, checking for response completion
   let responseComplete = false;
@@ -211,8 +211,8 @@ function ss(name) {
 
   // === STEP 8: Post-response screenshots ===
   console.log('\n=== Step 8: Post-response screenshots ===');
-  await page.screenshot({ path: ss('chat-advanced-response.png'), fullPage: true });
-  console.log('Saved: chat-advanced-response.png');
+  await page.screenshot({ path: ss('chat-response.png'), fullPage: true });
+  console.log('Saved: chat-response.png');
 
   // Get updated body text
   const bodyTextAfter = await page.locator('body').innerText().catch(() => '');
@@ -226,8 +226,8 @@ function ss(name) {
     await currentTab.click();
     await page.waitForTimeout(1000);
   }
-  await page.screenshot({ path: ss('chat-advanced-checklist-after.png'), fullPage: true });
-  console.log('Saved: chat-advanced-checklist-after.png');
+  await page.screenshot({ path: ss('chat-checklist-after.png'), fullPage: true });
+  console.log('Saved: chat-checklist-after.png');
 
   // Look for checklist items
   const checklistPatterns = ['checklist', 'SOW', 'IGCE', 'Acquisition Plan', 'Market Research', 'J&A', 'requirement'];
@@ -250,8 +250,8 @@ function ss(name) {
   }
 
   if (formElements.length > 0) {
-    await page.screenshot({ path: ss('chat-advanced-inline-forms.png'), fullPage: true });
-    console.log('Saved: chat-advanced-inline-forms.png');
+    await page.screenshot({ path: ss('chat-inline-forms.png'), fullPage: true });
+    console.log('Saved: chat-inline-forms.png');
   } else {
     console.log('No inline forms detected.');
   }
@@ -318,7 +318,7 @@ function ss(name) {
   // === FINAL REPORT ===
   console.log('\n');
   console.log('========================================================');
-  console.log('     CHAT-ADVANCED UI INSPECTION REPORT                 ');
+  console.log('         CHAT UI INSPECTION REPORT                      ');
   console.log('========================================================');
   console.log(`  Page loaded:                    YES`);
   console.log(`  Chat input found:               ${inputFound ? 'YES' : 'NO'}`);

@@ -190,9 +190,9 @@ just ship           # lint + CDK synth gate + deploy + smoke-prod verify
 └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-> **Interactive diagrams** in [`docs/excalidraw-diagrams/aws/`](docs/excalidraw-diagrams/aws/) — open in [Excalidraw](https://excalidraw.com) or Obsidian:
-> - [`20260220-175116-arch-aws-architecture-v1.excalidraw.md`](docs/excalidraw-diagrams/aws/20260220-175116-arch-aws-architecture-v1.excalidraw.md) (dark)
-> - [`20260220-175116-arch-aws-architecture-light-v1.excalidraw.md`](docs/excalidraw-diagrams/aws/20260220-175116-arch-aws-architecture-light-v1.excalidraw.md) (light)
+> **Interactive diagrams** in [`docs/architecture/diagrams/excalidraw/`](docs/architecture/diagrams/excalidraw/) — open in [Excalidraw](https://excalidraw.com) or Obsidian:
+> - [`20260220-175116-arch-aws-architecture-v1.excalidraw.md`](docs/architecture/diagrams/excalidraw/20260220-175116-arch-aws-architecture-v1.excalidraw.md) (dark)
+> - [`20260220-175116-arch-aws-architecture-light-v1.excalidraw.md`](docs/architecture/diagrams/excalidraw/20260220-175116-arch-aws-architecture-light-v1.excalidraw.md) (light)
 
 ### System Flow
 

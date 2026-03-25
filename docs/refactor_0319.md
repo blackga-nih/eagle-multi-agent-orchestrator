@@ -1,7 +1,9 @@
 # EAGLE Codebase Refactoring Guide
 
+Status: Historical analysis and roadmap snapshot. Use [`20260325-refactor-completion-plan.md`](/Users/hoquemi/Desktop/sm_eagle/docs/20260325-refactor-completion-plan.md) for current execution status and [`refactor-status-index.md`](/Users/hoquemi/Desktop/sm_eagle/docs/refactor-status-index.md) for document routing.
+
 **Date:** 2026-03-19
-**Status:** Analysis Complete
+**Status:** Historical - Analysis Complete
 **Estimated Total Duplicated/Dead Code:** ~2,500+ lines
 
 ---

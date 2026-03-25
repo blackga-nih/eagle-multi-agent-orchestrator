@@ -7,7 +7,7 @@ Provides endpoints for user profile and preferences:
 - User preferences (get/update/reset)
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends
 
@@ -17,6 +17,22 @@ from ..pref_store import get_prefs, update_prefs, reset_prefs
 from .dependencies import get_user_from_header
 
 router = APIRouter(prefix="/api/user", tags=["user"])
+
+GENERIC_ANALYTICS_ERROR = "Analytics data is temporarily unavailable."
+
+
+def _get_result_error(result: Any) -> Optional[str]:
+    if isinstance(result, dict):
+        error = result.get("error")
+        if isinstance(error, str) and error:
+            return error
+    return None
+
+
+def _sanitize_result_error(result: Dict[str, Any], fallback_error: str) -> Dict[str, Any]:
+    sanitized = dict(result)
+    sanitized["error"] = fallback_error
+    return sanitized
 
 
 @router.get("/me")
@@ -32,7 +48,9 @@ async def api_user_usage(
 ):
     """Get usage summary for current user."""
     tenant_id = user.tenant_id
-    return get_usage_summary(tenant_id, days)
+    result = get_usage_summary(tenant_id, days)
+    error = _get_result_error(result)
+    return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 
 
 @router.get("/preferences")

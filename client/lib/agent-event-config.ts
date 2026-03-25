@@ -1,9 +1,7 @@
 /**
  * Shared agent event configuration for log display components.
  *
- * Consolidates duplicate event formatting logic from:
- * - components/chat-simple/agent-logs.tsx
- * - components/chat/multi-agent-logs.tsx
+ * Consolidates duplicate event formatting logic for the active chat UI.
  *
  * Created: 2026-03-19 (Phase 2 refactor)
  */

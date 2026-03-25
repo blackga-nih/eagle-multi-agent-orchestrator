@@ -6,6 +6,7 @@ Extracted from main.py for better organization.
 """
 
 from decimal import Decimal
+import sys
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,7 +15,7 @@ from starlette.responses import Response
 
 from ..approval_store import create_approval_chain, get_chain_status, record_decision
 from ..audit_store import write_audit
-from ..changelog_store import list_changelog_entries
+from ..changelog_store import list_changelog_entries, list_document_changelog_entries
 from ..cognito_auth import UserContext
 from ..document_service import (
     create_package_document_version,
@@ -36,6 +37,18 @@ from ..package_store import (
 from .dependencies import get_user_from_header
 
 router = APIRouter(prefix="/api/packages", tags=["packages"])
+compat_router = APIRouter(tags=["packages"])
+
+
+def _resolve_main_override(name: str, default: Any) -> Any:
+    """Use app.main compatibility aliases when older tests patch them."""
+    main_module = sys.modules.get("app.main")
+    if main_module is None:
+        try:
+            from .. import main as main_module
+        except Exception:
+            return default
+    return getattr(main_module, name, default)
 
 
 class ResolvePackageContextRequest(BaseModel):
@@ -155,11 +168,14 @@ async def export_package_zip_endpoint(
     """Download all package documents as a ZIP archive."""
     from ..document_export import export_package_zip
 
-    pkg = get_package(user.tenant_id, package_id)
+    lookup_package = _resolve_main_override("get_package", get_package)
+    list_docs = _resolve_main_override("list_package_documents", list_package_documents)
+
+    pkg = lookup_package(user.tenant_id, package_id)
     if not pkg:
         raise HTTPException(status_code=404, detail="Package not found")
 
-    docs = list_package_documents(user.tenant_id, package_id)
+    docs = list_docs(user.tenant_id, package_id)
     docs_with_content = [d for d in docs if d.get("content")]
     if not docs_with_content:
         raise HTTPException(status_code=404, detail="No documents with content found")
@@ -181,7 +197,8 @@ async def list_documents_endpoint(
     user: UserContext = Depends(get_user_from_header),
 ):
     """List all generated documents for a package (latest version per doc type)."""
-    return list_package_documents(user.tenant_id, package_id)
+    list_docs = _resolve_main_override("list_package_documents", list_package_documents)
+    return list_docs(user.tenant_id, package_id)
 
 
 @router.post("/resolve-context")
@@ -346,6 +363,31 @@ async def get_package_changelog_endpoint(
     """Get all changelog entries for a package (all document types)."""
     entries = list_changelog_entries(user.tenant_id, package_id, None, limit)
     return {"entries": entries, "count": len(entries)}
+
+
+@router.get("/document-changelog/by-key")
+async def get_document_key_changelog_endpoint(
+    key: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get changelog entries for a document by S3 key."""
+    tenant_id = user.tenant_id
+    if not key.startswith(f"eagle/{tenant_id}/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    entries = list_document_changelog_entries(tenant_id, key, limit)
+    return {"entries": entries, "count": len(entries)}
+
+
+@compat_router.get("/api/document-changelog", include_in_schema=False)
+async def get_document_key_changelog_compat_endpoint(
+    key: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Compatibility alias for legacy document changelog lookups."""
+    return await get_document_key_changelog_endpoint(key=key, limit=limit, user=user)
 
 
 # ── Approval Chains ────────────────────────────────────────────────

@@ -13,9 +13,9 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from app.db_client import get_s3
 from app.formula_evaluation import evaluate_workbook_formulas_safe
 from app.template_registry import (
     TEMPLATE_BUCKET,
@@ -33,16 +33,6 @@ logger = logging.getLogger("eagle.template_service")
 CACHE_TTL_SECONDS = 60
 S3_TIMEOUT_SECONDS = 10
 DOCUMENTS_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
-
-# ── S3 Singleton ──────────────────────────────────────────────────────
-_s3_client = None
-
-
-def _get_s3():
-    global _s3_client
-    if _s3_client is None:
-        _s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
-    return _s3_client
 
 
 # ── Template Cache (60s TTL) ──────────────────────────────────────────
@@ -470,7 +460,7 @@ class TemplateService:
 
         # Fetch from S3
         try:
-            s3 = _get_s3()
+            s3 = get_s3()
             response = s3.get_object(Bucket=bucket, Key=s3_key)
             data = response["Body"].read()
             _cache_set(bucket, s3_key, data)

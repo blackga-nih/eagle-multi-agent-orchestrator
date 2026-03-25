@@ -9,10 +9,10 @@ import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .changelog_store import write_document_changelog_entry
+from .db_client import get_s3
 from .document_key_utils import (
     extract_package_document_ref,
     extract_workspace_document_ref,
@@ -26,7 +26,6 @@ from .template_service import XLSXPopulator
 logger = logging.getLogger("eagle.spreadsheet_edit")
 
 S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 MAX_PREVIEW_ROWS = 80
 MAX_PREVIEW_COLS = 18
 
@@ -36,12 +35,6 @@ class SpreadsheetCellEdit:
     sheet_id: str
     cell_ref: str
     value: str
-
-
-def _get_s3():
-    return boto3.client("s3", region_name=AWS_REGION)
-
-
 
 
 def _serialize_cell_value(value: Any) -> str:
@@ -223,7 +216,7 @@ def save_xlsx_preview_edits(
     if not edits:
         return {"error": "No valid spreadsheet cell edits were provided"}
 
-    s3 = _get_s3()
+    s3 = get_s3()
     try:
         response = s3.get_object(Bucket=S3_BUCKET, Key=doc_key)
         original_bytes = response["Body"].read()
