@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useRef, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useRef, useCallback, useMemo, ReactNode } from 'react';
 
 export interface FeedbackSnapshot {
   messages: { role: string; content: string; id?: string; timestamp?: unknown }[];
@@ -23,8 +23,10 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
 
   const getSnapshot = useCallback(() => snapshotRef.current, []);
 
+  const value = useMemo(() => ({ getSnapshot, setSnapshot }), [getSnapshot, setSnapshot]);
+
   return (
-    <FeedbackContext.Provider value={{ getSnapshot, setSnapshot }}>
+    <FeedbackContext.Provider value={value}>
       {children}
     </FeedbackContext.Provider>
   );

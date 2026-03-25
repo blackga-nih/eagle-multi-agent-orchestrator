@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from 'react';
 import { checkBackendHealth } from '@/hooks/use-agent-stream';
 
 interface BackendStatusContextValue {
@@ -25,11 +25,11 @@ export function BackendStatusProvider({ children }: { children: ReactNode }) {
       const ok = await checkBackendHealth();
       if (ok) {
         failCount.current = 0;
-        setBackendConnected(true);
+        setBackendConnected((prev) => (prev === true ? prev : true));
       } else {
         failCount.current += 1;
         if (failCount.current >= CONSECUTIVE_FAILURES_THRESHOLD) {
-          setBackendConnected(false);
+          setBackendConnected((prev) => (prev === false ? prev : false));
         }
       }
     };
@@ -38,8 +38,10 @@ export function BackendStatusProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
+  const value = useMemo(() => ({ backendConnected }), [backendConnected]);
+
   return (
-    <BackendStatusContext.Provider value={{ backendConnected }}>
+    <BackendStatusContext.Provider value={value}>
       {children}
     </BackendStatusContext.Provider>
   );

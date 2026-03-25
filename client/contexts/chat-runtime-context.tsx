@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useReducer, ReactNode, Dispatch } from 'react';
+import { createContext, useContext, useReducer, useMemo, ReactNode, Dispatch } from 'react';
 import { ChatMessage, DocumentInfo } from '@/types/chat';
 import { TrackedToolCall, ToolCallsByMessageId } from '@/components/chat-simple/simple-chat-interface';
 
@@ -235,9 +235,10 @@ const ChatRuntimeContext = createContext<ChatRuntimeContextValue | null>(null);
 
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     const [state, dispatch] = useReducer(chatRuntimeReducer, {} as ChatRuntimeState);
+    const value = useMemo(() => ({ state, dispatch }), [state, dispatch]);
 
     return (
-        <ChatRuntimeContext.Provider value={{ state, dispatch }}>
+        <ChatRuntimeContext.Provider value={value}>
             {children}
         </ChatRuntimeContext.Provider>
     );
