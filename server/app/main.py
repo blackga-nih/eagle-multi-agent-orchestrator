@@ -3178,7 +3178,7 @@ async def preview_s3_template(
     """Preview an S3 template — returns markdown text or a presigned PDF URL."""
     import boto3
     from app.template_registry import TEMPLATE_BUCKET, TEMPLATE_PREFIX, get_s3_template_by_key
-    from app.template_service import DOCXPopulator, XLSXPopulator
+    from app.template_service import DOCXPopulator
 
     if not s3_key:
         raise HTTPException(status_code=400, detail="s3_key is required")
