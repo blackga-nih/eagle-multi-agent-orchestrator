@@ -207,7 +207,7 @@ export default function SimpleChatInterface() {
     } = useSlashCommands({ onCommandSelect: handleCommandSelect });
 
     /** Right panel state. */
-    const [isPanelOpen, setIsPanelOpen] = useState(true);
+    const [isPanelOpen, setIsPanelOpen] = useState(false);
 
     /** Package state — driven by SSE state_update metadata events. */
     const { state: packageState, handleMetadata: handlePackageMetadata, reset: resetPackageState } = usePackageState();
@@ -644,7 +644,7 @@ export default function SimpleChatInterface() {
 
                 {/* Input footer */}
                 <footer className="bg-white border-t border-[#D8DEE6] px-6 py-3 shrink-0">
-                    <div className="max-w-3xl mx-auto">
+                    <div className="max-w-4xl mx-auto">
                         {error && (
                             <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
                                 {error}

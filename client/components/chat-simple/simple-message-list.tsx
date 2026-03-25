@@ -173,14 +173,33 @@ function InterleavedContent({
         (a, b) => (a.textSnapshotLength ?? 0) - (b.textSnapshotLength ?? 0)
     );
 
+    // Build segments: text blocks and groups of consecutive tool chips
     const segments: React.ReactNode[] = [];
     let cursor = 0;
+    let chipGroup: React.ReactNode[] = [];
+    let codeOutputs: React.ReactNode[] = [];
+
+    const flushChips = () => {
+        if (chipGroup.length > 0) {
+            segments.push(
+                <div key={`chips-${segments.length}`} className="flex flex-wrap gap-1.5 my-2">
+                    {chipGroup}
+                </div>
+            );
+            if (codeOutputs.length > 0) {
+                segments.push(...codeOutputs);
+                codeOutputs = [];
+            }
+            chipGroup = [];
+        }
+    };
 
     for (const tc of sorted) {
         const snapLen = tc.textSnapshotLength ?? 0;
 
-        // Text segment before this tool (if any new text since last cursor)
+        // Text segment before this tool — flush any pending chips first
         if (snapLen > cursor) {
+            flushChips();
             const textSlice = content.slice(cursor, snapLen).trim();
             if (textSlice) {
                 segments.push(
@@ -192,21 +211,25 @@ function InterleavedContent({
             cursor = snapLen;
         }
 
-        // Tool card
-        segments.push(
-            <div key={tc.toolUseId} className="my-1">
-                <ToolUseDisplay
-                    toolName={tc.toolName}
-                    input={tc.input}
-                    status={tc.status}
-                    result={tc.result}
-                    isClientSide={tc.isClientSide}
-                    sessionId={sessionId}
-                />
-                <CodeOutput tc={tc} />
-            </div>
+        // Accumulate tool chip into current group
+        chipGroup.push(
+            <ToolUseDisplay
+                key={tc.toolUseId}
+                toolName={tc.toolName}
+                input={tc.input}
+                status={tc.status}
+                result={tc.result}
+                isClientSide={tc.isClientSide}
+                sessionId={sessionId}
+            />
         );
+        // CodeOutput renders as a block below the chip group
+        const co = <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />;
+        if (tc.toolName === 'code') codeOutputs.push(co);
     }
+
+    // Flush remaining chips
+    flushChips();
 
     // Remaining text after all tools
     const remaining = content.slice(cursor).trim();
@@ -221,7 +244,6 @@ function InterleavedContent({
             </div>
         );
     } else if (isStreaming) {
-        // Still streaming but no text after last tool yet — show cursor
         segments.push(
             <div key="text-streaming" className="text-sm text-gray-800 leading-relaxed">
                 <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
@@ -344,7 +366,7 @@ export default function SimpleMessageList({
 
     return (
         <div className="flex-1 overflow-y-auto">
-            <div className="max-w-2xl mx-auto px-6 py-8 flex flex-col gap-8">
+            <div className="max-w-3xl mx-auto px-6 py-8 flex flex-col gap-8">
                 {messages.map((message, index) => {
                     const isLastMessage = index === lastIdx;
                     const isStreamingThis =
@@ -387,12 +409,13 @@ export default function SimpleMessageList({
                                 />
                             ) : (
                                 <>
-                                    {/* Legacy: tool cards above text (no snapshot data) */}
+                                    {/* Legacy: tool chips above text (no snapshot data) */}
                                     {toolCalls.length > 0 && (
-                                        <div className="flex flex-col gap-1 mb-1">
-                                            {toolCalls.map((tc) => (
-                                                <div key={tc.toolUseId}>
+                                        <>
+                                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                                {toolCalls.map((tc) => (
                                                     <ToolUseDisplay
+                                                        key={tc.toolUseId}
                                                         toolName={tc.toolName}
                                                         input={tc.input}
                                                         status={tc.status}
@@ -400,10 +423,12 @@ export default function SimpleMessageList({
                                                         isClientSide={tc.isClientSide}
                                                         sessionId={sessionId}
                                                     />
-                                                    <CodeOutput tc={tc} />
-                                                </div>
+                                                ))}
+                                            </div>
+                                            {toolCalls.filter(tc => tc.toolName === 'code').map(tc => (
+                                                <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />
                                             ))}
-                                        </div>
+                                        </>
                                     )}
 
                                     <div className="text-sm text-gray-800 leading-relaxed">
@@ -449,12 +474,13 @@ export default function SimpleMessageList({
                             Eagle
                         </span>
 
-                        {/* Pending tool cards — rendered as they arrive from SSE */}
+                        {/* Pending tool chips — rendered as they arrive from SSE */}
                         {pendingToolCalls.length > 0 && (
-                            <div className="flex flex-col gap-1 mb-1">
-                                {pendingToolCalls.map((tc) => (
-                                    <div key={tc.toolUseId}>
+                            <>
+                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                    {pendingToolCalls.map((tc) => (
                                         <ToolUseDisplay
+                                            key={tc.toolUseId}
                                             toolName={tc.toolName}
                                             input={tc.input}
                                             status={tc.status}
@@ -462,10 +488,12 @@ export default function SimpleMessageList({
                                             isClientSide={tc.isClientSide}
                                             sessionId={sessionId}
                                         />
-                                        <CodeOutput tc={tc} />
-                                    </div>
+                                    ))}
+                                </div>
+                                {pendingToolCalls.filter(tc => tc.toolName === 'code').map(tc => (
+                                    <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />
                                 ))}
-                            </div>
+                            </>
                         )}
 
                         {/* Phase-aware status indicator */}

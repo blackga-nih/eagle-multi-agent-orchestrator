@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 export interface ModalProps {
@@ -13,15 +14,18 @@ export interface ModalProps {
 }
 
 const sizeClasses = {
-  sm: 'w-[80vw]',
-  md: 'w-[80vw]',
-  lg: 'w-[85vw]',
-  xl: 'w-[88vw]',
+  sm: 'w-[50vw]',
+  md: 'w-[55vw]',
+  lg: 'w-[60vw]',
+  xl: 'w-[70vw]',
   full: 'w-[90vw] max-h-[90vh]',
 };
 
 export default function Modal({ isOpen, onClose, title, size = 'md', children, footer }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -37,9 +41,9 @@ export default function Modal({ isOpen, onClose, title, size = 'md', children, f
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
+  return createPortal(
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
@@ -64,6 +68,7 @@ export default function Modal({ isOpen, onClose, title, size = 'md', children, f
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ClientToolResult } from '@/lib/client-tools';
 import { DocumentInfo } from '@/types/chat';
 import { resolveResultPanel } from './tool-result-panels';
+import Modal from '@/components/ui/modal';
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -171,7 +172,7 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
   }
 }
 
-// ── Status indicator ────────────────────────────────────────────────
+// ── Status helpers ───────────────────────────────────────────────────
 
 function StatusDot({ status }: { status: ToolStatus }) {
   if (status === 'pending' || status === 'running') {
@@ -183,7 +184,28 @@ function StatusDot({ status }: { status: ToolStatus }) {
   return <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />;
 }
 
-// ── Document result card (inline in tool card) ──────────────────────
+const STATUS_TEXT: Record<ToolStatus, string> = {
+  pending: 'Pending',
+  running: 'Running…',
+  done: 'Completed',
+  error: 'Error',
+};
+
+// ── Chip border/bg by status ─────────────────────────────────────────
+
+function chipClasses(status: ToolStatus): string {
+  switch (status) {
+    case 'pending':
+    case 'running':
+      return 'border-blue-300 bg-blue-50 hover:bg-blue-100';
+    case 'error':
+      return 'border-red-300 bg-red-50 hover:bg-red-100';
+    case 'done':
+      return 'border-[#D1D9E0] bg-[#F8FAFC] hover:bg-gray-100';
+  }
+}
+
+// ── Document result card (shown inside modal) ────────────────────────
 
 const DOC_LABEL: Record<string, string> = {
   sow: 'Statement of Work',
@@ -216,7 +238,6 @@ function DocumentResultCard({
     const params = new URLSearchParams();
     if (sessionId) params.set('session', sessionId);
 
-    // Store content in sessionStorage for instant load in document viewer
     const docInfo: DocumentInfo = {
       document_id: s3Key || (data.document_id as string),
       package_id: data.package_id as string | undefined,
@@ -242,21 +263,21 @@ function DocumentResultCard({
   };
 
   return (
-    <div className="border-t border-[#E5E9F0] px-3 py-2.5 bg-white flex items-center gap-3">
+    <div className="bg-gray-50 rounded-lg p-4 flex items-center gap-3">
       <div className="flex-1 min-w-0">
-        <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">
+        <span className="text-[10px] font-bold uppercase text-blue-600 tracking-wider">
           {DOC_LABEL[docType] ?? docType.replace(/_/g, ' ')}
         </span>
-        <p className="text-xs font-medium text-gray-900 truncate">{title}</p>
-        <p className="text-[10px] text-gray-400">
+        <p className="text-sm font-medium text-gray-900 truncate">{title}</p>
+        <p className="text-xs text-gray-400 mt-0.5">
           {version ? `v${version}` : 'Draft'}
-          {wordCount ? ` • ${wordCount.toLocaleString()} words` : ''}
+          {wordCount ? ` · ${wordCount.toLocaleString()} words` : ''}
         </p>
       </div>
       <button
         type="button"
         onClick={handleOpen}
-        className="flex items-center gap-1 px-2.5 py-1 bg-[#003366] text-white text-[10px] font-medium rounded-md
+        className="flex items-center gap-1 px-3 py-1.5 bg-[#003366] text-white text-xs font-medium rounded-md
                    hover:bg-[#004488] transition-colors shrink-0"
       >
         Open Document
@@ -268,84 +289,11 @@ function DocumentResultCard({
   );
 }
 
-// ── Web search result card ───────────────────────────────────────────
-
-function parseWebSearchResult(result: ClientToolResult | null | undefined): Record<string, unknown> | null {
-  if (!result || !result.result) return null;
-
-  let data = result.result as Record<string, unknown>;
-  if (typeof data === 'string') {
-    try {
-      data = JSON.parse(data);
-    } catch {
-      return null;
-    }
-  }
-
-  if (data && typeof data === 'object' && !data.error && data.sources) {
-    return data;
-  }
-  return null;
-}
-
-function WebSearchResultCard({ data }: { data: Record<string, unknown> }) {
-  const answer = String(data.answer ?? '');
-  const sources = (data.sources as Array<Record<string, string>>) ?? [];
-  const sourceCount = (data.source_count as number) ?? sources.length;
-  const displaySources = sources.slice(0, 5);
-  const truncatedAnswer = answer.length > 300 ? answer.slice(0, 300) + '...' : answer;
-
-  return (
-    <div className="border-t border-[#E5E9F0] px-3 py-2.5 bg-white space-y-2">
-      {/* Answer preview */}
-      {truncatedAnswer && (
-        <p className="text-xs text-gray-700 leading-relaxed">{truncatedAnswer}</p>
-      )}
-
-      {/* Sources */}
-      {displaySources.length > 0 && (
-        <div className="space-y-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">
-              Sources
-            </span>
-            <span className="text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-              {sourceCount}
-            </span>
-          </div>
-          <ol className="space-y-0.5">
-            {displaySources.map((source, i) => (
-              <li key={i} className="flex items-baseline gap-1.5 text-[11px]">
-                <span className="text-gray-400 shrink-0">{i + 1}.</span>
-                <a
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-800 hover:underline truncate min-w-0"
-                  title={source.url}
-                >
-                  {source.domain || new URL(source.url).hostname}
-                </a>
-              </li>
-            ))}
-          </ol>
-          {sourceCount > 5 && (
-            <p className="text-[10px] text-gray-400">
-              +{sourceCount - 5} more sources
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Parse create_document result from tool result data ───────────────
+// ── Parse helpers ────────────────────────────────────────────────────
 
 function parseCreateDocumentResult(result: ClientToolResult | null | undefined): Record<string, unknown> | null {
   if (!result || !result.result) return null;
 
-  // result.result may be a parsed object or a JSON string
   let data = result.result as Record<string, unknown>;
   if (typeof data === 'string') {
     try {
@@ -361,6 +309,22 @@ function parseCreateDocumentResult(result: ClientToolResult | null | undefined):
   return null;
 }
 
+// ── Format input for modal display ───────────────────────────────────
+
+function formatInputForDisplay(input: Record<string, unknown>): Array<[string, string]> {
+  if (!input || Object.keys(input).length === 0) return [];
+  return Object.entries(input)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => {
+      const label = k.replace(/_/g, ' ');
+      const value = typeof v === 'string'
+        ? (v.length > 200 ? v.slice(0, 200) + '…' : v)
+        : JSON.stringify(v, null, 2);
+      return [label, value] as [string, string];
+    })
+    .slice(0, 8);
+}
+
 // ── Main component ──────────────────────────────────────────────────
 
 export default function ToolUseDisplay({
@@ -371,74 +335,96 @@ export default function ToolUseDisplay({
   isClientSide = false,
   sessionId,
 }: ToolUseDisplayProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const meta = getToolMeta(toolName);
   const summary = summarizeInput(toolName, input);
 
   const hasResult = result !== undefined && result !== null;
   const errorText = hasResult ? result.error : null;
-
-  // Special handling for create_document — show document card instead of raw JSON
   const docData = toolName === 'create_document' ? parseCreateDocumentResult(result) : null;
 
-  const hasExpandableResult = hasResult && !docData && (
-    errorText || result.result !== null && result.result !== undefined
-  );
-  const canExpand = (status === 'done' || status === 'error') && hasExpandableResult;
-  const showDocCard = status === 'done' && docData !== null;
+  const chipLabel = status === 'done' && toolName === 'create_document' ? 'Document Created' : meta.label;
 
   return (
-    <div
-      className={`my-1 rounded-lg border text-xs overflow-hidden transition-colors ${
-        status === 'running' || status === 'pending'
-          ? 'border-blue-200 bg-blue-50/50'
-          : status === 'error'
-          ? 'border-red-200 bg-red-50/30'
-          : 'border-[#E5E9F0] bg-[#F8FAFC]'
-      }`}
-    >
-      {/* Header row */}
+    <>
+      {/* ── Compact chip ── */}
       <button
         type="button"
-        className="w-full flex items-center gap-2 px-3 py-2 text-left"
-        onClick={() => canExpand && setExpanded((v) => !v)}
-        disabled={!canExpand && !showDocCard}
+        onClick={() => setModalOpen(true)}
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs
+                    cursor-pointer transition-colors select-none ${chipClasses(status)}`}
       >
-        {/* Icon */}
-        <span className="text-sm shrink-0 leading-none" role="img" aria-label={meta.label}>
+        <span className="text-sm leading-none shrink-0" role="img" aria-label={chipLabel}>
           {meta.icon}
         </span>
-
-        {/* Label */}
-        <span className="font-medium text-gray-800 shrink-0">
-          {status === 'done' && toolName === 'create_document' ? 'Document Created' : meta.label}
-        </span>
-
-        {/* Summary — shown as "Label — input params" */}
-        {summary && (
-          <span className="text-gray-400 truncate min-w-0 flex-1">
-            — &ldquo;{summary}&rdquo;
-          </span>
-        )}
-
-        {/* Status dot */}
+        <span className="font-medium text-gray-700 whitespace-nowrap">{chipLabel}</span>
         <StatusDot status={status} />
-
-        {/* Chevron */}
-        {canExpand && (
-          <span className={`text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}>
-            ▾
-          </span>
-        )}
       </button>
 
-      {/* Document result card — shown inline for create_document */}
-      {showDocCard && (
-        <DocumentResultCard data={docData} sessionId={sessionId} />
-      )}
+      {/* ── Detail modal ── */}
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={`${meta.icon} ${chipLabel}`}
+        size="lg"
+      >
+        <div className="space-y-5">
+          {/* Status + summary bar */}
+          <div className="flex items-center gap-3 text-sm">
+            <div className="flex items-center gap-1.5">
+              <StatusDot status={status} />
+              <span className={`font-medium ${
+                status === 'error' ? 'text-red-600' :
+                status === 'done' ? 'text-green-700' :
+                'text-blue-600'
+              }`}>
+                {STATUS_TEXT[status]}
+              </span>
+            </div>
+            {summary && (
+              <span className="text-gray-500 truncate">{summary}</span>
+            )}
+          </div>
 
-      {/* Collapsible result panel — type-specific rendering */}
-      {expanded && resolveResultPanel(toolName, input, result, errorText)}
-    </div>
+          {/* Input parameters */}
+          {Object.keys(input).length > 0 && (
+            <div>
+              <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">Input</h3>
+              <div className="bg-gray-50 rounded-lg p-3 space-y-1.5">
+                {formatInputForDisplay(input).map(([label, value]) => (
+                  <div key={label} className="flex gap-2 text-xs">
+                    <span className="font-medium text-gray-500 shrink-0 min-w-[80px]">{label}</span>
+                    <span className="text-gray-800 break-words whitespace-pre-wrap min-w-0">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {errorText && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <h3 className="text-xs font-bold uppercase text-red-600 tracking-wider mb-1">Error</h3>
+              <p className="text-sm text-red-700 whitespace-pre-wrap">{errorText}</p>
+            </div>
+          )}
+
+          {/* Document result card */}
+          {status === 'done' && docData && (
+            <DocumentResultCard data={docData} sessionId={sessionId} />
+          )}
+
+          {/* Tool-specific result panel */}
+          {!errorText && !docData && hasResult && (status === 'done' || status === 'error') && (
+            <div>
+              <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">Result</h3>
+              <div className="border border-gray-100 rounded-lg overflow-hidden">
+                {resolveResultPanel(toolName, input, result, null)}
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+    </>
   );
 }
