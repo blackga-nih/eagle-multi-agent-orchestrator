@@ -208,13 +208,29 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
 
         case 'generation/stateChange': {
             const existing = session.stateChangesByMsg[action.msgId] ?? [];
+            const sc = action.stateChange;
+            let updated: StateChangeEntry[];
+            if (sc.stateType === 'checklist_update') {
+                // Dedup: replace the last checklist_update for the same packageId
+                const idx = existing.findLastIndex(
+                    (e) => e.stateType === 'checklist_update' && e.packageId === sc.packageId,
+                );
+                if (idx >= 0) {
+                    updated = [...existing];
+                    updated[idx] = sc;
+                } else {
+                    updated = [...existing, sc];
+                }
+            } else {
+                updated = [...existing, sc];
+            }
             return {
                 ...state,
                 [sessionId]: {
                     ...session,
                     stateChangesByMsg: {
                         ...session.stateChangesByMsg,
-                        [action.msgId]: [...existing, action.stateChange],
+                        [action.msgId]: updated,
                     },
                 },
             };

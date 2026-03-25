@@ -8,7 +8,7 @@ Entity format:
     PK:  TEMPLATE#{tenant_id}   (use "global" as tenant_id for system defaults)
     SK:  TEMPLATE#{doc_type}#{user_id}
 
-doc_type values: "sow" | "igce" | "acquisition-plan" | "market-research" | "justification"
+doc_type values: "sow" | "igce" | "acquisition_plan" | "market_research" | "justification"
 user_id:         specific user ID  or  "shared" for tenant-wide defaults
 
 GSI (for reverse lookups by tenant + doc_type + recency):

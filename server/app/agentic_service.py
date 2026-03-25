@@ -3687,6 +3687,80 @@ def _exec_finalize_package(params: dict, tenant_id: str) -> dict:
     return result
 
 
+def _backfill_completed_docs(
+    package: dict, tenant_id: str, owner: str, session_id: str | None
+) -> None:
+    """Link pre-existing session documents to a newly created package.
+
+    When a user generates documents (e.g. SOW) before creating a package,
+    those docs live in S3 under the user prefix but aren't tracked in the
+    package's ``completed_documents``. This scans the user's S3 documents
+    prefix and registers any that match the package's required_documents.
+    """
+    try:
+        pkg_id = package.get("package_id")
+        required = set(package.get("required_documents", []))
+        if not pkg_id or not required or not owner:
+            return
+
+        bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+        prefix = f"eagle/{tenant_id}/{owner}/documents/"
+        s3 = _get_s3()
+        resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=200)
+        contents = resp.get("Contents", [])
+
+        # Parse doc_types from S3 keys: {prefix}{doc_type}_{timestamp}.{ext}
+        found: dict[str, str] = {}  # doc_type → s3_key (latest)
+        for obj in contents:
+            key = obj["Key"]
+            filename = key[len(prefix):]  # e.g. "sow_20260325_203000.md"
+            parts = filename.split("_", 1)
+            if parts:
+                dt = parts[0].lower()
+                if dt in required and dt not in found:
+                    found[dt] = key
+
+        if not found:
+            return
+
+        # Register each found doc as a package document
+        from app.document_service import create_package_document_version
+        from app.package_store import update_package
+
+        completed = list(package.get("completed_documents", []))
+        for doc_type, s3_key in found.items():
+            if doc_type in completed:
+                continue
+            # Read content from S3 to link into package
+            try:
+                obj = s3.get_object(Bucket=bucket, Key=s3_key)
+                content = obj["Body"].read()
+                result = create_package_document_version(
+                    tenant_id=tenant_id,
+                    package_id=pkg_id,
+                    doc_type=doc_type,
+                    content=content,
+                    title=f"{doc_type.replace('_', ' ').title()} (linked)",
+                    file_type=s3_key.rsplit(".", 1)[-1] if "." in s3_key else "md",
+                    created_by_user_id=owner,
+                    session_id=session_id,
+                    change_source="backfill",
+                )
+                if result.success:
+                    completed.append(doc_type)
+                    logger.info(
+                        "Backfilled %s from %s into package %s",
+                        doc_type, s3_key, pkg_id,
+                    )
+            except Exception:
+                logger.debug("Backfill failed for %s: %s", doc_type, s3_key, exc_info=True)
+
+        if completed != list(package.get("completed_documents", [])):
+            update_package(tenant_id, pkg_id, {"completed_documents": completed})
+    except Exception:
+        logger.debug("_backfill_completed_docs failed (non-critical)", exc_info=True)
+
+
 def _exec_manage_package(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Create, read, update, list, or get checklist for acquisition packages."""
     from app.package_store import (
@@ -3719,6 +3793,10 @@ def _exec_manage_package(params: dict, tenant_id: str, session_id: str = None) -
             acquisition_method=params.get("acquisition_method") or None,
             contract_type=params.get("contract_type") or None,
         )
+
+        # Backfill: link pre-existing session documents to the new package
+        _backfill_completed_docs(result, tenant_id, owner, session_id)
+
         return result
 
     elif operation == "get":

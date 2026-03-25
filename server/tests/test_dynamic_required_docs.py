@@ -23,12 +23,12 @@ class TestComputeRequiredDocs:
         )
         assert "sow" in slugs
         assert "igce" in slugs
-        assert "market-research" in slugs
-        assert "acquisition-plan" in slugs
-        assert "source-selection-plan" in slugs
+        assert "market_research" in slugs
+        assert "acquisition_plan" in slugs
+        assert "source_selection_plan" in slugs
 
     def test_micro_purchase_returns_minimal_list(self):
-        """Micro-purchase ($5K) should only require purchase-request and sb-review at most."""
+        """Micro-purchase ($5K) should only require purchase_request and sb_review at most."""
         from app.package_store import compute_required_docs
 
         slugs = compute_required_docs(
@@ -36,10 +36,10 @@ class TestComputeRequiredDocs:
             acquisition_method="micro",
             contract_type="ffp",
         )
-        # Micro-purchase: SOW/IGCE/market-research are not required
+        # Micro-purchase: SOW/IGCE/market_research are not required
         assert "sow" not in slugs
         assert "igce" not in slugs
-        assert "market-research" not in slugs
+        assert "market_research" not in slugs
 
     def test_sole_source_includes_justification(self):
         """Sole source acquisition should include justification document."""
@@ -62,8 +62,8 @@ class TestComputeRequiredDocs:
             contract_type="ffp",
             flags={"is_it": True, "is_services": True},
         )
-        assert "security-checklist" in slugs
-        assert "section-508" in slugs
+        assert "security_checklist" in slugs
+        assert "section_508" in slugs
 
     def test_fallback_to_static_on_compliance_error(self):
         """When compliance matrix raises, should fall back to static docs."""
@@ -122,7 +122,7 @@ class TestCreatePackageWithDynamicDocs:
         )
 
         assert "sow" in result["required_documents"]
-        assert "acquisition-plan" in result["required_documents"]
+        assert "acquisition_plan" in result["required_documents"]
         assert result.get("acquisition_method") == "negotiated"
         assert result.get("contract_type") == "ffp"
 
@@ -143,7 +143,7 @@ class TestCreatePackageWithDynamicDocs:
         )
 
         # Static full_competition docs
-        assert result["required_documents"] == ["sow", "igce", "market-research", "acquisition-plan"]
+        assert result["required_documents"] == ["sow", "igce", "market_research", "acquisition_plan"]
 
 
 class TestUpdatePackageRecalculation:
@@ -166,7 +166,7 @@ class TestUpdatePackageRecalculation:
         mock_table.return_value.update_item.return_value = {
             "Attributes": {
                 "package_id": "PKG-2026-0001",
-                "required_documents": ["sow", "igce", "market-research"],
+                "required_documents": ["sow", "igce", "market_research"],
                 "acquisition_method": "negotiated",
             }
         }
@@ -196,7 +196,7 @@ class TestUpdatePackageRecalculation:
         mock_table.return_value.update_item.return_value = {
             "Attributes": {
                 "package_id": "PKG-2026-0001",
-                "required_documents": ["sow", "igce", "market-research"],
+                "required_documents": ["sow", "igce", "market_research"],
                 "estimated_value": Decimal("500000"),
             }
         }
