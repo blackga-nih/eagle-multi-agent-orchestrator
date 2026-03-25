@@ -6,12 +6,12 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   ChevronRight,
   LogOut,
-  MessageSquare,
   Loader2,
   LayoutDashboard,
   FlaskConical,
   GitBranch,
   Pencil,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
@@ -43,12 +43,15 @@ export default function SidebarNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
-  const { sessions, currentSessionId, isLoading, createNewSession, setCurrentSession, renameSession } = useSession();
+  const { sessions, currentSessionId, isLoading, createNewSession, setCurrentSession, renameSession, deleteSession } = useSession();
 
   // Inline rename state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Delete confirmation state
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Focus input when editing starts
   useEffect(() => {
@@ -78,6 +81,18 @@ export default function SidebarNav() {
     } else if (e.key === 'Escape') {
       setEditingId(null);
       setEditTitle('');
+    }
+  };
+
+  const handleDelete = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (deletingId === sessionId) {
+      deleteSession(sessionId);
+      setDeletingId(null);
+    } else {
+      setDeletingId(sessionId);
+      // Auto-reset confirmation after 3 seconds
+      setTimeout(() => setDeletingId((prev) => (prev === sessionId ? null : prev)), 3000);
     }
   };
 
@@ -138,7 +153,7 @@ export default function SidebarNav() {
   };
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-full">
+    <aside className="w-72 bg-white border-r border-gray-200 flex flex-col h-full">
       {/* Chat section + conversation history */}
       <nav className="flex-1 flex flex-col overflow-hidden p-4 gap-4">
         <div className="flex flex-col flex-1 min-h-0">
@@ -172,16 +187,13 @@ export default function SidebarNav() {
                         router.push('/chat');
                       }
                     }}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors cursor-pointer group ${
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors cursor-pointer group ${
                       session.id === currentSessionId
                         ? 'bg-blue-50 text-blue-700'
                         : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >
                     <SessionStreamingDot sessionId={session.id} />
-                    <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${
-                      session.id === currentSessionId ? 'text-blue-500' : 'text-gray-300'
-                    }`} />
                     <div className="flex-1 min-w-0">
                       {editingId === session.id ? (
                         <input
@@ -192,29 +204,45 @@ export default function SidebarNav() {
                           onBlur={handleSaveEdit}
                           onKeyDown={handleKeyDown}
                           onClick={(e) => e.stopPropagation()}
-                          className="text-xs font-medium w-full bg-white border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="text-xs w-full bg-white border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       ) : (
-                        <div className="flex items-center gap-1">
-                          <p
-                            className="text-xs font-medium truncate flex-1"
-                            onDoubleClick={(e) => handleStartEdit(session.id, session.title, e)}
-                            title="Double-click to rename"
-                          >
-                            {session.title}
-                          </p>
+                        <p
+                          className="text-xs leading-snug"
+                          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                          onDoubleClick={(e) => handleStartEdit(session.id, session.title, e)}
+                          title={session.title}
+                        >
+                          {session.title}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-1">
+                        <p className="text-[11px] text-gray-400 truncate flex-1">
+                          {formatDate(session.updatedAt)} {session.messageCount > 0 && `• ${session.messageCount} msgs`}
+                        </p>
+                        <div className="flex items-center gap-0.5 shrink-0">
                           <button
                             onClick={(e) => handleStartEdit(session.id, session.title, e)}
-                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-200 rounded transition-opacity shrink-0"
+                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-200 rounded transition-opacity"
                             title="Rename chat"
                           >
-                            <Pencil className="w-2.5 h-2.5 text-gray-400" />
+                            <Pencil className="w-3 h-3 text-gray-400" />
+                          </button>
+                          <button
+                            onClick={(e) => handleDelete(session.id, e)}
+                            className={`p-0.5 rounded transition-opacity ${
+                              deletingId === session.id
+                                ? 'opacity-100 bg-red-100 hover:bg-red-200'
+                                : 'opacity-0 group-hover:opacity-100 hover:bg-gray-200'
+                            }`}
+                            title={deletingId === session.id ? 'Click again to confirm delete' : 'Delete chat'}
+                          >
+                            <Trash2 className={`w-3 h-3 ${
+                              deletingId === session.id ? 'text-red-500' : 'text-gray-400'
+                            }`} />
                           </button>
                         </div>
-                      )}
-                      <p className="text-[10px] text-gray-400 truncate">
-                        {formatDate(session.updatedAt)} {session.messageCount > 0 && `• ${session.messageCount} msgs`}
-                      </p>
+                      </div>
                     </div>
                   </div>
                 ))}
