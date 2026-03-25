@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { ChatMessage, DocumentInfo } from '@/types/chat';
 import DocumentCard from './document-card';
 import ToolUseDisplay from './tool-use-display';
+import StateChangeCard from './state-change-card';
 import CodeSandboxRenderer from './code-sandbox-renderer';
 import MessageFeedback from './message-feedback';
 import { ToolCallsByMessageId, TrackedToolCall } from './simple-chat-interface';
@@ -122,6 +123,8 @@ interface SimpleMessageListProps {
     sessionId?: string;
     /** Tool call state keyed by message ID — populated from SSE tool_use events. */
     toolCallsByMsg?: ToolCallsByMessageId;
+    /** State change entries keyed by message ID — populated from SSE metadata events. */
+    stateChangesByMsg?: Record<string, import('@/contexts/chat-runtime-context').StateChangeEntry[]>;
     /** Agent status text shown during model thinking / tool execution. */
     agentStatus?: string | null;
     /** Tool calls for the in-flight streaming message (shown during waiting phase). */
@@ -160,20 +163,27 @@ function CodeOutput({ tc }: { tc: TrackedToolCall }) {
 function InterleavedContent({
     content,
     toolCalls,
+    stateChanges = [],
     isStreaming,
     sessionId,
 }: {
     content: string;
     toolCalls: TrackedToolCall[];
+    stateChanges?: import('@/contexts/chat-runtime-context').StateChangeEntry[];
     isStreaming: boolean;
     sessionId?: string;
 }) {
-    // Sort tool calls by their text snapshot position (stream order)
-    const sorted = [...toolCalls].sort(
-        (a, b) => (a.textSnapshotLength ?? 0) - (b.textSnapshotLength ?? 0)
-    );
+    // Merge tool calls and state changes into a single sorted stream by textSnapshotLength
+    type StreamItem =
+        | { kind: 'tool'; tc: TrackedToolCall; snapLen: number }
+        | { kind: 'state'; entry: import('@/contexts/chat-runtime-context').StateChangeEntry; snapLen: number };
 
-    // Build segments: text blocks and groups of consecutive tool chips
+    const items: StreamItem[] = [
+        ...toolCalls.map((tc) => ({ kind: 'tool' as const, tc, snapLen: tc.textSnapshotLength ?? 0 })),
+        ...stateChanges.map((entry) => ({ kind: 'state' as const, entry, snapLen: entry.textSnapshotLength ?? 0 })),
+    ].sort((a, b) => a.snapLen - b.snapLen);
+
+    // Build segments: text blocks and groups of consecutive chips/cards
     const segments: React.ReactNode[] = [];
     let cursor = 0;
     let chipGroup: React.ReactNode[] = [];
@@ -194,10 +204,10 @@ function InterleavedContent({
         }
     };
 
-    for (const tc of sorted) {
-        const snapLen = tc.textSnapshotLength ?? 0;
+    for (const item of items) {
+        const snapLen = item.snapLen;
 
-        // Text segment before this tool — flush any pending chips first
+        // Text segment before this item — flush any pending chips first
         if (snapLen > cursor) {
             flushChips();
             const textSlice = content.slice(cursor, snapLen).trim();
@@ -211,21 +221,32 @@ function InterleavedContent({
             cursor = snapLen;
         }
 
-        // Accumulate tool chip into current group
-        chipGroup.push(
-            <ToolUseDisplay
-                key={tc.toolUseId}
-                toolName={tc.toolName}
-                input={tc.input}
-                status={tc.status}
-                result={tc.result}
-                isClientSide={tc.isClientSide}
-                sessionId={sessionId}
-            />
-        );
-        // CodeOutput renders as a block below the chip group
-        const co = <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />;
-        if (tc.toolName === 'code') codeOutputs.push(co);
+        if (item.kind === 'tool') {
+            const tc = item.tc;
+            // Accumulate tool chip into current group
+            chipGroup.push(
+                <ToolUseDisplay
+                    key={tc.toolUseId}
+                    toolName={tc.toolName}
+                    input={tc.input}
+                    status={tc.status}
+                    result={tc.result}
+                    isClientSide={tc.isClientSide}
+                    sessionId={sessionId}
+                />
+            );
+            // CodeOutput renders as a block below the chip group
+            const co = <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />;
+            if (tc.toolName === 'code') codeOutputs.push(co);
+        } else {
+            // State change card — render alongside tool chips
+            chipGroup.push(
+                <StateChangeCard
+                    key={`state-${item.entry.timestamp}`}
+                    entry={item.entry}
+                />
+            );
+        }
     }
 
     // Flush remaining chips
@@ -325,6 +346,7 @@ export default function SimpleMessageList({
     documents,
     sessionId,
     toolCallsByMsg = {},
+    stateChangesByMsg = {},
     agentStatus,
     pendingToolCalls = [],
 }: SimpleMessageListProps) {
@@ -385,13 +407,15 @@ export default function SimpleMessageList({
                         );
                     }
 
-                    // Retrieve tool calls associated with this assistant message
+                    // Retrieve tool calls and state changes associated with this assistant message
                     const toolCalls = toolCallsByMsg[message.id] ?? [];
+                    const stateChanges = stateChangesByMsg[message.id] ?? [];
 
-                    // Build interleaved content: text segments and tool cards in stream order.
+                    // Build interleaved content: text segments and tool/state cards in stream order.
                     // Each tool records textSnapshotLength — how much text existed when
                     // the tool was invoked, letting us split text around tool calls.
-                    const hasSnapshots = toolCalls.length > 0 && toolCalls.some(tc => tc.textSnapshotLength != null);
+                    const hasSnapshots = (toolCalls.length > 0 && toolCalls.some(tc => tc.textSnapshotLength != null))
+                        || stateChanges.length > 0;
 
                     return (
                         <div key={message.id} className="msg-contain group flex flex-col gap-1.5">
@@ -404,6 +428,7 @@ export default function SimpleMessageList({
                                 <InterleavedContent
                                     content={message.content}
                                     toolCalls={toolCalls}
+                                    stateChanges={stateChanges}
                                     isStreaming={isStreamingThis}
                                     sessionId={sessionId}
                                 />

@@ -99,6 +99,8 @@ export interface StartQueryParams {
     onMessageCommit?: (sessionId: string, message: Message) => void;
     /** Callback when document is generated (for localStorage persistence). */
     onDocumentGenerated?: (sessionId: string, doc: DocumentInfo) => void;
+    /** Callback when a state_update metadata event arrives (package state). */
+    onStateUpdate?: (metadata: Record<string, unknown>) => void;
 }
 
 interface ActiveRequest {
@@ -116,7 +118,7 @@ export class ChatStreamManager {
      * Returns the requestId.
      */
     startQuery(params: StartQueryParams): string {
-        const { sessionId, query, packageId, getToken, dispatch, onLog, onDocumentGenerated } = params;
+        const { sessionId, query, packageId, getToken, dispatch, onLog, onDocumentGenerated, onStateUpdate } = params;
 
         if (this.sessionToRequest.has(sessionId)) {
             throw new Error(`Session ${sessionId} already has an active request`);
@@ -169,7 +171,7 @@ export class ChatStreamManager {
         params: StartQueryParams,
         abortController: AbortController,
     ) {
-        const { sessionId, query, packageId, getToken, dispatch, onLog, onDocumentGenerated } = params;
+        const { sessionId, query, packageId, getToken, dispatch, onLog, onDocumentGenerated, onStateUpdate } = params;
         let accumulatedText = '';
         let eventCount = 0;
         /** True after a tool_use/tool_result event — next text chunk needs a separator. */
@@ -312,6 +314,30 @@ export class ChatStreamManager {
             if (event.type === 'handoff' && event.metadata) {
                 const target = String(event.metadata.target_agent ?? 'specialist');
                 dispatch({ type: 'generation/status', sessionId, requestId, status: `Handing off to ${target}` });
+            }
+
+            // --- State update metadata ---
+            if (event.type === 'metadata' && event.metadata?.state_type) {
+                onStateUpdate?.(event.metadata as Record<string, unknown>);
+                dispatch({
+                    type: 'generation/stateChange',
+                    sessionId,
+                    requestId,
+                    msgId: streamingMsgId,
+                    stateChange: {
+                        stateType: String(event.metadata.state_type),
+                        packageId: event.metadata.package_id as string | undefined,
+                        phase: event.metadata.phase as string | undefined,
+                        title: event.metadata.title as string | undefined,
+                        acquisitionMethod: event.metadata.acquisition_method as string | undefined,
+                        contractType: event.metadata.contract_type as string | undefined,
+                        contractVehicle: event.metadata.contract_vehicle as string | undefined,
+                        checklist: event.metadata.checklist as { required: string[]; completed: string[] } | undefined,
+                        progressPct: event.metadata.progress_pct as number | undefined,
+                        textSnapshotLength: accumulatedText.length,
+                        timestamp: Date.now(),
+                    },
+                });
             }
 
             // --- Complete ---

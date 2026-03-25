@@ -86,6 +86,7 @@ export default function SimpleChatInterface() {
     // Derived streaming state from runtime
     const streamingMsg = runtime.streamingMessage;
     const toolCallsByMsg = runtime.toolCallsByMsg;
+    const stateChangesByMsg = runtime.stateChangesByMsg;
     const agentStatus = runtime.agentStatus;
     const isStreaming = runtime.isStreaming;
 
@@ -409,6 +410,7 @@ export default function SimpleChatInterface() {
                     'Untitled Package';
                 saveGeneratedDocument(doc, sid, title);
             },
+            onStateUpdate: handlePackageMetadata,
         });
     };
 
@@ -636,6 +638,7 @@ export default function SimpleChatInterface() {
                         documents={mergedDocuments}
                         sessionId={currentSessionId}
                         toolCallsByMsg={toolCallsByMsg}
+                        stateChangesByMsg={stateChangesByMsg}
                         agentStatus={agentStatus}
                         pendingToolCalls={runtime.streamingMessageId ? (toolCallsByMsg[runtime.streamingMessageId] ?? []) : []}
                     />

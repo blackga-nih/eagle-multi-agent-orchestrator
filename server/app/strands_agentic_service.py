@@ -2936,6 +2936,7 @@ def _build_all_service_tools(
                                 "title": result.get("title", ""),
                                 "acquisition_method": result.get("acquisition_method"),
                                 "contract_type": result.get("contract_type"),
+                                "contract_vehicle": result.get("contract_vehicle"),
                             },
                         )
 

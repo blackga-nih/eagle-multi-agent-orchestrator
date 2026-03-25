@@ -5,6 +5,24 @@ import { ChatMessage, DocumentInfo } from '@/types/chat';
 import { TrackedToolCall, ToolCallsByMessageId } from '@/components/chat-simple/simple-chat-interface';
 
 // ---------------------------------------------------------------------------
+// State change entries (package state updates rendered inline in chat)
+// ---------------------------------------------------------------------------
+
+export interface StateChangeEntry {
+    stateType: string;
+    packageId?: string;
+    phase?: string;
+    title?: string;
+    acquisitionMethod?: string;
+    contractType?: string;
+    contractVehicle?: string;
+    checklist?: { required: string[]; completed: string[] };
+    progressPct?: number;
+    textSnapshotLength: number;
+    timestamp: number;
+}
+
+// ---------------------------------------------------------------------------
 // Per-session generation state
 // ---------------------------------------------------------------------------
 
@@ -16,6 +34,7 @@ export interface SessionGenerationState {
     streamingMessageId: string | null;
     toolCallsByMsg: ToolCallsByMessageId;
     documentsByMsg: Record<string, DocumentInfo[]>;
+    stateChangesByMsg: Record<string, StateChangeEntry[]>;
     agentStatus: string | null;
     error: string | null;
     /** Set once on generation/complete — the final committed message.
@@ -32,6 +51,7 @@ const IDLE_SESSION: Omit<SessionGenerationState, 'sessionId'> = {
     streamingMessageId: null,
     toolCallsByMsg: {},
     documentsByMsg: {},
+    stateChangesByMsg: {},
     agentStatus: null,
     error: null,
     completedMessage: null,
@@ -52,6 +72,7 @@ export type ChatRuntimeAction =
     | { type: 'generation/toolUse'; sessionId: string; requestId: string; msgId: string; toolUseId: string; patch: Partial<TrackedToolCall> }
     | { type: 'generation/toolResult'; sessionId: string; requestId: string; msgId: string; toolName: string; result: unknown }
     | { type: 'generation/document'; sessionId: string; requestId: string; msgId: string; document: DocumentInfo }
+    | { type: 'generation/stateChange'; sessionId: string; requestId: string; msgId: string; stateChange: StateChangeEntry }
     | { type: 'generation/complete'; sessionId: string; requestId: string; finalMessage?: ChatMessage }
     | { type: 'generation/error'; sessionId: string; requestId: string; error: string }
     | { type: 'generation/stopping'; sessionId: string }
@@ -93,9 +114,10 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
                 ...state,
                 [sessionId]: {
                     ...makeIdle(sessionId),
-                    // Preserve historical tool calls and documents from previous requests
+                    // Preserve historical tool calls, documents, and state changes from previous requests
                     toolCallsByMsg: session.toolCallsByMsg,
                     documentsByMsg: session.documentsByMsg,
+                    stateChangesByMsg: session.stateChangesByMsg,
                     activeRequestId: action.requestId,
                     status: 'streaming',
                     streamingMessageId: action.streamingMsgId,
@@ -173,6 +195,20 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
                 [sessionId]: {
                     ...session,
                     documentsByMsg: { ...session.documentsByMsg, [action.msgId]: merged },
+                },
+            };
+        }
+
+        case 'generation/stateChange': {
+            const existing = session.stateChangesByMsg[action.msgId] ?? [];
+            return {
+                ...state,
+                [sessionId]: {
+                    ...session,
+                    stateChangesByMsg: {
+                        ...session.stateChangesByMsg,
+                        [action.msgId]: [...existing, action.stateChange],
+                    },
                 },
             };
         }

@@ -54,6 +54,7 @@ export const TOOL_META: Record<string, { icon: string; label: string }> = {
   edit_docx_document:         { icon: '✏️', label: 'Editing Document' },
   get_latest_document:        { icon: '📄', label: 'Checking Document' },
   finalize_package:           { icon: '📦', label: 'Finalizing Package' },
+  manage_package:             { icon: '📦', label: 'Package Update' },
   document_changelog_search:  { icon: '📜', label: 'Changelog Search' },
   // Admin tools
   manage_skills:              { icon: '⚙️', label: 'Managing Skills' },

@@ -65,7 +65,7 @@ export default function TopNav() {
         </span>
         <div>
           <h1 className="text-lg font-bold tracking-wider">EAGLE</h1>
-          <p className="text-[11px] text-white/70 tracking-wide">Acquisition Assistant</p>
+          <p className="text-[11px] text-white/70 tracking-wide">Enhanced Acquisition Guidance and Learning Engine</p>
         </div>
       </div>
 
