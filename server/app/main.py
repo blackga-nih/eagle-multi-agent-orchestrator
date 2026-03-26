@@ -4122,6 +4122,7 @@ async def export_package_zip_endpoint(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Download all package documents as a ZIP archive."""
+    import base64
     from starlette.responses import Response
     from .document_export import export_package_zip
 
@@ -4130,9 +4131,30 @@ async def export_package_zip_endpoint(
         raise HTTPException(status_code=404, detail="Package not found")
 
     docs = list_package_documents(user.tenant_id, package_id)
-    docs_with_content = [d for d in docs if d.get("content")]
+    docs_with_content = [
+        d for d in docs
+        if d.get("content") or d.get("content_b64") or d.get("source_s3_key")
+    ]
     if not docs_with_content:
         raise HTTPException(status_code=404, detail="No documents with content found")
+
+    # S3-sourced docs store binary content in content_b64 or S3 only.
+    # Decode/fetch them so export_package_zip can include them directly.
+    s3_client = None
+    for doc in docs_with_content:
+        if doc.get("content"):
+            continue
+        if doc.get("content_b64"):
+            doc["_binary"] = base64.b64decode(doc["content_b64"])
+        elif doc.get("source_s3_key"):
+            try:
+                import boto3
+                if s3_client is None:
+                    s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+                resp = s3_client.get_object(Bucket=_S3_BUCKET, Key=doc["source_s3_key"])
+                doc["_binary"] = resp["Body"].read()
+            except Exception as exc:
+                logger.warning("Failed to fetch S3 doc %s: %s", doc.get("source_s3_key"), exc)
 
     result = export_package_zip(docs_with_content, pkg.get("title", "Package"), format)
 

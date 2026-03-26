@@ -58,6 +58,24 @@ class TestExportPackageZip:
         error_files = [n for n in names if "ERROR" in n]
         assert len(error_files) == 1
 
+    def test_binary_docs_included_in_zip(self):
+        """S3-sourced docs with _binary should be included as raw files."""
+        from app.document_export import export_package_zip
+
+        documents = [
+            {"doc_type": "sow", "title": "SOW", "content": "# SOW\nContent"},
+            {"doc_type": "igce", "title": "IGCE Template", "_binary": b"fake-xlsx-bytes",
+             "file_type": "xlsx", "filename": "igce_template.xlsx"},
+        ]
+
+        result = export_package_zip(documents, "Mixed Package", "md")
+
+        zf = zipfile.ZipFile(io.BytesIO(result["data"]))
+        names = zf.namelist()
+        assert len(names) == 2
+        assert "igce_template.xlsx" in names
+        assert zf.read("igce_template.xlsx") == b"fake-xlsx-bytes"
+
     def test_empty_docs_returns_empty_zip(self):
         """Empty document list should produce a valid but empty ZIP."""
         from app.document_export import export_package_zip

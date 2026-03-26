@@ -927,12 +927,19 @@ def export_package_zip(
         for doc in documents:
             doc_type = doc.get("doc_type", "unknown")
             title = doc.get("title", doc_type)
-            content = doc.get("content", "")
+            safe_title = re.sub(r'[^\w\-]', '_', title)[:40]
 
+            # Binary docs (S3-sourced templates) — include raw file directly
+            if doc.get("_binary"):
+                file_type = doc.get("file_type", "bin")
+                filename = doc.get("filename", f"{doc_type}_{safe_title}.{file_type}")
+                zf.writestr(filename, doc["_binary"])
+                continue
+
+            content = doc.get("content", "")
             if not content:
                 continue
 
-            safe_title = re.sub(r'[^\w\-]', '_', title)[:40]
             try:
                 result = export_document(content, export_format, title)
                 ext = export_format.lower()
