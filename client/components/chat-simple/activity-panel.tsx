@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { FileText, Bell, Terminal, ClipboardCheck, PanelRightClose, PanelRightOpen, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
@@ -24,6 +24,8 @@ interface ActivityPanelProps {
   onToggle: () => void;
   packageState?: PackageState;
   getToken: () => Promise<string | null>;
+  onRefreshPackage?: () => void;
+  isRefreshingPackage?: boolean;
 }
 
 type TabId = 'package' | 'documents' | 'notifications' | 'logs';
@@ -216,12 +218,23 @@ function PackageCard({
 function AllPackagesList({
   getToken,
   activePackageId,
+  isStreaming,
 }: {
   getToken: () => Promise<string | null>;
   activePackageId?: string;
+  isStreaming?: boolean;
 }) {
   const { packages, loading, error, refetch, fetchDocuments, documentsCache, loadingDocs } = useAllPackages(getToken);
   const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
+  const wasStreamingRef = useRef(false);
+
+  // Auto-refetch when streaming completes (new packages may have been created)
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming) {
+      refetch();
+    }
+    wasStreamingRef.current = !!isStreaming;
+  }, [isStreaming, refetch]);
 
   const handleToggle = async (pkgId: string) => {
     if (expandedPkg === pkgId) {
@@ -485,6 +498,8 @@ export default function ActivityPanel({
   onToggle,
   packageState,
   getToken,
+  onRefreshPackage,
+  isRefreshingPackage,
 }: ActivityPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('package');
 
@@ -574,8 +589,23 @@ export default function ActivityPanel({
             {/* Section A: Active package checklist (from SSE) */}
             {packageState && <ChecklistTabContent state={packageState} />}
 
+            {/* Refresh: scan chat for latest document and link active package */}
+            {onRefreshPackage && (
+              <div className={packageState?.packageId ? 'mt-2 mb-1' : 'mb-3'}>
+                <button
+                  onClick={onRefreshPackage}
+                  disabled={isRefreshingPackage || isStreaming}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-md border border-[#D8DEE6] text-gray-500 hover:text-[#003366] hover:border-[#003366] hover:bg-blue-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Scan chat for the most recent document and link the active package"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isRefreshingPackage ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingPackage ? 'Detecting...' : 'Detect Package from Chat'}</span>
+                </button>
+              </div>
+            )}
+
             {/* Divider between active checklist and all packages */}
-            {packageState && (
+            {packageState?.packageId && (
               <div className="border-t border-[#D8DEE6] my-4" />
             )}
 
@@ -583,6 +613,7 @@ export default function ActivityPanel({
             <AllPackagesList
               getToken={getToken}
               activePackageId={packageState?.packageId ?? undefined}
+              isStreaming={isStreaming}
             />
           </>
         )}

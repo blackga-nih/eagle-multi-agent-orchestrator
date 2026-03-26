@@ -274,6 +274,9 @@ export default function SimpleChatInterface() {
     // Streaming error from runtime
     const error = runtime.error;
 
+    /** Refresh-package-from-chat state */
+    const [isRefreshingPackage, setIsRefreshingPackage] = useState(false);
+
     // Log helpers
     const clearLogs = useCallback(() => setLogs([]), []);
     const addUserInputLog = useCallback((content: string) => {
@@ -287,6 +290,70 @@ export default function SimpleChatInterface() {
         };
         setLogs((prev) => [...prev, entry]);
     }, []);
+
+    // -----------------------------------------------------------------------
+    // Refresh active package by scanning chat documents
+    // -----------------------------------------------------------------------
+    const handleRefreshPackage = useCallback(async () => {
+        if (!currentSessionId) return;
+        setIsRefreshingPackage(true);
+        try {
+            // 1. Scan all documents in the chat for the most recent one with a package_id
+            const allDocs = Object.values(documents).flat();
+            const docsWithPkg = allDocs.filter((d) => d.package_id);
+            if (docsWithPkg.length === 0) return;
+
+            // Pick the most recently generated document
+            docsWithPkg.sort((a, b) => {
+                const ta = a.generated_at ? new Date(a.generated_at).getTime() : 0;
+                const tb = b.generated_at ? new Date(b.generated_at).getTime() : 0;
+                return tb - ta;
+            });
+            const latestPkgId = docsWithPkg[0].package_id!;
+
+            // 2. Set as active package for this session via resolve-context
+            const token = await getToken();
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+
+            await fetch('/api/packages/resolve-context', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    session_id: currentSessionId,
+                    package_id: latestPkgId,
+                    action: 'set',
+                }),
+            });
+
+            // 3. Fetch full session context to get checklist state
+            const ctxRes = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/context`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (ctxRes.ok) {
+                const ctx = await ctxRes.json();
+                if (ctx.package) {
+                    // Synthesize metadata events to update packageState
+                    handlePackageMetadata({
+                        state_type: 'checklist_update',
+                        package_id: ctx.package.package_id,
+                        phase: ctx.package.status,
+                        checklist: ctx.package.checklist,
+                        progress_pct: ctx.package.checklist
+                            ? Math.round(
+                                ((ctx.package.checklist.completed?.length ?? 0) /
+                                    Math.max(ctx.package.checklist.required?.length ?? 1, 1)) * 100
+                            )
+                            : 0,
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Package refresh failed:', err);
+        } finally {
+            setIsRefreshingPackage(false);
+        }
+    }, [currentSessionId, documents, getToken, handlePackageMetadata]);
 
     // -----------------------------------------------------------------------
     // Commit streaming message when generation completes
@@ -803,6 +870,8 @@ export default function SimpleChatInterface() {
                 onToggle={() => setIsPanelOpen(v => !v)}
                 packageState={packageState}
                 getToken={getToken}
+                onRefreshPackage={handleRefreshPackage}
+                isRefreshingPackage={isRefreshingPackage}
             />
 
             {/* Package selector modal for uploaded documents */}
