@@ -1572,6 +1572,10 @@ def _build_subagent_kb_tools(
     from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
     from .agentic_service import _exec_search_far
 
+    # Track which research tools have been called in this session to detect
+    # cascade violations (web_search before knowledge_search).
+    _kb_tools_called: set[str] = set()
+
     def _emit_input(name: str, tool_input: dict) -> None:
         """Push tool input so the stream can update the card with real params."""
         if result_queue and loop:
@@ -1607,6 +1611,7 @@ def _build_subagent_kb_tools(
             "keywords": keywords, "limit": limit,
         }.items() if v}
         _emit_input("knowledge_search", params)
+        _kb_tools_called.add("knowledge_search")
         result = exec_knowledge_search(params, tenant_id, session_id)
         return json.dumps(result, indent=2, default=str)
 
@@ -1618,6 +1623,7 @@ def _build_subagent_kb_tools(
             s3_key: S3 key path from a knowledge_search or search_far result
         """
         _emit_input("knowledge_fetch", {"s3_key": s3_key})
+        _kb_tools_called.add("knowledge_fetch")
         result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
         return json.dumps(result, indent=2, default=str)
 
@@ -1630,6 +1636,7 @@ def _build_subagent_kb_tools(
             parts: Optional list of FAR part numbers to filter (e.g. ["6", "16"])
         """
         _emit_input("search_far", {"query": query, "parts": parts})
+        _kb_tools_called.add("search_far")
         result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
         return json.dumps(result, indent=2, default=str)
 
@@ -1637,11 +1644,18 @@ def _build_subagent_kb_tools(
     def web_search(query: str) -> str:
         """Search the web for real-time information. Use for current market data, vendor info, pricing, policy updates, or any topic needing up-to-date info beyond the knowledge base.
 
-        IMPORTANT: After EVERY web_search call, you MUST call web_fetch on the top 5 source URLs returned. Search snippets are incomplete — they miss pricing tiers, licensing terms, compliance details, and contract vehicle numbers. Never cite a source you have not web_fetched.
+        IMPORTANT: You MUST call knowledge_search or search_far BEFORE using web_search. After EVERY web_search call, you MUST call web_fetch on the top 5 source URLs returned. Search snippets are incomplete — they miss pricing tiers, licensing terms, compliance details, and contract vehicle numbers. Never cite a source you have not web_fetched.
 
         Args:
             query: Natural language search query
         """
+        if not _kb_tools_called:
+            logger.warning(
+                "CASCADE VIOLATION: web_search called without prior KB lookup "
+                "(session=%s, query='%s'). The research cascade requires "
+                "knowledge_search or search_far BEFORE web_search.",
+                session_id, query[:100],
+            )
         _emit_input("web_search", {"query": query})
         result = exec_web_search(query)
         return json.dumps(result, indent=2, default=str)
@@ -3019,6 +3033,9 @@ def _build_kb_service_tools(
     from .agentic_service import _exec_search_far
     from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
 
+    # Track KB tool calls for cascade violation detection.
+    _kb_tools_called: set[str] = set()
+
     def _emit_input(name: str, tool_input: dict) -> None:
         """Push tool input so the stream loop can update the card."""
         if result_queue and loop:
@@ -3045,6 +3062,7 @@ def _build_kb_service_tools(
             parts: Optional list of FAR part numbers to filter (e.g. ["6", "16"])
         """
         _emit_input("search_far", {"query": query, "parts": parts})
+        _kb_tools_called.add("search_far")
         result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
         _emit("search_far", result)
         return json.dumps(result, indent=2, default=str)
@@ -3076,6 +3094,7 @@ def _build_kb_service_tools(
             "keywords": keywords, "limit": limit,
         }.items() if v}
         _emit_input("knowledge_search", params)
+        _kb_tools_called.add("knowledge_search")
         result = exec_knowledge_search(params, tenant_id, session_id)
         _emit("knowledge_search", result)
         return json.dumps(result, indent=2, default=str)
@@ -3088,6 +3107,7 @@ def _build_kb_service_tools(
             s3_key: S3 key path from a knowledge_search or search_far result
         """
         _emit_input("knowledge_fetch", {"s3_key": s3_key})
+        _kb_tools_called.add("knowledge_fetch")
         result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
         _emit("knowledge_fetch", result)
         return json.dumps(result, indent=2, default=str)
@@ -3096,11 +3116,18 @@ def _build_kb_service_tools(
     def web_search_tool(query: str) -> str:
         """Search the web for real-time information. Use for current market data, vendor info, pricing, policy updates, or any topic needing up-to-date info beyond the knowledge base.
 
-        IMPORTANT: After EVERY web_search call, you MUST call web_fetch on the top 5 source URLs returned. Search snippets are incomplete — they miss pricing tiers, licensing terms, compliance details, and contract vehicle numbers. Never cite a source you have not web_fetched.
+        IMPORTANT: You MUST call knowledge_search or search_far BEFORE using web_search. After EVERY web_search call, you MUST call web_fetch on the top 5 source URLs returned. Search snippets are incomplete — they miss pricing tiers, licensing terms, compliance details, and contract vehicle numbers. Never cite a source you have not web_fetched.
 
         Args:
             query: Natural language search query
         """
+        if not _kb_tools_called:
+            logger.warning(
+                "CASCADE VIOLATION: web_search called without prior KB lookup "
+                "(session=%s, query='%s'). The research cascade requires "
+                "knowledge_search or search_far BEFORE web_search.",
+                session_id, query[:100],
+            )
         _emit_input("web_search", {"query": query})
         result = exec_web_search(query)
         _emit("web_search", result)
@@ -3332,19 +3359,23 @@ def _build_supervisor_prompt_body(
         "  Layer 4 — load_data(name, section?): Fetch reference data (thresholds, vehicles, doc rules).\n"
         "  Only spawn a specialist subagent when you need expert reasoning, not for simple lookups.\n\n"
         "RESEARCH CASCADE — INTERNAL SOURCES FIRST (applies to MOST responses):\n"
-        "Before answering any acquisition, compliance, regulation, threshold, document, or procedural "
-        "question, follow this mandatory order. Do NOT skip to web_search without checking internal "
-        "sources first.\n\n"
-        "  STEP 1 — Knowledge Base:\n"
+        "CRITICAL: You MUST call knowledge_search BEFORE web_search. Telemetry shows 79% cascade "
+        "violation rate — this degrades answer quality and wastes web queries. Follow this mandatory "
+        "order strictly.\n\n"
+        "  STEP 1 — Knowledge Base (ALWAYS first, NEVER skip):\n"
         "    a) Call knowledge_search with relevant query, topic, and/or keywords.\n"
         "    b) If results found, call knowledge_fetch on the top 1-3 relevant s3_keys.\n"
         "    c) The KB is your primary source of truth — approved FAR/DFARS text, NIH policies, "
-        "templates, precedents.\n"
-        "    d) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
-        "    e) When search_far returns results with non-empty s3_keys, you MUST call "
+        "templates, checklists, and precedents.\n"
+        "    d) The KB also contains templates (SOW, IGCE, AP, J&A, MRR) and checklists — "
+        "search for these BEFORE generating documents from scratch.\n"
+        "    e) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
+        "    f) When search_far returns results with non-empty s3_keys, you MUST call "
         "knowledge_fetch on the top result's s3_key to read the full FAR document "
         "BEFORE responding. Never answer from the summary alone.\n"
-        "    f) If a search_far result has empty s3_keys, the summary is the best available.\n\n"
+        "    g) If a search_far result has empty s3_keys, the summary is the best available.\n"
+        "    h) BEFORE delegating to a specialist, run knowledge_search and pass KB findings "
+        "in the delegation context so the specialist does not skip straight to web.\n\n"
         "  STEP 2 — Compliance Matrix:\n"
         "    a) Call query_compliance_matrix when the question involves dollar thresholds, "
         "required documents, contract types, acquisition methods, competition rules, "

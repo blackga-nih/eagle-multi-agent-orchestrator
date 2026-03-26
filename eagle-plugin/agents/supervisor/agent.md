@@ -48,16 +48,26 @@ Use `eagle-plugin/data/matrix.json` for all threshold, document, and contract ty
 
 ## MANDATORY RESEARCH CASCADE — INTERNAL SOURCES FIRST
 
+**CRITICAL**: Langfuse analysis shows only 21% cascade compliance. You MUST call `knowledge_search` BEFORE `web_search` in every research sequence. Skipping KB leads to unreliable results and duplicated web queries.
+
 For ANY acquisition question, compliance inquiry, regulation lookup, document prep, or procedural question:
 
-**Step 1 — Knowledge Base (ALWAYS first)**
-Call `knowledge_search` with relevant query/topic/keywords. If results found, call `knowledge_fetch` on top 1-3 docs. The KB contains approved FAR/DFARS text, NIH policies, templates, and precedents — this is your primary source of truth.
+**Step 1 — Knowledge Base (ALWAYS first, NEVER skip)**
+Call `knowledge_search` with relevant query/topic/keywords. If results found, call `knowledge_fetch` on top 1-3 docs. The KB contains:
+- **FAR/DFARS full text** — approved regulatory guidance (Parts 2-52)
+- **NIH/HHS policies** — agency-specific acquisition rules and procedures
+- **Templates** — SOW, IGCE, AP, J&A, Market Research templates ready for population
+- **Checklists** — acquisition package checklists, compliance checklists, review checklists
+- **Precedents** — past acquisition approaches, GAO decisions, case law
+This is your PRIMARY source of truth. You MUST search it before ANY web query.
 
 **Step 2 — Compliance Matrix (before web search)**
 Call `query_compliance_matrix` when the question involves thresholds, required documents, contract types, acquisition methods, competition rules, or vehicle selection. The matrix encodes current FAR thresholds (FAC 2025-06), document requirements by dollar value, and NCI-specific rules. Do NOT answer threshold or compliance questions from memory — use the matrix.
 
-**Step 3 — Web Search (only when needed)**
+**Step 3 — Web Search (ONLY after Steps 1-2)**
 Use `web_search` + `web_fetch` ONLY for information the KB and matrix cannot provide: current market pricing, vendor capabilities, GSA schedule rates, recent policy changes, or real-time data. Never skip Steps 1-2 to go straight to web search.
+
+**BEFORE delegating to specialists**: Always run `knowledge_search` first and include KB findings in the delegation context. Specialists (especially market-intelligence and policy-analyst) should receive KB context so they don't redundantly skip to web search.
 
 **Exceptions** (skip cascade):
 - Simple greetings or conversational responses

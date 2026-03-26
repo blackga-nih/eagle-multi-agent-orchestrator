@@ -24,6 +24,161 @@ logger = logging.getLogger("eagle.knowledge_tools")
 METADATA_TABLE = os.environ.get("METADATA_TABLE", "eagle-document-metadata-dev")
 DOCUMENT_BUCKET = os.environ.get("DOCUMENT_BUCKET", "eagle-documents-695681773636-dev")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Built-in KB entries for templates and checklists
+# These are injected into search results so knowledge_search can discover them
+# even when they're not registered in the DynamoDB metadata table.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_TEMPLATE_PREFIX = "eagle-knowledge-base/approved/supervisor-core/essential-templates"
+
+BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
+    {
+        "document_id": "tmpl-sow",
+        "title": "Statement of Work (SOW) Template",
+        "summary": "Official NCI/HHS SOW template with sections for background, scope, period of performance, place of performance, and applicable documents. Use for competitive acquisitions above micro-purchase threshold.",
+        "document_type": "template",
+        "primary_topic": "acquisition_packages",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["SOW", "statement of work", "template", "requirements", "deliverables", "tasks", "performance"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/statement-of-work-template-eagle-v2.docx",
+        "confidence_score": 0.95,
+    },
+    {
+        "document_id": "tmpl-igce",
+        "title": "Independent Government Cost Estimate (IGCE) Template",
+        "summary": "Excel spreadsheet template for IGCE with line items, labor categories, rates, and total estimates. Variants available for commercial, educational, and nonprofit organizations.",
+        "document_type": "template",
+        "primary_topic": "funding",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["IGCE", "IGE", "cost estimate", "template", "pricing", "labor rates", "budget", "spreadsheet"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/01.D_IGCE_for_Commercial_Organizations.xlsx",
+        "confidence_score": 0.95,
+    },
+    {
+        "document_id": "tmpl-market-research",
+        "title": "HHS Streamlined Market Research Report Template",
+        "summary": "Official HHS FY26 streamlined market research report template. Sections for market conditions, vendors identified, pricing analysis, small business sources, set-aside recommendation, and conclusion.",
+        "document_type": "template",
+        "primary_topic": "market_research",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["market research", "MRR", "template", "vendors", "pricing", "small business", "set-aside", "competition"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/HHS_Streamlined_Market_Research_Template_FY26.docx",
+        "confidence_score": 0.95,
+    },
+    {
+        "document_id": "tmpl-justification",
+        "title": "Justification & Approval (J&A) Template — Over $350K",
+        "summary": "Template for sole source justification and approval for acquisitions over SAT ($350K). Includes FAR 6.302 authority citation, contractor rationale, efforts to compete, and market research summary.",
+        "document_type": "template",
+        "primary_topic": "compliance",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["J&A", "justification", "approval", "sole source", "template", "FAR 6.302", "competition", "JOFOC"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/Justification_and_Approval_Over_350K_Template.docx",
+        "confidence_score": 0.95,
+    },
+    {
+        "document_id": "tmpl-acquisition-plan",
+        "title": "HHS Streamlined Acquisition Plan Template",
+        "summary": "Official HHS streamlined acquisition plan template per FAR 7.105. Covers requirement description, estimated value, contract type, competition strategy, period of performance, set-aside, and funding.",
+        "document_type": "template",
+        "primary_topic": "acquisition_packages",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["acquisition plan", "AP", "template", "FAR 7.105", "strategy", "contract type", "competition", "planning"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/HHS Streamlined Acquisition Plan Template.docx",
+        "confidence_score": 0.95,
+    },
+    {
+        "document_id": "tmpl-cor-certification",
+        "title": "COR Appointment Memorandum Template",
+        "summary": "NIH COR appointment/certification memorandum template. Fields for nominee details, FAC-COR level, contract number, and appointment authority.",
+        "document_type": "template",
+        "primary_topic": "compliance",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["COR", "appointment", "certification", "memorandum", "template", "contracting officer representative"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/NIH COR Appointment Memorandum.docx",
+        "confidence_score": 0.90,
+    },
+    {
+        "document_id": "tmpl-son-products",
+        "title": "Statement of Need — Products (Equipment and Supplies)",
+        "summary": "Template for Statement of Need for products including equipment and supplies. Used during intake phase for competitive acquisitions.",
+        "document_type": "template",
+        "primary_topic": "acquisition_packages",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["SON", "statement of need", "products", "equipment", "supplies", "template", "intake", "requirements"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/3.a. SON - Products (including Equipment and Supplies).docx",
+        "confidence_score": 0.90,
+    },
+    {
+        "document_id": "tmpl-son-services",
+        "title": "Statement of Need — Services (Catalog Pricing)",
+        "summary": "Template for Statement of Need for services based on catalog pricing. Used during intake phase for competitive acquisitions.",
+        "document_type": "template",
+        "primary_topic": "acquisition_packages",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["SON", "statement of need", "services", "catalog", "pricing", "template", "intake"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/3.b. SON - Services based on Catalog Pricing.docx",
+        "confidence_score": 0.90,
+    },
+    {
+        "document_id": "tmpl-buy-american",
+        "title": "Buy American Act Determination Form",
+        "summary": "Determination form for Buy American Act non-availability exception. Required when acquiring foreign products that may fall under BAA requirements.",
+        "document_type": "template",
+        "primary_topic": "compliance",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["Buy American", "BAA", "determination", "template", "non-availability", "foreign", "compliance"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/DF_Buy_American_Non_Availability_Template.docx",
+        "confidence_score": 0.85,
+    },
+    {
+        "document_id": "tmpl-subk-plan",
+        "title": "HHS Subcontracting Plan Template",
+        "summary": "Template for subcontracting plans required for contracts over $900K (FAR 19.702). Includes small business subcontracting goals, reporting requirements, and good faith effort documentation.",
+        "document_type": "template",
+        "primary_topic": "socioeconomic",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["subcontracting", "subK", "plan", "template", "small business", "goals", "FAR 19.702"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/HHS SubK Plan Template - updated March 2022.doc",
+        "confidence_score": 0.85,
+    },
+    {
+        "document_id": "tmpl-j-and-a-under-sat",
+        "title": "Justification & Approval (J&A) Template — Under $350K",
+        "summary": "Streamlined J&A template for sole source acquisitions under the simplified acquisition threshold ($350K). Less documentation required than full J&A.",
+        "document_type": "template",
+        "primary_topic": "compliance",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["J&A", "justification", "sole source", "template", "simplified", "under SAT", "under $350K"],
+        "s3_key": f"{_TEMPLATE_PREFIX}/Justification_and_Approval_Under_350K_Template.docx",
+        "confidence_score": 0.90,
+    },
+    {
+        "document_id": "checklist-acquisition-package",
+        "title": "Acquisition Package Checklist",
+        "summary": "Checklist of required documents for a complete acquisition package. Varies by dollar threshold and acquisition method. Includes SOW, IGCE, AP, market research, J&A, evaluation criteria, and compliance documents.",
+        "document_type": "checklist",
+        "primary_topic": "acquisition_packages",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "keywords": ["checklist", "acquisition package", "required documents", "completeness", "review", "compliance"],
+        "s3_key": "",
+        "confidence_score": 0.80,
+    },
+]
 SEARCH_MODEL_ID = os.environ.get(
     "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-3-haiku-20240307-v1:0"
 )
@@ -332,7 +487,28 @@ def exec_knowledge_search(
             scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
             response = table.scan(**scan_kwargs)
             items.extend(response.get("Items", []))
-        logger.info("knowledge_search: scanned %d total items", len(items))
+
+        # Inject built-in template/checklist entries so they participate in search.
+        # Filter them the same way DynamoDB results are filtered.
+        for entry in BUILTIN_KB_ENTRIES:
+            if topic and entry.get("primary_topic") != topic:
+                continue
+            if document_type and entry.get("document_type") != document_type:
+                continue
+            if agent and entry.get("primary_agent") != agent:
+                continue
+            if authority_level and entry.get("authority_level") != authority_level:
+                continue
+            # Avoid duplicates if a DynamoDB entry already has the same document_id
+            if not any(it.get("document_id") == entry["document_id"] for it in items):
+                items.append(entry)
+
+        db_count = len(items) - sum(
+            1 for e in BUILTIN_KB_ENTRIES
+            if any(it.get("document_id") == e["document_id"] for it in items)
+        )
+        logger.info("knowledge_search: %d total items (%d DB + %d built-in templates)",
+                     len(items), db_count, len(items) - db_count)
     except ClientError as e:
         logger.error("knowledge_search DynamoDB error: %s", e)
         return {"error": str(e), "results": [], "count": 0}
