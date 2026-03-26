@@ -294,18 +294,54 @@ def _delete_upload(tenant_id: str, upload_id: str) -> None:
 
 
 class ExportRequest(BaseModel):
+    doc_key: Optional[str] = None
     content: Optional[str] = None
     content_b64: Optional[str] = None
     title: str = "Document"
     format: str = "docx"
 
 
-def _resolve_export_content(req: ExportRequest) -> str:
-    """Accept raw text or base64-encoded text for WAF-safe export requests."""
+def _resolve_export_content(req: ExportRequest, tenant_id: str, user_id: str) -> str:
+    """Resolve export content from a stored document or inline body payload."""
+    from botocore.exceptions import ClientError
+
+    if req.doc_key:
+        if not _is_allowed_document_key(req.doc_key, tenant_id, user_id):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        s3 = get_s3()
+        try:
+            response = s3.get_object(Bucket=_S3_BUCKET, Key=req.doc_key)
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "NoSuchKey":
+                raise HTTPException(status_code=404, detail="Document not found") from exc
+            logger.error("S3 export fetch error for %s: %s", req.doc_key, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to retrieve export source") from exc
+
+        content_type = response.get("ContentType") or _guess_content_type(req.doc_key)
+        if not _is_binary_document(req.doc_key, content_type):
+            return response["Body"].read().decode("utf-8", errors="replace")
+
+        raw_bytes = response["Body"].read()
+        if _supports_binary_preview(req.doc_key):
+            sidecar_key = f"{req.doc_key}.content.md"
+            try:
+                sidecar_resp = s3.get_object(Bucket=_S3_BUCKET, Key=sidecar_key)
+                return sidecar_resp["Body"].read().decode("utf-8", errors="replace")
+            except ClientError:
+                preview_payload = _extract_binary_preview_payload(req.doc_key, raw_bytes)
+                if preview_payload.get("content"):
+                    return preview_payload["content"]
+
+        raise HTTPException(
+            status_code=400,
+            detail="Document content is not available for export. Open a document with previewable text or provide content directly.",
+        )
+
     if req.content is not None:
         return req.content
     if not req.content_b64:
-        raise HTTPException(status_code=400, detail="content is required")
+        raise HTTPException(status_code=400, detail="doc_key or content is required")
     try:
         return base64.b64decode(req.content_b64).decode("utf-8")
     except (ValueError, UnicodeDecodeError) as exc:
@@ -341,7 +377,7 @@ class AssignToPackageRequest(BaseModel):
 async def api_export_document(req: ExportRequest, user: UserContext = Depends(get_user_from_header)):
     """Export content to DOCX, PDF, or Markdown."""
     try:
-        result = export_document(_resolve_export_content(req), req.format, req.title)
+        result = export_document(_resolve_export_content(req, user.tenant_id, user.user_id), req.format, req.title)
         return StreamingResponse(
             io.BytesIO(result["data"]),
             media_type=result["content_type"],

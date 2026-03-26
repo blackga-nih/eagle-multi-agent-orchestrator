@@ -16,11 +16,14 @@ import os
 import re
 import sys
 import base64
+import io
+import types
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from botocore.exceptions import ClientError
 
 # Ensure server/ is on sys.path so "app.main" resolves
 _server_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
@@ -62,6 +65,23 @@ def _mock_s3():
     """Return a MagicMock that behaves like a boto3 S3 client."""
     s3 = MagicMock()
     s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+    docx_key = "eagle/test-tenant/packages/PKG-2026-0020/market_research/v1/Market-Research-Report.docx"
+    sidecar_key = f"{docx_key}.content.md"
+
+    def _get_object(*, Bucket, Key, **kwargs):
+        if Key == docx_key:
+            return {
+                "Body": io.BytesIO(b"PK\x03\x04mock-docx"),
+                "ContentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }
+        if Key == sidecar_key:
+            return {
+                "Body": io.BytesIO(b"# Market Research\n\nExisting generated package document."),
+                "ContentType": "text/markdown; charset=utf-8",
+            }
+        raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not Found"}}, "GetObject")
+
+    s3.get_object.side_effect = _get_object
     s3.list_objects_v2.return_value = {
         "Contents": [
             {
@@ -134,7 +154,28 @@ def app_with_mocked_s3(mock_s3_client):
 
     with patch.dict(os.environ, ENV_PATCH, clear=False):
         with patch("app.agentic_service._get_s3", return_value=mock_s3_client):
-            with patch("app.strands_agentic_service.sdk_query", side_effect=_mock_sdk_query):
+            strands_stub = types.ModuleType("app.strands_agentic_service")
+            strands_stub.sdk_query = _mock_sdk_query
+            strands_stub.sdk_query_streaming = _mock_sdk_query
+            strands_stub.EAGLE_TOOLS = []
+            strands_stub.MODEL = "test-model"
+            docx_edit_stub = types.ModuleType("app.document_ai_edit_service")
+            docx_edit_stub.extract_docx_preview_payload = lambda raw_bytes: {
+                "content": None,
+                "preview_blocks": [],
+                "preview_mode": "none",
+            }
+            docx_edit_stub.save_docx_preview_edits = lambda **kwargs: {"error": "not implemented in test"}
+            multipart_stub = types.ModuleType("python_multipart")
+            multipart_stub.__version__ = "0.0.20"
+            with patch.dict(
+                sys.modules,
+                {
+                        "app.strands_agentic_service": strands_stub,
+                        "app.document_ai_edit_service": docx_edit_stub,
+                        "python_multipart": multipart_stub,
+                },
+            ):
                 import importlib
                 import app.main as main_module
                 importlib.reload(main_module)
@@ -489,6 +530,23 @@ class TestDocumentExportEndpoint:
             resp = client.post("/api/documents/export", json={
                 "content_b64": encoded,
                 "title": "Test SOW",
+                "format": "docx",
+            })
+        if resp.status_code == 503:
+            detail = resp.json().get("detail", "").lower()
+            assert "dependency missing" in detail
+            assert "python-docx" in detail
+            return
+
+        assert resp.status_code == 200
+        assert resp.content.startswith(b"PK\x03\x04")
+
+    def test_export_docx_accepts_doc_key_with_markdown_sidecar(self, app_with_mocked_s3):
+        """Stored package documents should export by doc_key without posting full content."""
+        with TestClient(app_with_mocked_s3) as client:
+            resp = client.post("/api/documents/export", json={
+                "doc_key": "eagle/test-tenant/packages/PKG-2026-0020/market_research/v1/Market-Research-Report.docx",
+                "title": "Market Research",
                 "format": "docx",
             })
         if resp.status_code == 503:

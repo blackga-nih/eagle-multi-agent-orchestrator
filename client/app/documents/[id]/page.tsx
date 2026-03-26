@@ -1360,16 +1360,23 @@ ${docSnippet}`;
             };
             if (token) headers['Authorization'] = `Bearer ${token}`;
 
-            // Base64-encode content to prevent NCI WAF/proxy from
-            // blocking POST bodies that contain legal text patterns.
-            const res = await fetch('/api/documents', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
+            const exportPayload = s3Key
+                ? {
+                    doc_key: s3Key,
+                    title: documentTitle,
+                    format,
+                }
+                : {
+                    // Base64-encode unsaved content to reduce WAF/proxy interference.
                     content_b64: btoa(unescape(encodeURIComponent(documentContent))),
                     title: documentTitle,
                     format,
-                }),
+                };
+
+            const res = await fetch('/api/documents', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(exportPayload),
             });
 
             if (!res.ok) {
