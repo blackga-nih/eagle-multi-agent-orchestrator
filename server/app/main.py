@@ -38,7 +38,7 @@ from .subscription_service import SubscriptionService
 from .admin_cost_service import AdminCostService
 from .document_classification_service import classify_document, extract_text_preview
 from .document_export import ExportDependencyError, export_document
-from .document_service import create_package_document_version
+from .document_service import create_package_document_version, get_document_markdown_s3_key
 from .document_store import get_document
 from .document_key_utils import is_allowed_document_key, extract_package_document_ref
 from .doc_type_registry import normalize_doc_type
@@ -604,14 +604,18 @@ def _resolve_export_content(req: ExportRequest, tenant_id: str, user_id: str) ->
 
         raw_bytes = response["Body"].read()
         if _supports_binary_preview(req.doc_key):
-            sidecar_key = f"{req.doc_key}.content.md"
-            try:
-                sidecar_resp = s3.get_object(Bucket=_S3_BUCKET, Key=sidecar_key)
-                return sidecar_resp["Body"].read().decode("utf-8", errors="replace")
-            except ClientError:
-                preview_payload = _extract_binary_preview_payload(req.doc_key, raw_bytes)
-                if preview_payload.get("content"):
-                    return preview_payload["content"]
+            sidecar_content = _load_document_markdown_sidecar(
+                s3=s3,
+                bucket=_S3_BUCKET,
+                doc_key=req.doc_key,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if sidecar_content is not None:
+                return sidecar_content
+            preview_payload = _extract_binary_preview_payload(req.doc_key, raw_bytes)
+            if preview_payload.get("content"):
+                return preview_payload["content"]
 
         raise HTTPException(
             status_code=400,
@@ -819,6 +823,54 @@ def _build_document_response(
     }
 
 
+def _get_markdown_sidecar_candidates(doc_key: str) -> list[str]:
+    candidates = [get_document_markdown_s3_key(doc_key)]
+    if "." in doc_key:
+        candidates.append(doc_key.rsplit(".", 1)[0] + ".parsed.md")
+    return candidates
+
+
+def _load_document_markdown_sidecar(
+    *,
+    s3,
+    bucket: str,
+    doc_key: str,
+    tenant_id: str,
+    user_id: str,
+) -> Optional[str]:
+    from botocore.exceptions import ClientError
+
+    package_ref = _extract_package_document_ref(doc_key)
+    metadata = None
+    if package_ref and package_ref.get("version") is not None:
+        metadata = get_document(
+            package_ref["tenant_id"],
+            package_ref["package_id"],
+            package_ref["doc_type"],
+            package_ref["version"],
+        )
+
+    candidates: list[str] = []
+    markdown_s3_key = (metadata or {}).get("markdown_s3_key")
+    if markdown_s3_key:
+        candidates.append(markdown_s3_key)
+    candidates.extend(_get_markdown_sidecar_candidates(doc_key))
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if not _is_allowed_document_key(candidate, tenant_id, user_id):
+            continue
+        try:
+            sidecar_resp = s3.get_object(Bucket=bucket, Key=candidate)
+            return sidecar_resp["Body"].read().decode("utf-8", errors="replace")
+        except ClientError:
+            continue
+    return None
+
+
 @app.get("/api/documents")
 async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
     """List documents in S3 for the current user."""
@@ -889,15 +941,19 @@ async def api_get_document(
         else:
             if include_content and _supports_binary_preview(doc_key):
                 raw_bytes = response["Body"].read()
-                # Prefer markdown sidecar (rich display content) over DOCX
-                # text extraction, which can be sparse for template-generated docs.
-                sidecar_key = f"{doc_key}.content.md"
-                try:
-                    sidecar_resp = s3.get_object(Bucket=bucket, Key=sidecar_key)
-                    content = sidecar_resp["Body"].read().decode("utf-8", errors="replace")
+                # Prefer the saved markdown sidecar over binary extraction so
+                # preview and exports reflect the same stored document content.
+                sidecar_content = _load_document_markdown_sidecar(
+                    s3=s3,
+                    bucket=bucket,
+                    doc_key=doc_key,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+                if sidecar_content is not None:
+                    content = sidecar_content
                     preview_mode = "markdown_sidecar"
-                except ClientError:
-                    # No sidecar — fall back to binary extraction
+                else:
                     preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
                     content = preview_payload.get("content")
                     preview_blocks = preview_payload.get("preview_blocks", [])

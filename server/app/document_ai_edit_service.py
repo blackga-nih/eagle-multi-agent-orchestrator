@@ -622,6 +622,7 @@ def save_docx_preview_edits(
             session_id=session_id,
             change_source=change_source,
             template_id=(existing or {}).get("template_id"),
+            markdown_content=preview_payload.get("content"),
         )
         if not result.success:
             return {"error": result.error or "Failed to save document version"}

@@ -37,6 +37,11 @@ logger = logging.getLogger("eagle.document_service")
 S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
 
 
+def get_document_markdown_s3_key(s3_key: str) -> str:
+    """Return the canonical markdown sidecar key for a stored document."""
+    return f"{s3_key}.content.md"
+
+
 @dataclass
 class DocumentResult:
     """Result of a document creation operation."""
@@ -198,7 +203,7 @@ def create_package_document_version(
     # Step 2b: Upload markdown sibling if available
     markdown_s3_key = None
     if markdown_content:
-        md_key = s3_key.rsplit(".", 1)[0] + ".parsed.md" if "." in s3_key else s3_key + ".parsed.md"
+        md_key = get_document_markdown_s3_key(s3_key)
         md_error = _upload_to_s3(md_key, markdown_content.encode("utf-8"), "md")
         if not md_error:
             markdown_s3_key = md_key
