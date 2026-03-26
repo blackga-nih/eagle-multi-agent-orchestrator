@@ -10,6 +10,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 const DEV_MODE = process.env.DEV_MODE === 'true' || process.env.NODE_ENV === 'development';
 

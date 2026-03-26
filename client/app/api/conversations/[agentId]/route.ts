@@ -13,6 +13,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { AgentSession, createEmptySession } from '@/types/conversation';
+
+export const dynamic = 'force-dynamic';
 import { AgentType } from '@/types/mcp';
 
 // Backend URL

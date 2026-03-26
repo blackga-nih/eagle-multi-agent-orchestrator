@@ -7,6 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 
 export async function POST(
