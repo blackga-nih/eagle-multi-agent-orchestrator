@@ -71,6 +71,7 @@ export type ChatRuntimeAction =
     | { type: 'generation/status'; sessionId: string; requestId: string; status: string }
     | { type: 'generation/toolUse'; sessionId: string; requestId: string; msgId: string; toolUseId: string; patch: Partial<TrackedToolCall> }
     | { type: 'generation/toolResult'; sessionId: string; requestId: string; msgId: string; toolName: string; result: unknown }
+    | { type: 'generation/toolInputDelta'; sessionId: string; requestId: string; msgId: string; toolUseId: string; delta: string }
     | { type: 'generation/document'; sessionId: string; requestId: string; msgId: string; document: DocumentInfo }
     | { type: 'generation/stateChange'; sessionId: string; requestId: string; msgId: string; stateChange: StateChangeEntry }
     | { type: 'generation/complete'; sessionId: string; requestId: string; finalMessage?: ChatMessage }
@@ -194,9 +195,29 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
             };
         }
 
+        case 'generation/toolInputDelta': {
+            const calls = session.toolCallsByMsg[action.msgId] ?? [];
+            const idx = calls.findIndex((tc) => tc.toolUseId === action.toolUseId);
+            if (idx === -1) return state;
+            const updated = calls.slice();
+            const existing = updated[idx];
+            updated[idx] = {
+                ...existing,
+                status: 'running',
+                streamingInput: (existing.streamingInput ?? '') + action.delta,
+            };
+            return {
+                ...state,
+                [sessionId]: {
+                    ...session,
+                    toolCallsByMsg: { ...session.toolCallsByMsg, [action.msgId]: updated },
+                },
+            };
+        }
+
         case 'generation/document': {
-            const existing = session.documentsByMsg[action.msgId] ?? [];
-            const merged = dedupeDocuments([...existing, action.document]);
+            const existingDocs = session.documentsByMsg[action.msgId] ?? [];
+            const merged = dedupeDocuments([...existingDocs, action.document]);
             return {
                 ...state,
                 [sessionId]: {

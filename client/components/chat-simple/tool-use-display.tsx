@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { ClientToolResult } from '@/lib/client-tools';
 import { DocumentInfo } from '@/types/chat';
 import { resolveResultPanel } from './tool-result-panels';
 import Modal from '@/components/ui/modal';
+import ReactMarkdown from 'react-markdown';
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'error' | 'interrupted';
 
@@ -15,6 +16,7 @@ interface ToolUseDisplayProps {
   result?: ClientToolResult | null;
   isClientSide?: boolean;
   sessionId?: string;
+  streamingInput?: string;
 }
 
 // ── Tool metadata: icon + human-friendly label ──────────────────────
@@ -332,6 +334,56 @@ function formatInputForDisplay(input: Record<string, unknown>): Array<[string, s
     .slice(0, 8);
 }
 
+// ── Streaming preview helpers ────────────────────────────────────────
+
+function extractContentFromJson(rawJson: string): string | null {
+  const match = rawJson.match(/"content"\s*:\s*"/);
+  if (!match || match.index === undefined) return null;
+  const start = match.index + match[0].length;
+  let content = rawJson.slice(start);
+  // Remove trailing incomplete escape
+  if (content.endsWith('\\')) content = content.slice(0, -1);
+  // Unescape JSON string sequences
+  return content
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\');
+}
+
+function StreamingPreview({ rawJson, toolName }: { rawJson: string; toolName: string }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const content = useMemo(
+    () => toolName === 'create_document' ? extractContentFromJson(rawJson) : null,
+    [rawJson, toolName],
+  );
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [rawJson.length]);
+
+  if (content) {
+    return (
+      <div ref={scrollRef} className="max-h-64 overflow-y-auto rounded-lg border border-gray-100 p-3">
+        <div className="prose prose-sm max-w-none">
+          <ReactMarkdown>{content}</ReactMarkdown>
+        </div>
+        <div className="flex items-center gap-2 text-blue-500 text-xs mt-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+          <span>Writing... ({Math.round(rawJson.length / 1024)}KB)</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-sm text-gray-500 flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
+      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+      <span>Composing input... ({rawJson.length} chars)</span>
+    </div>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────
 
 export default function ToolUseDisplay({
@@ -341,6 +393,7 @@ export default function ToolUseDisplay({
   result,
   isClientSide = false,
   sessionId,
+  streamingInput,
 }: ToolUseDisplayProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const meta = getToolMeta(toolName);
@@ -366,7 +419,13 @@ export default function ToolUseDisplay({
           {meta.icon}
         </span>
         <span className="font-medium text-gray-700 whitespace-nowrap">{chipLabel}</span>
-        <StatusDot status={status} />
+        {streamingInput && status !== 'done' ? (
+          <span className="text-[10px] text-blue-500 truncate max-w-[120px]">
+            Writing... ({Math.round(streamingInput.length / 1024)}KB)
+          </span>
+        ) : (
+          <StatusDot status={status} />
+        )}
       </button>
 
       {/* ── Detail modal ── */}
@@ -406,6 +465,16 @@ export default function ToolUseDisplay({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Streaming content preview */}
+          {streamingInput && status !== 'done' && (
+            <div>
+              <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">
+                Live Preview
+              </h3>
+              <StreamingPreview rawJson={streamingInput} toolName={toolName} />
             </div>
           )}
 

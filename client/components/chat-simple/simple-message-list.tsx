@@ -233,6 +233,7 @@ function InterleavedContent({
                     result={tc.result}
                     isClientSide={tc.isClientSide}
                     sessionId={sessionId}
+                    streamingInput={tc.streamingInput}
                 />
             );
             // CodeOutput renders as a block below the chip group
@@ -447,6 +448,7 @@ export default function SimpleMessageList({
                                                         result={tc.result}
                                                         isClientSide={tc.isClientSide}
                                                         sessionId={sessionId}
+                                                        streamingInput={tc.streamingInput}
                                                     />
                                                 ))}
                                             </div>
@@ -512,6 +514,7 @@ export default function SimpleMessageList({
                                             result={tc.result}
                                             isClientSide={tc.isClientSide}
                                             sessionId={sessionId}
+                                            streamingInput={tc.streamingInput}
                                         />
                                     ))}
                                 </div>

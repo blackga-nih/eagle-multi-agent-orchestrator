@@ -43,6 +43,8 @@ export interface TrackedToolCall {
     /** Length of accumulated text at the moment this tool was invoked.
      *  Used to interleave text segments and tool cards in stream order. */
     textSnapshotLength?: number;
+    /** Raw JSON being composed by the model as tool input (streamed via contentBlockDelta). */
+    streamingInput?: string;
 }
 
 /** Tool calls keyed by the parent message ID they belong to. */
@@ -800,6 +802,7 @@ export default function SimpleChatInterface() {
                 isOpen={isPanelOpen}
                 onToggle={() => setIsPanelOpen(v => !v)}
                 packageState={packageState}
+                getToken={getToken}
             />
 
             {/* Package selector modal for uploaded documents */}

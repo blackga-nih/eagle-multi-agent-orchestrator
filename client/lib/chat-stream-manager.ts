@@ -361,6 +361,21 @@ export class ChatStreamManager {
                 }
             }
 
+            // --- Tool input delta (streaming tool composition) ---
+            if (event.type === 'tool_input_delta' && event.metadata) {
+                const toolUseId = String(event.metadata.tool_use_id ?? '');
+                const delta = String(event.metadata.delta ?? '');
+                if (toolUseId && delta) {
+                    dispatch({
+                        type: 'generation/toolInputDelta',
+                        sessionId, requestId,
+                        msgId: streamingMsgId,
+                        toolUseId,
+                        delta,
+                    });
+                }
+            }
+
             // --- Agent status ---
             if (event.type === 'agent_status') {
                 dispatch({ type: 'generation/status', sessionId, requestId, status: event.metadata?.status ?? '' });
