@@ -16,14 +16,12 @@ import { useAuth } from '@/contexts/auth-context';
 import { SlashCommand } from '@/lib/slash-commands';
 import { Message as StreamMessage, AuditLogEntry } from '@/types/stream';
 import {
-    PAST_WORKFLOWS,
-    MOCK_AUDIT_LOGS,
     getWorkflowStatusColor,
     getAcquisitionTypeLabel,
     formatCurrency,
     formatDate,
     formatTime,
-} from '@/lib/mock-data';
+} from '@/lib/format-helpers';
 import type { ChatMessage } from '@/types/chat';
 
 // Re-export shared types so existing imports from this file keep working.
@@ -671,35 +669,10 @@ export default function ChatInterface() {
                                     <History className="w-5 h-5 text-blue-600" />
                                     Past Acquisitions
                                 </h3>
-                                <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-1 rounded-md">{PAST_WORKFLOWS.length} Records</span>
                             </div>
-                            <div className="space-y-4">
-                                {PAST_WORKFLOWS.map((workflow) => (
-                                    <div key={workflow.id} className="p-4 bg-gray-50 border border-gray-100 rounded-2xl hover:border-blue-200 transition-colors cursor-pointer group">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <h4 className="font-semibold text-sm text-gray-900 group-hover:text-blue-600 transition-colors">{workflow.title}</h4>
-                                            <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${getWorkflowStatusColor(workflow.status)}`}>
-                                                {workflow.status.replace('_', ' ')}
-                                            </span>
-                                        </div>
-                                        <p className="text-[11px] text-gray-500 mb-2 line-clamp-1">{workflow.description}</p>
-                                        <div className="flex flex-wrap gap-3 text-[11px] text-gray-500">
-                                            <span className="flex items-center gap-1">
-                                                <Calendar className="w-3 h-3" />
-                                                {workflow.completed_at ? formatDate(workflow.completed_at) : formatDate(workflow.updated_at)}
-                                            </span>
-                                            <span className="flex items-center gap-1 font-medium text-gray-700">
-                                                <DollarSign className="w-3 h-3" />
-                                                {workflow.estimated_value ? formatCurrency(workflow.estimated_value) : 'TBD'}
-                                            </span>
-                                            {workflow.acquisition_type && (
-                                                <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
-                                                    {getAcquisitionTypeLabel(workflow.acquisition_type)}
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
+                            <div className="text-center py-8">
+                                <p className="text-sm text-gray-500">No past acquisitions.</p>
+                                <p className="text-xs text-gray-400 mt-1">Completed packages will appear here.</p>
                             </div>
                         </div>
                     )}

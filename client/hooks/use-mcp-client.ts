@@ -15,7 +15,7 @@ import {
   generateMockResponse,
 } from '@/lib/mcp-config';
 import { useAgentSession } from './use-agent-session';
-import { CURRENT_USER } from '@/lib/mock-data';
+import { useAuth } from '@/contexts/auth-context';
 
 interface UseMCPClientOptions {
   agentId: AgentType;
@@ -57,6 +57,7 @@ interface UseMCPClientReturn extends MCPClientReturn {
 export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
   const { agentId, enablePersistence = true, enableSync = true, onMessage, onToolResult, onError } = options;
   const config = AGENT_CONFIGS[agentId];
+  const { user } = useAuth();
 
   // Use persistent session storage with sync
   const {
@@ -72,7 +73,7 @@ export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
     hasPendingChanges,
     forceSync,
   } = useAgentSession({
-    userId: CURRENT_USER.id,
+    userId: user?.userId || 'anonymous',
     agentId,
     enableSync,
     onError,

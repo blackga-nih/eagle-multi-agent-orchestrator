@@ -24,8 +24,8 @@ interface DocumentRequirementsProps {
   documentId: string;
 }
 
-// Mock requirements data for the document
-const MOCK_REQUIREMENTS = [
+// Placeholder requirements data — will be fetched from backend when component is wired up
+const PLACEHOLDER_REQUIREMENTS = [
   {
     id: 'req-001',
     label: 'Equipment Description',
@@ -123,7 +123,7 @@ export default function DocumentRequirements({ documentId }: DocumentRequirement
     );
   };
 
-  const getStatusIcon = (submission: typeof MOCK_REQUIREMENTS[0]['submission']) => {
+  const getStatusIcon = (submission: typeof PLACEHOLDER_REQUIREMENTS[0]['submission']) => {
     if (!submission) {
       return <Circle className="w-5 h-5 text-gray-300" />;
     }
@@ -163,9 +163,9 @@ export default function DocumentRequirements({ documentId }: DocumentRequirement
     });
   };
 
-  const completedCount = MOCK_REQUIREMENTS.filter(r => r.submission?.reviewStatus === 'approved').length;
-  const pendingCount = MOCK_REQUIREMENTS.filter(r => r.submission?.reviewStatus === 'pending').length;
-  const missingCount = MOCK_REQUIREMENTS.filter(r => !r.submission).length;
+  const completedCount = PLACEHOLDER_REQUIREMENTS.filter(r => r.submission?.reviewStatus === 'approved').length;
+  const pendingCount = PLACEHOLDER_REQUIREMENTS.filter(r => r.submission?.reviewStatus === 'pending').length;
+  const missingCount = PLACEHOLDER_REQUIREMENTS.filter(r => !r.submission).length;
 
   return (
     <div className="space-y-6">
@@ -196,7 +196,7 @@ export default function DocumentRequirements({ documentId }: DocumentRequirement
 
       {/* Requirements List */}
       <div className="space-y-3">
-        {MOCK_REQUIREMENTS.map((req) => {
+        {PLACEHOLDER_REQUIREMENTS.map((req) => {
           const isExpanded = expandedRequirements.includes(req.id);
           const hasDetails = req.submission?.source === 'ai_generated';
 

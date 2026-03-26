@@ -12,10 +12,9 @@ import Modal from '@/components/ui/modal';
 import { Tabs } from '@/components/ui/tabs';
 import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import {
-  MOCK_DOCUMENT_TEMPLATES,
   getDocumentStatusColor,
   formatDate,
-} from '@/lib/mock-data';
+} from '@/lib/format-helpers';
 import { getGeneratedDocuments, StoredDocument } from '@/lib/document-store';
 import { DocumentTemplate, DocumentType, DOCUMENT_TYPE_LABELS } from '@/types/schema';
 
@@ -113,6 +112,7 @@ export default function DocumentsPage() {
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [localDocs, setLocalDocs] = useState<DocumentListItem[]>([]);
   const [serverDocs, setServerDocs] = useState<DocumentListItem[]>([]);
+  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
 
   // Load localStorage docs on mount
   useEffect(() => {
@@ -147,6 +147,26 @@ export default function DocumentsPage() {
     return () => {
       cancelled = true;
     };
+  }, [getToken]);
+
+  // Load templates from backend
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTemplates() {
+      try {
+        const token = await getToken();
+        const res = await fetch('/api/templates', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setTemplates(data.templates || data || []);
+      } catch {
+        if (!cancelled) setTemplates([]);
+      }
+    }
+    loadTemplates();
+    return () => { cancelled = true; };
   }, [getToken]);
 
   const allDocuments = useMemo(() => {
@@ -418,7 +438,10 @@ export default function DocumentsPage() {
         size="lg"
       >
         <div className="space-y-4">
-          {MOCK_DOCUMENT_TEMPLATES.map((template: DocumentTemplate) => (
+          {templates.length === 0 && (
+            <p className="text-center text-gray-500 py-8">No templates available.</p>
+          )}
+          {templates.map((template: DocumentTemplate) => (
             <div
               key={template.id}
               className="p-4 border border-gray-200 rounded-xl hover:border-blue-300 hover:bg-blue-50/50 transition-all cursor-pointer"
@@ -485,7 +508,7 @@ export default function DocumentsPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Template</label>
             <select className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white">
               <option value="">No template (blank document)</option>
-              {MOCK_DOCUMENT_TEMPLATES.filter(t => t.is_active).map((t) => (
+              {templates.filter(t => t.is_active).map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
@@ -493,9 +516,7 @@ export default function DocumentsPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Associated Workflow</label>
             <select className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white">
-              <option value="">Select workflow...</option>
-              <option value="wf-001">128-Slice CT Scanner Acquisition</option>
-              <option value="wf-004">Laboratory Centrifuge</option>
+              <option value="">No associated workflow</option>
             </select>
           </div>
         </form>

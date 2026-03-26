@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, Filter, ArrowUpDown, Eye, Edit2, CheckCircle2, Circle, FileText, X, Check } from 'lucide-react';
+import { Plus, Search, Filter, ArrowUpDown, Eye, Edit2, CheckCircle2, Circle, FileText, Loader2 } from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
@@ -10,19 +10,14 @@ import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
 import { Tabs } from '@/components/ui/tabs';
 import {
-  CURRENT_WORKFLOW,
-  PAST_WORKFLOWS,
-  CURRENT_CHECKLIST,
   getWorkflowStatusColor,
   getAcquisitionTypeLabel,
   formatCurrency,
   formatDate,
-} from '@/lib/mock-data';
+} from '@/lib/format-helpers';
 import { getPackages, PackageData } from '@/lib/document-store';
 import { Workflow, WorkflowStatus } from '@/types/schema';
 import { useAuth } from '@/contexts/auth-context';
-
-const mockWorkflows = [CURRENT_WORKFLOW, ...PAST_WORKFLOWS];
 
 /** Convert a localStorage PackageData into a Workflow shape for the grid. */
 function packageToWorkflow(pkg: PackageData): Workflow {
@@ -41,6 +36,25 @@ function packageToWorkflow(pkg: PackageData): Workflow {
   };
 }
 
+/** Convert a backend package response into a Workflow shape. */
+function backendToWorkflow(pkg: Record<string, unknown>): Workflow {
+  return {
+    id: (pkg.package_id as string) || (pkg.id as string) || '',
+    user_id: (pkg.user_id as string) || '',
+    title: (pkg.title as string) || 'Untitled Package',
+    description: (pkg.description as string) || '',
+    status: ((pkg.status as string) || 'in_progress') as WorkflowStatus,
+    acquisition_type: pkg.acquisition_type as Workflow['acquisition_type'],
+    estimated_value: pkg.estimated_value as number | undefined,
+    timeline_deadline: pkg.timeline_deadline as string | undefined,
+    urgency_level: pkg.urgency_level as Workflow['urgency_level'],
+    created_at: (pkg.created_at as string) || new Date().toISOString(),
+    updated_at: (pkg.updated_at as string) || new Date().toISOString(),
+    metadata: { _source: 'backend' },
+    archived: false,
+  };
+}
+
 export default function WorkflowsPage() {
   const router = useRouter();
   const { getToken } = useAuth();
@@ -52,16 +66,42 @@ export default function WorkflowsPage() {
   const [editTitleValue, setEditTitleValue] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
   const [localPackages, setLocalPackages] = useState<PackageData[]>([]);
+  const [backendWorkflows, setBackendWorkflows] = useState<Workflow[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Load localStorage packages on mount
   useEffect(() => {
     setLocalPackages(getPackages());
   }, []);
 
+  // Fetch packages from backend
+  useEffect(() => {
+    let cancelled = false;
+    async function loadBackendPackages() {
+      try {
+        const token = await getToken();
+        const res = await fetch('/api/packages', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          const packages = Array.isArray(data) ? data : data.packages || [];
+          setBackendWorkflows(packages.map(backendToWorkflow));
+        }
+      } catch {
+        // Backend unavailable — show only localStorage packages
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    loadBackendPackages();
+    return () => { cancelled = true; };
+  }, [getToken]);
+
   const allWorkflows = useMemo(() => {
     const localAsWorkflows = localPackages.map(packageToWorkflow);
-    return [...localAsWorkflows, ...mockWorkflows];
-  }, [localPackages]);
+    return [...localAsWorkflows, ...backendWorkflows];
+  }, [localPackages, backendWorkflows]);
 
   const statusTabs = useMemo(() => [
     { id: 'all', label: 'All', badge: allWorkflows.length },
@@ -196,68 +236,80 @@ export default function WorkflowsPage() {
             <Tabs tabs={statusTabs} activeTab={activeTab} onChange={setActiveTab} variant="pills" />
           </div>
 
+          {/* Loading State */}
+          {loading && (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-6 h-6 animate-spin text-blue-500 mr-2" />
+              <span className="text-gray-500">Loading packages...</span>
+            </div>
+          )}
+
           {/* Workflow Grid */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredWorkflows.map((workflow) => (
-              <div
-                key={workflow.id}
-                className="bg-white rounded-2xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-lg transition-all cursor-pointer group"
-                onClick={() => handleWorkflowClick(workflow)}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-1">
-                      {workflow.title}
-                    </h3>
-                    <p className="text-xs text-gray-500 mt-0.5">{workflow.id}</p>
+          {!loading && (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {filteredWorkflows.map((workflow) => (
+                <div
+                  key={workflow.id}
+                  className="bg-white rounded-2xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-lg transition-all cursor-pointer group"
+                  onClick={() => handleWorkflowClick(workflow)}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-1">
+                        {workflow.title}
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-0.5">{workflow.id}</p>
+                    </div>
+                    <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${getWorkflowStatusColor(workflow.status)}`}>
+                      {workflow.status.replace('_', ' ')}
+                    </span>
                   </div>
-                  <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${getWorkflowStatusColor(workflow.status)}`}>
-                    {workflow.status.replace('_', ' ')}
-                  </span>
-                </div>
 
-                <p className="text-sm text-gray-600 mb-4 line-clamp-2">{workflow.description}</p>
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{workflow.description}</p>
 
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {workflow.acquisition_type && (
-                    <Badge variant="primary" size="sm">
-                      {getAcquisitionTypeLabel(workflow.acquisition_type)}
-                    </Badge>
-                  )}
-                  {workflow.urgency_level === 'urgent' && (
-                    <Badge variant="warning" size="sm">Urgent</Badge>
-                  )}
-                  {workflow.urgency_level === 'critical' && (
-                    <Badge variant="danger" size="sm">Critical</Badge>
-                  )}
-                  {(workflow.metadata as Record<string, unknown>)?._source === 'localStorage' && (
-                    <Badge variant="info" size="sm">AI Generated</Badge>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                  <div className="text-xs text-gray-500">
-                    {workflow.estimated_value && (
-                      <span className="font-semibold text-gray-700">{formatCurrency(workflow.estimated_value)}</span>
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {workflow.acquisition_type && (
+                      <Badge variant="primary" size="sm">
+                        {getAcquisitionTypeLabel(workflow.acquisition_type)}
+                      </Badge>
+                    )}
+                    {workflow.urgency_level === 'urgent' && (
+                      <Badge variant="warning" size="sm">Urgent</Badge>
+                    )}
+                    {workflow.urgency_level === 'critical' && (
+                      <Badge variant="danger" size="sm">Critical</Badge>
+                    )}
+                    {(workflow.metadata as Record<string, unknown>)?._source === 'localStorage' && (
+                      <Badge variant="info" size="sm">AI Generated</Badge>
                     )}
                   </div>
-                  <div className="text-xs text-gray-400">
-                    {formatDate(workflow.updated_at)}
+
+                  <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+                    <div className="text-xs text-gray-500">
+                      {workflow.estimated_value && (
+                        <span className="font-semibold text-gray-700">{formatCurrency(workflow.estimated_value)}</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {formatDate(workflow.updated_at)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
-          {filteredWorkflows.length === 0 && (
+          {!loading && filteredWorkflows.length === 0 && (
             <div className="text-center py-12">
-              <p className="text-gray-500">No acquisition packages found matching your criteria.</p>
+              <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No acquisition packages found.</p>
+              <p className="text-sm text-gray-400 mt-1">Start a new intake in Chat to create your first package.</p>
             </div>
           )}
         </div>
       </main>
 
-      {/* Mock Workflow Detail Modal */}
+      {/* Backend Workflow Detail Modal */}
       <Modal
         isOpen={!!selectedWorkflow}
         onClose={() => setSelectedWorkflow(null)}
@@ -319,36 +371,6 @@ export default function WorkflowsPage() {
               <label className="text-xs text-gray-500 uppercase tracking-wide">Description</label>
               <p className="mt-1 text-sm text-gray-700">{selectedWorkflow.description || 'No description'}</p>
             </div>
-
-            {selectedWorkflow.id === 'wf-001' && (
-              <div>
-                <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">Checklist Progress</label>
-                <div className="space-y-2">
-                  {CURRENT_CHECKLIST.map((item) => (
-                    <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                        item.status === 'completed' ? 'bg-green-500 text-white' :
-                        item.status === 'in_progress' ? 'bg-blue-500 text-white' :
-                        'bg-gray-200 text-gray-500'
-                      }`}>
-                        {item.step_order}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900">{item.step_name}</p>
-                        <p className="text-xs text-gray-500">{item.description}</p>
-                      </div>
-                      <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${
-                        item.status === 'completed' ? 'bg-green-100 text-green-700' :
-                        item.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
-                        {item.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </Modal>

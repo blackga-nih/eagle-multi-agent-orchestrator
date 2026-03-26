@@ -91,12 +91,16 @@ function buildChecklist(requiredDocs: string[]): PackageChecklist[] {
 }
 
 const DEFAULT_CHECKLIST: PackageChecklist[] = [
+  { document_type: 'purchase_request', label: 'Purchase Request', status: 'pending' },
   { document_type: 'sow', label: 'Statement of Work', status: 'pending' },
   { document_type: 'igce', label: 'Cost Estimate (IGCE)', status: 'pending' },
   { document_type: 'market_research', label: 'Market Research', status: 'pending' },
   { document_type: 'acquisition_plan', label: 'Acquisition Plan', status: 'pending' },
-  { document_type: 'justification', label: 'Justification', status: 'pending' },
+  { document_type: 'justification', label: 'Justification & Approval (J&A)', status: 'pending' },
+  { document_type: 'source_selection_plan', label: 'Source Selection Plan', status: 'pending' },
+  { document_type: 'qasp', label: 'Quality Assurance Surveillance Plan (QASP)', status: 'pending' },
   { document_type: 'funding_doc', label: 'Funding Document', status: 'pending' },
+  { document_type: 'sb_review', label: 'Small Business Review (HHS-653)', status: 'pending' },
 ];
 
 // ---------------------------------------------------------------------------

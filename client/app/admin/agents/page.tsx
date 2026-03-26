@@ -22,9 +22,10 @@ import {
   getAgentsForRole,
   getDefaultAgentForRole,
 } from '@/lib/mcp-config';
-import { CURRENT_USER, getUserRoleLabel } from '@/lib/mock-data';
+import { getUserRoleLabel, mapAuthRoleToUserRole } from '@/lib/format-helpers';
 import { AgentType } from '@/types/mcp';
 import { loadConversationStore } from '@/lib/conversation-store';
+import { useAuth } from '@/contexts/auth-context';
 
 const AGENT_ICONS: Record<AgentType, React.ReactNode> = {
   frontend: <Palette className="w-4 h-4" />,
@@ -35,15 +36,18 @@ const AGENT_ICONS: Record<AgentType, React.ReactNode> = {
 
 // Inner component that uses useSearchParams
 function AgentsPageContent() {
+  const { user } = useAuth();
+  const userRole = useMemo(() => mapAuthRoleToUserRole(user?.roles || []), [user]);
+
   // Get available agents based on user role
   const availableAgents = useMemo(
-    () => getAgentsForRole(CURRENT_USER.role),
-    []
+    () => getAgentsForRole(userRole),
+    [userRole]
   );
 
   const defaultAgent = useMemo(
-    () => getDefaultAgentForRole(CURRENT_USER.role),
-    []
+    () => getDefaultAgentForRole(userRole),
+    [userRole]
   );
 
   const [activeAgent, setActiveAgent] = useState<AgentType>(defaultAgent);
@@ -58,7 +62,7 @@ function AgentsPageContent() {
 
   // Load message counts from storage
   useEffect(() => {
-    const result = loadConversationStore(CURRENT_USER.id);
+    const result = loadConversationStore(user?.userId || 'dev-user');
     if (result.success && result.data) {
       const counts: Record<AgentType, number> = {
         frontend: 0,
@@ -96,7 +100,7 @@ function AgentsPageContent() {
             </div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">Access Restricted</h2>
             <p className="text-gray-500">
-              Your role ({getUserRoleLabel(CURRENT_USER.role)}) does not have access to any agents.
+              Your role ({getUserRoleLabel(userRole)}) does not have access to any agents.
             </p>
           </div>
         </main>
@@ -184,7 +188,7 @@ function AgentsPageContent() {
           {/* Role indicator */}
           <p className="text-xs text-gray-400 mt-2">
             Showing {availableAgents.length} agent{availableAgents.length !== 1 ? 's' : ''} for{' '}
-            <span className="font-medium">{getUserRoleLabel(CURRENT_USER.role)}</span> role
+            <span className="font-medium">{getUserRoleLabel(userRole)}</span> role
           </p>
         </div>
 
