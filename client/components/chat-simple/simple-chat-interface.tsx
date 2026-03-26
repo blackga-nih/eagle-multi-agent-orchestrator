@@ -24,6 +24,8 @@ import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 import ActivityPanel from './activity-panel';
 import ChatUploadButton from './chat-upload-button';
 import PackageSelectorModal from './package-selector-modal';
+import ContractMatrixModal from '../contract-matrix/contract-matrix-modal';
+import type { MatrixTab } from '../contract-matrix/matrix-types';
 import { UploadResult, assignToPackage } from '@/lib/document-api';
 import { usePackageState } from '@/hooks/use-package-state';
 import { useAnalytics } from '@/hooks/use-analytics';
@@ -102,18 +104,26 @@ export default function SimpleChatInterface() {
     const firstUserMsgRef = useRef<string | null>(null);
     /** Ctrl+K command palette state. */
     const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+    /** Ctrl+M contract matrix modal state. */
+    const [isMatrixOpen, setIsMatrixOpen] = useState(false);
+    const [matrixInitialTab, setMatrixInitialTab] = useState<MatrixTab>('explorer');
     /** Document upload state. */
     const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
     const [isPackageSelectorOpen, setIsPackageSelectorOpen] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const dragDepthRef = useRef(0);
 
-    // Global Ctrl+K keyboard shortcut
+    // Global Ctrl+K / Ctrl+M keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
                 e.preventDefault();
                 setIsCommandPaletteOpen((v) => !v);
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'm') {
+                e.preventDefault();
+                setMatrixInitialTab('explorer');
+                setIsMatrixOpen((v) => !v);
             }
         };
         window.addEventListener('keydown', handleKeyDown);
@@ -257,6 +267,17 @@ export default function SimpleChatInterface() {
 
     // Slash command handling
     const handleCommandSelect = (command: SlashCommand) => {
+        // Intercept matrix commands — open modal instead of inserting text
+        if (command.id === 'matrix') {
+            setMatrixInitialTab('explorer');
+            setIsMatrixOpen(true);
+            return;
+        }
+        if (command.id === 'contract-type') {
+            setMatrixInitialTab('selector');
+            setIsMatrixOpen(true);
+            return;
+        }
         setInput(command.name + ' ');
         textareaRef.current?.focus();
     };
@@ -884,6 +905,14 @@ export default function SimpleChatInterface() {
                 uploadResult={uploadResult}
                 onAssign={handlePackageAssignment}
                 getToken={getToken}
+            />
+
+            {/* Contract requirements matrix modal (Ctrl+M) */}
+            <ContractMatrixModal
+                isOpen={isMatrixOpen}
+                onClose={() => setIsMatrixOpen(false)}
+                onApply={insertText}
+                initialTab={matrixInitialTab}
             />
         </div>
     );

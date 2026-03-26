@@ -148,4 +148,75 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(helpfulBtn).not.toHaveClass(/bg-blue-600/);
     });
   });
+
+  // ─── Contract Matrix Modal (Ctrl+M) ──────────────────────────────
+
+  test.describe('Contract Matrix — Ctrl+M', () => {
+    test('Ctrl+M opens the contract matrix modal', async ({ page }) => {
+      await page.goto('/chat/');
+      await page.keyboard.press('Control+m');
+
+      const modal = page.locator('[data-testid="contract-matrix-modal"]');
+      await expect(modal).toBeVisible({ timeout: 3000 });
+    });
+
+    test('matrix modal shows three tabs', async ({ page }) => {
+      await page.goto('/chat/');
+      await page.keyboard.press('Control+m');
+
+      await expect(page.getByText('Detail Explorer')).toBeVisible();
+      await expect(page.getByText('2D Grid Matrix')).toBeVisible();
+      await expect(page.getByText('Contract Type Selector')).toBeVisible();
+    });
+
+    test('Escape closes the matrix modal', async ({ page }) => {
+      await page.goto('/chat/');
+      await page.keyboard.press('Control+m');
+      const modal = page.locator('[data-testid="contract-matrix-modal"]');
+      await expect(modal).toBeVisible();
+
+      await page.keyboard.press('Escape');
+
+      await expect(modal).not.toBeVisible();
+    });
+
+    test('Ctrl+M toggles the matrix modal closed', async ({ page }) => {
+      await page.goto('/chat/');
+
+      // Open
+      await page.keyboard.press('Control+m');
+      const modal = page.locator('[data-testid="contract-matrix-modal"]');
+      await expect(modal).toBeVisible();
+
+      // Close via same shortcut
+      await page.keyboard.press('Control+m');
+      await expect(modal).not.toBeVisible();
+    });
+
+    test('Detail Explorer tab shows acquisition method controls', async ({ page }) => {
+      await page.goto('/chat/');
+      await page.keyboard.press('Control+m');
+
+      // Check for method cards
+      await expect(page.getByText('Micro-Purchase')).toBeVisible();
+      await expect(page.getByText('Simplified (SAP)')).toBeVisible();
+      await expect(page.getByText('Negotiated')).toBeVisible();
+    });
+
+    test('clicking tab switches content', async ({ page }) => {
+      await page.goto('/chat/');
+      await page.keyboard.press('Control+m');
+
+      // Switch to Grid tab
+      await page.getByText('2D Grid Matrix').click();
+      // Grid should show method/type column headers
+      await expect(page.getByText('METHOD \\ TYPE')).toBeVisible();
+
+      // Switch to Contract Type Selector tab
+      await page.getByText('Contract Type Selector').click();
+      // Should show factor list
+      await expect(page.getByText('Commerciality')).toBeVisible();
+      await expect(page.getByText('Price Competition')).toBeVisible();
+    });
+  });
 });

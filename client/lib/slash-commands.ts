@@ -11,6 +11,8 @@ import {
     Settings,
     Accessibility,
     MessageSquare,
+    Grid3X3,
+    ListChecks,
     type LucideIcon,
 } from 'lucide-react';
 
@@ -119,6 +121,22 @@ export const slashCommands: SlashCommand[] = [
     },
 
     // ── Workflow ─────────────────────────────────────────────────────
+    {
+        id: 'matrix',
+        name: '/matrix',
+        description: 'Open the Contract Requirements Matrix explorer',
+        icon: Grid3X3,
+        color: 'blue',
+        category: 'Workflow',
+    },
+    {
+        id: 'contract-type',
+        name: '/contract-type',
+        description: 'Open the Contract Type Selector (13 FAR 16.104 factors)',
+        icon: ListChecks,
+        color: 'purple',
+        category: 'Workflow',
+    },
     {
         id: 'intake',
         name: '/intake',
