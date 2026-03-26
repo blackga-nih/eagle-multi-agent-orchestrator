@@ -198,7 +198,7 @@ export default function DocumentChecklist({ messages, data, sessionId }: Documen
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
-                    content,
+                    content_b64: btoa(unescape(encodeURIComponent(content))),
                     title: packageTitle,
                     format,
                 }),

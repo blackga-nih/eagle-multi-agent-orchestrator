@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
+import base64
 import io
 import uuid
 from collections import deque
@@ -572,16 +573,29 @@ async def api_get_session_context(
 # ── Document export endpoints ────────────────────────────────────────
 
 class ExportRequest(BaseModel):
-    content: str
+    content: Optional[str] = None
+    content_b64: Optional[str] = None
     title: str = "Document"
     format: str = "docx"
+
+
+def _resolve_export_content(req: ExportRequest) -> str:
+    """Accept raw text or base64-encoded text for WAF-safe export requests."""
+    if req.content is not None:
+        return req.content
+    if not req.content_b64:
+        raise HTTPException(status_code=400, detail="content is required")
+    try:
+        return base64.b64decode(req.content_b64).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid content_b64 payload") from exc
 
 
 @app.post("/api/documents/export")
 async def api_export_document(req: ExportRequest, user: UserContext = Depends(get_user_from_header)):
     """Export content to DOCX, PDF, or Markdown."""
     try:
-        result = export_document(req.content, req.format, req.title)
+        result = export_document(_resolve_export_content(req), req.format, req.title)
 
         return StreamingResponse(
             io.BytesIO(result["data"]),

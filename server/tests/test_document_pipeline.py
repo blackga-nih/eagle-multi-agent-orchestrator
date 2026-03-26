@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import base64
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -480,6 +481,24 @@ class TestDocumentExportEndpoint:
         assert resp.status_code == 503
         detail = resp.json().get("detail", "").lower()
         assert "dependency missing" in detail
+
+    def test_export_docx_accepts_base64_content(self, app_with_mocked_s3):
+        """Base64-encoded content should export without sending raw text in transit."""
+        encoded = base64.b64encode(b"# Test SOW\n\nThis is a test document.").decode("utf-8")
+        with TestClient(app_with_mocked_s3) as client:
+            resp = client.post("/api/documents/export", json={
+                "content_b64": encoded,
+                "title": "Test SOW",
+                "format": "docx",
+            })
+        if resp.status_code == 503:
+            detail = resp.json().get("detail", "").lower()
+            assert "dependency missing" in detail
+            assert "python-docx" in detail
+            return
+
+        assert resp.status_code == 200
+        assert resp.content.startswith(b"PK\x03\x04")
 
 
 # ══════════════════════════════════════════════════════════════════════
