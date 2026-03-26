@@ -182,9 +182,9 @@ def create_package_document_version(
             created_at=existing.get("created_at"),
         )
 
-    # Calculate next version
+    # Calculate next version (DynamoDB stores version as Decimal — coerce to int)
     history = get_document_history(tenant_id, package_id, doc_type)
-    next_version = (max(d["version"] for d in history) + 1) if history else 1
+    next_version = int(max(d["version"] for d in history) + 1) if history else 1
 
     # Generate S3 key
     artifact_name = _sanitize_filename(title) or doc_type
@@ -415,7 +415,7 @@ def _create_document_record(
         "PK": f"DOCUMENT#{tenant_id}",
         "SK": f"DOCUMENT#{package_id}#{doc_type}#{version}",
         "GSI1PK": f"TENANT#{tenant_id}",
-        "GSI1SK": f"DOCUMENT#{package_id}#{doc_type}#{version:04d}",
+        "GSI1SK": f"DOCUMENT#{package_id}#{doc_type}#{int(version):04d}",
         "document_id": document_id,
         "package_id": package_id,
         "doc_type": doc_type,

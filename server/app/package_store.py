@@ -119,6 +119,36 @@ def _required_docs_for(pathway: str) -> list[str]:
     return list(_REQUIRED_DOCS.get(pathway, []))
 
 
+_ACQUISITION_METHOD_ALIASES: dict[str, str] = {
+    "far part 15": "negotiated",
+    "part 15": "negotiated",
+    "full and open": "negotiated",
+    "full_competition": "negotiated",
+    "full competition": "negotiated",
+    "far part 14": "sealed_bidding",
+    "part 14": "sealed_bidding",
+    "far part 13": "simplified",
+    "part 13": "simplified",
+    "sba 8(a)": "8a",
+    "far part 8(a)": "8a",
+}
+
+_CONTRACT_TYPE_ALIASES: dict[str, str] = {
+    "firm fixed price": "ffp",
+    "firm_fixed_price": "ffp",
+    "cost plus fixed fee": "cpff",
+    "cost_plus_fixed_fee": "cpff",
+    "cost plus award fee": "cpaf",
+    "cost_plus_award_fee": "cpaf",
+    "cost plus incentive fee": "cpif",
+    "cost_plus_incentive_fee": "cpif",
+    "time and material": "t_and_m",
+    "time and materials": "t_and_m",
+    "time_and_materials": "t_and_m",
+    "t&m": "t_and_m",
+}
+
+
 def compute_required_docs(
     estimated_value: float,
     acquisition_method: str,
@@ -134,10 +164,13 @@ def compute_required_docs(
     try:
         from .compliance_matrix import get_requirements
 
+        am = _ACQUISITION_METHOD_ALIASES.get(acquisition_method.lower(), acquisition_method.lower())
+        ct = _CONTRACT_TYPE_ALIASES.get(contract_type.lower(), contract_type.lower())
+
         result = get_requirements(
             contract_value=estimated_value,
-            acquisition_method=acquisition_method.lower(),
-            contract_type=contract_type.lower(),
+            acquisition_method=am,
+            contract_type=ct,
             flags=flags,
         )
 

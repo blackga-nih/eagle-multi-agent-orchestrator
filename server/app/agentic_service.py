@@ -1929,7 +1929,7 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
         return _update_document_content(
             tenant_id=tenant_id,
             doc_key=update_key,
-            content=params.get("data", {}).get("content", ""),
+            content=params.get("content") or params.get("data", {}).get("content", ""),
             change_source="ai_edit",
             session_id=session_id,
         )
