@@ -50,9 +50,19 @@ export default function SlashCommandPicker({
         );
     }
 
-    // Group commands by category
-    const actionCommands = commands.filter((c) => c.category === 'actions');
-    const infoCommands = commands.filter((c) => c.category === 'info');
+    // Group commands by category dynamically
+    const categoryOrder = ['Documents', 'Compliance', 'Research', 'Workflow', 'Admin', 'Info'];
+    const grouped = categoryOrder
+        .map(cat => ({ label: cat, items: commands.filter(c => c.category === cat) }))
+        .filter(g => g.items.length > 0);
+    // Catch any commands with categories not in the order list
+    const knownCategories = new Set(categoryOrder);
+    const uncategorized = commands.filter(c => !knownCategories.has(c.category));
+    if (uncategorized.length > 0) {
+        grouped.push({ label: 'Other', items: uncategorized });
+    }
+
+    let currentIndex = 0;
 
     const renderCommand = (command: SlashCommand, index: number) => {
         const Icon = command.icon;
@@ -76,18 +86,20 @@ export default function SlashCommandPicker({
                 <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 text-sm">{command.name}</p>
                     <p className="text-xs text-gray-500 truncate">{command.description}</p>
+                    {command.preview && isSelected && (
+                        <p className="text-[10px] text-gray-400 font-mono mt-0.5 whitespace-pre-line leading-relaxed">
+                            {command.preview}
+                        </p>
+                    )}
                 </div>
                 {isSelected && (
-                    <span className="text-[10px] text-gray-400 font-medium px-2 py-0.5 bg-gray-100 rounded">
+                    <span className="text-[10px] text-gray-400 font-medium px-2 py-0.5 bg-gray-100 rounded shrink-0">
                         Enter
                     </span>
                 )}
             </button>
         );
     };
-
-    // Calculate the actual index for commands across groups
-    let currentIndex = 0;
 
     return (
         <div
@@ -107,31 +119,18 @@ export default function SlashCommandPicker({
 
             {/* Commands list */}
             <div className="max-h-64 overflow-y-auto">
-                {actionCommands.length > 0 && (
-                    <div>
+                {grouped.map(({ label, items }) => (
+                    <div key={label}>
                         <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-50/50">
-                            Actions
+                            {label}
                         </div>
-                        {actionCommands.map((command) => {
+                        {items.map((command) => {
                             const element = renderCommand(command, currentIndex);
                             currentIndex++;
                             return element;
                         })}
                     </div>
-                )}
-
-                {infoCommands.length > 0 && (
-                    <div>
-                        <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-50/50">
-                            Info
-                        </div>
-                        {infoCommands.map((command) => {
-                            const element = renderCommand(command, currentIndex);
-                            currentIndex++;
-                            return element;
-                        })}
-                    </div>
-                )}
+                ))}
             </div>
 
             {/* Footer hint */}

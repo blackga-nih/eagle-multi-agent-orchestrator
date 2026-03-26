@@ -13,6 +13,7 @@ import {
     MessageSquare,
     Grid3X3,
     ListChecks,
+    Command,
     type LucideIcon,
 } from 'lucide-react';
 
@@ -23,120 +24,58 @@ export interface SlashCommand {
     icon: LucideIcon;
     color: string;
     category: string;
+    preview?: string;
+    routesTo?: string | null;
+    tier?: string;
+    promptFile?: string | null;
 }
 
-export const slashCommands: SlashCommand[] = [
-    // ── Documents ────────────────────────────────────────────────────
-    {
-        id: 'document:sow',
-        name: '/document:SOW',
-        description: 'Draft a Statement of Work',
-        icon: FileText,
-        color: 'purple',
-        category: 'Documents',
-    },
-    {
-        id: 'document:igce',
-        name: '/document:IGCE',
-        description: 'Draft an Independent Government Cost Estimate',
-        icon: FileText,
-        color: 'purple',
-        category: 'Documents',
-    },
-    {
-        id: 'document:ap',
-        name: '/document:AP',
-        description: 'Draft an Acquisition Plan',
-        icon: FileText,
-        color: 'purple',
-        category: 'Documents',
-    },
-    {
-        id: 'document:ja',
-        name: '/document:J&A',
-        description: 'Draft a Justification & Approval',
-        icon: FileText,
-        color: 'purple',
-        category: 'Documents',
-    },
-    {
-        id: 'document:mrr',
-        name: '/document:MRR',
-        description: 'Draft a Market Research Report',
-        icon: FileText,
-        color: 'purple',
-        category: 'Documents',
-    },
+/** Maps icon name strings (from command-registry.json) to Lucide components. */
+export const iconMap: Record<string, LucideIcon> = {
+    Activity,
+    ClipboardList,
+    FileText,
+    ShieldCheck,
+    Search,
+    Cpu,
+    Upload,
+    BarChart3,
+    HelpCircle,
+    Settings,
+    Accessibility,
+    MessageSquare,
+    Grid3X3,
+    ListChecks,
+    Command,
+};
 
-    // ── Compliance ───────────────────────────────────────────────────
-    {
-        id: 'compliance:far',
-        name: '/compliance:FAR',
-        description: 'Search FAR clauses',
-        icon: ShieldCheck,
-        color: 'green',
-        category: 'Compliance',
-    },
-    {
-        id: 'compliance:dfars',
-        name: '/compliance:DFARS',
-        description: 'Search DFARS clauses',
-        icon: ShieldCheck,
-        color: 'green',
-        category: 'Compliance',
-    },
-    {
-        id: 'compliance:clauses',
-        name: '/compliance:clauses',
-        description: 'Identify required clauses for an acquisition',
-        icon: ShieldCheck,
-        color: 'green',
-        category: 'Compliance',
-    },
+/** Fallback icon when the registry specifies an unknown icon name. */
+const FALLBACK_ICON: LucideIcon = Command;
 
-    // ── Research ─────────────────────────────────────────────────────
-    {
-        id: 'research:policy',
-        name: '/research:policy',
-        description: 'Search NIH/HHS policies',
-        icon: Search,
-        color: 'cyan',
-        category: 'Research',
-    },
-    {
-        id: 'research:regulation',
-        name: '/research:regulation',
-        description: 'Look up federal regulations',
-        icon: Search,
-        color: 'cyan',
-        category: 'Research',
-    },
-    {
-        id: 'research:precedent',
-        name: '/research:precedent',
-        description: 'Find similar past acquisitions',
-        icon: Search,
-        color: 'cyan',
-        category: 'Research',
-    },
+/**
+ * Convert a raw command object from the backend API into a SlashCommand
+ * with a resolved Lucide icon component.
+ */
+export function mapBackendCommand(raw: Record<string, unknown>): SlashCommand {
+    return {
+        id: raw.id as string,
+        name: raw.command as string,
+        description: raw.description as string,
+        icon: iconMap[raw.icon as string] ?? FALLBACK_ICON,
+        color: raw.color as string,
+        category: raw.category as string,
+        preview: (raw.preview as string) ?? undefined,
+        routesTo: (raw.routesTo as string | null) ?? undefined,
+        tier: (raw.tier as string) ?? 'basic',
+        promptFile: (raw.promptFile as string | null) ?? undefined,
+    };
+}
 
-    // ── Workflow ─────────────────────────────────────────────────────
-    {
-        id: 'matrix',
-        name: '/matrix',
-        description: 'Open the Contract Requirements Matrix explorer',
-        icon: Grid3X3,
-        color: 'blue',
-        category: 'Workflow',
-    },
-    {
-        id: 'contract-type',
-        name: '/contract-type',
-        description: 'Open the Contract Type Selector (13 FAR 16.104 factors)',
-        icon: ListChecks,
-        color: 'purple',
-        category: 'Workflow',
-    },
+/**
+ * Minimal fallback commands shown when the backend is unreachable.
+ * Covers the 4 core workflows so the picker is never empty.
+ */
+export const FALLBACK_COMMANDS: SlashCommand[] = [
     {
         id: 'intake',
         name: '/intake',
@@ -144,67 +83,26 @@ export const slashCommands: SlashCommand[] = [
         icon: ClipboardList,
         color: 'blue',
         category: 'Workflow',
+        preview: '/intake [description]\nExample: /intake I need to purchase a CT scanner for $500K',
     },
     {
-        id: 'tech-review:specs',
-        name: '/tech-review:specs',
-        description: 'Review technical specifications',
-        icon: Cpu,
-        color: 'orange',
-        category: 'Workflow',
+        id: 'document:sow',
+        name: '/document:SOW',
+        description: 'Draft a Statement of Work',
+        icon: FileText,
+        color: 'purple',
+        category: 'Documents',
+        preview: '/document:SOW [title]\nExample: /document:SOW "CT Scanner Acquisition"',
     },
     {
-        id: 'tech-review:508',
-        name: '/tech-review:508',
-        description: 'Check Section 508 compliance',
-        icon: Accessibility,
-        color: 'orange',
-        category: 'Workflow',
+        id: 'compliance:far',
+        name: '/compliance:FAR',
+        description: 'Search FAR clauses',
+        icon: ShieldCheck,
+        color: 'green',
+        category: 'Compliance',
+        preview: '/compliance:FAR <query>\nExample: /compliance:FAR sole source justification',
     },
-    {
-        id: 'ingest',
-        name: '/ingest',
-        description: 'Upload and process a document',
-        icon: Upload,
-        color: 'indigo',
-        category: 'Workflow',
-    },
-
-    // ── Admin ────────────────────────────────────────────────────────
-    {
-        id: 'admin',
-        name: '/admin',
-        description: 'Ask the system — diagnose errors, check health, query logs',
-        icon: Activity,
-        color: 'rose',
-        category: 'Admin',
-    },
-    {
-        id: 'admin:skills',
-        name: '/admin:skills',
-        description: 'List and manage custom skills',
-        icon: Settings,
-        color: 'rose',
-        category: 'Admin',
-    },
-    {
-        id: 'admin:prompts',
-        name: '/admin:prompts',
-        description: 'View and edit agent prompt overrides',
-        icon: Settings,
-        color: 'rose',
-        category: 'Admin',
-    },
-    {
-        id: 'admin:templates',
-        name: '/admin:templates',
-        description: 'View and edit document templates',
-        icon: Settings,
-        color: 'rose',
-        category: 'Admin',
-    },
-
-    // ── Info ─────────────────────────────────────────────────────────
     {
         id: 'status',
         name: '/status',
@@ -212,33 +110,18 @@ export const slashCommands: SlashCommand[] = [
         icon: BarChart3,
         color: 'amber',
         category: 'Info',
-    },
-    {
-        id: 'help',
-        name: '/help',
-        description: 'Show available commands and capabilities',
-        icon: HelpCircle,
-        color: 'gray',
-        category: 'Info',
-    },
-    {
-        id: 'feedback',
-        name: '/feedback',
-        description: 'Send feedback — bug, suggestion, praise, or correction',
-        icon: MessageSquare,
-        color: 'red',
-        category: 'info',
+        preview: '/status [intake_id]\nExample: /status EAGLE-12345',
     },
 ];
 
-export function filterCommands(query: string): SlashCommand[] {
+export function filterCommands(commands: SlashCommand[], query: string): SlashCommand[] {
     const normalizedQuery = query.toLowerCase().replace(/^\//, '');
 
     if (!normalizedQuery) {
-        return slashCommands;
+        return commands;
     }
 
-    return slashCommands.filter(
+    return commands.filter(
         (cmd) =>
             cmd.name.toLowerCase().includes(normalizedQuery) ||
             cmd.description.toLowerCase().includes(normalizedQuery) ||
@@ -246,13 +129,13 @@ export function filterCommands(query: string): SlashCommand[] {
     );
 }
 
-export function getCommandById(id: string): SlashCommand | undefined {
-    return slashCommands.find((cmd) => cmd.id === id);
+export function getCommandById(commands: SlashCommand[], id: string): SlashCommand | undefined {
+    return commands.find((cmd) => cmd.id === id);
 }
 
-export function getCommandByName(name: string): SlashCommand | undefined {
+export function getCommandByName(commands: SlashCommand[], name: string): SlashCommand | undefined {
     const normalizedName = name.toLowerCase();
-    return slashCommands.find((cmd) => cmd.name.toLowerCase() === normalizedName);
+    return commands.find((cmd) => cmd.name.toLowerCase() === normalizedName);
 }
 
 export const commandColorClasses: Record<string, { bg: string; text: string; border: string }> = {

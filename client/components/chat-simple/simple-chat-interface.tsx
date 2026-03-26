@@ -7,6 +7,7 @@ import SimpleQuickActions from './simple-quick-actions';
 import SlashCommandPicker from '@/components/chat/slash-command-picker';
 import CommandPalette from './command-palette';
 import { useSlashCommands } from '@/hooks/use-slash-commands';
+import { useCommands } from '@/hooks/use-commands';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
 import { useFeedback } from '@/contexts/feedback-context';
@@ -265,7 +266,9 @@ export default function SimpleChatInterface() {
         });
     }, [messages, setSnapshot]);
 
-    // Slash command handling
+    // Slash command handling — commands fetched from backend registry
+    const { commands: registryCommands } = useCommands();
+
     const handleCommandSelect = (command: SlashCommand) => {
         // Intercept matrix commands — open modal instead of inserting text
         if (command.id === 'matrix') {
@@ -290,7 +293,7 @@ export default function SimpleChatInterface() {
         handleKeyDown: handleSlashKeyDown,
         selectCommand,
         closeCommandPicker,
-    } = useSlashCommands({ onCommandSelect: handleCommandSelect });
+    } = useSlashCommands({ commands: registryCommands, onCommandSelect: handleCommandSelect });
 
     // Streaming error from runtime
     const error = runtime.error;
@@ -771,6 +774,7 @@ export default function SimpleChatInterface() {
                     isOpen={isCommandPaletteOpen}
                     onClose={() => setIsCommandPaletteOpen(false)}
                     onSelect={handlePaletteSelect}
+                    commands={registryCommands}
                 />
 
                 {/* Main content area */}

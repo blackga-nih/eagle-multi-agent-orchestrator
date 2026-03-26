@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect } from 'react';
 import { filterCommands, SlashCommand } from '@/lib/slash-commands';
 
 interface UseSlashCommandsOptions {
+    /** The full list of available commands (from useCommands). */
+    commands: SlashCommand[];
     onCommandSelect?: (command: SlashCommand) => void;
 }
 
@@ -19,20 +21,20 @@ interface UseSlashCommandsReturn {
     closeCommandPicker: () => void;
 }
 
-export function useSlashCommands(options: UseSlashCommandsOptions = {}): UseSlashCommandsReturn {
-    const { onCommandSelect } = options;
+export function useSlashCommands(options: UseSlashCommandsOptions): UseSlashCommandsReturn {
+    const { commands, onCommandSelect } = options;
 
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [filteredCommands, setFilteredCommands] = useState<SlashCommand[]>([]);
 
-    // Update filtered commands when query changes
+    // Update filtered commands when query or commands list changes
     useEffect(() => {
-        const commands = filterCommands(query);
-        setFilteredCommands(commands);
+        const filtered = filterCommands(commands, query);
+        setFilteredCommands(filtered);
         setSelectedIndex(0);
-    }, [query]);
+    }, [query, commands]);
 
     const handleInputChange = useCallback((value: string, cursorPosition: number) => {
         // Check if we should open the command picker

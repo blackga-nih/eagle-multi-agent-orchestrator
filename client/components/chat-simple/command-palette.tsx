@@ -1,21 +1,22 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { SlashCommand, slashCommands, commandColorClasses, filterCommands } from '@/lib/slash-commands';
+import { SlashCommand, commandColorClasses, filterCommands } from '@/lib/slash-commands';
 import { Command, X, Search } from 'lucide-react';
 
 interface CommandPaletteProps {
     isOpen: boolean;
     onClose: () => void;
     onSelect: (command: SlashCommand) => void;
+    commands: SlashCommand[];
 }
 
-export default function CommandPalette({ isOpen, onClose, onSelect }: CommandPaletteProps) {
+export default function CommandPalette({ isOpen, onClose, onSelect, commands }: CommandPaletteProps) {
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const overlayRef = useRef<HTMLDivElement>(null);
 
-    const filtered = query ? filterCommands(query) : slashCommands;
+    const filtered = query ? filterCommands(commands, query) : commands;
 
     // Group by category (ordered)
     const categoryOrder = ['Documents', 'Compliance', 'Research', 'Workflow', 'Admin', 'Info'];
@@ -57,15 +58,15 @@ export default function CommandPalette({ isOpen, onClose, onSelect }: CommandPal
         }
     };
 
-    const renderGroup = (label: string, commands: SlashCommand[]) => {
-        if (commands.length === 0) return null;
+    const renderGroup = (label: string, cmds: SlashCommand[]) => {
+        if (cmds.length === 0) return null;
         return (
             <div key={label}>
                 <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
                     {label}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                    {commands.map((cmd) => {
+                    {cmds.map((cmd) => {
                         const Icon = cmd.icon;
                         const colors = commandColorClasses[cmd.color];
                         return (
@@ -81,10 +82,16 @@ export default function CommandPalette({ isOpen, onClose, onSelect }: CommandPal
                                     </span>
                                 </button>
                                 <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5
-                                    px-3 py-1.5 bg-gray-800 text-white text-[11px] rounded-lg
-                                    whitespace-nowrap opacity-0 group-hover:opacity-100
-                                    pointer-events-none transition-opacity z-10 shadow-lg">
-                                    {cmd.description}
+                                    px-3 py-2 bg-gray-800 text-white text-[11px] rounded-lg
+                                    whitespace-pre-line opacity-0 group-hover:opacity-100
+                                    pointer-events-none transition-opacity z-10 shadow-lg
+                                    min-w-[200px] max-w-[320px]">
+                                    <p className="font-medium mb-1">{cmd.description}</p>
+                                    {cmd.preview && (
+                                        <p className="text-gray-300 text-[10px] font-mono leading-relaxed">
+                                            {cmd.preview}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -131,7 +138,7 @@ export default function CommandPalette({ isOpen, onClose, onSelect }: CommandPal
                         </p>
                     ) : (
                         <>
-                            {grouped.map(({ label, commands }) => renderGroup(label, commands))}
+                            {grouped.map(({ label, commands: cmds }) => renderGroup(label, cmds))}
                         </>
                     )}
                 </div>
@@ -139,7 +146,7 @@ export default function CommandPalette({ isOpen, onClose, onSelect }: CommandPal
                 {/* Footer */}
                 <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
                     <span className="text-[10px] text-gray-400">
-                        Click a command to insert it into the chat
+                        Hover for usage preview &middot; Click to insert
                     </span>
                     <span className="text-[10px] text-gray-400">
                         <kbd className="px-1.5 py-0.5 bg-white rounded border border-gray-200 font-mono">Esc</kbd>
