@@ -1354,6 +1354,16 @@ ${docSnippet}`;
         setExportError(null);
 
         try {
+            if (format === 'docx' && isBinaryDocument && isDocxDocument && downloadUrl) {
+                const a = window.document.createElement('a');
+                a.href = downloadUrl;
+                a.download = `${documentTitle.replace(/[^a-z0-9]/gi, '_')}.docx`;
+                window.document.body.appendChild(a);
+                a.click();
+                window.document.body.removeChild(a);
+                return;
+            }
+
             const token = await getToken();
             const headers: Record<string, string> = {
                 'Content-Type': 'application/json',
@@ -1470,8 +1480,7 @@ ${docSnippet}`;
                                 <span className="text-xs text-red-600 mr-2">{exportError}</span>
                             )}
 
-                            {/* Download controls — always generate from displayed
-                                content so download matches what the user sees */}
+                            {/* Download controls */}
                             <div className="relative">
                                 <button
                                     onClick={() => setShowDownloadMenu(!showDownloadMenu)}
