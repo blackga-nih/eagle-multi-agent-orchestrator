@@ -363,6 +363,16 @@ export class ChatStreamManager {
                     onDocumentGenerated?.(sessionId, docInfo);
                     cpDocuments.push(docInfo);
                 }
+
+                // Auto-open HTML playground in new tab
+                if (tr.name === 'generate_html_playground') {
+                    try {
+                        const data = typeof tr.result === 'string' ? JSON.parse(tr.result) : tr.result;
+                        if (data?.presigned_url && data?.open_in_tab) {
+                            window.open(data.presigned_url, '_blank');
+                        }
+                    } catch { /* ignore parse errors */ }
+                }
             }
 
             // --- Tool input delta (streaming tool composition) ---

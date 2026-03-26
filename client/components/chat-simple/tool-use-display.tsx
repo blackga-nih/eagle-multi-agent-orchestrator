@@ -63,6 +63,7 @@ export const TOOL_META: Record<string, { icon: string; label: string }> = {
   manage_prompts:             { icon: '💬', label: 'Managing Prompts' },
   manage_templates:           { icon: '📋', label: 'Managing Templates' },
   cloudwatch_logs:            { icon: '🔎', label: 'CloudWatch Logs' },
+  generate_html_playground:   { icon: '🌐', label: 'Generating HTML' },
   // Client-side tools
   think:                { icon: '💭', label: 'Reasoning' },
   code:                 { icon: '💻', label: 'Running Code' },
@@ -92,6 +93,11 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
       const docType = String(input.doc_type ?? '').replace(/_/g, ' ');
       const title = String(input.title ?? '');
       return title ? `${docType}: ${title}` : docType;
+    }
+    case 'generate_html_playground': {
+      const htmlTitle = String(input.title ?? '');
+      const htmlDocType = String(input.doc_type ?? 'document').replace(/_/g, ' ');
+      return htmlTitle ? `${htmlDocType}: ${htmlTitle}` : htmlDocType;
     }
     case 's3_document_ops': {
       const op = String(input.operation ?? 'list');

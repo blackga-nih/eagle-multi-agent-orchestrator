@@ -1511,6 +1511,33 @@ EAGLE_TOOLS = [
             "required": ["operation"],
         },
     },
+    {
+        "name": "generate_html_playground",
+        "description": (
+            "Generate a self-contained HTML document and upload to S3. "
+            "Returns a presigned URL that opens in a new browser tab. "
+            "Use for interactive document playgrounds, HTML previews, "
+            "or downloadable HTML reports."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Document title for display and filename",
+                },
+                "html_content": {
+                    "type": "string",
+                    "description": "Complete self-contained HTML document (must start with <!DOCTYPE html>)",
+                },
+                "doc_type": {
+                    "type": "string",
+                    "description": "Document type label (sow, igce, ap, ja, mrr, playground, report)",
+                },
+            },
+            "required": ["title", "html_content"],
+        },
+    },
 ]
 
 # Max prompt size per subagent to avoid context overflow
@@ -3102,6 +3129,93 @@ def _build_all_service_tools(
             except Exception:
                 pass
 
+    # ---- N. generate_html_playground ----
+    @tool(name="generate_html_playground")
+    def generate_html_playground_tool(
+        title: str,
+        html_content: str,
+        doc_type: str = "document",
+    ) -> str:
+        """Generate a self-contained HTML document and upload to S3. Returns a presigned URL that the frontend opens in a new browser tab.
+
+        Use this tool when the user asks for an HTML preview, interactive document playground, or downloadable HTML document. The html_content must be a complete, self-contained HTML document (<!DOCTYPE html>...) with all CSS and JS inlined — no external dependencies.
+
+        Args:
+            title: Document title for display and filename
+            html_content: Complete self-contained HTML document string (must start with <!DOCTYPE html>)
+            doc_type: Document type label (sow, igce, ap, ja, mrr, playground, report)
+        """
+        set_log_context(**_log_ctx)
+        import time as _time_mod
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
+        try:
+            import re
+            from datetime import datetime
+
+            if not html_content or not html_content.strip().lower().startswith("<!doctype"):
+                return json.dumps({
+                    "error": "html_content must be a complete HTML document starting with <!DOCTYPE html>",
+                    "tool": "generate_html_playground",
+                })
+
+            safe_title = re.sub(r"[^\w\-]", "_", title)[:50]
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"{safe_title}_{timestamp}.html"
+            s3_key = f"eagle/{tenant_id}/html_playgrounds/{filename}"
+
+            content_bytes = html_content.encode("utf-8")
+
+            # Upload to S3
+            import boto3
+            from botocore.config import Config as BotoConfig
+            _s3_timeout = BotoConfig(connect_timeout=10, read_timeout=30, retries={"max_attempts": 2})
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"), config=_s3_timeout)
+            _bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+            s3.put_object(
+                Bucket=_bucket,
+                Key=s3_key,
+                Body=content_bytes,
+                ContentType="text/html; charset=utf-8",
+            )
+
+            # Generate presigned URL (1 hour expiry)
+            presigned_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": _bucket, "Key": s3_key},
+                ExpiresIn=3600,
+            )
+
+            result = {
+                "success": True,
+                "title": title,
+                "doc_type": doc_type,
+                "s3_key": s3_key,
+                "s3_bucket": _bucket,
+                "presigned_url": presigned_url,
+                "filename": filename,
+                "size_bytes": len(content_bytes),
+                "generated_at": datetime.utcnow().isoformat(),
+                "open_in_tab": True,
+            }
+            _emit("generate_html_playground", result)
+            logger.info(
+                "generate_html_playground DONE: title=%s s3_key=%s size=%d",
+                title, s3_key, len(content_bytes),
+            )
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            _tool_success = False
+            logger.error("Service tool generate_html_playground failed: %s", exc, exc_info=True)
+            return json.dumps({"error": str(exc), "tool": "generate_html_playground"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+                emit_tool_completed(tenant_id, user_id, session_id or "", "generate_html_playground", _tool_dur, _tool_success)
+            except Exception:
+                pass
+
     return [
         s3_document_ops_tool,
         dynamodb_intake_tool,
@@ -3119,6 +3233,7 @@ def _build_all_service_tools(
         langfuse_traces_tool,
         query_compliance_matrix_tool,
         manage_package_tool,
+        generate_html_playground_tool,
     ]
 
 

@@ -450,6 +450,16 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
           setLastDocument(docInfo);
           options.onDocumentGenerated?.(docInfo);
         }
+
+        // Auto-open HTML playground in new tab when presigned_url is returned
+        if (tr.name === 'generate_html_playground') {
+          try {
+            const data = typeof tr.result === 'string' ? JSON.parse(tr.result) : tr.result;
+            if (data?.presigned_url && data?.open_in_tab) {
+              window.open(data.presigned_url, '_blank');
+            }
+          } catch { /* ignore parse errors */ }
+        }
       }
 
       // Handle agent_status events — real-time progress indicators
