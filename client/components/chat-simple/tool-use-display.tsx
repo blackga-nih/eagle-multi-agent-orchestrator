@@ -370,7 +370,7 @@ function StreamingPreview({ rawJson, toolName }: { rawJson: string; toolName: st
         </div>
         <div className="flex items-center gap-2 text-blue-500 text-xs mt-2">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-          <span>Writing... ({Math.round(rawJson.length / 1024)}KB)</span>
+          <span>Writing... ({rawJson.length < 1024 ? `${rawJson.length}B` : `${Math.round(rawJson.length / 1024)}KB`})</span>
         </div>
       </div>
     );
@@ -421,7 +421,7 @@ export default function ToolUseDisplay({
         <span className="font-medium text-gray-700 whitespace-nowrap">{chipLabel}</span>
         {streamingInput && status !== 'done' ? (
           <span className="text-[10px] text-blue-500 truncate max-w-[120px]">
-            Writing... ({Math.round(streamingInput.length / 1024)}KB)
+            Writing... ({streamingInput.length < 1024 ? `${streamingInput.length}B` : `${Math.round(streamingInput.length / 1024)}KB`})
           </span>
         ) : (
           <StatusDot status={status} />
