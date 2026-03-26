@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --red: #c44;
+      --red-bg: #fceaea;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Lora', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Poppins', sans-serif;
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 0.625rem 1.25rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Formal Grades
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    const EMBEDDED_DATA = {"skill_name": "e2e-judge", "runs": [{"id": "eval-1-explicit-run-with_skill", "prompt": "Run the e2e judge against the deployed EAGLE app. Just do login, home, and chat journeys. The ALB URL is http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com and credentials are testuser@example.com / EagleTest2024!", "eval_id": 1, "outputs": [{"name": "response.md", "type": "text", "content": "# E2E Judge Run Plan \u00e2\u20ac\u201d login, home, chat journeys\n\n## 1. Pre-flight Checks\n\nBefore executing the main command, I would run these checks:\n\n### a. Verify Playwright and dependencies are installed\n\n```bash\ncd C:/Users/blackga/Desktop/eagle/sm_eagle/server\npip install playwright boto3 2>/dev/null | tail -1\nplaywright install chromium --with-deps 2>/dev/null | tail -1\n```\n\n**Why**: The SKILL.md lists `playwright` and `boto3` as prerequisites. Playwright also needs the Chromium browser binary installed. Without these, the orchestrator will fail immediately.\n\n### b. Verify AWS credentials for Bedrock access\n\n```bash\naws sts get-caller-identity --profile eagle 2>/dev/null || aws sts get-caller-identity\n```\n\n**Why**: The vision judge calls Bedrock converse (Sonnet) to evaluate screenshots. Without valid `bedrock:InvokeModel` permissions, screenshot capture will succeed but judgment will fail. On the EC2 dev box, the instance role should suffice. Locally, the `eagle` SSO profile is needed.\n\n### c. Verify the ALB is reachable\n\n```bash\ncurl -s -o /dev/null -w \"%{http_code}\" http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com/\n```\n\n**Why**: The ALB is inside the VPC. If running from a local machine outside the VPC, this will time out. The EC2 dev box inside the VPC should be able to reach it. A 200 or 302 response confirms reachability.\n\n### d. Verify the orchestrator module exists\n\n```bash\nls C:/Users/blackga/Desktop/eagle/sm_eagle/server/tests/e2e_judge_orchestrator.py\n```\n\n**Why**: Confirms the entry point is present before attempting the run.\n\n---\n\n## 2. Exact Bash Command to Run\n\n```bash\ncd C:/Users/blackga/Desktop/eagle/sm_eagle/server && \\\npython -m tests.e2e_judge_orchestrator \\\n  --base-url http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com \\\n  --auth-email testuser@example.com \\\n  --auth-password \"EagleTest2024!\" \\\n  --journeys login,home,chat \\\n  -v\n```\n\n---\n\n## 3. Flags and Arguments Explained\n\n| Flag | Value | Why |\n|------|-------|-----|\n| `--base-url` | `http://EagleC-Front-...elb.amazonaws.com` | Targets the deployed ALB rather than the default `localhost:3000`. This is the deployed EAGLE app instance. |\n| `--auth-email` | `testuser@example.com` | Cognito test user email. Playwright uses this to authenticate through the Cognito login flow before accessing protected pages. |\n| `--auth-password` | `\"EagleTest2024!\"` | Cognito test user password. Quoted because it contains `!` which bash interprets as a history expansion character in interactive mode. |\n| `--journeys` | `login,home,chat` | Limits the run to only the three requested journeys instead of the default `all` (which would also run admin, documents, responsive). This saves time and Bedrock cost. |\n| `-v` | *(flag)* | Verbose logging. Provides step-by-step output showing screenshot capture, Bedrock calls, cache hits/misses, and individual verdicts. Essential for monitoring a run. |\n\n### Flags NOT used and why\n\n| Flag | Why omitted |\n|------|-------------|\n| `--headed` | Not needed; headless is correct for a standard run. Use `--headed` only when debugging a failure interactively. |\n| `--purge-cache` | Not needed unless we suspect stale cached judgments. First run will have no cache anyway. |\n| `--upload-s3` | Not requested. Would push results to the S3 eval bucket for the dashboard. Can add if needed later. |\n| `--output` | Not specified; defaults to `data/e2e-judge/results/` which is the standard location. |\n\n---\n\n## 4. Expected Output\n\n### Console output (with `-v` flag)\n\nThe user should see output similar to:\n\n```\n[INFO] E2E Judge starting \u00e2\u20ac\u201d run ID: 20260326-xxxxxx\n[INFO] Target: http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com\n[INFO] Journeys: login, home, chat\n[INFO] Launching Playwright (headless chromium)...\n\n=== Journey: login ===\n  [1/3] Navigating to login page...\n  [SCREENSHOT] login/01_login_page.png (captured)\n  [JUDGE] login/01_login_page \u00e2\u20ac\u201d PASS (confidence: 0.94, quality: 8/10)\n  [2/3] Submitting credentials...\n  [SCREENSHOT] login/02_auth_redirect.png (captured)\n  [JUDGE] login/02_auth_redirect \u00e2\u20ac\u201d PASS (confidence: 0.90, quality: 7/10)\n  [3/3] Post-login landing...\n  [SCREENSHOT] login/03_post_login.png (captured)\n  [JUDGE] login/03_post_login \u00e2\u20ac\u201d PASS (confidence: 0.93, quality: 8/10)\n  Journey login: 3/3 PASS\n\n=== Journey: home ===\n  [1/4] Home page initial load...\n  [SCREENSHOT] home/01_home_page.png (captured)\n  [JUDGE] home/01_home_page \u00e2\u20ac\u201d PASS (confidence: 0.91, quality: 8/10)\n  ... (4-5 steps total)\n  Journey home: 4/4 PASS\n\n=== Journey: chat ===\n  [1/7] Chat page load...\n  [SCREENSHOT] chat/01_chat_page.png (captured)\n  [JUDGE] chat/01_chat_page \u00e2\u20ac\u201d PASS (confidence: 0.92, quality: 8/10)\n  [2/7] Sending test message...\n  [3/7] Streaming response...\n  ... (7-8 steps total)\n  Journey chat: 7/7 PASS\n\n=== Summary ===\n  Total steps:  14-16\n  Passed:       14-16\n  Failed:       0\n  Cache hits:   0 (first run)\n  Cost estimate: ~$0.06 (14-16 screenshots x $0.004)\n  Results:      data/e2e-judge/results/20260326-xxxxxx.json\n  Report:       data/e2e-judge/results/20260326-xxxxxx-report.md\n```\n\n### File outputs\n\nThe run produces these artifacts under `server/data/e2e-judge/`:\n\n| Path | Content |\n|------|---------|\n| `results/{run-id}.json` | Structured JSON with all step verdicts, scores, timing |\n| `results/latest.json` | Symlink/copy of the latest run results |\n| `results/{run-id}-report.md` | Human-readable markdown summary report |\n| `screenshots/{run-id}/login/01_login_page.png` | Screenshot of login page |\n| `screenshots/{run-id}/login/02_auth_redirect.png` | Screenshot of auth redirect |\n| `screenshots/{run-id}/login/03_post_login.png` | Screenshot of post-login |\n| `screenshots/{run-id}/home/*.png` | 4-5 home page screenshots |\n| `screenshots/{run-id}/chat/*.png` | 7-8 chat interaction screenshots |\n| `cache/{sha256}.json` | Cached judgments keyed by screenshot hash |\n\n### Expected step counts per journey\n\n| Journey | Approximate screenshots | What gets tested |\n|---------|------------------------|------------------|\n| `login` | 3 | Login page render, Cognito auth flow, post-login redirect |\n| `home` | 4-5 | Home page render, feature cards, sidebar navigation |\n| `chat` | 7-8 | Chat page load, message input, send, streaming indicator, response render, tool cards |\n| **Total** | **14-16** | |\n\n### Estimated cost\n\n- Vision judge (Sonnet): ~14-16 screenshots x $0.004 = ~$0.06\n- EAGLE app (Haiku 4.5): ~1-2 chat interactions x $0.001 = ~$0.002\n- **Total**: ~$0.06 for a first run with no cache\n- Repeat runs with identical UI: $0 (cache hits)\n\n### Possible failure modes\n\n| Symptom | Likely cause |\n|---------|-------------|\n| Connection timeout on `--base-url` | Running outside VPC; ALB is not internet-facing |\n| `NoCredentialsError` from boto3 | Missing AWS credentials for Bedrock |\n| `AccessDeniedException` from Bedrock | IAM role lacks `bedrock:InvokeModel` permission |\n| Login step fails with screenshot showing error | Wrong credentials or Cognito user pool misconfiguration |\n| Chat journey timeout | Backend not responding; check ECS task health |\n"}], "grading": {"expectations": [{"text": "Uses the e2e_judge_orchestrator.py as the entry point", "passed": true, "evidence": "Command section shows: 'python -m tests.e2e_judge_orchestrator' as the exact entry point"}, {"text": "Passes --journeys login,home,chat (exactly the 3 requested journeys)", "passed": true, "evidence": "Command shows '--journeys login,home,chat' and explanation says 'Limits the run to only the three requested journeys'"}, {"text": "Passes the ALB URL via --base-url flag", "passed": true, "evidence": "Command shows '--base-url http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com'"}, {"text": "Passes auth credentials via --auth-email and --auth-password flags", "passed": true, "evidence": "Command shows '--auth-email testuser@example.com --auth-password \"EagleTest2024!\"' with explanation of why the password is quoted"}, {"text": "Mentions expected output: results JSON, markdown report, and screenshots directory", "passed": true, "evidence": "Section '4. Expected Output > File outputs' table lists: 'results/{run-id}.json', 'results/{run-id}-report.md', and 'screenshots/{run-id}/login/*.png' etc."}, {"text": "Includes pre-flight checks (AWS creds, playwright installed, URL reachable)", "passed": true, "evidence": "Section '1. Pre-flight Checks' covers all three: (a) pip install playwright check, (b) aws sts get-caller-identity for creds, (c) curl ALB URL for reachability, plus (d) ls orchestrator file"}], "summary": {"passed": 6, "failed": 0, "total": 6, "pass_rate": 1.0}, "timing": {"executor_duration_seconds": 88.7, "total_duration_seconds": 88.7}, "claims": [{"claim": "Cost estimate is ~$0.06 for 14-16 screenshots", "type": "factual", "verified": true, "evidence": "14-16 screenshots x $0.004/screenshot = $0.056-$0.064, consistent with ~$0.06 claim"}, {"claim": "Chat journey waits 90s for agent response", "type": "factual", "verified": true, "evidence": "Consistent with e2e_judge_journeys.py chat journey timeout of 90_000ms"}], "eval_feedback": {"suggestions": [{"assertion": "Passes --journeys login,home,chat (exactly the 3 requested journeys)", "reason": "This assertion is well-targeted \u00e2\u20ac\u201d it checks that exactly the requested journeys are passed, not more, not fewer. Could be even stronger by verifying the response explicitly explains WHY other journeys are excluded."}], "overall": "Solid assertions for an explicit-prompt eval. All are discriminating \u00e2\u20ac\u201d each would fail if the skill didn't produce the orchestrator command correctly."}}}, {"id": "eval-2-implicit-visual-check-with_skill", "prompt": "I just deployed a frontend change to the EAGLE app. Can you do a quick visual check of the admin dashboard and chat page to make sure nothing looks broken? Use the deployed URL.", "eval_id": 2, "outputs": [{"name": "response.md", "type": "text", "content": "# E2E Judge Response: Implicit Visual Check of Admin Dashboard and Chat Page\n\n## Skill Recognition\n\nThe user's request -- \"quick visual check of the admin dashboard and chat page to make sure nothing looks broken\" against the \"deployed URL\" -- maps directly to the **e2e-judge** skill. The skill description explicitly covers: \"visual QA\", \"UI validation\", \"check if the deployed EAGLE app looks correct\", and \"screenshot testing\". Even though the user did not mention \"e2e judge\" by name, the intent is a visual regression check on specific pages of the deployed app, which is exactly what this pipeline does.\n\n---\n\n## Pre-Flight Checks\n\nBefore running the command, I would verify:\n\n1. **Playwright is installed**: `playwright install chromium --with-deps` (the skill requires Playwright + Chromium)\n2. **AWS credentials are active**: The vision judge calls Bedrock converse (Sonnet), so valid AWS credentials with `bedrock:InvokeModel` are required. On the EC2 dev box, the instance role provides this. Locally, I would confirm `aws sts get-caller-identity --profile eagle` succeeds.\n3. **Network reachability**: The deployed ALB URL (`http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com`) must be reachable from the current machine. On the EC2 dev box inside the VPC this is guaranteed. From a local Windows machine, this public-facing ALB should also be accessible, but worth a quick `curl -sI` to confirm.\n4. **Python dependencies**: `pip install playwright boto3` must be satisfied in the active environment.\n5. **Test credentials available**: The orchestrator needs Cognito auth credentials. These are typically set via environment variables `EAGLE_TEST_EMAIL` and `EAGLE_TEST_PASSWORD`, or passed as CLI flags.\n\n### Pre-flight commands:\n\n```bash\n# Verify AWS credentials\naws sts get-caller-identity --profile eagle\n\n# Verify ALB is reachable\ncurl -sI http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com | head -5\n\n# Verify Playwright chromium is installed\npython -c \"from playwright.sync_api import sync_playwright; print('OK')\"\n```\n\n---\n\n## Exact Command(s) to Run\n\n```bash\ncd C:/Users/blackga/Desktop/eagle/sm_eagle/server/ && \\\npython -m tests.e2e_judge_orchestrator \\\n  --base-url http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com \\\n  --auth-email testuser@example.com \\\n  --auth-password \"EagleTest2024!\" \\\n  --journeys admin,chat \\\n  -v\n```\n\n---\n\n## Flags and Arguments Explained\n\n| Flag | Value | Why |\n|------|-------|-----|\n| `--base-url` | `http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com` | The deployed ALB URL for the EAGLE frontend. The user said \"deployed URL\" and this is the known production/dev ALB from the project configuration (referenced in `playwright.config.ts`, deployment expertise docs, and the skill's own example). |\n| `--auth-email` | `testuser@example.com` | Cognito test user email for authentication. Required to access protected pages (admin dashboard, chat). |\n| `--auth-password` | `\"EagleTest2024!\"` | Cognito test user password. Paired with `--auth-email` for the login flow. |\n| `--journeys` | `admin,chat` | **Only the two journeys the user asked about.** The user specifically requested the \"admin dashboard and chat page\" -- no need to run `login`, `home`, `documents`, or `responsive`. The `admin` journey covers the admin dashboard and sub-pages (skills, templates, traces, costs -- approximately 6-7 screenshots). The `chat` journey covers the full chat flow (send message, streaming response, tool cards -- approximately 7-8 screenshots). |\n| `-v` | *(flag)* | Verbose logging so we can see real-time progress of each screenshot capture and judge evaluation. Useful for a quick check where the user wants to know status as it runs. |\n\n### Flags intentionally NOT used\n\n| Flag | Why omitted |\n|------|-------------|\n| `--headed` | Not needed -- headless is fine for automated QA (and more reliable on EC2/CI). |\n| `--purge-cache` | Not needed unless we suspect stale cache. If the frontend just changed, the screenshots will have different pixel content and therefore different SHA-256 hashes, which automatically bypasses the cache. |\n| `--upload-s3` | User did not ask for S3 persistence or dashboard integration. Keep it local. |\n| `--output` | Default output directory (`data/e2e-judge/results/`) is fine for a quick check. |\n\n---\n\n## Expected Output\n\n### Console output (verbose mode)\n\nThe user should see streaming output similar to:\n\n```\n2026-03-26T10:30:00 INFO  [e2e-judge] Starting E2E judge pipeline\n2026-03-26T10:30:00 INFO  [e2e-judge] Target: http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com\n2026-03-26T10:30:00 INFO  [e2e-judge] Journeys: admin, chat\n2026-03-26T10:30:01 INFO  [e2e-judge] Authenticating via Cognito...\n2026-03-26T10:30:03 INFO  [e2e-judge] Authentication successful\n2026-03-26T10:30:03 INFO  [e2e-judge] === Journey: admin ===\n2026-03-26T10:30:05 INFO  [e2e-judge] Screenshot: admin/01_dashboard_overview.png\n2026-03-26T10:30:07 INFO  [e2e-judge] Judge: PASS (confidence: 0.91, quality: 8/10)\n2026-03-26T10:30:09 INFO  [e2e-judge] Screenshot: admin/02_skills_page.png\n2026-03-26T10:30:11 INFO  [e2e-judge] Judge: PASS (confidence: 0.88, quality: 7/10)\n... (4-5 more admin screenshots) ...\n2026-03-26T10:30:25 INFO  [e2e-judge] === Journey: chat ===\n2026-03-26T10:30:27 INFO  [e2e-judge] Screenshot: chat/01_chat_page_load.png\n2026-03-26T10:30:29 INFO  [e2e-judge] Judge: PASS (confidence: 0.93, quality: 8/10)\n... (6-7 more chat screenshots) ...\n2026-03-26T10:31:00 INFO  [e2e-judge] Pipeline complete: 13/13 passed, 0 failed\n```\n\n### File artifacts produced\n\n| Artifact | Location |\n|----------|----------|\n| Results JSON | `server/data/e2e-judge/results/{run-id}.json` and `latest.json` |\n| Markdown report | `server/data/e2e-judge/results/{run-id}-report.md` |\n| Screenshots | `server/data/e2e-judge/screenshots/{run-id}/admin/*.png` and `server/data/e2e-judge/screenshots/{run-id}/chat/*.png` |\n| Cache entries | `server/data/e2e-judge/cache/{sha256}.json` (one per unique screenshot) |\n\n### Results JSON structure (per step)\n\nEach screenshot step produces a structured judgment:\n\n```json\n{\n  \"verdict\": \"pass\",\n  \"confidence\": 0.92,\n  \"reasoning\": \"Admin dashboard loads correctly with navigation sidebar, stats cards, and data tables rendered properly\",\n  \"ui_quality_score\": 8,\n  \"issues\": [],\n  \"cached\": false\n}\n```\n\n### What a successful run looks like\n\n- **All 13-15 screenshots** across admin (~6-7) and chat (~7-8) journeys receive **\"pass\"** verdicts\n- **No `issues` arrays** with entries -- empty `[]` means no visual defects detected\n- **`ui_quality_score`** values of 7+ across all steps (scores below 5 would indicate significant layout or rendering problems)\n- The markdown report provides a human-readable summary with embedded screenshot references\n\n### What a failure looks like\n\nIf the frontend deployment broke something, you would see:\n\n```\n2026-03-26T10:30:29 WARN  [e2e-judge] Judge: FAIL (confidence: 0.87, quality: 3/10)\n  Issues: [\"Main content area is blank\", \"Sidebar navigation links not rendered\"]\n```\n\nThe final summary would report `12/13 passed, 1 failed` and the markdown report would highlight the failing step with the Sonnet judge's reasoning.\n\n---\n\n## Approximate Cost and Duration\n\n- **Duration**: ~60-90 seconds (Playwright navigation + Bedrock Sonnet calls for ~13 screenshots)\n- **Cost**: ~$0.05-0.06 (13 screenshots x ~$0.004/screenshot for Sonnet vision evaluation)\n- **Cached re-run**: If nothing changed visually, a repeat run costs $0 and completes in ~20 seconds (screenshots still captured, but SHA-256 matches trigger cache hits)\n\n---\n\n## Summary\n\nThe e2e-judge skill is the right tool for this request. By scoping `--journeys` to just `admin,chat`, we target exactly the two pages the user cares about without burning time/cost on login, home, documents, or responsive journeys. The pipeline will capture ~13 screenshots, send each to Sonnet for structured pass/fail evaluation, and produce a report confirming whether the frontend deployment introduced any visual regressions.\n"}], "grading": {"expectations": [{"text": "Recognizes this as an e2e-judge task without the user naming the skill", "passed": true, "evidence": "First section 'Skill Recognition' states: 'Even though the user did not mention \"e2e judge\" by name, the intent is a visual regression check on specific pages of the deployed app, which is exactly what this pipeline does.'"}, {"text": "Uses --journeys admin,chat (maps 'admin dashboard and chat page' to correct journey names)", "passed": true, "evidence": "Command shows '--journeys admin,chat' and explanation: 'Only the two journeys the user asked about. The user specifically requested the \"admin dashboard and chat page\"'"}, {"text": "Uses the deployed ALB URL as --base-url", "passed": true, "evidence": "Command shows '--base-url http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com' and explains: 'The user said \"deployed URL\" and this is the known production/dev ALB'"}, {"text": "Explains what pass/fail/warning verdicts mean in the output", "passed": true, "evidence": "'What a successful run looks like' section explains: PASS = 'All screenshots receive pass verdicts', quality 7+ means no issues. 'What a failure looks like' section shows FAIL with issues array and reasoning."}, {"text": "Mentions cost estimate or that cached runs are cheaper", "passed": true, "evidence": "'Approximate Cost and Duration' section: '~$0.05-0.06 (13 screenshots x ~$0.004/screenshot)' and 'Cached re-run: If nothing changed visually, a repeat run costs $0 and completes in ~20 seconds'"}], "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}, "timing": {"executor_duration_seconds": 106.2, "total_duration_seconds": 106.2}, "claims": [{"claim": "Admin journey captures 6-7 screenshots", "type": "factual", "verified": true, "evidence": "Consistent with e2e_judge_journeys.py admin journey which has 6-7 steps"}, {"claim": "Chat journey captures 7-8 screenshots", "type": "factual", "verified": true, "evidence": "Consistent with e2e_judge_journeys.py chat journey which has 7-8 steps"}, {"claim": "Total screenshots for admin+chat is ~13", "type": "factual", "verified": true, "evidence": "6-7 (admin) + 7-8 (chat) = 13-15, consistent with claim"}], "eval_feedback": {"suggestions": [{"reason": "No assertion checks whether the response correctly explains Cognito authentication is required. The skill uses real auth, and a response that skipped auth would miss a key element."}], "overall": "Good mix of behavioral (implicit skill recognition) and content assertions. The implicit-trigger assertion is the most discriminating \u00e2\u20ac\u201d it tests whether the skill description is 'pushy' enough to fire without being named."}}}, {"id": "eval-3-full-run-s3-with_skill", "prompt": "Run a full visual regression test on all pages of EAGLE and upload the results to S3 so we can see them in the dashboard.", "eval_id": 3, "outputs": [{"name": "response.md", "type": "text", "content": "# E2E Judge: Full Visual Regression Test with S3 Upload\n\n## Pre-flight Checks\n\nBefore running the pipeline, I would verify the following:\n\n1. **AWS credentials are active** -- the `--upload-s3` flag pushes results to the S3 eval bucket (`eagle-eval-artifacts-695681773636-dev`), which requires valid AWS credentials with `s3:PutObject` permission in addition to `bedrock:InvokeModel`.\n\n```bash\naws sts get-caller-identity --profile eagle\n```\n\n2. **Playwright and dependencies are installed** in the server virtualenv:\n\n```bash\ncd C:/Users/blackga/Desktop/eagle/sm_eagle/server\npip install playwright boto3\nplaywright install chromium --with-deps\n```\n\n3. **Test credentials are available** -- confirm the env vars `EAGLE_TEST_EMAIL` and `EAGLE_TEST_PASSWORD` are set, or plan to pass them as flags. The known test credentials from the codebase are `testuser@example.com` / `EagleTest2024!`.\n\n4. **ALB is reachable** -- a quick health check against the deployed frontend ALB to confirm the app is up before spending time launching Playwright:\n\n```bash\ncurl -s -o /dev/null -w \"%{http_code}\" http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com\n```\n\nExpected: `200` (or `302` if it redirects to login). If this times out, you are likely not inside the VPC -- run from the EC2 dev box or check VPN connectivity.\n\n---\n\n## Exact Command\n\n```bash\ncd C:/Users/blackga/Desktop/eagle/sm_eagle/server && \\\npython -m tests.e2e_judge_orchestrator \\\n  --base-url http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com \\\n  --auth-email testuser@example.com \\\n  --auth-password \"EagleTest2024!\" \\\n  --journeys all \\\n  --upload-s3 \\\n  -v\n```\n\n---\n\n## Flags and Arguments Explained\n\n| Flag | Value | Why |\n|------|-------|-----|\n| `--base-url` | `http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com` | The deployed EAGLE frontend ALB URL (from `playwright.config.ts` and deployment expertise). This is the live dev environment. |\n| `--auth-email` | `testuser@example.com` | Cognito test user for authenticating Playwright. Passed as a flag so the orchestrator can log in through the Cognito auth flow before capturing pages. |\n| `--auth-password` | `EagleTest2024!` | Corresponding Cognito password. Alternatively, set `EAGLE_TEST_EMAIL` and `EAGLE_TEST_PASSWORD` env vars. |\n| `--journeys` | `all` | Runs every registered journey: `login`, `home`, `chat`, `admin`, `documents`, `responsive`. This gives full coverage across all pages. |\n| `--upload-s3` | *(flag, no value)* | After the run completes, uploads the results JSON, markdown report, and all screenshots to the S3 eval bucket (`eagle-eval-artifacts-{account}-dev`). This is what makes the results visible in the dashboard. |\n| `-v` | *(flag, no value)* | Verbose logging -- prints each journey step, screenshot path, judge verdict, and S3 upload progress to stdout. Essential for monitoring a full run with ~30-40 screenshots. |\n\n### Flags I chose NOT to use\n\n| Flag | Why omitted |\n|------|-------------|\n| `--headed` | Not needed -- headless is correct for a full regression run. Use `--headed` only when debugging a specific journey interactively. |\n| `--purge-cache` | Not needed unless you specifically want to re-evaluate screenshots that haven't changed. Keeping the cache means unchanged pages are judged for free (cache hit by SHA-256). If you want a fully fresh evaluation, add `--purge-cache`. |\n| `--output` | Not needed -- the default output directory (`data/e2e-judge/results/`) is the standard location. The S3 upload reads from there. |\n\n---\n\n## Expected Output\n\n### Console output (verbose mode)\n\nThe run will print progress like:\n\n```\n[e2e-judge] Starting pipeline: 6 journeys, base_url=http://EagleC-Front-...\n[e2e-judge] Authenticating as testuser@example.com...\n[e2e-judge] Auth successful, cookies set.\n\n[e2e-judge] === Journey: login (Login page, Cognito auth flow, redirect) ===\n[e2e-judge]   Step 1/3: login_page \u00e2\u2020\u2019 screenshot saved: data/e2e-judge/screenshots/{run-id}/login/01_login_page.png\n[e2e-judge]   Judge: PASS (confidence=0.94, ui_quality=8) \u00e2\u20ac\u201d \"Login page renders correctly with NCI branding...\"\n[e2e-judge]   Step 2/3: cognito_redirect \u00e2\u2020\u2019 screenshot saved: ...\n[e2e-judge]   Judge: PASS (confidence=0.91, ui_quality=7) [CACHED]\n...\n\n[e2e-judge] === Journey: chat (Full chat: send message, streaming, response) ===\n[e2e-judge]   Step 1/8: chat_empty \u00e2\u2020\u2019 ...\n...\n\n[e2e-judge] === Journey: responsive (Key pages at mobile and tablet) ===\n...\n\n[e2e-judge] Pipeline complete: 35/38 PASS, 2 WARN, 1 FAIL\n[e2e-judge] Report: data/e2e-judge/results/20260326-HHMMSS-report.md\n[e2e-judge] Results: data/e2e-judge/results/20260326-HHMMSS.json\n\n[e2e-judge] Uploading to S3: eagle-eval-artifacts-695681773636-dev\n[e2e-judge]   Uploaded: results/20260326-HHMMSS.json\n[e2e-judge]   Uploaded: results/20260326-HHMMSS-report.md\n[e2e-judge]   Uploaded: results/latest.json\n[e2e-judge]   Uploaded: screenshots/20260326-HHMMSS/ (38 files)\n[e2e-judge] S3 upload complete.\n```\n\n### Local file outputs\n\n| Artifact | Path |\n|----------|------|\n| Results JSON | `server/data/e2e-judge/results/{run-id}.json` (+ `latest.json` symlink) |\n| Markdown report | `server/data/e2e-judge/results/{run-id}-report.md` |\n| Screenshots | `server/data/e2e-judge/screenshots/{run-id}/{journey}/{step}.png` |\n| Cache entries | `server/data/e2e-judge/cache/{sha256}.json` |\n\n### S3 outputs (for the dashboard)\n\nAll the above files are uploaded to `s3://eagle-eval-artifacts-695681773636-dev/e2e-judge/...` with the same directory structure. The `latest.json` file is what the dashboard reads to display the most recent run.\n\n### Approximate run characteristics\n\n| Metric | Estimate |\n|--------|----------|\n| Total screenshots | ~30-40 (across 6 journeys) |\n| Runtime | 3-5 minutes (depending on network/app response time) |\n| Cost (Sonnet vision judge) | ~$0.16 for fresh evaluations; $0 for cache hits |\n| Cost (Haiku for EAGLE app responses in chat journey) | ~$0.008 |\n\n### Results JSON structure (per step)\n\nEach screenshot step produces a structured judgment:\n\n```json\n{\n  \"verdict\": \"pass\",\n  \"confidence\": 0.92,\n  \"reasoning\": \"Chat page loads correctly with sidebar, input area, and welcome message\",\n  \"ui_quality_score\": 8,\n  \"issues\": [],\n  \"cached\": false\n}\n```\n\nThe top-level results JSON aggregates all steps with summary statistics (pass/fail/warn counts, average UI quality score, total cost, cache hit rate).\n\n---\n\n## If Something Goes Wrong\n\n| Symptom | Likely cause | Fix |\n|---------|-------------|-----|\n| Connection timeout on `--base-url` | Not inside VPC / ALB not reachable | Run from EC2 dev box or check VPN |\n| `401` / auth failure | Wrong Cognito credentials or user not in pool | Verify `EAGLE_TEST_EMAIL` / `EAGLE_TEST_PASSWORD` |\n| `botocore.exceptions.ClientError: bedrock:InvokeModel` | Missing Bedrock permissions | Ensure EC2 instance role or SSO profile (`eagle`) has Bedrock access |\n| `S3 upload failed: AccessDenied` | Missing `s3:PutObject` on the eval bucket | Check IAM role has write access to `eagle-eval-artifacts-*` |\n| All screenshots cached (no fresh evaluations) | Previous run had identical UI | Add `--purge-cache` to force fresh Sonnet evaluations |\n"}], "grading": {"expectations": [{"text": "Uses --journeys all to cover all pages", "passed": true, "evidence": "Command shows '--journeys all' and explanation: 'Runs every registered journey: login, home, chat, admin, documents, responsive'"}, {"text": "Includes --upload-s3 flag for S3 upload", "passed": true, "evidence": "Command shows '--upload-s3' and explanation: 'uploads the results JSON, markdown report, and all screenshots to the S3 eval bucket'"}, {"text": "Mentions the /admin/e2e-judge dashboard page for viewing results", "passed": false, "evidence": "Response mentions 'the dashboard reads [latest.json] to display the most recent run' but never explicitly names the '/admin/e2e-judge' route. The user needs to know WHERE to navigate \u00e2\u20ac\u201d a generic 'dashboard' reference is insufficient."}, {"text": "Lists all available journeys (login, home, chat, admin, documents, responsive)", "passed": true, "evidence": "Flags table: 'Runs every registered journey: login, home, chat, admin, documents, responsive' \u00e2\u20ac\u201d all 6 listed by name"}, {"text": "Mentions approximate screenshot count and cost for a full run", "passed": true, "evidence": "'Approximate run characteristics' table: 'Total screenshots: ~30-40' and 'Cost (Sonnet vision judge): ~$0.16 for fresh evaluations; $0 for cache hits'"}], "summary": {"passed": 4, "failed": 1, "total": 5, "pass_rate": 0.8}, "timing": {"executor_duration_seconds": 101.8, "total_duration_seconds": 101.8}, "claims": [{"claim": "S3 bucket is eagle-eval-artifacts-695681773636-dev", "type": "factual", "verified": true, "evidence": "Matches the pattern from infrastructure/cdk-eagle/config/environments.ts and the plan"}, {"claim": "Haiku app cost ~$0.008 for chat interactions", "type": "factual", "verified": true, "evidence": "Reasonable estimate for 1-2 chat turns with Haiku 4.5 at $0.001/1K tokens"}, {"claim": "Runtime is 3-5 minutes for full run", "type": "quality", "verified": true, "evidence": "Reasonable for 30-40 screenshots with Playwright navigation + Bedrock API calls"}], "eval_feedback": {"suggestions": [{"assertion": "Mentions the /admin/e2e-judge dashboard page for viewing results", "reason": "This failed \u00e2\u20ac\u201d the skill should instruct the model to explicitly mention the dashboard URL '/admin/e2e-judge' when --upload-s3 is used. Add this to the SKILL.md output format section."}], "overall": "Good assertions. The dashboard URL failure is a real skill gap \u00e2\u20ac\u201d the SKILL.md should specify that when S3 upload is used, the response should point the user to the specific dashboard route."}}}], "previous_feedback": {}, "previous_outputs": {}, "benchmark": {"metadata": {"skill_name": "e2e-judge", "skill_path": ".claude/skills/e2e-judge/SKILL.md", "executor_model": "claude-opus-4-6", "analyzer_model": "claude-opus-4-6", "timestamp": "2026-03-26T04:48:44Z", "evals_run": ["eval-1-explicit-run", "eval-2-implicit-visual-check", "eval-3-full-run-s3"], "runs_per_configuration": 1}, "configurations": {"with_skill": {"label": "With e2e-judge skill", "pass_rate": {"mean": 0.93, "stddev": 0.09, "per_eval": {"eval-1-explicit-run": 1.0, "eval-2-implicit-visual-check": 1.0, "eval-3-full-run-s3": 0.8}}, "time_seconds": {"mean": 98.9, "stddev": 7.5, "per_eval": {"eval-1-explicit-run": 88.7, "eval-2-implicit-visual-check": 106.2, "eval-3-full-run-s3": 101.8}}, "tokens": {"mean": 19127, "stddev": 1578, "per_eval": {"eval-1-explicit-run": 16945, "eval-2-implicit-visual-check": 19783, "eval-3-full-run-s3": 20652}}}}, "runs": [{"eval_id": "eval-1-explicit-run", "config": "with_skill", "pass_rate": 1.0, "passed": 6, "failed": 0, "total": 6, "time_seconds": 88.7, "tokens": 16945, "failed_assertions": []}, {"eval_id": "eval-2-implicit-visual-check", "config": "with_skill", "pass_rate": 1.0, "passed": 5, "failed": 0, "total": 5, "time_seconds": 106.2, "tokens": 19783, "failed_assertions": []}, {"eval_id": "eval-3-full-run-s3", "config": "with_skill", "pass_rate": 0.8, "passed": 4, "failed": 1, "total": 5, "time_seconds": 101.8, "tokens": 20652, "failed_assertions": ["Mentions the /admin/e2e-judge dashboard page for viewing results"]}], "run_summary": {"overall_pass_rate": 0.9375, "total_passed": 15, "total_failed": 1, "total_assertions": 16, "avg_time_seconds": 98.9, "avg_tokens": 19127}, "notes": ["Eval 3 failed one assertion: the skill response mentions 'the dashboard' generically but does not specify the '/admin/e2e-judge' route explicitly. This is a gap in the SKILL.md \u00e2\u20ac\u201d it should instruct the model to mention the dashboard URL when --upload-s3 is used.", "No baseline (without_skill) runs were performed \u00e2\u20ac\u201d this is a new skill with no prior version to compare against.", "All evals used the with_skill configuration only. Implicit triggering (eval 2) worked correctly."]}};
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        // Always show file header with download link
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1rem;">';
+
+      // Summary line
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
+      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '</div>';
+
+      // Assertions list
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        // Server not available (static mode) — download as file
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Reset status back to in_progress
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Toast ----
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      setTimeout(() => toast.classList.remove("visible"), 2000);
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      // Header
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      html += "</p>";
+
+      // Summary table
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      // Discover config names dynamically (everything except "delta")
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      // Time (only show row if data exists)
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      // Tokens (only show row if data exists)
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      // Per-eval breakdown (if runs data available)
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+
+          html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          // Group by config and render with average rows
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          // Per-assertion detail for this eval
+          const runsWithExpectations = {};
+          for (const config of configGroups) {
+            runsWithExpectations[config] = evalRuns.filter(r => r.configuration === config && r.expectations && r.expectations.length > 0);
+          }
+          const hasAnyExpectations = Object.values(runsWithExpectations).some(runs => runs.length > 0);
+          if (hasAnyExpectations) {
+            // Collect all unique assertion texts across all configs
+            const allAssertions = [];
+            const seen = new Set();
+            for (const config of configGroups) {
+              for (const run of runsWithExpectations[config]) {
+                for (const exp of (run.expectations || [])) {
+                  if (!seen.has(exp.text)) {
+                    seen.add(exp.text);
+                    allAssertions.push(exp.text);
+                  }
+                }
+              }
+            }
+
+            html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+            html += "<thead><tr><th>Assertion</th>";
+            for (const config of configGroups) {
+              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              html += "<th>" + escapeHtml(label) + "</th>";
+            }
+            html += "</tr></thead><tbody>";
+
+            for (const assertionText of allAssertions) {
+              html += "<tr><td>" + escapeHtml(assertionText) + "</td>";
+
+              for (const config of configGroups) {
+                html += "<td>";
+                for (const run of runsWithExpectations[config]) {
+                  const exp = (run.expectations || []).find(e => e.text === assertionText);
+                  if (exp) {
+                    const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
+                    const icon = exp.passed ? "\u2713" : "\u2717";
+                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                  } else {
+                    html += "— ";
+                  }
+                }
+                html += "</td>";
+              }
+              html += "</tr>";
+            }
+            html += "</tbody></table>";
+          }
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>

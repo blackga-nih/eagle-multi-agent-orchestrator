@@ -1,0 +1,58 @@
+{
+  "expectations": [
+    {
+      "text": "Uses --journeys all to cover all pages",
+      "passed": true,
+      "evidence": "Command: '--journeys all'. Section 3: 'Runs every registered journey in JOURNEY_REGISTRY: login, home, chat, admin, documents, responsive.'"
+    },
+    {
+      "text": "Includes --upload-s3 flag for S3 upload",
+      "passed": true,
+      "evidence": "Command: '--upload-s3'. Flag table explains S3 upload behavior and bucket naming."
+    },
+    {
+      "text": "Explicitly mentions /admin/e2e-judge as the dashboard page for viewing results",
+      "passed": true,
+      "evidence": "Section 7 'Dashboard URL' explicitly shows: 'http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com/admin/e2e-judge' and quotes the SKILL.md instruction."
+    },
+    {
+      "text": "Lists all available journeys (login, home, chat, admin, documents, responsive)",
+      "passed": true,
+      "evidence": "Section 4 lists all 6 journeys with full descriptions, step lists, and screenshot counts in sub-sections 4.1-4.6"
+    },
+    {
+      "text": "Mentions approximate screenshot count and cost for a full run",
+      "passed": true,
+      "evidence": "Section 4 total table: '~25-40+, typical ~32-38'. Section 6: '~$0.16 for first run'"
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "passed": true,
+      "evidence": "Command: '--base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com'"
+    },
+    {
+      "text": "Does NOT hardcode credentials",
+      "passed": true,
+      "evidence": "Flags NOT used table: '--auth-email / --auth-password: Credentials come from EAGLE_TEST_EMAIL / EAGLE_TEST_PASSWORD env vars... Never pass passwords as CLI arguments'"
+    },
+    {
+      "text": "Mentions the chat journey's enhanced screenshot strategy (pre-send + 30s intervals)",
+      "passed": true,
+      "evidence": "Sections 8.2 'Pre-Send Captures' and 8.3 '30-Second Streaming Interval Captures' with full implementation details"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 197.1,
+    "total_duration_seconds": 197.1
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "All 8 assertions pass — including the /admin/e2e-judge dashboard URL that failed in iteration 1. The SKILL.md fix worked."
+  }
+}

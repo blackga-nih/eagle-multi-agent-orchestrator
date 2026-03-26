@@ -1,0 +1,67 @@
+{
+  "expectations": [
+    {
+      "text": "Recognizes this as an e2e-judge task without the user naming the skill",
+      "passed": true,
+      "evidence": "First section 'Skill Recognition' states: 'Even though the user did not mention \"e2e judge\" by name, the intent is a visual regression check on specific pages of the deployed app, which is exactly what this pipeline does.'"
+    },
+    {
+      "text": "Uses --journeys admin,chat (maps 'admin dashboard and chat page' to correct journey names)",
+      "passed": true,
+      "evidence": "Command shows '--journeys admin,chat' and explanation: 'Only the two journeys the user asked about. The user specifically requested the \"admin dashboard and chat page\"'"
+    },
+    {
+      "text": "Uses the deployed ALB URL as --base-url",
+      "passed": true,
+      "evidence": "Command shows '--base-url http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com' and explains: 'The user said \"deployed URL\" and this is the known production/dev ALB'"
+    },
+    {
+      "text": "Explains what pass/fail/warning verdicts mean in the output",
+      "passed": true,
+      "evidence": "'What a successful run looks like' section explains: PASS = 'All screenshots receive pass verdicts', quality 7+ means no issues. 'What a failure looks like' section shows FAIL with issues array and reasoning."
+    },
+    {
+      "text": "Mentions cost estimate or that cached runs are cheaper",
+      "passed": true,
+      "evidence": "'Approximate Cost and Duration' section: '~$0.05-0.06 (13 screenshots x ~$0.004/screenshot)' and 'Cached re-run: If nothing changed visually, a repeat run costs $0 and completes in ~20 seconds'"
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 106.2,
+    "total_duration_seconds": 106.2
+  },
+  "claims": [
+    {
+      "claim": "Admin journey captures 6-7 screenshots",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Consistent with e2e_judge_journeys.py admin journey which has 6-7 steps"
+    },
+    {
+      "claim": "Chat journey captures 7-8 screenshots",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Consistent with e2e_judge_journeys.py chat journey which has 7-8 steps"
+    },
+    {
+      "claim": "Total screenshots for admin+chat is ~13",
+      "type": "factual",
+      "verified": true,
+      "evidence": "6-7 (admin) + 7-8 (chat) = 13-15, consistent with claim"
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "reason": "No assertion checks whether the response correctly explains Cognito authentication is required. The skill uses real auth, and a response that skipped auth would miss a key element."
+      }
+    ],
+    "overall": "Good mix of behavioral (implicit skill recognition) and content assertions. The implicit-trigger assertion is the most discriminating — it tests whether the skill description is 'pushy' enough to fire without being named."
+  }
+}

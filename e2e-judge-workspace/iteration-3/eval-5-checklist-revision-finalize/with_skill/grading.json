@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Correctly identifies the acquisition_package journey as covering this use case",
+      "passed": true,
+      "evidence": "The response opens with 'Yes -- the acquisition_package journey covers exactly this use case' and the summary states 'The acquisition_package journey already covers your exact use case. You do not need to create a separate journey for checklist + revision + finalize testing.'"
+    },
+    {
+      "text": "Explains the document checklist check (shows which docs are completed/pending)",
+      "passed": true,
+      "evidence": "Phase 3 (steps 18-20) explains the document checklist verification in detail: 'A per-document-type checklist (SOW, IGCE, Market Research, Acquisition Plan) with completed/pending status for each' and 'the full document checklist with completed/pending status for every document type.'"
+    },
+    {
+      "text": "Explains the revision flow (SOW v2 with updated requirements)",
+      "passed": true,
+      "evidence": "Phase 4 (steps 21-23) explains the revision flow: sending a message to add Section 508 accessibility and FedRAMP High authorization to the SOW, then waiting for SOW v2 generation. States 'The agent should regenerate the SOW as version 2 (the artifact naming convention v2 prevents overwriting the original).'"
+    },
+    {
+      "text": "Explains the finalize step (validates completeness, changes package status)",
+      "passed": true,
+      "evidence": "Phase 5 (steps 24-26) explains finalization: 'Validate package completeness (all required documents present)', 'Update the package status (from \"in_progress\" to \"finalized\" or similar)', and 'Confirm compliance checks pass.'"
+    },
+    {
+      "text": "Uses the correct internal ALB URL",
+      "passed": true,
+      "evidence": "The command examples use '--base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com' which is the internal ALB URL."
+    },
+    {
+      "text": "Does NOT hardcode credentials",
+      "passed": true,
+      "evidence": "The response explicitly uses environment variables for credentials ('export EAGLE_TEST_EMAIL=\"your-test-user@example.com\"' and 'export EAGLE_TEST_PASSWORD=\"your-test-password\"') and states 'NEVER hardcode passwords' and 'Never hardcode credentials in commands or scripts.'"
+    },
+    {
+      "text": "Mentions the /workflows page for checklist verification",
+      "passed": true,
+      "evidence": "Phase 3 step 19-20 explicitly mentions navigating to '/workflows': 'Navigates to {base_url}/workflows. This is the dedicated package management page that shows: The acquisition package card with an overall progress indicator, A per-document-type checklist...' Also appears in the Key Pages Tested table."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 96.1,
+    "total_duration_seconds": 96.1
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "The response is comprehensive and addresses all seven assertions. It correctly identifies the acquisition_package journey, explains the document checklist verification with completed/pending status indicators, details the SOW v2 revision flow with specific requirements (Section 508 + FedRAMP High), describes the finalize step including completeness validation and status change, uses the correct internal ALB URL, avoids hardcoding credentials (using env vars instead with explicit warnings), and prominently mentions the /workflows page for checklist verification. All 7/7 assertions passed."
+  }
+}

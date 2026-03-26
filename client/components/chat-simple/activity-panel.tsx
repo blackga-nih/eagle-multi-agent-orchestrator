@@ -1,10 +1,14 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { FileText, Bell, Terminal, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { FileText, Bell, Terminal, ClipboardCheck, PanelRightClose, PanelRightOpen, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
 import AgentLogs, { buildDisplayEntries } from './agent-logs';
+import { ChecklistTabContent } from './checklist-panel';
+import type { PackageState } from '@/hooks/use-package-state';
+import { useAllPackages } from '@/hooks/use-all-packages';
+import type { PackageInfo, PackageDocument } from '@/lib/document-api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,9 +22,11 @@ interface ActivityPanelProps {
   isStreaming: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  packageState?: PackageState;
+  getToken: () => Promise<string | null>;
 }
 
-type TabId = 'documents' | 'notifications' | 'logs';
+type TabId = 'package' | 'documents' | 'notifications' | 'logs';
 
 interface TabDef {
   id: TabId;
@@ -29,10 +35,23 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
+  { id: 'package',       label: 'Package',       icon: ClipboardCheck },
   { id: 'documents',     label: 'Documents',     icon: FileText },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'logs',          label: 'Agent Logs',    icon: Terminal },
 ];
+
+// ---------------------------------------------------------------------------
+// Phase badge styles (shared with checklist-panel)
+// ---------------------------------------------------------------------------
+
+const PHASE_STYLES: Record<string, string> = {
+  intake: 'bg-blue-100 text-blue-800',
+  drafting: 'bg-amber-100 text-amber-800',
+  finalizing: 'bg-purple-100 text-purple-800',
+  review: 'bg-green-100 text-green-800',
+  approved: 'bg-emerald-100 text-emerald-800',
+};
 
 // ---------------------------------------------------------------------------
 // Document type icon helper
@@ -63,12 +82,217 @@ function getDocTypeLabel(doc: DocumentInfo): string {
   if (t.includes('subk') || t.includes('subcontract')) return 'Subcontracting Plan';
   if (t.includes('conference')) return 'Conference Request';
   if (t.includes('buy') && t.includes('american')) return 'Buy American';
+  if (t.includes('transmittal') || t.includes('cover memo')) return 'Transmittal Memo';
   return raw.replace(/_/g, ' ');
+}
+
+/** Relative time label (e.g. "2 days ago"). */
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+/** Format dollar value. */
+function formatValue(val?: string): string {
+  if (!val) return '';
+  const n = parseFloat(val);
+  if (isNaN(n)) return val;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toLocaleString()}`;
 }
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+/** Single package card in the all-packages list. */
+function PackageCard({
+  pkg,
+  isExpanded,
+  onToggle,
+  documents,
+  isLoadingDocs,
+}: {
+  pkg: PackageInfo;
+  isExpanded: boolean;
+  onToggle: () => void;
+  documents: PackageDocument[];
+  isLoadingDocs: boolean;
+}) {
+  const status = pkg.status ?? 'unknown';
+  const cr = pkg.compliance_readiness;
+  const progress = cr ? `${cr.finalized_count ?? 0}/${cr.total_required ?? 0}` : null;
+
+  const openDoc = (doc: PackageDocument) => {
+    const docId = encodeURIComponent(doc.s3_key || doc.document_id || doc.title);
+    window.open(`/documents/${docId}`, '_blank');
+  };
+
+  return (
+    <div className="rounded-lg border border-[#D8DEE6] bg-white overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full text-left px-3 py-2.5 hover:bg-gray-50 transition flex items-start gap-2"
+      >
+        <span className="mt-0.5 shrink-0 text-gray-400">
+          {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-[#003366] truncate">{pkg.title}</p>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-medium ${PHASE_STYLES[status] || 'bg-gray-100 text-gray-600'}`}>
+              {status}
+            </span>
+            {progress && (
+              <span className="text-[10px] text-gray-400">{progress} docs</span>
+            )}
+            {pkg.estimated_value && (
+              <span className="text-[10px] text-gray-400">{formatValue(pkg.estimated_value)}</span>
+            )}
+          </div>
+          {pkg.created_at && (
+            <p className="text-[9px] text-gray-400 mt-0.5">{relativeTime(pkg.created_at)}</p>
+          )}
+        </div>
+      </button>
+
+      {/* Expanded: show documents */}
+      {isExpanded && (
+        <div className="border-t border-[#D8DEE6] px-3 py-2 bg-gray-50">
+          {isLoadingDocs && (
+            <p className="text-[10px] text-gray-400 animate-pulse">Loading documents...</p>
+          )}
+          {!isLoadingDocs && documents.length === 0 && (
+            <p className="text-[10px] text-gray-400">No documents yet.</p>
+          )}
+          {!isLoadingDocs && documents.length > 0 && (
+            <div className="space-y-1">
+              {documents.map((doc) => (
+                <button
+                  key={doc.document_id}
+                  type="button"
+                  onClick={() => openDoc(doc)}
+                  className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white transition"
+                  title="Open document"
+                >
+                  <span className="text-sm shrink-0">{getDocIcon(doc.doc_type)}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-medium text-[#003366] truncate">{doc.title}</p>
+                    <div className="flex items-center gap-1.5 text-[9px] text-gray-400">
+                      <span className="uppercase">{doc.doc_type.replace(/_/g, ' ')}</span>
+                      <span>v{doc.version}</span>
+                      {doc.status && (
+                        <span className={`px-1 py-0.5 rounded-full font-medium ${
+                          doc.status === 'final' ? 'bg-green-100 text-green-700' :
+                          doc.status === 'draft' ? 'bg-amber-100 text-amber-700' :
+                          'bg-gray-100 text-gray-600'
+                        }`}>
+                          {doc.status}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** All Packages list component. */
+function AllPackagesList({
+  getToken,
+  activePackageId,
+}: {
+  getToken: () => Promise<string | null>;
+  activePackageId?: string;
+}) {
+  const { packages, loading, error, refetch, fetchDocuments, documentsCache, loadingDocs } = useAllPackages(getToken);
+  const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
+
+  const handleToggle = async (pkgId: string) => {
+    if (expandedPkg === pkgId) {
+      setExpandedPkg(null);
+    } else {
+      setExpandedPkg(pkgId);
+      await fetchDocuments(pkgId);
+    }
+  };
+
+  // Filter out the active package to avoid duplicate display
+  const filteredPackages = activePackageId
+    ? packages.filter((p) => p.package_id !== activePackageId)
+    : packages;
+
+  if (loading && packages.length === 0) {
+    return (
+      <div className="py-4 text-center">
+        <p className="text-[10px] text-gray-400 animate-pulse">Loading packages...</p>
+      </div>
+    );
+  }
+
+  if (error && packages.length === 0) {
+    return (
+      <div className="py-4 text-center">
+        <p className="text-[10px] text-red-400">Failed to load packages</p>
+        <button onClick={refetch} className="text-[10px] text-blue-500 hover:underline mt-1">Retry</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">
+          My Packages
+          {packages.length > 0 && (
+            <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] bg-gray-200 text-gray-600 font-bold">
+              {packages.length}
+            </span>
+          )}
+        </h4>
+        <button
+          onClick={refetch}
+          className="p-1 text-gray-400 hover:text-gray-600 rounded transition"
+          title="Refresh packages"
+        >
+          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
+      {filteredPackages.length === 0 && !activePackageId && (
+        <p className="text-[10px] text-gray-400 text-center py-2">No packages yet.</p>
+      )}
+
+      <div className="space-y-1.5">
+        {filteredPackages.map((pkg) => (
+          <PackageCard
+            key={pkg.package_id}
+            pkg={pkg}
+            isExpanded={expandedPkg === pkg.package_id}
+            onToggle={() => handleToggle(pkg.package_id)}
+            documents={documentsCache[pkg.package_id] ?? []}
+            isLoadingDocs={loadingDocs.has(pkg.package_id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function DocumentsTab({
   documents,
@@ -259,13 +483,16 @@ export default function ActivityPanel({
   isStreaming,
   isOpen,
   onToggle,
+  packageState,
+  getToken,
 }: ActivityPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('logs');
+  const [activeTab, setActiveTab] = useState<TabId>('package');
 
   const docCount = Object.values(documents).flat().length;
   const logDisplayCount = useMemo(() => buildDisplayEntries(logs).length, [logs]);
-
   const notifCount = docCount;
+  const packageRequired = packageState?.checklist?.required?.length ?? 0;
+  const packageCompleted = packageState?.checklist?.completed?.length ?? 0;
 
   // Collapsed strip
   if (!isOpen) {
@@ -287,6 +514,7 @@ export default function ActivityPanel({
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const badge =
+            tab.id === 'package' && packageRequired > 0 ? `${packageCompleted}/${packageRequired}` :
             tab.id === 'logs' && logDisplayCount > 0 ? logDisplayCount :
             tab.id === 'documents' && docCount > 0 ? docCount :
             tab.id === 'notifications' && notifCount > 0 ? notifCount :
@@ -304,7 +532,7 @@ export default function ActivityPanel({
             >
               <Icon className="w-3.5 h-3.5" />
               {tab.label}
-              {badge > 0 && (
+              {(typeof badge === 'string' || badge > 0) && (
                 <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] bg-[#003366] text-white font-bold min-w-[18px] text-center">
                   {badge}
                 </span>
@@ -341,6 +569,23 @@ export default function ActivityPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
+        {activeTab === 'package' && (
+          <>
+            {/* Section A: Active package checklist (from SSE) */}
+            {packageState && <ChecklistTabContent state={packageState} />}
+
+            {/* Divider between active checklist and all packages */}
+            {packageState && (
+              <div className="border-t border-[#D8DEE6] my-4" />
+            )}
+
+            {/* Section B: All packages from API */}
+            <AllPackagesList
+              getToken={getToken}
+              activePackageId={packageState?.packageId ?? undefined}
+            />
+          </>
+        )}
         {activeTab === 'documents' && <DocumentsTab documents={documents} sessionId={sessionId} />}
         {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
         {activeTab === 'logs' && <AgentLogs logs={logs} />}

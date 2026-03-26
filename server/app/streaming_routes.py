@@ -319,6 +319,16 @@ async def stream_generator(
                     await writer.write_reasoning(sse_queue, reasoning_data)
                     yield await sse_queue.get()
 
+            elif chunk_type == "tool_input_delta":
+                tid_delta = chunk.get("delta", "")
+                tid_id = chunk.get("tool_use_id", "")
+                tid_name = chunk.get("name", "")
+                if tid_delta and tid_id:
+                    await writer.write_tool_input_delta(
+                        sse_queue, tid_id, tid_delta, tool_name=tid_name,
+                    )
+                    yield await sse_queue.get()
+
             elif chunk_type == "handoff":
                 await writer.write_handoff(
                     sse_queue,

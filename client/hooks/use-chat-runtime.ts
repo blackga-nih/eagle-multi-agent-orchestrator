@@ -11,6 +11,7 @@ const IDLE_STATE: SessionGenerationState = {
     streamingMessageId: null,
     toolCallsByMsg: {},
     documentsByMsg: {},
+    stateChangesByMsg: {},
     agentStatus: null,
     error: null,
     completedMessage: null,

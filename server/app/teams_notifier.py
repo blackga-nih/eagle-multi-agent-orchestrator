@@ -34,7 +34,11 @@ WEBHOOK_URL: str = os.getenv(
         "https://prod-52.usgovtexas.logic.azure.us:443/workflows/8705df58d766420d8847222b1b12d7a0/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Xo4vpYNBYWWdyreboIYnBJtGlO3cNRLSEakEcNGWBoM",
     ),
 )
+_IS_ECS: bool = os.getenv("ECS_CONTAINER_METADATA_URI") is not None
 WEBHOOK_ENABLED: bool = os.getenv("TEAMS_WEBHOOK_ENABLED", "true").lower() == "true"
+# In local dev, only send if explicitly opted-in via env var
+if not _IS_ECS and os.getenv("TEAMS_WEBHOOK_ENABLED") is None:
+    WEBHOOK_ENABLED = False
 WEBHOOK_TIMEOUT: float = float(os.getenv("TEAMS_WEBHOOK_TIMEOUT", "5.0"))
 ENVIRONMENT: str = os.getenv("EAGLE_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev"))
 

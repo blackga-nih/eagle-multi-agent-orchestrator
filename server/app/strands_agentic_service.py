@@ -1726,6 +1726,10 @@ def _build_subagent_doc_tools(
             "output_format": output_format, "update_existing_key": update_existing_key,
             "template_id": template_id,
         }
+        logger.info(
+            "create_document_tool ENTRY (subagent): doc_type=%s title=%.80s package_id=%s content_len=%d",
+            doc_type, title, package_id, len(content or ""),
+        )
         try:
             # -- Micro-purchase guardrail (FAR 13.2) --
             _mp_block = _check_micropurchase_guardrail(parsed)
@@ -1739,6 +1743,7 @@ def _build_subagent_doc_tools(
 
             result = tool_dispatch["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
+            logger.info("create_document_tool DONE (subagent): doc_type=%s", doc_type)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
             logger.error("Subagent create_document failed: %s", exc, exc_info=True)
@@ -2265,6 +2270,10 @@ def _build_all_service_tools(
     """Build 14 service @tool functions with proper named parameters."""
     from .tools.legacy_dispatch import get_tool_dispatch
     from .compliance_matrix import execute_operation
+    from .telemetry.log_context import get_log_context, set_log_context
+
+    # Snapshot logging context for propagation into Strands tool threads
+    _log_ctx = get_log_context()
 
     tool_dispatch = get_tool_dispatch()
 
@@ -2308,14 +2317,26 @@ def _build_all_service_tools(
             key: S3 object key path
             content: Content to write (for 'write' operation)
         """
+        set_log_context(**_log_ctx)
+        import time as _time_mod
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
         parsed = {"operation": operation, "bucket": bucket, "key": key, "content": content}
         try:
             result = tool_dispatch["s3_document_ops"](parsed, tenant_id, scoped_session_id)
             _emit("s3_document_ops", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
+            _tool_success = False
             logger.error("Service tool s3_document_ops failed: %s", exc, exc_info=True)
             return json.dumps({"error": str(exc), "tool": "s3_document_ops"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+                emit_tool_completed(tenant_id, user_id, session_id or "", "s3_document_ops", _tool_dur, _tool_success)
+            except Exception:
+                pass
 
     # ---- 2. dynamodb_intake ----
     @tool(name="dynamodb_intake")
@@ -2328,14 +2349,26 @@ def _build_all_service_tools(
             item_id: Item identifier for read/update operations
             data: Data payload for create/update operations
         """
+        set_log_context(**_log_ctx)
+        import time as _time_mod
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
         parsed = {"operation": operation, "table": table, "item_id": item_id, "data": data or {}}
         try:
             result = tool_dispatch["dynamodb_intake"](parsed, tenant_id)
             _emit("dynamodb_intake", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
+            _tool_success = False
             logger.error("Service tool dynamodb_intake failed: %s", exc, exc_info=True)
             return json.dumps({"error": str(exc), "tool": "dynamodb_intake"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+                emit_tool_completed(tenant_id, user_id, session_id or "", "dynamodb_intake", _tool_dur, _tool_success)
+            except Exception:
+                pass
 
     # ---- 3. create_document (special prompt-context enrichment) ----
     @tool(name="create_document")
@@ -2363,12 +2396,20 @@ def _build_all_service_tools(
             update_existing_key: S3 key of existing document to update/revise
             template_id: Template ID to use for generation
         """
+        set_log_context(**_log_ctx)  # Restore logging context in tool thread
+        import time as _time_mod
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
         parsed = {
             "doc_type": doc_type, "title": title, "content": content,
             "data": data, "package_id": package_id,
             "output_format": output_format, "update_existing_key": update_existing_key,
             "template_id": template_id,
         }
+        logger.info(
+            "create_document_tool ENTRY (service): doc_type=%s title=%.80s package_id=%s content_len=%d session=%s",
+            doc_type, title, package_id, len(content or ""), session_id or "",
+        )
         try:
             # -- Micro-purchase guardrail (FAR 13.2) --
             _mp_block = _check_micropurchase_guardrail(parsed)
@@ -2508,14 +2549,28 @@ def _build_all_service_tools(
 
             result = tool_dispatch["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
+            logger.info(
+                "create_document_tool DONE (service): doc_type=%s package_id=%s success=%s",
+                parsed.get("doc_type"), parsed.get("package_id"),
+                "error" not in (result if isinstance(result, dict) else {}),
+            )
 
             if result_queue and loop and isinstance(result, dict):
                 _emit_package_state(result, "create_document", tenant_id, result_queue, loop)
 
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
+            _tool_success = False
             logger.error("Service tool create_document failed: %s", exc, exc_info=True)
             return json.dumps({"error": str(exc), "tool": "create_document"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            logger.info("create_document_tool TIMING: doc_type=%s duration_ms=%d success=%s", doc_type, _tool_dur, _tool_success)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+                emit_tool_completed(tenant_id, user_id, session_id or "", "create_document", _tool_dur, _tool_success)
+            except Exception:
+                pass
 
     # ---- 4. edit_docx_document ----
     @tool(name="edit_docx_document")
@@ -2842,6 +2897,10 @@ def _build_all_service_tools(
             updates: Fields to update (for update operation)
             status: Filter by status (for list operation)
         """
+        set_log_context(**_log_ctx)
+        import time as _time_mod
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
         parsed = {
             "operation": operation, "package_id": package_id,
             "title": title, "requirement_type": requirement_type,
@@ -2881,13 +2940,22 @@ def _build_all_service_tools(
                                 "title": result.get("title", ""),
                                 "acquisition_method": result.get("acquisition_method"),
                                 "contract_type": result.get("contract_type"),
+                                "contract_vehicle": result.get("contract_vehicle"),
                             },
                         )
 
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
+            _tool_success = False
             logger.error("Service tool manage_package failed: %s", exc, exc_info=True)
             return json.dumps({"error": str(exc), "tool": "manage_package"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+                emit_tool_completed(tenant_id, user_id, session_id or "", "manage_package", _tool_dur, _tool_success)
+            except Exception:
+                pass
 
     return [
         s3_document_ops_tool,
@@ -3858,6 +3926,14 @@ async def sdk_query_streaming(
             logger.warning("Failed to restore compaction state for session=%s, starting fresh", session_id)
 
     _ensure_langfuse_exporter()
+
+    # Emit trace.started telemetry
+    try:
+        from .telemetry.cloudwatch_emitter import emit_trace_started
+        emit_trace_started(tenant_id, user_id, session_id or "", prompt)
+    except Exception:
+        logger.debug("Failed to emit trace.started", exc_info=True)
+
     supervisor = Agent(
         model=_model,
         system_prompt=system_prompt,
@@ -3933,6 +4009,15 @@ async def sdk_query_streaming(
         _stream_iter = supervisor.stream_async(prompt).__aiter__()
         _pending_next: asyncio.Task | None = None
         _stream_done = False
+        # Track when the last visible event was yielded so we can emit
+        # periodic "still working" status events during long tool input
+        # generation (prevents the UI from appearing hung).
+        _last_visible_yield = _time.perf_counter()
+        _STALE_STATUS_INTERVAL = 8.0  # seconds
+        # Accumulate tool-input deltas and flush in batches to reduce
+        # SSE event count while still showing live progress.
+        _tool_input_buf = ""
+        _TOOL_INPUT_FLUSH_SIZE = 150  # chars
 
         while not _stream_done:
             if _pending_next is None:
@@ -3943,8 +4028,16 @@ async def sdk_query_streaming(
             # Always drain queue (subagent callback events may have arrived)
             for tool_result_chunk in _drain_tool_results():
                 yield tool_result_chunk
+                _last_visible_yield = _time.perf_counter()
 
             if not done:
+                # Emit periodic status while waiting for model output
+                if (_time.perf_counter() - _last_visible_yield) > _STALE_STATUS_INTERVAL:
+                    _stale_detail = "Preparing documents..." if any(
+                        "create_document" in str(tc) for tc in tools_called
+                    ) else "Working..."
+                    yield {"type": "agent_status", "status": _stale_detail, "detail": "model_generating"}
+                    _last_visible_yield = _time.perf_counter()
                 continue  # Timeout — loop back to drain again
 
             try:
@@ -3954,7 +4047,7 @@ async def sdk_query_streaming(
                 break
             _pending_next = None
 
-            # --- Reasoning / extended thinking ---
+            # --- Reasoning / extended thinking + tool input deltas ---
             raw_event = event.get("event", {})
             if isinstance(raw_event, dict):
                 delta = raw_event.get("contentBlockDelta", {}).get("delta", {})
@@ -3962,23 +4055,44 @@ async def sdk_query_streaming(
                 if reasoning_text:
                     yield {"type": "reasoning", "data": reasoning_text}
                     continue
+                # Tool input delta — model composing tool parameters
+                tool_input_text = delta.get("toolUse", {}).get("input", "")
+                if tool_input_text and _current_tool_id:
+                    _tool_input_buf += tool_input_text
+                    if len(_tool_input_buf) >= _TOOL_INPUT_FLUSH_SIZE:
+                        yield {
+                            "type": "tool_input_delta",
+                            "tool_use_id": _current_tool_id,
+                            "delta": _tool_input_buf,
+                            "name": tools_called[-1] if tools_called else "",
+                        }
+                        _tool_input_buf = ""
+                        _last_visible_yield = _time.perf_counter()
+                    continue
 
             # --- Text streaming ---
             data = event.get("data")
             if data and isinstance(data, str):
                 full_text_parts.append(data)
                 yield {"type": "text", "data": data}
+                _last_visible_yield = _time.perf_counter()
                 continue
 
             # --- Tool use start ---
-            # Emit immediately for fast UX. Input is empty at this
-            # point (Strands hasn't finished streaming it). The real
-            # input arrives later via tool_input events pushed by the
-            # tool functions themselves through result_queue.
+            # Flush any buffered tool-input deltas from previous tool
+            # before switching to the new one.
             current_tool = event.get("current_tool_use")
             if current_tool and isinstance(current_tool, dict):
                 tool_id = current_tool.get("toolUseId", "")
                 if tool_id and tool_id != _current_tool_id:
+                    if _tool_input_buf and _current_tool_id:
+                        yield {
+                            "type": "tool_input_delta",
+                            "tool_use_id": _current_tool_id,
+                            "delta": _tool_input_buf,
+                            "name": tools_called[-1] if tools_called else "",
+                        }
+                        _tool_input_buf = ""
                     _current_tool_id = tool_id
                     tool_name = current_tool.get("name", "")
                     tools_called.append(tool_name)
@@ -4004,6 +4118,7 @@ async def sdk_query_streaming(
                         "status": status_msg,
                         "detail": tool_name,
                     }
+                    _last_visible_yield = _time.perf_counter()
                 continue
 
             # --- Bedrock contentBlockStart fallback ---
@@ -4046,9 +4161,25 @@ async def sdk_query_streaming(
                     continue
 
             # --- Agent result (final event) ---
+            # Flush any remaining tool-input buffer
+            if _tool_input_buf and _current_tool_id:
+                yield {
+                    "type": "tool_input_delta",
+                    "tool_use_id": _current_tool_id,
+                    "delta": _tool_input_buf,
+                    "name": tools_called[-1] if tools_called else "",
+                }
+                _tool_input_buf = ""
             if "result" in event and hasattr(event.get("result"), "metrics"):
                 agent_result = event["result"]
 
+    except GeneratorExit:
+        _elapsed = int((_time.perf_counter() - _agent_start) * 1000)
+        logger.warning(
+            "stream_async GeneratorExit (client disconnect): session=%s elapsed_ms=%d tools_called=%s",
+            session_id, _elapsed, tools_called,
+        )
+        return  # Stream was abandoned — skip cleanup yields
     except Exception as exc:
         from strands.types.exceptions import ContextWindowOverflowException
         if isinstance(exc, ContextWindowOverflowException):
@@ -4176,6 +4307,21 @@ async def sdk_query_streaming(
         )
     except Exception:
         logger.debug("Failed to emit agent.timing telemetry", exc_info=True)
+
+    # Emit trace.completed telemetry
+    try:
+        from .telemetry.cloudwatch_emitter import emit_trace_completed
+        emit_trace_completed({
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "session_id": session_id or "",
+            "duration_ms": _agent_duration_ms,
+            "total_input_tokens": usage.get("inputTokens", 0),
+            "total_output_tokens": usage.get("outputTokens", 0),
+            "tools_called": tools_called,
+        })
+    except Exception:
+        logger.debug("Failed to emit trace.completed", exc_info=True)
 
     # End-of-turn state refresh — always emit latest package state
     for state_evt in _build_end_of_turn_state(package_context, tenant_id):

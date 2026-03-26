@@ -37,6 +37,8 @@ import { ChatMessage, DocumentInfo, Message } from '@/types/chat';
 import { AcquisitionData } from '@/types/schema';
 import { ChatSession } from '@/components/layout/chat-history-dropdown';
 import { generateUUID } from '@/lib/uuid';
+import type { TrackedToolCall, ToolCallsByMessageId } from '@/components/chat-simple/simple-chat-interface';
+import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -58,6 +60,8 @@ interface SessionData {
     messages: Message[];
     acquisitionData: AcquisitionData;
     documents?: Record<string, DocumentInfo[]>;
+    toolCallsByMsg?: ToolCallsByMessageId;
+    stateChangesByMsg?: Record<string, StateChangeEntry[]>;
     createdAt: string;
     updatedAt: string;
     status: 'in_progress' | 'completed' | 'draft';
@@ -77,6 +81,8 @@ export interface UseLocalCacheReturn {
         messages: Message[],
         acquisitionData: AcquisitionData,
         documents?: Record<string, DocumentInfo[]>,
+        toolCallsByMsg?: ToolCallsByMessageId,
+        stateChangesByMsg?: Record<string, StateChangeEntry[]>,
     ) => void;
     loadSession: (sessionId: string) => SessionData | null;
     createNewSession: () => string;
@@ -278,6 +284,8 @@ export function useLocalCache(
             messages: Message[],
             acquisitionData: AcquisitionData,
             documents?: Record<string, DocumentInfo[]>,
+            toolCallsByMsg?: ToolCallsByMessageId,
+            stateChangesByMsg?: Record<string, StateChangeEntry[]>,
         ): void => {
             if (!sessionId || messages.length === 0) return;
 
@@ -301,6 +309,21 @@ export function useLocalCache(
                     }
                 }
 
+                // Strip large tool result payloads to avoid localStorage quota pressure
+                let strippedToolCalls: ToolCallsByMessageId | undefined;
+                if (toolCallsByMsg && Object.keys(toolCallsByMsg).length > 0) {
+                    strippedToolCalls = {};
+                    for (const [msgId, calls] of Object.entries(toolCallsByMsg)) {
+                        strippedToolCalls[msgId] = calls.map((tc: TrackedToolCall) => {
+                            const resultStr = tc.result != null ? JSON.stringify(tc.result) : '';
+                            return {
+                                ...tc,
+                                result: resultStr.length > 10_000 ? null : tc.result,
+                            };
+                        });
+                    }
+                }
+
                 const sessionData: SessionData = {
                     id: sessionId,
                     title:
@@ -316,6 +339,10 @@ export function useLocalCache(
                     })) as Message[],
                     acquisitionData,
                     documents: strippedDocs,
+                    toolCallsByMsg: strippedToolCalls,
+                    stateChangesByMsg: stateChangesByMsg && Object.keys(stateChangesByMsg).length > 0
+                        ? stateChangesByMsg
+                        : undefined,
                     createdAt: existing?.createdAt ?? now,
                     updatedAt: now,
                     status: existing?.status ?? 'in_progress',

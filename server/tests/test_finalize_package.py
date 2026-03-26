@@ -37,7 +37,7 @@ class TestValidatePackageCompleteness:
 
         mock_get.return_value = {
             "package_id": "PKG-0001",
-            "required_documents": ["sow", "igce", "market-research"],
+            "required_documents": ["sow", "igce", "market_research"],
             "completed_documents": ["sow"],
             "estimated_value": "500000",
         }
@@ -48,7 +48,7 @@ class TestValidatePackageCompleteness:
         result = validate_package_completeness("tenant", "PKG-0001")
         assert result["ready"] is False
         assert "igce" in result["missing_documents"]
-        assert "market-research" in result["missing_documents"]
+        assert "market_research" in result["missing_documents"]
 
     @patch("app.document_store.list_package_documents")
     @patch("app.package_store.get_package")

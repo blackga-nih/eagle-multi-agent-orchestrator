@@ -6,12 +6,14 @@ import { useAuth } from '@/contexts/auth-context';
 import { ChatSession } from '@/components/layout/chat-history-dropdown';
 import { ChatMessage, DocumentInfo, Message } from '@/types/chat';
 import { AcquisitionData } from '@/types/schema';
+import type { ToolCallsByMessageId } from '@/components/chat-simple/simple-chat-interface';
+import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 
 interface SessionContextValue {
     sessions: ChatSession[];
     currentSessionId: string;
     isLoading: boolean;
-    saveSession: (sessionId: string, messages: Message[], acquisitionData: AcquisitionData, documents?: Record<string, DocumentInfo[]>) => void;
+    saveSession: (sessionId: string, messages: Message[], acquisitionData: AcquisitionData, documents?: Record<string, DocumentInfo[]>, toolCallsByMsg?: ToolCallsByMessageId, stateChangesByMsg?: Record<string, StateChangeEntry[]>) => void;
     loadSession: (sessionId: string) => {
         id: string;
         title: string;
@@ -19,6 +21,8 @@ interface SessionContextValue {
         messages: Message[];
         acquisitionData: AcquisitionData;
         documents?: Record<string, DocumentInfo[]>;
+        toolCallsByMsg?: ToolCallsByMessageId;
+        stateChangesByMsg?: Record<string, StateChangeEntry[]>;
         createdAt: string;
         updatedAt: string;
         status: 'in_progress' | 'completed' | 'draft';

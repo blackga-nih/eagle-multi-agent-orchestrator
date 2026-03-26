@@ -154,6 +154,64 @@ export async function listPackages(token?: string | null): Promise<PackageInfo[]
     return response.json();
 }
 
+// ── Package Document & Checklist API ─────────────────────────────
+
+export interface PackageDocument {
+    document_id: string;
+    doc_type: string;
+    title: string;
+    version: number;
+    status: string;
+    file_type: string;
+    content?: string;
+    s3_key?: string;
+    created_at?: string;
+    word_count?: number;
+}
+
+export interface PackageChecklist {
+    package_id: string;
+    required: string[];
+    completed: string[];
+    missing: string[];
+}
+
+/**
+ * List all documents for a package (latest version per doc type).
+ */
+export async function getPackageDocuments(
+    packageId: string,
+    token?: string | null,
+): Promise<PackageDocument[]> {
+    const response = await fetch(`/api/packages/${encodeURIComponent(packageId)}/documents`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to fetch package documents: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+/**
+ * Get the document checklist for a package.
+ */
+export async function getPackageChecklist(
+    packageId: string,
+    token?: string | null,
+): Promise<PackageChecklist> {
+    const response = await fetch(`/api/packages/${encodeURIComponent(packageId)}/checklist`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to fetch package checklist: ${response.status}`);
+    }
+
+    return response.json();
+}
+
 // ── Tag API ────────────────────────────────────────────────────────
 
 export async function addDocumentTags(docId: string, tags: string[], token?: string | null): Promise<void> {

@@ -44,6 +44,15 @@ def clear_log_context():
     _session_id.set("")
 
 
+def get_log_context() -> dict:
+    """Snapshot the current logging context for propagation to worker threads."""
+    return {
+        "tenant_id": _tenant_id.get(""),
+        "user_id": _user_id.get(""),
+        "session_id": _session_id.get(""),
+    }
+
+
 class EagleContextFilter(logging.Filter):
     """Inject tenant_id, user_id, session_id into every LogRecord."""
 

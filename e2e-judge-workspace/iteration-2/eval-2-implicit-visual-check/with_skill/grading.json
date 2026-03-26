@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Recognizes this as an e2e-judge task without the user naming the skill",
+      "passed": true,
+      "evidence": "Section 1 maps 'visual check' → 'visual QA', 'make sure nothing looks broken' → 'check if deployed app looks correct', 'deployed URL' → ALB URL. States: 'The user never mentioned e2e-judge by name, but multiple signals match.'"
+    },
+    {
+      "text": "Uses --journeys admin,chat (maps 'admin dashboard and chat page' to correct journey names)",
+      "passed": true,
+      "evidence": "Command: '--journeys admin,chat'. Section 4 includes mapping table: 'admin dashboard' → admin journey, 'chat page' → chat journey."
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "passed": true,
+      "evidence": "Command: '--base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com'"
+    },
+    {
+      "text": "Does NOT hardcode credentials — uses env vars or asks user",
+      "passed": true,
+      "evidence": "Section 4 omitted flags: '--auth-email / --auth-password: Not passed on the command line. These should come from EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD environment variables. The SKILL.md says Never hardcode passwords'"
+    },
+    {
+      "text": "Explains what pass/fail/warning verdicts mean in the output",
+      "passed": true,
+      "evidence": "Section 5 'Verdict definitions' with detailed descriptions: 'pass (score 7-10): The page looks correct', 'warning (score 4-6): Something looks off but usable', 'fail (score 1-3): The page is broken'"
+    },
+    {
+      "text": "Mentions cost estimate or that cached runs are cheaper",
+      "passed": true,
+      "evidence": "Section 6: '~$0.08-$0.10 for a fresh (uncached) run' and 'post-deploy run will likely see 0-30% cache hit rate'"
+    },
+    {
+      "text": "Mentions 30-second interval screenshots during chat streaming",
+      "passed": true,
+      "evidence": "Section 7 Strategy B: '30-Second Interval Screenshots During Streaming' with full implementation details"
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 194.4,
+    "total_duration_seconds": 194.4
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "All assertions pass. Strong implicit trigger recognition with detailed evidence of matching phrases."
+  }
+}

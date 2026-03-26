@@ -42,6 +42,7 @@ class StreamEventType(str, Enum):
     COMPLETE = "complete"
     ERROR = "error"
     HANDOFF = "handoff"
+    TOOL_INPUT_DELTA = "tool_input_delta"
 
 
 @dataclass
@@ -208,6 +209,16 @@ class MultiAgentStreamWriter:
         event = self._create_event(
             StreamEventType.METADATA,
             metadata={"state_type": state_type, **payload},
+        )
+        await queue.put(event.to_sse())
+
+    async def write_tool_input_delta(
+        self, queue, tool_use_id: str, delta: str, tool_name: str = "",
+    ):
+        """Emit a TOOL_INPUT_DELTA event with streaming tool input tokens."""
+        event = self._create_event(
+            StreamEventType.TOOL_INPUT_DELTA,
+            metadata={"tool_use_id": tool_use_id, "delta": delta, "tool_name": tool_name},
         )
         await queue.put(event.to_sse())
 

@@ -21,6 +21,16 @@ const DOC_LABELS: Record<string, string> = {
   'purchase-request': 'Purchase Request',
   eval_criteria: 'Evaluation Criteria',
   cor_certification: 'COR Certification',
+  'transmittal-memo': 'Transmittal Memo',
+};
+
+/** Phase-specific badge colors. */
+const PHASE_STYLES: Record<string, string> = {
+  intake: 'bg-blue-100 text-blue-800',
+  drafting: 'bg-amber-100 text-amber-800',
+  finalizing: 'bg-purple-100 text-purple-800',
+  review: 'bg-green-100 text-green-800',
+  approved: 'bg-emerald-100 text-emerald-800',
 };
 
 function docLabel(docType: string): string {
@@ -31,7 +41,12 @@ interface ChecklistPanelProps {
   state: PackageState;
 }
 
-export function ChecklistPanel({ state }: ChecklistPanelProps) {
+/**
+ * Embeddable checklist content for use inside the activity panel tab.
+ * Renders package header, progress, download, checklist items, and compliance alerts.
+ * Shows an empty state when no package is active.
+ */
+export function ChecklistTabContent({ state }: ChecklistPanelProps) {
   const { checklist, progressPct, phase, complianceAlerts, packageId } = state;
   const [downloading, setDownloading] = useState(false);
 
@@ -57,27 +72,39 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
     }
   }, [packageId]);
 
-  // Don't render if no package context
-  if (!checklist && !packageId) return null;
+  // Empty state — no package context yet
+  if (!checklist && !packageId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-center px-4">
+        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+          </svg>
+        </div>
+        <p className="text-sm text-gray-500">No active package.</p>
+        <p className="text-xs text-gray-400 mt-1">Start an acquisition intake to track required documents here.</p>
+      </div>
+    );
+  }
 
   const required = checklist?.required || [];
   const completed = new Set(checklist?.completed || []);
   const alertCount = complianceAlerts.filter((a) => a.severity !== 'info').length;
 
   return (
-    <div className="border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 w-72 flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+    <div className="flex flex-col gap-0">
+      {/* Package Header */}
+      <div className="mb-3">
+        <h4 className="text-sm font-semibold text-[#003366]">
           Acquisition Package
-        </h3>
+        </h4>
         {packageId && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-mono">
+          <p className="text-[10px] text-gray-400 mt-0.5 font-mono">
             {packageId}
           </p>
         )}
         {phase && (
-          <span className="inline-block mt-1 px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
+          <span className={`inline-block mt-1 px-2 py-0.5 text-[10px] rounded-full font-medium ${PHASE_STYLES[phase] || 'bg-blue-100 text-blue-800'}`}>
             {phase}
           </span>
         )}
@@ -85,16 +112,16 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
 
       {/* Progress Bar */}
       {required.length > 0 && (
-        <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+        <div className="mb-3">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-gray-600 dark:text-gray-400">Progress</span>
-            <span className="text-xs font-medium text-gray-900 dark:text-gray-100">
+            <span className="text-[10px] text-gray-500">Progress</span>
+            <span className="text-[10px] font-medium text-[#003366]">
               {completed.size}/{required.length}
             </span>
           </div>
-          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+          <div className="w-full bg-gray-200 rounded-full h-2">
             <div
-              className="bg-blue-600 dark:bg-blue-500 h-2 rounded-full transition-all duration-500 ease-out"
+              className="bg-[#2196F3] h-2 rounded-full transition-all duration-500 ease-out"
               style={{ width: `${progressPct}%` }}
             />
           </div>
@@ -103,11 +130,11 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
 
       {/* ZIP Download */}
       {packageId && completed.size > 0 && (
-        <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+        <div className="mb-3">
           <button
             onClick={handleDownloadZip}
             disabled={downloading}
-            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-[#003366] text-white hover:bg-[#004488] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {downloading ? (
               <span>Downloading...</span>
@@ -125,8 +152,8 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
 
       {/* Document Checklist */}
       {required.length > 0 && (
-        <div className="flex-1 overflow-y-auto px-4 py-2">
-          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+        <div className="mb-3">
+          <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-2">
             Required Documents
           </p>
           <ul className="space-y-1.5">
@@ -136,8 +163,8 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
                 <li key={docType} className="flex items-start gap-2">
                   <span className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center text-xs ${
                     isDone
-                      ? 'bg-green-100 dark:bg-green-900 border-green-500 text-green-700 dark:text-green-300'
-                      : 'border-gray-300 dark:border-gray-600'
+                      ? 'bg-green-100 border-green-500 text-green-700'
+                      : 'border-gray-300'
                   }`}>
                     {isDone && (
                       <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -147,8 +174,8 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
                   </span>
                   <span className={`text-xs leading-tight ${
                     isDone
-                      ? 'text-gray-500 dark:text-gray-400 line-through'
-                      : 'text-gray-800 dark:text-gray-200'
+                      ? 'text-gray-400 line-through'
+                      : 'text-gray-800'
                   }`}>
                     {docLabel(docType)}
                   </span>
@@ -161,8 +188,8 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
 
       {/* Compliance Alerts */}
       {alertCount > 0 && (
-        <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
-          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
+        <div className="border-t border-[#D8DEE6] pt-3">
+          <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">
             Compliance Alerts ({alertCount})
           </p>
           <div className="space-y-1 max-h-32 overflow-y-auto">
@@ -174,8 +201,8 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
                   key={i}
                   className={`text-xs px-2 py-1 rounded ${
                     alert.severity === 'critical'
-                      ? 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300'
-                      : 'bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-300'
+                      ? 'bg-red-50 text-red-700'
+                      : 'bg-yellow-50 text-yellow-700'
                   }`}
                 >
                   {alert.items.map((item, j) => (
@@ -191,4 +218,9 @@ export function ChecklistPanel({ state }: ChecklistPanelProps) {
       )}
     </div>
   );
+}
+
+/** @deprecated Use ChecklistTabContent inside ActivityPanel instead. */
+export function ChecklistPanel({ state }: ChecklistPanelProps) {
+  return <ChecklistTabContent state={state} />;
 }

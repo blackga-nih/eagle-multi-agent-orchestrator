@@ -573,8 +573,11 @@ def _update_package_checklist(
     required = pkg.get("required_documents", [])
     completed = pkg.get("completed_documents", [])
 
-    if doc_type in required and doc_type not in completed:
-        completed = list(set(completed + [doc_type]))
+    # Normalize: match both hyphenated and underscored variants (legacy compat)
+    normalized = doc_type.replace("-", "_")
+    match = next((r for r in required if r.replace("-", "_") == normalized), None)
+    if match and match not in completed and normalized not in completed:
+        completed = list(set(completed + [match]))
         update_package(tenant_id, package_id, {"completed_documents": completed})
         logger.debug(
             "Updated package %s completed_documents: %s", package_id, completed

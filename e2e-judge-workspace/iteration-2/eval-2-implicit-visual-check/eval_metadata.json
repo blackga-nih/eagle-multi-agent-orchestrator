@@ -1,0 +1,35 @@
+{
+  "eval_id": 2,
+  "eval_name": "implicit-visual-check",
+  "prompt": "I just deployed a frontend change to the EAGLE app. Can you do a quick visual check of the admin dashboard and chat page to make sure nothing looks broken? Use the deployed URL.",
+  "assertions": [
+    {
+      "text": "Recognizes this as an e2e-judge task without the user naming the skill",
+      "type": "content_check"
+    },
+    {
+      "text": "Uses --journeys admin,chat (maps 'admin dashboard and chat page' to correct journey names)",
+      "type": "content_check"
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "type": "content_check"
+    },
+    {
+      "text": "Does NOT hardcode credentials — uses env vars or asks user",
+      "type": "content_check"
+    },
+    {
+      "text": "Explains what pass/fail/warning verdicts mean in the output",
+      "type": "content_check"
+    },
+    {
+      "text": "Mentions cost estimate or that cached runs are cheaper",
+      "type": "content_check"
+    },
+    {
+      "text": "Mentions 30-second interval screenshots during chat streaming",
+      "type": "content_check"
+    }
+  ]
+}

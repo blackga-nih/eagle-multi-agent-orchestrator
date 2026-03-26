@@ -29,7 +29,7 @@ _SIMPLIFIED_THRESHOLD = Decimal("250000")
 _REQUIRED_DOCS: dict[str, list[str]] = {
     "micro_purchase": [],
     "simplified": ["igce"],
-    "full_competition": ["sow", "igce", "market-research", "acquisition-plan"],
+    "full_competition": ["sow", "igce", "market_research", "acquisition_plan"],
     "sole_source": ["sow", "igce", "justification"],
 }
 
@@ -38,19 +38,19 @@ _COMPLIANCE_DOC_TO_SLUG: dict[str, str] = {
     "SOW / PWS": "sow",
     "Statement of Need (SON)": "sow",
     "IGCE": "igce",
-    "Market Research Report": "market-research",
-    "Market Research": "market-research",
-    "Acquisition Plan": "acquisition-plan",
+    "Market Research Report": "market_research",
+    "Market Research": "market_research",
+    "Acquisition Plan": "acquisition_plan",
     "J&A / Justification": "justification",
-    "D&F (Determination & Findings)": "d-f",
-    "Source Selection Plan": "source-selection-plan",
-    "Subcontracting Plan": "subcontracting-plan",
+    "D&F (Determination & Findings)": "d_f",
+    "Source Selection Plan": "source_selection_plan",
+    "Subcontracting Plan": "subk_plan",
     "QASP": "qasp",
-    "HHS-653 Small Business Review": "sb-review",
-    "Purchase Request": "purchase-request",
-    "IT Security & Privacy Certification": "security-checklist",
-    "Section 508 ICT Evaluation": "section-508",
-    "Human Subjects Provisions": "human-subjects",
+    "HHS-653 Small Business Review": "sb_review",
+    "Purchase Request": "purchase_request",
+    "IT Security & Privacy Certification": "security_checklist",
+    "Section 508 ICT Evaluation": "section_508",
+    "Human Subjects Provisions": "human_subjects",
 }
 
 # -- Valid updatable fields --------------------------------------------------
@@ -547,8 +547,33 @@ def get_package_checklist(tenant_id: str, package_id: str) -> dict:
     }
 
 
+def start_finalization(tenant_id: str, package_id: str) -> Optional[dict]:
+    """Advance package status from drafting to finalizing.
+
+    Returns the updated package dict, or None if not found or in an
+    incompatible state.
+    """
+    pkg = get_package(tenant_id, package_id)
+    if pkg is None:
+        logger.warning(
+            "start_finalization: not found (tenant=%s, pkg=%s)", tenant_id, package_id
+        )
+        return None
+
+    if pkg.get("status") != "drafting":
+        logger.warning(
+            "start_finalization: invalid transition from %r (tenant=%s, pkg=%s)",
+            pkg.get("status"),
+            tenant_id,
+            package_id,
+        )
+        return None
+
+    return update_package(tenant_id, package_id, {"status": "finalizing"})
+
+
 def submit_package(tenant_id: str, package_id: str) -> Optional[dict]:
-    """Advance package status from drafting to review.
+    """Advance package status from drafting or finalizing to review.
 
     Returns the updated package dict, or None if not found or in an
     incompatible state.
@@ -560,7 +585,7 @@ def submit_package(tenant_id: str, package_id: str) -> Optional[dict]:
         )
         return None
 
-    if pkg.get("status") != "drafting":
+    if pkg.get("status") not in ("drafting", "finalizing"):
         logger.warning(
             "submit_package: invalid transition from %r (tenant=%s, pkg=%s)",
             pkg.get("status"),

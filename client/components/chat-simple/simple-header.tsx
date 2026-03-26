@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageSquare, FolderKanban, FileText, Layers, LayoutDashboard, Settings } from 'lucide-react';
+import { MessageSquare, FolderKanban, FileText, BookOpen, Layers, LayoutDashboard, Settings } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useBackendStatus } from '@/contexts/backend-status-context';
 import { useSettings } from '@/contexts/settings-context';
@@ -12,6 +12,7 @@ const allNavLinks = [
     { href: '/chat', label: 'Chat', icon: <MessageSquare className="w-4 h-4" />, admin: false },
     { href: '/workflows', label: 'Packages', icon: <FolderKanban className="w-4 h-4" />, admin: false },
     { href: '/documents', label: 'Documents', icon: <FileText className="w-4 h-4" />, admin: false },
+    { href: '/knowledge-base', label: 'Knowledge Base', icon: <BookOpen className="w-4 h-4" />, admin: false },
     { href: '/admin/workspaces', label: 'Workspaces', icon: <Layers className="w-4 h-4" />, admin: true },
     { href: '/admin', label: 'Admin', icon: <LayoutDashboard className="w-4 h-4" />, admin: true },
 ];
@@ -58,7 +59,7 @@ export default function SimpleHeader() {
                     </span>
                     <div>
                         <h1 className="text-lg font-bold tracking-wider">EAGLE</h1>
-                        <p className="text-[11px] text-white/70 tracking-wide">Acquisition Assistant</p>
+                        <p className="text-[11px] text-white/70 tracking-wide">Enhanced Acquisition Guidance and Learning Engine</p>
                     </div>
                 </div>
                 <div className="flex items-center justify-end gap-3">

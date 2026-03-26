@@ -523,17 +523,21 @@ jobs:
         cache-from: type=gha,scope=backend
         cache-to: type=gha,mode=max,scope=backend
 
-    - name: Update task definition with Bedrock model ID
+    - name: Update task definition with Bedrock model ID and Langfuse credentials
       id: task-def
+      env:
+        LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+        LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+        LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
       run: |
-        # Fetch current task def, strip read-only fields, inject EAGLE_BEDROCK_MODEL_ID
+        # Fetch current task def, strip read-only fields, inject env vars
         aws ecs describe-task-definition \
           --task-definition ${{ needs.setup.outputs.backend_service }} \
           --region ${{ env.AWS_REGION }} \
           --query 'taskDefinition' --output json > /tmp/current_td.json
 
         python3 - <<'PYEOF'
-        import json
+        import json, os
 
         with open('/tmp/current_td.json') as f:
             td = json.load(f)
@@ -545,6 +549,14 @@ jobs:
         env = td['containerDefinitions'][0].get('environment', [])
         env = [e for e in env if e['name'] != 'EAGLE_BEDROCK_MODEL_ID']
         env.append({'name': 'EAGLE_BEDROCK_MODEL_ID', 'value': '${{ env.EAGLE_BEDROCK_MODEL_ID }}'})
+
+        # Inject Langfuse credentials from GitHub Secrets
+        for var_name in ['LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY', 'LANGFUSE_HOST']:
+            env = [e for e in env if e['name'] != var_name]
+            val = os.environ.get(var_name, '')
+            if val:
+                env.append({'name': var_name, 'value': val})
+
         td['containerDefinitions'][0]['environment'] = env
 
         # Pin image to this commit's SHA (not implicit :latest)
