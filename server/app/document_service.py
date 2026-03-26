@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .document_store import (
@@ -42,18 +43,25 @@ TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
 _s3 = None
 _dynamodb = None
 
+# Timeout config for AWS operations — prevents indefinite hangs on S3/DynamoDB
+_DOC_SVC_TIMEOUT = Config(
+    connect_timeout=10,
+    read_timeout=30,
+    retries={"max_attempts": 2},
+)
+
 
 def _get_s3():
     global _s3
     if _s3 is None:
-        _s3 = boto3.client("s3", region_name=AWS_REGION)
+        _s3 = boto3.client("s3", region_name=AWS_REGION, config=_DOC_SVC_TIMEOUT)
     return _s3
 
 
 def _get_dynamodb():
     global _dynamodb
     if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION, config=_DOC_SVC_TIMEOUT)
     return _dynamodb
 
 

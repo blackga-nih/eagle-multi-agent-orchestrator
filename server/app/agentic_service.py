@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, List
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError, BotoCoreError
 
 from app.document_key_utils import is_tenant_scoped_key
@@ -140,18 +141,25 @@ _s3_client = None
 _dynamodb_resource = None
 _logs_client = None
 
+# Timeout config for AWS operations — prevents indefinite hangs on S3/DynamoDB
+_AWS_TIMEOUT = Config(
+    connect_timeout=10,
+    read_timeout=30,
+    retries={"max_attempts": 2},
+)
+
 
 def _get_s3():
     global _s3_client
     if _s3_client is None:
-        _s3_client = boto3.client("s3", region_name="us-east-1")
+        _s3_client = boto3.client("s3", region_name="us-east-1", config=_AWS_TIMEOUT)
     return _s3_client
 
 
 def _get_dynamodb():
     global _dynamodb_resource
     if _dynamodb_resource is None:
-        _dynamodb_resource = boto3.resource("dynamodb", region_name="us-east-1")
+        _dynamodb_resource = boto3.resource("dynamodb", region_name="us-east-1", config=_AWS_TIMEOUT)
     return _dynamodb_resource
 
 
@@ -495,6 +503,14 @@ _DOC_TYPE_ALIASES = {
     "independent_government_cost_estimate": "igce",
     "cost_estimate": "igce",
     "statement_of_work": "sow",
+    # RFP sections → closest existing types
+    "section_l": "eval_criteria",
+    "instructions_to_offerors": "eval_criteria",
+    "section_m": "eval_criteria",
+    "evaluation_factors": "eval_criteria",
+    "evaluation_criteria": "eval_criteria",
+    "source_selection_plan": "acquisition_plan",
+    "ssp": "acquisition_plan",
 }
 
 _TITLE_DOC_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -512,6 +528,10 @@ _TITLE_DOC_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"\b(j\s*(?:&|and)\s*a|justification(?:\s*&\s*approval)?|sole\s+source)\b", re.IGNORECASE),
         "justification",
     ),
+    # RFP sections
+    (re.compile(r"\bsection\s+[lLmM]\b", re.IGNORECASE), "eval_criteria"),
+    (re.compile(r"\binstructions?\s+to\s+offerors?\b", re.IGNORECASE), "eval_criteria"),
+    (re.compile(r"\bsource\s+selection\s+plan\b", re.IGNORECASE), "acquisition_plan"),
 ]
 
 

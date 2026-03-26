@@ -419,3 +419,83 @@ class TestSanitizeFilename:
         long_name = "A" * 100
         result = _sanitize_filename(long_name)
         assert len(result) <= 50
+
+
+# ---------------------------------------------------------------------------
+# TestDocumentServiceTimeouts
+# ---------------------------------------------------------------------------
+
+class TestDocumentServiceTimeouts:
+    """Verify boto3 clients have timeout config to prevent hanging."""
+
+    def test_s3_client_has_timeout_config(self):
+        """_get_s3() should return a client with connect/read timeouts configured."""
+        import app.document_service as ds
+
+        # Reset singleton so _get_s3 recreates the client
+        ds._s3 = None
+        try:
+            client = ds._get_s3()
+            cfg = client._client_config
+            assert cfg.connect_timeout is not None
+            assert cfg.connect_timeout <= 30, "connect_timeout too high"
+            assert cfg.read_timeout is not None
+            assert cfg.read_timeout <= 60, "read_timeout too high"
+        finally:
+            ds._s3 = None  # Clean up singleton
+
+    def test_s3_timeout_error_returns_failure(self):
+        """S3 ReadTimeoutError should propagate as upload failure."""
+        from app.document_service import create_package_document_version
+        from botocore.exceptions import ReadTimeoutError
+
+        mock_table = mock.MagicMock()
+        mock_s3 = mock.MagicMock()
+        mock_s3.put_object.side_effect = ReadTimeoutError(endpoint_url="https://s3.amazonaws.com")
+
+        with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
+             mock.patch("app.document_service.get_document_history", return_value=[]), \
+             mock.patch("app.document_service._get_table", return_value=mock_table), \
+             mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.write_changelog_entry"), \
+             mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
+             mock.patch("app.document_service.datetime", wraps=datetime,
+                       **{"utcnow.return_value": FAKE_NOW}):
+            result = create_package_document_version(
+                tenant_id=TENANT,
+                package_id=PACKAGE_ID,
+                doc_type=DOC_TYPE,
+                content=CONTENT,
+                title=TITLE,
+            )
+
+        assert result.success is False
+        assert "S3 upload failed" in result.error
+
+    def test_dynamodb_timeout_error_returns_failure(self):
+        """DynamoDB ConnectTimeoutError should propagate as failure."""
+        from app.document_service import create_package_document_version
+        from botocore.exceptions import ConnectTimeoutError
+
+        mock_table = mock.MagicMock()
+        mock_table.put_item.side_effect = ConnectTimeoutError(endpoint_url="https://dynamodb.us-east-1.amazonaws.com")
+        mock_s3 = mock.MagicMock()
+
+        with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
+             mock.patch("app.document_service.get_document_history", return_value=[]), \
+             mock.patch("app.document_service._get_table", return_value=mock_table), \
+             mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.write_changelog_entry"), \
+             mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
+             mock.patch("app.document_service.datetime", wraps=datetime,
+                       **{"utcnow.return_value": FAKE_NOW}):
+            result = create_package_document_version(
+                tenant_id=TENANT,
+                package_id=PACKAGE_ID,
+                doc_type=DOC_TYPE,
+                content=CONTENT,
+                title=TITLE,
+            )
+
+        assert result.success is False
+        assert result.error is not None

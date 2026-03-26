@@ -22,6 +22,7 @@ Key differences from sdk_agentic_service.py:
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -61,6 +62,10 @@ from .tools.web_fetch import exec_web_fetch
 from .tools.web_search import exec_web_search
 
 logger = logging.getLogger("eagle.strands_agent")
+
+# Timeout (seconds) for the entire create_document tool dispatch.
+# Prevents indefinite hangs when S3/DynamoDB operations are slow.
+_DOC_TOOL_TIMEOUT = 120
 
 
 # -- Langfuse OTEL exporter + parent-span client (lazy, one-shot) -----
@@ -1709,7 +1714,7 @@ def _build_subagent_doc_tools(
         CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
 
         Args:
-            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification)
+            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification). For RFP Section L/M or evaluation factors use eval_criteria. For source selection plans use acquisition_plan.
             title: Descriptive document title that includes the program or acquisition name
             content: REQUIRED — Full document content in markdown with all sections filled using real data
             data: Supplementary structured metadata (estimated_value, period_of_performance, naics_code, etc.)
@@ -1739,7 +1744,17 @@ def _build_subagent_doc_tools(
             if _prereq_block:
                 return _prereq_block
 
-            result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                _fut = _pool.submit(TOOL_DISPATCH["create_document"], parsed, tenant_id, scoped_session_id)
+                try:
+                    result = _fut.result(timeout=_DOC_TOOL_TIMEOUT)
+                except concurrent.futures.TimeoutError:
+                    logger.error("create_document TIMEOUT after %ds (subagent): doc_type=%s", _DOC_TOOL_TIMEOUT, doc_type)
+                    return json.dumps({
+                        "error": f"Document creation timed out after {_DOC_TOOL_TIMEOUT}s — likely an AWS connectivity issue. Try again.",
+                        "tool": "create_document",
+                        "timeout": True,
+                    })
             _emit("create_document", result)
             logger.info("create_document_tool DONE (subagent): doc_type=%s", doc_type)
             return json.dumps(result, indent=2, default=str)
@@ -2383,7 +2398,7 @@ def _build_all_service_tools(
         CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
 
         Args:
-            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification)
+            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification). For RFP Section L/M or evaluation factors use eval_criteria. For source selection plans use acquisition_plan.
             title: Descriptive document title that includes the program or acquisition name — e.g. "SOW - Cloud Computing Services for NCI Research Portal" or "IGCE - IT Support Services FY2026". Never use a generic label like "Statement of Work" alone.
             content: REQUIRED — Full document content in markdown with all sections filled using real data from conversation context, intake answers, and web research results. This is the primary document body.
             data: Supplementary structured metadata (estimated_value, period_of_performance, naics_code, etc.) for template population. Not a substitute for content.
@@ -2543,7 +2558,17 @@ def _build_all_service_tools(
                 except Exception:
                     pass  # No existing doc or lookup failed — create new
 
-            result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                _fut = _pool.submit(TOOL_DISPATCH["create_document"], parsed, tenant_id, scoped_session_id)
+                try:
+                    result = _fut.result(timeout=_DOC_TOOL_TIMEOUT)
+                except concurrent.futures.TimeoutError:
+                    logger.error("create_document TIMEOUT after %ds (service): doc_type=%s", _DOC_TOOL_TIMEOUT, doc_type)
+                    return json.dumps({
+                        "error": f"Document creation timed out after {_DOC_TOOL_TIMEOUT}s — likely an AWS connectivity issue. Try again.",
+                        "tool": "create_document",
+                        "timeout": True,
+                    })
             _emit("create_document", result)
             logger.info(
                 "create_document_tool DONE (service): doc_type=%s package_id=%s success=%s",
