@@ -693,6 +693,7 @@ def _build_document_response(
 
     title = None
     document_id = doc_key
+    template_provenance = None
     if package_ref and version is not None:
         metadata = get_document(package_ref["tenant_id"], package_ref["package_id"], package_ref["doc_type"], version)
         if metadata:
@@ -700,6 +701,7 @@ def _build_document_response(
             document_id = metadata.get("document_id", document_id)
             file_type = metadata.get("file_type", file_type)
             version = metadata.get("version", version)
+            template_provenance = metadata.get("template_provenance")
     elif package_ref:
         title = package_ref["doc_type"].replace("_", " ").title()
 
@@ -721,6 +723,7 @@ def _build_document_response(
         "document_type": doc_type,
         "version": version,
         "title": title,
+        "template_provenance": template_provenance,
     }
 
 
