@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
+import { formatDateTime, formatDate } from '@/lib/date-utils';
 import {
   CheckCircle2,
   XCircle,
@@ -79,21 +80,8 @@ function formatDuration(s: number) {
   return `${m}m ${sec}s`;
 }
 
-function formatTimestamp(ts: string) {
-  try {
-    return new Date(ts).toLocaleString();
-  } catch {
-    return ts;
-  }
-}
-
-function formatDate(ts: string) {
-  try {
-    return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  } catch {
-    return ts;
-  }
-}
+// Use formatTimestamp as alias for formatDateTime for backward compatibility
+const formatTimestamp = formatDateTime;
 
 /* ── Component ─────────────────────────────────────────────────── */
 

@@ -17,42 +17,24 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+from functools import lru_cache
+
+from ..db_client import get_dynamodb, get_s3, AWS_REGION
 
 logger = logging.getLogger("eagle.knowledge_tools")
 
-# Configuration
+# Configuration (separate from main EAGLE table)
 METADATA_TABLE = os.environ.get("METADATA_TABLE", "eagle-document-metadata-dev")
 DOCUMENT_BUCKET = os.environ.get("DOCUMENT_BUCKET", "eagle-documents-695681773636-dev")
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 SEARCH_MODEL_ID = os.environ.get(
     "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-3-haiku-20240307-v1:0"
 )
 
-# Lazy-loaded clients
-_dynamodb = None
-_s3 = None
-_bedrock_runtime = None
 
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_s3():
-    global _s3
-    if _s3 is None:
-        _s3 = boto3.client("s3", region_name=AWS_REGION)
-    return _s3
-
-
+@lru_cache(maxsize=1)
 def _get_bedrock_runtime():
-    global _bedrock_runtime
-    if _bedrock_runtime is None:
-        _bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
-    return _bedrock_runtime
+    """Get Bedrock runtime client for knowledge search."""
+    return boto3.client("bedrock-runtime", region_name=AWS_REGION)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -279,7 +261,7 @@ def exec_knowledge_search(
     2. If query or keywords provided, use LLM to semantically rank results
     3. Fall back to deterministic matching if LLM call fails
     """
-    table = _get_dynamodb().Table(METADATA_TABLE)
+    table = get_dynamodb().Table(METADATA_TABLE)
 
     # Extract query parameters
     topic = params.get("topic")
@@ -383,7 +365,7 @@ def exec_knowledge_fetch(
     If s3_key is not provided but a query is, automatically runs
     knowledge_search first and fetches the top result.
     """
-    s3 = _get_s3()
+    s3 = get_s3()
     key = params.get("s3_key") or params.get("document_id")
 
     # Auto-search when called without a key but with a query

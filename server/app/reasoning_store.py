@@ -9,25 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Optional
 
-import boto3
+from .db_client import get_table
 
 logger = logging.getLogger("eagle.reasoning")
-
-_TABLE_NAME: str | None = None
-_table = None
-
-
-def _get_table():
-    global _table, _TABLE_NAME
-    if _table is None:
-        _TABLE_NAME = os.getenv("DYNAMODB_TABLE", "eagle")
-        _table = boto3.resource("dynamodb").Table(_TABLE_NAME)
-    return _table
 
 
 @dataclass
@@ -193,7 +181,7 @@ class ReasoningLog:
         """Persist to DynamoDB as REASONING#{session_id}."""
         if not self.entries and not self.section_entries and not self.justification_entries:
             return
-        table = _get_table()
+        table = get_table()
         table.put_item(Item={
             "PK": f"SESSION#{self.session_id}",
             "SK": f"REASONING#{self.session_id}",
@@ -217,7 +205,7 @@ class ReasoningLog:
         """Load from DynamoDB. Returns empty log if not found."""
         log = cls(session_id, tenant_id, user_id)
         try:
-            table = _get_table()
+            table = get_table()
             resp = table.get_item(Key={
                 "PK": f"SESSION#{session_id}",
                 "SK": f"REASONING#{session_id}",

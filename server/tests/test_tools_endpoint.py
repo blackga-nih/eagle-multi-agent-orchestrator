@@ -40,13 +40,23 @@ def app_instance():
         "DEV_MODE": "false",
         "USE_BEDROCK": "false",
         "USE_PERSISTENT_SESSIONS": "false",
+        "EAGLE_APP_ROUTERS": "chat",
     }
     with patch.dict(os.environ, env_patch, clear=False):
-        with patch("app.strands_agentic_service.sdk_query", side_effect=_mock_sdk_query):
-            import importlib
-            import app.main as main_module
-            importlib.reload(main_module)
-            yield main_module.app
+        import importlib
+        import app.main as main_module
+
+        importlib.reload(main_module)
+        app = main_module.create_app(["chat"])
+        fake_runtime = MagicMock()
+        fake_runtime.EAGLE_TOOLS = [
+            {"name": "knowledge_search", "description": "Search KB", "input_schema": {}},
+            {"name": "knowledge_fetch", "description": "Fetch KB doc", "input_schema": {}},
+        ]
+        fake_runtime.MODEL = "test-model"
+        fake_runtime.sdk_query = _mock_sdk_query
+        with patch("app.routers.chat._get_strands_runtime", return_value=fake_runtime):
+            yield app
 
 
 def test_api_tools_includes_knowledge_base_tools(app_instance):

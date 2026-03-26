@@ -11,39 +11,15 @@ TTL: 7 years from write time (epoch seconds stored in `ttl` attribute).
 from __future__ import annotations
 
 import logging
-import os
 import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .db_client import get_table, now_iso, ttl_timestamp
+
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Lazy DynamoDB singletons (same pattern as audit_store.py)
-# ---------------------------------------------------------------------------
-
-_dynamodb = None
-_table = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        region = os.environ.get("AWS_REGION", "us-east-1")
-        _dynamodb = boto3.resource("dynamodb", region_name=region)
-    return _dynamodb
-
-
-def _get_table():
-    global _table
-    if _table is None:
-        table_name = os.environ.get("TABLE_NAME", "eagle")
-        _table = _get_dynamodb().Table(table_name)
-    return _table
 
 
 # ---------------------------------------------------------------------------
@@ -52,11 +28,7 @@ def _get_table():
 
 def _seven_year_ttl() -> int:
     """Return Unix epoch seconds 7 years from now."""
-    return int((datetime.now(timezone.utc) + timedelta(days=365 * 7)).timestamp())
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    return ttl_timestamp(days=365 * 7)
 
 
 def _normalize_change_source(change_source: str) -> str:
@@ -96,7 +68,7 @@ def write_changelog_entry(
     actor_user_id: User or system process that made the change.
     session_id:    Optional chat session that triggered the change.
     """
-    created_at = _now_iso()
+    created_at = now_iso()
     changelog_id = str(uuid.uuid4())
 
     pk = f"CHANGELOG#{tenant_id}"
@@ -122,7 +94,7 @@ def write_changelog_entry(
         item["session_id"] = session_id
 
     try:
-        _get_table().put_item(Item=item)
+        get_table().put_item(Item=item)
         logger.info(
             "changelog_store: wrote %s entry for %s/%s v%d (tenant=%s actor=%s)",
             change_type,
@@ -169,7 +141,7 @@ def list_changelog_entries(
     }
 
     try:
-        response = _get_table().query(**query_kwargs)
+        response = get_table().query(**query_kwargs)
         items: list[dict] = response.get("Items", [])
         logger.debug(
             "changelog_store: retrieved %d entries for tenant=%s package=%s doc_type=%s",
@@ -217,7 +189,7 @@ def write_document_changelog_entry(
     """
     import hashlib
 
-    created_at = _now_iso()
+    created_at = now_iso()
     changelog_id = str(uuid.uuid4())
 
     # Use hash of document key for SK to keep it reasonable length
@@ -246,7 +218,7 @@ def write_document_changelog_entry(
         item["session_id"] = session_id
 
     try:
-        _get_table().put_item(Item=item)
+        get_table().put_item(Item=item)
         logger.info(
             "changelog_store: wrote %s entry for doc_key=%s (tenant=%s actor=%s)",
             change_type,
@@ -280,7 +252,7 @@ def list_document_changelog_entries(
     }
 
     try:
-        response = _get_table().query(**query_kwargs)
+        response = get_table().query(**query_kwargs)
         items: list[dict] = response.get("Items", [])
         logger.debug(
             "changelog_store: retrieved %d entries for tenant=%s doc_key=%s",

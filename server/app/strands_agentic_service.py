@@ -935,7 +935,7 @@ async def _maybe_fast_path_document_generation(
                 "guardrail": True,
             }
 
-    from .agentic_service import _exec_create_document
+    from .tools.legacy_dispatch import exec_create_document
 
     doc_ctx = _extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
@@ -954,7 +954,7 @@ async def _maybe_fast_path_document_generation(
 
     scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
     result = await asyncio.to_thread(
-        _exec_create_document,
+        exec_create_document,
         params,
         tenant_id,
         scoped_session_id,
@@ -982,7 +982,7 @@ async def _ensure_create_document_for_direct_request(
     if not should_generate or not doc_type or "create_document" in tools_called:
         return None
 
-    from .agentic_service import _exec_create_document
+    from .tools.legacy_dispatch import exec_create_document
 
     doc_ctx = _extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
@@ -1001,7 +1001,7 @@ async def _ensure_create_document_for_direct_request(
 
     scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
     result = await asyncio.to_thread(
-        _exec_create_document,
+        exec_create_document,
         params,
         tenant_id,
         scoped_session_id,
@@ -1565,7 +1565,7 @@ def _build_subagent_kb_tools(
     schema matches what Bedrock models naturally send.
     """
     from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
-    from .agentic_service import _exec_search_far
+    from .tools.legacy_dispatch import exec_search_far
 
     def _emit_input(name: str, tool_input: dict) -> None:
         """Push tool input so the stream can update the card with real params."""
@@ -1625,7 +1625,7 @@ def _build_subagent_kb_tools(
             parts: Optional list of FAR part numbers to filter (e.g. ["6", "16"])
         """
         _emit_input("search_far", {"query": query, "parts": parts})
-        result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
+        result = exec_search_far({"query": query, "parts": parts}, tenant_id)
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="web_search")
@@ -1672,7 +1672,9 @@ def _build_subagent_doc_tools(
     since the subagent *is* the author and has full context.
     Documents are always scoped to the user, never to tenant or system.
     """
-    from .agentic_service import TOOL_DISPATCH
+    from .tools.legacy_dispatch import get_tool_dispatch
+
+    tool_dispatch = get_tool_dispatch()
 
     scoped_session_id = session_id
     if not scoped_session_id or "#" not in scoped_session_id:
@@ -1739,7 +1741,7 @@ def _build_subagent_doc_tools(
             if _prereq_block:
                 return _prereq_block
 
-            result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
             logger.info("create_document_tool DONE (subagent): doc_type=%s", doc_type)
             return json.dumps(result, indent=2, default=str)
@@ -1762,7 +1764,7 @@ def _build_subagent_doc_tools(
         """
         parsed = {"document_key": document_key, "edits": edits or [], "checkbox_edits": checkbox_edits or []}
         try:
-            result = TOOL_DISPATCH["edit_docx_document"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["edit_docx_document"](parsed, tenant_id, scoped_session_id)
             _emit("edit_docx_document", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2266,12 +2268,14 @@ def _build_all_service_tools(
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> list:
     """Build 14 service @tool functions with proper named parameters."""
-    from .agentic_service import TOOL_DISPATCH
+    from .tools.legacy_dispatch import get_tool_dispatch
     from .compliance_matrix import execute_operation
     from .telemetry.log_context import get_log_context, set_log_context
 
     # Snapshot logging context for propagation into Strands tool threads
     _log_ctx = get_log_context()
+
+    tool_dispatch = get_tool_dispatch()
 
     # Compute scoped session id once for per-user S3 scoping
     scoped_session_id = session_id
@@ -2319,7 +2323,7 @@ def _build_all_service_tools(
         _tool_success = True
         parsed = {"operation": operation, "bucket": bucket, "key": key, "content": content}
         try:
-            result = TOOL_DISPATCH["s3_document_ops"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["s3_document_ops"](parsed, tenant_id, scoped_session_id)
             _emit("s3_document_ops", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2351,7 +2355,7 @@ def _build_all_service_tools(
         _tool_success = True
         parsed = {"operation": operation, "table": table, "item_id": item_id, "data": data or {}}
         try:
-            result = TOOL_DISPATCH["dynamodb_intake"](parsed, tenant_id)
+            result = tool_dispatch["dynamodb_intake"](parsed, tenant_id)
             _emit("dynamodb_intake", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2530,7 +2534,7 @@ def _build_all_service_tools(
             _upd_key = parsed.get("update_existing_key", "").strip()
             if _pkg_id and _dt and not _upd_key:
                 try:
-                    existing = TOOL_DISPATCH["get_latest_document"](
+                    existing = tool_dispatch["get_latest_document"](
                         {"package_id": _pkg_id, "doc_type": _dt}, tenant_id,
                     )
                     existing_s3_key = (existing.get("document") or {}).get("s3_key", "")
@@ -2543,7 +2547,7 @@ def _build_all_service_tools(
                 except Exception:
                     pass  # No existing doc or lookup failed — create new
 
-            result = TOOL_DISPATCH["create_document"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["create_document"](parsed, tenant_id, scoped_session_id)
             _emit("create_document", result)
             logger.info(
                 "create_document_tool DONE (service): doc_type=%s package_id=%s success=%s",
@@ -2584,7 +2588,7 @@ def _build_all_service_tools(
         """
         parsed = {"document_key": document_key, "edits": edits or [], "checkbox_edits": checkbox_edits or []}
         try:
-            result = TOOL_DISPATCH["edit_docx_document"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["edit_docx_document"](parsed, tenant_id, scoped_session_id)
             _emit("edit_docx_document", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2601,7 +2605,7 @@ def _build_all_service_tools(
         """
         parsed = {"intake_id": intake_id}
         try:
-            result = TOOL_DISPATCH["get_intake_status"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["get_intake_status"](parsed, tenant_id, scoped_session_id)
             _emit("get_intake_status", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2620,7 +2624,7 @@ def _build_all_service_tools(
         """
         parsed = {"action": action, "intake_id": intake_id, "data": data or {}}
         try:
-            result = TOOL_DISPATCH["intake_workflow"](parsed, tenant_id)
+            result = tool_dispatch["intake_workflow"](parsed, tenant_id)
             _emit("intake_workflow", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2662,7 +2666,7 @@ def _build_all_service_tools(
             "tools": tools_list or [], "model": model, "visibility": visibility,
         }
         try:
-            result = TOOL_DISPATCH["manage_skills"](parsed, tenant_id)
+            result = tool_dispatch["manage_skills"](parsed, tenant_id)
             _emit("manage_skills", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2690,7 +2694,7 @@ def _build_all_service_tools(
             "prompt_body": prompt_body, "is_append": is_append,
         }
         try:
-            result = TOOL_DISPATCH["manage_prompts"](parsed, tenant_id)
+            result = tool_dispatch["manage_prompts"](parsed, tenant_id)
             _emit("manage_prompts", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2721,7 +2725,7 @@ def _build_all_service_tools(
             "user_id": scope,
         }
         try:
-            result = TOOL_DISPATCH["manage_templates"](parsed, tenant_id)
+            result = tool_dispatch["manage_templates"](parsed, tenant_id)
             _emit("manage_templates", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2740,7 +2744,7 @@ def _build_all_service_tools(
         """
         parsed = {"package_id": package_id, "doc_type": doc_type, "limit": limit}
         try:
-            result = TOOL_DISPATCH["document_changelog_search"](parsed, tenant_id)
+            result = tool_dispatch["document_changelog_search"](parsed, tenant_id)
             _emit("document_changelog_search", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2758,7 +2762,7 @@ def _build_all_service_tools(
         """
         parsed = {"package_id": package_id, "doc_type": doc_type}
         try:
-            result = TOOL_DISPATCH["get_latest_document"](parsed, tenant_id)
+            result = tool_dispatch["get_latest_document"](parsed, tenant_id)
             _emit("get_latest_document", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2776,7 +2780,7 @@ def _build_all_service_tools(
         """
         parsed = {"package_id": package_id, "auto_submit": auto_submit}
         try:
-            result = TOOL_DISPATCH["finalize_package"](parsed, tenant_id)
+            result = tool_dispatch["finalize_package"](parsed, tenant_id)
             _emit("finalize_package", result)
             if result_queue and loop and isinstance(result, dict):
                 _emit_package_state(result, "finalize_package", tenant_id, result_queue, loop)
@@ -2811,7 +2815,7 @@ def _build_all_service_tools(
             "end_time": end_time, "limit": limit, "user_id": user_id,
         }
         try:
-            result = TOOL_DISPATCH["cloudwatch_logs"](parsed, tenant_id)
+            result = tool_dispatch["cloudwatch_logs"](parsed, tenant_id)
             _emit("cloudwatch_logs", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2908,7 +2912,7 @@ def _build_all_service_tools(
             "status": status,
         }
         try:
-            result = TOOL_DISPATCH["manage_package"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["manage_package"](parsed, tenant_id, scoped_session_id)
             _emit("manage_package", result)
 
             # Emit SSE state_update for create/update/checklist operations
@@ -2987,7 +2991,7 @@ def _build_kb_service_tools(
     to receive empty input.  These dedicated @tool definitions expose each field by name
     so the model schema matches natural tool-calling behaviour.
     """
-    from .agentic_service import _exec_search_far
+    from .tools.legacy_dispatch import exec_search_far
     from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
 
     def _emit_input(name: str, tool_input: dict) -> None:
@@ -3016,7 +3020,7 @@ def _build_kb_service_tools(
             parts: Optional list of FAR part numbers to filter (e.g. ["6", "16"])
         """
         _emit_input("search_far", {"query": query, "parts": parts})
-        result = _exec_search_far({"query": query, "parts": parts}, tenant_id)
+        result = exec_search_far({"query": query, "parts": parts}, tenant_id)
         _emit("search_far", result)
         return json.dumps(result, indent=2, default=str)
 
@@ -3132,7 +3136,7 @@ def build_skill_tools(
     """Build @tool-wrapped subagent functions from skill registry.
 
     Same 4-layer prompt resolution as sdk_agentic_service.build_skill_agents():
-      1. Workspace override (wspc_store)
+      1. Workspace override (workspace_override_store)
       2. DynamoDB PLUGIN# canonical (plugin_store)
       3. Bundled eagle-plugin/ files (PLUGIN_CONTENTS)
       4. Tenant custom SKILL# items (skill_store)
@@ -3155,10 +3159,14 @@ def build_skill_tools(
         prompt_body = ""
         if workspace_id:
             try:
-                from .wspc_store import resolve_skill
+                from .workspace_override_store import resolve_skill
                 prompt_body, _source = resolve_skill(tenant_id, user_id, workspace_id, name)
             except Exception as exc:
-                logger.warning("wspc_store.resolve_skill failed for %s: %s -- using bundled", name, exc)
+                logger.warning(
+                    "workspace_override_store.resolve_skill failed for %s: %s -- using bundled",
+                    name,
+                    exc,
+                )
                 prompt_body = ""
 
         # Fall back to bundled PLUGIN_CONTENTS
@@ -3282,10 +3290,13 @@ def _build_supervisor_prompt_body(
     base_prompt = ""
     if workspace_id:
         try:
-            from .wspc_store import resolve_agent
+            from .workspace_override_store import resolve_agent
             base_prompt, _source = resolve_agent(tenant_id, user_id, workspace_id, "supervisor")
         except Exception as exc:
-            logger.warning("wspc_store.resolve_agent failed for supervisor: %s -- using bundled", exc)
+            logger.warning(
+                "workspace_override_store.resolve_agent failed for supervisor: %s -- using bundled",
+                exc,
+            )
 
     if not base_prompt:
         supervisor_entry = AGENTS.get("supervisor")

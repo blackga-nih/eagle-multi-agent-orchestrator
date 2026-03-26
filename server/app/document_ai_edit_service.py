@@ -10,12 +10,12 @@ import zipfile
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from .changelog_store import write_document_changelog_entry
+from .db_client import get_s3
 from .document_key_utils import (
     extract_package_document_ref,
     extract_workspace_document_ref,
@@ -28,7 +28,6 @@ from .template_service import DOCXPopulator
 logger = logging.getLogger("eagle.document_ai_edit")
 
 S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 
 @dataclass
@@ -50,10 +49,6 @@ class DocxPreviewBlock:
     text: str
     level: Optional[int] = None
     checked: Optional[bool] = None
-
-
-def _get_s3():
-    return boto3.client("s3", region_name=AWS_REGION)
 
 
 def _normalize_text(text: str) -> str:
@@ -469,7 +464,7 @@ def edit_docx_document(
     if not doc_key.lower().endswith(".docx"):
         return {"error": "DOCX edit tool only supports .docx documents"}
 
-    s3 = _get_s3()
+    s3 = get_s3()
     try:
         response = s3.get_object(Bucket=S3_BUCKET, Key=doc_key)
         original_bytes = response["Body"].read()
@@ -588,7 +583,7 @@ def save_docx_preview_edits(
     if not doc_key.lower().endswith(".docx"):
         return {"error": "Structured preview editing only supports .docx documents"}
 
-    s3 = _get_s3()
+    s3 = get_s3()
     try:
         response = s3.get_object(Bucket=S3_BUCKET, Key=doc_key)
         original_bytes = response["Body"].read()

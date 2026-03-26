@@ -18,6 +18,7 @@ Key difference from agentic_service.py:
   - agentic_service.py: skills = prompt text injected into one system prompt (shared context)
   - sdk_agentic_service.py: skills = AgentDefinitions with separate context windows per skill
 """
+from __future__ import annotations
 
 import json
 import logging
@@ -175,7 +176,7 @@ def build_skill_agents(
     Each skill becomes a subagent with its own fresh context window.
     The skill markdown content becomes the subagent's system prompt.
 
-    When workspace_id is provided, skill prompts are resolved via wspc_store
+    When workspace_id is provided, skill prompts are resolved via workspace_override_store
     using the 4-layer chain (workspace override → PLUGIN# canonical).
 
     Args:
@@ -201,10 +202,10 @@ def build_skill_agents(
         # Resolve prompt through workspace chain when workspace_id is available
         if workspace_id:
             try:
-                from .wspc_store import resolve_skill
+                from .workspace_override_store import resolve_skill
                 prompt_body, _source = resolve_skill(tenant_id, user_id, workspace_id, name)
             except Exception as exc:
-                logger.warning("wspc_store.resolve_skill failed for %s: %s — using bundled", name, exc)
+                logger.warning("workspace_override_store.resolve_skill failed for %s: %s — using bundled", name, exc)
                 prompt_body = ""
         else:
             prompt_body = ""
@@ -274,10 +275,10 @@ def build_supervisor_prompt(
     base_prompt = ""
     if workspace_id:
         try:
-            from .wspc_store import resolve_agent
+            from .workspace_override_store import resolve_agent
             base_prompt, _source = resolve_agent(tenant_id, user_id, workspace_id, "supervisor")
         except Exception as exc:
-            logger.warning("wspc_store.resolve_agent failed for supervisor: %s — using bundled", exc)
+            logger.warning("workspace_override_store.resolve_agent failed for supervisor: %s — using bundled", exc)
 
     # Fall back to bundled AGENTS content
     if not base_prompt:

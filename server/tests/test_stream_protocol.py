@@ -7,9 +7,11 @@ and use-agent-stream.ts expect.
 Run: pytest server/tests/test_stream_protocol.py -v
 """
 
+import asyncio
 import json
 import os
 import sys
+from functools import wraps
 
 import pytest
 
@@ -18,6 +20,14 @@ if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
 from app.stream_protocol import MultiAgentStreamWriter, StreamEvent, StreamEventType
+
+
+def async_test(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(fn(*args, **kwargs))
+
+    return wrapper
 
 
 # ── StreamEvent dataclass tests ──────────────────────────────────────
@@ -136,7 +146,7 @@ class TestMultiAgentStreamWriter:
     def writer(self):
         return MultiAgentStreamWriter("eagle", "EAGLE Acquisition Assistant")
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_write_text(self, writer):
         import asyncio
         q = asyncio.Queue()
@@ -147,7 +157,7 @@ class TestMultiAgentStreamWriter:
         assert payload["content"] == "Hello world"
         assert payload["agent_id"] == "eagle"
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_write_tool_use(self, writer):
         import asyncio
         q = asyncio.Queue()
@@ -159,7 +169,7 @@ class TestMultiAgentStreamWriter:
         assert payload["tool_use"]["input"] == {"query": "FAR 13"}
         assert payload["tool_use"]["tool_use_id"] == "tu-1"
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_write_tool_use_no_id(self, writer):
         import asyncio
         q = asyncio.Queue()
@@ -168,7 +178,7 @@ class TestMultiAgentStreamWriter:
         payload = json.loads(sse[6:].strip())
         assert "tool_use_id" not in payload["tool_use"]
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_write_tool_result(self, writer):
         import asyncio
         q = asyncio.Queue()
@@ -179,7 +189,7 @@ class TestMultiAgentStreamWriter:
         assert payload["tool_result"]["name"] == "search_far"
         assert payload["tool_result"]["result"] == {"text": "result"}
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_write_complete(self, writer):
         import asyncio
         q = asyncio.Queue()
@@ -188,7 +198,7 @@ class TestMultiAgentStreamWriter:
         payload = json.loads(sse[6:].strip())
         assert payload["type"] == "complete"
 
-    @pytest.mark.asyncio
+    @async_test
     async def test_write_error(self, writer):
         import asyncio
         q = asyncio.Queue()

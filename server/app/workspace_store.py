@@ -12,37 +12,18 @@ GSI1 projection:
     GSI1PK: TENANT#{tenant_id}
     GSI1SK: WORKSPACE#{user_id}#{workspace_id}
 """
-import os
 import time
 import uuid
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError, BotoCoreError
 
+from .db_client import get_table
+
 logger = logging.getLogger("eagle.workspace_store")
-
-# ── Configuration ─────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-# ── DynamoDB Client (lazy singleton) ─────────────────────────────────
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # ── Workspace Cache (60s TTL) ────────────────────────────────────────
 _workspace_cache: Dict[str, Dict[str, Any]] = {}
@@ -116,7 +97,7 @@ def create_workspace(
         item["base_workspace_id"] = base_workspace_id
 
     try:
-        _get_table().put_item(Item=item)
+        get_table().put_item(Item=item)
         logger.debug("workspace_store.create: [%s/%s] %s", tenant_id, user_id, name)
     except (ClientError, BotoCoreError) as e:
         logger.error("workspace_store.create failed [%s/%s]: %s", tenant_id, user_id, e)
@@ -131,7 +112,7 @@ def get_workspace(
 ) -> Optional[Dict[str, Any]]:
     """Fetch a workspace by ID.  Returns None if not found."""
     try:
-        resp = _get_table().get_item(
+        resp = get_table().get_item(
             Key={
                 "PK": f"WORKSPACE#{tenant_id}#{user_id}",
                 "SK": f"WORKSPACE#{workspace_id}",
@@ -147,7 +128,7 @@ def get_workspace(
 def list_workspaces(tenant_id: str, user_id: str) -> List[Dict[str, Any]]:
     """Return all workspaces for a user, sorted by updated_at descending."""
     try:
-        resp = _get_table().query(
+        resp = get_table().query(
             KeyConditionExpression=Key("PK").eq(f"WORKSPACE#{tenant_id}#{user_id}"),
         )
         items = [dict(i) for i in resp.get("Items", [])]
@@ -177,7 +158,7 @@ def activate_workspace(
     _ws_cache_invalidate(tenant_id, user_id)
     now = datetime.utcnow().isoformat()
     try:
-        _get_table().update_item(
+        get_table().update_item(
             Key={
                 "PK": f"WORKSPACE#{tenant_id}#{user_id}",
                 "SK": f"WORKSPACE#{workspace_id}",
@@ -212,7 +193,7 @@ def update_workspace(
     values = {f":{k}": v for k, v in safe.items()}
 
     try:
-        _get_table().update_item(
+        get_table().update_item(
             Key={
                 "PK": f"WORKSPACE#{tenant_id}#{user_id}",
                 "SK": f"WORKSPACE#{workspace_id}",
@@ -244,7 +225,7 @@ def delete_workspace(
         return False
 
     try:
-        _get_table().delete_item(
+        get_table().delete_item(
             Key={
                 "PK": f"WORKSPACE#{tenant_id}#{user_id}",
                 "SK": f"WORKSPACE#{workspace_id}",
@@ -304,7 +285,7 @@ def get_or_create_default(tenant_id: str, user_id: str) -> Dict[str, Any]:
 def _deactivate_all(tenant_id: str, user_id: str) -> None:
     """Set is_active=False on every workspace for this user."""
     workspaces = list_workspaces(tenant_id, user_id)
-    table = _get_table()
+    table = get_table()
     now = datetime.utcnow().isoformat()
     for ws in workspaces:
         if ws.get("is_active"):
@@ -324,7 +305,7 @@ def _deactivate_all(tenant_id: str, user_id: str) -> None:
 def increment_override_count(tenant_id: str, user_id: str, workspace_id: str, delta: int = 1) -> None:
     """Increment (or decrement) the override_count on a workspace record."""
     try:
-        _get_table().update_item(
+        get_table().update_item(
             Key={
                 "PK": f"WORKSPACE#{tenant_id}#{user_id}",
                 "SK": f"WORKSPACE#{workspace_id}",

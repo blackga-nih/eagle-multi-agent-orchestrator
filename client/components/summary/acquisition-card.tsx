@@ -1,7 +1,7 @@
 'use client';
 
-import { AcquisitionData } from '../chat/chat-interface';
 import { FileText, DollarSign, Clock, AlertCircle } from 'lucide-react';
+import { AcquisitionData } from '@/types/schema';
 
 interface AcquisitionCardProps {
     data: AcquisitionData;

@@ -9,22 +9,13 @@ import logging
 import os
 import time
 
-import boto3
 from botocore.exceptions import ClientError, BotoCoreError
+
+from ..db_client import get_logs
 
 logger = logging.getLogger("eagle.telemetry.cloudwatch")
 
 LOG_GROUP = os.getenv("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-_logs_client = None
-
-
-def _get_client():
-    global _logs_client
-    if _logs_client is None:
-        _logs_client = boto3.client("logs", region_name=AWS_REGION)
-    return _logs_client
 
 
 def _ensure_log_group_and_stream(client, stream_name: str):
@@ -71,7 +62,7 @@ def emit_telemetry_event(
     }
 
     try:
-        client = _get_client()
+        client = get_logs()
         stream_name = f"telemetry/{session_id}" if session_id else f"telemetry/{tenant_id}"
 
         _ensure_log_group_and_stream(client, stream_name)

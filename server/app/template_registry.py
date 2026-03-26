@@ -15,8 +15,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-import boto3
 from botocore.exceptions import ClientError
+
+from .db_client import get_s3
 
 logger = logging.getLogger("eagle.template_registry")
 
@@ -628,7 +629,7 @@ def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None)
         # Fetch from S3
         templates = []
         try:
-            s3 = boto3.client("s3")
+            s3 = get_s3()
             paginator = s3.get_paginator("list_objects_v2")
 
             for page in paginator.paginate(Bucket=TEMPLATE_BUCKET, Prefix=TEMPLATE_PREFIX):
@@ -696,7 +697,7 @@ def get_s3_template_by_key(s3_key: str) -> Optional[bytes]:
         Template file content as bytes, or None if not found
     """
     try:
-        s3 = boto3.client("s3")
+        s3 = get_s3()
         response = s3.get_object(Bucket=TEMPLATE_BUCKET, Key=s3_key)
         return response["Body"].read()
     except ClientError as e:

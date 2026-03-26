@@ -8,20 +8,16 @@ Preferences persist indefinitely (no TTL).
 In-process cache with 60-second TTL to avoid repeated DynamoDB reads
 within the same session (e.g. preload + agent tool access).
 """
-import os
 import logging
 import time as _time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-logger = logging.getLogger("eagle.pref_store")
+from .db_client import get_table
 
-# ── Configuration ─────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+logger = logging.getLogger("eagle.pref_store")
 
 # ── Default preferences ───────────────────────────────────────────────
 DEFAULT_PREFS: Dict[str, Any] = {
@@ -61,20 +57,6 @@ def _cache_set(tenant_id: str, user_id: str, prefs: Dict[str, Any]) -> None:
 def _cache_invalidate(tenant_id: str, user_id: str) -> None:
     _pref_cache.pop(_cache_key(tenant_id, user_id), None)
 
-# ── DynamoDB lazy singleton ───────────────────────────────────────────
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -110,7 +92,7 @@ def get_prefs(tenant_id: str, user_id: str) -> Dict[str, Any]:
         return cached
 
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 "PK": f"PREF#{tenant_id}",
@@ -164,7 +146,7 @@ def update_prefs(
     }
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=item)
         _cache_invalidate(tenant_id, user_id)
         logger.debug(
@@ -192,7 +174,7 @@ def reset_prefs(tenant_id: str, user_id: str) -> Dict[str, Any]:
     Returns DEFAULT_PREFS (a fresh copy) after deletion.
     """
     try:
-        table = _get_table()
+        table = get_table()
         table.delete_item(
             Key={
                 "PK": f"PREF#{tenant_id}",

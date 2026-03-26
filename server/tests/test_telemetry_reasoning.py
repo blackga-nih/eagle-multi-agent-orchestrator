@@ -129,7 +129,7 @@ class TestReasoningLog:
         log = ReasoningLog("sess-1", "tenant-1", "user-1")
         assert log.to_appendix_markdown() == ""
 
-    @patch("app.reasoning_store._get_table")
+    @patch("app.reasoning_store.get_table")
     def test_save_to_dynamodb(self, mock_table_fn):
         from app.reasoning_store import ReasoningLog
         mock_tbl = MagicMock()
@@ -142,7 +142,7 @@ class TestReasoningLog:
         assert item["PK"] == "SESSION#sess-1"
         assert item["SK"] == "REASONING#sess-1"
 
-    @patch("app.reasoning_store._get_table")
+    @patch("app.reasoning_store.get_table")
     def test_load_from_dynamodb(self, mock_table_fn):
         from app.reasoning_store import ReasoningLog
         mock_tbl = MagicMock()
@@ -165,7 +165,7 @@ class TestReasoningLog:
         log = ReasoningLog.load("sess-1", "tenant-1", "user-1")
         assert len(log.entries) == 1
 
-    @patch("app.reasoning_store._get_table")
+    @patch("app.reasoning_store.get_table")
     def test_load_missing_returns_empty(self, mock_table_fn):
         from app.reasoning_store import ReasoningLog
         mock_tbl = MagicMock()
@@ -174,7 +174,7 @@ class TestReasoningLog:
         log = ReasoningLog.load("no-exist", "t1", "u1")
         assert len(log.entries) == 0
 
-    @patch("app.reasoning_store._get_table")
+    @patch("app.reasoning_store.get_table")
     def test_save_empty_log_is_noop(self, mock_table_fn):
         from app.reasoning_store import ReasoningLog
         mock_tbl = MagicMock()

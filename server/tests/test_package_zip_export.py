@@ -1,4 +1,5 @@
 """Tests for ZIP package export (Feature 4)."""
+import asyncio
 import pytest
 import zipfile
 import io
@@ -72,58 +73,64 @@ class TestExportPackageZip:
 class TestZipEndpoint:
     """Test the /api/packages/{id}/export/zip endpoint."""
 
-    @pytest.mark.asyncio
-    async def test_returns_404_for_missing_package(self):
+    def test_returns_404_for_missing_package(self):
         """Should return 404 when package doesn't exist."""
-        from httpx import AsyncClient, ASGITransport
-        from app.main import app
+        async def _run():
+            from httpx import AsyncClient, ASGITransport
+            from app.main import app
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            with patch("app.main.get_package", return_value=None):
-                response = await client.get(
-                    "/api/packages/PKG-9999/export/zip",
-                    headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
-                )
-                assert response.status_code == 404
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                with patch("app.main.get_package", return_value=None):
+                    response = await client.get(
+                        "/api/packages/PKG-9999/export/zip",
+                        headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
+                    )
+                    assert response.status_code == 404
 
-    @pytest.mark.asyncio
-    async def test_returns_404_for_no_documents(self):
+        asyncio.run(_run())
+
+    def test_returns_404_for_no_documents(self):
         """Should return 404 when package has no documents with content."""
-        from httpx import AsyncClient, ASGITransport
-        from app.main import app
+        async def _run():
+            from httpx import AsyncClient, ASGITransport
+            from app.main import app
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            with patch("app.main.get_package", return_value={"title": "Test"}), \
-                 patch("app.main.list_package_documents", return_value=[]):
-                response = await client.get(
-                    "/api/packages/PKG-0001/export/zip",
-                    headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
-                )
-                assert response.status_code == 404
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                with patch("app.main.get_package", return_value={"title": "Test"}), \
+                     patch("app.main.list_package_documents", return_value=[]):
+                    response = await client.get(
+                        "/api/packages/PKG-0001/export/zip",
+                        headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
+                    )
+                    assert response.status_code == 404
 
-    @pytest.mark.asyncio
-    async def test_returns_zip_content_type(self):
+        asyncio.run(_run())
+
+    def test_returns_zip_content_type(self):
         """Should return application/zip content type on success."""
-        from httpx import AsyncClient, ASGITransport
-        from app.main import app
+        async def _run():
+            from httpx import AsyncClient, ASGITransport
+            from app.main import app
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            with patch("app.main.get_package", return_value={"title": "Test"}), \
-                 patch("app.main.list_package_documents", return_value=[
-                     {"doc_type": "sow", "title": "SOW", "content": "# SOW\nContent"}
-                 ]), \
-                 patch("app.document_export.export_package_zip", return_value={
-                     "data": b"PK\x03\x04fake",
-                     "filename": "test.zip",
-                     "content_type": "application/zip",
-                     "size_bytes": 10,
-                 }):
-                response = await client.get(
-                    "/api/packages/PKG-0001/export/zip",
-                    headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
-                )
-                assert response.status_code == 200
-                assert response.headers["content-type"] == "application/zip"
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                with patch("app.main.get_package", return_value={"title": "Test"}), \
+                     patch("app.main.list_package_documents", return_value=[
+                         {"doc_type": "sow", "title": "SOW", "content": "# SOW\nContent"}
+                     ]), \
+                     patch("app.document_export.export_package_zip", return_value={
+                         "data": b"PK\x03\x04fake",
+                         "filename": "test.zip",
+                         "content_type": "application/zip",
+                         "size_bytes": 10,
+                     }):
+                    response = await client.get(
+                        "/api/packages/PKG-0001/export/zip",
+                        headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
+                    )
+                    assert response.status_code == 200
+                    assert response.headers["content-type"] == "application/zip"
+
+        asyncio.run(_run())

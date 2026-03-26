@@ -15,22 +15,18 @@ Status lifecycle:
     draft -> review -> active -> disabled
     draft or disabled -> (deleted)
 """
-import os
 import time
 import uuid
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from boto3.dynamodb.conditions import Attr, Key
 
-logger = logging.getLogger("eagle.skill_store")
+from .db_client import get_table
 
-# -- Configuration -----------------------------------------------------------
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+logger = logging.getLogger("eagle.skill_store")
 
 # -- Allowed statuses --------------------------------------------------------
 _VALID_STATUSES = {"draft", "review", "active", "disabled"}
@@ -46,21 +42,6 @@ _UPDATABLE_FIELDS = {
     "model",
     "visibility",
 }
-
-# -- DynamoDB singleton (lazy, same pattern as plugin_store.py) --------------
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # -- In-Process Cache (60-second TTL, keyed by "{tenant_id}#{skill_id}") -----
 _skill_cache: Dict[str, Dict[str, Any]] = {}
@@ -185,7 +166,7 @@ def create_skill(
     )
 
     try:
-        _get_table().put_item(Item=item)
+        get_table().put_item(Item=item)
         _cache_set(tenant_id, skill_id, item)
         logger.debug("skill_store.create_skill: [%s/%s] created", tenant_id, skill_id)
     except (ClientError, BotoCoreError) as exc:
@@ -206,7 +187,7 @@ def get_skill(tenant_id: str, skill_id: str) -> Optional[Dict[str, Any]]:
         return cached
 
     try:
-        response = _get_table().get_item(
+        response = get_table().get_item(
             Key={
                 "PK": f"SKILL#{tenant_id}",
                 "SK": f"SKILL#{skill_id}",
@@ -259,7 +240,7 @@ def update_skill(
     updated["GSI2SK"] = f"TENANT#{tenant_id}#{skill_id}"
 
     try:
-        _get_table().put_item(Item=updated)
+        get_table().put_item(Item=updated)
         _cache_set(tenant_id, skill_id, updated)
         logger.debug(
             "skill_store.update_skill: [%s/%s] v%s", tenant_id, skill_id, updated["version"]
@@ -308,7 +289,7 @@ def _transition_status(
         updated["published_at"] = updated["updated_at"]
 
     try:
-        _get_table().put_item(Item=updated)
+        get_table().put_item(Item=updated)
         _cache_invalidate(tenant_id, skill_id)
         _cache_set(tenant_id, skill_id, updated)
         logger.debug(
@@ -370,7 +351,7 @@ def delete_skill(tenant_id: str, skill_id: str) -> bool:
         return False
 
     try:
-        _get_table().delete_item(
+        get_table().delete_item(
             Key={
                 "PK": f"SKILL#{tenant_id}",
                 "SK": f"SKILL#{skill_id}",
@@ -394,7 +375,7 @@ def list_skills(
     filter-expression status filter.
     """
     try:
-        table = _get_table()
+        table = get_table()
         if status is not None:
             response = table.query(
                 KeyConditionExpression=(
@@ -423,7 +404,7 @@ def list_active_skills(tenant_id: str) -> List[Dict[str, Any]]:
     Falls back to a full tenant query with status filter if the GSI is unavailable.
     """
     try:
-        table = _get_table()
+        table = get_table()
         response = table.query(
             IndexName="GSI2",
             KeyConditionExpression=(
