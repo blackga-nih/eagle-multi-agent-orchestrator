@@ -80,6 +80,34 @@ class TestComputeRequiredDocs:
             assert "sow" in slugs
             assert "igce" in slugs
 
+    def test_uppercase_contract_type_normalizes_to_lowercase(self):
+        """CPFF (uppercase) should return same docs as cpff (lowercase)."""
+        from app.package_store import compute_required_docs
+
+        upper = compute_required_docs(3_500_000, "negotiated", "CPFF")
+        lower = compute_required_docs(3_500_000, "negotiated", "cpff")
+        assert upper == lower
+        assert len(upper) == 10  # $3.5M CPFF negotiated → 10 required docs
+
+    def test_uppercase_acquisition_method_normalizes_to_lowercase(self):
+        """NEGOTIATED (uppercase) should return same docs as negotiated."""
+        from app.package_store import compute_required_docs
+
+        upper = compute_required_docs(500_000, "NEGOTIATED", "ffp")
+        lower = compute_required_docs(500_000, "negotiated", "ffp")
+        assert upper == lower
+        assert "sow" in upper
+
+    def test_mixed_case_inputs_return_correct_docs(self):
+        """Mixed case like 'Cpff' and 'Negotiated' should work."""
+        from app.package_store import compute_required_docs
+
+        slugs = compute_required_docs(3_500_000, "Negotiated", "Cpff")
+        assert len(slugs) == 10
+        assert "sow" in slugs
+        assert "igce" in slugs
+        assert "acquisition_plan" in slugs
+
     def test_all_compliance_doc_names_have_slug_mapping(self):
         """Every document name returned by get_requirements should have a slug mapping."""
         from app.compliance_matrix import get_requirements

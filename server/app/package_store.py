@@ -136,8 +136,8 @@ def compute_required_docs(
 
         result = get_requirements(
             contract_value=estimated_value,
-            acquisition_method=acquisition_method,
-            contract_type=contract_type,
+            acquisition_method=acquisition_method.lower(),
+            contract_type=contract_type.lower(),
             flags=flags,
         )
 
