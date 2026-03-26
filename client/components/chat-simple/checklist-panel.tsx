@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { PackageState } from '@/hooks/use-package-state';
 
 /** Human-readable labels for document types. */
@@ -49,12 +49,27 @@ interface ChecklistPanelProps {
 export function ChecklistTabContent({ state }: ChecklistPanelProps) {
   const { checklist, progressPct, phase, complianceAlerts, packageId } = state;
   const [downloading, setDownloading] = useState(false);
+  const [showFormatMenu, setShowFormatMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  const handleDownloadZip = useCallback(async () => {
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showFormatMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowFormatMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showFormatMenu]);
+
+  const handleDownloadZip = useCallback(async (format: 'docx' | 'pdf') => {
     if (!packageId) return;
+    setShowFormatMenu(false);
     setDownloading(true);
     try {
-      const res = await fetch(`/api/packages/${encodeURIComponent(packageId)}/export/zip`);
+      const res = await fetch(`/api/packages/${encodeURIComponent(packageId)}/export/zip?format=${format}`);
       if (!res.ok) throw new Error(`Export failed: ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -130,23 +145,56 @@ export function ChecklistTabContent({ state }: ChecklistPanelProps) {
 
       {/* ZIP Download */}
       {packageId && completed.size > 0 && (
-        <div className="mb-3">
-          <button
-            onClick={handleDownloadZip}
-            disabled={downloading}
-            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-[#003366] text-white hover:bg-[#004488] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {downloading ? (
+        <div className="mb-3 relative" ref={menuRef}>
+          {downloading ? (
+            <button
+              disabled
+              className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-[#003366] text-white opacity-50 cursor-not-allowed"
+            >
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
               <span>Downloading...</span>
-            ) : (
-              <>
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => setShowFormatMenu((prev) => !prev)}
+                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-[#003366] text-white hover:bg-[#004488] transition-colors"
+              >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <span>Download Package (ZIP)</span>
-              </>
-            )}
-          </button>
+                <span>Download Package</span>
+                <svg className={`w-3 h-3 transition-transform ${showFormatMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showFormatMenu && (
+                <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 overflow-hidden">
+                  <button
+                    onClick={() => handleDownloadZip('docx')}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-[#003366] transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>DOCX (Word)</span>
+                  </button>
+                  <button
+                    onClick={() => handleDownloadZip('pdf')}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                    <span>PDF</span>
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 

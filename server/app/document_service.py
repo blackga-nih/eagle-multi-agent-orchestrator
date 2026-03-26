@@ -597,7 +597,12 @@ def _update_package_checklist(
     package_id: str,
     doc_type: str,
 ) -> None:
-    """Update package completed_documents if this doc_type is required."""
+    """Update package checklist when a document is created.
+
+    If the doc_type is already required, mark it completed.
+    If the doc_type is NOT required, expand both required and completed
+    lists so the checklist dynamically grows with the package.
+    """
     pkg = get_package(tenant_id, package_id)
     if not pkg:
         return
@@ -608,11 +613,28 @@ def _update_package_checklist(
     # Normalize: match both hyphenated and underscored variants (legacy compat)
     normalized = doc_type.replace("-", "_")
     match = next((r for r in required if r.replace("-", "_") == normalized), None)
-    if match and match not in completed and normalized not in completed:
-        completed = list(set(completed + [match]))
-        update_package(tenant_id, package_id, {"completed_documents": completed})
+
+    updates: dict = {}
+
+    if match:
+        # Doc type IS in required list — mark completed if not already
+        if match not in completed and normalized not in completed:
+            completed = list(set(completed + [match]))
+            updates["completed_documents"] = completed
+    else:
+        # Doc type is NOT in required list — expand both lists
+        required = list(required) + [normalized]
+        completed = list(set(completed + [normalized]))
+        updates["required_documents"] = required
+        updates["completed_documents"] = completed
+
+    if updates:
+        update_package(tenant_id, package_id, updates)
         logger.debug(
-            "Updated package %s completed_documents: %s", package_id, completed
+            "Updated package %s checklist: required=%s, completed=%s",
+            package_id,
+            updates.get("required_documents", "unchanged"),
+            updates.get("completed_documents", "unchanged"),
         )
 
 

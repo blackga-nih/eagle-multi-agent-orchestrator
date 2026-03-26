@@ -67,6 +67,7 @@ _UPDATABLE_FIELDS = {
     "contract_vehicle",
     "status",
     "notes",
+    "required_documents",
     "completed_documents",
     "far_citations",
     # Tag attributes
