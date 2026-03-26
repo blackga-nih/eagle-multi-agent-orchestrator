@@ -1021,3 +1021,84 @@ query_param = user_query  # or str(user_query)
 Add `"competitive"` as an accepted acquisition method alias. Check the accepted methods list
 and either add it directly or map it to `"competitive_acquisition"` / `"full_and_open"`.
 
+---
+
+## Part 13: E2E Vision Judge (Screenshot-Based Testing)
+
+### Overview
+
+The **e2e-judge** skill provides screenshot-based E2E testing with LLM-as-judge evaluation. It runs Playwright on the EC2 devbox (inside VPC) against the deployed ALB, captures full-page screenshots at each UI step, and sends them to Claude Sonnet via Bedrock `converse()` for structured pass/fail evaluation.
+
+**Skill**: `.claude/skills/e2e-judge/SKILL.md`
+**Agent**: `.claude/agents/e2e-judge-agent.md`
+
+### Architecture
+
+```
+EC2 devbox (VPC) -> Playwright headless Chromium
+  -> Screenshot capture (PNG, SHA-256 hashed)
+    -> Bedrock converse (Sonnet 4.5 vision judge)
+      -> SHA-256 cache (7-day TTL)
+        -> Results JSON + markdown report
+          -> S3 upload -> gallery HTML
+```
+
+### Python Modules (server/tests/)
+
+| Module | Purpose |
+|--------|---------|
+| `e2e_judge_orchestrator.py` | CLI entry point — wires capture + judge + report |
+| `e2e_screenshot_capture.py` | Playwright screenshot utility, Cognito auth |
+| `e2e_vision_judge.py` | Bedrock converse with image blocks, structured verdicts |
+| `e2e_judge_cache.py` | SHA-256 file cache for judgments |
+| `e2e_judge_prompts.py` | Page-specific judge prompts |
+| `e2e_judge_journeys.py` | Journey definitions with `@journey` decorator |
+
+### Available Journeys
+
+| Journey | Steps | What it tests |
+|---------|-------|---------------|
+| `login` | 3 | Cognito auth flow |
+| `home` | 4 | Landing page, feature cards, navigation |
+| `chat` | 10 | Multi-turn conversation, streaming, agent responses |
+| `documents` | 2 | Document list, templates |
+| `workflows` | 4 | Acquisition packages grid, document checklist modal |
+| `admin` | 6 | Dashboard, skills, templates, traces, tests, costs |
+| `responsive` | 12+ | Key pages at mobile/tablet viewports |
+| `acquisition_package` | 25-35 | Full UC-1 lifecycle: intake -> doc gen -> checklist -> revision -> finalize -> export |
+
+### Running on EC2 Devbox
+
+```bash
+# SSH or SSM into the devbox (i-0390c06d166d18926)
+export PLAYWRIGHT_BROWSERS_PATH=/home/ec2-user/pw-browsers
+export EAGLE_TEST_EMAIL=<cognito-email>
+export EAGLE_TEST_PASSWORD=<cognito-password>
+cd /home/ec2-user/e2e-judge/server
+
+# Run specific journeys
+python3.12 -m tests.e2e_judge_orchestrator \
+  --base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com \
+  --journeys login,home,chat,workflows,admin \
+  --output /home/ec2-user/e2e-judge/data/e2e-judge/results \
+  --purge-cache
+
+# Upload results to S3
+aws s3 sync /home/ec2-user/e2e-judge/data/e2e-judge/screenshots/<run-id>/ \
+  s3://eagle-eval-artifacts-695681773636-dev/e2e-judge/screenshots/<run-id>/
+```
+
+### Key Details
+
+- **Judge model**: `us.anthropic.claude-sonnet-4-5-20250929-v1:0` (cross-region inference profile)
+- **Python**: `/usr/bin/python3.12` on the devbox (NOT system python3 which is 3.9)
+- **Auth**: Cognito login via `#email` and `#password` selectors, `button[type='submit']`
+- **Page loads**: Use `wait_until="domcontentloaded"` (NOT `networkidle` — SSE keeps connections open)
+- **Cost**: ~$0.15 for 25 screenshots, ~$0.03 for 4 screenshots (cached runs are free)
+- **Cache**: SHA-256 of PNG bytes -> `data/e2e-judge/cache/{sha256}.json`, 7-day TTL
+- **Deploy code**: Upload via S3 (`s3://eagle-eval-artifacts-695681773636-dev/e2e-judge-deploy/`)
+
+### Invoke via Skill
+
+Use `/e2e-judge` or ask Claude to "run the e2e vision judge" to invoke the skill directly.
+

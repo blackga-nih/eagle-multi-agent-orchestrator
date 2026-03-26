@@ -31,6 +31,7 @@ This expert covers:
 | `/experts:eval:self-improve` | **Closed-loop**: diagnose failures, fix agent/skill code, re-validate |
 | `/experts:eval:plan_build_improve` | Full ACT-LEARN-REUSE workflow |
 | `/experts:eval:maintenance` | Run eval suite and report results |
+| `/experts:eval:e2e-judge` | Run the e2e-judge screenshot + vision pipeline |
 
 ## Key Files
 
@@ -43,6 +44,7 @@ This expert covers:
 | `self-improve.md` | Closed-loop agent improvement (DIAGNOSE -> PRIORITIZE -> FIX -> VALIDATE) |
 | `plan_build_improve.md` | Full workflow command |
 | `maintenance.md` | Run tests and report results |
+| `e2e-judge.md` | Run e2e-judge screenshot + vision pipeline |
 
 ## Architecture
 
