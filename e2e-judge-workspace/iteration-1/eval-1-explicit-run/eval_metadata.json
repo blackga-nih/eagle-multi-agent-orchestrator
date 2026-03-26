@@ -1,0 +1,31 @@
+{
+  "eval_id": 1,
+  "eval_name": "explicit-run",
+  "prompt": "Run the e2e judge against the deployed EAGLE app. Just do login, home, and chat journeys. The ALB URL is http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com and credentials are testuser@example.com / EagleTest2024!",
+  "assertions": [
+    {
+      "text": "Uses the e2e_judge_orchestrator.py as the entry point",
+      "type": "content_check"
+    },
+    {
+      "text": "Passes --journeys login,home,chat (exactly the 3 requested journeys)",
+      "type": "content_check"
+    },
+    {
+      "text": "Passes the ALB URL via --base-url flag",
+      "type": "content_check"
+    },
+    {
+      "text": "Passes auth credentials via --auth-email and --auth-password flags",
+      "type": "content_check"
+    },
+    {
+      "text": "Mentions expected output: results JSON, markdown report, and screenshots directory",
+      "type": "content_check"
+    },
+    {
+      "text": "Includes pre-flight checks (AWS creds, playwright installed, URL reachable)",
+      "type": "content_check"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "skill_name": "e2e-judge",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Run the e2e judge against the deployed EAGLE app. Just do login, home, and chat journeys. I've set EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD in my env already.",
+      "expected_output": "Orchestrator runs 3 journeys (login, home, chat), captures screenshots including pre-send and 30s interval shots during streaming, judges each with Sonnet via Bedrock, produces results JSON and markdown report with pass/fail verdicts, quality scores, and cost.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I just deployed a frontend change to the EAGLE app. Can you do a quick visual check of the admin dashboard and chat page to make sure nothing looks broken? Use the deployed URL.",
+      "expected_output": "Recognizes this as an e2e-judge task. Runs the orchestrator with --journeys admin,chat against the internal ALB. Reports pass/fail for each step, highlights any visual issues found by the Sonnet judge, and shows the quality scores.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Run a full visual regression test on all pages of EAGLE and upload the results to S3 so we can see them in the dashboard.",
+      "expected_output": "Runs the orchestrator with --journeys all --upload-s3. Captures screenshots across all journeys (login, home, chat, admin, documents, responsive), judges each, uploads results + screenshots to S3, and points user to /admin/e2e-judge dashboard page.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "I want to run the full acquisition package e2e test -- the complete lifecycle from intake through document generation, revision, finalize, and export. Test against the deployed app. EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD are set.",
+      "expected_output": "Runs the orchestrator with --journeys acquisition_package against the internal ALB. Explains this is a multi-turn chat journey covering: intake ($750K cloud hosting), compliance analysis, SOW + IGCE + MR + AP generation, workflows/packages page check with document checklist, SOW v2 revision (Section 508 + FedRAMP), package finalization, and ZIP export. Mentions ~30+ screenshots across all phases, cost estimate, and that it takes longer than single-page journeys due to 7 chat turns.",
+      "files": [],
+      "assertions": [
+        "Uses --journeys acquisition_package flag",
+        "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+        "Does NOT hardcode credentials — uses env vars",
+        "Explains the journey covers intake, document generation, checklist, revision, finalize, and export phases",
+        "Mentions the document checklist check (navigates to /workflows page)",
+        "Mentions document revision (SOW v2 with new requirements)",
+        "Mentions package finalization (finalize_package tool or status change)",
+        "Mentions package export as ZIP",
+        "Mentions approximate screenshot count (25-35+) and that it takes longer than other journeys",
+        "Mentions cost estimate"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "After generating all documents, I want to verify the document checklist shows the right status and then test the revision + finalize flow. Can the e2e judge handle that?",
+      "expected_output": "Identifies this as the acquisition_package journey (or subset). Explains the journey navigates to /workflows to check the document checklist with completion status for each document type (SOW, IGCE, MR, AP), then returns to chat to request a document revision (SOW v2), and finally triggers package finalization. Shows the orchestrator command with --journeys acquisition_package.",
+      "files": [],
+      "assertions": [
+        "Correctly identifies the acquisition_package journey as covering this use case",
+        "Explains the document checklist check (shows which docs are completed/pending)",
+        "Explains the revision flow (SOW v2 with updated requirements)",
+        "Explains the finalize step (validates completeness, changes package status)",
+        "Uses the correct internal ALB URL",
+        "Does NOT hardcode credentials",
+        "Mentions the /workflows page for checklist verification"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Run a full visual regression on everything including the acquisition package lifecycle, and upload to S3. I need to see intake through export tested end to end.",
+      "expected_output": "Runs the orchestrator with --journeys all --upload-s3 (which now includes acquisition_package). Lists all 7 journeys: login, home, chat, admin, documents, responsive, acquisition_package. Warns that the acquisition_package journey is significantly longer (7 chat turns, 10+ minutes) and more expensive. Points to /admin/e2e-judge dashboard for results.",
+      "files": [],
+      "assertions": [
+        "Uses --journeys all --upload-s3 flags",
+        "Lists acquisition_package as one of the available journeys",
+        "Mentions the acquisition_package journey covers the full lifecycle (intake → export)",
+        "Uses the correct internal ALB URL",
+        "Does NOT hardcode credentials",
+        "Warns about longer runtime or higher cost for the acquisition_package journey",
+        "Points user to /admin/e2e-judge dashboard for results"
+      ]
+    }
+  ]
+}

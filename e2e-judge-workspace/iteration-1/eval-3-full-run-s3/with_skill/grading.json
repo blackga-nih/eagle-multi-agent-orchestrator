@@ -1,0 +1,68 @@
+{
+  "expectations": [
+    {
+      "text": "Uses --journeys all to cover all pages",
+      "passed": true,
+      "evidence": "Command shows '--journeys all' and explanation: 'Runs every registered journey: login, home, chat, admin, documents, responsive'"
+    },
+    {
+      "text": "Includes --upload-s3 flag for S3 upload",
+      "passed": true,
+      "evidence": "Command shows '--upload-s3' and explanation: 'uploads the results JSON, markdown report, and all screenshots to the S3 eval bucket'"
+    },
+    {
+      "text": "Mentions the /admin/e2e-judge dashboard page for viewing results",
+      "passed": false,
+      "evidence": "Response mentions 'the dashboard reads [latest.json] to display the most recent run' but never explicitly names the '/admin/e2e-judge' route. The user needs to know WHERE to navigate — a generic 'dashboard' reference is insufficient."
+    },
+    {
+      "text": "Lists all available journeys (login, home, chat, admin, documents, responsive)",
+      "passed": true,
+      "evidence": "Flags table: 'Runs every registered journey: login, home, chat, admin, documents, responsive' — all 6 listed by name"
+    },
+    {
+      "text": "Mentions approximate screenshot count and cost for a full run",
+      "passed": true,
+      "evidence": "'Approximate run characteristics' table: 'Total screenshots: ~30-40' and 'Cost (Sonnet vision judge): ~$0.16 for fresh evaluations; $0 for cache hits'"
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 1,
+    "total": 5,
+    "pass_rate": 0.8
+  },
+  "timing": {
+    "executor_duration_seconds": 101.8,
+    "total_duration_seconds": 101.8
+  },
+  "claims": [
+    {
+      "claim": "S3 bucket is eagle-eval-artifacts-695681773636-dev",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Matches the pattern from infrastructure/cdk-eagle/config/environments.ts and the plan"
+    },
+    {
+      "claim": "Haiku app cost ~$0.008 for chat interactions",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Reasonable estimate for 1-2 chat turns with Haiku 4.5 at $0.001/1K tokens"
+    },
+    {
+      "claim": "Runtime is 3-5 minutes for full run",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Reasonable for 30-40 screenshots with Playwright navigation + Bedrock API calls"
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Mentions the /admin/e2e-judge dashboard page for viewing results",
+        "reason": "This failed — the skill should instruct the model to explicitly mention the dashboard URL '/admin/e2e-judge' when --upload-s3 is used. Add this to the SKILL.md output format section."
+      }
+    ],
+    "overall": "Good assertions. The dashboard URL failure is a real skill gap — the SKILL.md should specify that when S3 upload is used, the response should point the user to the specific dashboard route."
+  }
+}

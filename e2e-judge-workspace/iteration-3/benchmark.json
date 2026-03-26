@@ -1,0 +1,165 @@
+{
+  "metadata": {
+    "skill_name": "e2e-judge",
+    "skill_path": ".claude/skills/e2e-judge/SKILL.md",
+    "executor_model": "claude-opus-4-6",
+    "analyzer_model": "claude-opus-4-6",
+    "timestamp": "2026-03-26T06:30:00Z",
+    "evals_run": [
+      "eval-1-explicit-run",
+      "eval-2-implicit-visual-check",
+      "eval-3-full-run-s3",
+      "eval-4-acquisition-lifecycle",
+      "eval-5-checklist-revision-finalize",
+      "eval-6-full-regression-with-package"
+    ],
+    "runs_per_configuration": 1,
+    "iteration": 3
+  },
+  "configurations": {
+    "with_skill": {
+      "label": "With e2e-judge skill (iteration 3)",
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "per_eval": {
+          "eval-1-explicit-run": 1.0,
+          "eval-2-implicit-visual-check": 1.0,
+          "eval-3-full-run-s3": 1.0,
+          "eval-4-acquisition-lifecycle": 1.0,
+          "eval-5-checklist-revision-finalize": 1.0,
+          "eval-6-full-regression-with-package": 1.0
+        }
+      },
+      "time_seconds": {
+        "mean": 112.1,
+        "stddev": 31.5,
+        "per_eval": {
+          "eval-1-explicit-run": 159.1,
+          "eval-2-implicit-visual-check": 100.6,
+          "eval-3-full-run-s3": 83.4,
+          "eval-4-acquisition-lifecycle": 151.3,
+          "eval-5-checklist-revision-finalize": 96.1,
+          "eval-6-full-regression-with-package": 82.2
+        }
+      },
+      "tokens": {
+        "mean": 28126,
+        "stddev": 9552,
+        "per_eval": {
+          "eval-1-explicit-run": 45710,
+          "eval-2-implicit-visual-check": 16987,
+          "eval-3-full-run-s3": 17094,
+          "eval-4-acquisition-lifecycle": 32066,
+          "eval-5-checklist-revision-finalize": 28198,
+          "eval-6-full-regression-with-package": 27702
+        }
+      }
+    }
+  },
+  "runs": [
+    {
+      "eval_id": "eval-1-explicit-run",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 8,
+      "failed": 0,
+      "total": 8,
+      "time_seconds": 159.1,
+      "tokens": 45710,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-2-implicit-visual-check",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 7,
+      "failed": 0,
+      "total": 7,
+      "time_seconds": 100.6,
+      "tokens": 16987,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-3-full-run-s3",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 9,
+      "failed": 0,
+      "total": 9,
+      "time_seconds": 83.4,
+      "tokens": 17094,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-4-acquisition-lifecycle",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 10,
+      "failed": 0,
+      "total": 10,
+      "time_seconds": 151.3,
+      "tokens": 32066,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-5-checklist-revision-finalize",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 7,
+      "failed": 0,
+      "total": 7,
+      "time_seconds": 96.1,
+      "tokens": 28198,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-6-full-regression-with-package",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 7,
+      "failed": 0,
+      "total": 7,
+      "time_seconds": 82.2,
+      "tokens": 27702,
+      "failed_assertions": []
+    }
+  ],
+  "run_summary": {
+    "overall_pass_rate": 1.0,
+    "total_passed": 48,
+    "total_failed": 0,
+    "total_assertions": 48,
+    "avg_time_seconds": 112.1,
+    "avg_tokens": 28126
+  },
+  "comparison_to_iteration_2": {
+    "pass_rate": "100% → 100% (maintained)",
+    "assertions": "23 → 48 (+25 new, covering acquisition package lifecycle)",
+    "evals": "3 → 6 (+3 new evals for acquisition_package journey)",
+    "failed": "0 → 0",
+    "new_evals": [
+      "eval-4-acquisition-lifecycle: Full UC-1 lifecycle test (10 assertions)",
+      "eval-5-checklist-revision-finalize: Checklist + revision + finalize flow (7 assertions)",
+      "eval-6-full-regression-with-package: Full regression including acquisition_package (7 assertions)"
+    ],
+    "new_assertions": [
+      "Uses --journeys acquisition_package flag (3 evals)",
+      "Explains journey covers intake, doc generation, checklist, revision, finalize, export (3 evals)",
+      "Mentions /workflows page for checklist verification (3 evals)",
+      "Mentions document revision (SOW v2) (2 evals)",
+      "Mentions package finalization (2 evals)",
+      "Mentions package export as ZIP (1 eval)",
+      "Warns about longer runtime for acquisition_package (2 evals)",
+      "Lists acquisition_package in available journeys (2 evals)",
+      "Eval 3 now expects 7 journeys listed (was 6)"
+    ]
+  },
+  "notes": [
+    "100% pass rate across all 48 assertions (up from 23 in iteration 2).",
+    "3 new evals added for the acquisition_package journey covering full UC-1 lifecycle.",
+    "Eval 3 (full-run-s3) updated: now expects 7 journeys listed (added acquisition_package) and warns about extended runtime.",
+    "Token usage varies: evals 4-6 use ~28-32K tokens (more complex acquisition package explanation) vs evals 1-3 at ~17-46K.",
+    "Average time per eval: 112s (vs 189s in iteration 2 — less thorough individual responses but more evals)."
+  ]
+}

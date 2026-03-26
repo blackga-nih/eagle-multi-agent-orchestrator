@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Uses --journeys all --upload-s3 flags",
+      "passed": true,
+      "evidence": "Lines 9-10 show the command with '--journeys all' and '--upload-s3' flags in the bash code block."
+    },
+    {
+      "text": "Lists acquisition_package as one of the available journeys",
+      "passed": true,
+      "evidence": "Line 34 in the 'All 7 Available Journeys' table lists '**acquisition_package**' as journey #7 with description 'Full UC-1 acquisition package lifecycle from intake through export'."
+    },
+    {
+      "text": "Mentions the acquisition_package journey covers the full lifecycle (intake -> export)",
+      "passed": true,
+      "evidence": "Lines 42-76 detail the acquisition_package journey across 6 phases: Intake, Document Generation, Document Checklist Check, Document Revision, Finalize Package, and Export. Line 42 states 'the entire UC-1 acquisition lifecycle end-to-end across 6 phases and 7 chat turns'."
+    },
+    {
+      "text": "Uses the correct internal ALB URL",
+      "passed": true,
+      "evidence": "Line 8: '--base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com' matches the canonical URL in SKILL.md and e2e_judge_orchestrator.py default."
+    },
+    {
+      "text": "Does NOT hardcode credentials",
+      "passed": true,
+      "evidence": "Lines 13-18 instruct using environment variables ('export EAGLE_TEST_EMAIL=...', 'export EAGLE_TEST_PASSWORD=...'). Line 13 explicitly states 'Auth credentials are read from environment variables -- never hardcode them'. Line 112 reiterates 'credentials are **never hardcoded** in the command or source code'."
+    },
+    {
+      "text": "Warns about longer runtime or higher cost for the acquisition_package journey",
+      "passed": true,
+      "evidence": "Lines 82-90 provide a 'Runtime Warning' section showing acquisition_package alone takes ~10-15 minutes and the full run takes ~20-30 minutes. Line 88 states 'The acquisition_package journey is the dominant cost in runtime.' Lines 96-106 provide a cost estimate table showing the full run costs ~$0.30+. Line 90 warns 'this is not a quick smoke test'."
+    },
+    {
+      "text": "Points user to /admin/e2e-judge dashboard for results",
+      "passed": true,
+      "evidence": "Lines 129-135 under 'Viewing Results' section explicitly direct the user to '/admin/e2e-judge' described as 'the E2E Judge dashboard on the admin panel, which renders the uploaded results with screenshot thumbnails, pass/fail verdicts, confidence scores, and UI quality ratings'."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 82.2,
+    "total_duration_seconds": 82.2
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "Perfect score. The response comprehensively covers all 7 assertions: it uses the correct CLI flags (--journeys all --upload-s3), lists all 7 journeys including acquisition_package, provides extensive detail on the acquisition_package lifecycle from intake through export across 6 phases, uses the correct internal ALB URL, instructs using environment variables for credentials (never hardcoded), includes both runtime and cost warnings for the acquisition_package journey, and directs users to the /admin/e2e-judge dashboard for viewing results."
+  }
+}

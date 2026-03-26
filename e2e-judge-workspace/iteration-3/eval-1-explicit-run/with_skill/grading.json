@@ -1,0 +1,58 @@
+{
+  "expectations": [
+    {
+      "text": "Uses the e2e_judge_orchestrator.py as the entry point",
+      "passed": true,
+      "evidence": "Line 7: 'python -m tests.e2e_judge_orchestrator' — uses e2e_judge_orchestrator as the entry point via module invocation."
+    },
+    {
+      "text": "Passes --journeys login,home,chat (exactly the 3 requested journeys)",
+      "passed": true,
+      "evidence": "Line 9: '--journeys login,home,chat' — exactly the three requested journeys, comma-separated."
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "passed": true,
+      "evidence": "Line 8: '--base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com' — contains the correct ALB hostname fragment."
+    },
+    {
+      "text": "Does NOT hardcode credentials — uses env vars or omits auth flags since user said they're set",
+      "passed": true,
+      "evidence": "Line 12: 'Since EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD are already set in your environment, the orchestrator will pick them up automatically. No --auth-email or --auth-password flags needed.' No credentials are hardcoded anywhere in the response."
+    },
+    {
+      "text": "Mentions pre-send screenshots (captured before each user message is sent)",
+      "passed": true,
+      "evidence": "Lines 66-67 (step 3, '03_pre_send_1') and lines 72 (step 9, '09_pre_send_2') describe capturing the input area before clicking send. Section 4.1 'Pre-Send Captures' (lines 82-84) explicitly explains: 'captures the input field before clicking send... creates a visual record of exactly what the user typed.'"
+    },
+    {
+      "text": "Mentions 30-second interval screenshots during streaming waits",
+      "passed": true,
+      "evidence": "Lines 68 (step 5, '05_a_interval_30s ... 05_d_interval_120s'): 'captures a screenshot every 30 seconds.' Section 4.2 '30-Second Interval Captures During Streaming' (lines 86-96) provides detailed explanation of the polling + capture loop with 30-second intervals."
+    },
+    {
+      "text": "Mentions expected output: results JSON, markdown report, and screenshots directory",
+      "passed": true,
+      "evidence": "Section 5 'Output Files' (lines 108-166) details all three: Section 5.1 'Results JSON' (lines 113-119) describes '{run-id}.json' and 'latest.json'; Section 5.2 'Markdown Report' (lines 122-127) describes '{run-id}-report.md'; Section 5.3 'Screenshots' (lines 129-157) describes the screenshots directory structure with all journey subfolders."
+    },
+    {
+      "text": "Includes cost estimate",
+      "passed": true,
+      "evidence": "Section 6 'Cost Estimate' (lines 169-201) provides a detailed breakdown: vision judge cost per screenshot (~$0.004), total range ($0.07-$0.10 for first run), EAGLE app cost (~$0.002), and total estimated cost. Includes a table of screenshot counts per journey."
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 159.1,
+    "total_duration_seconds": 159.1
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "The response passes all 8 assertions. It provides the correct command using e2e_judge_orchestrator with the exact three journeys requested, uses the correct ALB URL, avoids hardcoding credentials (relying on environment variables), thoroughly documents pre-send screenshots, 30-second interval screenshots, all expected output artifacts (JSON, markdown report, screenshots), and includes a detailed cost estimate with per-screenshot breakdown."
+  }
+}

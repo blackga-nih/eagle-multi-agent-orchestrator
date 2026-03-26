@@ -1,0 +1,39 @@
+{
+  "eval_id": 1,
+  "eval_name": "explicit-run",
+  "prompt": "Run the e2e judge against the deployed EAGLE app. Just do login, home, and chat journeys. I've set EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD in my env already.",
+  "assertions": [
+    {
+      "text": "Uses the e2e_judge_orchestrator.py as the entry point",
+      "type": "content_check"
+    },
+    {
+      "text": "Passes --journeys login,home,chat (exactly the 3 requested journeys)",
+      "type": "content_check"
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "type": "content_check"
+    },
+    {
+      "text": "Does NOT hardcode credentials — uses env vars or omits auth flags since user said they're set",
+      "type": "content_check"
+    },
+    {
+      "text": "Mentions pre-send screenshots (captured before each user message is sent)",
+      "type": "content_check"
+    },
+    {
+      "text": "Mentions 30-second interval screenshots during streaming waits",
+      "type": "content_check"
+    },
+    {
+      "text": "Mentions expected output: results JSON, markdown report, and screenshots directory",
+      "type": "content_check"
+    },
+    {
+      "text": "Includes cost estimate",
+      "type": "content_check"
+    }
+  ]
+}
