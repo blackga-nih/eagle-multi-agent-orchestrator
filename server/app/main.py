@@ -17,9 +17,12 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, HTTPException, Request, Header, Depends, WebSocket, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, List, Optional
+from starlette.websockets import WebSocketDisconnect
+from pydantic import BaseModel
+from typing import Dict, List, Optional, Any
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 import json
@@ -35,6 +38,9 @@ from .document_classification_service import classify_document, extract_text_pre
 from .document_export import export_document
 from .document_service import create_package_document_version
 from .document_store import get_document, list_package_documents
+from .document_key_utils import is_allowed_document_key, extract_package_document_ref
+from .spreadsheet_edit_service import extract_xlsx_preview_payload
+from .document_ai_edit_service import extract_docx_preview_payload
 from .routers.admin import router as admin_router
 from .routers.analytics import router as analytics_router
 from .routers.chat import EagleChatRequest, router as chat_router, set_sessions_ref as set_chat_sessions_ref, set_telemetry_ref as set_chat_telemetry_ref
@@ -51,8 +57,14 @@ from .routers.tenants import router as tenants_router
 from .routers.templates import router as templates_router, compat_router as templates_compat_router
 from .routers.user import router as user_router
 from .routers.workspaces import router as workspaces_router
-from .routers.dependencies import get_user_from_header
+from .routers.dependencies import get_user_from_header, get_session_context
+from .cognito_auth import UserContext, DEV_MODE
+from .config import auth as auth_config
+
+REQUIRE_AUTH = auth_config.require_auth
 from .routers.documents import _delete_upload, _get_upload, _put_upload
+from .auth import get_current_user
+from .admin_auth import get_admin_user, verify_tenant_admin
 from .streaming_routes import create_streaming_router
 from .package_store import get_package
 
@@ -122,7 +134,7 @@ async def request_timing_middleware(request: Request, call_next):
 
 
 # ── Error Webhook Exception Handlers ─────────────────────────────────
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 
 @app.exception_handler(HTTPException)
@@ -170,6 +182,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 subscription_service = SubscriptionService()
 admin_cost_service = AdminCostService()
 
+# ── S3 Configuration ─────────────────────────────────────────────────
+_S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
+
 # ── In-memory session store (fallback when persistent sessions disabled)
 SESSIONS: Dict[str, List[dict]] = {}
 set_chat_sessions_ref(SESSIONS)
@@ -185,24 +200,6 @@ def _log_telemetry(entry: dict):
     entry.setdefault("timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     TELEMETRY_LOG.append(entry)
     logger.info(json.dumps(entry, default=str))
-
-
-# ── Auth Helpers ─────────────────────────────────────────────────────
-
-async def get_user_from_header(authorization: Optional[str] = Header(None)) -> UserContext:
-    """Extract user from Authorization header (EAGLE Cognito auth)."""
-    user, error = extract_user_context(authorization)
-    if REQUIRE_AUTH and user.user_id == "anonymous":
-        raise HTTPException(status_code=401, detail=error or "Authentication required")
-    return user
-
-
-def get_session_context(user: UserContext, session_id: Optional[str] = None) -> tuple:
-    """Get tenant_id, user_id, and session_id from user context."""
-    tenant_id = user.tenant_id
-    user_id = user.user_id
-    sid = session_id or str(uuid.uuid4())
-    return tenant_id, user_id, sid
 
 
 # ══════════════════════════════════════════════════════════════════════

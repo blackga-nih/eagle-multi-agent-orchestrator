@@ -241,6 +241,15 @@ function DocumentResultCard({
   const wordCount = data.word_count as number | undefined;
   const version = data.version as number | undefined;
   const s3Key = String(data.s3_key ?? '');
+  const source = data.source as string | undefined;
+  const templatePath = data.template_path as string | undefined;
+  const templateProvenance = data.template_provenance as { template_id?: string; template_source?: string } | undefined;
+
+  // Derive template display info
+  const templateDisplay = templateProvenance?.template_id || templatePath || source || 'Built-in';
+  const templateLabel = templateDisplay.includes('/')
+    ? templateDisplay.split('/').pop()
+    : templateDisplay.replace(/_/g, ' ');
 
   const handleOpen = () => {
     const docId = encodeURIComponent(s3Key || (data.document_id as string) || title);
@@ -261,6 +270,8 @@ function DocumentResultCard({
       generated_at: data.generated_at as string | undefined,
       s3_key: s3Key || undefined,
       s3_location: data.s3_location as string | undefined,
+      source,
+      template_path: templatePath,
     };
     try {
       sessionStorage.setItem(`doc-content-${docId}`, JSON.stringify(docInfo));
@@ -282,6 +293,11 @@ function DocumentResultCard({
           {version ? `v${version}` : 'Draft'}
           {wordCount ? ` · ${wordCount.toLocaleString()} words` : ''}
         </p>
+        {templateDisplay && (
+          <p className="text-[10px] text-gray-400 mt-1 truncate" title={templateDisplay}>
+            Template: {templateLabel}
+          </p>
+        )}
       </div>
       <button
         type="button"

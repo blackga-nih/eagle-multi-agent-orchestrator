@@ -17,6 +17,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from .create_document_support import (
     _apply_sow_clear_edits,
+    _append_provenance_metadata,
     _augment_document_data_from_context,
     _default_output_format_for_doc_type,
     _generate_acquisition_plan,
@@ -212,6 +213,17 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
         }
         if result and hasattr(result, "template_path") and result.template_path:
             template_provenance["template_id"] = result.template_path
+
+    # Inject provenance metadata section into markdown content
+    content = _append_provenance_metadata(
+        content,
+        template_provenance,
+        source,
+        datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+    )
+    # Update content_to_store for markdown files (DOCX/XLSX use result.content binary)
+    if not (result and result.success and file_type in ("docx", "xlsx")):
+        content_to_store = content
 
     if package_id:
         from app.document_service import create_package_document_version

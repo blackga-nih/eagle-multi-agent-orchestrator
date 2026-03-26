@@ -76,6 +76,8 @@ export interface DocumentInfo {
   generated_at?: string;
   s3_key?: string;
   s3_location?: string;
+  source?: string;
+  template_path?: string;
   preview_mode?: 'docx_blocks' | 'xlsx_grid' | 'text_fallback' | 'none' | null;
   preview_blocks?: DocxPreviewBlock[];
   preview_sheets?: XlsxPreviewSheet[];
