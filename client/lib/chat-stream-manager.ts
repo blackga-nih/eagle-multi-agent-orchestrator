@@ -138,7 +138,11 @@ export class ChatStreamManager {
 
         // Fire-and-forget the async work
         this._runStream(requestId, streamingMsgId, params, abortController).catch((err) => {
-            if (err instanceof Error && err.name === 'AbortError') return;
+            if (err instanceof Error && err.name === 'AbortError') {
+                // User clicked stop — transition state back to idle
+                dispatch({ type: 'generation/complete', sessionId, requestId });
+                return;
+            }
             dispatch({ type: 'generation/error', sessionId, requestId, error: err instanceof Error ? err.message : 'Unknown error' });
         }).finally(() => {
             this.requests.delete(requestId);
