@@ -518,7 +518,7 @@ def _update_document_metadata(
         return
 
     try:
-        table = _get_table()
+        table = get_table()
         table.update_item(
             Key={
                 "PK": f"DOCUMENT#{tenant_id}",

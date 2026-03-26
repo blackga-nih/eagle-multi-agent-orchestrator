@@ -22,9 +22,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
+import io
 import uuid
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import time
 import logging
@@ -35,16 +36,32 @@ from contextlib import asynccontextmanager
 from .subscription_service import SubscriptionService
 from .admin_cost_service import AdminCostService
 from .document_classification_service import classify_document, extract_text_preview
-from .document_export import export_document
+from .document_export import ExportDependencyError, export_document
 from .document_service import create_package_document_version
-from .document_store import get_document, list_package_documents
+from .document_store import get_document
 from .document_key_utils import is_allowed_document_key, extract_package_document_ref
+from .doc_type_registry import normalize_doc_type
 from .spreadsheet_edit_service import extract_xlsx_preview_payload
-from .document_ai_edit_service import extract_docx_preview_payload
+from .spreadsheet_edit_service import save_xlsx_preview_edits
+from .document_ai_edit_service import extract_docx_preview_payload, save_docx_preview_edits
 from .routers.admin import router as admin_router
+from .routers.admin import (
+    GENERIC_ANALYTICS_ERROR,
+    _get_result_error,
+    _sanitize_result_error,
+    cost_service,
+    get_dashboard_stats,
+    get_top_users,
+    get_user_stats,
+)
 from .routers.analytics import router as analytics_router
-from .routers.chat import EagleChatRequest, router as chat_router, set_sessions_ref as set_chat_sessions_ref, set_telemetry_ref as set_chat_telemetry_ref
+from .routers.chat import (
+    router as chat_router,
+    set_sessions_ref as set_chat_sessions_ref,
+    set_telemetry_ref as set_chat_telemetry_ref,
+)
 from .routers.documents import router as documents_router, set_sessions_ref as set_documents_sessions_ref
+from .routers.documents import GENERIC_EDIT_ERROR
 from .routers.feedback import router as feedback_router
 from .routers.health import router as health_router
 from .routers.mcp import router as mcp_router
@@ -58,18 +75,40 @@ from .routers.templates import router as templates_router, compat_router as temp
 from .routers.user import router as user_router
 from .routers.workspaces import router as workspaces_router
 from .routers.dependencies import get_user_from_header, get_session_context
-from .cognito_auth import UserContext, DEV_MODE
+from .cognito_auth import UserContext, DEV_MODE, extract_user_context
 from .config import auth as auth_config
 
 REQUIRE_AUTH = auth_config.require_auth
-from .routers.documents import _delete_upload, _get_upload, _put_upload
+from . import feedback_store
 from .auth import get_current_user
 from .admin_auth import get_admin_user, verify_tenant_admin
+from .admin_service import calculate_cost, check_rate_limit, record_request_cost
+from .models import SubscriptionTier
+from .package_context_service import resolve_context, set_active_package
+from .session_store import (
+    add_message,
+    create_session as eagle_create_session,
+    delete_session as eagle_delete_session,
+    get_messages,
+    get_messages_for_anthropic,
+    get_session as eagle_get_session,
+    get_tenant_usage_overview,
+    get_usage_summary,
+    list_sessions as eagle_list_sessions,
+    list_tenant_sessions,
+    update_session as eagle_update_session,
+)
 from .streaming_routes import create_streaming_router
+from .strands_agentic_service import EAGLE_TOOLS, MODEL, sdk_query
 from .package_store import get_package
 
 from .error_webhook import notify_error, close_webhook_client
-from .teams_notifier import notify_startup, notify_suspicious, close_notifier_client
+from .teams_notifier import (
+    close_notifier_client,
+    notify_feedback,
+    notify_startup,
+    notify_suspicious,
+)
 from .daily_scheduler import start_scheduler, stop_scheduler
 
 # ── Logging ──────────────────────────────────────────────────────────
@@ -181,9 +220,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # ── Initialize existing services ─────────────────────────────────────
 subscription_service = SubscriptionService()
 admin_cost_service = AdminCostService()
+GENERIC_TRACE_ERROR = "Trace data is temporarily unavailable."
 
 # ── S3 Configuration ─────────────────────────────────────────────────
 _S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
+USE_PERSISTENT_SESSIONS = os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true"
 
 # ── In-memory session store (fallback when persistent sessions disabled)
 SESSIONS: Dict[str, List[dict]] = {}

@@ -558,7 +558,6 @@ async def assign_upload_to_package(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Assign an uploaded document to an acquisition package."""
-    import boto3
     from botocore.exceptions import ClientError
 
     get_upload = _resolve_main_override("_get_upload", _get_upload)

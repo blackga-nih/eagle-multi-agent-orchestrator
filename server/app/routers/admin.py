@@ -11,7 +11,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -102,7 +102,6 @@ def _apply_json_patch(obj: dict, patch: list) -> dict:
 
 def _regenerate_html_arrays(matrix: dict) -> None:
     """Replace THRESHOLDS and TYPES JS arrays in contract-requirements-matrix.html."""
-    import json as _json
     import re as _re
 
     html_path = Path(__file__).resolve().parent.parent.parent.parent / "contract-requirements-matrix.html"

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
 from typing import Any
 
 from boto3.dynamodb.conditions import Attr, Key

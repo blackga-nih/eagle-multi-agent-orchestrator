@@ -11,7 +11,6 @@ GSI (GSI1):
     GSI1PK:  TENANT#{tenant_id}
     GSI1SK:  DOCUMENT#{package_id}#{doc_type}#{version:04d}
 """
-import os
 import uuid
 import logging
 from datetime import datetime

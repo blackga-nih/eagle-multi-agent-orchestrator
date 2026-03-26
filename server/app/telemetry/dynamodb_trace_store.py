@@ -13,7 +13,7 @@ from typing import Optional, List, Dict, Any
 
 from botocore.exceptions import ClientError, BotoCoreError
 
-from ..db_client import get_table, ttl_timestamp
+from ..db_client import get_table
 
 logger = logging.getLogger("eagle.telemetry.store")
 

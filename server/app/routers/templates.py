@@ -6,7 +6,6 @@ standardization, clause references, and compliance gap analysis.
 """
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException

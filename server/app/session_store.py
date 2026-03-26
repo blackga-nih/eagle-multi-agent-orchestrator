@@ -14,7 +14,7 @@ from decimal import Decimal
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError, BotoCoreError
 
-from .db_client import get_table, item_to_dict, now_iso, ttl_timestamp
+from .db_client import get_table
 
 logger = logging.getLogger("eagle.sessions")
 
