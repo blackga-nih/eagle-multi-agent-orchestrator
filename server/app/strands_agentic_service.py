@@ -56,7 +56,7 @@ if __package__ is None or __package__ == "":
         importlib.import_module("app")
     __package__ = "app"
 
-from eagle_skill_constants import AGENTS, SKILLS, PLUGIN_CONTENTS
+from eagle_skill_constants import AGENTS, COMMANDS, SKILLS, PLUGIN_CONTENTS
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
 from .tools.web_fetch import exec_web_fetch
 from .tools.web_search import exec_web_search
@@ -3461,10 +3461,27 @@ def _build_supervisor_prompt_body(
         supervisor_entry = AGENTS.get("supervisor")
         base_prompt = supervisor_entry["body"].strip() if supervisor_entry else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
 
+    # Build tier-gated slash commands block
+    _tier_rank = {"basic": 0, "advanced": 1, "premium": 2}
+    _user_rank = _tier_rank.get(tier, 0)
+    cmd_lines = "\n".join(
+        f"  {cmd['command']}: {cmd['description']} → routes to {cmd.get('routesTo', 'supervisor')}"
+        for cmd in COMMANDS
+        if _tier_rank.get(cmd.get("tier", "basic"), 0) <= _user_rank
+        and cmd.get("routesTo") is not None  # skip client-only commands like /feedback
+    )
+
     return (
         f"{base_prompt}\n\n"
         f"--- ACTIVE SPECIALISTS ---\n"
         f"Available specialists for delegation:\n{agent_list}\n\n"
+        "--- AVAILABLE SLASH COMMANDS ---\n"
+        "Users may type these commands with a / prefix. When a message starts with a\n"
+        "recognized slash command, treat it as a HARD ROUTING DIRECTIVE — immediately\n"
+        "invoke the indicated specialist without re-asking about intent. You may still\n"
+        "ask for missing data fields, but never override the user's explicit command choice.\n"
+        "Natural language requests (without / prefix) continue to use semantic routing.\n\n"
+        f"{cmd_lines}\n\n"
         "Progressive Disclosure (how to find information):\n"
         "  You have layered access to skills and data. Use the lightest layer that answers the question:\n"
         "  Layer 1 — System prompt hints (you already have short descriptions above).\n"

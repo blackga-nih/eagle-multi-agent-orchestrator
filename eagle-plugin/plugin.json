@@ -23,12 +23,7 @@
     "admin-manager",
     "admin-diagnostics"
   ],
-  "commands": [
-    "intake",
-    "document",
-    "search",
-    "status"
-  ],
+  "commands": "command-registry.json",
   "data": {
     "far-database": { "file": "data/far-database.json" },
     "thresholds": { "file": "data/thresholds.json" },

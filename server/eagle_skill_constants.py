@@ -1,14 +1,18 @@
-"""Auto-discovery loader for EAGLE agents and skills.
+"""Auto-discovery loader for EAGLE agents, skills, and commands.
 
 Walks eagle-plugin/agents/*/agent.md and eagle-plugin/skills/*/SKILL.md,
-parses YAML frontmatter, and exports unified dicts.
+parses YAML frontmatter, and exports unified dicts.  Also loads the
+command registry from eagle-plugin/command-registry.json.
 
 Exports:
     AGENTS          — dict keyed by directory name for agents
     SKILLS          — dict keyed by directory name for skills
     PLUGIN_CONTENTS — unified dict (agents + skills)
     SKILL_CONSTANTS — dict mapping name -> body content
+    COMMANDS        — list of command dicts from command-registry.json
+    COMMAND_PROMPTS — dict mapping command id -> .md body (rich commands only)
 """
+import json
 import os
 import re
 
@@ -143,6 +147,33 @@ PLUGIN_CONTENTS: dict = {**AGENTS, **SKILLS}
 SKILL_CONSTANTS: dict = {}
 for key, entry in PLUGIN_CONTENTS.items():
     SKILL_CONSTANTS[key] = entry["body"]
+
+# ── Command registry ─────────────────────────────────────────────────
+# Loads eagle-plugin/command-registry.json — the single source of truth
+# for all slash commands (metadata, routing, previews).
+
+_COMMANDS_FILE = os.path.join(_PLUGIN_DIR, "command-registry.json")
+
+
+def _load_commands() -> list:
+    if not os.path.isfile(_COMMANDS_FILE):
+        return []
+    with open(_COMMANDS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+COMMANDS: list = _load_commands()
+
+# Load full .md body for commands that have a promptFile reference.
+COMMAND_PROMPTS: dict = {}
+for _cmd in COMMANDS:
+    _pf = _cmd.get("promptFile")
+    if _pf:
+        _fp = os.path.join(_PLUGIN_DIR, _pf)
+        if os.path.isfile(_fp):
+            _content = _read(_fp)
+            _, _body = _parse_frontmatter(_content)
+            COMMAND_PROMPTS[_cmd["id"]] = _body
 
 # ── Convenience exports (backward compat) ────────────────────────────
 

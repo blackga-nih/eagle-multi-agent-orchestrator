@@ -65,6 +65,7 @@ from .routers.documents import router as documents_router, set_sessions_ref as s
 from .routers.documents import GENERIC_EDIT_ERROR
 from .routers.feedback import router as feedback_router
 from .routers.health import router as health_router
+from .routers.commands import router as commands_router
 from .routers.mcp import router as mcp_router
 from .routers.packages import router as packages_router
 from .routers.packages import compat_router as packages_compat_router
@@ -2921,6 +2922,7 @@ streaming_router = create_streaming_router(subscription_service)
 app.include_router(admin_router)
 app.include_router(analytics_router)
 app.include_router(chat_router)
+app.include_router(commands_router)
 app.include_router(documents_router)
 app.include_router(feedback_router)
 app.include_router(health_router)

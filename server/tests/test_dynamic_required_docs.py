@@ -130,7 +130,7 @@ class TestComputeRequiredDocs:
 class TestCreatePackageWithDynamicDocs:
     """Test create_package with dynamic docs parameters."""
 
-    @patch("app.package_store._get_table")
+    @patch("app.package_store.get_table")
     @patch("app.package_store._next_package_id", return_value="PKG-2026-0001")
     def test_create_with_method_and_type_uses_dynamic_docs(self, mock_id, mock_table):
         """When acquisition_method and contract_type provided, use compliance matrix."""
@@ -154,7 +154,7 @@ class TestCreatePackageWithDynamicDocs:
         assert result.get("acquisition_method") == "negotiated"
         assert result.get("contract_type") == "ffp"
 
-    @patch("app.package_store._get_table")
+    @patch("app.package_store.get_table")
     @patch("app.package_store._next_package_id", return_value="PKG-2026-0001")
     def test_create_without_method_falls_back_to_static(self, mock_id, mock_table):
         """Without method/type, should use static pathway-based docs."""
@@ -177,7 +177,7 @@ class TestCreatePackageWithDynamicDocs:
 class TestUpdatePackageRecalculation:
     """Test that update_package recalculates docs on method/type change."""
 
-    @patch("app.package_store._get_table")
+    @patch("app.package_store.get_table")
     @patch("app.package_store.get_package")
     def test_update_acquisition_method_recalculates_docs(self, mock_get, mock_table):
         """Changing acquisition_method should trigger doc recalculation."""
@@ -207,7 +207,7 @@ class TestUpdatePackageRecalculation:
         # update_item should have been called
         mock_table.return_value.update_item.assert_called_once()
 
-    @patch("app.package_store._get_table")
+    @patch("app.package_store.get_table")
     @patch("app.package_store.get_package")
     def test_update_estimated_value_recalculates_docs(self, mock_get, mock_table):
         """Changing estimated_value should trigger doc recalculation."""
@@ -275,7 +275,7 @@ class TestDescriptiveTitle:
         )
         assert "[GSA]" in result
 
-    @patch("app.package_store._get_table")
+    @patch("app.package_store.get_table")
     @patch("app.package_store._next_package_id", return_value="PKG-2026-0001")
     def test_original_title_stored(self, mock_id, mock_table):
         """create_package should store the original title."""

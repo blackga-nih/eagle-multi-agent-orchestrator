@@ -99,7 +99,7 @@ class TestZipEndpoint:
 
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                with patch("app.main.get_package", return_value=None):
+                with patch("app.package_store.get_package", return_value=None):
                     response = await client.get(
                         "/api/packages/PKG-9999/export/zip",
                         headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
@@ -116,8 +116,8 @@ class TestZipEndpoint:
 
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                with patch("app.main.get_package", return_value={"title": "Test"}), \
-                     patch("app.main.list_package_documents", return_value=[]):
+                with patch("app.package_store.get_package", return_value={"title": "Test"}), \
+                     patch("app.document_store.list_package_documents", return_value=[]):
                     response = await client.get(
                         "/api/packages/PKG-0001/export/zip",
                         headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
@@ -134,21 +134,28 @@ class TestZipEndpoint:
 
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                with patch("app.main.get_package", return_value={"title": "Test"}), \
-                     patch("app.main.list_package_documents", return_value=[
-                         {"doc_type": "sow", "title": "SOW", "content": "# SOW\nContent"}
-                     ]), \
-                     patch("app.document_export.export_package_zip", return_value={
-                         "data": b"PK\x03\x04fake",
-                         "filename": "test.zip",
-                         "content_type": "application/zip",
-                         "size_bytes": 10,
-                     }):
-                    response = await client.get(
-                        "/api/packages/PKG-0001/export/zip",
-                        headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
-                    )
-                    assert response.status_code == 200
+                import app.main as _main_mod
+                _main_mod.get_package = lambda *a, **kw: {"title": "Test"}
+                _main_mod.list_package_documents = lambda *a, **kw: [
+                    {"doc_type": "sow", "title": "SOW", "content": "# SOW\nContent"}
+                ]
+                try:
+                    with patch("app.document_export.export_package_zip", return_value={
+                             "data": b"PK\x03\x04fake",
+                             "filename": "test.zip",
+                             "content_type": "application/zip",
+                             "size_bytes": 10,
+                         }):
+                        response = await client.get(
+                            "/api/packages/PKG-0001/export/zip",
+                            headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
+                        )
+                        assert response.status_code == 200
+                finally:
+                    if hasattr(_main_mod, "get_package"):
+                        delattr(_main_mod, "get_package")
+                    if hasattr(_main_mod, "list_package_documents"):
+                        delattr(_main_mod, "list_package_documents")
                     assert response.headers["content-type"] == "application/zip"
 
         asyncio.run(_run())
