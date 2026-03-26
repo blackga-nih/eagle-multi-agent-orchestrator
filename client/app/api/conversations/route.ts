@@ -26,20 +26,22 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  try {
-    // Try backend first
-    const response = await fetch(`${BACKEND_URL}/conversations?user_id=${userId}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(3000),
-    });
+  // Only try backend if AGENTCORE_URL is explicitly configured
+  if (process.env.AGENTCORE_URL) {
+    try {
+      const response = await fetch(`${BACKEND_URL}/conversations?user_id=${userId}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(3000),
+      });
 
-    if (response.ok) {
-      const data = await response.json();
-      return NextResponse.json(data);
+      if (response.ok) {
+        const data = await response.json();
+        return NextResponse.json(data);
+      }
+    } catch {
+      // Backend unavailable - use in-memory store
     }
-  } catch {
-    // Backend unavailable - use in-memory store
   }
 
   // Return from in-memory store (development mode)
@@ -83,21 +85,23 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    try {
-      // Try backend first
-      const response = await fetch(`${BACKEND_URL}/conversations`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(5000),
-      });
+    // Only try backend if AGENTCORE_URL is explicitly configured
+    if (process.env.AGENTCORE_URL) {
+      try {
+        const response = await fetch(`${BACKEND_URL}/conversations`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(5000),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        return NextResponse.json(data);
+        if (response.ok) {
+          const data = await response.json();
+          return NextResponse.json(data);
+        }
+      } catch {
+        // Backend unavailable - use in-memory store
       }
-    } catch {
-      // Backend unavailable - use in-memory store
     }
 
     // Update in-memory store (development mode)

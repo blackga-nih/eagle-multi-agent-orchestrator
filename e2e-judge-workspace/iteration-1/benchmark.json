@@ -1,0 +1,93 @@
+{
+  "metadata": {
+    "skill_name": "e2e-judge",
+    "skill_path": ".claude/skills/e2e-judge/SKILL.md",
+    "executor_model": "claude-opus-4-6",
+    "analyzer_model": "claude-opus-4-6",
+    "timestamp": "2026-03-26T04:48:44Z",
+    "evals_run": ["eval-1-explicit-run", "eval-2-implicit-visual-check", "eval-3-full-run-s3"],
+    "runs_per_configuration": 1
+  },
+  "configurations": {
+    "with_skill": {
+      "label": "With e2e-judge skill",
+      "pass_rate": {
+        "mean": 0.93,
+        "stddev": 0.09,
+        "per_eval": {
+          "eval-1-explicit-run": 1.0,
+          "eval-2-implicit-visual-check": 1.0,
+          "eval-3-full-run-s3": 0.8
+        }
+      },
+      "time_seconds": {
+        "mean": 98.9,
+        "stddev": 7.5,
+        "per_eval": {
+          "eval-1-explicit-run": 88.7,
+          "eval-2-implicit-visual-check": 106.2,
+          "eval-3-full-run-s3": 101.8
+        }
+      },
+      "tokens": {
+        "mean": 19127,
+        "stddev": 1578,
+        "per_eval": {
+          "eval-1-explicit-run": 16945,
+          "eval-2-implicit-visual-check": 19783,
+          "eval-3-full-run-s3": 20652
+        }
+      }
+    }
+  },
+  "runs": [
+    {
+      "eval_id": "eval-1-explicit-run",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 6,
+      "failed": 0,
+      "total": 6,
+      "time_seconds": 88.7,
+      "tokens": 16945,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-2-implicit-visual-check",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 5,
+      "failed": 0,
+      "total": 5,
+      "time_seconds": 106.2,
+      "tokens": 19783,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-3-full-run-s3",
+      "config": "with_skill",
+      "pass_rate": 0.8,
+      "passed": 4,
+      "failed": 1,
+      "total": 5,
+      "time_seconds": 101.8,
+      "tokens": 20652,
+      "failed_assertions": [
+        "Mentions the /admin/e2e-judge dashboard page for viewing results"
+      ]
+    }
+  ],
+  "run_summary": {
+    "overall_pass_rate": 0.9375,
+    "total_passed": 15,
+    "total_failed": 1,
+    "total_assertions": 16,
+    "avg_time_seconds": 98.9,
+    "avg_tokens": 19127
+  },
+  "notes": [
+    "Eval 3 failed one assertion: the skill response mentions 'the dashboard' generically but does not specify the '/admin/e2e-judge' route explicitly. This is a gap in the SKILL.md — it should instruct the model to mention the dashboard URL when --upload-s3 is used.",
+    "No baseline (without_skill) runs were performed — this is a new skill with no prior version to compare against.",
+    "All evals used the with_skill configuration only. Implicit triggering (eval 2) worked correctly."
+  ]
+}

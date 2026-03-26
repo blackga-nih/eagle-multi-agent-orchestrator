@@ -1,0 +1,105 @@
+{
+  "metadata": {
+    "skill_name": "e2e-judge",
+    "skill_path": ".claude/skills/e2e-judge/SKILL.md",
+    "executor_model": "claude-opus-4-6",
+    "analyzer_model": "claude-opus-4-6",
+    "timestamp": "2026-03-26T05:15:00Z",
+    "evals_run": ["eval-1-explicit-run", "eval-2-implicit-visual-check", "eval-3-full-run-s3"],
+    "runs_per_configuration": 1,
+    "iteration": 2
+  },
+  "configurations": {
+    "with_skill": {
+      "label": "With e2e-judge skill (iteration 2)",
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "per_eval": {
+          "eval-1-explicit-run": 1.0,
+          "eval-2-implicit-visual-check": 1.0,
+          "eval-3-full-run-s3": 1.0
+        }
+      },
+      "time_seconds": {
+        "mean": 189.4,
+        "stddev": 9.0,
+        "per_eval": {
+          "eval-1-explicit-run": 176.8,
+          "eval-2-implicit-visual-check": 194.4,
+          "eval-3-full-run-s3": 197.1
+        }
+      },
+      "tokens": {
+        "mean": 40981,
+        "stddev": 1867,
+        "per_eval": {
+          "eval-1-explicit-run": 40563,
+          "eval-2-implicit-visual-check": 38930,
+          "eval-3-full-run-s3": 43450
+        }
+      }
+    }
+  },
+  "runs": [
+    {
+      "eval_id": "eval-1-explicit-run",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 8,
+      "failed": 0,
+      "total": 8,
+      "time_seconds": 176.8,
+      "tokens": 40563,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-2-implicit-visual-check",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 7,
+      "failed": 0,
+      "total": 7,
+      "time_seconds": 194.4,
+      "tokens": 38930,
+      "failed_assertions": []
+    },
+    {
+      "eval_id": "eval-3-full-run-s3",
+      "config": "with_skill",
+      "pass_rate": 1.0,
+      "passed": 8,
+      "failed": 0,
+      "total": 8,
+      "time_seconds": 197.1,
+      "tokens": 43450,
+      "failed_assertions": []
+    }
+  ],
+  "run_summary": {
+    "overall_pass_rate": 1.0,
+    "total_passed": 23,
+    "total_failed": 0,
+    "total_assertions": 23,
+    "avg_time_seconds": 189.4,
+    "avg_tokens": 40981
+  },
+  "comparison_to_iteration_1": {
+    "pass_rate": "93.75% → 100% (+6.25%)",
+    "assertions": "16 → 23 (+7 new, stricter)",
+    "failed": "1 → 0",
+    "fix_applied": "SKILL.md now instructs model to mention /admin/e2e-judge when --upload-s3 is used",
+    "new_assertions": [
+      "Correct internal ALB URL (3 evals)",
+      "No hardcoded credentials (3 evals)",
+      "Pre-send screenshots (2 evals)",
+      "30-second interval screenshots (3 evals)"
+    ]
+  },
+  "notes": [
+    "100% pass rate across all 23 assertions (up from 93.75% on 16 assertions in iteration 1).",
+    "The eval 3 /admin/e2e-judge dashboard failure from iteration 1 is now fixed.",
+    "New assertions verify correct ALB URL, no hardcoded credentials, and screenshot strategy details.",
+    "Token usage ~2x higher than iteration 1 (40K vs 19K avg) because responses are more thorough with screenshot strategy documentation."
+  ]
+}

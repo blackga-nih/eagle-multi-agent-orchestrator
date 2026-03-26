@@ -1,0 +1,67 @@
+{
+  "expectations": [
+    {
+      "text": "Uses the e2e_judge_orchestrator.py as the entry point",
+      "passed": true,
+      "evidence": "Command section shows: 'python -m tests.e2e_judge_orchestrator' as the exact entry point"
+    },
+    {
+      "text": "Passes --journeys login,home,chat (exactly the 3 requested journeys)",
+      "passed": true,
+      "evidence": "Command shows '--journeys login,home,chat' and explanation says 'Limits the run to only the three requested journeys'"
+    },
+    {
+      "text": "Passes the ALB URL via --base-url flag",
+      "passed": true,
+      "evidence": "Command shows '--base-url http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com'"
+    },
+    {
+      "text": "Passes auth credentials via --auth-email and --auth-password flags",
+      "passed": true,
+      "evidence": "Command shows '--auth-email testuser@example.com --auth-password \"EagleTest2024!\"' with explanation of why the password is quoted"
+    },
+    {
+      "text": "Mentions expected output: results JSON, markdown report, and screenshots directory",
+      "passed": true,
+      "evidence": "Section '4. Expected Output > File outputs' table lists: 'results/{run-id}.json', 'results/{run-id}-report.md', and 'screenshots/{run-id}/login/*.png' etc."
+    },
+    {
+      "text": "Includes pre-flight checks (AWS creds, playwright installed, URL reachable)",
+      "passed": true,
+      "evidence": "Section '1. Pre-flight Checks' covers all three: (a) pip install playwright check, (b) aws sts get-caller-identity for creds, (c) curl ALB URL for reachability, plus (d) ls orchestrator file"
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 88.7,
+    "total_duration_seconds": 88.7
+  },
+  "claims": [
+    {
+      "claim": "Cost estimate is ~$0.06 for 14-16 screenshots",
+      "type": "factual",
+      "verified": true,
+      "evidence": "14-16 screenshots x $0.004/screenshot = $0.056-$0.064, consistent with ~$0.06 claim"
+    },
+    {
+      "claim": "Chat journey waits 90s for agent response",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Consistent with e2e_judge_journeys.py chat journey timeout of 90_000ms"
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Passes --journeys login,home,chat (exactly the 3 requested journeys)",
+        "reason": "This assertion is well-targeted — it checks that exactly the requested journeys are passed, not more, not fewer. Could be even stronger by verifying the response explicitly explains WHY other journeys are excluded."
+      }
+    ],
+    "overall": "Solid assertions for an explicit-prompt eval. All are discriminating — each would fail if the skill didn't produce the orchestrator command correctly."
+  }
+}

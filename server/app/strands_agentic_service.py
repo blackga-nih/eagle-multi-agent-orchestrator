@@ -2936,6 +2936,7 @@ def _build_all_service_tools(
                                 "title": result.get("title", ""),
                                 "acquisition_method": result.get("acquisition_method"),
                                 "contract_type": result.get("contract_type"),
+                                "contract_vehicle": result.get("contract_vehicle"),
                             },
                         )
 
@@ -4002,6 +4003,10 @@ async def sdk_query_streaming(
         # generation (prevents the UI from appearing hung).
         _last_visible_yield = _time.perf_counter()
         _STALE_STATUS_INTERVAL = 8.0  # seconds
+        # Accumulate tool-input deltas and flush in batches to reduce
+        # SSE event count while still showing live progress.
+        _tool_input_buf = ""
+        _TOOL_INPUT_FLUSH_SIZE = 150  # chars
 
         while not _stream_done:
             if _pending_next is None:
@@ -4031,13 +4036,27 @@ async def sdk_query_streaming(
                 break
             _pending_next = None
 
-            # --- Reasoning / extended thinking ---
+            # --- Reasoning / extended thinking + tool input deltas ---
             raw_event = event.get("event", {})
             if isinstance(raw_event, dict):
                 delta = raw_event.get("contentBlockDelta", {}).get("delta", {})
                 reasoning_text = delta.get("reasoningContent", {}).get("text", "")
                 if reasoning_text:
                     yield {"type": "reasoning", "data": reasoning_text}
+                    continue
+                # Tool input delta — model composing tool parameters
+                tool_input_text = delta.get("toolUse", {}).get("input", "")
+                if tool_input_text and _current_tool_id:
+                    _tool_input_buf += tool_input_text
+                    if len(_tool_input_buf) >= _TOOL_INPUT_FLUSH_SIZE:
+                        yield {
+                            "type": "tool_input_delta",
+                            "tool_use_id": _current_tool_id,
+                            "delta": _tool_input_buf,
+                            "name": tools_called[-1] if tools_called else "",
+                        }
+                        _tool_input_buf = ""
+                        _last_visible_yield = _time.perf_counter()
                     continue
 
             # --- Text streaming ---
@@ -4049,14 +4068,20 @@ async def sdk_query_streaming(
                 continue
 
             # --- Tool use start ---
-            # Emit immediately for fast UX. Input is empty at this
-            # point (Strands hasn't finished streaming it). The real
-            # input arrives later via tool_input events pushed by the
-            # tool functions themselves through result_queue.
+            # Flush any buffered tool-input deltas from previous tool
+            # before switching to the new one.
             current_tool = event.get("current_tool_use")
             if current_tool and isinstance(current_tool, dict):
                 tool_id = current_tool.get("toolUseId", "")
                 if tool_id and tool_id != _current_tool_id:
+                    if _tool_input_buf and _current_tool_id:
+                        yield {
+                            "type": "tool_input_delta",
+                            "tool_use_id": _current_tool_id,
+                            "delta": _tool_input_buf,
+                            "name": tools_called[-1] if tools_called else "",
+                        }
+                        _tool_input_buf = ""
                     _current_tool_id = tool_id
                     tool_name = current_tool.get("name", "")
                     tools_called.append(tool_name)
@@ -4125,6 +4150,15 @@ async def sdk_query_streaming(
                     continue
 
             # --- Agent result (final event) ---
+            # Flush any remaining tool-input buffer
+            if _tool_input_buf and _current_tool_id:
+                yield {
+                    "type": "tool_input_delta",
+                    "tool_use_id": _current_tool_id,
+                    "delta": _tool_input_buf,
+                    "name": tools_called[-1] if tools_called else "",
+                }
+                _tool_input_buf = ""
             if "result" in event and hasattr(event.get("result"), "metrics"):
                 agent_result = event["result"]
 

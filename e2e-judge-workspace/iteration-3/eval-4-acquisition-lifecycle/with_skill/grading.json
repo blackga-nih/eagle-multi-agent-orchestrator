@@ -1,0 +1,68 @@
+{
+  "expectations": [
+    {
+      "text": "Uses --journeys acquisition_package flag",
+      "passed": true,
+      "evidence": "Line 9 shows the exact command: `python -m tests.e2e_judge_orchestrator ... --journeys acquisition_package`"
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "passed": true,
+      "evidence": "Line 8 shows `--base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com`"
+    },
+    {
+      "text": "Does NOT hardcode credentials — uses env vars",
+      "passed": true,
+      "evidence": "Section 2 (lines 23-31) explicitly explains that credentials are read from environment variables EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD, not passed as CLI arguments, and the command in Section 1 does not include any credential flags."
+    },
+    {
+      "text": "Explains the journey covers intake, document generation, checklist, revision, finalize, and export phases",
+      "passed": true,
+      "evidence": "Section 3 (lines 35-114) details all 7 phases: Phase 1 Intake, Phase 2 Document Generation, Phase 3 Document Checklist Check, Phase 4 Document Revision, Phase 5 Package Finalization, Phase 6 Export and Final Verification. All six named phases (intake, document generation, checklist, revision, finalize, export) are covered."
+    },
+    {
+      "text": "Mentions the document checklist check (navigates to /workflows page)",
+      "passed": true,
+      "evidence": "Phase 3 (lines 72-78) explicitly states: 'Navigates to `/workflows` to see the package card' and describes clicking on the package card to view the per-document checklist. Section 8 (lines 265-285) provides further detail."
+    },
+    {
+      "text": "Mentions document revision (SOW v2 with new requirements)",
+      "passed": true,
+      "evidence": "Phase 4 (lines 82-88) describes Message 5 as 'SOW v2 Revision (Section 508 + FedRAMP)' and states EAGLE must 'regenerate the SOW as version 2' with added Section 508 accessibility and FedRAMP High requirements."
+    },
+    {
+      "text": "Mentions package finalization (finalize_package tool or status change)",
+      "passed": true,
+      "evidence": "Phase 5 (lines 90-96) describes Message 6 'Finalize the Package' which 'updates the package status from in-progress to finalized or ready for review.' Section 9 (lines 289-303) provides additional detail about the finalization workflow and status change."
+    },
+    {
+      "text": "Mentions package export as ZIP",
+      "passed": true,
+      "evidence": "Phase 6 (lines 98-114) describes Message 7 'ZIP Export': 'Export the complete acquisition package as a ZIP file.' Section 10 (lines 307-331) elaborates on the ZIP bundling with manifest.json."
+    },
+    {
+      "text": "Mentions approximate screenshot count (25-35+) and that it takes longer than other journeys",
+      "passed": true,
+      "evidence": "Section 5 (lines 156-206) is titled 'Approximate Screenshot Count (25-35+)' with a detailed table. Lines 198-205 explain why the journey is significantly longer: '7 chat turns vs. 2', 'Extended timeouts', 'Total runtime: Expected wall-clock time is 10-15 minutes, compared to ~2-3 minutes for the chat journey.'"
+    },
+    {
+      "text": "Mentions cost estimate",
+      "passed": true,
+      "evidence": "Section 6 (lines 209-227) provides a detailed cost estimate: ~$0.12 for vision judge costs, ~$0.02-0.05 for app costs, total first run ~$0.14-0.17, cached repeat run ~$0.02-0.05."
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 151.3,
+    "total_duration_seconds": 151.3
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "The response is exceptionally thorough and passes all 10 assertions. It provides the exact command with the correct --journeys flag and internal ALB URL, uses environment variables for credentials (no hardcoding), and comprehensively explains all 6 phases of the acquisition lifecycle journey (intake, document generation, checklist, revision, finalize, export). The screenshot count (25-35+), runtime comparison to other journeys, and cost estimate are all clearly documented with detailed breakdowns."
+  }
+}

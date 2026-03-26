@@ -1,0 +1,14 @@
+{
+  "eval_id": 6,
+  "eval_name": "full-regression-with-package",
+  "prompt": "Run a full visual regression on everything including the acquisition package lifecycle, and upload to S3. I need to see intake through export tested end to end.",
+  "assertions": [
+    "Uses --journeys all --upload-s3 flags",
+    "Lists acquisition_package as one of the available journeys",
+    "Mentions the acquisition_package journey covers the full lifecycle (intake → export)",
+    "Uses the correct internal ALB URL",
+    "Does NOT hardcode credentials",
+    "Warns about longer runtime or higher cost for the acquisition_package journey",
+    "Points user to /admin/e2e-judge dashboard for results"
+  ]
+}

@@ -43,14 +43,14 @@ MOCK_PACKAGE = {
     "acquisition_pathway": "full_competition",
     "estimated_value": "350000",
     "status": "drafting",
-    "required_documents": ["sow", "igce", "market-research", "acquisition-plan"],
+    "required_documents": ["sow", "igce", "market_research", "acquisition_plan"],
     "completed_documents": ["sow", "igce"],
 }
 
 MOCK_CHECKLIST = {
-    "required": ["sow", "igce", "market-research", "acquisition-plan"],
+    "required": ["sow", "igce", "market_research", "acquisition_plan"],
     "completed": ["sow", "igce"],
-    "missing": ["market-research", "acquisition-plan"],
+    "missing": ["market_research", "acquisition_plan"],
     "complete": False,
 }
 
@@ -102,8 +102,8 @@ class TestFormatContextForPrompt:
         assert "full_competition" in result
         assert "sow (v2)" in result
         assert "igce (v1)" in result
-        assert "market-research" in result
-        assert "acquisition-plan" in result
+        assert "market_research" in result
+        assert "acquisition_plan" in result
 
     def test_package_all_complete(self):
         checklist = {

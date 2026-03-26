@@ -1,0 +1,16 @@
+{
+  "eval_id": 3,
+  "eval_name": "full-run-s3",
+  "prompt": "Run a full visual regression test on all pages of EAGLE and upload the results to S3 so we can see them in the dashboard.",
+  "assertions": [
+    "Uses --journeys all to cover all pages",
+    "Includes --upload-s3 flag for S3 upload",
+    "Explicitly mentions /admin/e2e-judge as the dashboard page for viewing results",
+    "Lists all available journeys (login, home, chat, admin, documents, responsive, acquisition_package)",
+    "Mentions approximate screenshot count and cost for a full run",
+    "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+    "Does NOT hardcode credentials",
+    "Mentions the chat journey's enhanced screenshot strategy (pre-send + 30s intervals)",
+    "Mentions acquisition_package as the longest journey or warns about extended runtime"
+  ]
+}

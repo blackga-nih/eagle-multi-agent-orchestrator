@@ -1,0 +1,58 @@
+{
+  "expectations": [
+    {
+      "text": "Uses the e2e_judge_orchestrator.py as the entry point",
+      "passed": true,
+      "evidence": "Command: 'python -m tests.e2e_judge_orchestrator' shown in Section 2"
+    },
+    {
+      "text": "Passes --journeys login,home,chat (exactly the 3 requested journeys)",
+      "passed": true,
+      "evidence": "Command shows '--journeys login,home,chat'. Flag table explains why other journeys are excluded."
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "passed": true,
+      "evidence": "Command: '--base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com'"
+    },
+    {
+      "text": "Does NOT hardcode credentials — uses env vars or omits auth flags since user said they're set",
+      "passed": true,
+      "evidence": "Flag table: '--auth-email OMITTED... Since the user confirmed these env vars are already set, explicit flags are unnecessary and would risk the password appearing in shell history.'"
+    },
+    {
+      "text": "Mentions pre-send screenshots (captured before each user message is sent)",
+      "passed": true,
+      "evidence": "Section 6a 'Pre-Send Captures': 'Step 03_pre_send_1... A screenshot is taken showing the message in the input area' and 'Step 09_pre_send_2... Screenshot taken before clicking send'"
+    },
+    {
+      "text": "Mentions 30-second interval screenshots during streaming waits",
+      "passed": true,
+      "evidence": "Section 6b: 'wait_with_interval_screenshots()... takes a labeled screenshot every 30 seconds if the agent is still streaming, with suffixes _a, _b, _c'"
+    },
+    {
+      "text": "Mentions expected output: results JSON, markdown report, and screenshots directory",
+      "passed": true,
+      "evidence": "Section 4b lists: 'results/{run-id}.json', 'latest.json', 'results/{run-id}-report.md', screenshots tree"
+    },
+    {
+      "text": "Includes cost estimate",
+      "passed": true,
+      "evidence": "Section 5: 'Typical first run (17 screenshots, no cache): ~$0.07' with full breakdown table"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 176.8,
+    "total_duration_seconds": 176.8
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "All assertions pass. The response is thorough, covering every flag, file output, cost scenario, and screenshot strategy detail."
+  }
+}

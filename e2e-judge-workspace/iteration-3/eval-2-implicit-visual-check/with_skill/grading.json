@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Recognizes this as an e2e-judge task without the user naming the skill",
+      "passed": true,
+      "evidence": "Lines 5-11: 'Your request to \"do a quick visual check of the admin dashboard and chat page to make sure nothing looks broken\" maps directly to the e2e-judge skill.' Also explicitly states 'No need to mention \"e2e-judge\" by name.'"
+    },
+    {
+      "text": "Uses --journeys admin,chat (maps 'admin dashboard and chat page' to correct journey names)",
+      "passed": true,
+      "evidence": "Line 34: '--journeys admin,chat'. Lines 17-24 provide a mapping table: 'admin dashboard' -> 'admin' journey, 'chat page' -> 'chat' journey."
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "passed": true,
+      "evidence": "Line 33: '--base-url http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com'"
+    },
+    {
+      "text": "Does NOT hardcode credentials — uses env vars or asks user",
+      "passed": true,
+      "evidence": "Line 51: 'These come from EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD env vars'. Line 56: 'I will not hardcode passwords in the command -- if the env vars are not set, I will ask you for them before running.'"
+    },
+    {
+      "text": "Explains what pass/fail/warning verdicts mean in the output",
+      "passed": true,
+      "evidence": "Lines 73-98: Detailed verdict explanation table with pass ('The UI looks correct'), fail ('Something is visibly broken'), and warning ('The page renders but something is off'), each with meaning and action needed. Also includes interpretation guidance for deployment scenarios."
+    },
+    {
+      "text": "Mentions cost estimate or that cached runs are cheaper",
+      "passed": true,
+      "evidence": "Lines 102-127: Full cost estimate section. Fresh run: ~$0.07-$0.10. Cached run: ~$0.002. Line 127: 'The cache makes repeated runs essentially free.'"
+    },
+    {
+      "text": "Mentions 30-second interval screenshots during chat streaming",
+      "passed": true,
+      "evidence": "Line 22: 'Multi-turn chat: 2 messages, pre-send screenshots, 30s streaming intervals -- ~10-15+ screenshots'"
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 0,
+    "total_duration_seconds": 0
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "Perfect score. The response demonstrates comprehensive skill recognition without explicit invocation, correct journey mapping, proper ALB URL usage, secure credential handling via env vars, thorough verdict explanations, detailed cost estimates with cache comparison, and mention of 30-second streaming interval screenshots. The response is exceptionally thorough and well-structured."
+  }
+}

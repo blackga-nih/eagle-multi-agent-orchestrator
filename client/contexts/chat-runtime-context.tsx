@@ -5,6 +5,24 @@ import { ChatMessage, DocumentInfo } from '@/types/chat';
 import { TrackedToolCall, ToolCallsByMessageId } from '@/components/chat-simple/simple-chat-interface';
 
 // ---------------------------------------------------------------------------
+// State change entries (package state updates rendered inline in chat)
+// ---------------------------------------------------------------------------
+
+export interface StateChangeEntry {
+    stateType: string;
+    packageId?: string;
+    phase?: string;
+    title?: string;
+    acquisitionMethod?: string;
+    contractType?: string;
+    contractVehicle?: string;
+    checklist?: { required: string[]; completed: string[] };
+    progressPct?: number;
+    textSnapshotLength: number;
+    timestamp: number;
+}
+
+// ---------------------------------------------------------------------------
 // Per-session generation state
 // ---------------------------------------------------------------------------
 
@@ -16,6 +34,7 @@ export interface SessionGenerationState {
     streamingMessageId: string | null;
     toolCallsByMsg: ToolCallsByMessageId;
     documentsByMsg: Record<string, DocumentInfo[]>;
+    stateChangesByMsg: Record<string, StateChangeEntry[]>;
     agentStatus: string | null;
     error: string | null;
     /** Set once on generation/complete — the final committed message.
@@ -32,6 +51,7 @@ const IDLE_SESSION: Omit<SessionGenerationState, 'sessionId'> = {
     streamingMessageId: null,
     toolCallsByMsg: {},
     documentsByMsg: {},
+    stateChangesByMsg: {},
     agentStatus: null,
     error: null,
     completedMessage: null,
@@ -51,11 +71,20 @@ export type ChatRuntimeAction =
     | { type: 'generation/status'; sessionId: string; requestId: string; status: string }
     | { type: 'generation/toolUse'; sessionId: string; requestId: string; msgId: string; toolUseId: string; patch: Partial<TrackedToolCall> }
     | { type: 'generation/toolResult'; sessionId: string; requestId: string; msgId: string; toolName: string; result: unknown }
+    | { type: 'generation/toolInputDelta'; sessionId: string; requestId: string; msgId: string; toolUseId: string; delta: string }
     | { type: 'generation/document'; sessionId: string; requestId: string; msgId: string; document: DocumentInfo }
+    | { type: 'generation/stateChange'; sessionId: string; requestId: string; msgId: string; stateChange: StateChangeEntry }
     | { type: 'generation/complete'; sessionId: string; requestId: string; finalMessage?: ChatMessage }
     | { type: 'generation/error'; sessionId: string; requestId: string; error: string }
     | { type: 'generation/stopping'; sessionId: string }
-    | { type: 'generation/reset'; sessionId: string };
+    | { type: 'generation/reset'; sessionId: string }
+    | {
+        type: 'generation/restore';
+        sessionId: string;
+        toolCallsByMsg: ToolCallsByMessageId;
+        stateChangesByMsg: Record<string, StateChangeEntry[]>;
+        documentsByMsg: Record<string, DocumentInfo[]>;
+      };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -93,9 +122,10 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
                 ...state,
                 [sessionId]: {
                     ...makeIdle(sessionId),
-                    // Preserve historical tool calls and documents from previous requests
+                    // Preserve historical tool calls, documents, and state changes from previous requests
                     toolCallsByMsg: session.toolCallsByMsg,
                     documentsByMsg: session.documentsByMsg,
+                    stateChangesByMsg: session.stateChangesByMsg,
                     activeRequestId: action.requestId,
                     status: 'streaming',
                     streamingMessageId: action.streamingMsgId,
@@ -165,14 +195,64 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
             };
         }
 
+        case 'generation/toolInputDelta': {
+            const calls = session.toolCallsByMsg[action.msgId] ?? [];
+            const idx = calls.findIndex((tc) => tc.toolUseId === action.toolUseId);
+            if (idx === -1) return state;
+            const updated = calls.slice();
+            const existing = updated[idx];
+            updated[idx] = {
+                ...existing,
+                status: 'running',
+                streamingInput: (existing.streamingInput ?? '') + action.delta,
+            };
+            return {
+                ...state,
+                [sessionId]: {
+                    ...session,
+                    toolCallsByMsg: { ...session.toolCallsByMsg, [action.msgId]: updated },
+                },
+            };
+        }
+
         case 'generation/document': {
-            const existing = session.documentsByMsg[action.msgId] ?? [];
-            const merged = dedupeDocuments([...existing, action.document]);
+            const existingDocs = session.documentsByMsg[action.msgId] ?? [];
+            const merged = dedupeDocuments([...existingDocs, action.document]);
             return {
                 ...state,
                 [sessionId]: {
                     ...session,
                     documentsByMsg: { ...session.documentsByMsg, [action.msgId]: merged },
+                },
+            };
+        }
+
+        case 'generation/stateChange': {
+            const existing = session.stateChangesByMsg[action.msgId] ?? [];
+            const sc = action.stateChange;
+            let updated: StateChangeEntry[];
+            if (sc.stateType === 'checklist_update') {
+                // Dedup: replace the last checklist_update for the same packageId
+                const idx = existing.findLastIndex(
+                    (e) => e.stateType === 'checklist_update' && e.packageId === sc.packageId,
+                );
+                if (idx >= 0) {
+                    updated = [...existing];
+                    updated[idx] = sc;
+                } else {
+                    updated = [...existing, sc];
+                }
+            } else {
+                updated = [...existing, sc];
+            }
+            return {
+                ...state,
+                [sessionId]: {
+                    ...session,
+                    stateChangesByMsg: {
+                        ...session.stateChangesByMsg,
+                        [action.msgId]: updated,
+                    },
                 },
             };
         }
@@ -216,6 +296,33 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
                 ...state,
                 [sessionId]: makeIdle(sessionId),
             };
+
+        case 'generation/restore': {
+            // Bulk-load persisted tool calls, state changes, and documents
+            // without changing session status (stays idle). Bypasses stale-request
+            // guard since it has no requestId.
+            const mergedTools = { ...session.toolCallsByMsg };
+            for (const [msgId, calls] of Object.entries(action.toolCallsByMsg)) {
+                mergedTools[msgId] = [...(mergedTools[msgId] ?? []), ...calls];
+            }
+            const mergedStateChanges = { ...session.stateChangesByMsg };
+            for (const [msgId, entries] of Object.entries(action.stateChangesByMsg)) {
+                mergedStateChanges[msgId] = [...(mergedStateChanges[msgId] ?? []), ...entries];
+            }
+            const mergedDocs = { ...session.documentsByMsg };
+            for (const [msgId, docs] of Object.entries(action.documentsByMsg)) {
+                mergedDocs[msgId] = dedupeDocuments([...(mergedDocs[msgId] ?? []), ...docs]);
+            }
+            return {
+                ...state,
+                [sessionId]: {
+                    ...session,
+                    toolCallsByMsg: mergedTools,
+                    stateChangesByMsg: mergedStateChanges,
+                    documentsByMsg: mergedDocs,
+                },
+            };
+        }
 
         default:
             return state;

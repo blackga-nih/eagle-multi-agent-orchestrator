@@ -6,6 +6,7 @@ import {
     ArrowLeft,
     Save,
     FileText,
+    FileSpreadsheet,
     Send,
     Bot,
     User,
@@ -1297,17 +1298,6 @@ ${docSnippet}`;
                 setDownloadUrl(null);
                 setS3Key(result.s3_key || result.key || s3Key);
                 setIsEditing(false);
-            } else if (isBinaryDocument && isXlsxDocument) {
-                const savedPreviewSheets = normalizeXlsxPreviewSheets(result.preview_sheets);
-                setDocumentContent(result.content ?? documentContent);
-                setXlsxPreviewSheets(savedPreviewSheets);
-                setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(savedPreviewSheets));
-                setActiveXlsxSheetId(savedPreviewSheets[0]?.sheet_id || null);
-                setCurrentDocumentId(result.document_id || currentDocumentId);
-                setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
-                setDownloadUrl(null);
-                setS3Key(result.s3_key || result.key || s3Key);
-                setIsEditing(false);
             } else {
                 setDocumentContent(editContent);
             }
@@ -1504,20 +1494,41 @@ ${docSnippet}`;
                                 </button>
                                 {showDownloadMenu && (
                                     <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden">
-                                        <button
-                                            onClick={() => handleDownload('docx')}
-                                            className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
-                                        >
-                                            <FileText className="w-4 h-4 text-blue-600" />
-                                            Download as Word (.docx)
-                                        </button>
-                                        <button
-                                            onClick={() => handleDownload('pdf')}
-                                            className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100"
-                                        >
-                                            <FileText className="w-4 h-4 text-red-600" />
-                                            Download as PDF (.pdf)
-                                        </button>
+                                        {isBinaryDocument && isXlsxDocument ? (
+                                            downloadUrl ? (
+                                                <a
+                                                    href={downloadUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    onClick={() => setShowDownloadMenu(false)}
+                                                    className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+                                                >
+                                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                                    Download as Excel (.xlsx)
+                                                </a>
+                                            ) : (
+                                                <div className="px-4 py-2.5 text-sm text-gray-400">
+                                                    Download unavailable
+                                                </div>
+                                            )
+                                        ) : (
+                                            <>
+                                                <button
+                                                    onClick={() => handleDownload('docx')}
+                                                    className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+                                                >
+                                                    <FileText className="w-4 h-4 text-blue-600" />
+                                                    Download as Word (.docx)
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDownload('pdf')}
+                                                    className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100"
+                                                >
+                                                    <FileText className="w-4 h-4 text-red-600" />
+                                                    Download as PDF (.pdf)
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1525,16 +1536,12 @@ ${docSnippet}`;
                             {/* Edit / Preview toggle */}
                             <button
                                 onClick={handleToggleEdit}
-                                disabled={isBinaryDocument && !canEditDocxPreview && !canEditXlsxPreview}
+                                disabled={isBinaryDocument && !canEditDocxPreview}
                                 title={
-                                    isBinaryDocument && !canEditDocxPreview && !canEditXlsxPreview
+                                    isBinaryDocument && !canEditDocxPreview
                                         ? 'Direct editing is unavailable for this binary document type.'
-                                        : isBinaryDocument
-                                            ? (
-                                                isDocxDocument
-                                                    ? 'Edit this structured DOCX preview. Changes will be applied back to the source document with python-docx.'
-                                                    : 'Edit this structured spreadsheet preview. Changes will be applied back to the workbook with openpyxl.'
-                                            )
+                                        : isBinaryDocument && isDocxDocument
+                                            ? 'Edit this structured DOCX preview. Changes will be applied back to the source document with python-docx.'
                                             : undefined
                                 }
                                 className="flex items-center gap-2 px-4 py-2 bg-[#003366] text-white rounded-xl text-sm font-medium hover:bg-[#004488] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -1561,8 +1568,6 @@ ${docSnippet}`;
                                         || !s3Key
                                         || (isBinaryDocument && isDocxDocument
                                             ? !hasDocxPreviewChanges
-                                            : isBinaryDocument && isXlsxDocument
-                                                ? !hasXlsxPreviewChanges
                                             : editContent === documentContent)
                                     }
                                     className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -1571,8 +1576,6 @@ ${docSnippet}`;
                                             ? 'Document must be saved to S3 first'
                                             : isBinaryDocument && isDocxDocument
                                                 ? (hasDocxPreviewChanges ? 'Save DOCX preview edits to S3' : 'No changes to save')
-                                                : isBinaryDocument && isXlsxDocument
-                                                    ? (hasXlsxPreviewChanges ? 'Save spreadsheet edits to S3' : 'No changes to save')
                                                 : (editContent === documentContent ? 'No changes to save' : 'Save to S3')
                                     }
                                 >
@@ -1787,143 +1790,32 @@ ${docSnippet}`;
                                         )}
                                     </div>
                                 ) : isBinaryDocument && isXlsxDocument ? (
-                                    <div className="space-y-6">
-                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-950">
-                                            <div className="flex items-center gap-2 text-base font-semibold">
-                                                <FileText className="h-5 w-5" />
-                                                XLSX preview
-                                            </div>
-                                            <p className="mt-3 leading-6">
-                                                This spreadsheet remains stored as a native `.xlsx` file. The pane below shows worksheet data extracted with `openpyxl` so you can review and edit input cells without leaving the browser.
+                                    <div className="flex flex-col items-center justify-center py-16">
+                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center max-w-md">
+                                            <FileSpreadsheet className="h-12 w-12 text-emerald-600 mx-auto" />
+                                            <h3 className="mt-4 text-lg font-semibold text-gray-900">
+                                                {documentTitle || 'Excel Spreadsheet'}
+                                            </h3>
+                                            <p className="mt-1 text-sm text-gray-500">
+                                                {documentType ? documentType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Excel Document'} (.xlsx)
                                             </p>
-                                            <p className="mt-3 leading-6">
-                                                Formula cells (highlighted in blue) are read-only and auto-calculate when you edit input cells. Changes are written back to the workbook preserving formulas, formatting, and sheet structure.
+                                            <p className="mt-4 text-sm text-gray-600 leading-relaxed">
+                                                This spreadsheet is best viewed in Microsoft Excel or Google Sheets.
                                             </p>
-                                            {downloadUrl && (
+                                            {downloadUrl ? (
                                                 <a
                                                     href={downloadUrl}
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-4 py-2 text-sm font-medium text-white hover:bg-[#004488]"
+                                                    className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-6 py-3 text-sm font-medium text-white hover:bg-[#004488] transition-colors"
                                                 >
                                                     <Download className="h-4 w-4" />
-                                                    Open current file
+                                                    Download Excel (.xlsx)
                                                 </a>
+                                            ) : (
+                                                <p className="mt-6 text-sm text-gray-400">Download link loading...</p>
                                             )}
                                         </div>
-                                        {activeXlsxSheet ? (
-                                            <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5">
-                                                {/* Sheet tabs */}
-                                                <div className="flex flex-wrap gap-2">
-                                                    {displayedXlsxSheets.map((sheet) => (
-                                                        <button
-                                                            key={sheet.sheet_id}
-                                                            onClick={() => setActiveXlsxSheetId(sheet.sheet_id)}
-                                                            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                                                                activeXlsxSheet.sheet_id === sheet.sheet_id
-                                                                    ? 'bg-[#003366] text-white'
-                                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                                            }`}
-                                                        >
-                                                            {sheet.title}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                {/* Truncation warning */}
-                                                {activeXlsxSheet.truncated && (
-                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                                        Preview limited to {activeXlsxSheet.max_row} rows x {activeXlsxSheet.max_col} columns. Download for full view.
-                                                    </div>
-                                                )}
-
-                                                {/* Scrollable table with sticky headers */}
-                                                <div className="overflow-auto max-h-[500px] rounded-lg border border-gray-200 bg-white">
-                                                    <table className="min-w-full border-collapse text-sm">
-                                                        <thead className="bg-gray-100 sticky top-0 z-10">
-                                                            <tr>
-                                                                <th className="border-b border-r border-gray-300 px-2 py-2 text-center font-semibold text-gray-500 w-10 text-xs">
-
-                                                                </th>
-                                                                {activeXlsxSheet.rows[0]?.cells.map((cell) => (
-                                                                    <th
-                                                                        key={cell.cell_ref}
-                                                                        className="border-b border-r border-gray-300 px-2 py-2 text-center font-semibold text-gray-600 min-w-[70px] text-xs"
-                                                                    >
-                                                                        {cell.cell_ref.replace(/\d+/g, '')}
-                                                                    </th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {activeXlsxSheet.rows.map((row, rowIdx) => (
-                                                                <tr key={row.row_index} className={rowIdx === 0 ? 'bg-gray-50' : ''}>
-                                                                    <td className="border-b border-r border-gray-200 bg-gray-50 px-2 py-1.5 text-center text-xs font-medium text-gray-400 w-10">
-                                                                        {row.row_index}
-                                                                    </td>
-                                                                    {row.cells.map((cell) => (
-                                                                        <td
-                                                                            key={cell.cell_ref}
-                                                                            className={`border-b border-r border-gray-200 px-1.5 py-1 ${
-                                                                                cell.is_formula
-                                                                                    ? 'bg-sky-50'
-                                                                                    : cell.editable
-                                                                                        ? 'bg-white'
-                                                                                        : 'bg-gray-50'
-                                                                            }`}
-                                                                            title={cell.is_formula ? `Formula: ${cell.value}` : undefined}
-                                                                        >
-                                                                            {isEditing && cell.editable ? (
-                                                                                <input
-                                                                                    type="text"
-                                                                                    value={cell.value}
-                                                                                    onChange={(e) => updateXlsxPreviewCell(activeXlsxSheet.sheet_id, cell.cell_ref, e.target.value)}
-                                                                                    className="w-full min-w-[60px] rounded border border-gray-300 px-1.5 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                                                                />
-                                                                            ) : (
-                                                                                <div
-                                                                                    className={`min-w-[60px] truncate text-sm ${
-                                                                                        cell.is_formula
-                                                                                            ? 'text-sky-700 font-medium'
-                                                                                            : cell.editable
-                                                                                                ? 'text-gray-900'
-                                                                                                : 'text-gray-500'
-                                                                                    }`}
-                                                                                >
-                                                                                    {cell.display_value || (cell.is_formula ? '\u2014' : '')}
-                                                                                </div>
-                                                                            )}
-                                                                        </td>
-                                                                    ))}
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-
-                                                {/* Legend */}
-                                                <div className="flex flex-wrap gap-4 text-xs text-gray-500">
-                                                    <span className="flex items-center gap-1.5">
-                                                        <span className="inline-block w-3 h-3 bg-white border border-gray-300 rounded-sm" />
-                                                        Editable
-                                                    </span>
-                                                    <span className="flex items-center gap-1.5">
-                                                        <span className="inline-block w-3 h-3 bg-sky-50 border border-gray-300 rounded-sm" />
-                                                        Formula (auto-calculated)
-                                                    </span>
-                                                    <span className="flex items-center gap-1.5">
-                                                        <span className="inline-block w-3 h-3 bg-gray-50 border border-gray-300 rounded-sm" />
-                                                        Read-only
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        ) : documentContent ? (
-                                            <CollapsibleMarkdown content={documentContent} defaultExpanded />
-                                        ) : (
-                                            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
-                                                Preview unavailable for this XLSX. You can still download the current file.
-                                            </div>
-                                        )}
                                     </div>
                                 ) : isBinaryDocument ? (
                                     <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-sm text-blue-950">

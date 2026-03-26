@@ -1,7 +1,10 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { FileText, BookOpen, Scale, Shield, Search } from 'lucide-react';
 import Badge, { BadgeVariant } from '@/components/ui/badge';
+
+const PAGE_SIZE = 20;
 
 export interface KBDocument {
   document_id: string;
@@ -43,6 +46,13 @@ interface KBDocumentListProps {
 }
 
 export default function KBDocumentList({ documents, onSelect, loading }: KBDocumentListProps) {
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Reset visible count when documents change (new search, etc.)
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [documents]);
+
   if (loading) {
     return (
       <div className="space-y-3">
@@ -67,9 +77,12 @@ export default function KBDocumentList({ documents, onSelect, loading }: KBDocum
     );
   }
 
+  const visible = documents.slice(0, visibleCount);
+  const remaining = documents.length - visibleCount;
+
   return (
     <div className="space-y-3">
-      {documents.map((doc) => (
+      {visible.map((doc) => (
         <button
           key={doc.document_id}
           onClick={() => onSelect(doc)}
@@ -111,6 +124,15 @@ export default function KBDocumentList({ documents, onSelect, loading }: KBDocum
           </div>
         </button>
       ))}
+
+      {remaining > 0 && (
+        <button
+          onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+          className="w-full py-3 text-sm text-blue-600 hover:text-blue-700 font-medium bg-white rounded-xl border border-gray-200 hover:border-blue-300 transition-colors"
+        >
+          Load more ({Math.min(remaining, PAGE_SIZE)} of {remaining} remaining)
+        </button>
+      )}
     </div>
   );
 }

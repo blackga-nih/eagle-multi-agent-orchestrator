@@ -1,0 +1,14 @@
+{
+  "eval_id": 5,
+  "eval_name": "checklist-revision-finalize",
+  "prompt": "After generating all documents, I want to verify the document checklist shows the right status and then test the revision + finalize flow. Can the e2e judge handle that?",
+  "assertions": [
+    "Correctly identifies the acquisition_package journey as covering this use case",
+    "Explains the document checklist check (shows which docs are completed/pending)",
+    "Explains the revision flow (SOW v2 with updated requirements)",
+    "Explains the finalize step (validates completeness, changes package status)",
+    "Uses the correct internal ALB URL",
+    "Does NOT hardcode credentials",
+    "Mentions the /workflows page for checklist verification"
+  ]
+}

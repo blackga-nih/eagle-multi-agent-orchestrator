@@ -108,6 +108,11 @@ export function usePackageState() {
             },
           ];
           break;
+
+        case 'package_update':
+          // Session restore path — /api/sessions/{id}/context sends this
+          if (metadata.phase) next.phase = metadata.phase as string;
+          break;
       }
 
       return next;

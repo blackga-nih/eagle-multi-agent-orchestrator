@@ -1,0 +1,17 @@
+{
+  "eval_id": 4,
+  "eval_name": "acquisition-lifecycle",
+  "prompt": "I want to run the full acquisition package e2e test -- the complete lifecycle from intake through document generation, revision, finalize, and export. Test against the deployed app. EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD are set.",
+  "assertions": [
+    "Uses --journeys acquisition_package flag",
+    "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+    "Does NOT hardcode credentials — uses env vars",
+    "Explains the journey covers intake, document generation, checklist, revision, finalize, and export phases",
+    "Mentions the document checklist check (navigates to /workflows page)",
+    "Mentions document revision (SOW v2 with new requirements)",
+    "Mentions package finalization (finalize_package tool or status change)",
+    "Mentions package export as ZIP",
+    "Mentions approximate screenshot count (25-35+) and that it takes longer than other journeys",
+    "Mentions cost estimate"
+  ]
+}

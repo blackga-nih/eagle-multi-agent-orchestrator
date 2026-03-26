@@ -1,0 +1,63 @@
+{
+  "expectations": [
+    {
+      "text": "Uses --journeys all to cover all pages",
+      "passed": true,
+      "evidence": "Line 15 shows `--journeys all` in the command example."
+    },
+    {
+      "text": "Includes --upload-s3 flag for S3 upload",
+      "passed": true,
+      "evidence": "Line 16 shows `--upload-s3` in the command example."
+    },
+    {
+      "text": "Explicitly mentions /admin/e2e-judge as the dashboard page for viewing results",
+      "passed": true,
+      "evidence": "Lines 46-49: URL shown as 'http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com/admin/e2e-judge' and described as 'The `/admin/e2e-judge` dashboard displays:'"
+    },
+    {
+      "text": "Lists all available journeys (login, home, chat, admin, documents, responsive, acquisition_package)",
+      "passed": true,
+      "evidence": "Lines 29-35: Table lists all 7 journeys: login, home, chat, admin, documents, responsive, acquisition_package."
+    },
+    {
+      "text": "Mentions approximate screenshot count and cost for a full run",
+      "passed": true,
+      "evidence": "Line 37: 'Total screenshots for a full run: approximately 57-75+'. Lines 119-132: Cost table estimates $0.24-$0.31 for a full run with no cache."
+    },
+    {
+      "text": "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+      "passed": true,
+      "evidence": "Line 14: 'http://internal-eaglec-front-teerfwosqs71-1457581412.us-east-1.elb.amazonaws.com'"
+    },
+    {
+      "text": "Does NOT hardcode credentials",
+      "passed": true,
+      "evidence": "Lines 73-76 use placeholder values ('your-test-user@nih.gov', 'your-test-password'). Line 89 explicitly states: 'Never hardcode passwords in scripts or commit them to the repository.'"
+    },
+    {
+      "text": "Mentions the chat journey's enhanced screenshot strategy (pre-send + 30s intervals)",
+      "passed": true,
+      "evidence": "Lines 101-107: 'Chat journey — pre-send screenshots: Before each message is sent, a screenshot is captured' and 'Chat journey — 30-second interval captures during streaming: After sending a message, the pipeline captures screenshots at 30-second intervals'"
+    },
+    {
+      "text": "Mentions acquisition_package as the longest journey or warns about extended runtime",
+      "passed": true,
+      "evidence": "Line 138: 'The acquisition_package journey is significantly longer than all other journeys combined.' Line 147: 'takes approximately 10-15 minutes to complete'. Section header: 'Warning: acquisition_package Is the Longest Journey'"
+    }
+  ],
+  "summary": {
+    "passed": 9,
+    "failed": 0,
+    "total": 9,
+    "pass_rate": 1.0
+  },
+  "timing": {
+    "executor_duration_seconds": 83.4,
+    "total_duration_seconds": 83.4
+  },
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "The response passes all 9 assertions. It provides a comprehensive and well-structured guide for running a full E2E Judge visual regression test with S3 upload. It correctly uses --journeys all and --upload-s3, lists all 7 journeys with descriptions and screenshot counts, mentions the /admin/e2e-judge dashboard, uses the correct internal ALB URL, avoids hardcoding credentials, describes the chat journey's pre-send + 30s interval screenshot strategy, and explicitly warns about acquisition_package being the longest journey."
+  }
+}

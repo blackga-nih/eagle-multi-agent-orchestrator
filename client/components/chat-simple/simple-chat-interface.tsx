@@ -19,6 +19,8 @@ import { AuditLogEntry } from '@/types/stream';
 import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
 import { ToolStatus } from './tool-use-display';
+import { loadCheckpoint, clearCheckpoint } from '@/lib/streaming-checkpoint';
+import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 import ActivityPanel from './activity-panel';
 import ChatUploadButton from './chat-upload-button';
 import PackageSelectorModal from './package-selector-modal';
@@ -41,6 +43,8 @@ export interface TrackedToolCall {
     /** Length of accumulated text at the moment this tool was invoked.
      *  Used to interleave text segments and tool cards in stream order. */
     textSnapshotLength?: number;
+    /** Raw JSON being composed by the model as tool input (streamed via contentBlockDelta). */
+    streamingInput?: string;
 }
 
 /** Tool calls keyed by the parent message ID they belong to. */
@@ -86,6 +90,7 @@ export default function SimpleChatInterface() {
     // Derived streaming state from runtime
     const streamingMsg = runtime.streamingMessage;
     const toolCallsByMsg = runtime.toolCallsByMsg;
+    const stateChangesByMsg = runtime.stateChangesByMsg;
     const agentStatus = runtime.agentStatus;
     const isStreaming = runtime.isStreaming;
 
@@ -141,6 +146,59 @@ export default function SimpleChatInterface() {
         firstUserMsgRef.current = null;
         setIsLoadingSession(false);
 
+        // Restore mid-stream checkpoint (if user refreshed during SSE streaming)
+        const checkpoint = loadCheckpoint(currentSessionId);
+        if (checkpoint) {
+            const restoredMsg: ChatMessage = {
+                id: checkpoint.streamingMsgId,
+                role: 'assistant',
+                content: checkpoint.text + '\n\n---\n*Response interrupted — please resend your message.*',
+                timestamp: new Date(checkpoint.updatedAt),
+            };
+            setMessages(prev => [...prev, restoredMsg]);
+
+            const restoredToolCalls: ToolCallsByMessageId = {};
+            if (checkpoint.toolCalls.length > 0) {
+                restoredToolCalls[checkpoint.streamingMsgId] = checkpoint.toolCalls.map(tc => ({
+                    ...tc,
+                    status: (tc.status === 'done' ? 'done' : 'interrupted') as ToolStatus,
+                }));
+            }
+            const restoredStateChanges: Record<string, StateChangeEntry[]> = {};
+            if (checkpoint.stateChanges.length > 0) {
+                restoredStateChanges[checkpoint.streamingMsgId] = checkpoint.stateChanges;
+            }
+            const restoredDocs: Record<string, DocumentInfo[]> = {};
+            if (checkpoint.documents.length > 0) {
+                restoredDocs[checkpoint.streamingMsgId] = checkpoint.documents;
+            }
+            dispatch({
+                type: 'generation/restore',
+                sessionId: currentSessionId,
+                toolCallsByMsg: restoredToolCalls,
+                stateChangesByMsg: restoredStateChanges,
+                documentsByMsg: restoredDocs,
+            });
+
+            clearCheckpoint(currentSessionId);
+        }
+
+        // Restore persisted tool calls and state changes from session history
+        if (sessionData) {
+            const hasToolCalls = sessionData.toolCallsByMsg && Object.keys(sessionData.toolCallsByMsg).length > 0;
+            const hasStateChanges = sessionData.stateChangesByMsg && Object.keys(sessionData.stateChangesByMsg).length > 0;
+            const hasDocs = sessionData.documents && Object.keys(sessionData.documents).length > 0;
+            if (hasToolCalls || hasStateChanges || hasDocs) {
+                dispatch({
+                    type: 'generation/restore',
+                    sessionId: currentSessionId,
+                    toolCallsByMsg: sessionData.toolCallsByMsg || {},
+                    stateChangesByMsg: sessionData.stateChangesByMsg || {},
+                    documentsByMsg: sessionData.documents || {},
+                });
+            }
+        }
+
         // Background: preload context from backend (non-blocking)
         void (async () => {
             try {
@@ -164,12 +222,12 @@ export default function SimpleChatInterface() {
         })();
     }, [currentSessionId, loadSession]);
 
-    // Auto-save session
+    // Auto-save session (includes tool calls and state changes for persistence across refresh)
     const saveSessionDebounced = useCallback(() => {
         if (messages.length > 0 && currentSessionId) {
-            saveSession(currentSessionId, messages, {}, documents);
+            saveSession(currentSessionId, messages, {}, documents, toolCallsByMsg, stateChangesByMsg);
         }
-    }, [currentSessionId, messages, documents, saveSession]);
+    }, [currentSessionId, messages, documents, toolCallsByMsg, stateChangesByMsg, saveSession]);
 
     useEffect(() => {
         const timeoutId = setTimeout(saveSessionDebounced, 500);
@@ -409,6 +467,7 @@ export default function SimpleChatInterface() {
                     'Untitled Package';
                 saveGeneratedDocument(doc, sid, title);
             },
+            onStateUpdate: handlePackageMetadata,
         });
     };
 
@@ -636,6 +695,7 @@ export default function SimpleChatInterface() {
                         documents={mergedDocuments}
                         sessionId={currentSessionId}
                         toolCallsByMsg={toolCallsByMsg}
+                        stateChangesByMsg={stateChangesByMsg}
                         agentStatus={agentStatus}
                         pendingToolCalls={runtime.streamingMessageId ? (toolCallsByMsg[runtime.streamingMessageId] ?? []) : []}
                     />
@@ -742,6 +802,7 @@ export default function SimpleChatInterface() {
                 isOpen={isPanelOpen}
                 onToggle={() => setIsPanelOpen(v => !v)}
                 packageState={packageState}
+                getToken={getToken}
             />
 
             {/* Package selector modal for uploaded documents */}
