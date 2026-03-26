@@ -5,6 +5,7 @@ Real AWS tools (S3, DynamoDB, CloudWatch) scoped per-tenant.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import time
@@ -1421,6 +1422,198 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
             return {"error": f"CloudWatch error ({error_code}): {error_msg}"}
     except BotoCoreError as e:
         return {"error": f"AWS connection error: {str(e)}"}
+
+
+# ---------------------------------------------------------------------------
+# Langfuse trace query tool
+# ---------------------------------------------------------------------------
+
+def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
+    """Query Langfuse traces for system diagnostics.
+
+    Operations: list_recent, get_trace, search_errors, health_summary.
+    Wraps async langfuse_client functions in a sync context.
+    """
+    from .telemetry.langfuse_client import (
+        classify_error,
+        get_trace,
+        langfuse_trace_url,
+        list_observations,
+        list_traces,
+    )
+
+    operation = params.get("operation", "list_recent")
+    trace_id = params.get("trace_id", "")
+    user_id_filter = params.get("user_id_filter", "")
+    session_id_filter = params.get("session_id_filter", "")
+    tags_filter = params.get("tags_filter", "")
+    start_time = params.get("start_time", "")
+    end_time = params.get("end_time", "")
+    limit = min(params.get("limit", 20), 100)
+
+    # Parse relative times ('-1h', '-30m', '-24h') to ISO 8601
+    def _resolve_time(val: str) -> str:
+        if not val:
+            return ""
+        if val.startswith("-"):
+            try:
+                num = int(val[1:-1])
+                unit = val[-1]
+                multipliers = {"m": 60, "h": 3600, "d": 86400}
+                offset_sec = num * multipliers.get(unit, 3600)
+                from datetime import datetime, timezone, timedelta
+                dt = datetime.now(timezone.utc) - timedelta(seconds=offset_sec)
+                return dt.isoformat()
+            except (ValueError, IndexError):
+                return val
+        return val
+
+    from_ts = _resolve_time(start_time) or None
+    to_ts = _resolve_time(end_time) or None
+    tags = [t.strip() for t in tags_filter.split(",") if t.strip()] or None
+
+    def _truncate_trace(t: dict) -> dict:
+        """Extract key fields from a trace, truncate large text."""
+        return {
+            "trace_id": t.get("id", ""),
+            "name": t.get("name", ""),
+            "timestamp": t.get("timestamp", ""),
+            "session_id": t.get("sessionId", ""),
+            "user_id": t.get("userId", ""),
+            "duration_ms": t.get("latency"),
+            "status": "error" if t.get("level") == "ERROR" or t.get("statusMessage") else "success",
+            "status_message": (t.get("statusMessage") or "")[:500],
+            "total_cost_usd": t.get("totalCost"),
+            "input_tokens": t.get("usage", {}).get("input", 0) if isinstance(t.get("usage"), dict) else 0,
+            "output_tokens": t.get("usage", {}).get("output", 0) if isinstance(t.get("usage"), dict) else 0,
+            "tags": t.get("tags", []),
+            "langfuse_url": langfuse_trace_url(t["id"]) if t.get("id") else "",
+        }
+
+    try:
+        if operation == "list_recent":
+            result = asyncio.run(list_traces(
+                limit=limit,
+                user_id=user_id_filter or None,
+                session_id=session_id_filter or None,
+                tags=tags,
+                from_timestamp=from_ts,
+                to_timestamp=to_ts,
+            ))
+            if result.get("error"):
+                return {"error": result["error"]}
+            traces = [_truncate_trace(t) for t in result.get("data", [])]
+            return {
+                "operation": "list_recent",
+                "trace_count": len(traces),
+                "total_available": result.get("meta", {}).get("totalItems", 0),
+                "traces": traces,
+            }
+
+        elif operation == "get_trace":
+            if not trace_id:
+                return {"error": "trace_id is required for get_trace operation"}
+            trace = asyncio.run(get_trace(trace_id))
+            if not trace:
+                return {"error": f"Trace {trace_id} not found or Langfuse not configured"}
+            obs_result = asyncio.run(list_observations(trace_id=trace_id, limit=50))
+            observations = [
+                {
+                    "id": o.get("id", ""),
+                    "type": o.get("type", ""),
+                    "name": o.get("name", ""),
+                    "start_time": o.get("startTime", ""),
+                    "end_time": o.get("endTime", ""),
+                    "status_message": (o.get("statusMessage") or "")[:500],
+                    "model": o.get("model", ""),
+                    "input_tokens": o.get("usage", {}).get("input", 0) if isinstance(o.get("usage"), dict) else 0,
+                    "output_tokens": o.get("usage", {}).get("output", 0) if isinstance(o.get("usage"), dict) else 0,
+                }
+                for o in obs_result.get("data", [])
+            ]
+            summary = _truncate_trace(trace)
+            summary["observations"] = observations
+            return {"operation": "get_trace", "trace": summary}
+
+        elif operation == "search_errors":
+            # Fetch recent traces and filter for errors
+            result = asyncio.run(list_traces(
+                limit=limit,
+                user_id=user_id_filter or None,
+                session_id=session_id_filter or None,
+                from_timestamp=from_ts or _resolve_time("-1h") or None,
+                to_timestamp=to_ts,
+            ))
+            if result.get("error"):
+                return {"error": result["error"]}
+            error_traces = []
+            error_categories: dict = {}
+            for t in result.get("data", []):
+                status_msg = t.get("statusMessage") or ""
+                level = t.get("level", "")
+                has_error_tag = any("error:" in tag or "severity:" in tag for tag in (t.get("tags") or []))
+                if status_msg or level == "ERROR" or has_error_tag:
+                    info = classify_error(status_msg)
+                    entry = _truncate_trace(t)
+                    entry["error_category"] = info["category"]
+                    entry["error_severity"] = info["severity"]
+                    error_traces.append(entry)
+                    cat = info["category"]
+                    error_categories[cat] = error_categories.get(cat, 0) + 1
+            return {
+                "operation": "search_errors",
+                "error_count": len(error_traces),
+                "error_categories": error_categories,
+                "errors": error_traces[:50],
+            }
+
+        elif operation == "health_summary":
+            # Aggregate trace stats over the last hour
+            from_1h = _resolve_time("-1h")
+            result = asyncio.run(list_traces(
+                limit=100,
+                from_timestamp=from_1h or None,
+            ))
+            if result.get("error"):
+                return {"error": result["error"]}
+            traces = result.get("data", [])
+            total = len(traces)
+            errors = 0
+            total_latency = 0
+            latency_count = 0
+            total_cost = 0.0
+            error_categories: dict = {}
+            for t in traces:
+                if t.get("statusMessage") or t.get("level") == "ERROR":
+                    errors += 1
+                    info = classify_error(t.get("statusMessage", ""))
+                    cat = info["category"]
+                    error_categories[cat] = error_categories.get(cat, 0) + 1
+                lat = t.get("latency")
+                if lat and isinstance(lat, (int, float)):
+                    total_latency += lat
+                    latency_count += 1
+                cost = t.get("totalCost")
+                if cost and isinstance(cost, (int, float)):
+                    total_cost += cost
+            return {
+                "operation": "health_summary",
+                "period": "last_1_hour",
+                "total_traces": total,
+                "total_available": result.get("meta", {}).get("totalItems", 0),
+                "error_count": errors,
+                "error_rate": f"{(errors / total * 100):.1f}%" if total > 0 else "0%",
+                "avg_latency_ms": round(total_latency / latency_count) if latency_count > 0 else None,
+                "total_cost_usd": round(total_cost, 4),
+                "error_categories": error_categories,
+            }
+
+        else:
+            return {"error": f"Unknown operation: {operation}. Use list_recent, get_trace, search_errors, or health_summary."}
+
+    except Exception as exc:
+        logger.error("langfuse_traces tool failed: %s", exc, exc_info=True)
+        return {"error": f"Langfuse query failed: {str(exc)}"}
 
 
 def _exec_search_far(params: dict, tenant_id: str) -> dict:
@@ -3802,7 +3995,7 @@ def _backfill_completed_docs(
             parts = filename.split("_", 1)
             if parts:
                 dt = parts[0].lower()
-                if dt in required and dt not in found:
+                if dt and dt not in found:
                     found[dt] = key
 
         if not found:
@@ -3813,6 +4006,7 @@ def _backfill_completed_docs(
         from app.package_store import update_package
 
         completed = list(package.get("completed_documents", []))
+        new_required = list(package.get("required_documents", []))
         for doc_type, s3_key in found.items():
             if doc_type in completed:
                 continue
@@ -3833,6 +4027,8 @@ def _backfill_completed_docs(
                 )
                 if result.success:
                     completed.append(doc_type)
+                    if doc_type not in required:
+                        new_required.append(doc_type)
                     logger.info(
                         "Backfilled %s from %s into package %s",
                         doc_type, s3_key, pkg_id,
@@ -3840,8 +4036,13 @@ def _backfill_completed_docs(
             except Exception:
                 logger.debug("Backfill failed for %s: %s", doc_type, s3_key, exc_info=True)
 
+        updates: dict = {}
         if completed != list(package.get("completed_documents", [])):
-            update_package(tenant_id, pkg_id, {"completed_documents": completed})
+            updates["completed_documents"] = completed
+        if new_required != list(package.get("required_documents", [])):
+            updates["required_documents"] = new_required
+        if updates:
+            update_package(tenant_id, pkg_id, updates)
     except Exception:
         logger.debug("_backfill_completed_docs failed (non-critical)", exc_info=True)
 
@@ -3937,6 +4138,7 @@ TOOL_DISPATCH = {
     "s3_document_ops": _exec_s3_document_ops,
     "dynamodb_intake": _exec_dynamodb_intake,
     "cloudwatch_logs": _exec_cloudwatch_logs,
+    "langfuse_traces": _exec_langfuse_traces,
     "search_far": _exec_search_far,
     "create_document": _exec_create_document,
     "edit_docx_document": _exec_edit_docx_document,

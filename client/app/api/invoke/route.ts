@@ -37,6 +37,13 @@ const COMMAND_PROMPTS: Record<string, string> = {
   '/tech-review:508':    'Check Section 508 accessibility compliance for',
   '/ingest':             'Upload and process this document',
   // Admin
+  '/admin': '[SYSTEM DIAGNOSTIC MODE] The user is asking about EAGLE system behavior, errors, or performance. '
+    + 'For quick questions (capabilities, configuration, how things work), answer directly. '
+    + 'For diagnostic questions (errors, slowness, failures, specific sessions), use the langfuse_traces tool '
+    + '(operations: health_summary, search_errors, list_recent, get_trace) and cloudwatch_logs tool to gather evidence before answering. '
+    + 'Include trace IDs, timestamps, error patterns, and Langfuse URLs in your answer so they can be referenced in feedback. '
+    + 'End your response with: "Press **Ctrl+J** to submit feedback with these diagnostic details."\n'
+    + 'Question:',
   '/admin:skills':    'List all custom skills and their current status. I can create, edit, publish, or delete skills.',
   '/admin:prompts':   'List all agent prompt overrides. I can view, set, or reset prompt overrides for any agent.',
   '/admin:templates': 'List all document templates. I can view, edit, or reset templates for any document type.',

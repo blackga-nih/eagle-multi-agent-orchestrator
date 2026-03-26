@@ -1138,6 +1138,54 @@ EAGLE_TOOLS = [
             "required": ["operation"],
         },
     },
+    {
+        "name": "langfuse_traces",
+        "description": (
+            "Query Langfuse traces for system diagnostics and observability. "
+            "Use search_errors to find recent failures. Use health_summary for a quick "
+            "system overview (error rate, avg latency, cost). "
+            "Use get_trace to inspect a specific trace with its observations."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["list_recent", "get_trace", "search_errors", "health_summary"],
+                    "description": "Trace operation: list_recent, get_trace, search_errors, or health_summary",
+                },
+                "trace_id": {
+                    "type": "string",
+                    "description": "Specific trace ID to fetch (required for get_trace)",
+                },
+                "user_id_filter": {
+                    "type": "string",
+                    "description": "Filter traces by user ID",
+                },
+                "session_id_filter": {
+                    "type": "string",
+                    "description": "Filter traces by session ID",
+                },
+                "tags_filter": {
+                    "type": "string",
+                    "description": "Comma-separated tags to filter by (e.g. 'error:sso-expired,severity:infra')",
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "Start time (ISO 8601 or relative like '-1h', '-30m', '-24h')",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "End time (ISO 8601 or relative)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum traces to return (default: 20, max: 100)",
+                },
+            },
+            "required": ["operation"],
+        },
+    },
     # Progressive disclosure tools
     {
         "name": "list_skills",
@@ -2861,6 +2909,60 @@ def _build_all_service_tools(
             logger.error("Service tool cloudwatch_logs failed: %s", exc, exc_info=True)
             return json.dumps({"error": str(exc), "tool": "cloudwatch_logs"})
 
+    # ---- 13b. langfuse_traces ----
+    @tool(name="langfuse_traces")
+    def langfuse_traces_tool(
+        operation: str = "list_recent",
+        trace_id: str = "",
+        user_id_filter: str = "",
+        session_id_filter: str = "",
+        tags_filter: str = "",
+        start_time: str = "",
+        end_time: str = "",
+        limit: int = 20,
+    ) -> str:
+        """Query Langfuse traces for system diagnostics and observability.
+
+        Operations: list_recent, get_trace, search_errors, health_summary.
+        Use search_errors to find recent failures grouped by category.
+        Use health_summary for a quick system overview (error rate, avg latency, cost).
+        Time params accept ISO 8601 or relative like '-1h', '-30m', '-24h'.
+
+        Args:
+            operation: Trace operation — 'list_recent', 'get_trace', 'search_errors', 'health_summary'
+            trace_id: Specific trace ID to fetch (required for get_trace)
+            user_id_filter: Filter traces by user ID
+            session_id_filter: Filter traces by session ID
+            tags_filter: Comma-separated tags to filter by (e.g. 'error:sso-expired,severity:infra')
+            start_time: Start time — ISO 8601 or relative like '-1h', '-30m'
+            end_time: End time — ISO 8601 or relative
+            limit: Maximum traces to return (default 20, max 100)
+        """
+        parsed = {
+            "operation": operation, "trace_id": trace_id,
+            "user_id_filter": user_id_filter, "session_id_filter": session_id_filter,
+            "tags_filter": tags_filter, "start_time": start_time,
+            "end_time": end_time, "limit": limit, "user_id": user_id,
+        }
+        import time as _time_mod
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
+        try:
+            result = TOOL_DISPATCH["langfuse_traces"](parsed, tenant_id)
+            _emit("langfuse_traces", result)
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            _tool_success = False
+            logger.error("Service tool langfuse_traces failed: %s", exc, exc_info=True)
+            return json.dumps({"error": str(exc), "tool": "langfuse_traces"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+                emit_tool_completed(tenant_id, user_id, session_id or "", "langfuse_traces", _tool_dur, _tool_success)
+            except Exception:
+                pass
+
     # ---- 14. query_compliance_matrix ----
     @tool(name="query_compliance_matrix")
     def query_compliance_matrix_tool(
@@ -3010,6 +3112,7 @@ def _build_all_service_tools(
         get_latest_document_tool,
         finalize_package_tool,
         cloudwatch_logs_tool,
+        langfuse_traces_tool,
         query_compliance_matrix_tool,
         manage_package_tool,
     ]

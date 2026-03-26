@@ -20,7 +20,8 @@
     "knowledge-retrieval",
     "tech-review",
     "ingest-document",
-    "admin-manager"
+    "admin-manager",
+    "admin-diagnostics"
   ],
   "commands": [
     "intake",

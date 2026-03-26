@@ -1,4 +1,5 @@
 import {
+    Activity,
     ClipboardList,
     FileText,
     ShieldCheck,
@@ -152,6 +153,14 @@ export const slashCommands: SlashCommand[] = [
     },
 
     // ── Admin ────────────────────────────────────────────────────────
+    {
+        id: 'admin',
+        name: '/admin',
+        description: 'Ask the system — diagnose errors, check health, query logs',
+        icon: Activity,
+        color: 'rose',
+        category: 'Admin',
+    },
     {
         id: 'admin:skills',
         name: '/admin:skills',
