@@ -291,3 +291,44 @@ class TestDescriptiveTitle:
         )
         assert result["original_title"] == "Test"
         assert result["title"] != "Test"  # Should be descriptive
+
+    def test_short_meaningful_title_incorporated(self):
+        """Short but meaningful titles should be incorporated with metadata."""
+        from app.package_store import _generate_descriptive_title
+
+        result = _generate_descriptive_title(
+            "CT Scanner Procurement", "supplies", Decimal("500000")
+        )
+        assert "CT Scanner Procurement" in result
+        assert "$500K" in result
+
+    def test_short_meaningful_title_with_vehicle(self):
+        from app.package_store import _generate_descriptive_title
+
+        result = _generate_descriptive_title(
+            "Cloud Services", "services", Decimal("250000"), "GSA"
+        )
+        assert "Cloud Services" in result
+        assert "$250K" in result
+        assert "[GSA]" in result
+
+    def test_empty_title_treated_as_generic(self):
+        from app.package_store import _generate_descriptive_title
+
+        result = _generate_descriptive_title("", "services", Decimal("100000"))
+        assert "Services" in result
+        assert "$100K" in result
+
+    def test_meaningful_title_no_value(self):
+        """Meaningful title with no estimated value should just use the title."""
+        from app.package_store import _generate_descriptive_title
+
+        result = _generate_descriptive_title("Lab Equipment", "supplies", None)
+        assert result == "Lab Equipment"
+
+    def test_meaningful_title_zero_value(self):
+        """Meaningful title with $0 value should just use the title."""
+        from app.package_store import _generate_descriptive_title
+
+        result = _generate_descriptive_title("Lab Equipment", "supplies", Decimal("0"))
+        assert result == "Lab Equipment"

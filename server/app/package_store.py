@@ -78,6 +78,12 @@ _UPDATABLE_FIELDS = {
     "approval_level",
 }
 
+# -- Generic titles that should be replaced, not incorporated ---------------
+_GENERIC_TITLES = {
+    "acquisition package", "acquisition", "test", "untitled",
+    "new package", "package", "draft", "untitled acquisition",
+}
+
 # -- DynamoDB singleton ------------------------------------------------------
 _dynamodb = None
 
@@ -204,34 +210,44 @@ def _generate_descriptive_title(
 ) -> str:
     """Build a descriptive package title from metadata.
 
-    Only replaces generic titles (< 30 chars or exactly "Acquisition Package").
-    Preserves user-provided specific titles.  Stores the original as
-    ``original_title`` on the item (handled by the caller).
+    Three tiers:
+      1. Long specific titles (>= 30 chars, not generic) — keep unchanged.
+      2. Short but meaningful titles — incorporate with metadata suffix.
+         e.g. "CT Scanner Procurement" → "CT Scanner Procurement — $500K"
+      3. Generic titles — replace with type + metadata.
+         e.g. "Acquisition Package" → "Services — $500K"
+
+    Stores the original as ``original_title`` on the item (handled by caller).
     """
-    if len(title) >= 30 and title != "Acquisition Package":
-        return title
+    stripped = title.strip()
+    is_generic = stripped.lower() in _GENERIC_TITLES or len(stripped) <= 2
 
-    parts: list[str] = []
+    # Tier 1: Long specific titles — keep unchanged
+    if len(stripped) >= 30 and not is_generic:
+        return stripped
 
-    # Type label
-    label = (requirement_type or "Acquisition").replace("_", " ").title()
-    parts.append(label)
-
-    # Formatted value
+    # Build metadata suffix (formatted value)
+    value_str = ""
     if estimated_value is not None:
         val = float(estimated_value)
         if val >= 1_000_000:
-            parts.append(f"${val / 1_000_000:.1f}M")
+            value_str = f"${val / 1_000_000:.1f}M"
         elif val >= 1_000:
-            parts.append(f"${val / 1_000:.0f}K")
+            value_str = f"${val / 1_000:.0f}K"
         elif val > 0:
-            parts.append(f"${val:,.0f}")
+            value_str = f"${val:,.0f}"
 
-    desc = " — ".join(parts)
-    if contract_vehicle:
-        desc += f" [{contract_vehicle}]"
+    vehicle_tag = f" [{contract_vehicle}]" if contract_vehicle else ""
 
-    return desc
+    if is_generic:
+        # Tier 3: Generic title — replace with type + metadata
+        label = (requirement_type or "Acquisition").replace("_", " ").title()
+        parts = [p for p in [label, value_str] if p]
+        return " — ".join(parts) + vehicle_tag
+    else:
+        # Tier 2: Short meaningful title — incorporate with metadata
+        parts = [p for p in [stripped, value_str] if p]
+        return " — ".join(parts) + vehicle_tag
 
 
 def _has_unfilled_markers(content: str) -> list[str]:
@@ -465,6 +481,15 @@ def update_package(
                 )
             else:
                 allowed["required_documents"] = _required_docs_for(new_pathway)
+
+    # Regenerate descriptive title when metadata that affects it changes
+    _title_triggers = {"estimated_value", "requirement_type", "contract_vehicle"}
+    if _title_triggers & allowed.keys() and "title" not in allowed:
+        orig_title = existing.get("original_title") or existing.get("title", "")
+        ev = Decimal(str(allowed.get("estimated_value", existing.get("estimated_value", 0))))
+        new_req_type = allowed.get("requirement_type") or existing.get("requirement_type")
+        new_vehicle = allowed.get("contract_vehicle") or existing.get("contract_vehicle")
+        allowed["title"] = _generate_descriptive_title(orig_title, new_req_type, ev, new_vehicle)
 
     now = _now_iso()
     allowed["updated_at"] = now

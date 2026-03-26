@@ -2512,7 +2512,11 @@ def _build_all_service_tools(
                         # Create new package only if none exists for this session
                         _data = parsed.get("data") or {}
                         _est = _data.get("estimated_value") or _data.get("total_value") or 0
-                        _title = parsed.get("title") or "Acquisition Package"
+                        # Extract a meaningful title: prefer requirement description
+                        # over generic document title (e.g. "Statement of Work")
+                        _desc = str(_data.get("description") or _data.get("requirement_description") or "")
+                        _title = _desc.split(".")[0].strip()[:60] if _desc.strip() else ""
+                        _title = _title or parsed.get("title") or "Acquisition Package"
                         _req_type = _data.get("requirement_type") or "services"
                         _pkg = _create_pkg(
                             tenant_id=tenant_id,
