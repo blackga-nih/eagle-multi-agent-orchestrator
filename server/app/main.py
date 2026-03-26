@@ -17,7 +17,7 @@ else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional
 from collections import deque
