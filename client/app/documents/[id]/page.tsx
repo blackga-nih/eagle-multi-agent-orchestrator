@@ -126,6 +126,20 @@ function docxPreviewBlocksEqual(left: DocxPreviewBlock[], right: DocxPreviewBloc
     });
 }
 
+function collectChangedDocxPreviewBlocks(originalBlocks: DocxPreviewBlock[], editedBlocks: DocxPreviewBlock[]): DocxPreviewBlock[] {
+    const originalMap = new Map(originalBlocks.map((block) => [block.block_id, block]));
+    return editedBlocks.filter((block) => {
+        const original = originalMap.get(block.block_id);
+        if (!original) return true;
+        return (
+            block.kind !== original.kind
+            || block.text !== original.text
+            || (block.level ?? null) !== (original.level ?? null)
+            || (block.checked ?? null) !== (original.checked ?? null)
+        );
+    });
+}
+
 function normalizeXlsxPreviewSheets(sheets: unknown): XlsxPreviewSheet[] {
     if (!Array.isArray(sheets)) return [];
     return sheets.flatMap((sheet) => {
@@ -1245,9 +1259,12 @@ ${docSnippet}`;
                 : isBinaryDocument && isXlsxDocument
                     ? `/api/documents/${encodeURIComponent(s3Key)}/xlsx-edit`
                     : `/api/documents/${encodeURIComponent(s3Key)}`;
+            const changedDocxPreviewBlocks = docxPreviewMode === 'text_fallback'
+                ? editDocxPreviewBlocks
+                : collectChangedDocxPreviewBlocks(docxPreviewBlocks, editDocxPreviewBlocks);
             const requestBody = isBinaryDocument && isDocxDocument
                 ? {
-                    preview_blocks: editDocxPreviewBlocks,
+                    preview_blocks: changedDocxPreviewBlocks,
                     preview_mode: docxPreviewMode || 'docx_blocks',
                     change_source: 'user_edit',
                 }
