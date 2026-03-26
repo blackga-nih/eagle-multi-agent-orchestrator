@@ -33,8 +33,8 @@ import {
     idbPutMessages,
     IDBSession,
 } from '@/lib/idb-cache';
-import { ChatMessage, DocumentInfo } from '@/types/chat';
-import { Message, AcquisitionData } from '@/components/chat/chat-interface';
+import { ChatMessage, DocumentInfo, Message } from '@/types/chat';
+import { AcquisitionData } from '@/types/schema';
 import { ChatSession } from '@/components/layout/chat-history-dropdown';
 import { generateUUID } from '@/lib/uuid';
 import type { TrackedToolCall, ToolCallsByMessageId } from '@/components/chat-simple/simple-chat-interface';

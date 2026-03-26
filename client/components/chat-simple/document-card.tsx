@@ -95,6 +95,11 @@ export default function DocumentCard({ document, sessionId }: DocumentCardProps)
                             {document.word_count.toLocaleString()} words
                         </p>
                     )}
+                    {(document.source || document.template_path || document.template_provenance) && (
+                        <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                            Template: {document.template_provenance?.template_id || document.template_path || document.source || 'Built-in'}
+                        </p>
+                    )}
                 </div>
 
                 {/* Action */}

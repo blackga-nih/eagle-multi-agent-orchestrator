@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Message, AcquisitionData } from '@/components/chat/chat-interface';
 import { ChatSession } from '@/components/layout/chat-history-dropdown';
-import { DocumentInfo } from '@/types/chat';
+import { DocumentInfo, Message } from '@/types/chat';
+import { AcquisitionData } from '@/types/schema';
 import { generateUUID } from '@/lib/uuid';
 
 const STORAGE_KEY = 'eagle_chat_sessions';

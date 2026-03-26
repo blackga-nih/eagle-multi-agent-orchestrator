@@ -120,6 +120,14 @@ export default function SimpleChatInterface() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+    /** Right panel state. */
+    const [isPanelOpen, setIsPanelOpen] = useState(true);
+
+    /** Package state — driven by SSE state_update metadata events. */
+    const { state: packageState, handleMetadata: handlePackageMetadata, reset: resetPackageState } = usePackageState();
+
+    const { track } = useAnalytics();
+
     // Load session data
     useEffect(() => {
         if (!currentSessionId) {
@@ -220,7 +228,7 @@ export default function SimpleChatInterface() {
                 // Non-blocking — swallow errors
             }
         })();
-    }, [currentSessionId, loadSession]);
+    }, [currentSessionId, loadSession, resetPackageState, getToken, handlePackageMetadata]);
 
     // Auto-save session (includes tool calls and state changes for persistence across refresh)
     const saveSessionDebounced = useCallback(() => {
@@ -262,14 +270,6 @@ export default function SimpleChatInterface() {
         selectCommand,
         closeCommandPicker,
     } = useSlashCommands({ onCommandSelect: handleCommandSelect });
-
-    /** Right panel state. */
-    const [isPanelOpen, setIsPanelOpen] = useState(false);
-
-    /** Package state — driven by SSE state_update metadata events. */
-    const { state: packageState, handleMetadata: handlePackageMetadata, reset: resetPackageState } = usePackageState();
-
-    const { track } = useAnalytics();
 
     // Streaming error from runtime
     const error = runtime.error;

@@ -11,32 +11,17 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
-import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError, BotoCoreError
+
+from .db_client import get_table
 
 logger = logging.getLogger("eagle.sessions")
 
 # ── Configuration ────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 
-# ── DynamoDB Client ──────────────────────────────────────────────────
-_dynamodb = None
-
 GENERIC_USAGE_ERROR = "Usage data is temporarily unavailable."
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
 
 
 # ── In-Memory Cache ──────────────────────────────────────────────────
@@ -131,7 +116,7 @@ def create_session(
     }
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=session)
         _update_cache(session_id, session)
         logger.info("Created session: %s for user %s", session_id, user_id)
@@ -158,7 +143,7 @@ def get_session(
         return _serialize_item(_session_cache[session_id])
 
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 "PK": f"SESSION#{tenant_id}#{user_id}",
@@ -207,7 +192,7 @@ def update_session(
         expr_values[val_alias] = v
 
     try:
-        table = _get_table()
+        table = get_table()
         response = table.update_item(
             Key={
                 "PK": f"SESSION#{tenant_id}#{user_id}",
@@ -235,7 +220,7 @@ def delete_session(
     Delete a session and its messages.
     """
     try:
-        table = _get_table()
+        table = get_table()
 
         # Delete session record
         table.delete_item(
@@ -279,7 +264,7 @@ def list_sessions(
     Returns most recent sessions first.
     """
     try:
-        table = _get_table()
+        table = get_table()
 
         key_condition = "PK = :pk AND begins_with(SK, :sk_prefix)"
         expr_values = {
@@ -345,7 +330,7 @@ def add_message(
     }
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=message)
 
         # Update session message count and updated_at
@@ -382,7 +367,7 @@ def get_messages(
     Returns messages in chronological order.
     """
     try:
-        table = _get_table()
+        table = get_table()
 
         key_condition = "PK = :pk AND begins_with(SK, :sk_prefix)"
         expr_values = {
@@ -514,7 +499,7 @@ def record_usage(
     }
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=usage)
 
         # Also update session total_tokens
@@ -541,7 +526,7 @@ def get_usage_summary(
     Get usage summary for a tenant.
     """
     try:
-        table = _get_table()
+        table = get_table()
 
         # Query usage records for the past N days
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -605,7 +590,7 @@ def get_usage_metrics(
 ) -> List[Dict[str, Any]]:
     """Query USAGE# records for a tenant within a date range."""
     try:
-        table = _get_table()
+        table = get_table()
         response = table.query(
             KeyConditionExpression="PK = :pk AND SK BETWEEN :start AND :end",
             ExpressionAttributeValues={
@@ -632,7 +617,7 @@ def get_all_tenants() -> List[Dict[str, str]]:
       - ProjectionExpression limits payload to two attributes
     """
     try:
-        table = _get_table()
+        table = get_table()
         response = table.scan(
             IndexName="GSI1",
             FilterExpression=Attr("GSI1PK").begins_with("TENANT#"),
@@ -663,7 +648,7 @@ def get_tenants_by_tier(tier: str) -> List[Dict[str, str]]:
     metadata includes a subscription_tier field.
     """
     try:
-        table = _get_table()
+        table = get_table()
         response = table.query(
             IndexName="GSI2",
             KeyConditionExpression=Key("GSI2PK").eq(f"TIER#{tier}"),
@@ -708,7 +693,7 @@ def store_cost_metric(
         **{k: v for k, v in metadata.items()},
     }
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=item)
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to store cost metric: %s", e)
@@ -720,7 +705,7 @@ def get_tenant_usage_overview(tenant_id: str) -> Dict[str, Any]:
     Returns a dict with total_messages, sessions count, and recent metrics.
     """
     try:
-        table = _get_table()
+        table = get_table()
 
         # Count usage records (recent metrics)
         usage_resp = table.query(
@@ -764,7 +749,7 @@ def list_tenant_sessions(tenant_id: str) -> List[Dict[str, Any]]:
     Returns sessions sorted by created_at descending (ScanIndexForward=False).
     """
     try:
-        table = _get_table()
+        table = get_table()
         response = table.query(
             IndexName="GSI1",
             KeyConditionExpression=Key("GSI1PK").eq(f"TENANT#{tenant_id}"),
@@ -779,7 +764,7 @@ def list_tenant_sessions(tenant_id: str) -> List[Dict[str, Any]]:
 def get_subscription_usage(tenant_id: str, tier: str) -> Optional[Dict[str, Any]]:
     """Get current subscription usage counters for a tenant/tier."""
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 "PK": f"SUB#{tenant_id}",
@@ -803,7 +788,7 @@ def put_subscription_usage(
 ) -> None:
     """Store subscription usage counters for a tenant/tier."""
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item={
             "PK": f"SUB#{tenant_id}",
             "SK": f"SUB#{tier}#current",

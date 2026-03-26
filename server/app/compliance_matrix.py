@@ -9,6 +9,7 @@ Backed by three JSON data files in eagle-plugin/data/:
 
 All functions are read-only (no tenant state, no side effects).
 """
+from __future__ import annotations
 
 import json
 from pathlib import Path

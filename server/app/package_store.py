@@ -6,22 +6,20 @@ PK:  PACKAGE#{tenant_id}
 SK:  PACKAGE#{package_id}
 GSI: GSI1PK = TENANT#{tenant_id}, GSI1SK = PACKAGE#{status}#{created_at}
 """
-import os
-import re
+from __future__ import annotations
+
 import logging
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
-logger = logging.getLogger("eagle.packages")
+from .db_client import get_table, now_iso
 
-# -- Configuration ----------------------------------------------------------
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+logger = logging.getLogger("eagle.packages")
 
 # -- FAR Thresholds ---------------------------------------------------------
 _MICRO_PURCHASE_THRESHOLD = Decimal("10000")
@@ -85,27 +83,8 @@ _GENERIC_TITLES = {
     "new package", "package", "draft", "untitled acquisition",
 }
 
-# -- DynamoDB singleton ------------------------------------------------------
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # -- Internal helpers -------------------------------------------------------
-
-
-def _now_iso() -> str:
-    """Return current UTC time as ISO-8601 string."""
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _pathway_from_value(estimated_value: Decimal) -> str:
@@ -265,7 +244,7 @@ def _next_package_id(tenant_id: str) -> str:
     highest sequence number found.  If no packages exist, starts at 0001.
     """
     year = datetime.now(timezone.utc).strftime("%Y")
-    table = _get_table()
+    table = get_table()
 
     try:
         response = table.query(
@@ -348,7 +327,7 @@ def create_package(
         title, requirement_type, estimated_value, contract_vehicle
     )
 
-    now = _now_iso()
+    now = now_iso()
 
     item: dict = {
         "PK": f"PACKAGE#{tenant_id}",
@@ -402,7 +381,7 @@ def create_package(
     except Exception as e:
         logger.debug("Auto-tag computation skipped during create_package: %s", e)
 
-    _get_table().put_item(Item=item)
+    get_table().put_item(Item=item)
     logger.info("Created package %s for tenant %s", package_id, tenant_id)
     return _serialize(item)
 
@@ -413,7 +392,7 @@ def get_package(tenant_id: str, package_id: str) -> Optional[dict]:
     Returns the serialised package dict, or None if not found.
     """
     try:
-        response = _get_table().get_item(
+        response = get_table().get_item(
             Key={
                 "PK": f"PACKAGE#{tenant_id}",
                 "SK": f"PACKAGE#{package_id}",
@@ -492,7 +471,7 @@ def update_package(
         new_vehicle = allowed.get("contract_vehicle") or existing.get("contract_vehicle")
         allowed["title"] = _generate_descriptive_title(orig_title, new_req_type, ev, new_vehicle)
 
-    now = _now_iso()
+    now = now_iso()
     allowed["updated_at"] = now
 
     # Keep GSI1SK consistent with current (or new) status
@@ -519,7 +498,7 @@ def update_package(
     update_expression = "SET " + ", ".join(expr_parts)
 
     try:
-        response = _get_table().update_item(
+        response = get_table().update_item(
             Key={
                 "PK": f"PACKAGE#{tenant_id}",
                 "SK": f"PACKAGE#{package_id}",
@@ -566,7 +545,7 @@ def list_packages(
 
     Returns a list of serialised package dicts (may be empty).
     """
-    table = _get_table()
+    table = get_table()
 
     try:
         if status:
@@ -703,7 +682,7 @@ def approve_package(tenant_id: str, package_id: str) -> Optional[dict]:
     return update_package(
         tenant_id,
         package_id,
-        {"status": "approved", "approved_at": _now_iso()},
+        {"status": "approved", "approved_at": now_iso()},
     )
 
 

@@ -2,25 +2,26 @@
 Cognito JWT Authentication
 Validates AWS Cognito JWTs and extracts user/tenant context.
 """
-import os
 import time
 import logging
 import httpx
 from typing import Optional, Dict, Any, Tuple
 
+from .config import auth as auth_config
+
 logger = logging.getLogger("eagle.auth")
 
-# ── Configuration ────────────────────────────────────────────────────
-COGNITO_REGION = os.getenv("COGNITO_REGION", os.getenv("AWS_REGION", "us-east-1"))
-COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID", "")
-COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID", "")
+# ── Configuration (from centralized config) ──────────────────────────
+COGNITO_REGION = auth_config.cognito_region
+COGNITO_USER_POOL_ID = auth_config.cognito_user_pool_id
+COGNITO_CLIENT_ID = auth_config.cognito_client_id
 COGNITO_ISSUER = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
 COGNITO_JWKS_URL = f"{COGNITO_ISSUER}/.well-known/jwks.json"
 
 # Dev mode bypass
-DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
-DEV_USER_ID = os.getenv("DEV_USER_ID", "dev-user")
-DEV_TENANT_ID = os.getenv("DEV_TENANT_ID", "dev-tenant")
+DEV_MODE = auth_config.dev_mode
+DEV_USER_ID = auth_config.dev_user_id
+DEV_TENANT_ID = auth_config.dev_tenant_id
 
 # ── JWKS Cache ───────────────────────────────────────────────────────
 _jwks_cache: Dict[str, Any] = {}

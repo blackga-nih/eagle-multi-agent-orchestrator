@@ -11,23 +11,13 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 
-import boto3
 from botocore.exceptions import ClientError, BotoCoreError
+
+from ..db_client import get_table
 
 logger = logging.getLogger("eagle.telemetry.store")
 
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 TRACE_TTL_DAYS = int(os.getenv("TRACE_TTL_DAYS", "30"))
-
-_dynamodb = None
-
-
-def _get_table():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb.Table(TABLE_NAME)
 
 
 def store_trace(summary: dict, spans: list, trace_json: list = None) -> bool:
@@ -77,7 +67,7 @@ def store_trace(summary: dict, spans: list, trace_json: list = None) -> bool:
             item["trace_json"] = trace_str
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=item)
         logger.info("Stored trace %s for tenant %s", trace_id, tenant_id)
         return True
@@ -93,7 +83,7 @@ def get_traces(
 ) -> List[Dict[str, Any]]:
     """Fetch recent traces for a tenant."""
     try:
-        table = _get_table()
+        table = get_table()
 
         key_condition = "PK = :pk"
         expr_values: dict = {":pk": f"TRACE#{tenant_id}"}
@@ -124,7 +114,7 @@ def get_traces(
 def get_trace_detail(tenant_id: str, trace_id: str, date: str) -> Optional[Dict]:
     """Fetch a single trace with full spans and trace_json."""
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 "PK": f"TRACE#{tenant_id}",
@@ -154,7 +144,7 @@ def get_traces_by_session(session_id: str, limit: int = 20) -> List[Dict]:
     to a table scan filtered by session_id (slower but works without GSI).
     """
     try:
-        table = _get_table()
+        table = get_table()
         try:
             response = table.query(
                 IndexName="GSI1",

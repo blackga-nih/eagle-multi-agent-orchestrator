@@ -7,34 +7,18 @@ Uses the shared `eagle` single-table with PK/SK patterns:
 
 Non-fatal: all writes are best-effort so test runs never fail due to persistence.
 """
-import os
 import time
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from decimal import Decimal
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+from .db_client import get_table
+
 logger = logging.getLogger("eagle.test_results")
-
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
 
 
 def _decimal_safe(obj):
@@ -58,7 +42,7 @@ def save_test_run(run_id: str, summary: Dict[str, Any]) -> bool:
     SK: RUN#{run_id}
     """
     try:
-        table = _get_table()
+        table = get_table()
         item = _decimal_safe({
             "PK": "TESTRUN#system",
             "SK": f"RUN#{run_id}",
@@ -91,7 +75,7 @@ def save_test_result(run_id: str, nodeid: str, result: Dict[str, Any]) -> bool:
     SK: RESULT#{nodeid}
     """
     try:
-        table = _get_table()
+        table = get_table()
         # Truncate long error messages to stay under 400KB item limit
         error_msg = result.get("error", "")
         if len(error_msg) > 2000:
@@ -122,7 +106,7 @@ def save_test_result(run_id: str, nodeid: str, result: Dict[str, Any]) -> bool:
 def list_test_runs(limit: int = 20) -> List[Dict[str, Any]]:
     """List recent test runs, newest first."""
     try:
-        table = _get_table()
+        table = get_table()
         resp = table.query(
             KeyConditionExpression=Key("PK").eq("TESTRUN#system"),
             ScanIndexForward=False,  # newest first
@@ -152,7 +136,7 @@ def list_test_runs(limit: int = 20) -> List[Dict[str, Any]]:
 def get_test_run_results(run_id: str) -> List[Dict[str, Any]]:
     """Get all individual test results for a specific run."""
     try:
-        table = _get_table()
+        table = get_table()
         resp = table.query(
             KeyConditionExpression=(
                 Key("PK").eq(f"TESTRUN#RUN#{run_id}") &

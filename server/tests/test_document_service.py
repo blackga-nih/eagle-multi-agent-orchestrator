@@ -61,8 +61,8 @@ class TestCreatePackageDocumentVersion:
 
         with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
              mock.patch("app.document_service.get_document_history", return_value=[]), \
-             mock.patch("app.document_service._get_table", return_value=mock_table), \
-             mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package"), \
              mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
@@ -94,8 +94,8 @@ class TestCreatePackageDocumentVersion:
 
         with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
              mock.patch("app.document_service.get_document_history", return_value=existing), \
-             mock.patch("app.document_service._get_table", return_value=mock_table), \
-             mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package"), \
              mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
@@ -170,8 +170,8 @@ class TestCreatePackageDocumentVersion:
 
         with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
              mock.patch("app.document_service.get_document_history", return_value=[]), \
-             mock.patch("app.document_service._get_table", return_value=mock_table), \
-             mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
              mock.patch("app.document_service.datetime", wraps=datetime,
@@ -205,8 +205,8 @@ class TestCreatePackageDocumentVersion:
 
         with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
              mock.patch("app.document_service.get_document_history", return_value=existing), \
-             mock.patch("app.document_service._get_table", return_value=mock_table), \
-             mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package"), \
              mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
@@ -237,8 +237,8 @@ class TestCreatePackageDocumentVersion:
 
         with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
              mock.patch("app.document_service.get_document_history", return_value=[]), \
-             mock.patch("app.document_service._get_table", return_value=mock_table), \
-             mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package") as mock_update, \
              mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
@@ -268,8 +268,8 @@ class TestCreatePackageDocumentVersion:
 
         with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
              mock.patch("app.document_service.get_document_history", return_value=[]), \
-             mock.patch("app.document_service._get_table", return_value=mock_table), \
-             mock.patch("app.document_service._get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package"), \
              mock.patch("app.document_service.write_changelog_entry"), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
@@ -309,7 +309,7 @@ class TestGetDocumentDownloadUrl:
         mock_s3.generate_presigned_url.return_value = "https://presigned-url"
 
         with mock.patch("app.document_service.get_document", return_value=mock_doc), \
-             mock.patch("app.document_service._get_s3", return_value=mock_s3):
+             mock.patch("app.document_service.get_s3", return_value=mock_s3):
             url = get_document_download_url(TENANT, PACKAGE_ID, DOC_TYPE)
 
         assert url == "https://presigned-url"

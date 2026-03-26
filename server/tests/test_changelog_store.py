@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 @pytest.fixture
 def mock_dynamodb_table():
     """Mock DynamoDB table for testing."""
-    with patch("app.changelog_store._get_table") as mock_get_table:
+    with patch("app.changelog_store.get_table") as mock_get_table:
         mock_table = MagicMock()
         mock_get_table.return_value = mock_table
         yield mock_table

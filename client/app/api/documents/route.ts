@@ -91,13 +91,6 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json() as Record<string, unknown>;
 
-    // Decode base64-encoded content (WAF bypass: frontend encodes to
-    // prevent NCI proxy from blocking legal text patterns in POST body)
-    if (body.content_b64 && typeof body.content_b64 === 'string') {
-      body.content = Buffer.from(body.content_b64, 'base64').toString('utf-8');
-      delete body.content_b64;
-    }
-
     // Build headers - only include Authorization if present
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

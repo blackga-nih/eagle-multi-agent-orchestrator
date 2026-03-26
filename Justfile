@@ -220,7 +220,7 @@ lint: lint-py lint-ts
 
 # Lint Python with ruff
 lint-py:
-    cd server && python3 -m ruff check app/
+    cd server && .venv/bin/python -m ruff check app/
 
 # Type-check TypeScript
 lint-ts:

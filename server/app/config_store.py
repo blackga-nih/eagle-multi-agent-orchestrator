@@ -20,19 +20,15 @@ Known keys and defaults:
 """
 import json
 import logging
-import os
 import time
 from datetime import datetime
 from typing import Any, Dict
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-logger = logging.getLogger("eagle.config_store")
+from .db_client import get_table
 
-# -- Configuration ------------------------------------------------------
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+logger = logging.getLogger("eagle.config_store")
 
 # -- Known defaults -----------------------------------------------------
 _DEFAULTS: Dict[str, Any] = {
@@ -50,20 +46,6 @@ _DEFAULTS: Dict[str, Any] = {
 }
 
 _CONFIG_PK = "CONFIG#global"
-
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # -- In-Process Cache (60-second TTL per config key) --------------------
 _config_cache: Dict[str, Dict[str, Any]] = {}
@@ -124,7 +106,7 @@ def get_config(key: str, default: Any = None) -> Any:
         return cached
 
     try:
-        table = _get_table()
+        table = get_table()
         response = table.get_item(
             Key={
                 "PK": _CONFIG_PK,
@@ -163,7 +145,7 @@ def put_config(key: str, value: Any, updated_by: str = "admin") -> dict:
     }
 
     try:
-        table = _get_table()
+        table = get_table()
         table.put_item(Item=item)
         _cache_invalidate(key)
         _cache_invalidate("__all__")
@@ -180,7 +162,7 @@ def delete_config(key: str) -> bool:
     Returns True on success, False if an error occurred.
     """
     try:
-        table = _get_table()
+        table = get_table()
         table.delete_item(
             Key={
                 "PK": _CONFIG_PK,
@@ -207,7 +189,7 @@ def list_config() -> Dict[str, Any]:
         return cached  # type: ignore[return-value]
 
     try:
-        table = _get_table()
+        table = get_table()
         response = table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
             ExpressionAttributeValues={

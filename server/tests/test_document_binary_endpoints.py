@@ -212,9 +212,8 @@ def test_get_document_returns_binary_metadata_for_canonical_package_doc():
     app = main_module.app
     s3 = _build_s3_mock()
 
-    with patch("boto3.client", return_value=s3), patch.object(
-        main_module,
-        "get_document",
+    with patch("boto3.client", return_value=s3), patch(
+        "app.routers.documents.get_document",
         return_value={
             "document_id": "doc-123",
             "title": "Statement of Work",
@@ -296,11 +295,11 @@ def test_post_docx_edit_updates_workspace_docx_preview_blocks():
     main_module = _load_app()
     app = main_module.app
     s3 = _build_s3_mock()
+    import app.document_ai_edit_service as docx_service
 
     # Patch _get_s3 via the function's own globals (module reload makes
-    # sys.modules["app.document_ai_edit_service"] stale, so string-based
-    # patch targets the wrong module object).
-    _save_fn = main_module.save_docx_preview_edits
+    # the canonical edit service module the correct patch target.
+    _save_fn = docx_service.save_docx_preview_edits
     _orig_get_s3 = _save_fn.__globals__["_get_s3"]
     _save_fn.__globals__["_get_s3"] = lambda: s3
 
@@ -335,10 +334,11 @@ def test_post_xlsx_edit_updates_workspace_xlsx_preview_cells():
     main_module = _load_app()
     app = main_module.app
     s3 = _build_s3_mock()
+    import app.spreadsheet_edit_service as xlsx_service
 
     # Patch _get_s3 via the function's own globals (module reload makes
-    # sys.modules stale, so string-based patch targets the wrong object).
-    _save_fn = main_module.save_xlsx_preview_edits
+    # the canonical spreadsheet service module the correct patch target.
+    _save_fn = xlsx_service.save_xlsx_preview_edits
     _orig_get_s3 = _save_fn.__globals__["_get_s3"]
     _save_fn.__globals__["_get_s3"] = lambda: s3
 

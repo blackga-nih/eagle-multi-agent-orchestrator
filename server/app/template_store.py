@@ -18,41 +18,22 @@ GSI (for reverse lookups by tenant + doc_type + recency):
 from __future__ import annotations
 
 import logging
-import os
 import re
 import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
-logger = logging.getLogger("eagle.template_store")
+from .db_client import get_table
 
-# ── Configuration ─────────────────────────────────────────────────────
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+logger = logging.getLogger("eagle.template_store")
 
 from .doc_type_registry import ALL_DOC_TYPES  # noqa: E402
 
 # Accept both hyphenated and underscored forms via normalize_doc_type()
 VALID_DOC_TYPES = ALL_DOC_TYPES
-
-# ── DynamoDB singleton (lazy, same pattern as plugin_store.py) ────
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb  # noqa: PLW0603
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
-
 
 # ── In-Process Cache (60-second TTL) ─────────────────────
 # Key format: f"{tenant_id}#{doc_type}#{user_id}"
@@ -169,7 +150,7 @@ def put_template(
         item["ttl"] = ttl
 
     try:
-        _get_table().put_item(Item=item)
+        get_table().put_item(Item=item)
         _cache_invalidate(tenant_id, doc_type, user_id)
         logger.debug(
             "template_store.put_template: [%s/%s/%s] v%s",
@@ -201,7 +182,7 @@ def get_template(tenant_id: str, doc_type: str, user_id: str) -> Optional[dict]:
         return cached  # type: ignore[return-value]
 
     try:
-        response = _get_table().get_item(
+        response = get_table().get_item(
             Key={"PK": _pk(tenant_id), "SK": _sk(doc_type, user_id)}
         )
         item = response.get("Item")
@@ -222,7 +203,7 @@ def get_template(tenant_id: str, doc_type: str, user_id: str) -> Optional[dict]:
 def delete_template(tenant_id: str, doc_type: str, user_id: str) -> bool:
     '''Delete a TEMPLATE# item.  Returns True on success, False on error.'''
     try:
-        _get_table().delete_item(
+        get_table().delete_item(
             Key={"PK": _pk(tenant_id), "SK": _sk(doc_type, user_id)}
         )
         _cache_invalidate(tenant_id, doc_type, user_id)
@@ -263,7 +244,7 @@ def list_tenant_templates(
     pk_val = _pk(tenant_id)
 
     try:
-        table = _get_table()
+        table = get_table()
 
         if doc_type:
             sk_prefix = f"TEMPLATE#{doc_type}#"

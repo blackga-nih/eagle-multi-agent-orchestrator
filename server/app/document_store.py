@@ -11,42 +11,20 @@ GSI (GSI1):
     GSI1PK:  TENANT#{tenant_id}
     GSI1SK:  DOCUMENT#{package_id}#{doc_type}#{version:04d}
 """
-import os
 import uuid
 import logging
 from datetime import datetime
 from typing import Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from boto3.dynamodb.conditions import Attr, Key
 
+from .db_client import get_table, item_to_dict
+
 logger = logging.getLogger('eagle.document_store')
-
-# -- Configuration --------------------------------------------------------
-TABLE_NAME = os.getenv('EAGLE_SESSIONS_TABLE', 'eagle')
-AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-
-# -- DynamoDB Client (lazy singleton) -------------------------------------
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
 
 
 # -- Helpers ---------------------------------------------------------------
-
-def _item_to_dict(item) -> dict:
-    """Convert a raw DynamoDB item to a plain dict."""
-    return dict(item)
 
 
 def _sk(package_id: str, doc_type: str, version: int) -> str:
@@ -89,7 +67,7 @@ def create_document(
 
     Returns the newly created document dict.
     """
-    table = _get_table()
+    table = get_table()
     now = datetime.utcnow().isoformat()
 
     existing = get_document_history(tenant_id, package_id, doc_type)
@@ -170,7 +148,7 @@ def get_document(
     """
     if version is not None:
         try:
-            table = _get_table()
+            table = get_table()
             response = table.get_item(
                 Key={
                     'PK': f'DOCUMENT#{tenant_id}',
@@ -178,7 +156,7 @@ def get_document(
                 }
             )
             raw = response.get('Item')
-            return _item_to_dict(raw) if raw else None
+            return item_to_dict(raw) if raw else None
         except (ClientError, BotoCoreError) as e:
             logger.error('document_store.get_document failed: %s', e)
             return None
@@ -199,7 +177,7 @@ def finalize_document(
 
     Returns the updated document dict, or None if the document was not found.
     """
-    table = _get_table()
+    table = get_table()
     pk = f'DOCUMENT#{tenant_id}'
     sk = _sk(package_id, doc_type, version)
 
@@ -213,7 +191,7 @@ def finalize_document(
             ReturnValues='ALL_NEW',
         )
         attrs = response.get('Attributes', {})
-        return _item_to_dict(attrs) if attrs else None
+        return item_to_dict(attrs) if attrs else None
     except ClientError as e:
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
             logger.warning(
@@ -234,7 +212,7 @@ def list_package_documents(tenant_id: str, package_id: str) -> list[dict]:
     Queries all DOCUMENT# items whose SK begins with DOCUMENT#{package_id}#,
     then selects the highest version per doc_type.
     """
-    table = _get_table()
+    table = get_table()
     sk_prefix = f'DOCUMENT#{package_id}#'
 
     try:
@@ -244,7 +222,7 @@ def list_package_documents(tenant_id: str, package_id: str) -> list[dict]:
                 & Key('SK').begins_with(sk_prefix)
             ),
         )
-        items = [_item_to_dict(i) for i in response.get('Items', [])]
+        items = [item_to_dict(i) for i in response.get('Items', [])]
     except (ClientError, BotoCoreError) as e:
         logger.error('document_store.list_package_documents failed: %s', e)
         return []
@@ -264,7 +242,7 @@ def get_document_history(
     doc_type: str,
 ) -> list[dict]:
     """Return all versions of a given doc_type within a package, sorted ascending."""
-    table = _get_table()
+    table = get_table()
     sk_prefix = f'DOCUMENT#{package_id}#{doc_type}#'
 
     try:
@@ -274,7 +252,7 @@ def get_document_history(
                 & Key('SK').begins_with(sk_prefix)
             ),
         )
-        items = [_item_to_dict(i) for i in response.get('Items', [])]
+        items = [item_to_dict(i) for i in response.get('Items', [])]
         return sorted(items, key=lambda d: d.get('version', 0))
     except (ClientError, BotoCoreError) as e:
         logger.error('document_store.get_document_history failed: %s', e)
@@ -290,7 +268,7 @@ def get_document_by_id(
     The current table schema does not index document_id directly, so this uses
     the tenant partition with a filter expression as an MVP lookup path.
     """
-    table = _get_table()
+    table = get_table()
 
     try:
         response = table.query(
@@ -301,7 +279,7 @@ def get_document_by_id(
         items = response.get("Items", [])
         if not items:
             return None
-        return _item_to_dict(items[0])
+        return item_to_dict(items[0])
     except (ClientError, BotoCoreError) as e:
         logger.error("document_store.get_document_by_id failed: %s", e)
         return None
@@ -337,7 +315,7 @@ def create_document_from_s3(
     """
     import base64
 
-    table = _get_table()
+    table = get_table()
     now = datetime.utcnow().isoformat()
 
     existing = get_document_history(tenant_id, package_id, doc_type)

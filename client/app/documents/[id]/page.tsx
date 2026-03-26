@@ -35,6 +35,7 @@ import {
     extractBackgroundFromMessages,
 } from '@/lib/template-hydration';
 import { getGeneratedDocument } from '@/lib/document-store';
+import { formatRelativeTime } from '@/lib/date-utils';
 import { addDocumentTags, removeDocumentTags } from '@/lib/document-api';
 import { DOCUMENT_TYPE_LABELS } from '@/types/schema';
 
@@ -121,6 +122,20 @@ function docxPreviewBlocksEqual(left: DocxPreviewBlock[], right: DocxPreviewBloc
             && block.text === other.text
             && (block.level ?? null) === (other.level ?? null)
             && (block.checked ?? null) === (other.checked ?? null)
+        );
+    });
+}
+
+function collectChangedDocxPreviewBlocks(originalBlocks: DocxPreviewBlock[], editedBlocks: DocxPreviewBlock[]): DocxPreviewBlock[] {
+    const originalMap = new Map(originalBlocks.map((block) => [block.block_id, block]));
+    return editedBlocks.filter((block) => {
+        const original = originalMap.get(block.block_id);
+        if (!original) return true;
+        return (
+            block.kind !== original.kind
+            || block.text !== original.text
+            || (block.level ?? null) !== (original.level ?? null)
+            || (block.checked ?? null) !== (original.checked ?? null)
         );
     });
 }
@@ -263,20 +278,6 @@ interface ChangelogEntry {
     created_at: string;
 }
 
-function formatRelativeTime(dateStr: string): string {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
-}
 
 function DocumentChangelogPanel({
     packageId,
@@ -1258,9 +1259,12 @@ ${docSnippet}`;
                 : isBinaryDocument && isXlsxDocument
                     ? `/api/documents/${encodeURIComponent(s3Key)}/xlsx-edit`
                     : `/api/documents/${encodeURIComponent(s3Key)}`;
+            const changedDocxPreviewBlocks = docxPreviewMode === 'text_fallback'
+                ? editDocxPreviewBlocks
+                : collectChangedDocxPreviewBlocks(docxPreviewBlocks, editDocxPreviewBlocks);
             const requestBody = isBinaryDocument && isDocxDocument
                 ? {
-                    preview_blocks: editDocxPreviewBlocks,
+                    preview_blocks: changedDocxPreviewBlocks,
                     preview_mode: docxPreviewMode || 'docx_blocks',
                     change_source: 'user_edit',
                 }
@@ -1367,22 +1371,39 @@ ${docSnippet}`;
         setExportError(null);
 
         try {
+            if (format === 'docx' && isBinaryDocument && isDocxDocument && downloadUrl) {
+                const a = window.document.createElement('a');
+                a.href = downloadUrl;
+                a.download = `${documentTitle.replace(/[^a-z0-9]/gi, '_')}.docx`;
+                window.document.body.appendChild(a);
+                a.click();
+                window.document.body.removeChild(a);
+                return;
+            }
+
             const token = await getToken();
             const headers: Record<string, string> = {
                 'Content-Type': 'application/json',
             };
             if (token) headers['Authorization'] = `Bearer ${token}`;
 
-            // Base64-encode content to prevent NCI WAF/proxy from
-            // blocking POST bodies that contain legal text patterns.
-            const res = await fetch('/api/documents', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
+            const exportPayload = s3Key
+                ? {
+                    doc_key: s3Key,
+                    title: documentTitle,
+                    format,
+                }
+                : {
+                    // Base64-encode unsaved content to reduce WAF/proxy interference.
                     content_b64: btoa(unescape(encodeURIComponent(documentContent))),
                     title: documentTitle,
                     format,
-                }),
+                };
+
+            const res = await fetch('/api/documents', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(exportPayload),
             });
 
             if (!res.ok) {
@@ -1476,8 +1497,7 @@ ${docSnippet}`;
                                 <span className="text-xs text-red-600 mr-2">{exportError}</span>
                             )}
 
-                            {/* Download controls — always generate from displayed
-                                content so download matches what the user sees */}
+                            {/* Download controls */}
                             <div className="relative">
                                 <button
                                     onClick={() => setShowDownloadMenu(!showDownloadMenu)}

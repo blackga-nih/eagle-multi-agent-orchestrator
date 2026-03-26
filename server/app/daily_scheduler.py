@@ -9,6 +9,8 @@ Config via environment variables:
     TEAMS_DAILY_SUMMARY_ENABLED — on/off (default: "true")
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os

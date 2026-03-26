@@ -15,31 +15,15 @@ Tag types:
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime
 from typing import Optional
 
-import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .db_client import get_table
+
 logger = logging.getLogger("eagle.tag_store")
-
-TABLE_NAME = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-_dynamodb = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-    return _dynamodb
-
-
-def _get_table():
-    return _get_dynamodb().Table(TABLE_NAME)
 
 
 # ── Core CRUD ─────────────────────────────────────────────────────────
@@ -62,7 +46,7 @@ def add_tags(
     Returns:
         Number of TAG# items written
     """
-    table = _get_table()
+    table = get_table()
     now = datetime.utcnow().isoformat()
     written = 0
 
@@ -103,7 +87,7 @@ def remove_tags(
     Returns:
         Number of TAG# items deleted
     """
-    table = _get_table()
+    table = get_table()
     deleted = 0
 
     for tag_value in tag_values:
@@ -144,7 +128,7 @@ def get_entity_tags(
     # For now, we return tags from the entity item directly.
     result = {"system_tags": [], "user_tags": [], "far_tags": []}
 
-    table = _get_table()
+    table = get_table()
 
     # Determine entity PK/SK prefix
     if entity_type == "document":
@@ -158,9 +142,11 @@ def get_entity_tags(
         # Query the entity's partition for items matching the entity_id
         response = table.query(
             KeyConditionExpression=Key("PK").eq(pk_prefix),
-            FilterExpression=boto3.dynamodb.conditions.Attr("document_id").eq(entity_id)
-            if entity_type == "document"
-            else boto3.dynamodb.conditions.Attr("package_id").eq(entity_id),
+            FilterExpression=(
+                Attr("document_id").eq(entity_id)
+                if entity_type == "document"
+                else Attr("package_id").eq(entity_id)
+            ),
             Limit=1,
         )
         items = response.get("Items", [])
@@ -190,7 +176,7 @@ def find_entities_by_tag(
     Returns:
         List of dicts with entity_type, entity_id, tag_type, created_at
     """
-    table = _get_table()
+    table = get_table()
     pk = f"TAG#{tenant_id}#{tag_value}"
 
     try:
@@ -278,7 +264,7 @@ def update_entity_tags(
 
     Returns True on success.
     """
-    table = _get_table()
+    table = get_table()
 
     # Build update expression
     update_parts = []
@@ -308,7 +294,7 @@ def update_entity_tags(
         try:
             response = table.query(
                 KeyConditionExpression=Key("PK").eq(pk),
-                FilterExpression=boto3.dynamodb.conditions.Attr("document_id").eq(entity_id),
+                FilterExpression=Attr("document_id").eq(entity_id),
                 Limit=1,
             )
             items = response.get("Items", [])

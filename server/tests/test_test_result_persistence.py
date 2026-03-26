@@ -78,7 +78,7 @@ class TestSaveTestRun:
         from app.test_result_store import save_test_run
 
         mock_table = mock.MagicMock()
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             result = save_test_run(MOCK_RUN_ID, MOCK_SUMMARY)
 
         assert result is True
@@ -98,7 +98,7 @@ class TestSaveTestRun:
 
         mock_table = mock.MagicMock()
         mock_table.put_item.side_effect = Exception("DDB down")
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             result = save_test_run(MOCK_RUN_ID, MOCK_SUMMARY)
 
         assert result is False
@@ -122,7 +122,7 @@ class TestSaveTestResult:
             "duration_s": 0.5,
             "error": "",
         }
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             ok = save_test_result(MOCK_RUN_ID, "tests/test_foo.py::test_bar", result_data)
 
         assert ok is True
@@ -144,7 +144,7 @@ class TestSaveTestResult:
             "duration_s": 1.0,
             "error": long_error,
         }
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             save_test_result(MOCK_RUN_ID, "tests/test_foo.py::test_fail", result_data)
 
         item = mock_table.put_item.call_args[1]["Item"]
@@ -156,7 +156,7 @@ class TestSaveTestResult:
 
         mock_table = mock.MagicMock()
         mock_table.put_item.side_effect = Exception("boom")
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             ok = save_test_result(MOCK_RUN_ID, "nodeid", {"status": "passed"})
         assert ok is False
 
@@ -189,7 +189,7 @@ class TestListTestRuns:
                 },
             ]
         }
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             runs = list_test_runs(limit=5)
 
         assert len(runs) == 1
@@ -211,7 +211,7 @@ class TestListTestRuns:
 
         mock_table = mock.MagicMock()
         mock_table.query.side_effect = Exception("timeout")
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             runs = list_test_runs()
 
         assert runs == []
@@ -236,7 +236,7 @@ class TestGetRunResults:
                  "test_name": "test_1", "status": "failed", "duration_s": Decimal("1.5"), "error": "AssertionError"},
             ]
         }
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             results = get_test_run_results(MOCK_RUN_ID)
 
         assert len(results) == 2
@@ -250,7 +250,7 @@ class TestGetRunResults:
 
         mock_table = mock.MagicMock()
         mock_table.query.side_effect = Exception("DDB unreachable")
-        with mock.patch("app.test_result_store._get_table", return_value=mock_table):
+        with mock.patch("app.test_result_store.get_table", return_value=mock_table):
             results = get_test_run_results(MOCK_RUN_ID)
 
         assert results == []

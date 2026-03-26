@@ -17,7 +17,6 @@ Config via environment variables:
 
 import asyncio
 import logging
-import os
 import time
 import traceback as tb_module
 import uuid
@@ -28,24 +27,20 @@ import httpx
 from fastapi import Request
 
 from .telemetry.log_context import _tenant_id, _user_id, _session_id
+from .config import webhooks as webhook_config, app as app_config
 
 logger = logging.getLogger("eagle.error_webhook")
 
-# ── Configuration ────────────────────────────────────────────────────
+# ── Configuration (from centralized config) ──────────────────────────
 
-WEBHOOK_URL: str = os.getenv(
-    "ERROR_WEBHOOK_URL",
-    "https://prod-52.usgovtexas.logic.azure.us:443/workflows/8705df58d766420d8847222b1b12d7a0/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Xo4vpYNBYWWdyreboIYnBJtGlO3cNRLSEakEcNGWBoM",
-)
-WEBHOOK_ENABLED: bool = os.getenv("ERROR_WEBHOOK_ENABLED", "true").lower() == "true"
-WEBHOOK_TIMEOUT: float = float(os.getenv("ERROR_WEBHOOK_TIMEOUT", "5.0"))
-RATE_LIMIT: int = int(os.getenv("ERROR_WEBHOOK_RATE_LIMIT", "10"))
-INCLUDE_TRACEBACK: bool = os.getenv("ERROR_WEBHOOK_INCLUDE_TRACEBACK", "true").lower() == "true"
-MIN_STATUS: int = int(os.getenv("ERROR_WEBHOOK_MIN_STATUS", "500"))
-EXCLUDE_PATHS: list[str] = [
-    p.strip() for p in os.getenv("ERROR_WEBHOOK_EXCLUDE_PATHS", "/api/health").split(",") if p.strip()
-]
-ENVIRONMENT: str = os.getenv("EAGLE_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev"))
+WEBHOOK_URL: str = webhook_config.error_url
+WEBHOOK_ENABLED: bool = webhook_config.error_enabled
+WEBHOOK_TIMEOUT: float = webhook_config.error_timeout
+RATE_LIMIT: int = webhook_config.error_rate_limit
+INCLUDE_TRACEBACK: bool = webhook_config.error_include_traceback
+MIN_STATUS: int = webhook_config.error_min_status
+EXCLUDE_PATHS: list[str] = webhook_config.error_exclude_paths
+ENVIRONMENT: str = app_config.environment
 
 
 # ── Token-bucket rate limiter ────────────────────────────────────────
