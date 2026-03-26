@@ -364,6 +364,76 @@ async def journey_documents(page, capture, base_url: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Workflows / Acquisition Packages Journey
+# ---------------------------------------------------------------------------
+@journey("workflows", "Acquisition Packages page with package grid and document checklist modal")
+async def journey_workflows(page, capture, base_url: str) -> list[dict]:
+    """Navigates to /workflows (Packages), screenshots the grid, opens a package
+    to show the document checklist side panel, and captures the modal."""
+    screenshots = []
+
+    # 1. Navigate to the Acquisition Packages page
+    await page.goto(f"{base_url}/workflows", wait_until="domcontentloaded")
+    await page.wait_for_timeout(3000)
+    s = await capture.take(page, "workflows", "01_packages_grid",
+                           "Acquisition Packages page with package cards, status tabs, search bar")
+    screenshots.append(s)
+
+    # 2. Look for package cards in the grid and click the first one (the mock "128-Slice CT Scanner")
+    cards = page.locator("main .grid > div.cursor-pointer, main .grid > div[class*='hover']")
+    card_count = await cards.count()
+    if card_count > 0:
+        # Screenshot the first card before clicking
+        s = await capture.take(page, "workflows", "02_package_cards_detail",
+                               "Close-up of acquisition package cards showing titles, status badges, doc counts")
+        screenshots.append(s)
+
+        # Click the first card to open the checklist modal
+        await cards.first.click()
+        await page.wait_for_timeout(2000)
+
+        # 3. Screenshot the modal with document checklist
+        s = await capture.take(page, "workflows", "03_checklist_modal",
+                               "Document checklist modal showing checklist items with status (completed/pending)")
+        screenshots.append(s)
+
+        # 4. Close the modal and try clicking a localStorage package if any (AI Generated badge)
+        close_btn = page.locator("button:has-text('Close'), [aria-label='Close']")
+        if await close_btn.count() > 0:
+            await close_btn.first.click()
+            await page.wait_for_timeout(1000)
+
+        # Try to find an AI Generated package (localStorage)
+        ai_cards = page.locator("text=AI Generated")
+        if await ai_cards.count() > 0:
+            # Click the parent card
+            ai_card = ai_cards.first.locator("xpath=ancestor::div[contains(@class, 'cursor-pointer')]")
+            if await ai_card.count() > 0:
+                await ai_card.first.click()
+                await page.wait_for_timeout(2000)
+                s = await capture.take(page, "workflows", "04_ai_package_checklist",
+                                       "AI-generated package checklist modal with document completion status")
+                screenshots.append(s)
+
+                close_btn2 = page.locator("button:has-text('Close'), [aria-label='Close']")
+                if await close_btn2.count() > 0:
+                    await close_btn2.first.click()
+                    await page.wait_for_timeout(500)
+
+    # 5. Check status tab filtering
+    tabs = page.locator("[role='tab'], button:has-text('In Progress'), button:has-text('Completed')")
+    if await tabs.count() > 1:
+        # Click "In Progress" or second tab
+        await tabs.nth(1).click()
+        await page.wait_for_timeout(1500)
+        s = await capture.take(page, "workflows", "05_filtered_packages",
+                               "Packages filtered by status tab showing filtered results")
+        screenshots.append(s)
+
+    return screenshots
+
+
+# ---------------------------------------------------------------------------
 # Responsive Journey
 # ---------------------------------------------------------------------------
 @journey("responsive", "Key pages at mobile (375px) and tablet (768px) viewports")
