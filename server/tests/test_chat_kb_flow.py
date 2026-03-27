@@ -64,7 +64,7 @@ def test_supervisor_prompt_cascade_requires_kb_before_web():
         tier="advanced",
         agent_names=[],
     )
-    assert "Do NOT skip to web_search without checking internal" in prompt
+    assert "knowledge_search BEFORE web_search" in prompt
 
 
 def test_supervisor_prompt_compliance_matrix_before_web():
