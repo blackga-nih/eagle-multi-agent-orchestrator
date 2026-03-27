@@ -166,7 +166,11 @@ async def export_package_zip_endpoint(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Download all package documents as a ZIP archive."""
+    import logging
+    from ..db_client import get_s3
     from ..document_export import export_package_zip
+
+    logger = logging.getLogger("eagle.packages")
 
     lookup_package = _resolve_main_override("get_package", get_package)
     list_docs = _resolve_main_override("list_package_documents", list_package_documents)
@@ -176,7 +180,38 @@ async def export_package_zip_endpoint(
         raise HTTPException(status_code=404, detail="Package not found")
 
     docs = list_docs(user.tenant_id, package_id)
-    docs_with_content = [d for d in docs if d.get("content")]
+    if not docs:
+        raise HTTPException(status_code=404, detail="No documents found for this package")
+
+    # Fetch content from S3 for each document (content is stored in S3, not DynamoDB)
+    s3 = get_s3()
+    docs_with_content = []
+    for doc in docs:
+        # If content already present (e.g. from test mocks), use it directly
+        if doc.get("content"):
+            docs_with_content.append(doc)
+            continue
+
+        s3_key = doc.get("s3_key")
+        s3_bucket = doc.get("s3_bucket")
+        if not s3_key or not s3_bucket:
+            logger.warning("Document %s/%s missing s3_key or s3_bucket, skipping",
+                           doc.get("doc_type"), doc.get("version"))
+            continue
+
+        try:
+            obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+            raw_content = obj["Body"].read()
+            file_type = doc.get("file_type", "md")
+            if file_type in ("md", "txt", "json", "html"):
+                doc["content"] = raw_content.decode("utf-8")
+            else:
+                doc["_binary"] = raw_content
+                doc["filename"] = f"{doc.get('doc_type', 'doc')}_{doc.get('title', 'document')}.{file_type}"
+            docs_with_content.append(doc)
+        except Exception as e:
+            logger.warning("Failed to fetch S3 content for %s: %s", s3_key, e)
+
     if not docs_with_content:
         raise HTTPException(status_code=404, detail="No documents with content found")
 
