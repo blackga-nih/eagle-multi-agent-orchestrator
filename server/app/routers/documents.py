@@ -591,7 +591,7 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
         for obj in response.get("Contents", []):
             key = obj["Key"]
             name = key.split("/")[-1]
-            if not name:
+            if not name or name.endswith(".content.md"):
                 continue
             documents.append(
                 {

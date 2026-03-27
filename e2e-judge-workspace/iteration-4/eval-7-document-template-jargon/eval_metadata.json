@@ -1,0 +1,15 @@
+{
+  "eval_id": 7,
+  "eval_name": "document-template-jargon",
+  "prompt": "Run the e2e judge on just the documents journey. I want to make sure the document viewer doesn't show any template jargon like {{VARIABLE}} placeholders, and that .content.md sidecar files aren't appearing as separate entries in the document list. EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD are set.",
+  "assertions": [
+    "Uses --journeys documents flag",
+    "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+    "Does NOT hardcode credentials — uses env vars",
+    "Explains that the documents journey checks for .content.md sidecar files in the document list",
+    "Explains that the judge detects {{PLACEHOLDER}} template jargon or unfilled placeholders in document content",
+    "Does NOT navigate to /templates (a non-existent route) — uses the Templates button/modal on the documents page instead",
+    "Mentions opening document previews to check content for template variables",
+    "Mentions cost estimate"
+  ]
+}

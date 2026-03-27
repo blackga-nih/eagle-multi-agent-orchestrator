@@ -133,7 +133,9 @@ export default function DocumentsPage() {
         const data = (await response.json()) as { documents?: ServerDocumentMetadata[] };
         if (cancelled) return;
 
-        const uploadedDocs = (data.documents || []).map(serverDocToDocument);
+        const uploadedDocs = (data.documents || [])
+          .filter(doc => !doc.name.endsWith('.content.md'))
+          .map(serverDocToDocument);
 
         setServerDocs(uploadedDocs);
       } catch {

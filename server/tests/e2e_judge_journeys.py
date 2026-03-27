@@ -332,32 +332,102 @@ async def journey_admin(page, capture, base_url: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Documents Journey
 # ---------------------------------------------------------------------------
-@journey("documents", "Document list, template view, and document detail")
+@journey("documents", "Document list with sidecar/template jargon checks, document preview, templates modal")
 async def journey_documents(page, capture, base_url: str) -> list[dict]:
-    """Captures the documents section of the app."""
+    """Captures the documents page and validates no template jargon or sidecar leaks.
+
+    Screenshot strategy:
+    - Document list (check for .content.md sidecar file entries)
+    - Scrolled list (catch sidecar files below the fold)
+    - Document preview modal (check for {{PLACEHOLDER}} template jargon)
+    - Scrolled preview (check body text for template variables)
+    - Second document preview (verify multiple docs have real content)
+    - Templates modal via button (not /templates route, which 404s)
+    """
     screenshots = []
 
+    # Step 1: Navigate to /documents
     await page.goto(f"{base_url}/documents", wait_until="domcontentloaded")
     await page.wait_for_timeout(2000)
-    s = await capture.take(page, "documents", "01_documents_list", "Documents listing page with document cards or table")
+    s = await capture.take(page, "documents", "01_documents_list",
+                           "Documents listing page — check for .content.md sidecar file entries and duplicate documents")
     screenshots.append(s)
 
-    # Try clicking first document if any exist
-    doc_items = page.locator("[data-testid*='document'], .document-card, tr[data-testid]")
+    # Step 2: Scroll down to reveal more documents (sidecar files may be below fold)
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    await page.wait_for_timeout(1000)
+    s = await capture.take(page, "documents", "02_documents_list_scrolled",
+                           "Scrolled document list — check all visible entries for .content.md sidecar filenames")
+    screenshots.append(s)
+
+    # Scroll back to top for clicking
+    await page.evaluate("window.scrollTo(0, 0)")
+    await page.wait_for_timeout(500)
+
+    # Step 3: Click first document to open preview modal — check for template jargon
+    doc_items = page.locator("main .space-y-3 > div.cursor-pointer, [data-testid*='document'], .document-card")
     if await doc_items.count() > 0:
         await doc_items.first.click()
         await page.wait_for_timeout(2000)
-        s = await capture.take(page, "documents", "02_document_detail", "Single document detail view")
+        s = await capture.take(page, "documents", "03_document_preview",
+                               "Document preview modal — check content for {{PLACEHOLDER}} template jargon or [To Be Filled] markers")
         screenshots.append(s)
 
-        # Go back
-        await page.go_back()
+        # Step 4: Scroll within the preview modal to see full content
+        await page.evaluate("""
+            const modal = document.querySelector('[role="dialog"]')
+                || document.querySelector('.fixed.inset-0')
+                || document.querySelector('[class*="max-h"][class*="overflow"]');
+            if (modal) {
+                const scrollable = modal.querySelector('[class*="overflow-y"]') || modal;
+                scrollable.scrollTo(0, scrollable.scrollHeight);
+            }
+        """)
         await page.wait_for_timeout(1000)
+        s = await capture.take(page, "documents", "04_document_preview_scrolled",
+                               "Scrolled document preview content — check body text for {{VARIABLE}} template placeholders")
+        screenshots.append(s)
 
-    # Check templates page
-    await page.goto(f"{base_url}/templates", wait_until="domcontentloaded")
-    await page.wait_for_timeout(2000)
-    s = await capture.take(page, "documents", "03_templates", "Document templates listing")
+        # Close the modal
+        close_btn = page.locator("button:has-text('Close'), button:has-text('close'), [aria-label='Close']")
+        if await close_btn.count() > 0:
+            await close_btn.first.click()
+            await page.wait_for_timeout(1000)
+
+        # Step 5: Click a second document if available
+        if await doc_items.count() > 1:
+            await doc_items.nth(1).click()
+            await page.wait_for_timeout(2000)
+            s = await capture.take(page, "documents", "05_second_document_preview",
+                                   "Second document preview — verify content is populated, no template jargon or unfilled placeholders")
+            screenshots.append(s)
+
+            # Close the second modal
+            if await close_btn.count() > 0:
+                await close_btn.first.click()
+                await page.wait_for_timeout(1000)
+
+    # Step 6: Open Templates modal via the button (NOT /templates route which 404s)
+    templates_btn = page.locator("button:has-text('Templates')")
+    if await templates_btn.count() > 0:
+        try:
+            await templates_btn.first.click()
+            await page.wait_for_timeout(2000)
+            s = await capture.take(page, "documents", "06_templates_modal",
+                                   "Templates modal opened via button — should show template list, not a 404 page")
+            screenshots.append(s)
+
+            # Close templates modal
+            close_btn = page.locator("button:has-text('Close'), button:has-text('close'), [aria-label='Close']")
+            if await close_btn.count() > 0:
+                await close_btn.first.click()
+                await page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+    # Step 7: Final state of documents page
+    s = await capture.take(page, "documents", "07_documents_final",
+                           "Final documents page state — clean document list with no template artifacts")
     screenshots.append(s)
 
     return screenshots

@@ -66,6 +66,22 @@
         "Warns about longer runtime or higher cost for the acquisition_package journey",
         "Points user to /admin/e2e-judge dashboard for results"
       ]
+    },
+    {
+      "id": 7,
+      "prompt": "Run the e2e judge on just the documents journey. I want to make sure the document viewer doesn't show any template jargon like {{VARIABLE}} placeholders, and that .content.md sidecar files aren't appearing as separate entries in the document list. EAGLE_TEST_EMAIL and EAGLE_TEST_PASSWORD are set.",
+      "expected_output": "Runs the orchestrator with --journeys documents against the internal ALB. The enhanced documents journey captures 6-7 screenshots covering the document list (checking for .content.md sidecar entries), document previews (checking for {{PLACEHOLDER}} template jargon), and templates modal. Reports pass/fail with specific template jargon issues identified.",
+      "files": [],
+      "assertions": [
+        "Uses --journeys documents flag",
+        "Uses the correct internal ALB URL (internal-eaglec-front-teerfwosqs71)",
+        "Does NOT hardcode credentials — uses env vars",
+        "Explains that the documents journey checks for .content.md sidecar files in the document list",
+        "Explains that the judge detects {{PLACEHOLDER}} template jargon or unfilled placeholders in document content",
+        "Does NOT navigate to /templates (a non-existent route) — uses the Templates button/modal on the documents page instead",
+        "Mentions opening document previews to check content for template variables",
+        "Mentions cost estimate"
+      ]
     }
   ]
 }
