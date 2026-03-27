@@ -23,7 +23,7 @@ from ..document_service import (
     get_document_download_url,
 )
 from ..document_store import get_document, get_document_history, list_package_documents
-from ..package_context_service import clear_active_package, resolve_context, set_active_package
+from ..package_context_service import clear_active_package, detect_package_from_session, resolve_context, set_active_package
 from ..package_store import (
     approve_package,
     create_package,
@@ -209,6 +209,23 @@ async def resolve_package_context_endpoint(
     """Resolve and optionally persist active package context for a session."""
     if body.action == "clear":
         clear_active_package(user.tenant_id, user.user_id, body.session_id)
+        return {"mode": "workspace", "package_id": None}
+
+    if body.action == "detect":
+        detected = detect_package_from_session(
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+            session_id=body.session_id,
+        )
+        if detected:
+            return {
+                "mode": detected.mode,
+                "package_id": detected.package_id,
+                "package_title": detected.package_title,
+                "acquisition_pathway": detected.acquisition_pathway,
+                "required_documents": detected.required_documents or [],
+                "completed_documents": detected.completed_documents or [],
+            }
         return {"mode": "workspace", "package_id": None}
 
     if body.package_id and body.action in (None, "set"):

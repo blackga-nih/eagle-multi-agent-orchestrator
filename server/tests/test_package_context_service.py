@@ -260,3 +260,99 @@ class TestPackageContext:
 
         ctx = PackageContext(mode="package", package_id=None)
         assert ctx.is_package_mode is False
+
+
+# ---------------------------------------------------------------------------
+# TestDetectPackageFromSession
+# ---------------------------------------------------------------------------
+
+import json
+
+# Messages containing tool_result with package_id (Anthropic format)
+MESSAGES_WITH_TOOL_RESULT = [
+    {
+        "role": "user",
+        "content": "Generate an SOW for my package",
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps([
+            {"type": "tool_use", "id": "tu_1", "name": "generate_document",
+             "input": {"doc_type": "sow", "package_id": PACKAGE_ID}},
+        ]),
+        "content_type": "list",
+    },
+    {
+        "role": "user",
+        "content": json.dumps([
+            {"type": "tool_result", "tool_use_id": "tu_1",
+             "content": json.dumps({"package_id": PACKAGE_ID, "doc_type": "sow", "title": "SOW v1"})},
+        ]),
+        "content_type": "list",
+    },
+]
+
+MESSAGES_WITHOUT_PACKAGE = [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Hi there"},
+]
+
+
+class TestDetectPackageFromSession:
+    """Verify detect_package_from_session scans messages for package_id."""
+
+    def test_detects_package_from_tool_result(self):
+        """Finds package_id in tool_result content blocks."""
+        from app.package_context_service import detect_package_from_session
+
+        with mock.patch("app.package_context_service.get_messages", return_value=MESSAGES_WITH_TOOL_RESULT), \
+             mock.patch("app.package_context_service.get_package", return_value=MOCK_PACKAGE), \
+             mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION)), \
+             mock.patch("app.package_context_service.update_session"):
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is not None
+        assert ctx.package_id == PACKAGE_ID
+        assert ctx.mode == "package"
+
+    def test_returns_none_when_no_messages(self):
+        """Returns None when session has no messages."""
+        from app.package_context_service import detect_package_from_session
+
+        with mock.patch("app.package_context_service.get_messages", return_value=[]):
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is None
+
+    def test_returns_none_when_no_package_in_messages(self):
+        """Returns None when messages have no package_id references."""
+        from app.package_context_service import detect_package_from_session
+
+        with mock.patch("app.package_context_service.get_messages", return_value=MESSAGES_WITHOUT_PACKAGE):
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is None
+
+    def test_detects_package_from_tool_use_input(self):
+        """Finds package_id in tool_use input blocks."""
+        from app.package_context_service import detect_package_from_session
+
+        messages = [
+            {
+                "role": "assistant",
+                "content": json.dumps([
+                    {"type": "tool_use", "id": "tu_1", "name": "generate_document",
+                     "input": {"doc_type": "sow", "package_id": PACKAGE_ID}},
+                ]),
+                "content_type": "list",
+            },
+        ]
+
+        with mock.patch("app.package_context_service.get_messages", return_value=messages), \
+             mock.patch("app.package_context_service.get_package", return_value=MOCK_PACKAGE), \
+             mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION)), \
+             mock.patch("app.package_context_service.update_session"):
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is not None
+        assert ctx.package_id == PACKAGE_ID

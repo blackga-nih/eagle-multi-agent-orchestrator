@@ -322,42 +322,31 @@ export default function SimpleChatInterface() {
         if (!currentSessionId) return;
         setIsRefreshingPackage(true);
         try {
-            // 1. Scan all documents in the chat for the most recent one with a package_id
-            const allDocs = Object.values(documents).flat();
-            const docsWithPkg = allDocs.filter((d) => d.package_id);
-            if (docsWithPkg.length === 0) return;
-
-            // Pick the most recently generated document
-            docsWithPkg.sort((a, b) => {
-                const ta = a.generated_at ? new Date(a.generated_at).getTime() : 0;
-                const tb = b.generated_at ? new Date(b.generated_at).getTime() : 0;
-                return tb - ta;
-            });
-            const latestPkgId = docsWithPkg[0].package_id!;
-
-            // 2. Set as active package for this session via resolve-context
             const token = await getToken();
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = `Bearer ${token}`;
 
-            await fetch('/api/packages/resolve-context', {
+            // 1. Ask the backend to detect the package from session messages
+            const detectRes = await fetch('/api/packages/resolve-context', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
                     session_id: currentSessionId,
-                    package_id: latestPkgId,
-                    action: 'set',
+                    action: 'detect',
                 }),
             });
+            if (!detectRes.ok) return;
 
-            // 3. Fetch full session context to get checklist state
+            const detected = await detectRes.json();
+            if (detected.mode === 'workspace' || !detected.package_id) return;
+
+            // 2. Fetch full session context to get checklist state
             const ctxRes = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/context`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
             });
             if (ctxRes.ok) {
                 const ctx = await ctxRes.json();
                 if (ctx.package) {
-                    // Synthesize metadata events to update packageState
                     handlePackageMetadata({
                         state_type: 'checklist_update',
                         package_id: ctx.package.package_id,
@@ -377,7 +366,7 @@ export default function SimpleChatInterface() {
         } finally {
             setIsRefreshingPackage(false);
         }
-    }, [currentSessionId, documents, getToken, handlePackageMetadata]);
+    }, [currentSessionId, getToken, handlePackageMetadata]);
 
     // -----------------------------------------------------------------------
     // Commit streaming message when generation completes
