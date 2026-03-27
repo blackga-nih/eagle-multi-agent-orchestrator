@@ -491,7 +491,7 @@ export default function ToolUseDisplay({
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         title={`${meta.icon} ${chipLabel}`}
-        size="lg"
+        size={toolName === 'query_compliance_matrix' ? 'xl' : 'lg'}
       >
         <div className="space-y-5">
           {/* Status + summary bar */}
