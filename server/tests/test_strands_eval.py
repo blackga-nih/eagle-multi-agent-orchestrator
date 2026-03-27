@@ -13,6 +13,8 @@ Tests the core patterns for the EAGLE multi-tenant architecture:
 32-34. Admin & store validation: admin-manager registration, workspace defaults, store CRUD API
 35-42. MVP1 UC coverage (Excel-aligned): new acquisition, GSA schedule, sole source,
        competitive range, IGCE, small business set-aside, tech-to-contract, E2E acquisition
+138-142. Jira QA validation (EAGLE-70 to EAGLE-76): cascade enforcement, KB ranking,
+         FAR 16.505 exceptions, SBIR protest KB search
 
 SDK: strands-agents
 Backend: AWS Bedrock (boto3 native)
@@ -226,6 +228,22 @@ _TEST_METADATA: dict[int, dict] = {
     40: {"uc_id": "UC-13", "uc_name": "small-business-setaside", "phase": "uc-e2e",       "mvp": "MVP1"},
     41: {"uc_id": "UC-16", "uc_name": "tech-to-contract",        "phase": "uc-e2e",       "mvp": "MVP1"},
     42: {"uc_id": "UC-29", "uc_name": "e2e-acquisition",         "phase": "uc-e2e",       "mvp": "MVP1"},
+    # Category 15: Demo Script Multi-Turn UC Tests
+    129: {"uc_id": "UC-02", "uc_name": "gsa-schedule-multi-turn",       "phase": "demo-mt",  "mvp": "MVP1"},
+    130: {"uc_id": "UC-02", "uc_name": "micro-purchase-multi-turn",     "phase": "demo-mt",  "mvp": "MVP1"},
+    131: {"uc_id": "UC-03", "uc_name": "sole-source-multi-turn",        "phase": "demo-mt",  "mvp": "MVP1"},
+    132: {"uc_id": "UC-04", "uc_name": "competitive-range-multi-turn",  "phase": "demo-mt",  "mvp": "MVP1"},
+    133: {"uc_id": "UC-10", "uc_name": "igce-development-multi-turn",   "phase": "demo-mt",  "mvp": "MVP1"},
+    134: {"uc_id": "UC-13", "uc_name": "small-business-multi-turn",     "phase": "demo-mt",  "mvp": "MVP1"},
+    135: {"uc_id": "UC-16", "uc_name": "tech-to-contract-multi-turn",   "phase": "demo-mt",  "mvp": "MVP1"},
+    136: {"uc_id": "UC-29", "uc_name": "e2e-acquisition-multi-turn",    "phase": "demo-mt",  "mvp": "MVP1"},
+    137: {"uc_id": "UC-29", "uc_name": "e2e-finalize-package",          "phase": "demo-mt",  "mvp": "MVP1"},
+    # Category 16: Jira QA Validation (EAGLE-70 through EAGLE-76)
+    138: {"uc_id": "EAGLE-70", "uc_name": "jira70-kb-before-web",          "phase": "jira-qa",  "mvp": "MVP1"},
+    139: {"uc_id": "EAGLE-72", "uc_name": "jira72-gao-b302358",            "phase": "jira-qa",  "mvp": "MVP1"},
+    140: {"uc_id": "EAGLE-73", "uc_name": "jira73-bona-fide-needs",        "phase": "jira-qa",  "mvp": "MVP1"},
+    141: {"uc_id": "EAGLE-74", "uc_name": "jira74-far16505-exceptions",    "phase": "jira-qa",  "mvp": "MVP1"},
+    142: {"uc_id": "EAGLE-76", "uc_name": "jira76-sbir-protest-kb",        "phase": "jira-qa",  "mvp": "MVP1"},
     # Phase 2: Tool chain validation
     43: {"uc_id": None,    "uc_name": "intake-calls-search-far", "phase": "tool-chain",   "mvp": "MVP1"},
     44: {"uc_id": None,    "uc_name": "legal-cites-far-authority","phase": "tool-chain",  "mvp": "MVP1"},
@@ -7708,6 +7726,794 @@ async def test_128_skill_supervisor_delegates():
 
 
 # ============================================================
+# Category 15: Demo Script Multi-Turn UC Tests (129-136)
+# Each test replays the exact multi-message conversation from
+# EAGLE-DEMO-SCRIPT.md, using the same session_id across turns
+# to validate multi-turn context retention and progressive
+# acquisition package development.
+# ============================================================
+
+
+async def _collect_multi_turn(
+    prompts: list[str],
+    skill_names: list[str] = None,
+    tier: str = "premium",
+    max_turns: int = 10,
+) -> tuple[list[StrandsResultCollector], str]:
+    """Run multiple prompts sequentially with the same session_id.
+
+    Returns (list_of_collectors, combined_all_text_lower).
+    Each turn reuses the session so DynamoDB message history carries context.
+    Sets StrandsResultCollector._latest to an aggregated collector so that
+    _run_test post-hooks (--validate-traces, --emit-cloudwatch) see the full
+    multi-turn token counts and tool calls.
+    """
+    session_id = f"eval-mt-{uuid.uuid4().hex[:12]}"
+    collectors = []
+    for i, prompt in enumerate(prompts):
+        print(f"  [Turn {i + 1}/{len(prompts)}] Sending: {prompt[:80]}...")
+        collector = await _collect_sdk_query(
+            prompt=prompt,
+            skill_names=skill_names,
+            tier=tier,
+            max_turns=max_turns,
+            session_id=session_id,
+        )
+        collectors.append(collector)
+        print(f"  [Turn {i + 1}] Response: {len(collector.result_text)} chars, "
+              f"{collector.total_input_tokens} in / {collector.total_output_tokens} out")
+
+    # Build an aggregated collector for _run_test post-hooks
+    agg = StrandsResultCollector()
+    agg.result_text = "\n---\n".join(c.result_text for c in collectors)
+    for c in collectors:
+        agg.tool_use_blocks.extend(c.tool_use_blocks)
+        agg.total_input_tokens += c.total_input_tokens
+        agg.total_output_tokens += c.total_output_tokens
+        agg.total_cost_usd += c.total_cost_usd
+        agg.messages_raw.extend(c.messages_raw)
+    StrandsResultCollector._latest = agg
+
+    combined = " ".join(c.all_text_lower() for c in collectors)
+    return collectors, combined
+
+
+async def test_129_uc02_gsa_schedule_multi_turn():
+    """UC-2 multi-turn: $45K GSA Schedule purchase — intake, details, generate docs."""
+    print("\n" + "=" * 70)
+    print("TEST 129: UC-2 Multi-Turn — GSA Schedule Purchase ($45K)")
+    print("=" * 70)
+
+    prompts = [
+        "I need to purchase a $45,000 confocal microscope for our genomics lab. "
+        "This is an urgent need -- our current microscope failed last week and we have "
+        "active grant-funded experiments. I believe GSA Schedule covers this type of "
+        "equipment. The vendor is Zeiss and they're on GSA Schedule 66 III. "
+        "Building 37, Room 410. What's the acquisition pathway and what documents do I need?",
+
+        "It's grant-funded under R01-CA-228473. No special security requirements. "
+        "We need installation and 1-year warranty included. Delivery within 30 days. "
+        "The quote is valid through end of month.",
+
+        "Generate the purchase request documentation for this GSA Schedule order.",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, skill_names=["oa-intake"], max_turns=10,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "gsa_schedule": ["gsa schedule", "gsa ", "schedule 66", "federal supply"],
+            "below_sat": ["simplified", "below sat", "threshold", "$350", "under $"],
+            "far_part_8": ["far 8", "part 8", "far part 8", "required sources"],
+            "vehicle_identified": ["schedule", "bpa", "gsa advantage", "e-buy", "vehicle"],
+            "multi_turn_context": ["microscope", "zeiss", "grant", "r01", "genomics"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 3
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    print(f"  Turns completed: {len(collectors)}/3")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-2 Multi-Turn GSA Schedule")
+    return passed
+
+
+async def test_130_uc02_1_micro_purchase_multi_turn():
+    """UC-2.1 multi-turn: $14K micro purchase — intake, confirm details."""
+    print("\n" + "=" * 70)
+    print("TEST 130: UC-2.1 Multi-Turn — Micro Purchase ($14K)")
+    print("=" * 70)
+
+    prompts = [
+        "I have a quote for $13,800 from Fisher Scientific for lab supplies -- "
+        "centrifuge tubes, pipette tips, and reagents. Grant-funded, deliver to "
+        "Building 37 Room 204. I want to use the purchase card.",
+
+        "The quote is from last week, valid for 30 days. Fisher Scientific is on "
+        "AbilityOne/JWOD and I checked FedMall -- these specific items aren't "
+        "available there. I have purchase card authority up to $15K. No hazmat involved.",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, skill_names=["oa-intake"], max_turns=10,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "micro_purchase": ["micro-purchase", "micro purchase", "purchase card", "below $"],
+            "threshold": ["$15,000", "$15k", "threshold", "mpt", "micro-purchase threshold"],
+            "priority_sources": ["abilityone", "jwod", "fedmall", "priority", "required source"],
+            "price_reasonable": ["price", "reasonable", "quote", "fair", "competitive"],
+            "multi_turn_context": ["fisher", "centrifuge", "pipette", "reagent", "building 37"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 3
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    print(f"  Turns completed: {len(collectors)}/2")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-2.1 Multi-Turn Micro Purchase")
+    return passed
+
+
+async def test_131_uc03_sole_source_multi_turn():
+    """UC-3 multi-turn: $280K sole source — intake, vendor details, generate J&A."""
+    print("\n" + "=" * 70)
+    print("TEST 131: UC-3 Multi-Turn — Sole Source Justification ($280K)")
+    print("=" * 70)
+
+    prompts = [
+        "I need to sole-source a $280,000 annual software maintenance contract to "
+        "Illumina Inc. for our BaseSpace Sequence Hub platform. Only Illumina can "
+        "maintain this proprietary genomic analysis software -- no other vendor has "
+        "access to the source code or can provide updates. We've used this system "
+        "for 3 years. The current contract expires in 60 days. What's the "
+        "justification authority and what documents do I need?",
+
+        "We contacted two other genomics software firms (DNAnexus and Seven Bridges) "
+        "and neither can maintain BaseSpace -- it's proprietary to Illumina. We have "
+        "email documentation from both vendors confirming this. The system supports "
+        "200+ active research protocols and downtime would halt clinical trials. "
+        "Previous contract: GS-35F-0038X.",
+
+        "Generate the Justification and Approval document for this sole source procurement.",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, skill_names=["oa-intake"], max_turns=10,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "sole_source": ["sole source", "sole-source", "only one", "single source"],
+            "far_6_302": ["far 6", "6.302", "other than full", "part 6"],
+            "ja_document": ["justification", "j&a", "jofoc", "approval"],
+            "protest_risk": ["protest", "sam.gov", "sources sought", "publiciz", "market research"],
+            "multi_turn_context": ["illumina", "basespace", "dnanexus", "seven bridges", "proprietary"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 3
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    print(f"  Turns completed: {len(collectors)}/3")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-3 Multi-Turn Sole Source")
+    return passed
+
+
+async def test_132_uc04_competitive_range_multi_turn():
+    """UC-4 multi-turn: $2.1M competitive range — advisory, SB consideration, memo outline."""
+    print("\n" + "=" * 70)
+    print("TEST 132: UC-4 Multi-Turn — Competitive Range Advisory ($2.1M)")
+    print("=" * 70)
+
+    prompts = [
+        "We're in a FAR Part 15 negotiated procurement for IT modernization services, "
+        "$2.1M estimated value. We received 7 proposals and after initial evaluation, "
+        "3 are clearly in the competitive range but 2 are borderline -- technically "
+        "acceptable but weak on past performance. Do we have to keep all offerors in "
+        "the competitive range? Can we narrow it? What are the rules and risks?",
+
+        "One of the borderline offerors is a small business and we have a 40% small "
+        "business goal this quarter. Does that change the calculus? Also, if we exclude "
+        "them and they protest, what's our exposure?",
+
+        "What should we document in the competitive range determination memo to protect "
+        "against a protest? Give me an outline.",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, skill_names=["legal-counsel"], max_turns=10,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "competitive_range": ["competitive range", "competitive-range"],
+            "far_15": ["far 15", "far part 15", "15.306", "15.503"],
+            "narrowing": ["narrow", "exclude", "eliminate", "not required to include"],
+            "protest_analysis": ["protest", "debrief", "gao", "challenge", "risk"],
+            "multi_turn_context": ["small business", "40%", "memo", "outline", "document"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 3
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    print(f"  Turns completed: {len(collectors)}/3")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-4 Multi-Turn Competitive Range")
+    return passed
+
+
+async def test_133_uc10_igce_multi_turn():
+    """UC-10 multi-turn: $4.5M IGCE — intake, rate details, generate IGCE."""
+    print("\n" + "=" * 70)
+    print("TEST 133: UC-10 Multi-Turn — IGCE Development ($4.5M)")
+    print("=" * 70)
+
+    prompts = [
+        "I need to develop an IGCE for a clinical research support services contract. "
+        "3-year period of performance (base + 2 option years). Labor categories: "
+        "Project Manager (1 FTE), Senior Biostatistician (2 FTE), Data Managers (3 FTE), "
+        "Clinical Research Associates (4 FTE). Plus ODCs for travel ($50K/year) and "
+        "software licenses ($30K/year). Estimated total value around $4.5M. "
+        "This will be evaluated under FAR Part 15 with cost realism analysis. "
+        "What should the IGCE include and what methodology should I use?",
+
+        "Use GSA rates as the baseline. PM at GS-14 equivalent (~$175K loaded), "
+        "Senior Biostatistician at GS-13 (~$155K loaded), Data Managers at GS-12 "
+        "(~$130K loaded), CRAs at GS-11 (~$115K loaded). Apply 3% annual escalation. "
+        "Work location is NIH campus Bethesda with 25% travel to clinical sites. "
+        "Indirect rate estimate: 45% fringe, 15% overhead, 8% G&A, 6% fee.",
+
+        "Generate the IGCE document with the rate structure we discussed.",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, skill_names=["oa-intake"], max_turns=10,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "igce": ["igce", "independent government cost estimate", "cost estimate"],
+            "labor_rates": ["labor", "gs-14", "gs-13", "gs-12", "gs-11", "$175", "$155", "$130"],
+            "escalation": ["escalat", "3%", "annual increase", "option year"],
+            "cost_realism": ["cost realism", "realism", "far 15.404", "cost analysis"],
+            "multi_turn_context": ["biostatistician", "fringe", "overhead", "g&a", "indirect"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 3
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    print(f"  Turns completed: {len(collectors)}/3")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-10 Multi-Turn IGCE")
+    return passed
+
+
+async def test_134_uc13_small_business_multi_turn():
+    """UC-13 multi-turn: $450K small business — intake, market research, generate report."""
+    print("\n" + "=" * 70)
+    print("TEST 134: UC-13 Multi-Turn — Small Business Set-Aside ($450K)")
+    print("=" * 70)
+
+    prompts = [
+        "I have a $450,000 IT services requirement for network infrastructure "
+        "monitoring and management at NCI. NAICS code 541512 (Computer Systems "
+        "Design Services, $34M size standard). I found 8 small businesses on "
+        "SAM.gov with relevant experience and 3 large businesses. Should this "
+        "be set aside for small business? What type of set-aside? What market "
+        "research documentation do I need?",
+
+        "Here's what I found on SAM.gov: 5 of the 8 small businesses have prior "
+        "federal IT monitoring contracts over $100K. Two are 8(a) certified, one "
+        "is HUBZone, and one is SDVOSB. The requirement includes 24/7 NOC monitoring, "
+        "incident response SLA under 15 minutes, and quarterly vulnerability assessments. "
+        "Performance period is 1 base year plus 4 option years.",
+
+        "Generate the Market Research Report documenting the small business "
+        "set-aside determination.",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, skill_names=["market-intelligence"], max_turns=10,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "set_aside": ["set-aside", "set aside", "small business set"],
+            "rule_of_two": ["rule of two", "rule of 2", "two or more", "reasonable expectation"],
+            "far_part_19": ["far 19", "part 19", "far part 19", "19.502"],
+            "socioeconomic": ["8(a)", "hubzone", "sdvosb", "service-disabled", "socioeconomic"],
+            "multi_turn_context": ["541512", "noc monitoring", "vulnerability", "incident response"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 3
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    print(f"  Turns completed: {len(collectors)}/3")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-13 Multi-Turn Small Business")
+    return passed
+
+
+async def test_135_uc16_tech_to_contract_multi_turn():
+    """UC-16 multi-turn: genomic sequencing — tech spec, additional reqs, generate SOW."""
+    print("\n" + "=" * 70)
+    print("TEST 135: UC-16 Multi-Turn — Tech Requirements to Contract Language")
+    print("=" * 70)
+
+    prompts = [
+        "I'm a program scientist and I need help turning my technical requirements "
+        "into a SOW. Here's what we need: whole-genome sequencing services for our "
+        "cancer genomics program. Requires Illumina NovaSeq 6000 or equivalent platform, "
+        "minimum 30x coverage depth, paired-end 150bp reads. We need library preparation "
+        "(DNA extraction, fragmentation, adapter ligation), sequencing, bioinformatics "
+        "pipeline (alignment to GRCh38, variant calling with GATK, quality metrics), "
+        "and data delivery via Globus to our HPC cluster. Expected throughput: 500 samples "
+        "per year across 3 years. CLIA-certified lab required. "
+        "Please translate this into SOW language a contracting officer can use.",
+
+        "A few more things: samples will ship on dry ice, contractor must provide "
+        "a LIMS portal for tracking, turnaround time is 4 weeks per batch of 50 samples, "
+        "and we need monthly quality reports with Q30 scores above 85%. Data must be BAM "
+        "and VCF format. All data handling must comply with NIH Genomic Data Sharing Policy "
+        "and dbGaP submission requirements.",
+
+        "Generate the full Statement of Work incorporating all these technical requirements.",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, skill_names=["tech-translator"], max_turns=12,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "sow_structure": ["scope of work", "statement of work", "sow", "performance work"],
+            "contract_language": ["contractor shall", "the contractor", "government", "period of performance"],
+            "tech_preserved": ["sequencing", "bioinformat", "variant", "illumina", "novaseq"],
+            "turn2_requirements": ["lims", "q30", "dry ice", "bam", "vcf", "dbgap"],
+            "measurable_standards": ["30x", "coverage", "500 sample", "4 week", "85%", "150bp"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 3
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    print(f"  Turns completed: {len(collectors)}/3")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-16 Multi-Turn Tech to Contract")
+    return passed
+
+
+async def test_136_uc29_e2e_acquisition_multi_turn():
+    """UC-29 multi-turn: $3.5M R&D — intake, details, SOW, remaining docs, SB strategy."""
+    print("\n" + "=" * 70)
+    print("TEST 136: UC-29 Multi-Turn — End-to-End Acquisition ($3.5M R&D)")
+    print("=" * 70)
+
+    prompts = [
+        "I'm starting a new $3.5M acquisition for R&D services -- bioinformatics "
+        "pipeline development and clinical data analysis support for NCI's Division "
+        "of Cancer Treatment and Diagnosis. This is a complex requirement: "
+        "Phase 1 (Year 1): develop ML-based variant classification pipeline. "
+        "Phase 2 (Years 2-3): operate pipeline + provide clinical data analysis. "
+        "Estimated 15 FTEs across data science, bioinformatics, and project management. "
+        "We want a CPFF contract type, FAR Part 15 competitive negotiated procurement. "
+        "I need the full acquisition package: SOW, IGCE, Acquisition Plan, "
+        "Market Research Report, and small business coordination. "
+        "What's the complete roadmap and what regulatory requirements apply?",
+
+        "Phase 1 team: 2 ML engineers, 2 bioinformaticians, 1 PM. Phase 2 adds: "
+        "3 clinical data analysts, 2 data engineers, 3 biostatisticians, 2 QA specialists. "
+        "Travel: quarterly PI meetings at NIH Bethesda plus annual site visits to 4 NCTN "
+        "clinical sites. All data subject to NIH data management and sharing policy. "
+        "Need FISMA Moderate ATO for cloud infrastructure. Previous related contract was "
+        "HHSN261201800001C (completed 2025).",
+
+        "Generate the Statement of Work for this acquisition.",
+
+        "Now generate the IGCE, Acquisition Plan, and Market Research Report.",
+
+        "What's the small business subcontracting plan strategy for this $3.5M contract? "
+        "We need to meet NCI's socioeconomic goals.",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, max_turns=12,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "full_package": ["sow", "igce", "acquisition plan", "market research"],
+            "far_15_competitive": ["far 15", "part 15", "competitive", "negotiated"],
+            "cost_threshold": ["tina", "$750", "certified cost", "cost or pricing"],
+            "multi_phase": ["phase 1", "phase 2", "ml engineer", "bioinformatician", "biostatistician"],
+            "small_business": ["small business", "subcontracting plan", "socioeconomic", "far 19"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 3
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    # Additional check: verify context retention across 5 turns
+    last_text = collectors[-1].all_text_lower() if collectors else ""
+    context_retained = any(w in last_text for w in [
+        "small business", "subcontract", "$3.5", "nci", "socioeconomic",
+    ])
+    print(f"  Context retained in turn 5: {context_retained}")
+    print(f"  Turns completed: {len(collectors)}/5")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-29 Multi-Turn E2E Acquisition")
+    return passed
+
+
+async def test_137_uc29_finalize_package():
+    """UC-29 finalize: 6-turn chain ending with package validation and readiness check."""
+    print("\n" + "=" * 70)
+    print("TEST 137: UC-29 Finalize — Package Validation ($3.5M R&D)")
+    print("=" * 70)
+
+    prompts = [
+        # Turn 1: Intake
+        "I'm starting a new $3.5M acquisition for R&D services -- bioinformatics "
+        "pipeline development and clinical data analysis support for NCI's Division "
+        "of Cancer Treatment and Diagnosis. This is a complex requirement: "
+        "Phase 1 (Year 1): develop ML-based variant classification pipeline. "
+        "Phase 2 (Years 2-3): operate pipeline + provide clinical data analysis. "
+        "Estimated 15 FTEs across data science, bioinformatics, and project management. "
+        "We want a CPFF contract type, FAR Part 15 competitive negotiated procurement. "
+        "I need the full acquisition package: SOW, IGCE, Acquisition Plan, "
+        "Market Research Report, and small business coordination. "
+        "What's the complete roadmap and what regulatory requirements apply?",
+
+        # Turn 2: Team details
+        "Phase 1 team: 2 ML engineers, 2 bioinformaticians, 1 PM. Phase 2 adds: "
+        "3 clinical data analysts, 2 data engineers, 3 biostatisticians, 2 QA specialists. "
+        "Travel: quarterly PI meetings at NIH Bethesda plus annual site visits to 4 NCTN "
+        "clinical sites. All data subject to NIH data management and sharing policy. "
+        "Need FISMA Moderate ATO for cloud infrastructure. Previous related contract was "
+        "HHSN261201800001C (completed 2025).",
+
+        # Turn 3: Generate SOW
+        "Generate the Statement of Work for this acquisition.",
+
+        # Turn 4: Generate remaining docs
+        "Now generate the IGCE, Acquisition Plan, and Market Research Report.",
+
+        # Turn 5: Small business strategy
+        "What's the small business subcontracting plan strategy for this $3.5M contract? "
+        "We need to meet NCI's socioeconomic goals.",
+
+        # Turn 6: Finalize — package validation
+        "Review the complete acquisition package we've built in this session. "
+        "List every document generated, check for any missing required documents "
+        "or unfilled sections, verify FAR Part 15 compliance requirements are met, "
+        "and give me a readiness assessment. Is this package ready for submission "
+        "to the contracting officer?",
+    ]
+
+    try:
+        collectors, combined = await _collect_multi_turn(
+            prompts, max_turns=12,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    if _HAS_EVAL_HELPERS:
+        ind, count = check_indicators(combined, {
+            "documents_listed": ["sow", "igce", "acquisition plan", "market research"],
+            "completeness_check": ["complete", "ready", "readiness", "missing", "outstanding"],
+            "far_compliance": ["far 15", "part 15", "tina", "certified cost", "compliance"],
+            "package_status": ["submit", "contracting officer", "package", "approval", "review"],
+            "full_context": ["bioinformatics", "phase 1", "phase 2", "small business", "$3.5"],
+        })
+        print(f"  Indicators: {count}/5 -> {ind}")
+        passed = count >= 4  # Stricter: need 4/5 for finalize
+    else:
+        passed = all(len(c.result_text) > 0 for c in collectors)
+
+    # Verify turn 6 specifically references documents from earlier turns
+    t6_text = collectors[-1].all_text_lower() if len(collectors) >= 6 else ""
+    docs_referenced = sum(1 for d in ["sow", "igce", "acquisition plan", "market research"]
+                          if d in t6_text)
+    print(f"  Turn 6 references {docs_referenced}/4 documents from earlier turns")
+    print(f"  Turns completed: {len(collectors)}/6")
+
+    # Aggregate token totals for reporting
+    total_in = sum(c.total_input_tokens for c in collectors)
+    total_out = sum(c.total_output_tokens for c in collectors)
+    print(f"  Total tokens: {total_in:,} in / {total_out:,} out")
+    print(f"  {'PASS' if passed else 'FAIL'} - UC-29 Finalize Package")
+    return passed
+
+
+# ============================================================
+# Category 16: Jira QA Validation — EAGLE-70 through EAGLE-76
+# ============================================================
+
+async def test_138_jira70_kb_before_web():
+    """EAGLE-70: knowledge_search called BEFORE web_search (cascade enforcement)."""
+    print("\n" + "=" * 70)
+    print("TEST 138: EAGLE-70 -- KB search before web search (cascade)")
+    print("=" * 70)
+
+    try:
+        collector = await _collect_sdk_query(
+            "What are the simplified acquisition threshold and micro-purchase "
+            "threshold under FAC 2025-06?",
+            max_turns=12,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    tool_names = [t["tool"] for t in collector.tool_use_blocks]
+    print(f"  Tools called (in order): {tool_names}")
+
+    # Find first knowledge_search and first web_search
+    kb_idx = next((i for i, t in enumerate(tool_names) if "knowledge" in t), -1)
+    web_idx = next((i for i, t in enumerate(tool_names) if t == "web_search"), -1)
+
+    kb_called = kb_idx >= 0
+    no_cascade_violation = web_idx == -1 or (kb_idx >= 0 and kb_idx < web_idx)
+
+    print(f"  knowledge_search called: {kb_called} (idx={kb_idx})")
+    print(f"  web_search idx: {web_idx}")
+    print(f"  No cascade violation: {no_cascade_violation}")
+
+    text = collector.all_text_lower()
+    has_thresholds = ("15,000" in text or "15000" in text or "$15" in text) and \
+                     ("350,000" in text or "350000" in text or "$350" in text)
+    print(f"  Mentions thresholds ($15K/$350K): {has_thresholds}")
+
+    passed = kb_called and no_cascade_violation and len(collector.result_text) > 0
+    print(f"  {'PASS' if passed else 'FAIL'} - EAGLE-70 cascade enforcement")
+    return passed
+
+
+async def test_139_jira72_gao_b302358():
+    """EAGLE-72: KB search returns GAO B-302358 IDIQ document."""
+    print("\n" + "=" * 70)
+    print("TEST 139: EAGLE-72 -- KB returns GAO B-302358 IDIQ document")
+    print("=" * 70)
+
+    try:
+        from app.tools.knowledge_tools import exec_knowledge_search
+    except ImportError:
+        print("  SKIP - knowledge_tools not importable")
+        return None
+
+    result = exec_knowledge_search(
+        {
+            "query": "GAO B-302358 IDIQ minimum obligation requirements",
+            "keywords": ["GAO", "B-302358", "IDIQ", "minimum", "obligation"],
+            "limit": 10,
+        },
+        "test-tenant",
+        "test-session",
+    )
+
+    results_list = result.get("results", [])
+    print(f"  KB returned {len(results_list)} results")
+
+    # Check if GAO B-302358 document appears in results
+    gao_found = False
+    for item in results_list:
+        s3_key = item.get("s3_key", "").lower()
+        title = item.get("title", "").lower()
+        doc_id = item.get("document_id", "").lower()
+        if "gao" in s3_key and "302358" in s3_key:
+            gao_found = True
+            print(f"  Found GAO doc: {item.get('s3_key', '')}")
+            break
+        if "302358" in title or "302358" in doc_id:
+            gao_found = True
+            print(f"  Found GAO doc: {item.get('title', '')}")
+            break
+
+    if not gao_found:
+        # Print top results for debugging
+        for i, item in enumerate(results_list[:5]):
+            print(f"  Result {i}: {item.get('title', '')} | {item.get('s3_key', '')}")
+
+    passed = gao_found
+    print(f"  {'PASS' if passed else 'FAIL'} - EAGLE-72 GAO B-302358 in KB results")
+    return passed
+
+
+async def test_140_jira73_bona_fide_needs():
+    """EAGLE-73: KB search returns BOTH severable AND bona_fide_needs docs."""
+    print("\n" + "=" * 70)
+    print("TEST 140: EAGLE-73 -- KB returns severable AND bona fide needs docs")
+    print("=" * 70)
+
+    try:
+        from app.tools.knowledge_tools import exec_knowledge_search
+    except ImportError:
+        print("  SKIP - knowledge_tools not importable")
+        return None
+
+    result = exec_knowledge_search(
+        {
+            "query": "How does the severable vs. non-severable distinction affect "
+                     "which fiscal year's appropriation must fund a contract?",
+            "keywords": ["severable", "non-severable", "bona fide needs",
+                         "fiscal year", "appropriation"],
+            "limit": 15,
+        },
+        "test-tenant",
+        "test-session",
+    )
+
+    results_list = result.get("results", [])
+    print(f"  KB returned {len(results_list)} results")
+
+    severable_found = False
+    bona_fide_found = False
+
+    for item in results_list:
+        s3_key = item.get("s3_key", "").lower()
+        title = item.get("title", "").lower()
+        if "severable" in s3_key or "severable" in title:
+            severable_found = True
+            print(f"  Found severable doc: {item.get('s3_key', '') or item.get('title', '')}")
+        if "bona_fide" in s3_key or "bona fide" in title:
+            bona_fide_found = True
+            print(f"  Found bona fide doc: {item.get('s3_key', '') or item.get('title', '')}")
+
+    if not severable_found or not bona_fide_found:
+        for i, item in enumerate(results_list[:5]):
+            print(f"  Result {i}: {item.get('title', '')} | {item.get('s3_key', '')}")
+
+    print(f"  Severable doc found: {severable_found}")
+    print(f"  Bona fide needs doc found: {bona_fide_found}")
+
+    passed = severable_found and bona_fide_found
+    print(f"  {'PASS' if passed else 'FAIL'} - EAGLE-73 both docs in KB results")
+    return passed
+
+
+async def test_141_jira74_far16505_exceptions():
+    """EAGLE-74: Response lists 7 FAR 16.505 fair opportunity exceptions."""
+    print("\n" + "=" * 70)
+    print("TEST 141: EAGLE-74 -- FAR 16.505 lists 7 exceptions")
+    print("=" * 70)
+
+    try:
+        collector = await _collect_sdk_query(
+            "What are the fair opportunity exceptions that allow a single-award "
+            "task order under FAR 16.505?",
+            max_turns=12,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    tool_names = [t["tool"] for t in collector.tool_use_blocks]
+    print(f"  Tools called: {tool_names}")
+
+    text = collector.all_text_lower()
+
+    # Check for correct FAR reference (16.505, NOT 16.507)
+    correct_ref = "16.505" in text
+    wrong_ref = "16.507" in text
+    print(f"  Cites FAR 16.505: {correct_ref}")
+    print(f"  Cites wrong FAR 16.507: {wrong_ref}")
+
+    # Check for all 7 exceptions
+    exception_indicators = {
+        "urgent": ["urgent"],
+        "unique_capability": ["unique", "highly specialized"],
+        "logical_follow_on": ["logical follow", "follow-on", "follow on"],
+        "minimum_guarantee": ["minimum guarantee", "minimum amount"],
+        "statutory": ["statutory"],
+        "small_business": ["small business set-aside", "small business"],
+        "other_than_full": ["other than full and open", "dod", "nasa", "coast guard"],
+    }
+
+    found_exceptions = {}
+    for exc_name, indicators in exception_indicators.items():
+        found_exceptions[exc_name] = any(ind in text for ind in indicators)
+
+    exception_count = sum(1 for v in found_exceptions.values() if v)
+    print(f"  Exceptions found ({exception_count}/7): {found_exceptions}")
+
+    # Pass: correct FAR ref, no wrong ref, and at least 6 of 7 exceptions
+    # (allowing 6 as a soft threshold since LLM responses vary slightly)
+    passed = correct_ref and not wrong_ref and exception_count >= 6
+    print(f"  {'PASS' if passed else 'FAIL'} - EAGLE-74 FAR 16.505 exceptions")
+    return passed
+
+
+async def test_142_jira76_sbir_protest_kb():
+    """EAGLE-76: SBIR protest question searches KB first, finds protest docs."""
+    print("\n" + "=" * 70)
+    print("TEST 142: EAGLE-76 -- SBIR protest uses KB, finds protest-guidance")
+    print("=" * 70)
+
+    try:
+        collector = await _collect_sdk_query(
+            "An offeror eliminated from a SBIR competition simultaneously requests "
+            "a debriefing and files a protest on Day 8 after receiving the "
+            "elimination notice. The debriefing hasn't been provided yet. Walk "
+            "through the correct procedural sequence, applicable protest timeliness "
+            "rules, and how the choice between pre-award and post-award debriefing "
+            "affects the protest stay and timeline.",
+            max_turns=12,
+        )
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    tool_names = [t["tool"] for t in collector.tool_use_blocks]
+    print(f"  Tools called (in order): {tool_names}")
+
+    # Check KB called before web
+    kb_idx = next((i for i, t in enumerate(tool_names) if "knowledge" in t), -1)
+    web_idx = next((i for i, t in enumerate(tool_names) if t == "web_search"), -1)
+
+    kb_called = kb_idx >= 0
+    no_cascade_violation = web_idx == -1 or (kb_idx >= 0 and kb_idx < web_idx)
+    print(f"  knowledge_search called: {kb_called} (idx={kb_idx})")
+    print(f"  web_search idx: {web_idx}")
+    print(f"  No cascade violation: {no_cascade_violation}")
+
+    # Check if protest-guidance docs were fetched
+    kb_inputs = [
+        t.get("input", {}) for t in collector.tool_use_blocks
+        if "knowledge" in t.get("tool", "")
+    ]
+    protest_docs_searched = any(
+        "protest" in json.dumps(inp, default=str).lower()
+        for inp in kb_inputs
+    )
+    print(f"  Protest-related KB search: {protest_docs_searched}")
+
+    text = collector.all_text_lower()
+    has_content = any(w in text for w in [
+        "protest", "debriefing", "timeliness", "stay",
+    ])
+    print(f"  Response covers protest/debriefing topics: {has_content}")
+
+    passed = kb_called and no_cascade_violation and has_content and len(collector.result_text) > 0
+    print(f"  {'PASS' if passed else 'FAIL'} - EAGLE-76 SBIR protest KB search")
+    return passed
+
+
+# ============================================================
 # Main infrastructure
 # ============================================================
 
@@ -7877,6 +8683,22 @@ test_names = {
     126: "126_skill_tech_quantified_criteria",
     127: "127_skill_docgen_research_first",
     128: "128_skill_supervisor_delegates",
+    # Category 15: Demo Script Multi-Turn UC Tests
+    129: "129_uc02_gsa_schedule_multi_turn",
+    130: "130_uc02_1_micro_purchase_multi_turn",
+    131: "131_uc03_sole_source_multi_turn",
+    132: "132_uc04_competitive_range_multi_turn",
+    133: "133_uc10_igce_multi_turn",
+    134: "134_uc13_small_business_multi_turn",
+    135: "135_uc16_tech_to_contract_multi_turn",
+    136: "136_uc29_e2e_acquisition_multi_turn",
+    137: "137_uc29_finalize_package",
+    # Category 16: Jira QA Validation (EAGLE-70 through EAGLE-76)
+    138: "138_jira70_kb_before_web",
+    139: "139_jira72_gao_b302358",
+    140: "140_jira73_bona_fide_needs",
+    141: "141_jira74_far16505_exceptions",
+    142: "142_jira76_sbir_protest_kb",
 }
 
 
@@ -8168,6 +8990,22 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         126: ("126_skill_tech_quantified_criteria", test_126_skill_tech_quantified_criteria),
         127: ("127_skill_docgen_research_first",    test_127_skill_docgen_research_first),
         128: ("128_skill_supervisor_delegates",     test_128_skill_supervisor_delegates),
+        # Category 15: Demo Script Multi-Turn UC Tests
+        129: ("129_uc02_gsa_schedule_multi_turn",         test_129_uc02_gsa_schedule_multi_turn),
+        130: ("130_uc02_1_micro_purchase_multi_turn",     test_130_uc02_1_micro_purchase_multi_turn),
+        131: ("131_uc03_sole_source_multi_turn",          test_131_uc03_sole_source_multi_turn),
+        132: ("132_uc04_competitive_range_multi_turn",    test_132_uc04_competitive_range_multi_turn),
+        133: ("133_uc10_igce_multi_turn",                 test_133_uc10_igce_multi_turn),
+        134: ("134_uc13_small_business_multi_turn",       test_134_uc13_small_business_multi_turn),
+        135: ("135_uc16_tech_to_contract_multi_turn",     test_135_uc16_tech_to_contract_multi_turn),
+        136: ("136_uc29_e2e_acquisition_multi_turn",      test_136_uc29_e2e_acquisition_multi_turn),
+        137: ("137_uc29_finalize_package",                test_137_uc29_finalize_package),
+        # Category 16: Jira QA Validation (EAGLE-70 through EAGLE-76)
+        138: ("138_jira70_kb_before_web",              test_138_jira70_kb_before_web),
+        139: ("139_jira72_gao_b302358",                test_139_jira72_gao_b302358),
+        140: ("140_jira73_bona_fide_needs",            test_140_jira73_bona_fide_needs),
+        141: ("141_jira74_far16505_exceptions",        test_141_jira74_far16505_exceptions),
+        142: ("142_jira76_sbir_protest_kb",            test_142_jira76_sbir_protest_kb),
     }
 
     result_key, test_fn = TEST_REGISTRY[test_id]
