@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EAGLE — Home</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  /* Lucide-style SVG icons inlined as background-image helpers */
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+</style>
+</head>
+<body class="bg-white min-h-screen flex flex-col">
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     HEADER  (SimpleHeader)
+     ═══════════════════════════════════════════════════════════════════════ -->
+<header class="bg-[#003366] text-white shrink-0 z-10" style="box-shadow:0 2px 8px rgba(0,51,102,0.3)">
+  <!-- Row 1: Branding centered, status right -->
+  <div class="grid grid-cols-3 items-center px-6" style="height:56px">
+    <div></div>
+    <div class="flex items-center justify-center gap-3">
+      <span class="text-[28px] leading-none" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3))">🦅</span>
+      <div>
+        <h1 class="text-lg font-bold tracking-wider">EAGLE</h1>
+        <p class="text-[11px] text-white/70 tracking-wide">Acquisition Assistant</p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-1.5">
+      <span class="inline-block w-2 h-2 rounded-full bg-[#4CAF50]" style="box-shadow:0 0 6px rgba(76,175,80,0.6)"></span>
+      <span class="text-xs text-white/85">Connected</span>
+    </div>
+  </div>
+
+  <!-- Row 2: Nav tabs centered -->
+  <nav class="flex items-center justify-center gap-1 px-6 pb-2">
+    <a href="#" class="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors">
+      <!-- MessageSquare icon -->
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Chat
+    </a>
+    <a href="#" class="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8l-2 4h12l-2-4z"/></svg>
+      Packages
+    </a>
+    <a href="#" class="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Documents
+    </a>
+    <a href="#" class="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M2 12h20M12 2v20"/></svg>
+      Workspaces
+    </a>
+    <a href="#" class="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Admin
+    </a>
+  </nav>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     MAIN — Home page hero (page.tsx)
+     ═══════════════════════════════════════════════════════════════════════ -->
+<main class="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-slate-50 to-white">
+  <div class="max-w-6xl w-full flex flex-col lg:flex-row gap-12 lg:gap-16">
+
+    <!-- Left Column — Branding -->
+    <div class="lg:w-2/5 flex flex-col justify-center">
+      <h1 class="text-5xl lg:text-6xl font-bold mb-2">
+        <span class="bg-gradient-to-r from-[#003366] to-[#0066cc] bg-clip-text text-transparent">
+          EAGLE
+        </span>
+      </h1>
+      <h2 class="text-xl lg:text-2xl font-semibold text-gray-700 mb-6">
+        AI-Powered Acquisition Assistant
+      </h2>
+      <p class="text-gray-600 leading-relaxed mb-4">
+        Empowering the NCI Office of Acquisitions with intelligent tools
+        that streamline procurement workflows, automate document generation,
+        and provide instant access to federal acquisition regulations.
+      </p>
+      <p class="text-gray-500 text-sm">
+        Developed by NCI for acquisition professionals.
+      </p>
+    </div>
+
+    <!-- Right Column — Feature Cards -->
+    <div class="lg:w-3/5 flex flex-col gap-4">
+
+      <!-- Chat -->
+      <a href="#" class="flex items-start gap-4 p-5 bg-white rounded-xl border border-gray-200 hover:border-gray-300 hover:shadow-md transition-all group">
+        <div class="p-3 rounded-lg bg-blue-50">
+          <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="flex-1">
+          <h3 class="font-semibold text-lg text-blue-600 group-hover:underline">Chat</h3>
+          <p class="text-gray-600 text-sm mt-1">AI-powered assistant for acquisition tasks, FAR/DFARS search, and document guidance</p>
+        </div>
+      </a>
+
+      <!-- Document Templates -->
+      <a href="#" class="flex items-start gap-4 p-5 bg-white rounded-xl border border-gray-200 hover:border-gray-300 hover:shadow-md transition-all group">
+        <div class="p-3 rounded-lg bg-emerald-50">
+          <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </div>
+        <div class="flex-1">
+          <h3 class="font-semibold text-lg text-emerald-600 group-hover:underline">Document Templates</h3>
+          <p class="text-gray-600 text-sm mt-1">Browse and use templates for SOWs, IGCEs, acquisition plans, and more</p>
+        </div>
+      </a>
+
+      <!-- Acquisition Packages -->
+      <a href="#" class="flex items-start gap-4 p-5 bg-white rounded-xl border border-gray-200 hover:border-gray-300 hover:shadow-md transition-all group">
+        <div class="p-3 rounded-lg bg-purple-50">
+          <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16.5 9.4 7.55 4.24"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+        </div>
+        <div class="flex-1">
+          <h3 class="font-semibold text-lg text-purple-600 group-hover:underline">Acquisition Packages</h3>
+          <p class="text-gray-600 text-sm mt-1">View, manage, and track your acquisition packages and workflows</p>
+        </div>
+      </a>
+
+      <!-- Admin -->
+      <a href="#" class="flex items-start gap-4 p-5 bg-white rounded-xl border border-gray-200 hover:border-gray-300 hover:shadow-md transition-all group">
+        <div class="p-3 rounded-lg bg-orange-50">
+          <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </div>
+        <div class="flex-1">
+          <h3 class="font-semibold text-lg text-orange-600 group-hover:underline">Admin</h3>
+          <p class="text-gray-600 text-sm mt-1">Dashboard, analytics, user management, and system settings</p>
+        </div>
+      </a>
+
+    </div>
+  </div>
+</main>
+
+<!-- Footer -->
+<footer class="text-center py-4 text-xs text-gray-400 border-t border-gray-100">
+  EAGLE &middot; National Cancer Institute &middot; Powered by Claude (Anthropic SDK)
+</footer>
+
+</body>
+</html>
