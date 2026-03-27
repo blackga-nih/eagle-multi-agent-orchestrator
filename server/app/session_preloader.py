@@ -159,13 +159,20 @@ def format_context_for_prompt(ctx: PreloadedContext) -> str:
         completed = ctx.checklist.get("completed", [])
         missing = ctx.checklist.get("missing", [])
 
-        # Add version info from preloaded documents
-        doc_versions: dict[str, int] = {}
+        # Add version + s3_key info from preloaded documents
+        doc_info: dict[str, dict] = {}
         for doc in ctx.documents:
-            doc_versions[doc.get("doc_type", "")] = doc.get("version", 1)
+            dt = doc.get("doc_type", "")
+            doc_info[dt] = {"version": doc.get("version", 1), "s3_key": doc.get("s3_key", "")}
+
+        def _fmt_doc(d: str) -> str:
+            info = doc_info.get(d, {})
+            v = info.get("version", "?")
+            key = info.get("s3_key", "")
+            return f"{d} (v{v}, key={key})" if key else f"{d} (v{v})"
 
         completed_str = ", ".join(
-            f"{d} (v{doc_versions.get(d, '?')})" for d in completed
+            _fmt_doc(d) for d in completed
         ) if completed else "none"
         missing_str = ", ".join(missing) if missing else "none"
 

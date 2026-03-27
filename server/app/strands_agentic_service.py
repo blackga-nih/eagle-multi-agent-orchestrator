@@ -1862,7 +1862,7 @@ def _build_subagent_doc_tools(
         """Apply targeted edits to an existing DOCX document. Use for text replacements or checkbox toggles.
 
         Args:
-            document_key: S3 key of the DOCX document to edit
+            document_key: Full S3 key of the DOCX document (e.g. eagle/{tenant}/packages/{pkg_id}/{doc_type}/v{N}/{file}.docx). Use the s3_key from create_document response or session context -- never invent keys.
             edits: List of edit objects, each with 'search_text' and 'replacement_text'
             checkbox_edits: List of checkbox edit objects, each with 'label_text' and 'checked' (bool)
         """
@@ -2700,7 +2700,7 @@ def _build_all_service_tools(
         """Apply targeted edits to an existing DOCX document. Use for text replacements or checkbox toggles.
 
         Args:
-            document_key: S3 key of the DOCX document to edit
+            document_key: Full S3 key of the DOCX document (e.g. eagle/{tenant}/packages/{pkg_id}/{doc_type}/v{N}/{file}.docx). Use the s3_key from create_document response or session context -- never invent keys.
             edits: List of edit objects, each with 'search_text' and 'replacement_text'
             checkbox_edits: List of checkbox edit objects, each with 'label_text' and 'checked' (bool)
         """
@@ -3735,6 +3735,9 @@ def _build_supervisor_prompt_body(
         f"{_DOC_SECTION_HINTS}"
         "2) Do not paste full document bodies in chat unless the user explicitly asks for inline text.\n"
         "3) After create_document, respond briefly and direct the user to open/edit the document card.\n\n"
+        "RESULT VERIFICATION: After tool calls, check the returned JSON for 'error' keys. "
+        "If a tool returned an error, do NOT claim the operation succeeded. Report the error "
+        "and suggest corrective action. Never fabricate success.\n\n"
         "FAST vs DEEP routing:\n"
         "  FAST (seconds):\n"
         "    - load_data('matrix', 'thresholds') for threshold lookups.\n"

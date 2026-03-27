@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from ..db_client import get_s3
+from ..document_key_utils import is_allowed_document_key
 from ..session_scope import extract_leaf_session_id, extract_tenant_id, extract_user_id
 from ..template_registry import get_template_mapping
 
@@ -432,8 +433,8 @@ def _update_document_content(
     user_id = extract_user_id(session_id)
     bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
 
-    if not doc_key.startswith(f"eagle/{tenant_id}/{user_id}/"):
-        return {"error": "Access denied: document key must be within user's prefix"}
+    if not is_allowed_document_key(doc_key, tenant_id, user_id):
+        return {"error": "Access denied: document key is not within an allowed scope"}
 
     if "/packages/" in doc_key:
         from ..document_service import create_package_document_version
