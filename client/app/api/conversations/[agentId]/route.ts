@@ -36,29 +36,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   const userId = searchParams.get('user_id');
 
   if (!userId) {
-    return NextResponse.json(
-      { error: 'Missing required parameter: user_id' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Missing required parameter: user_id' }, { status: 400 });
   }
 
   if (!VALID_AGENT_IDS.includes(agentId as AgentType)) {
     return NextResponse.json(
       { error: `Invalid agent ID. Must be one of: ${VALID_AGENT_IDS.join(', ')}` },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   try {
     // Try backend first
-    const response = await fetch(
-      `${BACKEND_URL}/conversations/${agentId}?user_id=${userId}`,
-      {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(3000),
-      }
-    );
+    const response = await fetch(`${BACKEND_URL}/conversations/${agentId}?user_id=${userId}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(3000),
+    });
 
     if (response.ok) {
       const data = await response.json();
@@ -87,16 +81,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const { userId, session } = body;
 
     if (!userId) {
-      return NextResponse.json(
-        { error: 'Missing required field: userId' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing required field: userId' }, { status: 400 });
     }
 
     if (!VALID_AGENT_IDS.includes(agentId as AgentType)) {
       return NextResponse.json(
         { error: `Invalid agent ID. Must be one of: ${VALID_AGENT_IDS.join(', ')}` },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -146,20 +137,18 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     memoryStore.set(userId, userStore);
 
     // Log for audit (in production, this would go to audit table)
-    console.log(`[AUDIT] Session updated: user=${userId}, agent=${agentId}, messages=${session?.messageCount || 0}`);
+    console.log(
+      `[AUDIT] Session updated: user=${userId}, agent=${agentId}, messages=${session?.messageCount || 0}`,
+    );
 
     return NextResponse.json({
       success: true,
       agentId,
       lastUpdated: now,
     });
-
   } catch (error) {
     console.error('Session PUT error:', error);
-    return NextResponse.json(
-      { error: 'Failed to update session' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to update session' }, { status: 500 });
   }
 }
 
@@ -169,29 +158,23 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   const userId = searchParams.get('user_id');
 
   if (!userId) {
-    return NextResponse.json(
-      { error: 'Missing required parameter: user_id' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Missing required parameter: user_id' }, { status: 400 });
   }
 
   if (!VALID_AGENT_IDS.includes(agentId as AgentType)) {
     return NextResponse.json(
       { error: `Invalid agent ID. Must be one of: ${VALID_AGENT_IDS.join(', ')}` },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   try {
     // Try backend first
-    const response = await fetch(
-      `${BACKEND_URL}/conversations/${agentId}?user_id=${userId}`,
-      {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(3000),
-      }
-    );
+    const response = await fetch(`${BACKEND_URL}/conversations/${agentId}?user_id=${userId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(3000),
+    });
 
     if (response.ok) {
       const data = await response.json();

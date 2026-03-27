@@ -4,24 +4,50 @@ test.describe('Tool Meta Coverage', () => {
   // All tools registered in strands_agentic_service.py
   const KNOWN_TOOLS = [
     // Subagents (from plugin.json)
-    'oa_intake', 'legal_counsel', 'market_intelligence', 'tech_translator',
-    'tech_review', 'public_interest', 'document_generator', 'compliance',
-    'policy_analyst', 'policy_librarian', 'policy_supervisor',
-    'ingest_document', 'knowledge_retrieval',
+    'oa_intake',
+    'legal_counsel',
+    'market_intelligence',
+    'tech_translator',
+    'tech_review',
+    'public_interest',
+    'document_generator',
+    'compliance',
+    'policy_analyst',
+    'policy_librarian',
+    'policy_supervisor',
+    'ingest_document',
+    'knowledge_retrieval',
     // KB & web tools
-    'knowledge_search', 'knowledge_fetch', 'search_far', 'web_search', 'web_fetch',
+    'knowledge_search',
+    'knowledge_fetch',
+    'search_far',
+    'web_search',
+    'web_fetch',
     // Progressive disclosure
-    'load_skill', 'list_skills', 'load_data',
+    'load_skill',
+    'list_skills',
+    'load_data',
     // Document & package tools
-    'create_document', 'edit_docx_document', 'get_latest_document',
-    'finalize_package', 'document_changelog_search',
-    's3_document_ops', 'dynamodb_intake',
+    'create_document',
+    'edit_docx_document',
+    'get_latest_document',
+    'finalize_package',
+    'document_changelog_search',
+    's3_document_ops',
+    'dynamodb_intake',
     // Workflow & status
-    'get_intake_status', 'intake_workflow', 'query_compliance_matrix',
+    'get_intake_status',
+    'intake_workflow',
+    'query_compliance_matrix',
     // Admin
-    'manage_skills', 'manage_prompts', 'manage_templates', 'cloudwatch_logs',
+    'manage_skills',
+    'manage_prompts',
+    'manage_templates',
+    'cloudwatch_logs',
     // Client-side
-    'think', 'code', 'editor',
+    'think',
+    'code',
+    'editor',
   ];
 
   test('every known tool has a TOOL_META entry (no generic fallback)', async ({ page }) => {
@@ -41,7 +67,9 @@ test.describe('Tool Meta Coverage', () => {
           if (matches && matches.length > 10) {
             return matches.length;
           }
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
       return 0;
     });
@@ -78,8 +106,10 @@ test.describe('Tool Meta Coverage', () => {
         if (hasGear) {
           // If it has gear, it should be an intentionally-geared tool (manage_skills)
           // not a fallback. Check it also has a proper label.
-          const hasProperLabel = text.includes('Managing Skills')
-            || text.includes('Running Code') || text.includes('Editing');
+          const hasProperLabel =
+            text.includes('Managing Skills') ||
+            text.includes('Running Code') ||
+            text.includes('Editing');
           expect(hasProperLabel, `Tool card with gear icon has fallback label: ${text}`).toBe(true);
         }
       }

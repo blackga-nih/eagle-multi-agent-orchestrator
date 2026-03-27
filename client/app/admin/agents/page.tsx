@@ -40,15 +40,9 @@ function AgentsPageContent() {
   const userRole = useMemo(() => mapAuthRoleToUserRole(user?.roles || []), [user]);
 
   // Get available agents based on user role
-  const availableAgents = useMemo(
-    () => getAgentsForRole(userRole),
-    [userRole]
-  );
+  const availableAgents = useMemo(() => getAgentsForRole(userRole), [userRole]);
 
-  const defaultAgent = useMemo(
-    () => getDefaultAgentForRole(userRole),
-    [userRole]
-  );
+  const defaultAgent = useMemo(() => getDefaultAgentForRole(userRole), [userRole]);
 
   const [activeAgent, setActiveAgent] = useState<AgentType>(defaultAgent);
   const searchParams = useSearchParams();
@@ -122,9 +116,7 @@ function AgentsPageContent() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-gray-900">Agent Workbench</h1>
-                <p className="text-sm text-gray-500">
-                  Specialized AI agents with MCP tool access
-                </p>
+                <p className="text-sm text-gray-500">Specialized AI agents with MCP tool access</p>
               </div>
             </div>
 
@@ -172,9 +164,7 @@ function AgentsPageContent() {
                   {count > 0 && (
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                        isActive
-                          ? 'bg-white/30'
-                          : 'bg-gray-200 text-gray-500'
+                        isActive ? 'bg-white/30' : 'bg-gray-200 text-gray-500'
                       }`}
                     >
                       {count}
@@ -205,16 +195,18 @@ function AgentsPageContent() {
 export default function AgentsPage() {
   return (
     <AuthGuard>
-    <Suspense fallback={
-      <div className="flex flex-col h-screen bg-gray-50">
-        <TopNav />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="animate-pulse text-gray-400">Loading agents...</div>
-        </main>
-      </div>
-    }>
-      <AgentsPageContent />
-    </Suspense>
+      <Suspense
+        fallback={
+          <div className="flex flex-col h-screen bg-gray-50">
+            <TopNav />
+            <main className="flex-1 flex items-center justify-center">
+              <div className="animate-pulse text-gray-400">Loading agents...</div>
+            </main>
+          </div>
+        }
+      >
+        <AgentsPageContent />
+      </Suspense>
     </AuthGuard>
   );
 }

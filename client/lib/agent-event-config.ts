@@ -140,7 +140,7 @@ export function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
 
   function flushTextBuffer() {
     if (textBuffer.length === 0) return;
-    const merged = textBuffer.map(l => l.content ?? '').join('');
+    const merged = textBuffer.map((l) => l.content ?? '').join('');
     entries.push({
       log: textBuffer[textBuffer.length - 1],
       group: [...textBuffer],

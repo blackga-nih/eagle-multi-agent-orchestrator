@@ -64,10 +64,11 @@ function init() {
     if (!target) return;
 
     const tag = target.tagName.toLowerCase();
-    const isInteractive = ['a', 'button', 'input', 'select', 'textarea'].includes(tag)
-      || target.closest('a, button, [role="button"], [tabindex]')
-      || target.getAttribute('role') === 'button'
-      || target.getAttribute('tabindex') !== null;
+    const isInteractive =
+      ['a', 'button', 'input', 'select', 'textarea'].includes(tag) ||
+      target.closest('a, button, [role="button"], [tabindex]') ||
+      target.getAttribute('role') === 'button' ||
+      target.getAttribute('tabindex') !== null;
 
     if (!isInteractive) {
       trackEvent('dead_click', {

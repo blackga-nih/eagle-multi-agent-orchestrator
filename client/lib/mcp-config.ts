@@ -31,7 +31,11 @@ When helping users, you can:
 Always provide clear, actionable advice with code examples when appropriate.`,
     mcpServers: [
       { name: 'filesystem', url: 'http://localhost:8080/mcp', description: 'File system access' },
-      { name: 'browser-tools', url: 'http://localhost:8082/mcp', description: 'Browser inspection' },
+      {
+        name: 'browser-tools',
+        url: 'http://localhost:8082/mcp',
+        description: 'Browser inspection',
+      },
     ],
     icon: 'Palette',
     color: 'text-blue-600',
@@ -100,14 +104,31 @@ When helping users, you have access to real AWS tools:
 Always prioritize security and cost-effectiveness in your recommendations.
 Use the available tools to provide accurate, real-time information about the infrastructure.`,
     mcpServers: [
-      { name: 'cloudwatch', url: 'http://localhost:8083/mcp', description: 'CloudWatch logs, metrics, and alarms' },
-      { name: 'aws-cli', url: 'http://localhost:8084/mcp', description: 'EC2, ECS, Lambda, CloudFormation' },
+      {
+        name: 'cloudwatch',
+        url: 'http://localhost:8083/mcp',
+        description: 'CloudWatch logs, metrics, and alarms',
+      },
+      {
+        name: 'aws-cli',
+        url: 'http://localhost:8084/mcp',
+        description: 'EC2, ECS, Lambda, CloudFormation',
+      },
     ],
     icon: 'Cloud',
     color: 'text-orange-600',
     bgColor: 'bg-orange-50',
     borderColor: 'border-orange-200',
-    mockTools: ['query_logs', 'get_metrics', 'list_alarms', 'get_log_groups', 'describe_instances', 'describe_ecs_services', 'list_lambda_functions', 'describe_stack'],
+    mockTools: [
+      'query_logs',
+      'get_metrics',
+      'list_alarms',
+      'get_log_groups',
+      'describe_instances',
+      'describe_ecs_services',
+      'list_lambda_functions',
+      'describe_stack',
+    ],
   },
   analyst: {
     id: 'analyst',
@@ -132,7 +153,11 @@ When helping users, you can:
 Always validate your findings and provide clear explanations of your analysis.`,
     mcpServers: [
       { name: 'postgres', url: 'http://localhost:8081/mcp', description: 'PostgreSQL database' },
-      { name: 'filesystem', url: 'http://localhost:8080/mcp', description: 'File system for exports' },
+      {
+        name: 'filesystem',
+        url: 'http://localhost:8080/mcp',
+        description: 'File system for exports',
+      },
     ],
     icon: 'BarChart3',
     color: 'text-purple-600',
@@ -195,8 +220,11 @@ export const MOCK_TOOL_DEFINITIONS: Record<string, { name: string; description: 
 export function generateMockResponse(
   agentId: AgentType,
   userMessage: string,
-  includeToolCall: boolean = false
-): { content: string; toolCalls?: { name: string; args: Record<string, unknown>; result: unknown }[] } {
+  includeToolCall: boolean = false,
+): {
+  content: string;
+  toolCalls?: { name: string; args: Record<string, unknown>; result: unknown }[];
+} {
   const config = AGENT_CONFIGS[agentId];
   const tools = MOCK_TOOL_DEFINITIONS[agentId];
 
@@ -218,9 +246,13 @@ export function generateMockResponse(
     case 'frontend':
       content = `As a Frontend Expert, I can help you with that.
 
-${includeToolCall ? `I used the **${toolCalls?.[0]?.name}** tool to gather information.
+${
+  includeToolCall
+    ? `I used the **${toolCalls?.[0]?.name}** tool to gather information.
 
-` : ''}Based on your question about "${userMessage.slice(0, 50)}...", here's my analysis:
+`
+    : ''
+}Based on your question about "${userMessage.slice(0, 50)}...", here's my analysis:
 
 1. **Component Structure**: Consider using a modular approach with separate concerns
 2. **Styling**: Tailwind CSS classes can be optimized for better maintainability
@@ -232,9 +264,13 @@ Would you like me to dive deeper into any of these areas?`;
     case 'backend':
       content = `As a Backend Expert, I'll help you address this.
 
-${includeToolCall ? `I executed the **${toolCalls?.[0]?.name}** tool.
+${
+  includeToolCall
+    ? `I executed the **${toolCalls?.[0]?.name}** tool.
 
-` : ''}Regarding "${userMessage.slice(0, 50)}...", here's what I found:
+`
+    : ''
+}Regarding "${userMessage.slice(0, 50)}...", here's what I found:
 
 1. **API Design**: RESTful patterns with proper error handling
 2. **Database**: Indexed queries for optimal performance
@@ -246,9 +282,13 @@ Let me know if you need specific code examples or further clarification.`;
     case 'aws_admin':
       content = `As an AWS Admin, I'll investigate this for you.
 
-${includeToolCall ? `I ran the **${toolCalls?.[0]?.name}** tool to check the infrastructure.
+${
+  includeToolCall
+    ? `I ran the **${toolCalls?.[0]?.name}** tool to check the infrastructure.
 
-` : ''}For your question about "${userMessage.slice(0, 50)}...", here's my assessment:
+`
+    : ''
+}For your question about "${userMessage.slice(0, 50)}...", here's my assessment:
 
 1. **Resources**: All services are operating normally
 2. **Logs**: No critical errors in the last 24 hours
@@ -260,9 +300,13 @@ Would you like me to drill down into any specific service or metric?`;
     case 'analyst':
       content = `As a Data Analyst, I can help analyze this.
 
-${includeToolCall ? `I used the **${toolCalls?.[0]?.name}** tool to query the data.
+${
+  includeToolCall
+    ? `I used the **${toolCalls?.[0]?.name}** tool to query the data.
 
-` : ''}Based on your request about "${userMessage.slice(0, 50)}...", here are my findings:
+`
+    : ''
+}Based on your request about "${userMessage.slice(0, 50)}...", here are my findings:
 
 1. **Data Quality**: The dataset is complete with minimal null values
 2. **Trends**: There's a positive trend in the key metrics
@@ -280,23 +324,88 @@ function getMockToolResult(toolName: string, agentId: AgentType): unknown {
     // Frontend tools
     read_file: { content: '// Sample file content\nexport function example() { ... }', lines: 42 },
     list_files: { files: ['index.tsx', 'styles.css', 'utils.ts'], count: 3 },
-    search_code: { matches: [{ file: 'app.tsx', line: 15, content: 'const result = ...' }], total: 1 },
+    search_code: {
+      matches: [{ file: 'app.tsx', line: 15, content: 'const result = ...' }],
+      total: 1,
+    },
     // Backend tools
     query_database: { rows: [{ id: 1, name: 'Sample', value: 100 }], rowCount: 1 },
     list_tables: { tables: ['users', 'workflows', 'documents'], count: 3 },
     describe_table: { columns: ['id', 'name', 'created_at'], primaryKey: 'id' },
     // CloudWatch tools
-    query_logs: { results: [{ '@timestamp': new Date().toISOString(), '@message': 'INFO: Request processed successfully', level: 'INFO' }], rowCount: 1 },
-    get_metrics: { datapoints: [{ timestamp: new Date().toISOString(), value: 42.5, unit: 'Percent' }], label: 'CPUUtilization', namespace: 'AWS/ECS' },
-    list_alarms: { alarms: [{ name: 'HighCPU', state: 'OK', metric: 'CPUUtilization', threshold: 80 }], count: 1 },
-    get_log_groups: { logGroups: [{ name: '/ecs/nci-oa-agent', storedBytes: 1024000, retentionDays: 30 }], count: 1 },
+    query_logs: {
+      results: [
+        {
+          '@timestamp': new Date().toISOString(),
+          '@message': 'INFO: Request processed successfully',
+          level: 'INFO',
+        },
+      ],
+      rowCount: 1,
+    },
+    get_metrics: {
+      datapoints: [{ timestamp: new Date().toISOString(), value: 42.5, unit: 'Percent' }],
+      label: 'CPUUtilization',
+      namespace: 'AWS/ECS',
+    },
+    list_alarms: {
+      alarms: [{ name: 'HighCPU', state: 'OK', metric: 'CPUUtilization', threshold: 80 }],
+      count: 1,
+    },
+    get_log_groups: {
+      logGroups: [{ name: '/ecs/nci-oa-agent', storedBytes: 1024000, retentionDays: 30 }],
+      count: 1,
+    },
     // AWS CLI tools
-    describe_instances: { instances: [{ id: 'i-0abc123', name: 'nci-oa-agent-prod', state: 'running', type: 't3.medium', privateIp: '10.0.1.50' }], count: 1 },
-    describe_ecs_services: { services: [{ name: 'nci-oa-agent', status: 'ACTIVE', runningCount: 2, desiredCount: 2, taskDefinition: 'nci-oa-agent:42' }], count: 1 },
-    list_lambda_functions: { functions: [{ name: 'nci-oa-agent-processor', runtime: 'python3.12', memory: 256, timeout: 30 }], count: 1 },
-    describe_stack: { name: 'nci-oa-agent-prod', status: 'CREATE_COMPLETE', outputs: { ApiUrl: 'https://api.example.com', ClusterArn: 'arn:aws:ecs:us-east-1:123456789:cluster/prod' } },
-    list_ecs_clusters: { clusters: [{ name: 'nci-oa-agent-prod', runningTasks: 4, pendingTasks: 0, activeServices: 2 }], count: 1 },
-    get_caller_identity: { account: '123456789012', arn: 'arn:aws:iam::123456789012:user/developer', userId: 'AIDAEXAMPLE' },
+    describe_instances: {
+      instances: [
+        {
+          id: 'i-0abc123',
+          name: 'nci-oa-agent-prod',
+          state: 'running',
+          type: 't3.medium',
+          privateIp: '10.0.1.50',
+        },
+      ],
+      count: 1,
+    },
+    describe_ecs_services: {
+      services: [
+        {
+          name: 'nci-oa-agent',
+          status: 'ACTIVE',
+          runningCount: 2,
+          desiredCount: 2,
+          taskDefinition: 'nci-oa-agent:42',
+        },
+      ],
+      count: 1,
+    },
+    list_lambda_functions: {
+      functions: [
+        { name: 'nci-oa-agent-processor', runtime: 'python3.12', memory: 256, timeout: 30 },
+      ],
+      count: 1,
+    },
+    describe_stack: {
+      name: 'nci-oa-agent-prod',
+      status: 'CREATE_COMPLETE',
+      outputs: {
+        ApiUrl: 'https://api.example.com',
+        ClusterArn: 'arn:aws:ecs:us-east-1:123456789:cluster/prod',
+      },
+    },
+    list_ecs_clusters: {
+      clusters: [
+        { name: 'nci-oa-agent-prod', runningTasks: 4, pendingTasks: 0, activeServices: 2 },
+      ],
+      count: 1,
+    },
+    get_caller_identity: {
+      account: '123456789012',
+      arn: 'arn:aws:iam::123456789012:user/developer',
+      userId: 'AIDAEXAMPLE',
+    },
     // Analyst tools
     run_sql: { rows: [{ count: 156 }], rowCount: 1 },
     export_csv: { filename: 'export_20260129.csv', rows: 100, size: '24KB' },

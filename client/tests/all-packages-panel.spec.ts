@@ -57,13 +57,48 @@ const MOCK_PACKAGES = [
 
 const MOCK_DOCUMENTS: Record<string, Array<Record<string, unknown>>> = {
   'PKG-001': [
-    { document_id: 'DOC-001', doc_type: 'sow', title: 'SOW - Genomics Equipment', version: 1, status: 'draft', file_type: 'docx' },
-    { document_id: 'DOC-002', doc_type: 'market_research', title: 'MRR - Lab Equipment Market', version: 1, status: 'final', file_type: 'docx' },
+    {
+      document_id: 'DOC-001',
+      doc_type: 'sow',
+      title: 'SOW - Genomics Equipment',
+      version: 1,
+      status: 'draft',
+      file_type: 'docx',
+    },
+    {
+      document_id: 'DOC-002',
+      doc_type: 'market_research',
+      title: 'MRR - Lab Equipment Market',
+      version: 1,
+      status: 'final',
+      file_type: 'docx',
+    },
   ],
   'PKG-003': [
-    { document_id: 'DOC-010', doc_type: 'sow', title: 'SOW - Cloud Migration', version: 2, status: 'final', file_type: 'docx' },
-    { document_id: 'DOC-011', doc_type: 'igce', title: 'IGCE - Cloud Services', version: 1, status: 'final', file_type: 'xlsx' },
-    { document_id: 'DOC-012', doc_type: 'acquisition_plan', title: 'AP - Cloud Migration', version: 1, status: 'final', file_type: 'docx' },
+    {
+      document_id: 'DOC-010',
+      doc_type: 'sow',
+      title: 'SOW - Cloud Migration',
+      version: 2,
+      status: 'final',
+      file_type: 'docx',
+    },
+    {
+      document_id: 'DOC-011',
+      doc_type: 'igce',
+      title: 'IGCE - Cloud Services',
+      version: 1,
+      status: 'final',
+      file_type: 'xlsx',
+    },
+    {
+      document_id: 'DOC-012',
+      doc_type: 'acquisition_plan',
+      title: 'AP - Cloud Migration',
+      version: 1,
+      status: 'final',
+      file_type: 'docx',
+    },
   ],
 };
 
@@ -130,8 +165,20 @@ async function setupRoutes(
 
   // Mock SSE endpoint (prevents hanging)
   const sseEvents = options?.sseEvents ?? [
-    { type: 'text', agent_id: 'eagle', agent_name: 'EAGLE', content: 'Hello', timestamp: '2026-01-01T00:00:01Z' },
-    { type: 'complete', agent_id: 'eagle', agent_name: 'EAGLE', metadata: {}, timestamp: '2026-01-01T00:00:02Z' },
+    {
+      type: 'text',
+      agent_id: 'eagle',
+      agent_name: 'EAGLE',
+      content: 'Hello',
+      timestamp: '2026-01-01T00:00:01Z',
+    },
+    {
+      type: 'complete',
+      agent_id: 'eagle',
+      agent_name: 'EAGLE',
+      metadata: {},
+      timestamp: '2026-01-01T00:00:02Z',
+    },
   ];
   await page.route('**/api/invoke', async (route) => {
     await route.fulfill({
@@ -152,12 +199,14 @@ async function setupRoutes(
 // ---------------------------------------------------------------------------
 
 test.describe('All Packages in Activity Panel', () => {
-
   test('Package tab shows all user packages from API', async ({ page }) => {
     test.setTimeout(30_000);
     await setupRoutes(page);
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     // Package tab is default — click to ensure
     await page.getByText('Package', { exact: true }).first().click();
@@ -176,7 +225,10 @@ test.describe('All Packages in Activity Panel', () => {
     test.setTimeout(30_000);
     await setupRoutes(page);
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
     await page.getByText('Package', { exact: true }).first().click();
     await page.waitForTimeout(2_000);
 
@@ -190,7 +242,10 @@ test.describe('All Packages in Activity Panel', () => {
     test.setTimeout(30_000);
     await setupRoutes(page);
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
     await page.getByText('Package', { exact: true }).first().click();
     await page.waitForTimeout(2_000);
 
@@ -225,13 +280,28 @@ test.describe('All Packages in Activity Panel', () => {
         },
         timestamp: '2026-01-01T00:00:01Z',
       },
-      { type: 'text', agent_id: 'eagle', agent_name: 'EAGLE', content: 'Package updated.', timestamp: '2026-01-01T00:00:02Z' },
-      { type: 'complete', agent_id: 'eagle', agent_name: 'EAGLE', metadata: {}, timestamp: '2026-01-01T00:00:03Z' },
+      {
+        type: 'text',
+        agent_id: 'eagle',
+        agent_name: 'EAGLE',
+        content: 'Package updated.',
+        timestamp: '2026-01-01T00:00:02Z',
+      },
+      {
+        type: 'complete',
+        agent_id: 'eagle',
+        agent_name: 'EAGLE',
+        metadata: {},
+        timestamp: '2026-01-01T00:00:03Z',
+      },
     ];
 
     await setupRoutes(page, { sseEvents });
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     // Send a message to trigger SSE with checklist_update
     const textarea = page.locator('textarea').first();
@@ -255,7 +325,10 @@ test.describe('All Packages in Activity Panel', () => {
     test.setTimeout(30_000);
     await setupRoutes(page, { packages: [] });
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     // Start a new chat to clear any session state
     const newChatBtn = page.getByRole('button', { name: 'New Chat' });
@@ -272,7 +345,10 @@ test.describe('All Packages in Activity Panel', () => {
     test.setTimeout(30_000);
     await setupRoutes(page);
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
     await page.getByText('Package', { exact: true }).first().click();
     await page.waitForTimeout(2_000);
 
@@ -320,8 +396,20 @@ test.describe('All Packages in Activity Panel', () => {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
         body: buildSSE([
-          { type: 'text', agent_id: 'eagle', agent_name: 'EAGLE', content: 'Done', timestamp: '2026-01-01T00:00:01Z' },
-          { type: 'complete', agent_id: 'eagle', agent_name: 'EAGLE', metadata: {}, timestamp: '2026-01-01T00:00:02Z' },
+          {
+            type: 'text',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            content: 'Done',
+            timestamp: '2026-01-01T00:00:01Z',
+          },
+          {
+            type: 'complete',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            metadata: {},
+            timestamp: '2026-01-01T00:00:02Z',
+          },
         ]),
       });
     });
@@ -332,7 +420,10 @@ test.describe('All Packages in Activity Panel', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
     });
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
     await page.getByText('Package', { exact: true }).first().click();
     await page.waitForTimeout(2_000);
 

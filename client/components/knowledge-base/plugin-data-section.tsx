@@ -48,26 +48,32 @@ export default function PluginDataSection() {
     })();
   }, [getToken]);
 
-  const openFile = useCallback(async (name: string) => {
-    setSelectedFile(name);
-    setContentLoading(true);
-    setFileContent(null);
-    setSearchQuery('');
-    try {
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/knowledge-base/plugin-data?file=${encodeURIComponent(name)}`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setFileContent(data.content);
-      }
-    } catch {
+  const openFile = useCallback(
+    async (name: string) => {
+      setSelectedFile(name);
+      setContentLoading(true);
       setFileContent(null);
-    } finally {
-      setContentLoading(false);
-    }
-  }, [getToken]);
+      setSearchQuery('');
+      try {
+        const token = await getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await fetch(
+          `/api/knowledge-base/plugin-data?file=${encodeURIComponent(name)}`,
+          { headers },
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setFileContent(data.content);
+        }
+      } catch {
+        setFileContent(null);
+      } finally {
+        setContentLoading(false);
+      }
+    },
+    [getToken],
+  );
 
   const formatBytes = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -120,7 +126,10 @@ export default function PluginDataSection() {
       {/* File content modal */}
       <Modal
         isOpen={!!selectedFile}
-        onClose={() => { setSelectedFile(null); setFileContent(null); }}
+        onClose={() => {
+          setSelectedFile(null);
+          setFileContent(null);
+        }}
         title={selectedFile || ''}
         size="xl"
       >
@@ -191,9 +200,15 @@ function PluginFileViewer({
             <tbody>
               {filtered.slice(0, 200).map((item: Record<string, unknown>, i: number) => (
                 <tr key={i} className="border-t border-gray-100 hover:bg-blue-50">
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{String(item.part || '')}</td>
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{String(item.section || '')}</td>
-                  <td className="px-3 py-2 text-gray-900">{String(item.title || item.name || '')}</td>
+                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                    {String(item.part || '')}
+                  </td>
+                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                    {String(item.section || '')}
+                  </td>
+                  <td className="px-3 py-2 text-gray-900">
+                    {String(item.title || item.name || '')}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -215,7 +230,9 @@ function PluginFileViewer({
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2 mb-4">
           {keys.map((key) => (
-            <Badge key={key} variant="primary">{key}</Badge>
+            <Badge key={key} variant="primary">
+              {key}
+            </Badge>
           ))}
         </div>
         <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-gray-50 rounded-lg p-4 max-h-[500px] overflow-y-auto font-mono leading-relaxed">

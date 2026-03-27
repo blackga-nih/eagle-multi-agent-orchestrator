@@ -38,10 +38,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error('Sessions GET error:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch sessions' },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch sessions' }, { status: 502 });
   }
 }
 
@@ -68,9 +65,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error('Sessions POST error:', error);
-    return NextResponse.json(
-      { error: 'Failed to create session' },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: 'Failed to create session' }, { status: 502 });
   }
 }

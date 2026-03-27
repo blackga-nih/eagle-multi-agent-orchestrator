@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       console.error(`FastAPI /api/documents/upload error: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Backend error: ${response.status}`, detail: errorText },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
           detail: `Ensure FastAPI is running at ${FASTAPI_URL}`,
           details: String(error),
         },
-        { status: 503 }
+        { status: 503 },
       );
     }
 
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
         detail: error instanceof Error ? error.message : 'Unexpected upload proxy error',
         details: String(error),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

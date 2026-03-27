@@ -26,7 +26,9 @@ export default async function globalSetup(config: FullConfig) {
   // Race: either the login form appears (prod) or the page redirects away (dev mode)
   const onLoginPage = await Promise.race([
     page.waitForSelector('#login-email', { timeout: 8000 }).then(() => true),
-    page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 8000 }).then(() => false),
+    page
+      .waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 8000 })
+      .then(() => false),
   ]).catch(() => false); // if both timeout, assume dev mode
 
   if (onLoginPage) {

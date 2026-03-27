@@ -10,14 +10,14 @@ import {
   ExternalLink,
   Sparkles,
   User,
-  Clock
+  Clock,
 } from 'lucide-react';
 import {
   RequirementSubmission,
   ReviewStatus,
   SubmissionSource,
   REVIEW_STATUS_CLASSES,
-  SUBMISSION_SOURCE_CLASSES
+  SUBMISSION_SOURCE_CLASSES,
 } from '@/types/schema';
 
 interface DocumentRequirementsProps {
@@ -38,7 +38,7 @@ const PLACEHOLDER_REQUIREMENTS = [
       reviewStatus: 'approved' as ReviewStatus,
       submittedBy: 'Jane Smith',
       submittedAt: '2026-01-28T12:05:00Z',
-    }
+    },
   },
   {
     id: 'req-002',
@@ -51,13 +51,17 @@ const PLACEHOLDER_REQUIREMENTS = [
       source: 'ai_generated' as SubmissionSource,
       reviewStatus: 'approved' as ReviewStatus,
       confidence: 0.92,
-      reasoning: 'Based on market analysis of similar 128-slice CT scanners from Siemens, GE, and Philips.',
+      reasoning:
+        'Based on market analysis of similar 128-slice CT scanners from Siemens, GE, and Philips.',
       citations: [
-        { title: 'MD Buyline CT Scanner Pricing Report 2025', url: 'https://mdbuyline.com/reports/ct-2025' },
-        { title: 'GSA Schedule GS-07F-0000X', url: '#' }
+        {
+          title: 'MD Buyline CT Scanner Pricing Report 2025',
+          url: 'https://mdbuyline.com/reports/ct-2025',
+        },
+        { title: 'GSA Schedule GS-07F-0000X', url: '#' },
       ],
       submittedAt: '2026-01-28T12:08:00Z',
-    }
+    },
   },
   {
     id: 'req-003',
@@ -72,7 +76,7 @@ const PLACEHOLDER_REQUIREMENTS = [
       confidence: 0.85,
       reasoning: 'Standard lead time for high-end CT scanners based on vendor specifications.',
       submittedAt: '2026-01-28T12:10:00Z',
-    }
+    },
   },
   {
     id: 'req-004',
@@ -81,12 +85,13 @@ const PLACEHOLDER_REQUIREMENTS = [
     required: true,
     submission: {
       id: 'sub-004',
-      value: 'Complete installation within 30 days of delivery, including site preparation, electrical, and HVAC modifications.',
+      value:
+        'Complete installation within 30 days of delivery, including site preparation, electrical, and HVAC modifications.',
       source: 'user' as SubmissionSource,
       reviewStatus: 'approved' as ReviewStatus,
       submittedBy: 'Jane Smith',
       submittedAt: '2026-01-28T12:12:00Z',
-    }
+    },
   },
   {
     id: 'req-005',
@@ -99,31 +104,33 @@ const PLACEHOLDER_REQUIREMENTS = [
       source: 'ai_generated' as SubmissionSource,
       reviewStatus: 'pending' as ReviewStatus,
       confidence: 0.78,
-      reasoning: 'Recommended based on similar equipment acquisitions and FDA guidelines for CT operator training.',
+      reasoning:
+        'Recommended based on similar equipment acquisitions and FDA guidelines for CT operator training.',
       submittedAt: '2026-01-28T12:15:00Z',
-    }
+    },
   },
   {
     id: 'req-006',
     label: 'Warranty Period',
     fieldType: 'text',
     required: true,
-    submission: null
+    submission: null,
   },
 ];
 
 export default function DocumentRequirements({ documentId }: DocumentRequirementsProps) {
-  const [expandedRequirements, setExpandedRequirements] = useState<string[]>(['req-002', 'req-003']);
+  const [expandedRequirements, setExpandedRequirements] = useState<string[]>([
+    'req-002',
+    'req-003',
+  ]);
 
   const toggleExpanded = (reqId: string) => {
-    setExpandedRequirements(prev =>
-      prev.includes(reqId)
-        ? prev.filter(id => id !== reqId)
-        : [...prev, reqId]
+    setExpandedRequirements((prev) =>
+      prev.includes(reqId) ? prev.filter((id) => id !== reqId) : [...prev, reqId],
     );
   };
 
-  const getStatusIcon = (submission: typeof PLACEHOLDER_REQUIREMENTS[0]['submission']) => {
+  const getStatusIcon = (submission: (typeof PLACEHOLDER_REQUIREMENTS)[0]['submission']) => {
     if (!submission) {
       return <Circle className="w-5 h-5 text-gray-300" />;
     }
@@ -143,10 +150,12 @@ export default function DocumentRequirements({ documentId }: DocumentRequirement
     const labels = {
       user: 'Manual',
       ai_generated: 'AI Generated',
-      imported: 'Imported'
+      imported: 'Imported',
     };
     return (
-      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${SUBMISSION_SOURCE_CLASSES[source]}`}>
+      <span
+        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${SUBMISSION_SOURCE_CLASSES[source]}`}
+      >
         {source === 'ai_generated' && <Sparkles className="w-3 h-3" />}
         {source === 'user' && <User className="w-3 h-3" />}
         {labels[source]}
@@ -159,13 +168,17 @@ export default function DocumentRequirements({ documentId }: DocumentRequirement
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   };
 
-  const completedCount = PLACEHOLDER_REQUIREMENTS.filter(r => r.submission?.reviewStatus === 'approved').length;
-  const pendingCount = PLACEHOLDER_REQUIREMENTS.filter(r => r.submission?.reviewStatus === 'pending').length;
-  const missingCount = PLACEHOLDER_REQUIREMENTS.filter(r => !r.submission).length;
+  const completedCount = PLACEHOLDER_REQUIREMENTS.filter(
+    (r) => r.submission?.reviewStatus === 'approved',
+  ).length;
+  const pendingCount = PLACEHOLDER_REQUIREMENTS.filter(
+    (r) => r.submission?.reviewStatus === 'pending',
+  ).length;
+  const missingCount = PLACEHOLDER_REQUIREMENTS.filter((r) => !r.submission).length;
 
   return (
     <div className="space-y-6">
@@ -236,9 +249,12 @@ export default function DocumentRequirements({ documentId }: DocumentRequirement
                 {req.submission && (
                   <div className="flex items-center gap-2">
                     {getSourceBadge(req.submission.source)}
-                    {hasDetails && (
-                      isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />
-                    )}
+                    {hasDetails &&
+                      (isExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-gray-400" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                      ))}
                   </div>
                 )}
               </button>
@@ -253,8 +269,11 @@ export default function DocumentRequirements({ documentId }: DocumentRequirement
                       <div className="flex-1 h-2 bg-gray-200 rounded-full max-w-32">
                         <div
                           className={`h-2 rounded-full ${
-                            req.submission.confidence >= 0.9 ? 'bg-emerald-500' :
-                            req.submission.confidence >= 0.7 ? 'bg-amber-500' : 'bg-red-500'
+                            req.submission.confidence >= 0.9
+                              ? 'bg-emerald-500'
+                              : req.submission.confidence >= 0.7
+                                ? 'bg-amber-500'
+                                : 'bg-red-500'
                           }`}
                           style={{ width: `${req.submission.confidence * 100}%` }}
                         />

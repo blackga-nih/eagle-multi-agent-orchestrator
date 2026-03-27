@@ -17,17 +17,14 @@ export async function GET(request: NextRequest) {
     const authHeader = request.headers.get('authorization');
 
     if (!authHeader) {
-      return NextResponse.json(
-        { error: 'Missing Authorization header' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Missing Authorization header' }, { status: 401 });
     }
 
     const response = await fetch(`${FASTAPI_URL}/api/user/me`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeader,
+        Authorization: authHeader,
       },
     });
 
@@ -36,7 +33,7 @@ export async function GET(request: NextRequest) {
       console.error(`FastAPI /api/user/me error: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Backend error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -51,13 +48,13 @@ export async function GET(request: NextRequest) {
           error: 'Cannot connect to backend',
           details: `Ensure FastAPI is running at ${FASTAPI_URL}`,
         },
-        { status: 503 }
+        { status: 503 },
       );
     }
 
     return NextResponse.json(
       { error: 'Internal server error', details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -15,7 +15,10 @@ export async function GET(request: NextRequest) {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 
-    const response = await fetch(`${FASTAPI_URL}/api/knowledge-base/stats`, { method: 'GET', headers });
+    const response = await fetch(`${FASTAPI_URL}/api/knowledge-base/stats`, {
+      method: 'GET',
+      headers,
+    });
 
     if (!response.ok) {
       const text = await response.text();
@@ -29,10 +32,16 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       return NextResponse.json(
-        { error: 'Cannot connect to backend', details: `Ensure FastAPI is running at ${FASTAPI_URL}` },
+        {
+          error: 'Cannot connect to backend',
+          details: `Ensure FastAPI is running at ${FASTAPI_URL}`,
+        },
         { status: 503 },
       );
     }
-    return NextResponse.json({ error: 'Internal server error', details: String(error) }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Internal server error', details: String(error) },
+      { status: 500 },
+    );
   }
 }

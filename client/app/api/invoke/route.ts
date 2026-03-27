@@ -18,43 +18,48 @@ const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 
 const COMMAND_PROMPTS: Record<string, string> = {
   // Documents
-  '/document:sow':    'Draft a Statement of Work (SOW)',
-  '/document:igce':   'Draft an Independent Government Cost Estimate (IGCE)',
-  '/document:ap':     'Draft an Acquisition Plan',
-  '/document:j&a':    'Draft a Justification & Approval (J&A)',
-  '/document:mrr':    'Draft a Market Research Report',
+  '/document:sow': 'Draft a Statement of Work (SOW)',
+  '/document:igce': 'Draft an Independent Government Cost Estimate (IGCE)',
+  '/document:ap': 'Draft an Acquisition Plan',
+  '/document:j&a': 'Draft a Justification & Approval (J&A)',
+  '/document:mrr': 'Draft a Market Research Report',
   // Compliance
-  '/compliance:far':     'Search FAR clauses and regulations for',
-  '/compliance:dfars':   'Search DFARS clauses for',
+  '/compliance:far': 'Search FAR clauses and regulations for',
+  '/compliance:dfars': 'Search DFARS clauses for',
   '/compliance:clauses': 'Identify the required FAR/DFARS clauses for',
   // Research
-  '/research:policy':     'Search NIH/HHS policies about',
+  '/research:policy': 'Search NIH/HHS policies about',
   '/research:regulation': 'Look up federal acquisition regulations about',
-  '/research:precedent':  'Find similar past acquisitions for',
+  '/research:precedent': 'Find similar past acquisitions for',
   // Workflow
-  '/intake':             'Start a new acquisition intake and ask me for details',
-  '/tech-review:specs':  'Review the technical specifications for',
-  '/tech-review:508':    'Check Section 508 accessibility compliance for',
-  '/ingest':             'Upload and process this document',
+  '/intake': 'Start a new acquisition intake and ask me for details',
+  '/tech-review:specs': 'Review the technical specifications for',
+  '/tech-review:508': 'Check Section 508 accessibility compliance for',
+  '/ingest': 'Upload and process this document',
   // Admin
-  '/admin': '[SYSTEM DIAGNOSTIC MODE] The user is asking about EAGLE system behavior, errors, or performance. '
-    + 'For quick questions (capabilities, configuration, how things work), answer directly. '
-    + 'For diagnostic questions (errors, slowness, failures, specific sessions), use the langfuse_traces tool '
-    + '(operations: health_summary, search_errors, list_recent, get_trace) and cloudwatch_logs tool to gather evidence before answering. '
-    + 'Include trace IDs, timestamps, error patterns, and Langfuse URLs in your answer so they can be referenced in feedback. '
-    + 'End your response with: "Press **Ctrl+J** to submit feedback with these diagnostic details."\n'
-    + 'Question:',
-  '/admin:skills':    'List all custom skills and their current status. I can create, edit, publish, or delete skills.',
-  '/admin:prompts':   'List all agent prompt overrides. I can view, set, or reset prompt overrides for any agent.',
-  '/admin:templates': 'List all document templates. I can view, edit, or reset templates for any document type.',
+  '/admin':
+    '[SYSTEM DIAGNOSTIC MODE] The user is asking about EAGLE system behavior, errors, or performance. ' +
+    'For quick questions (capabilities, configuration, how things work), answer directly. ' +
+    'For diagnostic questions (errors, slowness, failures, specific sessions), use the langfuse_traces tool ' +
+    '(operations: health_summary, search_errors, list_recent, get_trace) and cloudwatch_logs tool to gather evidence before answering. ' +
+    'Include trace IDs, timestamps, error patterns, and Langfuse URLs in your answer so they can be referenced in feedback. ' +
+    'End your response with: "Press **Ctrl+J** to submit feedback with these diagnostic details."\n' +
+    'Question:',
+  '/admin:skills':
+    'List all custom skills and their current status. I can create, edit, publish, or delete skills.',
+  '/admin:prompts':
+    'List all agent prompt overrides. I can view, set, or reset prompt overrides for any agent.',
+  '/admin:templates':
+    'List all document templates. I can view, edit, or reset templates for any document type.',
   // Info
   '/status': 'Show the current acquisition package status, completed artifacts, and next steps.',
-  '/help':   'List your capabilities and available commands.',
+  '/help': 'List your capabilities and available commands.',
   // Legacy (bare parent commands)
-  '/document':   'Create the requested acquisition document(s)',
-  '/research':   'Research this acquisition/regulatory question',
+  '/document': 'Create the requested acquisition document(s)',
+  '/research': 'Research this acquisition/regulatory question',
   '/compliance': 'Check FAR/DFARS compliance',
-  '/acquisition-package': 'Start a new acquisition package and ask me for the minimum required intake details',
+  '/acquisition-package':
+    'Start a new acquisition package and ask me for the minimum required intake details',
 };
 
 function normalizeSlashCommand(input: string): string {
@@ -81,7 +86,7 @@ export async function POST(request: NextRequest) {
     if (!body.prompt && !body.query) {
       return NextResponse.json(
         { error: 'Missing required field: prompt or query' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -117,7 +122,7 @@ export async function POST(request: NextRequest) {
       console.error(`FastAPI error: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Backend error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -136,7 +141,7 @@ export async function POST(request: NextRequest) {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        Connection: 'keep-alive',
         'X-Accel-Buffering': 'no',
       },
     });
@@ -149,13 +154,13 @@ export async function POST(request: NextRequest) {
           error: 'Cannot connect to backend',
           details: `Ensure FastAPI is running at ${FASTAPI_URL}`,
         },
-        { status: 503 }
+        { status: 503 },
       );
     }
 
     return NextResponse.json(
       { error: 'Internal server error', details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -185,7 +190,7 @@ export async function GET() {
         backend: FASTAPI_URL,
         error: `Backend returned ${response.status}`,
       },
-      { status: 503 }
+      { status: 503 },
     );
   } catch {
     return NextResponse.json(
@@ -194,7 +199,7 @@ export async function GET() {
         backend: FASTAPI_URL,
         error: 'Cannot connect to backend',
       },
-      { status: 503 }
+      { status: 503 },
     );
   }
 }

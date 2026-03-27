@@ -64,13 +64,13 @@ const DOCS_KEY = 'eagle_generated_docs';
 
 /** Slug-to-DocumentType mapping for backend required_documents slugs. */
 const SLUG_TO_DOC_TYPE: Record<string, DocumentType> = {
-  'sow': 'sow',
-  'igce': 'igce',
+  sow: 'sow',
+  igce: 'igce',
   'market-research': 'market_research',
   'acquisition-plan': 'acquisition_plan',
-  'justification': 'justification',
+  justification: 'justification',
   'd-f': 'd_f',
-  'qasp': 'qasp',
+  qasp: 'qasp',
   'source-selection-plan': 'source_selection_plan',
   'subcontracting-plan': 'subcontracting_plan',
   'sb-review': 'sb_review',
@@ -85,7 +85,9 @@ const SLUG_TO_DOC_TYPE: Record<string, DocumentType> = {
 function buildChecklist(requiredDocs: string[]): PackageChecklist[] {
   return requiredDocs.map((slug) => {
     const docType = SLUG_TO_DOC_TYPE[slug] || (slug.replace(/-/g, '_') as DocumentType);
-    const label = DOCUMENT_TYPE_LABELS[docType] || slug.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const label =
+      DOCUMENT_TYPE_LABELS[docType] ||
+      slug.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     return { document_type: docType, label, status: 'pending' as const };
   });
 }
@@ -181,9 +183,10 @@ export function saveGeneratedDocument(
   let pkg = packages[packageKey];
 
   if (!pkg) {
-    const checklist = requiredDocuments && requiredDocuments.length > 0
-      ? buildChecklist(requiredDocuments)
-      : DEFAULT_CHECKLIST.map((c) => ({ ...c }));
+    const checklist =
+      requiredDocuments && requiredDocuments.length > 0
+        ? buildChecklist(requiredDocuments)
+        : DEFAULT_CHECKLIST.map((c) => ({ ...c }));
     pkg = {
       id: packageKey,
       package_id: doc.package_id,
@@ -202,9 +205,7 @@ export function saveGeneratedDocument(
   }
 
   // Update checklist item
-  const checkItem = pkg.checklist.find(
-    (c) => c.document_type === doc.document_type,
-  );
+  const checkItem = pkg.checklist.find((c) => c.document_type === doc.document_type);
   if (checkItem) {
     checkItem.status = 'completed';
     checkItem.document_id = docId;

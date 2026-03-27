@@ -53,7 +53,7 @@ function buildToolCalls(events: AGUILogEntry[]): TrackedToolCall[] {
     }
   }
 
-  return order.map(id => map.get(id)!).filter(Boolean);
+  return order.map((id) => map.get(id)!).filter(Boolean);
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ function buildSteps(events: AGUILogEntry[]): TrackedStep[] {
     }
   }
 
-  return order.map(n => map.get(n)!).filter(Boolean);
+  return order.map((n) => map.get(n)!).filter(Boolean);
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +105,11 @@ function extractFileRefs(toolCalls: TrackedToolCall[]): FileRef[] {
     // s3_document_ops read results
     if (tc.toolName === 's3_document_ops') {
       let parsedArgs: Record<string, unknown> = {};
-      try { parsedArgs = JSON.parse(tc.args); } catch { /* skip */ }
+      try {
+        parsedArgs = JSON.parse(tc.args);
+      } catch {
+        /* skip */
+      }
       const op = String(parsedArgs.operation ?? '');
       const key = String(parsedArgs.key ?? '');
       if ((op === 'read' || op === 'get') && key && tc.result.length > 0) {
@@ -197,24 +201,20 @@ function ToolCard({ tc }: { tc: TrackedToolCall }) {
   return (
     <div
       className={`rounded-lg border text-xs overflow-hidden transition-colors ${
-        tc.status === 'running'
-          ? 'border-blue-200 bg-blue-50/50'
-          : 'border-[#E5E9F0] bg-[#F8FAFC]'
+        tc.status === 'running' ? 'border-blue-200 bg-blue-50/50' : 'border-[#E5E9F0] bg-[#F8FAFC]'
       }`}
     >
       <button
         type="button"
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-black/[0.02] transition-colors"
-        onClick={() => canExpand && setExpanded(v => !v)}
+        onClick={() => canExpand && setExpanded((v) => !v)}
         disabled={!canExpand}
       >
         <span className="text-sm shrink-0 leading-none" role="img" aria-label={meta.label}>
           {meta.icon}
         </span>
         <span className="font-medium text-gray-800 shrink-0">{meta.label}</span>
-        {summary && (
-          <span className="text-gray-400 truncate min-w-0 flex-1">{summary}</span>
-        )}
+        {summary && <span className="text-gray-400 truncate min-w-0 flex-1">{summary}</span>}
         {isSubagent && (
           <span className="text-[9px] px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-bold shrink-0">
             specialist
@@ -263,7 +263,7 @@ function FileCard({ file }: { file: FileRef }) {
       <button
         type="button"
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-black/[0.02] transition-colors"
-        onClick={() => hasContent && setExpanded(v => !v)}
+        onClick={() => hasContent && setExpanded((v) => !v)}
         disabled={!hasContent}
       >
         <span className="text-sm shrink-0">{'\u{1F4C4}'}</span>
@@ -342,14 +342,14 @@ export default function InlineToolCards({ events }: InlineToolCardsProps) {
       {/* Subagent delegation badges */}
       {steps.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {steps.map(step => (
+          {steps.map((step) => (
             <StepBadge key={step.name} step={step} />
           ))}
         </div>
       )}
 
       {/* Tool call cards */}
-      {toolCalls.map(tc => (
+      {toolCalls.map((tc) => (
         <ToolCard key={tc.toolCallId} tc={tc} />
       ))}
 
@@ -359,7 +359,7 @@ export default function InlineToolCards({ events }: InlineToolCardsProps) {
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
             Files Referenced
           </span>
-          {fileRefs.map(file => (
+          {fileRefs.map((file) => (
             <FileCard key={file.path} file={file} />
           ))}
         </div>

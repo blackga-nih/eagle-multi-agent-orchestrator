@@ -29,7 +29,9 @@ export default function WebSearchPanel({ text }: { text: string }) {
   if (!data) {
     return (
       <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white max-h-48 overflow-y-auto">
-        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">{text}</pre>
+        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
+          {text}
+        </pre>
       </div>
     );
   }
@@ -44,7 +46,9 @@ export default function WebSearchPanel({ text }: { text: string }) {
       {/* Answer preview */}
       {truncatedAnswer && (
         <div className="px-3 py-1.5 border-b border-gray-100">
-          <p className="text-[11px] text-gray-600 leading-relaxed line-clamp-3">{truncatedAnswer}</p>
+          <p className="text-[11px] text-gray-600 leading-relaxed line-clamp-3">
+            {truncatedAnswer}
+          </p>
         </div>
       )}
 
@@ -52,7 +56,9 @@ export default function WebSearchPanel({ text }: { text: string }) {
       {sources.length > 0 && (
         <>
           <div className="px-3 py-1 border-b border-gray-100 flex items-center gap-2">
-            <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">Sources</span>
+            <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">
+              Sources
+            </span>
             <span className="text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
               {sourceCount}
             </span>
@@ -61,11 +67,20 @@ export default function WebSearchPanel({ text }: { text: string }) {
             {sources.slice(0, 5).map((source, i) => {
               let displayDomain = source.domain || '';
               if (!displayDomain && source.url) {
-                try { displayDomain = new URL(source.url).hostname; } catch { displayDomain = source.url; }
+                try {
+                  displayDomain = new URL(source.url).hostname;
+                } catch {
+                  displayDomain = source.url;
+                }
               }
               return (
-                <div key={i} className="flex items-center gap-2 px-3 py-1 hover:bg-blue-50/50 transition-colors">
-                  <span className="text-[10px] text-gray-400 shrink-0 w-3 text-right">{i + 1}.</span>
+                <div
+                  key={i}
+                  className="flex items-center gap-2 px-3 py-1 hover:bg-blue-50/50 transition-colors"
+                >
+                  <span className="text-[10px] text-gray-400 shrink-0 w-3 text-right">
+                    {i + 1}.
+                  </span>
                   <a
                     href={source.url}
                     target="_blank"

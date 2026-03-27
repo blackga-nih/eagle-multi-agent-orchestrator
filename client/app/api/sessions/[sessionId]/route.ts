@@ -40,10 +40,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error('Session GET error:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch session' },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch session' }, { status: 502 });
   }
 }
 
@@ -69,9 +66,6 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error('Session DELETE error:', error);
-    return NextResponse.json(
-      { error: 'Failed to delete session' },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: 'Failed to delete session' }, { status: 502 });
   }
 }

@@ -32,7 +32,10 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
 
   // === STEP 1: Hard refresh navigation ===
   console.log('=== STEP 1: Opening http://localhost:3000/chat-v2 with hard refresh ===');
-  await page.goto('http://localhost:3000/chat-v2', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.goto('http://localhost:3000/chat-v2', {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000,
+  });
 
   // === STEP 2: Wait for CopilotKit to initialize ===
   console.log('=== STEP 2: Waiting 5s for CopilotKit init ===');
@@ -52,27 +55,33 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
 
   // === STEP 3: Screenshot initial state ===
   console.log('=== STEP 3: Initial state screenshot ===');
-  await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-01-initial.png'), fullPage: true });
+  await page.screenshot({
+    path: path.join(SCREENSHOTS_DIR, 'chat-v2-01-initial.png'),
+    fullPage: true,
+  });
 
   // === STEP 4: Check console for errors ===
   console.log('=== STEP 4: Console error analysis ===');
-  const runtimeInfoErrors = consoleErrors.filter(e => e.includes('Failed to load runtime info'));
+  const runtimeInfoErrors = consoleErrors.filter((e) => e.includes('Failed to load runtime info'));
   const agentNotFound = [...consoleErrors, ...consoleWarnings, ...allLogs].filter(
-    e => e.toLowerCase().includes('agent') && e.toLowerCase().includes('not found')
+    (e) => e.toLowerCase().includes('agent') && e.toLowerCase().includes('not found'),
   );
   const infoErrors = [...consoleErrors, ...allLogs].filter(
-    e => e.includes('/info') && (e.includes('404') || e.includes('error') || e.includes('Error'))
+    (e) => e.includes('/info') && (e.includes('404') || e.includes('error') || e.includes('Error')),
   );
 
   console.log(`/info requests captured: ${infoRequests.length}`);
-  infoRequests.forEach(r => console.log(`  ${r.url} -> ${r.status}`));
+  infoRequests.forEach((r) => console.log(`  ${r.url} -> ${r.status}`));
   console.log(`"Failed to load runtime info" errors: ${runtimeInfoErrors.length}`);
   console.log(`"Agent not found" mentions: ${agentNotFound.length}`);
   console.log(`/info related errors in console: ${infoErrors.length}`);
 
   // === STEP 5: Screenshot of console state (capture page with any visible errors) ===
   console.log('=== STEP 5: Console state screenshot ===');
-  await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-02-console-state.png'), fullPage: true });
+  await page.screenshot({
+    path: path.join(SCREENSHOTS_DIR, 'chat-v2-02-console-state.png'),
+    fullPage: true,
+  });
 
   // === STEP 6: Type "What is FAR Part 6?" and submit ===
   console.log('=== STEP 6: Typing "What is FAR Part 6?" ===');
@@ -94,9 +103,15 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
 
   if (!chatInput) {
     console.log('ERROR: No chat input found. Page may not have loaded correctly.');
-    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const bodyText = await page
+      .locator('body')
+      .innerText()
+      .catch(() => '');
     console.log(`Page body (first 3000 chars): ${bodyText.substring(0, 3000)}`);
-    await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-ERROR-no-input.png'), fullPage: true });
+    await page.screenshot({
+      path: path.join(SCREENSHOTS_DIR, 'chat-v2-ERROR-no-input.png'),
+      fullPage: true,
+    });
     return;
   }
 
@@ -110,14 +125,17 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
 
   // === STEP 8: Screenshot showing response + AG-UI panel ===
   console.log('=== STEP 8: Post-response screenshot ===');
-  await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-03-after-response.png'), fullPage: true });
+  await page.screenshot({
+    path: path.join(SCREENSHOTS_DIR, 'chat-v2-03-after-response.png'),
+    fullPage: true,
+  });
 
   // Check for assistant response in chat
   const responseSelectors = [
     '[data-message-role="assistant"]',
     '.copilotkit-assistant-message',
     '[class*="assistant"]',
-    '.prose',  // common markdown render container
+    '.prose', // common markdown render container
   ];
   let assistantResponseFound = false;
   let assistantResponseSelector = '';
@@ -133,8 +151,14 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
 
   if (!assistantResponseFound) {
     // Try broader text-based detection
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    if (bodyText.toLowerCase().includes('far part 6') || bodyText.toLowerCase().includes('competition')) {
+    const bodyText = await page
+      .locator('body')
+      .innerText()
+      .catch(() => '');
+    if (
+      bodyText.toLowerCase().includes('far part 6') ||
+      bodyText.toLowerCase().includes('competition')
+    ) {
       assistantResponseFound = true;
       console.log('Assistant response detected via body text content (mentions FAR/competition)');
     }
@@ -150,7 +174,13 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
   ];
   let agUiVisible = false;
   for (const sel of agUiPanelSelectors) {
-    if (await page.locator(sel).first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (
+      await page
+        .locator(sel)
+        .first()
+        .isVisible({ timeout: 2_000 })
+        .catch(() => false)
+    ) {
       agUiVisible = true;
       console.log(`AG-UI panel found via: ${sel}`);
       break;
@@ -171,18 +201,28 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
   ];
 
   // Detect event types in page text
-  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const bodyText = await page
+    .locator('body')
+    .innerText()
+    .catch(() => '');
   const eventTypes = [
-    'RUN_STARTED', 'RUN_FINISHED',
-    'TEXT_MESSAGE_START', 'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END',
-    'TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END',
-    'STATE_SNAPSHOT', 'STATE_DELTA',
-    'STEP_STARTED', 'STEP_FINISHED',
+    'RUN_STARTED',
+    'RUN_FINISHED',
+    'TEXT_MESSAGE_START',
+    'TEXT_MESSAGE_CONTENT',
+    'TEXT_MESSAGE_END',
+    'TOOL_CALL_START',
+    'TOOL_CALL_ARGS',
+    'TOOL_CALL_END',
+    'STATE_SNAPSHOT',
+    'STATE_DELTA',
+    'STEP_STARTED',
+    'STEP_FINISHED',
     'CUSTOM',
   ];
-  const foundEventTypes = eventTypes.filter(et => bodyText.includes(et));
+  const foundEventTypes = eventTypes.filter((et) => bodyText.includes(et));
   console.log(`Event types found in page text: ${foundEventTypes.length}`);
-  foundEventTypes.forEach(et => console.log(`  - ${et}`));
+  foundEventTypes.forEach((et) => console.log(`  - ${et}`));
 
   // Count total events mentioned
   let eventCount = 0;
@@ -213,7 +253,13 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
           '[class*="detail"]',
         ];
         for (const ms of modalSelectors) {
-          if (await page.locator(ms).first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+          if (
+            await page
+              .locator(ms)
+              .first()
+              .isVisible({ timeout: 2_000 })
+              .catch(() => false)
+          ) {
             modalOpened = true;
             console.log(`Modal opened via: ${ms}`);
             break;
@@ -223,17 +269,26 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
         // === STEP 10: Screenshot of detail modal ===
         if (modalOpened) {
           console.log('=== STEP 10: Detail modal screenshot ===');
-          await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-04-event-detail-modal.png'), fullPage: true });
+          await page.screenshot({
+            path: path.join(SCREENSHOTS_DIR, 'chat-v2-04-event-detail-modal.png'),
+            fullPage: true,
+          });
         } else {
           console.log('No modal detected after clicking badge, taking screenshot anyway');
-          await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-04-after-badge-click.png'), fullPage: true });
+          await page.screenshot({
+            path: path.join(SCREENSHOTS_DIR, 'chat-v2-04-after-badge-click.png'),
+            fullPage: true,
+          });
         }
         break;
       }
     }
   } else {
     console.log('No event badges found to click.');
-    await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-04-no-events.png'), fullPage: true });
+    await page.screenshot({
+      path: path.join(SCREENSHOTS_DIR, 'chat-v2-04-no-events.png'),
+      fullPage: true,
+    });
   }
 
   // === FINAL REPORT ===
@@ -241,12 +296,18 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
   console.log('╔══════════════════════════════════════════════════════════════╗');
   console.log('║              CHAT-V2 VALIDATION REPORT                      ║');
   console.log('╠══════════════════════════════════════════════════════════════╣');
-  console.log(`║ /info succeeded (no 404):        ${infoRequests.every(r => r.status < 400) ? 'YES' : 'NO'}  (${infoRequests.length} requests)`);
-  console.log(`║ "Agent eagle not found" in console: ${agentNotFound.length > 0 ? 'YES (' + agentNotFound.length + ')' : 'NO'}`);
+  console.log(
+    `║ /info succeeded (no 404):        ${infoRequests.every((r) => r.status < 400) ? 'YES' : 'NO'}  (${infoRequests.length} requests)`,
+  );
+  console.log(
+    `║ "Agent eagle not found" in console: ${agentNotFound.length > 0 ? 'YES (' + agentNotFound.length + ')' : 'NO'}`,
+  );
   console.log(`║ Assistant response rendered:      ${assistantResponseFound ? 'YES' : 'NO'}`);
   console.log(`║ AG-UI Events panel visible:       ${agUiVisible ? 'YES' : 'NO'}`);
   console.log(`║ AG-UI event count:                ${eventCount}`);
-  console.log(`║ Event types found:                ${foundEventTypes.length > 0 ? foundEventTypes.join(', ') : 'NONE'}`);
+  console.log(
+    `║ Event types found:                ${foundEventTypes.length > 0 ? foundEventTypes.join(', ') : 'NONE'}`,
+  );
   console.log(`║ Event detail modal opened:        ${modalOpened ? 'YES' : 'NO'}`);
   console.log(`║ Total console errors:             ${consoleErrors.length}`);
   console.log(`║ Network failures:                 ${networkErrors.length}`);
@@ -256,18 +317,18 @@ test('Full validation of chat-v2 CopilotKit + AG-UI integration', async ({ page 
   // Dump all console errors
   if (consoleErrors.length > 0) {
     console.log('=== CONSOLE ERRORS ===');
-    consoleErrors.forEach(e => console.log(`  ERROR: ${e}`));
+    consoleErrors.forEach((e) => console.log(`  ERROR: ${e}`));
   }
 
   // Dump all browser logs
   console.log('=== ALL BROWSER CONSOLE LOGS ===');
-  allLogs.forEach(l => console.log(`  ${l}`));
+  allLogs.forEach((l) => console.log(`  ${l}`));
   console.log('=== END CONSOLE LOGS ===');
 
   // Dump network errors
   if (networkErrors.length > 0) {
     console.log('=== NETWORK ERRORS ===');
-    networkErrors.forEach(e => console.log(`  ${e}`));
+    networkErrors.forEach((e) => console.log(`  ${e}`));
   }
 
   // Dump page text excerpt

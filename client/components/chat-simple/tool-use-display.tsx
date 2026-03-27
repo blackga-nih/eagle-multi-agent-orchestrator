@@ -23,51 +23,51 @@ interface ToolUseDisplayProps {
 
 export const TOOL_META: Record<string, { icon: string; label: string }> = {
   // Specialist subagents
-  oa_intake:            { icon: '📋', label: 'Intake Assessment' },
-  legal_counsel:        { icon: '⚖️', label: 'Legal Analysis' },
-  market_intelligence:  { icon: '📊', label: 'Market Research' },
-  tech_translator:      { icon: '🔧', label: 'Technical Review' },
-  tech_review:          { icon: '🔧', label: 'Technical Review' },
-  public_interest:      { icon: '🏛️', label: 'Public Interest Review' },
-  document_generator:   { icon: '📄', label: 'Generating Document' },
-  compliance:           { icon: '✅', label: 'Compliance Check' },
-  policy_analyst:       { icon: '📜', label: 'Policy Analysis' },
-  policy_librarian:     { icon: '📚', label: 'Policy Lookup' },
-  policy_supervisor:    { icon: '👤', label: 'Policy Review' },
-  ingest_document:      { icon: '📥', label: 'Document Ingestion' },
-  knowledge_retrieval:  { icon: '🔍', label: 'Knowledge Search' },
+  oa_intake: { icon: '📋', label: 'Intake Assessment' },
+  legal_counsel: { icon: '⚖️', label: 'Legal Analysis' },
+  market_intelligence: { icon: '📊', label: 'Market Research' },
+  tech_translator: { icon: '🔧', label: 'Technical Review' },
+  tech_review: { icon: '🔧', label: 'Technical Review' },
+  public_interest: { icon: '🏛️', label: 'Public Interest Review' },
+  document_generator: { icon: '📄', label: 'Generating Document' },
+  compliance: { icon: '✅', label: 'Compliance Check' },
+  policy_analyst: { icon: '📜', label: 'Policy Analysis' },
+  policy_librarian: { icon: '📚', label: 'Policy Lookup' },
+  policy_supervisor: { icon: '👤', label: 'Policy Review' },
+  ingest_document: { icon: '📥', label: 'Document Ingestion' },
+  knowledge_retrieval: { icon: '🔍', label: 'Knowledge Search' },
   // Service tools
-  s3_document_ops:      { icon: '📁', label: 'Document Storage' },
-  dynamodb_intake:      { icon: '🗃️', label: 'Intake Records' },
-  create_document:      { icon: '📝', label: 'Creating Document' },
-  get_intake_status:    { icon: '📊', label: 'Intake Status' },
-  intake_workflow:      { icon: '🔄', label: 'Intake Workflow' },
-  search_far:           { icon: '📖', label: 'Searching FAR/DFARS' },
-  web_search:           { icon: '🌐', label: 'Web Search' },
-  web_fetch:            { icon: '📄', label: 'Reading Page' },
+  s3_document_ops: { icon: '📁', label: 'Document Storage' },
+  dynamodb_intake: { icon: '🗃️', label: 'Intake Records' },
+  create_document: { icon: '📝', label: 'Creating Document' },
+  get_intake_status: { icon: '📊', label: 'Intake Status' },
+  intake_workflow: { icon: '🔄', label: 'Intake Workflow' },
+  search_far: { icon: '📖', label: 'Searching FAR/DFARS' },
+  web_search: { icon: '🌐', label: 'Web Search' },
+  web_fetch: { icon: '📄', label: 'Reading Page' },
   query_compliance_matrix: { icon: '✅', label: 'Compliance Matrix' },
   // Knowledge & reference tools
-  knowledge_search:           { icon: '🔍', label: 'Knowledge Search' },
-  knowledge_fetch:            { icon: '📄', label: 'Reading Document' },
-  load_skill:                 { icon: '📋', label: 'Loading Skill' },
-  list_skills:                { icon: '📑', label: 'Listing Skills' },
-  load_data:                  { icon: '📊', label: 'Loading Data' },
+  knowledge_search: { icon: '🔍', label: 'Knowledge Search' },
+  knowledge_fetch: { icon: '📄', label: 'Reading Document' },
+  load_skill: { icon: '📋', label: 'Loading Skill' },
+  list_skills: { icon: '📑', label: 'Listing Skills' },
+  load_data: { icon: '📊', label: 'Loading Data' },
   // Document management tools
-  edit_docx_document:         { icon: '✏️', label: 'Editing Document' },
-  get_latest_document:        { icon: '📄', label: 'Checking Document' },
-  finalize_package:           { icon: '📦', label: 'Finalizing Package' },
-  manage_package:             { icon: '📦', label: 'Package Update' },
-  document_changelog_search:  { icon: '📜', label: 'Changelog Search' },
+  edit_docx_document: { icon: '✏️', label: 'Editing Document' },
+  get_latest_document: { icon: '📄', label: 'Checking Document' },
+  finalize_package: { icon: '📦', label: 'Finalizing Package' },
+  manage_package: { icon: '📦', label: 'Package Update' },
+  document_changelog_search: { icon: '📜', label: 'Changelog Search' },
   // Admin tools
-  manage_skills:              { icon: '⚙️', label: 'Managing Skills' },
-  manage_prompts:             { icon: '💬', label: 'Managing Prompts' },
-  manage_templates:           { icon: '📋', label: 'Managing Templates' },
-  cloudwatch_logs:            { icon: '🔎', label: 'CloudWatch Logs' },
-  generate_html_playground:   { icon: '🌐', label: 'Generating HTML' },
+  manage_skills: { icon: '⚙️', label: 'Managing Skills' },
+  manage_prompts: { icon: '💬', label: 'Managing Prompts' },
+  manage_templates: { icon: '📋', label: 'Managing Templates' },
+  cloudwatch_logs: { icon: '🔎', label: 'CloudWatch Logs' },
+  generate_html_playground: { icon: '🌐', label: 'Generating HTML' },
   // Client-side tools
-  think:                { icon: '💭', label: 'Reasoning' },
-  code:                 { icon: '💻', label: 'Running Code' },
-  editor:               { icon: '✏️', label: 'Editing' },
+  think: { icon: '💭', label: 'Reasoning' },
+  code: { icon: '💻', label: 'Running Code' },
+  editor: { icon: '✏️', label: 'Editing' },
 };
 
 function getToolMeta(toolName: string) {
@@ -249,7 +249,9 @@ function DocumentResultCard({
   const s3Key = String(data.s3_key ?? '');
   const source = data.source as string | undefined;
   const templatePath = data.template_path as string | undefined;
-  const templateProvenance = data.template_provenance as { template_id?: string; template_source?: string } | undefined;
+  const templateProvenance = data.template_provenance as
+    | { template_id?: string; template_source?: string }
+    | undefined;
 
   // Derive template display info
   const templateDisplay = templateProvenance?.template_id || templatePath || source || 'Built-in';
@@ -312,8 +314,18 @@ function DocumentResultCard({
                    hover:bg-[#004488] transition-colors shrink-0"
       >
         Open Document
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        <svg
+          className="w-3 h-3"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+          />
         </svg>
       </button>
     </div>
@@ -322,7 +334,9 @@ function DocumentResultCard({
 
 // ── Parse helpers ────────────────────────────────────────────────────
 
-function parseCreateDocumentResult(result: ClientToolResult | null | undefined): Record<string, unknown> | null {
+function parseCreateDocumentResult(
+  result: ClientToolResult | null | undefined,
+): Record<string, unknown> | null {
   if (!result || !result.result) return null;
 
   let data = result.result as Record<string, unknown>;
@@ -334,7 +348,12 @@ function parseCreateDocumentResult(result: ClientToolResult | null | undefined):
     }
   }
 
-  if (data && typeof data === 'object' && !data.error && (data.document_type || data.doc_type || data.s3_key)) {
+  if (
+    data &&
+    typeof data === 'object' &&
+    !data.error &&
+    (data.document_type || data.doc_type || data.s3_key)
+  ) {
     return data;
   }
   return null;
@@ -348,9 +367,12 @@ function formatInputForDisplay(input: Record<string, unknown>): Array<[string, s
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
     .map(([k, v]) => {
       const label = k.replace(/_/g, ' ');
-      const value = typeof v === 'string'
-        ? (v.length > 200 ? v.slice(0, 200) + '…' : v)
-        : JSON.stringify(v, null, 2);
+      const value =
+        typeof v === 'string'
+          ? v.length > 200
+            ? v.slice(0, 200) + '…'
+            : v
+          : JSON.stringify(v, null, 2);
       return [label, value] as [string, string];
     })
     .slice(0, 8);
@@ -376,7 +398,7 @@ function extractContentFromJson(rawJson: string): string | null {
 function StreamingPreview({ rawJson, toolName }: { rawJson: string; toolName: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const content = useMemo(
-    () => toolName === 'create_document' ? extractContentFromJson(rawJson) : null,
+    () => (toolName === 'create_document' ? extractContentFromJson(rawJson) : null),
     [rawJson, toolName],
   );
 
@@ -386,13 +408,22 @@ function StreamingPreview({ rawJson, toolName }: { rawJson: string; toolName: st
 
   if (content) {
     return (
-      <div ref={scrollRef} className="max-h-64 overflow-y-auto rounded-lg border border-gray-100 p-3">
+      <div
+        ref={scrollRef}
+        className="max-h-64 overflow-y-auto rounded-lg border border-gray-100 p-3"
+      >
         <div className="prose prose-sm max-w-none">
           <ReactMarkdown>{content}</ReactMarkdown>
         </div>
         <div className="flex items-center gap-2 text-blue-500 text-xs mt-2">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-          <span>Writing... ({rawJson.length < 1024 ? `${rawJson.length}B` : `${Math.round(rawJson.length / 1024)}KB`})</span>
+          <span>
+            Writing... (
+            {rawJson.length < 1024
+              ? `${rawJson.length}B`
+              : `${Math.round(rawJson.length / 1024)}KB`}
+            )
+          </span>
         </div>
       </div>
     );
@@ -425,7 +456,8 @@ export default function ToolUseDisplay({
   const errorText = hasResult ? result.error : null;
   const docData = toolName === 'create_document' ? parseCreateDocumentResult(result) : null;
 
-  const chipLabel = status === 'done' && toolName === 'create_document' ? 'Document Created' : meta.label;
+  const chipLabel =
+    status === 'done' && toolName === 'create_document' ? 'Document Created' : meta.label;
 
   return (
     <>
@@ -443,7 +475,11 @@ export default function ToolUseDisplay({
         <span className="font-medium text-gray-700 whitespace-nowrap">{chipLabel}</span>
         {streamingInput && status !== 'done' ? (
           <span className="text-[10px] text-blue-500 truncate max-w-[120px]">
-            Writing... ({streamingInput.length < 1024 ? `${streamingInput.length}B` : `${Math.round(streamingInput.length / 1024)}KB`})
+            Writing... (
+            {streamingInput.length < 1024
+              ? `${streamingInput.length}B`
+              : `${Math.round(streamingInput.length / 1024)}KB`}
+            )
           </span>
         ) : (
           <StatusDot status={status} />
@@ -462,28 +498,34 @@ export default function ToolUseDisplay({
           <div className="flex items-center gap-3 text-sm">
             <div className="flex items-center gap-1.5">
               <StatusDot status={status} />
-              <span className={`font-medium ${
-                status === 'error' ? 'text-red-600' :
-                status === 'done' ? 'text-green-700' :
-                'text-blue-600'
-              }`}>
+              <span
+                className={`font-medium ${
+                  status === 'error'
+                    ? 'text-red-600'
+                    : status === 'done'
+                      ? 'text-green-700'
+                      : 'text-blue-600'
+                }`}
+              >
                 {STATUS_TEXT[status]}
               </span>
             </div>
-            {summary && (
-              <span className="text-gray-500 truncate">{summary}</span>
-            )}
+            {summary && <span className="text-gray-500 truncate">{summary}</span>}
           </div>
 
           {/* Input parameters */}
           {Object.keys(input).length > 0 && (
             <div>
-              <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">Input</h3>
+              <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">
+                Input
+              </h3>
               <div className="bg-gray-50 rounded-lg p-3 space-y-1.5">
                 {formatInputForDisplay(input).map(([label, value]) => (
                   <div key={label} className="flex gap-2 text-xs">
                     <span className="font-medium text-gray-500 shrink-0 min-w-[80px]">{label}</span>
-                    <span className="text-gray-800 break-words whitespace-pre-wrap min-w-0">{value}</span>
+                    <span className="text-gray-800 break-words whitespace-pre-wrap min-w-0">
+                      {value}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -503,7 +545,9 @@ export default function ToolUseDisplay({
           {/* Error */}
           {errorText && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <h3 className="text-xs font-bold uppercase text-red-600 tracking-wider mb-1">Error</h3>
+              <h3 className="text-xs font-bold uppercase text-red-600 tracking-wider mb-1">
+                Error
+              </h3>
               <p className="text-sm text-red-700 whitespace-pre-wrap">{errorText}</p>
             </div>
           )}
@@ -516,7 +560,9 @@ export default function ToolUseDisplay({
           {/* Tool-specific result panel */}
           {!errorText && !docData && hasResult && (status === 'done' || status === 'error') && (
             <div>
-              <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">Result</h3>
+              <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">
+                Result
+              </h3>
               <div className="border border-gray-100 rounded-lg overflow-hidden">
                 {resolveResultPanel(toolName, input, result, null)}
               </div>

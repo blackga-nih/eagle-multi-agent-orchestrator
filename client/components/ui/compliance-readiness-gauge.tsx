@@ -28,7 +28,13 @@ function scoreToColor(score: number): { stroke: string; text: string; bg: string
 const RADIUS = 44;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-function CircularGauge({ score, colors }: { score: number; colors: ReturnType<typeof scoreToColor> }) {
+function CircularGauge({
+  score,
+  colors,
+}: {
+  score: number;
+  colors: ReturnType<typeof scoreToColor>;
+}) {
   const pct = clamp(score, 0, 100) / 100;
   const dashOffset = CIRCUMFERENCE * (1 - pct);
 
@@ -42,14 +48,7 @@ function CircularGauge({ score, colors }: { score: number; colors: ReturnType<ty
       aria-label={`Compliance readiness score: ${score}%`}
     >
       {/* Track */}
-      <circle
-        cx="60"
-        cy="60"
-        r={RADIUS}
-        fill="none"
-        stroke="#e5e7eb"
-        strokeWidth="10"
-      />
+      <circle cx="60" cy="60" r={RADIUS} fill="none" stroke="#e5e7eb" strokeWidth="10" />
       {/* Progress arc — starts at top (−90°) */}
       <circle
         cx="60"

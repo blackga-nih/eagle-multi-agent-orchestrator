@@ -42,8 +42,22 @@ const MOCK_PACKAGES = [
 
 const MOCK_DOCUMENTS: Record<string, Array<Record<string, unknown>>> = {
   'PKG-ZIP-001': [
-    { document_id: 'DOC-A1', doc_type: 'sow', title: 'SOW - Cloud Migration', version: 1, status: 'draft', file_type: 'docx' },
-    { document_id: 'DOC-A2', doc_type: 'acquisition_plan', title: 'AP - Cloud Migration', version: 2, status: 'final', file_type: 'docx' },
+    {
+      document_id: 'DOC-A1',
+      doc_type: 'sow',
+      title: 'SOW - Cloud Migration',
+      version: 1,
+      status: 'draft',
+      file_type: 'docx',
+    },
+    {
+      document_id: 'DOC-A2',
+      doc_type: 'acquisition_plan',
+      title: 'AP - Cloud Migration',
+      version: 2,
+      status: 'final',
+      file_type: 'docx',
+    },
   ],
   'PKG-ZIP-002': [],
 };
@@ -100,9 +114,8 @@ async function setupRoutes(page: import('@playwright/test').Page) {
 
     // Return a minimal valid ZIP (PK header)
     const zipBytes = new Uint8Array([
-      0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ]);
     await route.fulfill({
       status: 200,
@@ -120,8 +133,20 @@ async function setupRoutes(page: import('@playwright/test').Page) {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
       body: buildSSE([
-        { type: 'text', agent_id: 'eagle', agent_name: 'EAGLE', content: 'Hello', timestamp: '2026-01-01T00:00:01Z' },
-        { type: 'complete', agent_id: 'eagle', agent_name: 'EAGLE', metadata: {}, timestamp: '2026-01-01T00:00:02Z' },
+        {
+          type: 'text',
+          agent_id: 'eagle',
+          agent_name: 'EAGLE',
+          content: 'Hello',
+          timestamp: '2026-01-01T00:00:01Z',
+        },
+        {
+          type: 'complete',
+          agent_id: 'eagle',
+          agent_name: 'EAGLE',
+          metadata: {},
+          timestamp: '2026-01-01T00:00:02Z',
+        },
       ]),
     });
   });
@@ -137,12 +162,14 @@ async function setupRoutes(page: import('@playwright/test').Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Package Documents Route & ZIP Download', () => {
-
   test('expanding a package fetches and displays its documents', async ({ page }) => {
     test.setTimeout(30_000);
     await setupRoutes(page);
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
     await page.getByText('Package', { exact: true }).first().click();
     await page.waitForTimeout(2_000);
 
@@ -159,7 +186,10 @@ test.describe('Package Documents Route & ZIP Download', () => {
     test.setTimeout(30_000);
     await setupRoutes(page);
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
     await page.getByText('Package', { exact: true }).first().click();
     await page.waitForTimeout(2_000);
 
@@ -205,7 +235,10 @@ test.describe('Package Documents Route & ZIP Download', () => {
     test.setTimeout(15_000);
     await setupRoutes(page);
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     // Call the ZIP endpoint directly via page.evaluate
     const result = await page.evaluate(async () => {
@@ -228,7 +261,10 @@ test.describe('Package Documents Route & ZIP Download', () => {
     test.setTimeout(15_000);
     await setupRoutes(page);
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     const result = await page.evaluate(async () => {
       const res = await fetch('/api/packages/PKG-ZIP-002/export/zip');
@@ -260,8 +296,20 @@ test.describe('Package Documents Route & ZIP Download', () => {
         },
         timestamp: '2026-01-01T00:00:01Z',
       },
-      { type: 'text', agent_id: 'eagle', agent_name: 'EAGLE', content: 'Package updated.', timestamp: '2026-01-01T00:00:02Z' },
-      { type: 'complete', agent_id: 'eagle', agent_name: 'EAGLE', metadata: {}, timestamp: '2026-01-01T00:00:03Z' },
+      {
+        type: 'text',
+        agent_id: 'eagle',
+        agent_name: 'EAGLE',
+        content: 'Package updated.',
+        timestamp: '2026-01-01T00:00:02Z',
+      },
+      {
+        type: 'complete',
+        agent_id: 'eagle',
+        agent_name: 'EAGLE',
+        metadata: {},
+        timestamp: '2026-01-01T00:00:03Z',
+      },
     ];
 
     await setupRoutes(page);
@@ -275,7 +323,10 @@ test.describe('Package Documents Route & ZIP Download', () => {
       });
     });
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     // Send a message to trigger SSE with checklist_update
     const textarea = page.locator('textarea').first();

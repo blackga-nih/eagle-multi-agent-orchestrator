@@ -33,30 +33,45 @@ const toolNavItems: NavItem[] = [
 ];
 
 /** Tiny component so we can call useChatRuntime per session row. */
-const SessionStreamingDot = memo(function SessionStreamingDot({ sessionId }: { sessionId: string }) {
-    const runtime = useChatRuntime(sessionId);
-    if (!runtime.isStreaming) return null;
-    return (
-        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shrink-0" title="Generating..." />
-    );
+const SessionStreamingDot = memo(function SessionStreamingDot({
+  sessionId,
+}: {
+  sessionId: string;
+}) {
+  const runtime = useChatRuntime(sessionId);
+  if (!runtime.isStreaming) return null;
+  return (
+    <span
+      className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shrink-0"
+      title="Generating..."
+    />
+  );
 });
 
 /** Pure helper — no component deps. */
 function formatDate(date: Date): string {
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    if (days === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    if (days === 1) return 'Yesterday';
-    if (days < 7) return `${days}d ago`;
-    return date.toLocaleDateString();
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  if (days === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString();
 }
 
 export default function SidebarNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
-  const { sessions, currentSessionId, isLoading, createNewSession, setCurrentSession, renameSession, deleteSession } = useSession();
+  const {
+    sessions,
+    currentSessionId,
+    isLoading,
+    createNewSession,
+    setCurrentSession,
+    renameSession,
+    deleteSession,
+  } = useSession();
   const { adminMode, setAdminMode } = useSettings();
 
   // Settings dropdown state
@@ -160,9 +175,11 @@ export default function SidebarNav() {
       {item.icon}
       <span className="flex-1">{item.label}</span>
       {item.badge && (
-        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-          isActive(item.href) ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
-        }`}>
+        <span
+          className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+            isActive(item.href) ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
+          }`}
+        >
           {item.badge}
         </span>
       )}
@@ -174,7 +191,7 @@ export default function SidebarNav() {
   const sortedSessions = useMemo(
     () =>
       [...sessions]
-        .map(s => ({ ...s, createdAt: new Date(s.createdAt), updatedAt: new Date(s.updatedAt) }))
+        .map((s) => ({ ...s, createdAt: new Date(s.createdAt), updatedAt: new Date(s.updatedAt) }))
         .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()),
     [sessions],
   );
@@ -186,7 +203,10 @@ export default function SidebarNav() {
         <div className="flex flex-col flex-1 min-h-0">
           {/* New Chat button */}
           <button
-            onClick={() => { createNewSession(); router.push('/chat'); }}
+            onClick={() => {
+              createNewSession();
+              router.push('/chat');
+            }}
             className="flex items-center justify-center px-3 py-2.5 mb-2 rounded-xl text-sm font-medium transition-all w-full bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-200"
           >
             <span>New Chat</span>
@@ -200,9 +220,7 @@ export default function SidebarNav() {
                 Loading...
               </div>
             ) : sortedSessions.length === 0 ? (
-              <div className="py-4 text-center text-gray-400 text-xs">
-                No conversations yet
-              </div>
+              <div className="py-4 text-center text-gray-400 text-xs">No conversations yet</div>
             ) : (
               <div className="space-y-0.5">
                 {sortedSessions.map((session) => (
@@ -236,7 +254,12 @@ export default function SidebarNav() {
                       ) : (
                         <p
                           className="text-xs leading-snug"
-                          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                          style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
                           onDoubleClick={(e) => handleStartEdit(session.id, session.title, e)}
                           title={session.title}
                         >
@@ -245,7 +268,8 @@ export default function SidebarNav() {
                       )}
                       <div className="flex items-center gap-1">
                         <p className="text-[11px] text-gray-400 truncate flex-1">
-                          {formatDate(session.updatedAt)} {session.messageCount > 0 && `• ${session.messageCount} msgs`}
+                          {formatDate(session.updatedAt)}{' '}
+                          {session.messageCount > 0 && `• ${session.messageCount} msgs`}
                         </p>
                         <div className="flex items-center gap-0.5 shrink-0">
                           <button
@@ -262,11 +286,17 @@ export default function SidebarNav() {
                                 ? 'opacity-100 bg-red-100 hover:bg-red-200'
                                 : 'opacity-0 group-hover:opacity-100 hover:bg-gray-200'
                             }`}
-                            title={deletingId === session.id ? 'Click again to confirm delete' : 'Delete chat'}
+                            title={
+                              deletingId === session.id
+                                ? 'Click again to confirm delete'
+                                : 'Delete chat'
+                            }
                           >
-                            <Trash2 className={`w-3 h-3 ${
-                              deletingId === session.id ? 'text-red-500' : 'text-gray-400'
-                            }`} />
+                            <Trash2
+                              className={`w-3 h-3 ${
+                                deletingId === session.id ? 'text-red-500' : 'text-gray-400'
+                              }`}
+                            />
                           </button>
                         </div>
                       </div>

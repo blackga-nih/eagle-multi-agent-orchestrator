@@ -42,7 +42,8 @@ test.describe('Admin Templates Page', () => {
     const count = await cards.count();
     if (count > 0) {
       // Document type labels from the page source
-      const docTypes = page.getByText('Statement of Work')
+      const docTypes = page
+        .getByText('Statement of Work')
         .or(page.getByText('Cost Estimate (IGCE)'))
         .or(page.getByText('Market Research'))
         .or(page.getByText('Acquisition Plan'))
@@ -58,7 +59,8 @@ test.describe('Admin Templates Page', () => {
     const cards = page.getByRole('heading', { level: 3 });
     const count = await cards.count();
     if (count > 0) {
-      const sourceBadge = page.getByText('Bundled', { exact: true })
+      const sourceBadge = page
+        .getByText('Bundled', { exact: true })
         .or(page.getByText('Custom', { exact: true }));
       await expect(sourceBadge.first()).toBeVisible();
     }

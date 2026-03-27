@@ -25,7 +25,7 @@ export default function ContractTypeSelectorTab({
   const progressPct = (answered / total) * 100;
 
   function getSelectedOption(factorId: string): string | null {
-    const a = factorAnswers.find(x => x.factorId === factorId);
+    const a = factorAnswers.find((x) => x.factorId === factorId);
     return a ? a.optionId : null;
   }
 
@@ -58,7 +58,9 @@ export default function ContractTypeSelectorTab({
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <div className="text-[10px] font-mono font-semibold text-gray-500">{answered} / {total}</div>
+            <div className="text-[10px] font-mono font-semibold text-gray-500">
+              {answered} / {total}
+            </div>
           </div>
         </div>
 
@@ -107,16 +109,22 @@ export default function ContractTypeSelectorTab({
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
-                        isTop ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'
-                      }`}>
+                      <span
+                        className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                          isTop ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'
+                        }`}
+                      >
                         #{i + 1}
                       </span>
-                      <span className={`text-sm font-semibold ${isTop ? 'text-blue-700' : 'text-gray-800'}`}>
+                      <span
+                        className={`text-sm font-semibold ${isTop ? 'text-blue-700' : 'text-gray-800'}`}
+                      >
                         {rec.label}
                       </span>
                       {rec.blocked && (
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-red-200 text-red-700 font-bold">BLOCKED</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-red-200 text-red-700 font-bold">
+                          BLOCKED
+                        </span>
                       )}
                     </div>
                     {isTop && (
@@ -147,7 +155,9 @@ export default function ContractTypeSelectorTab({
                         style={{ width: `${rec.score}%` }}
                       />
                     </div>
-                    <span className="text-xs font-mono font-semibold text-gray-500 w-8 text-right">{rec.score}</span>
+                    <span className="text-xs font-mono font-semibold text-gray-500 w-8 text-right">
+                      {rec.score}
+                    </span>
                   </div>
 
                   {/* Reasoning */}

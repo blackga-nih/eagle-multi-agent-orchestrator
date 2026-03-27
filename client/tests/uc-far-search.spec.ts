@@ -25,7 +25,7 @@ test.describe('UC: FAR/DFARS Search Workflow', () => {
 
     // Response should include FAR citation and regulation content
     await expect(page.locator('main')).toContainText(
-      /FAR|Part \d+|simplified acquisition|threshold|federal acquisition|regulation|DFARS/i
+      /FAR|Part \d+|simplified acquisition|threshold|federal acquisition|regulation|DFARS/i,
     );
   });
 });

@@ -33,7 +33,7 @@ const TEST_DOC = {
 };
 
 /** Seed sessionStorage with a test document before navigating to the viewer. */
-async function seedDocument(page: ReturnType<typeof test['info']> extends never ? never : any) {
+async function seedDocument(page: ReturnType<(typeof test)['info']> extends never ? never : any) {
   // Navigate to a blank page first so we can set sessionStorage on the correct origin
   await page.goto('/');
   await page.evaluate(
@@ -57,14 +57,10 @@ test.describe('Document Viewer (frontend-only)', () => {
     await page.goto(`/documents/${TEST_DOC_ID}`);
 
     // Title or heading should be visible
-    await expect(
-      page.getByText('Statement of Work').first(),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Statement of Work').first()).toBeVisible({ timeout: 10_000 });
 
     // Some body content should appear
-    await expect(
-      page.getByText('IT consulting services').first(),
-    ).toBeVisible();
+    await expect(page.getByText('IT consulting services').first()).toBeVisible();
   });
 
   test('download dropdown shows format options', async ({ page }) => {
@@ -78,12 +74,8 @@ test.describe('Document Viewer (frontend-only)', () => {
     if (await downloadBtn.isVisible()) {
       await downloadBtn.click();
       // Format options should appear
-      await expect(
-        page.getByText(/word|docx/i).first(),
-      ).toBeVisible({ timeout: 5_000 });
-      await expect(
-        page.getByText(/pdf/i).first(),
-      ).toBeVisible();
+      await expect(page.getByText(/word|docx/i).first()).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByText(/pdf/i).first()).toBeVisible();
     } else {
       // If no download button, check for export links/buttons elsewhere
       const exportBtn = page.getByRole('button', { name: /export/i });
@@ -98,12 +90,11 @@ test.describe('Document Viewer (frontend-only)', () => {
     await expect(page.getByText('Statement of Work').first()).toBeVisible({ timeout: 10_000 });
 
     // Intercept the export POST
-    const exportPromise = page.waitForRequest(
-      (req) =>
-        req.url().includes('/api/documents') &&
-        req.method() === 'POST',
-      { timeout: 15_000 },
-    ).catch(() => null);
+    const exportPromise = page
+      .waitForRequest((req) => req.url().includes('/api/documents') && req.method() === 'POST', {
+        timeout: 15_000,
+      })
+      .catch(() => null);
 
     // Click download/export
     const downloadBtn = page.getByRole('button', { name: /download/i });
@@ -185,7 +176,10 @@ test.describe('Document Generation (requires agent)', () => {
 
     // Click and verify navigation
     const [newPage] = await Promise.all([
-      page.context().waitForEvent('page', { timeout: 10_000 }).catch(() => null),
+      page
+        .context()
+        .waitForEvent('page', { timeout: 10_000 })
+        .catch(() => null),
       docLink.click(),
     ]);
 
@@ -203,9 +197,9 @@ test.describe('Document Generation (requires agent)', () => {
     await page.goto('/documents/');
 
     // Should see at least the page heading
-    await expect(
-      page.getByRole('heading', { name: /documents/i }).first(),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: /documents/i }).first()).toBeVisible({
+      timeout: 10_000,
+    });
 
     // If there are any documents, they should be in the list
     const docCards = page.locator('[class*="card"], [class*="document"], [role="listitem"]');

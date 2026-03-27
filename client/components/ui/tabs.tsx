@@ -55,9 +55,11 @@ export function Tabs({ tabs, activeTab, onChange, variant = 'pills' }: TabsProps
           {tab.icon}
           {tab.label}
           {tab.badge !== undefined && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-              activeTab === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
-            }`}>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                activeTab === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+              }`}
+            >
               {tab.badge}
             </span>
           )}

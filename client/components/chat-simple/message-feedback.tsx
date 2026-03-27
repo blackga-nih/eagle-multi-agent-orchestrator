@@ -14,32 +14,35 @@ export default function MessageFeedback({ messageId, sessionId }: MessageFeedbac
   const [feedback, setFeedback] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const submit = useCallback(async (type: 'thumbs_up' | 'thumbs_down') => {
-    if (submitting || feedback === type) return;
-    setSubmitting(true);
-    try {
-      const token = await getToken();
-      const res = await fetch('/api/feedback/message', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          session_id: sessionId,
-          message_id: messageId,
-          feedback_type: type,
-        }),
-      });
-      if (res.ok) {
-        setFeedback(type);
+  const submit = useCallback(
+    async (type: 'thumbs_up' | 'thumbs_down') => {
+      if (submitting || feedback === type) return;
+      setSubmitting(true);
+      try {
+        const token = await getToken();
+        const res = await fetch('/api/feedback/message', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            session_id: sessionId,
+            message_id: messageId,
+            feedback_type: type,
+          }),
+        });
+        if (res.ok) {
+          setFeedback(type);
+        }
+      } catch {
+        // Silent fail — feedback is non-critical
+      } finally {
+        setSubmitting(false);
       }
-    } catch {
-      // Silent fail — feedback is non-critical
-    } finally {
-      setSubmitting(false);
-    }
-  }, [getToken, messageId, sessionId, feedback, submitting]);
+    },
+    [getToken, messageId, sessionId, feedback, submitting],
+  );
 
   return (
     <div className="flex items-center gap-1 mt-1">

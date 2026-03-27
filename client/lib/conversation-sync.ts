@@ -18,10 +18,7 @@ import {
   UserConversationStore,
   createEmptyStore,
 } from '@/types/conversation';
-import {
-  loadConversationStore,
-  saveConversationStore,
-} from './conversation-store';
+import { loadConversationStore, saveConversationStore } from './conversation-store';
 
 const API_BASE = '/api/conversations';
 
@@ -95,7 +92,7 @@ export async function pushToBackend(store: UserConversationStore): Promise<boole
 export async function syncSessionToBackend(
   userId: string,
   agentId: AgentType,
-  session: AgentSession | null
+  session: AgentSession | null,
 ): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE}/${agentId}`, {
@@ -126,7 +123,7 @@ export async function syncSessionToBackend(
  */
 export async function syncContextToBackend(
   userId: string,
-  context: SharedContext
+  context: SharedContext,
 ): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE}/context`, {
@@ -157,7 +154,7 @@ export async function syncContextToBackend(
  */
 export function mergeStores(
   local: UserConversationStore,
-  remote: UserConversationStore
+  remote: UserConversationStore,
 ): UserConversationStore {
   const localTime = new Date(local.lastUpdated).getTime();
   const remoteTime = new Date(remote.lastUpdated).getTime();
@@ -188,7 +185,7 @@ export function mergeStores(
  */
 function mergeSession(
   local: AgentSession | null,
-  remote: AgentSession | null
+  remote: AgentSession | null,
 ): AgentSession | null {
   if (!local) return remote;
   if (!remote) return local;
@@ -210,9 +207,8 @@ function mergeSession(
 export async function fullSync(userId: string): Promise<UserConversationStore> {
   // Load local store
   const localResult = loadConversationStore(userId);
-  const localStore = localResult.success && localResult.data
-    ? localResult.data
-    : createEmptyStore(userId);
+  const localStore =
+    localResult.success && localResult.data ? localResult.data : createEmptyStore(userId);
 
   // Fetch from backend
   const remoteStore = await fetchFromBackend(userId);

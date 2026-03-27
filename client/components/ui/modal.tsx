@@ -21,7 +21,14 @@ const sizeClasses = {
   full: 'w-[90vw] max-h-[90vh]',
 };
 
-export default function Modal({ isOpen, onClose, title, size = 'md', children, footer }: ModalProps) {
+export default function Modal({
+  isOpen,
+  onClose,
+  title,
+  size = 'md',
+  children,
+  footer,
+}: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -49,7 +56,10 @@ export default function Modal({ isOpen, onClose, title, size = 'md', children, f
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={(e) => e.target === overlayRef.current && onClose()}
     >
-      <div data-testid="modal-content" className={`${sizeClasses[size]} w-full bg-white rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200`}>
+      <div
+        data-testid="modal-content"
+        className={`${sizeClasses[size]} w-full bg-white rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200`}
+      >
         {title && (
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 className="text-lg font-bold text-gray-900">{title}</h2>

@@ -7,7 +7,9 @@ test.describe('Home Page & Backend Connectivity', () => {
 
   test('home page renders hero section', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'EAGLE' }).first()).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'AI-Powered Acquisition Assistant' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'AI-Powered Acquisition Assistant' }),
+    ).toBeVisible();
   });
 
   test('home page description mentions NCI', async ({ page }) => {

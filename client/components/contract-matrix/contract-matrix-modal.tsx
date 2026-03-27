@@ -75,17 +75,28 @@ export default function ContractMatrixModal({
     navigator.clipboard.writeText(summary);
   }, [summary]);
 
-  const handleUseType = useCallback((typeId: string) => {
-    setType(typeId);
-    setActiveTab('explorer');
-  }, [setType, setActiveTab]);
+  const handleUseType = useCallback(
+    (typeId: string) => {
+      setType(typeId);
+      setActiveTab('explorer');
+    },
+    [setType, setActiveTab],
+  );
 
   if (!isOpen) return null;
 
   const tabs = [
-    { id: 'explorer' as MatrixTab, label: 'Detail Explorer', icon: <Search className="w-3.5 h-3.5" /> },
+    {
+      id: 'explorer' as MatrixTab,
+      label: 'Detail Explorer',
+      icon: <Search className="w-3.5 h-3.5" />,
+    },
     { id: 'grid' as MatrixTab, label: '2D Grid Matrix', icon: <Grid3X3 className="w-3.5 h-3.5" /> },
-    { id: 'selector' as MatrixTab, label: 'Contract Type Selector', icon: <ListChecks className="w-3.5 h-3.5" /> },
+    {
+      id: 'selector' as MatrixTab,
+      label: 'Contract Type Selector',
+      icon: <ListChecks className="w-3.5 h-3.5" />,
+    },
   ];
 
   return createPortal(
@@ -102,7 +113,9 @@ export default function ContractMatrixModal({
           <div className="flex items-center gap-4">
             <div>
               <h2 className="text-lg font-bold text-gray-900">Contract Requirements Matrix</h2>
-              <p className="text-[11px] text-gray-400">NCI Office of Acquisitions &mdash; HHS/NIH Thresholds (FAC 2025-06)</p>
+              <p className="text-[11px] text-gray-400">
+                NCI Office of Acquisitions &mdash; HHS/NIH Thresholds (FAC 2025-06)
+              </p>
             </div>
             <div className="ml-4">
               <Tabs
@@ -158,9 +171,15 @@ export default function ContractMatrixModal({
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
           <div className="text-[11px] text-gray-400">
-            Press <kbd className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-mono text-[10px]">Esc</kbd> to close
-            &nbsp;&middot;&nbsp;
-            <kbd className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-mono text-[10px]">Ctrl+M</kbd> to toggle
+            Press{' '}
+            <kbd className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-mono text-[10px]">
+              Esc
+            </kbd>{' '}
+            to close &nbsp;&middot;&nbsp;
+            <kbd className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-mono text-[10px]">
+              Ctrl+M
+            </kbd>{' '}
+            to toggle
           </div>
           <div className="flex items-center gap-2">
             <button

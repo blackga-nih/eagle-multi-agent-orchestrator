@@ -36,31 +36,34 @@ export default function KnowledgeBasePage() {
   const [searchInput, setSearchInput] = useState('');
   const [selectedDocument, setSelectedDocument] = useState<KBDocument | null>(null);
 
-  const fetchDocuments = useCallback(async (query?: string) => {
-    setLoading(true);
-    try {
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+  const fetchDocuments = useCallback(
+    async (query?: string) => {
+      setLoading(true);
+      try {
+        const token = await getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const params = new URLSearchParams();
-      if (query) params.set('query', query);
+        const params = new URLSearchParams();
+        if (query) params.set('query', query);
 
-      const url = params.toString()
-        ? `/api/knowledge-base?${params.toString()}`
-        : '/api/knowledge-base';
+        const url = params.toString()
+          ? `/api/knowledge-base?${params.toString()}`
+          : '/api/knowledge-base';
 
-      const res = await fetch(url, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setDocuments(data.documents || []);
+        const res = await fetch(url, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          setDocuments(data.documents || []);
+        }
+      } catch {
+        // silently fail
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false);
-    }
-  }, [getToken]);
+    },
+    [getToken],
+  );
 
   const fetchStats = useCallback(async () => {
     try {
@@ -91,10 +94,14 @@ export default function KnowledgeBasePage() {
   // Update tab badges with stats
   const tabsWithBadges = KB_TABS.map((tab) => ({
     ...tab,
-    badge: tab.id === 'all' && stats ? stats.total :
-      tab.id === 'by_topic' && stats ? Object.keys(stats.by_topic).length :
-      tab.id === 'by_type' && stats ? Object.keys(stats.by_type).length :
-      undefined,
+    badge:
+      tab.id === 'all' && stats
+        ? stats.total
+        : tab.id === 'by_topic' && stats
+          ? Object.keys(stats.by_topic).length
+          : tab.id === 'by_type' && stats
+            ? Object.keys(stats.by_type).length
+            : undefined,
   }));
 
   return (
@@ -122,7 +129,11 @@ export default function KnowledgeBasePage() {
                 {searchInput && (
                   <button
                     type="button"
-                    onClick={() => { setSearchInput(''); setSearchQuery(''); fetchDocuments(); }}
+                    onClick={() => {
+                      setSearchInput('');
+                      setSearchQuery('');
+                      fetchDocuments();
+                    }}
                     className="absolute right-14 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600"
                   >
                     Clear
@@ -144,7 +155,12 @@ export default function KnowledgeBasePage() {
 
             {/* Tabs */}
             <div className="mb-6">
-              <Tabs tabs={tabsWithBadges} activeTab={activeTab} onChange={setActiveTab} variant="pills" />
+              <Tabs
+                tabs={tabsWithBadges}
+                activeTab={activeTab}
+                onChange={setActiveTab}
+                variant="pills"
+              />
             </div>
 
             {/* Tab content */}
@@ -178,17 +194,12 @@ export default function KnowledgeBasePage() {
               </div>
             )}
 
-            {activeTab === 'reference' && (
-              <PluginDataSection />
-            )}
+            {activeTab === 'reference' && <PluginDataSection />}
           </div>
         </main>
 
         {/* Preview modal */}
-        <KBPreviewModal
-          document={selectedDocument}
-          onClose={() => setSelectedDocument(null)}
-        />
+        <KBPreviewModal document={selectedDocument} onClose={() => setSelectedDocument(null)} />
       </div>
     </AuthGuard>
   );

@@ -85,10 +85,9 @@ export default function FeedbackModal() {
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
       // Backend expects `feedback_text`; build it from comment + type tag
-      const feedbackText = [
-        comment.trim(),
-        feedbackType ? `[${feedbackType}]` : '',
-      ].filter(Boolean).join(' ');
+      const feedbackText = [comment.trim(), feedbackType ? `[${feedbackType}]` : '']
+        .filter(Boolean)
+        .join(' ');
 
       const { messages, lastMessageId } = getSnapshot();
 
@@ -129,9 +128,10 @@ export default function FeedbackModal() {
         resetForm();
       }, 1500);
     } catch (err) {
-      const msg = err instanceof Error && err.message === 'auth'
-        ? 'Session expired. Please sign in again.'
-        : 'Could not submit feedback. Please try again.';
+      const msg =
+        err instanceof Error && err.message === 'auth'
+          ? 'Session expired. Please sign in again.'
+          : 'Could not submit feedback. Please try again.';
       setError(msg);
     } finally {
       setSubmitting(false);
@@ -220,9 +220,7 @@ export default function FeedbackModal() {
             <span>auto-captured</span>
           </div>
 
-          {error && (
-            <p className="text-sm text-red-600">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       )}
     </Modal>

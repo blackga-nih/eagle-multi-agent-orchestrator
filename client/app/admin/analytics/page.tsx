@@ -116,10 +116,7 @@ export default function AnalyticsPage() {
             <PageHeader
               title="Analytics"
               description="Real-time observability across traces, tools, and feedback"
-              breadcrumbs={[
-                { label: 'Admin', href: '/admin' },
-                { label: 'Analytics' },
-              ]}
+              breadcrumbs={[{ label: 'Admin', href: '/admin' }, { label: 'Analytics' }]}
               actions={
                 <div className="flex items-center gap-3">
                   <div className="inline-flex items-center bg-white border border-gray-200 rounded-xl p-1">
@@ -168,30 +165,18 @@ export default function AnalyticsPage() {
                     icon={<AlertTriangle className="w-5 h-5" />}
                     label="Error Rate"
                     value={traceSummary ? `${traceSummary.error_rate_pct}%` : '—'}
-                    color={
-                      (traceSummary?.error_rate_pct ?? 0) > 10
-                        ? 'bg-red-500'
-                        : 'bg-amber-500'
-                    }
+                    color={(traceSummary?.error_rate_pct ?? 0) > 10 ? 'bg-red-500' : 'bg-amber-500'}
                   />
                   <SummaryCard
                     icon={<Clock className="w-5 h-5" />}
                     label="Avg Latency"
-                    value={
-                      traceSummary
-                        ? formatDuration(traceSummary.avg_latency_ms)
-                        : '—'
-                    }
+                    value={traceSummary ? formatDuration(traceSummary.avg_latency_ms) : '—'}
                     color="bg-blue-500"
                   />
                   <SummaryCard
                     icon={<DollarSign className="w-5 h-5" />}
                     label="Total Cost"
-                    value={
-                      traceSummary
-                        ? `$${traceSummary.total_cost_usd.toFixed(4)}`
-                        : '—'
-                    }
+                    value={traceSummary ? `$${traceSummary.total_cost_usd.toFixed(4)}` : '—'}
                     color="bg-green-500"
                   />
                   <SummaryCard
@@ -200,9 +185,7 @@ export default function AnalyticsPage() {
                     value={feedback ? `${feedback.thumbs_up_pct}%` : '—'}
                     color="bg-emerald-500"
                     subtitle={
-                      feedback
-                        ? `${feedback.thumbs_up}/${feedback.total} positive`
-                        : undefined
+                      feedback ? `${feedback.thumbs_up}/${feedback.total} positive` : undefined
                     }
                   />
                   <SummaryCard
@@ -244,9 +227,7 @@ export default function AnalyticsPage() {
                               <span className="text-sm font-medium text-gray-900 truncate">
                                 {tool.name}
                               </span>
-                              <span className="text-xs text-gray-400">
-                                {tool.call_count} calls
-                              </span>
+                              <span className="text-xs text-gray-400">{tool.call_count} calls</span>
                             </div>
                             <div className="flex items-center gap-3">
                               <span className="text-xs text-gray-500">
@@ -257,8 +238,8 @@ export default function AnalyticsPage() {
                                   tool.success_rate >= 95
                                     ? 'bg-green-50 text-green-600'
                                     : tool.success_rate >= 80
-                                    ? 'bg-amber-50 text-amber-600'
-                                    : 'bg-red-50 text-red-600'
+                                      ? 'bg-amber-50 text-amber-600'
+                                      : 'bg-red-50 text-red-600'
                                 }`}
                               >
                                 {tool.success_rate.toFixed(0)}%
@@ -284,8 +265,7 @@ export default function AnalyticsPage() {
                         View traces
                       </a>
                     </div>
-                    {!traceSummary ||
-                    Object.keys(traceSummary.error_breakdown).length === 0 ? (
+                    {!traceSummary || Object.keys(traceSummary.error_breakdown).length === 0 ? (
                       <div className="p-8 text-center text-gray-400 text-sm">
                         No errors in this period
                       </div>
@@ -295,7 +275,7 @@ export default function AnalyticsPage() {
                           .sort(([, a], [, b]) => b - a)
                           .map(([category, count]) => {
                             const maxCount = Math.max(
-                              ...Object.values(traceSummary.error_breakdown)
+                              ...Object.values(traceSummary.error_breakdown),
                             );
                             return (
                               <div key={category}>
@@ -303,9 +283,7 @@ export default function AnalyticsPage() {
                                   <span className="text-sm text-gray-700 capitalize">
                                     {category.replace(/-/g, ' ')}
                                   </span>
-                                  <span className="text-sm font-medium text-gray-900">
-                                    {count}
-                                  </span>
+                                  <span className="text-sm font-medium text-gray-900">{count}</span>
                                 </div>
                                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                                   <div
@@ -329,9 +307,7 @@ export default function AnalyticsPage() {
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 text-gray-400" />
-                        <h3 className="font-bold text-gray-900">
-                          User Feedback
-                        </h3>
+                        <h3 className="font-bold text-gray-900">User Feedback</h3>
                       </div>
                       <a
                         href="/admin/feedback"
@@ -357,17 +333,10 @@ export default function AnalyticsPage() {
                       </div>
                       <div className="text-right">
                         <p className="text-sm text-gray-700">
-                          <span className="font-medium text-green-600">
-                            {feedback.thumbs_up}
-                          </span>{' '}
-                          /{' '}
-                          <span className="font-medium text-red-600">
-                            {feedback.thumbs_down}
-                          </span>
+                          <span className="font-medium text-green-600">{feedback.thumbs_up}</span> /{' '}
+                          <span className="font-medium text-red-600">{feedback.thumbs_down}</span>
                         </p>
-                        <p className="text-xs text-gray-400">
-                          {feedback.total} total
-                        </p>
+                        <p className="text-xs text-gray-400">{feedback.total} total</p>
                       </div>
                     </div>
                   </div>

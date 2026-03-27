@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       console.error(`Admin telemetry error: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Backend error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -55,13 +55,13 @@ export async function GET(request: NextRequest) {
           error: 'Cannot connect to backend',
           details: `Ensure FastAPI is running at ${FASTAPI_URL}`,
         },
-        { status: 503 }
+        { status: 503 },
       );
     }
 
     return NextResponse.json(
       { error: 'Internal server error', details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

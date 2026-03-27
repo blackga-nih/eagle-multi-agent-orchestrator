@@ -32,7 +32,9 @@ function TagGroup({ label, tags, variant, onRemove, readOnly }: TagGroupProps) {
 
   return (
     <div className="mb-2 last:mb-0">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">{label}</div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">
+        {label}
+      </div>
       <div className="flex flex-wrap gap-1.5">
         {tags.map((tag) => (
           <span key={tag} className={`${baseClasses} ${variantClasses[variant]}`}>
@@ -136,7 +138,10 @@ export default function TagEditor({
               </button>
               <button
                 type="button"
-                onClick={() => { setInputValue(''); setShowInput(false); }}
+                onClick={() => {
+                  setInputValue('');
+                  setShowInput(false);
+                }}
                 className="text-xs px-2 py-1 text-gray-500 hover:text-gray-700 rounded-md hover:bg-gray-100 transition-colors"
               >
                 Cancel

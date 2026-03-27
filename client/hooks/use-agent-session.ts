@@ -197,7 +197,7 @@ export function useAgentSession(options: UseAgentSessionOptions): UseAgentSessio
         }
       }, 300); // 300ms debounce for localStorage
     },
-    [userId, enableSync, onSave, onError]
+    [userId, enableSync, onSave, onError],
   );
 
   // Get current session
@@ -226,7 +226,7 @@ export function useAgentSession(options: UseAgentSessionOptions): UseAgentSessio
         return newStore;
       });
     },
-    [agentId, convOptions, debouncedSave]
+    [agentId, convOptions, debouncedSave],
   );
 
   // Add tool result to session
@@ -252,7 +252,7 @@ export function useAgentSession(options: UseAgentSessionOptions): UseAgentSessio
         return newStore;
       });
     },
-    [agentId, convOptions, debouncedSave]
+    [agentId, convOptions, debouncedSave],
   );
 
   // Clear session history
@@ -281,7 +281,7 @@ export function useAgentSession(options: UseAgentSessionOptions): UseAgentSessio
         return newStore;
       });
     },
-    [convOptions, debouncedSave]
+    [convOptions, debouncedSave],
   );
 
   // Add an insight from this agent
@@ -305,7 +305,7 @@ export function useAgentSession(options: UseAgentSessionOptions): UseAgentSessio
         return newStore;
       });
     },
-    [agentId, convOptions, debouncedSave]
+    [agentId, convOptions, debouncedSave],
   );
 
   // Get context prompt for agent

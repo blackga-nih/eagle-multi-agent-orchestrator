@@ -98,24 +98,24 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
 
 /** Emoji icons for each document type (used in activity panel, doc cards). */
 export const DOCUMENT_TYPE_ICONS: Record<DocumentType, string> = {
-  sow: '\u{1F4DD}',                      // memo
-  igce: '\u{1F4B0}',                     // money bag
-  market_research: '\u{1F50D}',          // magnifying glass
-  acquisition_plan: '\u{1F4CB}',         // clipboard
-  justification: '\u{2696}',            // scales
-  funding_doc: '\u{1F4B5}',             // dollar
-  eval_criteria: '\u{2705}',            // check mark
-  security_checklist: '\u{1F512}',      // lock
-  section_508: '\u{267F}',              // wheelchair
-  cor_certification: '\u{1F3C5}',       // medal
+  sow: '\u{1F4DD}', // memo
+  igce: '\u{1F4B0}', // money bag
+  market_research: '\u{1F50D}', // magnifying glass
+  acquisition_plan: '\u{1F4CB}', // clipboard
+  justification: '\u{2696}', // scales
+  funding_doc: '\u{1F4B5}', // dollar
+  eval_criteria: '\u{2705}', // check mark
+  security_checklist: '\u{1F512}', // lock
+  section_508: '\u{267F}', // wheelchair
+  cor_certification: '\u{1F3C5}', // medal
   contract_type_justification: '\u{1F4C3}', // page with curl
-  d_f: '\u{1F4DC}',                     // scroll
-  qasp: '\u{1F50E}',                    // magnifying glass right
-  source_selection_plan: '\u{1F3AF}',   // target
-  subcontracting_plan: '\u{1F91D}',     // handshake
-  sb_review: '\u{1F3E2}',              // office building
-  purchase_request: '\u{1F4E5}',       // inbox tray
-  human_subjects: '\u{1F9EC}',         // dna
+  d_f: '\u{1F4DC}', // scroll
+  qasp: '\u{1F50E}', // magnifying glass right
+  source_selection_plan: '\u{1F3AF}', // target
+  subcontracting_plan: '\u{1F91D}', // handshake
+  sb_review: '\u{1F3E2}', // office building
+  purchase_request: '\u{1F4E5}', // inbox tray
+  human_subjects: '\u{1F9EC}', // dna
 };
 
 // =============================================================================

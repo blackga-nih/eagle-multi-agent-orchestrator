@@ -18,10 +18,19 @@ export { default as ToolTimingSummary } from './tool-timing-summary';
 
 /** Subagent tools whose results are markdown reports. */
 export const SUBAGENT_TOOLS = new Set([
-  'oa_intake', 'legal_counsel', 'market_intelligence', 'tech_translator',
-  'tech_review', 'public_interest', 'compliance', 'policy_analyst',
-  'policy_librarian', 'policy_supervisor', 'document_generator',
-  'ingest_document', 'knowledge_retrieval',
+  'oa_intake',
+  'legal_counsel',
+  'market_intelligence',
+  'tech_translator',
+  'tech_review',
+  'public_interest',
+  'compliance',
+  'policy_analyst',
+  'policy_librarian',
+  'policy_supervisor',
+  'document_generator',
+  'ingest_document',
+  'knowledge_retrieval',
 ]);
 
 /** Extract a displayable text string from a ClientToolResult. */

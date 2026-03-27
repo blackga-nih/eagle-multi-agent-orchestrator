@@ -25,11 +25,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => ({ getSnapshot, setSnapshot }), [getSnapshot, setSnapshot]);
 
-  return (
-    <FeedbackContext.Provider value={value}>
-      {children}
-    </FeedbackContext.Provider>
-  );
+  return <FeedbackContext.Provider value={value}>{children}</FeedbackContext.Provider>;
 }
 
 export function useFeedback() {

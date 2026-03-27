@@ -27,7 +27,9 @@ export default function IntakeWorkflowPanel({ text }: { text: string }) {
   } catch {
     return (
       <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white max-h-64 overflow-y-auto">
-        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">{text}</pre>
+        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
+          {text}
+        </pre>
       </div>
     );
   }
@@ -35,12 +37,14 @@ export default function IntakeWorkflowPanel({ text }: { text: string }) {
   const currentStage = data.stage || data.current_stage || '';
   const currentIdx = matchStageIndex(currentStage);
   const completedSet = new Set(
-    (data.completed_stages || []).map((s: string) => matchStageIndex(s))
+    (data.completed_stages || []).map((s: string) => matchStageIndex(s)),
   );
 
   return (
     <div className="border-t border-[#E5E9F0] bg-white px-3 py-3">
-      <div className="text-[9px] font-bold uppercase text-blue-600 tracking-wider mb-2">Intake Progress</div>
+      <div className="text-[9px] font-bold uppercase text-blue-600 tracking-wider mb-2">
+        Intake Progress
+      </div>
 
       {/* Horizontal step indicator */}
       <div className="flex items-center gap-1 mb-2">
@@ -49,11 +53,15 @@ export default function IntakeWorkflowPanel({ text }: { text: string }) {
           const isCurrent = idx === currentIdx;
           return (
             <div key={stage} className="flex items-center gap-1 flex-1">
-              <div className={`flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold shrink-0
-                ${isComplete ? 'bg-green-500 text-white' : isCurrent ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
+              <div
+                className={`flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold shrink-0
+                ${isComplete ? 'bg-green-500 text-white' : isCurrent ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'}`}
+              >
                 {isComplete ? '✓' : idx + 1}
               </div>
-              <span className={`text-[9px] truncate ${isCurrent ? 'font-bold text-gray-800' : 'text-gray-500'}`}>
+              <span
+                className={`text-[9px] truncate ${isCurrent ? 'font-bold text-gray-800' : 'text-gray-500'}`}
+              >
                 {stage}
               </span>
               {idx < STAGES.length - 1 && (

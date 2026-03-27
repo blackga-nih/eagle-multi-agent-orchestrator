@@ -22,7 +22,10 @@ test('chat-v2: send Hello with 60s wait for response', async ({ page }) => {
 
   // === STEP 1: Hard refresh ===
   console.log('=== STEP 1: Opening http://localhost:3000/chat-v2 with hard refresh ===');
-  await page.goto('http://localhost:3000/chat-v2', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.goto('http://localhost:3000/chat-v2', {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000,
+  });
 
   // === STEP 2: Wait 5s for page to stabilize ===
   console.log('=== STEP 2: Waiting 5s for page to load ===');
@@ -40,7 +43,10 @@ test('chat-v2: send Hello with 60s wait for response', async ({ page }) => {
     }
   }
 
-  await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-long-01-initial.png'), fullPage: true });
+  await page.screenshot({
+    path: path.join(SCREENSHOTS_DIR, 'chat-v2-long-01-initial.png'),
+    fullPage: true,
+  });
 
   // === STEP 3: Type "Hello" and submit ===
   console.log('=== STEP 3: Typing "Hello" and submitting ===');
@@ -62,7 +68,10 @@ test('chat-v2: send Hello with 60s wait for response', async ({ page }) => {
 
   if (!chatInput) {
     console.log('ERROR: No chat input found.');
-    await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-long-ERROR-no-input.png'), fullPage: true });
+    await page.screenshot({
+      path: path.join(SCREENSHOTS_DIR, 'chat-v2-long-ERROR-no-input.png'),
+      fullPage: true,
+    });
     return;
   }
 
@@ -76,10 +85,16 @@ test('chat-v2: send Hello with 60s wait for response', async ({ page }) => {
 
   // === STEP 5: Take final screenshot ===
   console.log('=== STEP 5: Taking final screenshot after 60s wait ===');
-  await page.screenshot({ path: path.join(SCREENSHOTS_DIR, 'chat-v2-long-02-after-60s.png'), fullPage: true });
+  await page.screenshot({
+    path: path.join(SCREENSHOTS_DIR, 'chat-v2-long-02-after-60s.png'),
+    fullPage: true,
+  });
 
   // === Analysis ===
-  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const bodyText = await page
+    .locator('body')
+    .innerText()
+    .catch(() => '');
 
   // Check for assistant response
   const responseSelectors = [
@@ -101,7 +116,13 @@ test('chat-v2: send Hello with 60s wait for response', async ({ page }) => {
   if (!assistantResponseFound) {
     // Check body text for any substantive response
     const lowerBody = bodyText.toLowerCase();
-    if (lowerBody.includes('hello') && (lowerBody.includes('assist') || lowerBody.includes('help') || lowerBody.includes('welcome') || lowerBody.includes('acquisition'))) {
+    if (
+      lowerBody.includes('hello') &&
+      (lowerBody.includes('assist') ||
+        lowerBody.includes('help') ||
+        lowerBody.includes('welcome') ||
+        lowerBody.includes('acquisition'))
+    ) {
       assistantResponseFound = true;
       console.log('Assistant response detected via body text content');
     }
@@ -109,14 +130,21 @@ test('chat-v2: send Hello with 60s wait for response', async ({ page }) => {
 
   // Check AG-UI event types
   const eventTypes = [
-    'RUN_STARTED', 'RUN_FINISHED',
-    'TEXT_MESSAGE_START', 'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END',
-    'TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END',
-    'STATE_SNAPSHOT', 'STATE_DELTA',
-    'STEP_STARTED', 'STEP_FINISHED',
+    'RUN_STARTED',
+    'RUN_FINISHED',
+    'TEXT_MESSAGE_START',
+    'TEXT_MESSAGE_CONTENT',
+    'TEXT_MESSAGE_END',
+    'TOOL_CALL_START',
+    'TOOL_CALL_ARGS',
+    'TOOL_CALL_END',
+    'STATE_SNAPSHOT',
+    'STATE_DELTA',
+    'STEP_STARTED',
+    'STEP_FINISHED',
     'CUSTOM',
   ];
-  const foundEventTypes = eventTypes.filter(et => bodyText.includes(et));
+  const foundEventTypes = eventTypes.filter((et) => bodyText.includes(et));
 
   let eventCount = 0;
   for (const et of eventTypes) {
@@ -152,17 +180,17 @@ test('chat-v2: send Hello with 60s wait for response', async ({ page }) => {
 
   if (consoleErrors.length > 0) {
     console.log('\n=== CONSOLE ERRORS ===');
-    consoleErrors.slice(0, 20).forEach(e => console.log(`  ${e.substring(0, 300)}`));
+    consoleErrors.slice(0, 20).forEach((e) => console.log(`  ${e.substring(0, 300)}`));
   }
 
   if (networkErrors.length > 0) {
     console.log('\n=== NETWORK ERRORS ===');
-    networkErrors.forEach(e => console.log(`  ${e}`));
+    networkErrors.forEach((e) => console.log(`  ${e}`));
   }
 
   if (visibleErrors.length > 0) {
     console.log('\n=== VISIBLE UI ERRORS ===');
-    visibleErrors.forEach(e => console.log(`  ${e}`));
+    visibleErrors.forEach((e) => console.log(`  ${e}`));
   }
 
   console.log('\n=== PAGE TEXT (first 5000 chars) ===');
@@ -170,6 +198,6 @@ test('chat-v2: send Hello with 60s wait for response', async ({ page }) => {
   console.log('=== END PAGE TEXT ===');
 
   console.log('\n=== ALL BROWSER LOGS ===');
-  allLogs.forEach(l => console.log(`  ${l}`));
+  allLogs.forEach((l) => console.log(`  ${l}`));
   console.log('=== END LOGS ===');
 });

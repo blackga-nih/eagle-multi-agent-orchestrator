@@ -43,9 +43,11 @@ test.describe('Admin Workspaces Page', () => {
       await expect(cards.first()).toBeVisible();
       // Visibility label should appear (private, tenant, or public)
       await expect(
-        page.getByText('private').first()
+        page
+          .getByText('private')
+          .first()
           .or(page.getByText('tenant').first())
-          .or(page.getByText('public').first())
+          .or(page.getByText('public').first()),
       ).toBeVisible();
     }
   });

@@ -75,44 +75,47 @@ test.describe('Session Memory — Multi-Turn Context', () => {
     // ── Phase 3: Send message 1 with distinctive context ────────────────
     await sendMessage(
       page,
-      `My codename is ${CODENAME} and I am the lead engineer for Project ${PROJECT}. Please acknowledge both.`
+      `My codename is ${CODENAME} and I am the lead engineer for Project ${PROJECT}. Please acknowledge both.`,
     );
     await waitForStreamComplete(page);
 
     // Verify message 1 got a response
     await expect(page.locator('text=🦅 EAGLE')).toBeVisible();
-    const response1 = await page.locator('main').textContent() ?? '';
+    const response1 = (await page.locator('main').textContent()) ?? '';
     expect(response1.length).toBeGreaterThan(50);
 
     // Screenshot after message 1
     await page.screenshot({ path: 'memory-msg1.png' });
 
     // ── Phase 4: Send message 2 in the SAME session (no New Chat) ───────
-    await sendMessage(
-      page,
-      'What is my codename and what project am I leading?'
-    );
+    await sendMessage(page, 'What is my codename and what project am I leading?');
     await waitForStreamComplete(page);
 
     // Screenshot after message 2
     await page.screenshot({ path: 'memory-msg2.png' });
 
     // ── Phase 5: Verify EAGLE remembers the context ──────────────────────
-    const mainContent = await page.locator('main').textContent() ?? '';
+    const mainContent = (await page.locator('main').textContent()) ?? '';
 
     // EAGLE should recall both distinctive pieces of context
     const remembersCodename = mainContent.toUpperCase().includes(CODENAME);
     const remembersProject = mainContent.toUpperCase().includes(PROJECT);
 
-    expect(remembersCodename, `EAGLE should recall codename "${CODENAME}" but response was:\n${mainContent.slice(-800)}`).toBe(true);
-    expect(remembersProject, `EAGLE should recall project "${PROJECT}" but response was:\n${mainContent.slice(-800)}`).toBe(true);
+    expect(
+      remembersCodename,
+      `EAGLE should recall codename "${CODENAME}" but response was:\n${mainContent.slice(-800)}`,
+    ).toBe(true);
+    expect(
+      remembersProject,
+      `EAGLE should recall project "${PROJECT}" but response was:\n${mainContent.slice(-800)}`,
+    ).toBe(true);
 
     // ── Phase 6: Verify session_id is consistent across messages ────────
     // Both requests must carry the same session_id for SDK resume to work
     if (sessionIds.length >= 2) {
       expect(
         sessionIds[0],
-        `session_id changed between message 1 (${sessionIds[0]}) and message 2 (${sessionIds[1]}) — SDK resume will fail`
+        `session_id changed between message 1 (${sessionIds[0]}) and message 2 (${sessionIds[1]}) — SDK resume will fail`,
       ).toBe(sessionIds[1]);
     }
   });
@@ -173,7 +176,7 @@ test.describe('Session Memory — Multi-Turn Context', () => {
     const uniqueIds = [...new Set(capturedIds)];
     expect(
       uniqueIds.length,
-      `Expected 1 unique session_id across all messages in a session, got: ${JSON.stringify(capturedIds)}`
+      `Expected 1 unique session_id across all messages in a session, got: ${JSON.stringify(capturedIds)}`,
     ).toBeLessThanOrEqual(1);
   });
 
@@ -216,7 +219,7 @@ test.describe('Session Memory — Multi-Turn Context', () => {
     if (sessionIds.length >= 2) {
       expect(
         sessionIds[0],
-        'New session should get a different session_id than the previous session'
+        'New session should get a different session_id than the previous session',
       ).not.toBe(sessionIds[1]);
     }
   });

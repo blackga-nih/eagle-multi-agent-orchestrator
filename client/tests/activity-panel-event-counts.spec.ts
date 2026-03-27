@@ -23,8 +23,9 @@ function buildSSE(events: Array<Record<string, unknown>>): string {
 // ---------------------------------------------------------------------------
 
 test.describe('Activity Panel Event Counts', () => {
-
-  test('tab badge matches displayed timeline row count after text-chunk merging', async ({ page }) => {
+  test('tab badge matches displayed timeline row count after text-chunk merging', async ({
+    page,
+  }) => {
     test.setTimeout(45_000);
 
     // 10 text chunks from same agent (will merge into 1 display entry)
@@ -69,7 +70,10 @@ test.describe('Activity Panel Event Counts', () => {
       });
     });
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     // Send a message to trigger SSE
     const textarea = page.locator('textarea').first();
@@ -119,7 +123,6 @@ test.describe('Activity Panel Event Counts', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('User Input Badge', () => {
-
   test('user message shows "user" badge, not "agent"', async ({ page }) => {
     test.setTimeout(45_000);
 
@@ -129,13 +132,28 @@ test.describe('User Input Badge', () => {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
         body: buildSSE([
-          { type: 'text', agent_id: 'eagle', agent_name: 'EAGLE', content: 'Hello!', timestamp: '2026-01-01T00:00:01Z' },
-          { type: 'complete', agent_id: 'eagle', agent_name: 'EAGLE', metadata: { duration_ms: 1000 }, timestamp: '2026-01-01T00:00:02Z' },
+          {
+            type: 'text',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            content: 'Hello!',
+            timestamp: '2026-01-01T00:00:01Z',
+          },
+          {
+            type: 'complete',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            metadata: { duration_ms: 1000 },
+            timestamp: '2026-01-01T00:00:02Z',
+          },
         ]),
       });
     });
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     const textarea = page.locator('textarea').first();
     await expect(textarea).toBeVisible({ timeout: 5_000 });
@@ -187,13 +205,28 @@ test.describe('User Input Badge', () => {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
         body: buildSSE([
-          { type: 'text', agent_id: 'eagle', agent_name: 'EAGLE', content: 'Response text', timestamp: '2026-01-01T00:00:01Z' },
-          { type: 'complete', agent_id: 'eagle', agent_name: 'EAGLE', metadata: {}, timestamp: '2026-01-01T00:00:02Z' },
+          {
+            type: 'text',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            content: 'Response text',
+            timestamp: '2026-01-01T00:00:01Z',
+          },
+          {
+            type: 'complete',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            metadata: {},
+            timestamp: '2026-01-01T00:00:02Z',
+          },
         ]),
       });
     });
 
-    await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.goto('http://localhost:3000/chat/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000,
+    });
 
     const textarea = page.locator('textarea').first();
     await expect(textarea).toBeVisible({ timeout: 5_000 });
@@ -208,7 +241,9 @@ test.describe('User Input Badge', () => {
     await page.waitForTimeout(1_000);
 
     // The user's message text should appear in a timeline row
-    const userRow = page.locator('[class*="border-l-"][class*="cursor-pointer"]', { hasText: 'my specific test message' });
+    const userRow = page.locator('[class*="border-l-"][class*="cursor-pointer"]', {
+      hasText: 'my specific test message',
+    });
     await expect(userRow).toBeVisible({ timeout: 5_000 });
 
     // That row should have the "user" badge
