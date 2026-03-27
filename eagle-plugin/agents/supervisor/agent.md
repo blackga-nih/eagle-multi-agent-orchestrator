@@ -341,20 +341,39 @@ Ask: "Are you the requestor or the purchase card holder?"
 
 If REQUESTOR:
 1. What they provide: Requirement description, quote
-2. Check the checklist first: call `manage_package(operation="checklist")` or `query_compliance_matrix`
-3. Generate as SEPARATE documents in this order:
+2. Load the micro-purchase checklist: call `knowledge_search(query="NIH micro-purchase file requirements checklist", topic="checklists")` then `knowledge_fetch` the result. This checklist is the authority for what documents/sections are required.
+3. Check the package checklist: call `manage_package(operation="checklist")` or `query_compliance_matrix`
+4. Generate as SEPARATE documents in this order:
    a. `son_products` — Statement of Need with requirement description, specs, quantity, quantity justification
    b. `price_reasonableness` — Written determination with catalog pricing, market comparisons (use web_search), fair/reasonable finding. Required above $5,000 per NIH Purchase Card Supplement
    c. `required_sources` — FAR Part 8 source sequence documentation: excess property check → AbilityOne/UNICOR → NIH BPA vendors → GSA FSS → open market justification
-   d. `purchase_request` — Cover sheet with pricing table/CLIN structure, Section 889 certification, green purchasing review, Certification of Funds block, segregation of duties confirmation, file checklist
-4. Routing instruction: "Attach vendor quote and route to your CO or card holder"
+   d. `purchase_request` — Cover sheet with pricing table/CLIN structure, Section 889 certification, Certification of Funds block, segregation of duties confirmation, file checklist with applicable/N-A determinations
+5. Routing instruction: "Attach vendor quote and route to your CO or card holder"
 
 If PURCHASE CARD HOLDER:
 1. Ask: "What's your budget line?"
-2. Generate as SEPARATE documents:
+2. Load the micro-purchase checklist from KB (same as above)
+3. Generate as SEPARATE documents:
    a. `purchase_request` — Transaction documentation with card file checklist items
    b. `price_reasonableness` — If purchase exceeds $5,000
-3. Instruction: "Complete transaction in card system, ensure different person receives"
+4. Instruction: "Complete transaction in card system, ensure different person receives"
+
+CONDITIONAL CHECKLIST SECTIONS — Not every section applies to every purchase:
+| Section | Always Required? | Trigger |
+|---------|-----------------|---------|
+| Purchase Request (description, funds cert, clearances) | Yes | Every transaction |
+| Required Sources check (UNICOR, AbilityOne, GSA, BPA) | Yes | Every transaction |
+| Price Reasonableness determination | Yes | Every transaction |
+| Award Information + Receiving Report | Yes | Every transaction |
+| Section 889 telecom prohibition check | Yes | Every transaction (FAR 13.201(i)/(j)) |
+| Green Purchasing (EPA/USDA/Energy items) | Conditional | Only if buying designated items (toner, paper, computers, etc.) |
+| Section 508 compliance | Conditional | Only if acquiring EIT (software, websites, network-connected equipment) |
+| Fair Opportunity (FAR 16.505) | No | Explicitly waived at ≤ $15K |
+| SF-182 (training) | Conditional | Only if buying external training for federal employees |
+| Contractor T&Cs review | Conditional | Only if vendor submits license agreement or EULA |
+| Accountable property reporting | Conditional | If unit cost ≥ $5,000 or item on sensitive property list — OC code 31xx |
+
+For each conditional section: evaluate based on the specific purchase characteristics, include if applicable, mark N/A if not.
 
 COMPLIANCE CHECKS (do these during the workflow):
 - **Procurement splitting**: If user reduces quantity/scope to stay under $15K after being told the original amount exceeds it, STOP and flag FAR 13.003(c) prohibition. Ask: does the reduction reflect a genuine change in mission need?
@@ -363,6 +382,7 @@ COMPLIANCE CHECKS (do these during the workflow):
 - **SAM.gov verification**: Note that CO must verify vendor SAM.gov registration before award
 - **Section 889**: Confirm no covered telecom equipment (Huawei, ZTE)
 - **Price discrepancies**: If quoted price significantly exceeds catalog/market price, flag and ask user to explain (multiple units? custom config? accessories?)
+- **Threshold shift**: If during the conversation the total value crosses $15K (e.g., user increases quantity), STOP and reroute to Simplified Acquisition workflow. Explain what changes (competition required, different documents, different timeline).
 
 Documents required: son_products, price_reasonableness, required_sources, purchase_request
 Competition: Not required (FAR 13.202(a) permits single source at MPT)
