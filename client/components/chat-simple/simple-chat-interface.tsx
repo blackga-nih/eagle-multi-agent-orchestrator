@@ -494,9 +494,11 @@ export default function SimpleChatInterface() {
                     body: JSON.stringify({
                         session_id: currentSessionId,
                         feedback_text: feedbackText,
-                        conversation_snapshot: messages.map((m) => ({
+                        conversation_snapshot: messages.slice(-20).map((m) => ({
                             role: m.role,
-                            content: m.content,
+                            content: m.content.length > 2000
+                                ? m.content.slice(0, 2000) + '… [truncated]'
+                                : m.content,
                             timestamp: m.timestamp,
                         })),
                     }),

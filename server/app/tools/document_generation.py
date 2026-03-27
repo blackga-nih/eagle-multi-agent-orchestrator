@@ -89,6 +89,9 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
         "sow", "igce", "market_research", "justification", "acquisition_plan",
         "eval_criteria", "security_checklist", "section_508", "cor_certification",
         "contract_type_justification",
+        # Micro-purchase / simplified package documents
+        "son_products", "son_services", "purchase_request",
+        "price_reasonableness", "required_sources",
     }
     if doc_type not in valid_doc_types:
         return {"error": f"Unknown document type: {doc_type}. Supported: {', '.join(sorted(valid_doc_types))}."}

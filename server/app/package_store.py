@@ -22,12 +22,12 @@ from .db_client import get_table, now_iso
 logger = logging.getLogger("eagle.packages")
 
 # -- FAR Thresholds ---------------------------------------------------------
-_MICRO_PURCHASE_THRESHOLD = Decimal("10000")
-_SIMPLIFIED_THRESHOLD = Decimal("250000")
+_MICRO_PURCHASE_THRESHOLD = Decimal("15000")
+_SIMPLIFIED_THRESHOLD = Decimal("350000")
 
 # -- Required documents by acquisition pathway ------------------------------
 _REQUIRED_DOCS: dict[str, list[str]] = {
-    "micro_purchase": [],
+    "micro_purchase": ["son_products", "price_reasonableness", "required_sources", "purchase_request"],
     "simplified": ["igce"],
     "full_competition": ["sow", "igce", "market_research", "acquisition_plan"],
     "sole_source": ["sow", "igce", "justification"],
@@ -51,6 +51,8 @@ _COMPLIANCE_DOC_TO_SLUG: dict[str, str] = {
     "IT Security & Privacy Certification": "security_checklist",
     "Section 508 ICT Evaluation": "section_508",
     "Human Subjects Provisions": "human_subjects",
+    "Price Reasonableness Determination": "price_reasonableness",
+    "Required Sources Documentation": "required_sources",
 }
 
 # -- Valid updatable fields --------------------------------------------------

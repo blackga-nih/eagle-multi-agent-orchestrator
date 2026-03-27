@@ -536,8 +536,8 @@ def _check_micropurchase_guardrail(parsed: dict) -> str | None:
             "message": (
                 f"Micro-purchase guardrail (FAR 13.2): ${ev:,.0f} is below the "
                 f"$15,000 micro-purchase threshold. A formal {dt.upper()} is not required. "
-                f"Micro-purchases use simplified procedures — purchase card or micro-purchase "
-                f"order. No formal acquisition package is needed."
+                f"For micro-purchases, generate these document types instead: "
+                f"son_products, price_reasonableness, required_sources, purchase_request."
             ),
             "threshold": 15000,
             "value": ev,
@@ -1327,7 +1327,8 @@ EAGLE_TOOLS = [
                         "section_508", "cor_certification",
                         "contract_type_justification",
                         "son_products", "son_services", "buy_american",
-                        "subk_plan", "conference_request"
+                        "subk_plan", "conference_request",
+                        "purchase_request", "price_reasonableness", "required_sources",
                     ],
                     "description": "Type of acquisition document to generate",
                 },
@@ -1731,6 +1732,12 @@ def _build_subagent_kb_tools(
                 "knowledge_search or search_far BEFORE web_search.",
                 session_id, query[:100],
             )
+            return json.dumps({
+                "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
+                         "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
+                "query": query,
+                "action_required": "Call knowledge_search or search_far with this query first.",
+            }, indent=2)
         _emit_input("web_search", {"query": query})
         result = exec_web_search(query)
         return json.dumps(result, indent=2, default=str)
@@ -1800,12 +1807,12 @@ def _build_subagent_doc_tools(
         update_existing_key: str = "",
         template_id: str = "",
     ) -> str:
-        """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification). Documents are saved to S3.
+        """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification, SON, Purchase Request, Price Reasonableness, Required Sources). Documents are saved to S3.
 
         CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
 
         Args:
-            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification). For RFP Section L/M or evaluation factors use eval_criteria. For source selection plans use acquisition_plan.
+            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification, son_products, son_services, purchase_request, price_reasonableness, required_sources). For micro-purchases use son_products, purchase_request, price_reasonableness, required_sources.
             title: Descriptive document title that includes the program or acquisition name
             content: REQUIRED — Full document content in markdown with all sections filled using real data
             data: Supplementary structured metadata (estimated_value, period_of_performance, naics_code, etc.)
@@ -2486,12 +2493,12 @@ def _build_all_service_tools(
         update_existing_key: str = "",
         template_id: str = "",
     ) -> str:
-        """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification). Documents are saved to S3.
+        """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification, SON, Purchase Request, Price Reasonableness, Required Sources). Documents are saved to S3.
 
         CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
 
         Args:
-            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification). For RFP Section L/M or evaluation factors use eval_criteria. For source selection plans use acquisition_plan.
+            doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification, son_products, son_services, purchase_request, price_reasonableness, required_sources). For micro-purchases use son_products, purchase_request, price_reasonableness, required_sources.
             title: Descriptive document title that includes the program or acquisition name — e.g. "SOW - Cloud Computing Services for NCI Research Portal" or "IGCE - IT Support Services FY2026". Never use a generic label like "Statement of Work" alone.
             content: REQUIRED — Full document content in markdown with all sections filled using real data from conversation context, intake answers, and web research results. This is the primary document body.
             data: Supplementary structured metadata (estimated_value, period_of_performance, naics_code, etc.) for template population. Not a substitute for content.
@@ -2699,6 +2706,8 @@ def _build_all_service_tools(
     ) -> str:
         """Apply targeted edits to an existing DOCX document. Use for text replacements or checkbox toggles.
 
+        IMPORTANT: When editing multiple documents (e.g. "update all package documents"), process ONE document at a time. Call get_latest_document for one doc_type, apply edits, then move to the next. NEVER load all documents into context simultaneously — this causes context overflow and timeouts.
+
         Args:
             document_key: Full S3 key of the DOCX document (e.g. eagle/{tenant}/packages/{pkg_id}/{doc_type}/v{N}/{file}.docx). Use the s3_key from create_document response or session context -- never invent keys.
             edits: List of edit objects, each with 'search_text' and 'replacement_text'
@@ -2873,6 +2882,8 @@ def _build_all_service_tools(
     @tool(name="get_latest_document")
     def get_latest_document_tool(package_id: str, doc_type: str) -> str:
         """Get latest document version with recent changelog entries.
+
+        IMPORTANT: When editing multiple documents, call this for ONE doc_type at a time. Complete the edit before loading the next document. Never load all documents at once.
 
         Args:
             package_id: Acquisition package ID (required)
@@ -3350,6 +3361,12 @@ def _build_kb_service_tools(
                 "knowledge_search or search_far BEFORE web_search.",
                 session_id, query[:100],
             )
+            return json.dumps({
+                "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
+                         "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
+                "query": query,
+                "action_required": "Call knowledge_search or search_far with this query first.",
+            }, indent=2)
         _emit_input("web_search", {"query": query})
         result = exec_web_search(query)
         _emit("web_search", result)
@@ -3602,7 +3619,11 @@ def _build_supervisor_prompt_body(
         "  Layer 1 — System prompt hints (you already have short descriptions above).\n"
         "  Layer 2 — list_skills(): Discover available skills, agents, and data files with descriptions.\n"
         "  Layer 3 — load_skill(name): Read full skill instructions/workflows to follow them yourself.\n"
-        "  Layer 4 — load_data(name, section?): Fetch reference data (thresholds, vehicles, doc rules).\n"
+        "  Layer 4 — load_data(name, section?): Fetch reference data (vehicles, doc rules).\n"
+        "  IMPORTANT: For policy questions, FAR/DFARS guidance, thresholds, appropriations law,\n"
+        "  protests, or any acquisition-related knowledge query, you MUST use the RESEARCH CASCADE\n"
+        "  below (knowledge_search -> query_compliance_matrix -> web_search). Never use load_data\n"
+        "  as a substitute for knowledge_search or query_compliance_matrix.\n"
         "  Only spawn a specialist subagent when you need expert reasoning, not for simple lookups.\n\n"
         "RESEARCH CASCADE — INTERNAL SOURCES FIRST (applies to MOST responses):\n"
         "CRITICAL: You MUST call knowledge_search BEFORE web_search. Telemetry shows 79% cascade "
@@ -4477,6 +4498,34 @@ async def sdk_query_streaming(
             "stream_async GeneratorExit (client disconnect): session=%s elapsed_ms=%d tools_called=%s",
             session_id, _elapsed, tools_called,
         )
+        # Persist partial work so "continue" sees prior research
+        if session_id and (full_text_parts or tools_called):
+            try:
+                partial_content = []
+                if full_text_parts:
+                    partial_content.append({
+                        "type": "text",
+                        "text": "".join(full_text_parts),
+                    })
+                from .session_store import add_message
+                add_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=partial_content if partial_content else "[interrupted — no text accumulated]",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    metadata={
+                        "interrupted": True,
+                        "elapsed_ms": _elapsed,
+                        "tools_called": tools_called,
+                    },
+                )
+                logger.info(
+                    "Persisted partial work on disconnect: session=%s text_parts=%d tools=%s",
+                    session_id, len(full_text_parts), tools_called,
+                )
+            except Exception:
+                logger.warning("Failed to persist partial work on disconnect: session=%s", session_id)
         return  # Stream was abandoned — skip cleanup yields
     except Exception as exc:
         from strands.types.exceptions import ContextWindowOverflowException

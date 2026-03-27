@@ -92,6 +92,17 @@ export default function FeedbackModal() {
 
       const { messages, lastMessageId } = getSnapshot();
 
+      // Truncate snapshot to avoid oversized payloads that fail at the proxy layer
+      const MAX_SNAPSHOT_MESSAGES = 20;
+      const MAX_CONTENT_LENGTH = 2000;
+      const trimmedMessages = messages.slice(-MAX_SNAPSHOT_MESSAGES).map((m) => ({
+        ...m,
+        content:
+          m.content.length > MAX_CONTENT_LENGTH
+            ? m.content.slice(0, MAX_CONTENT_LENGTH) + '… [truncated]'
+            : m.content,
+      }));
+
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers,
@@ -101,7 +112,7 @@ export default function FeedbackModal() {
           session_id: currentSessionId || undefined,
           page: pathname,
           last_message_id: lastMessageId || undefined,
-          conversation_snapshot: messages,
+          conversation_snapshot: trimmedMessages,
         }),
       });
 

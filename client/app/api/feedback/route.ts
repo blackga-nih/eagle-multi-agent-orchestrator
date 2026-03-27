@@ -28,7 +28,9 @@ export async function POST(request: NextRequest) {
 
     const data = await response.json();
     return NextResponse.json(data);
-  } catch {
-    return NextResponse.json({ error: 'Failed to submit feedback' }, { status: 500 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[feedback proxy] Failed to forward feedback to backend:', msg);
+    return NextResponse.json({ error: `Failed to submit feedback: ${msg}` }, { status: 500 });
   }
 }
