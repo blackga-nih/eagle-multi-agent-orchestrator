@@ -17,30 +17,30 @@ import {
   registerAppTool,
   registerAppResource,
   RESOURCE_MIME_TYPE,
-} from "@modelcontextprotocol/ext-apps/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import cors from "cors";
-import express from "express";
-import fs from "node:fs/promises";
-import path from "node:path";
+} from '@modelcontextprotocol/ext-apps/server';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import cors from 'cors';
+import express from 'express';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 // ── constants ────────────────────────────────────────────────────────────────
 
 const PORT = Number(process.env.PORT ?? 3002);
 
 // Works from both `tsx server.ts` (source) and `node dist/server.js` (compiled)
-const DIST_DIR = import.meta.filename?.endsWith(".ts")
-  ? path.join(import.meta.dirname, "dist")
+const DIST_DIR = import.meta.filename?.endsWith('.ts')
+  ? path.join(import.meta.dirname, 'dist')
   : import.meta.dirname;
 
-const RESOURCE_URI = "ui://excalidraw/mcp-app.html";
+const RESOURCE_URI = 'ui://excalidraw/mcp-app.html';
 
 // ── MCP server ────────────────────────────────────────────────────────────────
 
 const mcpServer = new McpServer({
-  name: "EAGLE Excalidraw MCP App",
-  version: "1.0.0",
+  name: 'EAGLE Excalidraw MCP App',
+  version: '1.0.0',
 });
 
 /**
@@ -51,43 +51,43 @@ const mcpServer = new McpServer({
  */
 registerAppTool(
   mcpServer,
-  "create_diagram",
+  'create_diagram',
   {
-    title: "Create Diagram",
+    title: 'Create Diagram',
     description:
-      "Opens an interactive Excalidraw diagram canvas inside the chat. " +
-      "Provide a title and optional Excalidraw elements JSON array to pre-populate the canvas. " +
-      "The admin can then edit the diagram live.",
+      'Opens an interactive Excalidraw diagram canvas inside the chat. ' +
+      'Provide a title and optional Excalidraw elements JSON array to pre-populate the canvas. ' +
+      'The admin can then edit the diagram live.',
     inputSchema: {
-      type: "object" as const,
+      type: 'object' as const,
       properties: {
         title: {
-          type: "string",
-          description: "Diagram title shown in the canvas header",
+          type: 'string',
+          description: 'Diagram title shown in the canvas header',
         },
         elements: {
-          type: "array",
+          type: 'array',
           description:
-            "Excalidraw elements array. Each element should have: id, type (rectangle|ellipse|arrow|text|diamond|line), x, y, width, height, strokeColor, backgroundColor, text (for text elements), fontSize.",
-          items: { type: "object" },
+            'Excalidraw elements array. Each element should have: id, type (rectangle|ellipse|arrow|text|diamond|line), x, y, width, height, strokeColor, backgroundColor, text (for text elements), fontSize.',
+          items: { type: 'object' },
         },
         appState: {
-          type: "object",
-          description: "Optional Excalidraw appState overrides (viewBackgroundColor, zoom, etc.)",
+          type: 'object',
+          description: 'Optional Excalidraw appState overrides (viewBackgroundColor, zoom, etc.)',
         },
       },
-      required: ["title"],
+      required: ['title'],
     },
     _meta: { ui: { resourceUri: RESOURCE_URI } },
   },
   async (args) => {
     const payload = {
-      title: (args.title as string) ?? "New Diagram",
+      title: (args.title as string) ?? 'New Diagram',
       elements: (args.elements as unknown[]) ?? [],
       appState: (args.appState as Record<string, unknown>) ?? {},
     };
     return {
-      content: [{ type: "text" as const, text: JSON.stringify(payload) }],
+      content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
     };
   },
 );
@@ -98,18 +98,18 @@ registerAppTool(
  */
 registerAppTool(
   mcpServer,
-  "reset_diagram",
+  'reset_diagram',
   {
-    title: "Reset Canvas",
-    description: "Clears all elements from the Excalidraw canvas.",
-    inputSchema: { type: "object" as const, properties: {} },
-    _meta: { ui: { resourceUri: RESOURCE_URI, visibility: ["app"] } },
+    title: 'Reset Canvas',
+    description: 'Clears all elements from the Excalidraw canvas.',
+    inputSchema: { type: 'object' as const, properties: {} },
+    _meta: { ui: { resourceUri: RESOURCE_URI, visibility: ['app'] } },
   },
   async () => ({
     content: [
       {
-        type: "text" as const,
-        text: JSON.stringify({ title: "New Diagram", elements: [], appState: {} }),
+        type: 'text' as const,
+        text: JSON.stringify({ title: 'New Diagram', elements: [], appState: {} }),
       },
     ],
   }),
@@ -124,14 +124,12 @@ registerAppResource(
   RESOURCE_URI,
   { mimeType: RESOURCE_MIME_TYPE },
   async () => {
-    const htmlPath = path.join(DIST_DIR, "mcp-app.html");
+    const htmlPath = path.join(DIST_DIR, 'mcp-app.html');
     let html: string;
     try {
-      html = await fs.readFile(htmlPath, "utf-8");
+      html = await fs.readFile(htmlPath, 'utf-8');
     } catch {
-      throw new Error(
-        `UI bundle not found at ${htmlPath}. Run "npm run build" first.`,
-      );
+      throw new Error(`UI bundle not found at ${htmlPath}. Run "npm run build" first.`);
     }
     return {
       contents: [{ uri: RESOURCE_URI, mimeType: RESOURCE_MIME_TYPE, text: html }],
@@ -143,20 +141,20 @@ registerAppResource(
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: '10mb' }));
 
 // Health check
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", server: "eagle-excalidraw-mcp-app" });
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', server: 'eagle-excalidraw-mcp-app' });
 });
 
 // MCP endpoint — each request creates a fresh stateless transport
-app.post("/mcp", async (req, res) => {
+app.post('/mcp', async (req, res) => {
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });
-  res.on("close", () => transport.close());
+  res.on('close', () => transport.close());
   await mcpServer.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });

@@ -19,7 +19,9 @@ export default defineConfig({
 
   use: {
     // Base URL for the deployed application
-    baseURL: process.env.BASE_URL || 'http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com',
+    baseURL:
+      process.env.BASE_URL ||
+      'http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com',
 
     // Reuse Cognito session saved by global-setup — all tests start authenticated
     storageState: 'tests/.auth/user.json',

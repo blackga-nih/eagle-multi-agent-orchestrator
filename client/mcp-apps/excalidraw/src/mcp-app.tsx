@@ -5,22 +5,22 @@
  * renders an interactive Excalidraw canvas, and lets admins
  * edit diagrams live inside the EAGLE chat interface.
  */
-import React, { useCallback, useEffect, useState } from "react";
-import { createRoot } from "react-dom/client";
-import { Excalidraw, exportToBlob } from "@excalidraw/excalidraw";
-import { useApp, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
+import React, { useCallback, useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Excalidraw, exportToBlob } from '@excalidraw/excalidraw';
+import { useApp, useHostStyles } from '@modelcontextprotocol/ext-apps/react';
 import type {
   ExcalidrawImperativeAPI,
   ExcalidrawInitialDataState,
-} from "@excalidraw/excalidraw/types";
-import type { McpUiHostContext } from "@modelcontextprotocol/ext-apps";
+} from '@excalidraw/excalidraw/types';
+import type { McpUiHostContext } from '@modelcontextprotocol/ext-apps';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
 interface DiagramPayload {
   title: string;
-  elements: ExcalidrawInitialDataState["elements"];
-  appState?: Partial<ExcalidrawInitialDataState["appState"]>;
+  elements: ExcalidrawInitialDataState['elements'];
+  appState?: Partial<ExcalidrawInitialDataState['appState']>;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -28,11 +28,11 @@ interface DiagramPayload {
 function parseDiagramPayload(text: string): DiagramPayload | null {
   try {
     const data = JSON.parse(text);
-    if (typeof data === "object" && data !== null) {
+    if (typeof data === 'object' && data !== null) {
       return {
-        title: (data.title as string) ?? "Diagram",
-        elements: (data.elements as ExcalidrawInitialDataState["elements"]) ?? [],
-        appState: (data.appState as Partial<ExcalidrawInitialDataState["appState"]>) ?? {},
+        title: (data.title as string) ?? 'Diagram',
+        elements: (data.elements as ExcalidrawInitialDataState['elements']) ?? [],
+        appState: (data.appState as Partial<ExcalidrawInitialDataState['appState']>) ?? {},
       };
     }
   } catch {
@@ -55,16 +55,16 @@ function ToolbarButton({ onClick, title, children }: ToolbarButtonProps) {
       onClick={onClick}
       title={title}
       style={{
-        padding: "4px 10px",
+        padding: '4px 10px',
         borderRadius: 6,
-        border: "1px solid #d0d7de",
-        background: "#f6f8fa",
-        cursor: "pointer",
+        border: '1px solid #d0d7de',
+        background: '#f6f8fa',
+        cursor: 'pointer',
         fontSize: 12,
-        display: "flex",
-        alignItems: "center",
+        display: 'flex',
+        alignItems: 'center',
         gap: 4,
-        color: "#24292f",
+        color: '#24292f',
       }}
     >
       {children}
@@ -76,9 +76,9 @@ function ToolbarButton({ onClick, title, children }: ToolbarButtonProps) {
 
 function ExcalidrawMcpApp() {
   const [diagram, setDiagram] = useState<DiagramPayload>({
-    title: "New Diagram",
+    title: 'New Diagram',
     elements: [],
-    appState: { viewBackgroundColor: "#ffffff" },
+    appState: { viewBackgroundColor: '#ffffff' },
   });
   const [excalidrawApi, setExcalidrawApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [hostCtx, setHostCtx] = useState<McpUiHostContext | undefined>();
@@ -87,13 +87,13 @@ function ExcalidrawMcpApp() {
   // ── MCP App lifecycle ──────────────────────────────────────────────────────
 
   const { app, error } = useApp({
-    appInfo: { name: "EAGLE Excalidraw", version: "1.0.0" },
+    appInfo: { name: 'EAGLE Excalidraw', version: '1.0.0' },
     capabilities: {},
     onAppCreated: (a) => {
       // Receive diagram data from tool result (create_diagram or reset_diagram)
       a.ontoolresult = async (result) => {
-        const textItem = result.content?.find((c) => c.type === "text");
-        if (!textItem || textItem.type !== "text") return;
+        const textItem = result.content?.find((c) => c.type === 'text');
+        if (!textItem || textItem.type !== 'text') return;
         const payload = parseDiagramPayload(textItem.text);
         if (payload) {
           setDiagram(payload);
@@ -116,9 +116,11 @@ function ExcalidrawMcpApp() {
   useEffect(() => {
     if (!excalidrawApi || !diagram.elements) return;
     excalidrawApi.updateScene({
-      elements: diagram.elements as Parameters<ExcalidrawImperativeAPI["updateScene"]>[0]["elements"],
+      elements: diagram.elements as Parameters<
+        ExcalidrawImperativeAPI['updateScene']
+      >[0]['elements'],
       appState: {
-        viewBackgroundColor: "#ffffff",
+        viewBackgroundColor: '#ffffff',
         ...(diagram.appState ?? {}),
       },
     });
@@ -129,29 +131,29 @@ function ExcalidrawMcpApp() {
 
   const handleClear = useCallback(async () => {
     if (!app) return;
-    await app.callServerTool({ name: "reset_diagram", arguments: {} });
+    await app.callServerTool({ name: 'reset_diagram', arguments: {} });
   }, [app]);
 
   const handleExportPng = useCallback(async () => {
     if (!excalidrawApi) return;
-    setExportStatus("Exporting…");
+    setExportStatus('Exporting…');
     try {
       const blob = await exportToBlob({
         elements: excalidrawApi.getSceneElements(),
         appState: excalidrawApi.getAppState(),
         files: excalidrawApi.getFiles(),
-        mimeType: "image/png",
+        mimeType: 'image/png',
       });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
-      a.download = `${diagram.title.replace(/\s+/g, "-")}.png`;
+      a.download = `${diagram.title.replace(/\s+/g, '-')}.png`;
       a.click();
       URL.revokeObjectURL(url);
-      setExportStatus("Exported!");
+      setExportStatus('Exported!');
       setTimeout(() => setExportStatus(null), 2000);
     } catch (e) {
-      setExportStatus("Export failed");
+      setExportStatus('Export failed');
       console.error(e);
     }
   }, [excalidrawApi, diagram.title]);
@@ -159,10 +161,10 @@ function ExcalidrawMcpApp() {
   const handleSendToChat = useCallback(async () => {
     if (!app || !excalidrawApi) return;
     const elements = excalidrawApi.getSceneElements();
-    const summary = `I've updated the diagram "${diagram.title}" with ${elements.length} element(s). The canvas now contains: ${elements.map((e) => e.type).join(", ")}.`;
+    const summary = `I've updated the diagram "${diagram.title}" with ${elements.length} element(s). The canvas now contains: ${elements.map((e) => e.type).join(', ')}.`;
     await app.sendMessage({
-      role: "user",
-      content: [{ type: "text", text: summary }],
+      role: 'user',
+      content: [{ type: 'text', text: summary }],
     });
   }, [app, excalidrawApi, diagram.title]);
 
@@ -170,7 +172,7 @@ function ExcalidrawMcpApp() {
 
   if (error) {
     return (
-      <div style={{ padding: 16, color: "red" }}>
+      <div style={{ padding: 16, color: 'red' }}>
         <strong>MCP App connection error:</strong> {error.message}
       </div>
     );
@@ -181,10 +183,10 @@ function ExcalidrawMcpApp() {
   return (
     <div
       style={{
-        display: "flex",
-        flexDirection: "column",
-        width: "100%",
-        height: "100%",
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: '100%',
         paddingTop: (safeArea as { top?: number }).top ?? 0,
         paddingRight: (safeArea as { right?: number }).right ?? 0,
         paddingBottom: (safeArea as { bottom?: number }).bottom ?? 0,
@@ -194,16 +196,16 @@ function ExcalidrawMcpApp() {
       {/* Toolbar */}
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
+          display: 'flex',
+          alignItems: 'center',
           gap: 8,
-          padding: "6px 12px",
-          borderBottom: "1px solid #d0d7de",
-          background: "#f6f8fa",
+          padding: '6px 12px',
+          borderBottom: '1px solid #d0d7de',
+          background: '#f6f8fa',
           flexShrink: 0,
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: 13, color: "#003366", marginRight: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: 13, color: '#003366', marginRight: 8 }}>
           🎨 {diagram.title}
         </span>
 
@@ -220,20 +222,18 @@ function ExcalidrawMcpApp() {
         </ToolbarButton>
 
         {exportStatus && (
-          <span style={{ fontSize: 12, color: "#57606a", marginLeft: 4 }}>
-            {exportStatus}
-          </span>
+          <span style={{ fontSize: 12, color: '#57606a', marginLeft: 4 }}>{exportStatus}</span>
         )}
       </div>
 
       {/* Excalidraw canvas */}
-      <div style={{ flex: 1, position: "relative" }}>
+      <div style={{ flex: 1, position: 'relative' }}>
         <Excalidraw
           excalidrawAPI={(api) => setExcalidrawApi(api)}
           initialData={{
             elements: diagram.elements ?? [],
             appState: {
-              viewBackgroundColor: "#ffffff",
+              viewBackgroundColor: '#ffffff',
               ...(diagram.appState ?? {}),
             },
           }}
@@ -250,7 +250,7 @@ function ExcalidrawMcpApp() {
 
 // ── bootstrap ─────────────────────────────────────────────────────────────────
 
-createRoot(document.getElementById("root")!).render(
+createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ExcalidrawMcpApp />
   </React.StrictMode>,

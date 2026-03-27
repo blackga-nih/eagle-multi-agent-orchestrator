@@ -36,8 +36,7 @@
     "mermaid": "^11.4.1",
     "dompurify": "^3.3.2",
     "fast-xml-parser": "^5.5.7",
-    "flatted": "^3.4.2",
-    "nanoid": "^5.0.9"
+    "flatted": "^3.4.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^2.1.4",
