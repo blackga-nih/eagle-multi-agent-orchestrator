@@ -1,3 +1,8 @@
 # Formatting normalization commits
-# Add commit SHAs here after running one-time format passes
 # Configure with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: add ruff format config and normalize Python code
+3fd551a
+
+# style: add Prettier, format frontend code, add format recipes
+1262751
