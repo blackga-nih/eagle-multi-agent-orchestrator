@@ -2302,11 +2302,11 @@ def _make_load_data_tool(
 ):
     @tool(name="load_data")
     def load_data_tool(name: str, section: str = "") -> str:
-        """Load reference data from the eagle-plugin data directory. Use this to access thresholds, contract types, document requirements, approval chains, contract vehicles, and other acquisition reference data on demand.
+        """Load reference data from the eagle-plugin data directory. Use this to access contract vehicles, document requirement rules, and approval chain definitions. For acquisition thresholds and policy questions, use knowledge_search or query_compliance_matrix instead — they are authoritative.
 
         Args:
-            name: Data file name (e.g. "matrix", "thresholds", "contract-vehicles")
-            section: Optional top-level key to extract (e.g. "thresholds", "doc_rules", "approval_chains", "contract_types"). Omit to get the full file.
+            name: Data file name (e.g. "contract-vehicles", "doc-rules")
+            section: Optional top-level key to extract (e.g. "doc_rules", "approval_chains", "contract_types"). Omit to get the full file.
         """
         config = _load_plugin_config()
         data_index = config.get("data", {})
@@ -3660,7 +3660,11 @@ def _build_supervisor_prompt_body(
         "  EXCEPTIONS (skip cascade): Greetings, document edits, package management ops, "
         "or when user explicitly requests web search.\n\n"
         "  CITATION — In final answers, include a Sources section with title + s3_key for KB docs "
-        "and URL for web sources. If no KB results, explicitly say so.\n\n"
+        "and URL for web sources. If no KB results, explicitly say so.\n"
+        "  FAR SECTION ACCURACY — Only cite FAR section numbers that appear in the search_far "
+        "results or knowledge_fetch content. Never invent or approximate FAR section numbers. "
+        "For example, cite 16.505(b)(2)(i) not 16.507-6 — if a section number is not in the "
+        "retrieved text, do not cite it.\n\n"
         "COLLECT BEFORE RESEARCH — Before performing web research for any document, you MUST\n"
         "first collect a minimum set of information from the user. If any item is missing,\n"
         "ASK the user — do NOT assume or invent values.\n\n"
@@ -3761,11 +3765,10 @@ def _build_supervisor_prompt_body(
         "and suggest corrective action. Never fabricate success.\n\n"
         "FAST vs DEEP routing:\n"
         "  FAST (seconds):\n"
-        "    - load_data('matrix', 'thresholds') for threshold lookups.\n"
-        "    - load_data('contract-vehicles', 'nitaac') for vehicle details.\n"
-        "    - query_compliance_matrix for computed compliance decisions.\n"
+        "    - knowledge_search → knowledge_fetch for threshold, policy, and regulatory questions.\n"
+        "    - query_compliance_matrix for computed compliance decisions and threshold validation.\n"
         "    - search_far → knowledge_fetch(s3_key) for FAR/DFARS clause lookups (search, then read full doc).\n"
-        "    - knowledge_search → knowledge_fetch for KB documents.\n"
+        "    - load_data('contract-vehicles', 'nitaac') for vehicle details.\n"
         "    - web_search → web_fetch(top URLs) for current market data, news, vendor info, pricing.\n"
         "    - load_skill(name) to read a workflow and follow it yourself.\n"
         "  DEEP (specialist): Delegate to specialist subagents only for complex analysis,\n"
