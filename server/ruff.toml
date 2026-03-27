@@ -13,3 +13,5 @@ select = ["E", "F", "W", "I"]
 "app/sdk_agentic_service.py" = ["E402"]
 # F401: try/except availability probes for optional dependencies
 "app/document_export.py" = ["F401"]
+# E501: LLM system prompts in triple-quoted strings need readable long lines
+"app/tools/create_document_support.py" = ["E501"]
