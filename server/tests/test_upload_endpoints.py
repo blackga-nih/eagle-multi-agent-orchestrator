@@ -463,11 +463,10 @@ class TestS3TemplateEndpoints:
         """GET /api/templates/s3/download-url returns a presigned URL for valid template keys."""
         valid_key = "eagle-knowledge-base/approved/supervisor-core/essential-templates/1.a. AP Under SAT.docx"
 
-        with patch("boto3.client") as mock_boto3_client:
-            mock_s3 = MagicMock()
-            mock_s3.generate_presigned_url.return_value = "https://signed.example/template"
-            mock_boto3_client.return_value = mock_s3
+        mock_s3 = MagicMock()
+        mock_s3.generate_presigned_url.return_value = "https://signed.example/template"
 
+        with patch("app.routers.templates.get_s3", return_value=mock_s3):
             response = client.get(f"/api/templates/s3/download-url?s3_key={valid_key}")
 
         assert response.status_code == 200

@@ -168,6 +168,8 @@ def test_exec_knowledge_search_query_matches_title(monkeypatch):
     ddb = MagicMock()
     ddb.Table.return_value = table
     monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
+    # Suppress built-in KB entries so only DynamoDB mock results participate
+    monkeypatch.setattr(kt, "BUILTIN_KB_ENTRIES", [])
 
     result = kt.exec_knowledge_search(
         {"query": "IDIQ Minimum"},
@@ -233,6 +235,8 @@ def test_exec_knowledge_search_query_no_match_returns_empty(monkeypatch):
     ddb = MagicMock()
     ddb.Table.return_value = table
     monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
+    # Suppress built-in KB entries so only DynamoDB mock results participate
+    monkeypatch.setattr(kt, "BUILTIN_KB_ENTRIES", [])
 
     result = kt.exec_knowledge_search(
         {"query": "B-999999"},
@@ -258,6 +262,8 @@ def test_exec_knowledge_search_query_matches_summary(monkeypatch):
     ddb = MagicMock()
     ddb.Table.return_value = table
     monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
+    # Suppress built-in KB entries so only DynamoDB mock results participate
+    monkeypatch.setattr(kt, "BUILTIN_KB_ENTRIES", [])
 
     result = kt.exec_knowledge_search(
         {"query": "B-302358"},

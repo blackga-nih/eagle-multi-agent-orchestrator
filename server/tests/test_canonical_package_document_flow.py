@@ -214,7 +214,7 @@ def test_forced_document_creation_carries_document_context(monkeypatch):
             "word_count": 200,
         }
 
-    monkeypatch.setattr("app.agentic_service._exec_create_document", fake_exec_create_document)
+    monkeypatch.setattr("app.tools.legacy_dispatch.exec_create_document", fake_exec_create_document)
 
     prompt = (
         "You are assisting with edits to an acquisition document in EAGLE.\n\n"
@@ -307,7 +307,6 @@ def test_extract_document_context_from_prompt():
 
 
 def test_create_document_tool_infers_doc_context_from_prompt(monkeypatch):
-    import app.agentic_service as agentic_service
     from app.strands_agentic_service import _build_all_service_tools
 
     captured = {}
@@ -318,7 +317,7 @@ def test_create_document_tool_infers_doc_context_from_prompt(monkeypatch):
         captured["session_id"] = session_id
         return {"status": "saved", "document_type": "sow", "title": params.get("title", "")}
 
-    monkeypatch.setitem(agentic_service.TOOL_DISPATCH, "create_document", fake_create_document)
+    monkeypatch.setattr("app.tools.legacy_dispatch.exec_create_document", fake_create_document)
 
     prompt = (
         "[DOCUMENT CONTEXT]\n\n"

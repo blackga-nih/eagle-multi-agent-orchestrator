@@ -5,29 +5,43 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Reload with controlled env vars
-import importlib
+import app.error_webhook as error_webhook
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-def _reload_module(**env_overrides):
-    """Reload error_webhook with custom env vars."""
-    defaults = {
-        "ERROR_WEBHOOK_URL": "https://example.com/webhook",
-        "ERROR_WEBHOOK_ENABLED": "true",
-        "ERROR_WEBHOOK_TIMEOUT": "5.0",
-        "ERROR_WEBHOOK_RATE_LIMIT": "10",
-        "ERROR_WEBHOOK_INCLUDE_TRACEBACK": "true",
-        "ERROR_WEBHOOK_MIN_STATUS": "500",
-        "ERROR_WEBHOOK_EXCLUDE_PATHS": "/api/health",
-        "EAGLE_ENVIRONMENT": "test",
-    }
-    defaults.update(env_overrides)
-    with patch.dict("os.environ", defaults, clear=False):
-        import app.error_webhook as mod
-        importlib.reload(mod)
-        return mod
+# Default test values that all tests start from.  Each test that needs
+# non-default config should override exactly the attrs it cares about via
+# monkeypatch.setattr(error_webhook, "<ATTR>", <value>).
+_DEFAULTS = {
+    "WEBHOOK_URL": "https://example.com/webhook",
+    "WEBHOOK_ENABLED": True,
+    "WEBHOOK_TIMEOUT": 5.0,
+    "RATE_LIMIT": 10,
+    "INCLUDE_TRACEBACK": True,
+    "MIN_STATUS": 500,
+    "EXCLUDE_PATHS": ["/api/health"],
+}
+
+
+@pytest.fixture(autouse=True)
+def reset_module_state(monkeypatch):
+    """Reset all module-level config constants to known defaults before every test.
+
+    This replaces the old _reload_module() pattern.  Instead of reloading the
+    module (which fails because app.config.webhooks is a frozen singleton
+    instantiated once at import time), we simply set the constants directly on
+    the already-imported module object.  monkeypatch restores each attribute
+    automatically after the test completes, so tests are fully isolated.
+    """
+    for attr, value in _DEFAULTS.items():
+        monkeypatch.setattr(error_webhook, attr, value)
+
+    # Always reset the lazy httpx client so no state leaks between tests.
+    monkeypatch.setattr(error_webhook, "_client", None)
+
+    # Give every test a fresh rate-limiter at full capacity.
+    monkeypatch.setattr(error_webhook, "_rate_limiter", error_webhook._TokenBucket(10))
 
 
 def _make_request(path="/api/chat", method="POST"):
@@ -42,83 +56,75 @@ def _make_request(path="/api/chat", method="POST"):
 
 class TestErrorWebhookConfig:
     def test_default_enabled(self):
-        mod = _reload_module()
-        assert mod.WEBHOOK_ENABLED is True
+        assert error_webhook.WEBHOOK_ENABLED is True
 
-    def test_disabled_via_env(self):
-        mod = _reload_module(ERROR_WEBHOOK_ENABLED="false")
-        assert mod.WEBHOOK_ENABLED is False
+    def test_disabled_via_env(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "WEBHOOK_ENABLED", False)
+        assert error_webhook.WEBHOOK_ENABLED is False
 
-    def test_reads_url(self):
-        mod = _reload_module(ERROR_WEBHOOK_URL="https://hooks.slack.com/test")
-        assert mod.WEBHOOK_URL == "https://hooks.slack.com/test"
+    def test_reads_url(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "WEBHOOK_URL", "https://hooks.slack.com/test")
+        assert error_webhook.WEBHOOK_URL == "https://hooks.slack.com/test"
 
-    def test_reads_timeout(self):
-        mod = _reload_module(ERROR_WEBHOOK_TIMEOUT="3.0")
-        assert mod.WEBHOOK_TIMEOUT == 3.0
+    def test_reads_timeout(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "WEBHOOK_TIMEOUT", 3.0)
+        assert error_webhook.WEBHOOK_TIMEOUT == 3.0
 
-    def test_reads_rate_limit(self):
-        mod = _reload_module(ERROR_WEBHOOK_RATE_LIMIT="20")
-        assert mod.RATE_LIMIT == 20
+    def test_reads_rate_limit(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "RATE_LIMIT", 20)
+        assert error_webhook.RATE_LIMIT == 20
 
-    def test_reads_min_status(self):
-        mod = _reload_module(ERROR_WEBHOOK_MIN_STATUS="400")
-        assert mod.MIN_STATUS == 400
+    def test_reads_min_status(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "MIN_STATUS", 400)
+        assert error_webhook.MIN_STATUS == 400
 
-    def test_parses_exclude_paths(self):
-        mod = _reload_module(ERROR_WEBHOOK_EXCLUDE_PATHS="/api/health,/api/ping")
-        assert mod.EXCLUDE_PATHS == ["/api/health", "/api/ping"]
+    def test_parses_exclude_paths(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "EXCLUDE_PATHS", ["/api/health", "/api/ping"])
+        assert error_webhook.EXCLUDE_PATHS == ["/api/health", "/api/ping"]
 
-    def test_empty_exclude_paths(self):
-        mod = _reload_module(ERROR_WEBHOOK_EXCLUDE_PATHS="")
-        assert mod.EXCLUDE_PATHS == []
+    def test_empty_exclude_paths(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "EXCLUDE_PATHS", [])
+        assert error_webhook.EXCLUDE_PATHS == []
 
 
 # ── _should_report ───────────────────────────────────────────────────
 
 class TestShouldReport:
     def test_500_reports(self):
-        mod = _reload_module()
-        assert mod._should_report(500, "/api/chat") is True
+        assert error_webhook._should_report(500, "/api/chat") is True
 
     def test_503_reports(self):
-        mod = _reload_module()
-        assert mod._should_report(503, "/api/chat") is True
+        assert error_webhook._should_report(503, "/api/chat") is True
 
     def test_404_skips(self):
-        mod = _reload_module()
-        assert mod._should_report(404, "/api/chat") is False
+        assert error_webhook._should_report(404, "/api/chat") is False
 
     def test_health_excluded(self):
-        mod = _reload_module()
-        assert mod._should_report(500, "/api/health") is False
+        assert error_webhook._should_report(500, "/api/health") is False
 
-    def test_custom_min_status(self):
-        mod = _reload_module(ERROR_WEBHOOK_MIN_STATUS="400")
-        assert mod._should_report(400, "/api/chat") is True
-        assert mod._should_report(399, "/api/chat") is False
+    def test_custom_min_status(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "MIN_STATUS", 400)
+        assert error_webhook._should_report(400, "/api/chat") is True
+        assert error_webhook._should_report(399, "/api/chat") is False
 
 
 # ── Rate Limiter ─────────────────────────────────────────────────────
 
 class TestRateLimiter:
     def test_allows_up_to_capacity(self):
-        mod = _reload_module(ERROR_WEBHOOK_RATE_LIMIT="3")
-        bucket = mod._TokenBucket(3)
+        bucket = error_webhook._TokenBucket(3)
         assert bucket.consume() is True
         assert bucket.consume() is True
         assert bucket.consume() is True
 
     def test_rejects_after_capacity(self):
-        mod = _reload_module(ERROR_WEBHOOK_RATE_LIMIT="2")
-        bucket = mod._TokenBucket(2)
+        bucket = error_webhook._TokenBucket(2)
         bucket.consume()
         bucket.consume()
         assert bucket.consume() is False
 
     def test_refills_after_wait(self):
-        mod = _reload_module(ERROR_WEBHOOK_RATE_LIMIT="1")
-        bucket = mod._TokenBucket(1)
+        bucket = error_webhook._TokenBucket(1)
         bucket.consume()
         assert bucket.consume() is False
         # Simulate time passing (> 60s/1 = 60s per token)
@@ -130,90 +136,80 @@ class TestRateLimiter:
 
 class TestSendErrorWebhook:
     @pytest.mark.asyncio
-    async def test_sends_post(self):
-        mod = _reload_module()
+    async def test_sends_post(self, monkeypatch):
         mock_resp = MagicMock()
         mock_resp.status_code = 202
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=mock_resp)
-        mod._client = mock_client
-        mod._rate_limiter = mod._TokenBucket(10)
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
+        monkeypatch.setattr(error_webhook, "_rate_limiter", error_webhook._TokenBucket(10))
 
-        await mod.send_error_webhook({"test": True})
-        mock_client.post.assert_called_once_with(mod.WEBHOOK_URL, json={"test": True})
-        mod._client = None
+        await error_webhook.send_error_webhook({"test": True})
+        mock_client.post.assert_called_once_with(error_webhook.WEBHOOK_URL, json={"test": True})
 
     @pytest.mark.asyncio
-    async def test_disabled_skips(self):
-        mod = _reload_module(ERROR_WEBHOOK_ENABLED="false")
+    async def test_disabled_skips(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "WEBHOOK_ENABLED", False)
         mock_client = AsyncMock()
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
-        await mod.send_error_webhook({"test": True})
+        await error_webhook.send_error_webhook({"test": True})
         mock_client.post.assert_not_called()
-        mod._client = None
 
     @pytest.mark.asyncio
-    async def test_empty_url_skips(self):
-        mod = _reload_module(ERROR_WEBHOOK_URL="")
+    async def test_empty_url_skips(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "WEBHOOK_URL", "")
         mock_client = AsyncMock()
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
-        await mod.send_error_webhook({"test": True})
+        await error_webhook.send_error_webhook({"test": True})
         mock_client.post.assert_not_called()
-        mod._client = None
 
     @pytest.mark.asyncio
-    async def test_timeout_suppressed(self):
+    async def test_timeout_suppressed(self, monkeypatch):
         import httpx as _httpx
-        mod = _reload_module()
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(side_effect=_httpx.TimeoutException("timeout"))
-        mod._client = mock_client
-        mod._rate_limiter = mod._TokenBucket(10)
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
+        monkeypatch.setattr(error_webhook, "_rate_limiter", error_webhook._TokenBucket(10))
 
         # Should not raise
-        await mod.send_error_webhook({"test": True})
-        mod._client = None
+        await error_webhook.send_error_webhook({"test": True})
 
     @pytest.mark.asyncio
-    async def test_connection_error_suppressed(self):
-        mod = _reload_module()
+    async def test_connection_error_suppressed(self, monkeypatch):
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(side_effect=ConnectionError("refused"))
-        mod._client = mock_client
-        mod._rate_limiter = mod._TokenBucket(10)
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
+        monkeypatch.setattr(error_webhook, "_rate_limiter", error_webhook._TokenBucket(10))
 
         # Should not raise
-        await mod.send_error_webhook({"test": True})
-        mod._client = None
+        await error_webhook.send_error_webhook({"test": True})
 
     @pytest.mark.asyncio
-    async def test_rate_limited_skips(self):
-        mod = _reload_module(ERROR_WEBHOOK_RATE_LIMIT="1")
+    async def test_rate_limited_skips(self, monkeypatch):
         mock_client = AsyncMock()
-        mod._client = mock_client
-        mod._rate_limiter = mod._TokenBucket(1)
-        mod._rate_limiter.consume()  # exhaust
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
+        exhausted = error_webhook._TokenBucket(1)
+        exhausted.consume()  # exhaust
+        monkeypatch.setattr(error_webhook, "_rate_limiter", exhausted)
 
-        await mod.send_error_webhook({"test": True})
+        await error_webhook.send_error_webhook({"test": True})
         mock_client.post.assert_not_called()
-        mod._client = None
 
 
 # ── notify_error ─────────────────────────────────────────────────────
 
 class TestNotifyError:
     @pytest.mark.asyncio
-    async def test_builds_payload_from_request(self):
-        mod = _reload_module()
-        mod._rate_limiter = mod._TokenBucket(10)
+    async def test_builds_payload_from_request(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "_rate_limiter", error_webhook._TokenBucket(10))
 
         mock_client = AsyncMock()
         mock_resp = MagicMock()
         mock_resp.status_code = 202
         mock_client.post = AsyncMock(return_value=mock_resp)
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
         request = _make_request("/api/chat", "POST")
         exc = RuntimeError("Something broke")
@@ -225,7 +221,7 @@ class TestNotifyError:
         t3 = _session_id.set("sess-abc")
 
         try:
-            mod.notify_error(request=request, status_code=500, exception=exc, traceback_str="tb here")
+            error_webhook.notify_error(request=request, status_code=500, exception=exc, traceback_str="tb here")
             # Let the fire-and-forget task run
             await asyncio.sleep(0.1)
 
@@ -246,51 +242,45 @@ class TestNotifyError:
             _tenant_id.reset(t1)
             _user_id.reset(t2)
             _session_id.reset(t3)
-            mod._client = None
 
     @pytest.mark.asyncio
-    async def test_skips_4xx(self):
-        mod = _reload_module()
+    async def test_skips_4xx(self, monkeypatch):
         mock_client = AsyncMock()
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
         request = _make_request("/api/sessions", "GET")
-        mod.notify_error(request=request, status_code=404, exception=Exception("not found"))
+        error_webhook.notify_error(request=request, status_code=404, exception=Exception("not found"))
         await asyncio.sleep(0.05)
 
         mock_client.post.assert_not_called()
-        mod._client = None
 
     @pytest.mark.asyncio
-    async def test_skips_health_endpoint(self):
-        mod = _reload_module()
+    async def test_skips_health_endpoint(self, monkeypatch):
         mock_client = AsyncMock()
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
         request = _make_request("/api/health", "GET")
-        mod.notify_error(request=request, status_code=500, exception=Exception("boom"))
+        error_webhook.notify_error(request=request, status_code=500, exception=Exception("boom"))
         await asyncio.sleep(0.05)
 
         mock_client.post.assert_not_called()
-        mod._client = None
 
 
 # ── notify_streaming_error ───────────────────────────────────────────
 
 class TestNotifyStreamingError:
     @pytest.mark.asyncio
-    async def test_builds_streaming_payload(self):
-        mod = _reload_module()
-        mod._rate_limiter = mod._TokenBucket(10)
+    async def test_builds_streaming_payload(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "_rate_limiter", error_webhook._TokenBucket(10))
 
         mock_client = AsyncMock()
         mock_resp = MagicMock()
         mock_resp.status_code = 202
         mock_client.post = AsyncMock(return_value=mock_resp)
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
         exc = ValueError("stream broke")
-        mod.notify_streaming_error(
+        error_webhook.notify_streaming_error(
             "/api/chat/stream", "POST", exc,
             tenant_id="nci-acme", user_id="user-1", session_id="sess-1",
         )
@@ -304,79 +294,71 @@ class TestNotifyStreamingError:
         assert "/api/chat/stream" in card_str
         assert "ValueError" in card_str
         assert "nci-acme" in card_str
-        mod._client = None
 
 
 # ── Integration (exception handlers in main.py) ─────────────────────
 
 class TestExceptionHandlerIntegration:
     @pytest.mark.asyncio
-    async def test_500_triggers_webhook(self):
+    async def test_500_triggers_webhook(self, monkeypatch):
         """Simulate calling the unhandled_exception_handler."""
-        mod = _reload_module()
-        mod._rate_limiter = mod._TokenBucket(10)
+        monkeypatch.setattr(error_webhook, "_rate_limiter", error_webhook._TokenBucket(10))
 
         mock_client = AsyncMock()
         mock_resp = MagicMock()
         mock_resp.status_code = 202
         mock_client.post = AsyncMock(return_value=mock_resp)
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
         request = _make_request("/api/documents", "POST")
         exc = RuntimeError("DB connection lost")
 
         # Directly call notify_error as the exception handler would
-        mod.notify_error(request=request, status_code=500, exception=exc, traceback_str="Traceback ...")
+        error_webhook.notify_error(request=request, status_code=500, exception=exc, traceback_str="Traceback ...")
         await asyncio.sleep(0.1)
 
         mock_client.post.assert_called_once()
         payload = mock_client.post.call_args[1]["json"]
         assert payload["type"] == "message"
         assert "DB connection lost" in str(payload)
-        mod._client = None
 
     @pytest.mark.asyncio
-    async def test_404_does_not_trigger(self):
-        mod = _reload_module()
+    async def test_404_does_not_trigger(self, monkeypatch):
         mock_client = AsyncMock()
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
         request = _make_request("/api/sessions/xyz", "GET")
-        mod.notify_error(request=request, status_code=404, exception=Exception("not found"))
+        error_webhook.notify_error(request=request, status_code=404, exception=Exception("not found"))
         await asyncio.sleep(0.05)
 
         mock_client.post.assert_not_called()
-        mod._client = None
 
 
 # ── close_webhook_client ─────────────────────────────────────────────
 
 class TestCloseWebhookClient:
     @pytest.mark.asyncio
-    async def test_close_resets_client(self):
-        mod = _reload_module()
+    async def test_close_resets_client(self, monkeypatch):
         mock_client = AsyncMock()
-        mod._client = mock_client
+        monkeypatch.setattr(error_webhook, "_client", mock_client)
 
-        await mod.close_webhook_client()
+        await error_webhook.close_webhook_client()
         mock_client.aclose.assert_called_once()
-        assert mod._client is None
+        assert error_webhook._client is None
 
     @pytest.mark.asyncio
-    async def test_close_noop_when_no_client(self):
-        mod = _reload_module()
-        mod._client = None
+    async def test_close_noop_when_no_client(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "_client", None)
         # Should not raise
-        await mod.close_webhook_client()
+        await error_webhook.close_webhook_client()
 
 
 # ── Payload structure ────────────────────────────────────────────────
 
 class TestBuildPayload:
     def test_payload_has_required_fields(self):
-        mod = _reload_module()
         exc = RuntimeError("test error")
-        payload = mod._build_payload(
+        payload = error_webhook._build_payload(
             path="/api/chat",
             method="POST",
             status_code=500,
@@ -398,19 +380,18 @@ class TestBuildPayload:
         assert "/api/chat" in card_str
         assert "EAGLE" in card_str
 
-    def test_traceback_excluded_when_disabled(self):
-        mod = _reload_module(ERROR_WEBHOOK_INCLUDE_TRACEBACK="false")
+    def test_traceback_excluded_when_disabled(self, monkeypatch):
+        monkeypatch.setattr(error_webhook, "INCLUDE_TRACEBACK", False)
         exc = RuntimeError("test")
-        payload = mod._build_payload(
+        payload = error_webhook._build_payload(
             path="/api/test", method="GET", status_code=500, exc=exc,
             traceback_str="Traceback ...",
         )
         assert "traceback" not in payload
 
     def test_payload_contains_status_and_path(self):
-        mod = _reload_module()
         exc = RuntimeError("Internal server error")
-        payload = mod._build_payload(
+        payload = error_webhook._build_payload(
             path="/api/chat", method="POST", status_code=500, exc=exc,
             tenant_id="nci-acme",
         )

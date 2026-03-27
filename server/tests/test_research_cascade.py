@@ -42,7 +42,8 @@ def test_kb_is_primary_source(supervisor_prompt):
 
 
 def test_no_skip_to_web(supervisor_prompt):
-    assert "Do NOT skip to web_search" in supervisor_prompt
+    # The prompt enforces KB-first ordering; assert the STEP 1 "NEVER skip" language is present
+    assert "NEVER skip" in supervisor_prompt
 
 
 def test_compliance_matrix_referenced(supervisor_prompt):

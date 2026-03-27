@@ -8,13 +8,16 @@ BASE = "http://localhost:8000"
 @pytest.mark.asyncio
 async def test_feedback_requires_auth():
     """POST /api/feedback without token returns 401 when REQUIRE_AUTH=true."""
-    async with httpx.AsyncClient(base_url=BASE) as client:
-        r = await client.post("/api/feedback", json={
-            "feedback_text": "test feedback",
-            "session_id": "test-session",
-        })
-        # If REQUIRE_AUTH=true (prod), expect 401; if false (dev), expect 200
-        assert r.status_code in (200, 401)
+    try:
+        async with httpx.AsyncClient(base_url=BASE, timeout=3.0) as client:
+            r = await client.post("/api/feedback", json={
+                "feedback_text": "test feedback",
+                "session_id": "test-session",
+            })
+            # If REQUIRE_AUTH=true (prod), expect 401; if false (dev), expect 200
+            assert r.status_code in (200, 401)
+    except (httpx.ConnectError, httpx.ReadTimeout):
+        pytest.skip("Server not running at localhost:8000")
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,47 @@ def _reload_cognito_auth(**env_overrides):
         return mod
 
 
+def _patch_cognito_auth(monkeypatch, **overrides):
+    """
+    Return a reference to app.cognito_auth with module-level variables patched
+    via monkeypatch.setattr() instead of importlib.reload().
+
+    This avoids state leakage caused by app.config being a frozen singleton
+    that is not re-evaluated on reload — meaning DEV_MODE and other flags read
+    from auth_config stay stale across tests when reload() is used.
+
+    Supported overrides (all optional, defaults match a non-dev configuration):
+        DEV_MODE            bool or str  (default False)
+        DEV_USER_ID         str          (default "dev-user")
+        DEV_TENANT_ID       str          (default "dev-tenant")
+        COGNITO_USER_POOL_ID str         (default "us-east-1_TestPool")
+        COGNITO_CLIENT_ID   str          (default "test-client-id")
+    """
+    import app.cognito_auth as mod
+
+    defaults = {
+        "DEV_MODE": False,
+        "DEV_USER_ID": "dev-user",
+        "DEV_TENANT_ID": "dev-tenant",
+        "COGNITO_USER_POOL_ID": "us-east-1_TestPool",
+        "COGNITO_CLIENT_ID": "test-client-id",
+    }
+    # Allow string "true"/"false" for DEV_MODE, mirroring the env-var style
+    merged = {**defaults, **overrides}
+    dev_mode_raw = merged["DEV_MODE"]
+    if isinstance(dev_mode_raw, str):
+        dev_mode_val = dev_mode_raw.lower() in ("true", "1", "yes")
+    else:
+        dev_mode_val = bool(dev_mode_raw)
+
+    monkeypatch.setattr(mod, "DEV_MODE", dev_mode_val)
+    monkeypatch.setattr(mod, "DEV_USER_ID", merged["DEV_USER_ID"])
+    monkeypatch.setattr(mod, "DEV_TENANT_ID", merged["DEV_TENANT_ID"])
+    monkeypatch.setattr(mod, "COGNITO_USER_POOL_ID", merged["COGNITO_USER_POOL_ID"])
+    monkeypatch.setattr(mod, "COGNITO_CLIENT_ID", merged["COGNITO_CLIENT_ID"])
+    return mod
+
+
 # ── UserContext unit tests ────────────────────────────────────────────
 
 
@@ -107,24 +148,24 @@ class TestUserContext:
 class TestDevModeToggle:
     """Verify that DEV_MODE=true vs false changes auth behavior."""
 
-    def test_dev_mode_true_bypasses_validation(self):
-        mod = _reload_cognito_auth(DEV_MODE="true")
+    def test_dev_mode_true_bypasses_validation(self, monkeypatch):
+        mod = _patch_cognito_auth(monkeypatch, DEV_MODE="true")
         assert mod.DEV_MODE is True
         is_valid, claims, err = mod.validate_token("any-garbage-token")
         assert is_valid is True
         assert claims["sub"] == "dev-user"
         assert err is None
 
-    def test_dev_mode_false_rejects_garbage_token(self):
-        mod = _reload_cognito_auth(DEV_MODE="false")
+    def test_dev_mode_false_rejects_garbage_token(self, monkeypatch):
+        mod = _patch_cognito_auth(monkeypatch, DEV_MODE="false")
         assert mod.DEV_MODE is False
         is_valid, claims, err = mod.validate_token("not-a-real-jwt")
         assert is_valid is False
         assert claims is None
         assert err is not None
 
-    def test_dev_mode_simple_validation_bypass(self):
-        mod = _reload_cognito_auth(DEV_MODE="true")
+    def test_dev_mode_simple_validation_bypass(self, monkeypatch):
+        mod = _patch_cognito_auth(monkeypatch, DEV_MODE="true")
         is_valid, claims, err = mod.validate_token_simple("garbage")
         assert is_valid is True
         assert claims["sub"] == "dev-user"
@@ -136,8 +177,8 @@ class TestDevModeToggle:
 class TestExtractUserContext:
     """Tests for the main extract_user_context() entry point."""
 
-    def test_dev_mode_returns_dev_user_regardless_of_token(self):
-        mod = _reload_cognito_auth(DEV_MODE="true")
+    def test_dev_mode_returns_dev_user_regardless_of_token(self, monkeypatch):
+        mod = _patch_cognito_auth(monkeypatch, DEV_MODE="true")
         ctx, err = mod.extract_user_context(token=None)
         assert err is None
         assert ctx.user_id == "dev-user"
@@ -148,38 +189,41 @@ class TestExtractUserContext:
         assert err2 is None
         assert ctx2.user_id == "dev-user"
 
-    def test_non_dev_no_token_returns_anonymous(self):
-        mod = _reload_cognito_auth(DEV_MODE="false")
+    def test_non_dev_no_token_returns_anonymous(self, monkeypatch):
+        mod = _patch_cognito_auth(monkeypatch, DEV_MODE="false")
         ctx, err = mod.extract_user_context(token=None)
         assert ctx.user_id == "anonymous"
         assert err == "No token provided"
 
-    def test_non_dev_invalid_token_returns_anonymous(self):
-        mod = _reload_cognito_auth(DEV_MODE="false")
+    def test_non_dev_invalid_token_returns_anonymous(self, monkeypatch):
+        mod = _patch_cognito_auth(monkeypatch, DEV_MODE="false")
         ctx, err = mod.extract_user_context(token="Bearer bad-token", validate=True)
         assert ctx.user_id == "anonymous"
         assert err is not None
 
-    def test_bearer_prefix_stripped(self):
+    def test_bearer_prefix_stripped(self, monkeypatch):
         """extract_user_context strips 'Bearer ' before passing to validator."""
-        mod = _reload_cognito_auth(DEV_MODE="false")
-        # Use simple validation (no Cognito configured)
-        mod_no_cognito = _reload_cognito_auth(
-            DEV_MODE="false", COGNITO_USER_POOL_ID="", COGNITO_CLIENT_ID=""
+        # Use simple validation path (no Cognito configured)
+        mod = _patch_cognito_auth(
+            monkeypatch, DEV_MODE="false",
+            COGNITO_USER_POOL_ID="", COGNITO_CLIENT_ID="",
         )
         # With empty pool, validate path goes to validate_token_simple
         # which will try to decode the JWT — will fail for garbage, but
         # the important thing is the Bearer prefix is stripped
-        ctx, err = mod_no_cognito.extract_user_context(
+        ctx, err = mod.extract_user_context(
             token="Bearer not.valid.jwt", validate=True
         )
         # Should be anonymous since token is invalid
         assert ctx.user_id == "anonymous"
 
-    def test_non_dev_with_valid_simple_jwt(self):
+    def test_non_dev_with_valid_simple_jwt(self, monkeypatch):
         """A properly structured JWT decoded with simple validation succeeds."""
-        mod = _reload_cognito_auth(
-            DEV_MODE="false", COGNITO_USER_POOL_ID="", COGNITO_CLIENT_ID=""
+        mod = _patch_cognito_auth(
+            monkeypatch,
+            DEV_MODE="false",
+            COGNITO_USER_POOL_ID="",
+            COGNITO_CLIENT_ID="",
         )
         # generate_test_token produces an HS256 JWT
         token = mod.generate_test_token(

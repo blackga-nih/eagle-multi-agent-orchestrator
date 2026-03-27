@@ -541,14 +541,37 @@ class TestDocumentExportEndpoint:
         assert resp.status_code == 200
         assert resp.content.startswith(b"PK\x03\x04")
 
-    def test_export_docx_accepts_doc_key_with_markdown_sidecar(self, app_with_mocked_s3):
+    def test_export_docx_accepts_doc_key_with_markdown_sidecar(self, app_with_mocked_s3, mock_s3_client):
         """Stored package documents should export by doc_key without posting full content."""
-        with TestClient(app_with_mocked_s3) as client:
-            resp = client.post("/api/documents/export", json={
-                "doc_key": "eagle/test-tenant/packages/PKG-2026-0020/market_research/v1/Market-Research-Report.docx",
-                "title": "Market Research",
-                "format": "docx",
-            })
+        from app.cognito_auth import UserContext
+        import app.main as _main_mod
+        import app.db_client as _db
+
+        _db.get_s3.cache_clear()
+
+        # Use dependency_overrides for auth (avoids module-identity issues in full suite)
+        async def _test_user():
+            return UserContext(
+                user_id="test-user",
+                tenant_id="test-tenant",
+                email="test@example.com",
+                username="test-user",
+                roles=["admin"],
+                tier="premium",
+            )
+
+        app_with_mocked_s3.dependency_overrides[_main_mod.get_user_from_header] = _test_user
+        try:
+            with patch("boto3.client", return_value=mock_s3_client):
+                with TestClient(app_with_mocked_s3) as client:
+                    resp = client.post("/api/documents/export", json={
+                        "doc_key": "eagle/test-tenant/packages/PKG-2026-0020/market_research/v1/Market-Research-Report.docx",
+                        "title": "Market Research",
+                        "format": "docx",
+                    })
+        finally:
+            app_with_mocked_s3.dependency_overrides.pop(_main_mod.get_user_from_header, None)
+
         if resp.status_code == 503:
             detail = resp.json().get("detail", "").lower()
             assert "dependency missing" in detail

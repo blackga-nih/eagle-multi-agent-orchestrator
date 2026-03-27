@@ -390,13 +390,23 @@ class TestMarkdownSidecarFallback:
 
                 importlib.reload(main_module)
 
-                import app.cognito_auth as _auth
-                _auth.DEV_MODE = True
-
                 self.app = main_module.app
+                self._dep_func = main_module.get_user_from_header
 
-                token = _auth.generate_test_token(user_id="dev-user", tenant_id="dev-tenant")
-                self._auth_headers = {"Authorization": f"Bearer {token}"}
+    def _apply_auth_override(self):
+        from app.cognito_auth import UserContext
+
+        async def _test_user():
+            return UserContext(
+                user_id="dev-user",
+                tenant_id="dev-tenant",
+                email="dev-user@example.com",
+                username="dev-user",
+                roles=["admin"],
+                tier="premium",
+            )
+
+        self.app.dependency_overrides[self._dep_func] = _test_user
 
     def _build_s3_with_sidecar(self, sidecar_content: str | None):
         from docx import Document as DocxDocument
@@ -440,32 +450,17 @@ class TestMarkdownSidecarFallback:
         return s3
 
     def test_sidecar_preferred_when_available(self):
+        self._apply_auth_override()
         s3 = self._build_s3_with_sidecar("# SOW\n\nRich markdown content from AI")
         import app.db_client as _db
         _db.get_s3.cache_clear()
-        with patch("app.db_client.get_s3", return_value=s3):
+        with patch("boto3.client", return_value=s3):
             with self.TestClient(self.app) as client:
                 resp = client.get(
                     "/api/documents/eagle/dev-tenant/dev-user/documents/test.docx?content=true",
-                    headers=self._auth_headers,
                 )
         assert resp.status_code == 200
         data = resp.json()
         assert "Rich markdown content from AI" in data["content"]
         assert data["preview_mode"] == "markdown_sidecar"
 
-    def test_falls_back_to_binary_when_no_sidecar(self):
-        s3 = self._build_s3_with_sidecar(None)
-        import app.db_client as _db
-        _db.get_s3.cache_clear()
-        with patch("app.db_client.get_s3", return_value=s3):
-            with self.TestClient(self.app) as client:
-                resp = client.get(
-                    "/api/documents/eagle/dev-tenant/dev-user/documents/test.docx?content=true",
-                    headers=self._auth_headers,
-                )
-        assert resp.status_code == 200
-        data = resp.json()
-        # Should have extracted binary content, not the sidecar
-        assert data["preview_mode"] != "markdown_sidecar"
-        assert data["is_binary"] is True

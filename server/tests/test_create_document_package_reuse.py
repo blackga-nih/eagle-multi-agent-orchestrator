@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-import app.agentic_service as agentic_service
+import app.tools.legacy_dispatch as legacy_dispatch
 from app.strands_agentic_service import _build_all_service_tools
 
 
@@ -18,7 +18,7 @@ EXISTING_PKG_ID = "PKG-2026-0099"
 
 
 def _get_create_document_tool(monkeypatch, list_packages_return, create_package_return=None):
-    """Helper: build tools with mocked package_store and TOOL_DISPATCH."""
+    """Helper: build tools with mocked package_store and patched get_tool_dispatch."""
 
     # Mock list_packages
     monkeypatch.setattr(
@@ -35,7 +35,7 @@ def _get_create_document_tool(monkeypatch, list_packages_return, create_package_
 
     monkeypatch.setattr("app.package_store.create_package", _fake_create_package)
 
-    # Mock TOOL_DISPATCH entries used by create_document_tool
+    # Patch get_tool_dispatch to inject fake handlers used by create_document_tool
     def fake_create_document(params, tenant_id, session_id):
         return {
             "status": "saved",
@@ -47,8 +47,15 @@ def _get_create_document_tool(monkeypatch, list_packages_return, create_package_
     def fake_get_latest_document(params, tenant_id):
         return {"document": None}
 
-    monkeypatch.setitem(agentic_service.TOOL_DISPATCH, "create_document", fake_create_document)
-    monkeypatch.setitem(agentic_service.TOOL_DISPATCH, "get_latest_document", fake_get_latest_document)
+    real_get_tool_dispatch = legacy_dispatch.get_tool_dispatch
+
+    def patched_get_tool_dispatch():
+        dispatch = real_get_tool_dispatch()
+        dispatch["create_document"] = fake_create_document
+        dispatch["get_latest_document"] = fake_get_latest_document
+        return dispatch
+
+    monkeypatch.setattr(legacy_dispatch, "get_tool_dispatch", patched_get_tool_dispatch)
 
     tools = _build_all_service_tools(
         tenant_id=TENANT_ID,
@@ -146,8 +153,15 @@ def test_skips_lookup_when_package_id_already_provided(monkeypatch):
     def fake_get_latest_document(params, tenant_id):
         return {"document": None}
 
-    monkeypatch.setitem(agentic_service.TOOL_DISPATCH, "create_document", fake_create_document)
-    monkeypatch.setitem(agentic_service.TOOL_DISPATCH, "get_latest_document", fake_get_latest_document)
+    real_get_tool_dispatch = legacy_dispatch.get_tool_dispatch
+
+    def patched_get_tool_dispatch():
+        dispatch = real_get_tool_dispatch()
+        dispatch["create_document"] = fake_create_document
+        dispatch["get_latest_document"] = fake_get_latest_document
+        return dispatch
+
+    monkeypatch.setattr(legacy_dispatch, "get_tool_dispatch", patched_get_tool_dispatch)
 
     tools = _build_all_service_tools(
         tenant_id=TENANT_ID,
@@ -185,8 +199,15 @@ def test_owner_user_id_passed_to_list_packages(monkeypatch):
     def fake_get_latest_document(params, tenant_id):
         return {"document": None}
 
-    monkeypatch.setitem(agentic_service.TOOL_DISPATCH, "create_document", fake_create_document)
-    monkeypatch.setitem(agentic_service.TOOL_DISPATCH, "get_latest_document", fake_get_latest_document)
+    real_get_tool_dispatch = legacy_dispatch.get_tool_dispatch
+
+    def patched_get_tool_dispatch():
+        dispatch = real_get_tool_dispatch()
+        dispatch["create_document"] = fake_create_document
+        dispatch["get_latest_document"] = fake_get_latest_document
+        return dispatch
+
+    monkeypatch.setattr(legacy_dispatch, "get_tool_dispatch", patched_get_tool_dispatch)
 
     tools = _build_all_service_tools(
         tenant_id=TENANT_ID,
