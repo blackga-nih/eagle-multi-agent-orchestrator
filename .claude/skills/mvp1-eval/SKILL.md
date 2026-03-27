@@ -1,6 +1,6 @@
 ---
 name: mvp1-eval
-description: Run the EAGLE evaluation suite — unit tests, integration tests, and live Bedrock eval tests covering supervisor routing, subagent orchestration, compliance matrix, document pipeline, and all UC use cases. Tests are tagged by MVP phase (MVP1 core, MVP2 intake optimization, MVP3 integrations).
+description: Run the EAGLE evaluation suite — unit tests, integration tests, frontend E2E (Playwright + visual QA), and live Bedrock eval tests covering supervisor routing, subagent orchestration, compliance matrix, document pipeline, and all UC use cases. Tests are tagged by MVP phase (MVP1 core, MVP2 intake optimization, MVP3 integrations).
 model: sonnet
 ---
 
@@ -45,6 +45,10 @@ Run the curated test suite validating the EAGLE acquisition package workflow end
 | Tier 2 integration | `server/tests/test_strands_poc.py` | Live Bedrock — UC-02 micro purchase E2E |
 | Tier 2 integration | `server/tests/test_strands_service_integration.py` | SDK query adapter tests |
 | Skill config | `.claude/skills/mvp1-eval/config.json` | Multi-repo config (sm_eagle, sample-multi-tenant, eagle-multi-agent) |
+| Tier 4a Playwright tests | `client/tests/*.spec.ts` | 15 curated spec files — navigation, chat, admin, documents, workflows, keyboard shortcuts, feedback, knowledge base |
+| Tier 4a Playwright config | `client/tests/eval-playwright.config.ts` | Eval-specific config — Chromium only, screenshots on every test |
+| Tier 4b e2e-judge orchestrator | `server/tests/e2e_judge_orchestrator.py` | Screenshot + vision judge pipeline — 8 journeys, Bedrock Sonnet |
+| Tier 4b e2e-judge journeys | `server/tests/e2e_judge_journeys.py` | Journey definitions — login, home, chat, admin, documents, workflows, responsive, acquisition_package |
 
 ### Backend Key Files
 | Source | Path | Description |
@@ -104,6 +108,10 @@ Extract these values for use in all subsequent steps:
 | `TIER1_TESTS` | `tier1_tests[]` | see defaults below |
 | `TIER2_TESTS` | `tier2_tests[]` | see defaults below |
 | `TIER3_TEST` | `tier3_test` | `tests/test_strands_eval.py` |
+| `CLIENT_DIR` | `client_dir` | `client` |
+| `TIER4A_TESTS` | `tier4a_tests[]` | see defaults below |
+| `TIER4A_PROJECT` | `tier4a_project` | `chromium` |
+| `TIER4B_JOURNEYS` | `tier4b_journeys[]` | `["login","home","chat","admin","documents","workflows"]` |
 
 If `$REPO_NAME` is not found in the config, print a warning and use fallback values. Do **not** abort — the skill should work in unknown repos with sensible defaults.
 
@@ -130,7 +138,7 @@ cd $SERVER_DIR
 
 ## Test Tiers
 
-The suite is organized in 3 tiers, run sequentially. Stop and report if a tier has failures before proceeding to the next.
+The suite is organized in 4 tiers, run sequentially. Stop and report if a tier has failures before proceeding to the next.
 
 ### Tier 1: Unit Tests (fast, no AWS needed)
 
@@ -175,7 +183,7 @@ AWS_PROFILE=eagle python -m pytest tests/test_strands_eval.py -v --tb=short -x 2
 AWS_PROFILE=eagle python tests/test_strands_eval.py 2>&1
 ```
 
-**Tests (42 implemented):**
+**Tests (137 implemented):**
 
 | # | Test | Category | MVP | Jira | Excel UC |
 |---|------|----------|-----|------|----------|
@@ -222,6 +230,22 @@ AWS_PROFILE=eagle python tests/test_strands_eval.py 2>&1
 | 41 | uc16_tech_to_contract_language | Use case | MVP1 | -- | UC-16 |
 | 42 | uc29_e2e_acquisition | Use case | MVP1 | -- | UC-29 |
 
+### Category 15: Demo Script Multi-Turn UC Tests (129-136)
+
+These replay the exact multi-message conversations from `EAGLE-DEMO-SCRIPT.md`, validating context retention across turns. Run with `--tests 129,130,131,132,133,134,135,136`.
+
+| # | Test | UC | Turns | Skill | Demo Script Section |
+|---|------|----|-------|-------|---------------------|
+| 129 | uc02_gsa_schedule_multi_turn | UC-2 | 3 | oa-intake | GSA Schedule ($45K) |
+| 130 | uc02_1_micro_purchase_multi_turn | UC-2.1 | 2 | oa-intake | Micro Purchase ($14K) |
+| 131 | uc03_sole_source_multi_turn | UC-3 | 3 | oa-intake | Sole Source ($280K) |
+| 132 | uc04_competitive_range_multi_turn | UC-4 | 3 | legal-counsel | Competitive Range ($2.1M) |
+| 133 | uc10_igce_multi_turn | UC-10 | 3 | oa-intake | IGCE Development ($4.5M) |
+| 134 | uc13_small_business_multi_turn | UC-13 | 3 | market-intelligence | Small Business ($450K) |
+| 135 | uc16_tech_to_contract_multi_turn | UC-16 | 3 | tech-translator | Tech to Contract Language |
+| 136 | uc29_e2e_acquisition_multi_turn | UC-29 | 5 | supervisor | E2E Acquisition ($3.5M) |
+| 137 | uc29_finalize_package | UC-29 | 6 | supervisor | E2E + Package Validation ($3.5M) |
+
 ### Planned MVP2 Tests (not yet implemented)
 
 These tests will validate the EAGLE-54 intake optimization epic. Add them as the features land.
@@ -245,13 +269,114 @@ These tests will validate the EAGLE-54 intake optimization epic. Add them as the
 | 52 | co_session_handoff | Workflow | MVP3 | EAGLE-36 |
 | 53 | concurrent_users_load | Scale | MVP3 | -- |
 
+### Tier 4: Frontend E2E (needs reachable frontend URL)
+
+Frontend end-to-end tests validating that the EAGLE UI renders correctly, navigation works, and key interactive features function. Split into two sub-tiers.
+
+#### Step 4.0: Resolve Frontend URL
+
+Determine the target URL for frontend tests. Check in this order:
+
+1. If `BASE_URL` env var is already set, use it.
+2. Else check if `http://localhost:3000` is reachable:
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ 2>/dev/null
+```
+If returns 200, use `http://localhost:3000`.
+3. Fall back to the deployed ALB URL from `client/playwright.config.ts` default (`http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com`).
+
+Store the resolved URL in `RESOLVED_BASE_URL`. Print it so the user knows which target is being tested.
+
+#### Tier 4a: Playwright Spec Tests (fast, free, ~2-3 min)
+
+Structural tests that verify page layout, navigation, component rendering, and interactive features. Most require no live backend — they test the frontend in isolation.
+
+**Prerequisites**: Playwright must be installed in `$CLIENT_DIR`. If `npx playwright --version` fails, run `npx playwright install chromium` first.
+
+```bash
+cd $CLIENT_DIR && BASE_URL=$RESOLVED_BASE_URL npx playwright test \
+  ${TIER4A_TESTS[@]} \
+  --project=$TIER4A_PROJECT \
+  --config=tests/eval-playwright.config.ts \
+  --reporter=list 2>&1
+```
+
+**Curated MVP1 test files (15):**
+
+| File | What it validates | Backend? |
+|------|-------------------|----------|
+| `navigation.spec.ts` | Home page, EAGLE branding, feature cards | Health endpoint only |
+| `chat.spec.ts` | Chat page structure, new chat welcome, submit button | No |
+| `chat-features.spec.ts` | Activity panel tabs, collapse/open, default state | No |
+| `admin-dashboard.spec.ts` | Dashboard cards, system health, quick actions | No |
+| `documents.spec.ts` | Documents page header, filter tabs, search | No |
+| `workflows.spec.ts` | Acquisition packages page, filters, empty state | No |
+| `keyboard-shortcuts.spec.ts` | Ctrl+K command palette, search, categories | No |
+| `validate-feedback.spec.ts` | Ctrl+J feedback modal, submit flow | No |
+| `knowledge-base.spec.ts` | KB page, tabs, search, document cards | No |
+| `admin-skills.spec.ts` | Skills page header, breadcrumbs, tabs | No |
+| `admin-templates.spec.ts` | Templates page header, search, cards | No |
+| `admin-workspaces.spec.ts` | Workspaces page header, CRUD buttons | No |
+| `modal-width.spec.ts` | Modal responsiveness (80% viewport) | No |
+| `no-mock-data.spec.ts` | Guard: no mock imports in source | No (filesystem) |
+| `document-pipeline.spec.ts` | Document viewer, markdown rendering, export buttons | No |
+
+**Expected**: ~60+ tests (Chromium only), ~2-3 min. All pass with reachable frontend.
+
+**Note**: If a test fails with a connection error to `localhost:8000` (backend health check), count it as "skipped (no backend)" rather than a failure. Tests using `test.slow()` that timeout without a live backend should also be counted as skipped.
+
+#### Tier 4b: Visual QA — e2e-judge (optional, ~$0.16, ~20-30 min)
+
+Screenshot-based visual regression using Bedrock Sonnet as evaluator. **Only run if user requests `--full` or `--visual`.**
+
+```bash
+cd $SERVER_DIR && python -m tests.e2e_judge_orchestrator \
+  --base-url $RESOLVED_BASE_URL \
+  --journeys $(echo ${TIER4B_JOURNEYS[@]} | tr ' ' ',') \
+  2>&1
+```
+
+If `EAGLE_TEST_EMAIL` and `EAGLE_TEST_PASSWORD` are set in `server/.env`, pass them:
+```bash
+cd $SERVER_DIR && python -m tests.e2e_judge_orchestrator \
+  --base-url $RESOLVED_BASE_URL \
+  --journeys $(echo ${TIER4B_JOURNEYS[@]} | tr ' ' ',') \
+  --auth-email $EAGLE_TEST_EMAIL \
+  --auth-password $EAGLE_TEST_PASSWORD \
+  2>&1
+```
+
+**Journeys (6 MVP1 curated):**
+
+| Journey | Screenshots | What it evaluates |
+|---------|-------------|-------------------|
+| `login` | 3 | Login page, auth flow, post-auth redirect |
+| `home` | 4 | Home page layout, sidebar, feature cards |
+| `chat` | 6+ | Chat lifecycle: empty state, message send, streaming, response, tool cards |
+| `admin` | 4+ | Admin dashboard, skills, templates sub-pages |
+| `documents` | 4+ | Document list, viewer, template jargon checks |
+| `workflows` | 4+ | Package grid, document checklist modal |
+
+**Expected**: ~25 screenshots, ~$0.10-0.16 cost, 20-30 min. SHA-256 cache means re-runs of unchanged UI are free.
+
+**Results**: The orchestrator writes:
+- `data/e2e-judge/results/{run_id}.json` — structured results
+- `data/e2e-judge/results/{run_id}-report.md` — markdown report
+- `data/e2e-judge/results/latest.json` — latest results symlink
+
+Read `latest.json` after the run to extract: `passed`, `failed`, `warnings`, `avg_quality_score`, `pass_rate`, `cache_stats`.
+
 ## Arguments
 
-- `--full` — Run all 3 tiers including the full 42-test eval suite
-- `--tier N` — Run only tier N (1, 2, or 3)
+- `--full` — Run all 4 tiers including the full eval suite and visual QA
+- `--tier N` — Run only tier N (1, 2, 3, or 4)
+- `--tier 4a` — Run only Tier 4a (Playwright spec tests)
+- `--tier 4b` — Run only Tier 4b (e2e-judge visual QA)
+- `--visual` — Include Tier 4b (e2e-judge visual QA) in the run
+- `--base-url URL` — Override the frontend URL for Tier 4 tests
 - `--mvp N` — Run only tests tagged as MVP N (1, 2, or 3). Currently all implemented tests are MVP1; MVP2 tests will land as EAGLE-54 features ship
 - `--reauth` — Run `AWS_PROFILE=eagle aws sso login` before tests
-- (default) — Run Tier 1 + Tier 2 only
+- (default) — Run Tier 1 + Tier 2 + Tier 4a
 
 ## Reporting
 
@@ -269,6 +394,12 @@ After each tier, report:
 | `tier2_pass`, `tier2_total` | pytest output for Tier 2 |
 | `tier3_pass`, `tier3_total` | pytest output for Tier 3 (0/0 if skipped) |
 | `tier3_run` | `True` if `--full` or `--tier 3` was passed |
+| `tier4a_pass`, `tier4a_total` | Playwright test output for Tier 4a |
+| `tier4a_skipped` | Tests that failed due to missing backend (connection errors, slow timeouts) |
+| `tier4b_pass`, `tier4b_total` | e2e-judge orchestrator output for Tier 4b (0/0 if skipped) |
+| `tier4b_avg_score` | Average UI quality score (1-10) from e2e-judge |
+| `tier4b_cost` | Judge cost in USD from `cache_stats.cost_usd` |
+| `tier4b_run` | `True` if `--full` or `--visual` was passed |
 | `failed_tests` | List of all failing test names across all tiers |
 | `elapsed_seconds` | Total wall-clock time across all tiers that ran |
 
@@ -379,6 +510,8 @@ Output the final report in this format:
 | 1 - Unit | N | N | N | N | Ns |
 | 2 - Integration | 6 | N | N | N | Ns |
 | 3 - Full Eval | 42 | N | N | N | Ns |
+| 4a - Playwright | N | N | N | N | Ns |
+| 4b - Visual QA | N | N | N | N | Ns |
 | **Total** | **N** | **N** | **N** | **N** | **Ns** |
 
 ### Coverage by MVP Phase
@@ -416,6 +549,27 @@ Output the final report in this format:
 |----------|--------|-------|-------------|
 | sow | eagle/tenant/.../sow_20260316_... | [View]({langfuse_url}) | [S3]({s3_console_url}) |
 | (none if no documents created) |
+
+### Frontend E2E Summary
+
+#### Tier 4a — Playwright Spec Tests
+- **Target**: {RESOLVED_BASE_URL}
+- **Project**: Chromium
+- **Files**: 15 spec files, {tier4a_total} tests
+- **Result**: {tier4a_pass}/{tier4a_total} passed ({tier4a_skipped} skipped — no backend)
+
+#### Tier 4b — Visual QA (e2e-judge)
+<!-- If tier4b_run: -->
+- **Target**: {RESOLVED_BASE_URL}
+- **Journeys**: {tier4b_journeys}
+- **Screenshots**: {tier4b_total}
+- **Result**: {tier4b_pass} pass, {tier4b_failed} fail, {tier4b_warnings} warn
+- **Avg Quality Score**: {tier4b_avg_score}/10
+- **Judge Cost**: ${tier4b_cost:.4f}
+- **Cache Hit Rate**: {cache_hit_rate}%
+<!-- Else: -->
+SKIPPED — run with `--full` or `--visual` to include visual regression
+<!-- End if -->
 
 ### Errors & Warnings
 
@@ -465,17 +619,22 @@ date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 # --- Fill from accumulated tier variables ---
 # tier1_pass, tier1_total, tier2_pass, tier2_total
 # tier3_pass, tier3_total, tier3_run (bool)
+# tier4a_pass, tier4a_total
+# tier4b_pass, tier4b_total, tier4b_avg_score, tier4b_cost, tier4b_run (bool)
 # failed_tests (list of str), elapsed_seconds (float)
 
 all_pass = (
     tier1_pass == tier1_total
     and tier2_pass == tier2_total
+    and tier4a_pass == tier4a_total
     and (not tier3_run or tier3_pass == tier3_total)
+    and (not tier4b_run or tier4b_pass == tier4b_total)
 )
 style = "good" if all_pass else "attention"
-total_pass = tier1_pass + tier2_pass + (tier3_pass if tier3_run else 0)
-total = tier1_total + tier2_total + (tier3_total if tier3_run else 0)
+total_pass = tier1_pass + tier2_pass + tier4a_pass + (tier3_pass if tier3_run else 0) + (tier4b_pass if tier4b_run else 0)
+total = tier1_total + tier2_total + tier4a_total + (tier3_total if tier3_run else 0) + (tier4b_total if tier4b_run else 0)
 tier3_value = f"{tier3_pass}/{tier3_total}" if tier3_run else "SKIPPED"
+tier4b_value = f"{tier4b_pass}/{tier4b_total} (avg {tier4b_avg_score}/10)" if tier4b_run else "SKIPPED"
 status_label = "All Pass" if all_pass else f"{len(failed_tests)} Failed"
 
 facts = [
@@ -484,6 +643,8 @@ facts = [
     {"title": "Tier 1 — Unit", "value": f"{tier1_pass}/{tier1_total}"},
     {"title": "Tier 2 — Integration", "value": f"{tier2_pass}/{tier2_total}"},
     {"title": "Tier 3 — Full Eval", "value": tier3_value},
+    {"title": "Tier 4a — Playwright", "value": f"{tier4a_pass}/{tier4a_total}"},
+    {"title": "Tier 4b — Visual QA", "value": tier4b_value},
     {"title": "Total", "value": f"{total_pass}/{total} passed"},
     {"title": "Duration", "value": f"{elapsed_seconds:.0f}s"},
 ]
