@@ -697,16 +697,35 @@ _ecs-wait-frontend:
 # ── QA Shortcuts ────────────────────────────────────────────
 # All recipes support QA via: EAGLE_ENV=qa just <recipe>
 # These aliases save typing for the most common QA operations.
+#
+# NOTE: In practice, QA deploys go through GitHub Actions (workflow_dispatch
+# with environment=qa). These local recipes are available but not the
+# primary QA deploy path. Use:
+#   gh workflow run deploy.yml --ref <branch> -f environment=qa
+# or trigger via GitHub Actions UI > "Deploy EAGLE Platform" > Run workflow > qa.
 
-# Deploy to QA environment
+# Deploy to QA via GitHub Actions workflow_dispatch (recommended)
+# Usage: just deploy-qa-ci [branch]
+deploy-qa-ci BRANCH="main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Triggering QA deploy via GitHub Actions ==="
+    echo "Branch: {{BRANCH}}"
+    gh workflow run deploy.yml --ref {{BRANCH}} -f environment=qa
+    echo ""
+    echo "Deploy triggered. Watch progress with:"
+    echo "  gh run watch"
+    echo "  gh run list --workflow deploy.yml --limit 5"
+
+# Deploy to QA environment (local Docker build + ECR push)
 deploy-qa:
     EAGLE_ENV=qa just deploy
 
-# Deploy backend to QA only
+# Deploy backend to QA only (local Docker build + ECR push)
 deploy-backend-qa:
     EAGLE_ENV=qa just deploy-backend
 
-# Deploy frontend to QA only
+# Deploy frontend to QA only (local Docker build + ECR push)
 deploy-frontend-qa:
     EAGLE_ENV=qa just deploy-frontend
 
