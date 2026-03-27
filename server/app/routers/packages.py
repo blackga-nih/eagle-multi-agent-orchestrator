@@ -163,6 +163,7 @@ async def approve_package_endpoint(
 async def export_package_zip_endpoint(
     package_id: str,
     format: str = "docx",
+    save_to_workspace: bool = False,
     user: UserContext = Depends(get_user_from_header),
 ):
     """Download all package documents as a ZIP archive."""
@@ -217,12 +218,26 @@ async def export_package_zip_endpoint(
 
     result = export_package_zip(docs_with_content, pkg.get("title", "Package"), format)
 
+    headers = {
+        "Content-Disposition": f'attachment; filename="{result["filename"]}"',
+    }
+    if save_to_workspace:
+        try:
+            from .documents import _save_export_to_workspace
+            s3_key = _save_export_to_workspace(
+                user.tenant_id, user.user_id, result["filename"],
+                result["data"], result["content_type"],
+                pkg.get("title", "Package"), "zip",
+            )
+            headers["X-S3-Key"] = s3_key
+        except Exception as e:
+            logger.warning("Failed to save ZIP export to workspace: %s", e)
+            headers["X-S3-Save-Error"] = str(e)[:200]
+
     return Response(
         content=result["data"],
         media_type=result["content_type"],
-        headers={
-            "Content-Disposition": f'attachment; filename="{result["filename"]}"',
-        },
+        headers=headers,
     )
 
 

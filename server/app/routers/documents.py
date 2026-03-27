@@ -347,6 +347,7 @@ class ExportRequest(BaseModel):
     content_b64: Optional[str] = None
     title: str = "Document"
     format: str = "docx"
+    save_to_workspace: bool = False
 
 
 def _resolve_export_content(req: ExportRequest, tenant_id: str, user_id: str) -> str:
@@ -425,18 +426,50 @@ class AssignToPackageRequest(BaseModel):
 # ── Endpoints ────────────────────────────────────────────────────────
 
 
+def _save_export_to_workspace(
+    tenant_id: str, user_id: str, filename: str,
+    data: bytes, content_type: str, title: str, fmt: str,
+) -> str:
+    """Save exported file to user's workspace in S3. Returns the S3 key."""
+    from ..changelog_store import write_document_changelog_entry
+
+    s3_key = f"eagle/{tenant_id}/{user_id}/exports/{filename}"
+    get_s3().put_object(Bucket=_S3_BUCKET, Key=s3_key, Body=data, ContentType=content_type)
+    write_document_changelog_entry(
+        tenant_id=tenant_id,
+        document_key=s3_key,
+        change_type="create",
+        change_source="user_export",
+        change_summary=f"Exported {title} as {fmt}",
+        actor_user_id=user_id,
+    )
+    logger.info("Export saved to workspace: %s (%d bytes)", s3_key, len(data))
+    return s3_key
+
+
 @router.post("/export")
 async def api_export_document(req: ExportRequest, user: UserContext = Depends(get_user_from_header)):
     """Export content to DOCX, PDF, or Markdown."""
     try:
         result = export_document(_resolve_export_content(req, user.tenant_id, user.user_id), req.format, req.title)
+        headers = {
+            "Content-Disposition": f'attachment; filename="{result["filename"]}"',
+            "X-File-Size": str(result["size_bytes"]),
+        }
+        if req.save_to_workspace:
+            try:
+                s3_key = _save_export_to_workspace(
+                    user.tenant_id, user.user_id, result["filename"],
+                    result["data"], result["content_type"], req.title, req.format,
+                )
+                headers["X-S3-Key"] = s3_key
+            except Exception as e:
+                logger.warning("Failed to save export to workspace: %s", e)
+                headers["X-S3-Save-Error"] = str(e)[:200]
         return StreamingResponse(
             io.BytesIO(result["data"]),
             media_type=result["content_type"],
-            headers={
-                "Content-Disposition": f'attachment; filename="{result["filename"]}"',
-                "X-File-Size": str(result["size_bytes"]),
-            },
+            headers=headers,
         )
     except ExportDependencyError as e:
         logger.error("Export dependency error: %s", e)
