@@ -52,6 +52,7 @@ if __package__ is None or __package__ == "":
     if _parent not in sys.path:
         sys.path.insert(0, _parent)
     import importlib
+
     if "app" not in sys.modules:
         importlib.import_module("app")
     __package__ = "app"
@@ -89,12 +90,16 @@ def _ensure_langfuse_exporter():
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     if not public_key or not secret_key:
-        logger.warning("[EAGLE] Langfuse credentials missing — traces will NOT be exported. "
-                       "Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY to enable.")
+        logger.warning(
+            "[EAGLE] Langfuse credentials missing — traces will NOT be exported. "
+            "Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY to enable."
+        )
         return
     try:
         import base64
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
         from opentelemetry.sdk.trace.export import SimpleSpanProcessor
         from strands.telemetry import StrandsTelemetry
 
@@ -123,10 +128,16 @@ def _ensure_langfuse_exporter():
         # ContextVar tokens fail to detach across async boundaries.
         try:
             from langfuse import get_client
+
             _langfuse_client = get_client()
-            logger.info("[EAGLE] Langfuse SDK client initialized for parent span wrapping")
+            logger.info(
+                "[EAGLE] Langfuse SDK client initialized for parent span wrapping"
+            )
         except Exception as client_exc:
-            logger.warning("[EAGLE] Langfuse SDK client init failed (tracing still works via OTLP): %s", client_exc)
+            logger.warning(
+                "[EAGLE] Langfuse SDK client init failed (tracing still works via OTLP): %s",
+                client_exc,
+            )
     except Exception as exc:
         logger.warning("[EAGLE] Langfuse exporter injection failed: %s", exc)
 
@@ -159,6 +170,7 @@ async def _langfuse_set_session(
     try:
         import base64
         import httpx
+
         auth = "Basic " + base64.b64encode(f"{pk}:{sk}".encode()).decode()
         payload: dict = {"id": trace_id_hex, "sessionId": session_id}
         if user_id:
@@ -176,12 +188,15 @@ async def _langfuse_set_session(
         if resp.status_code < 300:
             logger.debug(
                 "[EAGLE] Langfuse trace patched: trace=%s session=%s tags=%s",
-                trace_id_hex[:16], session_id, tags,
+                trace_id_hex[:16],
+                session_id,
+                tags,
             )
         else:
             logger.debug(
                 "[EAGLE] Langfuse trace patch non-2xx: %d %s",
-                resp.status_code, resp.text[:100],
+                resp.status_code,
+                resp.text[:100],
             )
     except Exception as exc:
         logger.debug("[EAGLE] Langfuse trace patch failed: %s", exc)
@@ -261,6 +276,7 @@ def _build_trace_attrs(
 @dataclass
 class TextBlock:
     """Adapter for text content blocks."""
+
     type: str = "text"
     text: str = ""
 
@@ -268,6 +284,7 @@ class TextBlock:
 @dataclass
 class ToolUseBlock:
     """Adapter for tool_use content blocks (subagent delegation info)."""
+
     type: str = "tool_use"
     name: str = ""
     input: dict = field(default_factory=dict)
@@ -276,12 +293,14 @@ class ToolUseBlock:
 @dataclass
 class AssistantMessage:
     """Adapter matching Claude SDK AssistantMessage interface."""
+
     content: list = field(default_factory=list)
 
 
 @dataclass
 class ResultMessage:
     """Adapter matching Claude SDK ResultMessage interface."""
+
     result: str = ""
     usage: dict = field(default_factory=dict)
 
@@ -302,6 +321,7 @@ def _default_model() -> str:
         return env_model
     try:
         import boto3
+
         account = boto3.client("sts").get_caller_identity()["Account"]
         return _SONNET if account == _NCI_ACCOUNT else _HAIKU
     except Exception:
@@ -408,9 +428,9 @@ _summarization_agent = Agent(
 # Per-tier compaction aggressiveness and DynamoDB message load limits.
 # Basic: aggressive (lower budget). Premium: gentle (full context).
 _TIER_COMPACTION = {
-    "basic":    {"summary_ratio": 0.5, "preserve_recent": 8},
+    "basic": {"summary_ratio": 0.5, "preserve_recent": 8},
     "advanced": {"summary_ratio": 0.4, "preserve_recent": 12},
-    "premium":  {"summary_ratio": 0.3, "preserve_recent": 15},
+    "premium": {"summary_ratio": 0.3, "preserve_recent": 15},
 }
 
 TIER_MESSAGE_LIMITS = {
@@ -434,7 +454,16 @@ def _build_conversation_manager(tier: str) -> SummarizingConversationManager:
 # This avoids long multi-tool loops for straightforward document creation asks.
 _DOC_TYPE_HINTS: list[tuple[str, list[str]]] = [
     ("sow", ["statement of work", " sow"]),
-    ("igce", ["igce", "ige", "independent government estimate", "independent government cost estimate", "cost estimate"]),
+    (
+        "igce",
+        [
+            "igce",
+            "ige",
+            "independent government estimate",
+            "independent government cost estimate",
+            "cost estimate",
+        ],
+    ),
     ("market_research", ["market research"]),
     ("acquisition_plan", ["acquisition plan"]),
     ("justification", ["justification", "j&a", "j and a", "sole source"]),
@@ -457,7 +486,16 @@ _DOC_TYPE_LABELS: dict[str, str] = {
     "contract_type_justification": "Contract Type Justification",
 }
 _DIRECT_DOC_VERBS = ("generate", "draft", "create", "write", "produce")
-_DOC_EDIT_VERBS = ("edit", "update", "revise", "modify", "fill", "rewrite", "adjust", "amend")
+_DOC_EDIT_VERBS = (
+    "edit",
+    "update",
+    "revise",
+    "modify",
+    "fill",
+    "rewrite",
+    "adjust",
+    "amend",
+)
 _SLOW_PATH_HINTS = ("research", "far", "dfars", "policy", "compare", "analyze")
 _DOC_REQUEST_BLOCKERS = (
     "what is",
@@ -506,6 +544,7 @@ def _check_micropurchase_guardrail(parsed: dict) -> str | None:
     Returns None if no guardrail applies (proceed normally).
     """
     import re as _re_mp
+
     _mp_doc_types = {"sow", "acquisition_plan", "igce"}
     dt = str(parsed.get("doc_type", "")).strip().lower()
     if dt not in _mp_doc_types:
@@ -519,30 +558,32 @@ def _check_micropurchase_guardrail(parsed: dict) -> str | None:
             data_raw = {}
 
     ev_raw = str(data_raw.get("estimated_value", "")).replace(",", "").replace("$", "")
-    ev_nums = _re_mp.findall(r'\d+\.?\d*', ev_raw)
+    ev_nums = _re_mp.findall(r"\d+\.?\d*", ev_raw)
     ev = float(ev_nums[0]) if ev_nums else 0.0
 
     if ev == 0.0:
         scan_text = f"{parsed.get('title', '')} {str(parsed.get('content', ''))[:500]}"
-        dollar_matches = _re_mp.findall(r'\$\s*([\d,]+(?:\.\d+)?)', scan_text)
+        dollar_matches = _re_mp.findall(r"\$\s*([\d,]+(?:\.\d+)?)", scan_text)
         amounts = [float(m.replace(",", "")) for m in dollar_matches]
         amounts_under = [a for a in amounts if 0 < a < 15000]
         if amounts_under:
             ev = min(amounts_under)
 
     if 0 < ev < 15000:
-        return json.dumps({
-            "status": "guardrail",
-            "message": (
-                f"Micro-purchase guardrail (FAR 13.2): ${ev:,.0f} is below the "
-                f"$15,000 micro-purchase threshold. A formal {dt.upper()} is not required. "
-                f"For micro-purchases, generate these document types instead: "
-                f"son_products, price_reasonableness, required_sources, purchase_request."
-            ),
-            "threshold": 15000,
-            "value": ev,
-            "word_count": 0,
-        })
+        return json.dumps(
+            {
+                "status": "guardrail",
+                "message": (
+                    f"Micro-purchase guardrail (FAR 13.2): ${ev:,.0f} is below the "
+                    f"$15,000 micro-purchase threshold. A formal {dt.upper()} is not required. "
+                    f"For micro-purchases, generate these document types instead: "
+                    f"son_products, price_reasonableness, required_sources, purchase_request."
+                ),
+                "threshold": 15000,
+                "value": ev,
+                "word_count": 0,
+            }
+        )
     return None
 
 
@@ -552,7 +593,10 @@ def _check_micropurchase_guardrail(parsed: dict) -> str | None:
 
 _DOC_PREREQUISITES: dict[str, list[tuple[str, str]]] = {
     "market_research": [
-        ("requirement_description", "description of the requirement (what is being acquired)"),
+        (
+            "requirement_description",
+            "description of the requirement (what is being acquired)",
+        ),
         ("naics_code", "NAICS code or industry sector"),
         ("estimated_value", "estimated value or budget range"),
     ],
@@ -576,14 +620,14 @@ _DOC_PREREQUISITES: dict[str, list[tuple[str, str]]] = {
 
 # Patterns that indicate unfilled template placeholders
 _PLACEHOLDER_PATTERNS = [
-    r"\{\{[A-Z_]+\}\}",           # {{VENDOR_NAME}}, {{PRICE_LOW}}
-    r"\[TBD\]",                    # [TBD]
-    r"\[Insert[^\]]*\]",           # [Insert vendor name here]
-    r"\[Amount\]",                 # [Amount]
-    r"\[Vendor\s*Name\]",          # [Vendor Name]
-    r"\[Contractor\s*Name\]",      # [Contractor Name]
-    r"\$\[",                       # $[Amount]
-    r"\[PLACEHOLDER\]",            # [PLACEHOLDER]
+    r"\{\{[A-Z_]+\}\}",  # {{VENDOR_NAME}}, {{PRICE_LOW}}
+    r"\[TBD\]",  # [TBD]
+    r"\[Insert[^\]]*\]",  # [Insert vendor name here]
+    r"\[Amount\]",  # [Amount]
+    r"\[Vendor\s*Name\]",  # [Vendor Name]
+    r"\[Contractor\s*Name\]",  # [Contractor Name]
+    r"\$\[",  # $[Amount]
+    r"\[PLACEHOLDER\]",  # [PLACEHOLDER]
 ]
 
 
@@ -626,19 +670,27 @@ def _check_document_prerequisites(parsed: dict) -> str | None:
 
         if field_name == "estimated_value":
             # Look for dollar amounts in content
-            if _re_prereq.search(r'\$[\d,]+', content):
+            if _re_prereq.search(r"\$[\d,]+", content):
                 found_in_content = True
         elif field_name == "naics_code":
             # Look for NAICS pattern (5-6 digits)
-            if _re_prereq.search(r'\b\d{5,6}\b', content):
+            if _re_prereq.search(r"\b\d{5,6}\b", content):
                 found_in_content = True
         elif field_name == "period_of_performance":
             # Look for date ranges or duration mentions
-            if _re_prereq.search(r'(?:month|year|day|week|PoP|period of performance)', content, _re_prereq.IGNORECASE):
+            if _re_prereq.search(
+                r"(?:month|year|day|week|PoP|period of performance)",
+                content,
+                _re_prereq.IGNORECASE,
+            ):
                 found_in_content = True
         elif field_name == "labor_categories":
             # Look for labor-related terms
-            if _re_prereq.search(r'(?:labor|categor|position|role|staff|engineer|analyst|developer|specialist)', content, _re_prereq.IGNORECASE):
+            if _re_prereq.search(
+                r"(?:labor|categor|position|role|staff|engineer|analyst|developer|specialist)",
+                content,
+                _re_prereq.IGNORECASE,
+            ):
                 found_in_content = True
         elif field_name == "proposed_contractor":
             # Must have a specific company name — hard to validate generically
@@ -650,10 +702,18 @@ def _check_document_prerequisites(parsed: dict) -> str | None:
             if len(content) > 100:
                 found_in_content = True
         elif field_name == "authority":
-            if _re_prereq.search(r'(?:FAR\s*6\.302|sole.source|limited.source|unusual.urgent)', content, _re_prereq.IGNORECASE):
+            if _re_prereq.search(
+                r"(?:FAR\s*6\.302|sole.source|limited.source|unusual.urgent)",
+                content,
+                _re_prereq.IGNORECASE,
+            ):
                 found_in_content = True
         elif field_name == "contract_type":
-            if _re_prereq.search(r'(?:firm.fixed|FFP|time.and.material|T&M|cost.reimburs|IDIQ|BPA)', content, _re_prereq.IGNORECASE):
+            if _re_prereq.search(
+                r"(?:firm.fixed|FFP|time.and.material|T&M|cost.reimburs|IDIQ|BPA)",
+                content,
+                _re_prereq.IGNORECASE,
+            ):
                 found_in_content = True
 
         if not found_in_content:
@@ -684,19 +744,21 @@ def _check_document_prerequisites(parsed: dict) -> str | None:
         return None
 
     doc_label = dt.replace("_", " ").title()
-    return json.dumps({
-        "status": "guardrail",
-        "guardrail": "document_prerequisites",
-        "message": (
-            f"Cannot generate {doc_label} — prerequisites not met.\n\n"
-            + "\n".join(f"• {issue}" for issue in issues)
-            + "\n\nCollect the missing information from the user, then perform "
-            "web research (web_search + web_fetch) before calling create_document."
-        ),
-        "missing_fields": missing,
-        "placeholder_count": len(placeholders_found),
-        "word_count": 0,
-    })
+    return json.dumps(
+        {
+            "status": "guardrail",
+            "guardrail": "document_prerequisites",
+            "message": (
+                f"Cannot generate {doc_label} — prerequisites not met.\n\n"
+                + "\n".join(f"• {issue}" for issue in issues)
+                + "\n\nCollect the missing information from the user, then perform "
+                "web research (web_search + web_fetch) before calling create_document."
+            ),
+            "missing_fields": missing,
+            "placeholder_count": len(placeholders_found),
+            "word_count": 0,
+        }
+    )
 
 
 def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
@@ -760,7 +822,9 @@ def _is_document_generation_request(prompt: str) -> tuple[bool, str | None]:
     # [USER REQUEST] as document generation intent.
     if "[document context]" in lowered and "[user request]" in lowered:
         user_req = _extract_user_request_from_prompt(prompt).lower()
-        if any(v in user_req for v in _DIRECT_DOC_VERBS) or any(v in user_req for v in _DOC_EDIT_VERBS):
+        if any(v in user_req for v in _DIRECT_DOC_VERBS) or any(
+            v in user_req for v in _DOC_EDIT_VERBS
+        ):
             return True, doc_type
 
     phrase = _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ")).lower()
@@ -845,7 +909,9 @@ def _extract_context_data_from_prompt(prompt: str, doc_type: str) -> dict[str, A
         if sections.get("security"):
             data["security_requirements"] = "; ".join(sections["security"])[:600]
         if sections.get("environment_tiers"):
-            data["place_of_performance"] = "; ".join(sections["environment_tiers"])[:300]
+            data["place_of_performance"] = "; ".join(sections["environment_tiers"])[
+                :300
+            ]
         if scope_items:
             data["scope"] = " ".join(scope_items)[:500]
 
@@ -857,7 +923,11 @@ def _extract_context_data_from_prompt(prompt: str, doc_type: str) -> dict[str, A
         data.setdefault("estimated_value", money)
         data.setdefault("total_estimate", money)
 
-    m_period = re.search(r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})", prompt, flags=re.IGNORECASE)
+    m_period = re.search(
+        r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})",
+        prompt,
+        flags=re.IGNORECASE,
+    )
     if m_period:
         period = m_period.group(0).strip()
         data.setdefault("period_of_performance", period)
@@ -882,7 +952,7 @@ def _fast_path_title(prompt: str, doc_type: str) -> str:
         idx = lowered.find(marker)
         if idx == -1:
             continue
-        tail = prompt[idx + len(marker):].strip()
+        tail = prompt[idx + len(marker) :].strip()
         # Take up to the first sentence end or 60 chars
         for stop in (".", "\n", "?", "!", ";"):
             stop_idx = tail.find(stop)
@@ -920,7 +990,8 @@ async def _maybe_fast_path_document_generation(
     # -- Micro-purchase guardrail (FAR 13.2) --
     if doc_type in ("sow", "acquisition_plan", "igce"):
         import re as _re_mp_fp
-        _dollar_matches = _re_mp_fp.findall(r'\$\s*([\d,]+(?:\.\d+)?)', prompt)
+
+        _dollar_matches = _re_mp_fp.findall(r"\$\s*([\d,]+(?:\.\d+)?)", prompt)
         _amounts = [float(m.replace(",", "")) for m in _dollar_matches]
         _amounts_under = [a for a in _amounts if 0 < a < 15000]
         if _amounts_under:
@@ -1023,6 +1094,7 @@ async def _ensure_create_document_for_direct_request(
         "doc_type": doc_type,
         "result": result,
     }
+
 
 # -- Tool Schemas (for health/status endpoints) -------------------------
 # These are the Anthropic tool_use format schemas used by main.py and
@@ -1151,7 +1223,12 @@ EAGLE_TOOLS = [
             "properties": {
                 "operation": {
                     "type": "string",
-                    "enum": ["list_recent", "get_trace", "search_errors", "health_summary"],
+                    "enum": [
+                        "list_recent",
+                        "get_trace",
+                        "search_errors",
+                        "health_summary",
+                    ],
                     "description": "Trace operation: list_recent, get_trace, search_errors, or health_summary",
                 },
                 "trace_id": {
@@ -1322,13 +1399,24 @@ EAGLE_TOOLS = [
                 "doc_type": {
                     "type": "string",
                     "enum": [
-                        "sow", "igce", "market_research", "justification",
-                        "acquisition_plan", "eval_criteria", "security_checklist",
-                        "section_508", "cor_certification",
+                        "sow",
+                        "igce",
+                        "market_research",
+                        "justification",
+                        "acquisition_plan",
+                        "eval_criteria",
+                        "security_checklist",
+                        "section_508",
+                        "cor_certification",
                         "contract_type_justification",
-                        "son_products", "son_services", "buy_american",
-                        "subk_plan", "conference_request",
-                        "purchase_request", "price_reasonableness", "required_sources",
+                        "son_products",
+                        "son_services",
+                        "buy_american",
+                        "subk_plan",
+                        "conference_request",
+                        "purchase_request",
+                        "price_reasonableness",
+                        "required_sources",
                     ],
                     "description": "Type of acquisition document to generate",
                 },
@@ -1572,6 +1660,7 @@ def _load_plugin_config() -> dict:
     # Overlay DynamoDB manifest fields (version, agent_count, skill_count)
     try:
         from .plugin_store import get_plugin_manifest
+
         manifest = get_plugin_manifest()
         if manifest:
             config.update(manifest)
@@ -1630,6 +1719,7 @@ def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> st
 
 # -- @tool Factory ---------------------------------------------------
 
+
 def _build_subagent_kb_tools(
     tenant_id: str,
     session_id: str,
@@ -1681,11 +1771,19 @@ def _build_subagent_kb_tools(
             keywords: List of keyword filters
             limit: Maximum results to return (default 10)
         """
-        params = {k: v for k, v in {
-            "query": query, "topic": topic, "document_type": document_type,
-            "agent": agent, "authority_level": authority_level,
-            "keywords": keywords, "limit": limit,
-        }.items() if v}
+        params = {
+            k: v
+            for k, v in {
+                "query": query,
+                "topic": topic,
+                "document_type": document_type,
+                "agent": agent,
+                "authority_level": authority_level,
+                "keywords": keywords,
+                "limit": limit,
+            }.items()
+            if v
+        }
         _emit_input("knowledge_search", params)
         _kb_tools_called.add("knowledge_search")
         result = exec_knowledge_search(params, tenant_id, session_id)
@@ -1730,14 +1828,18 @@ def _build_subagent_kb_tools(
                 "CASCADE VIOLATION: web_search called without prior KB lookup "
                 "(session=%s, query='%s'). The research cascade requires "
                 "knowledge_search or search_far BEFORE web_search.",
-                session_id, query[:100],
+                session_id,
+                query[:100],
             )
-            return json.dumps({
-                "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
-                         "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
-                "query": query,
-                "action_required": "Call knowledge_search or search_far with this query first.",
-            }, indent=2)
+            return json.dumps(
+                {
+                    "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
+                    "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
+                    "query": query,
+                    "action_required": "Call knowledge_search or search_far with this query first.",
+                },
+                indent=2,
+            )
         _emit_input("web_search", {"query": query})
         result = exec_web_search(query)
         return json.dumps(result, indent=2, default=str)
@@ -1786,10 +1888,18 @@ def _build_subagent_doc_tools(
             return
         emit_result = result
         if name != "create_document" and isinstance(result, dict):
-            text_val = result.get("content") or result.get("text") or result.get("result")
+            text_val = (
+                result.get("content") or result.get("text") or result.get("result")
+            )
             if isinstance(text_val, str) and len(text_val) > 2000:
                 emit_result = {**result}
-                key = "content" if "content" in result else "text" if "text" in result else "result"
+                key = (
+                    "content"
+                    if "content" in result
+                    else "text"
+                    if "text" in result
+                    else "result"
+                )
                 emit_result[key] = text_val[:2000] + "..."
         loop.call_soon_threadsafe(
             result_queue.put_nowait,
@@ -1822,14 +1932,21 @@ def _build_subagent_doc_tools(
             template_id: Template ID to use for generation
         """
         parsed = {
-            "doc_type": doc_type, "title": title, "content": content,
-            "data": data, "package_id": package_id,
-            "output_format": output_format, "update_existing_key": update_existing_key,
+            "doc_type": doc_type,
+            "title": title,
+            "content": content,
+            "data": data,
+            "package_id": package_id,
+            "output_format": output_format,
+            "update_existing_key": update_existing_key,
             "template_id": template_id,
         }
         logger.info(
             "create_document_tool ENTRY (subagent): doc_type=%s title=%.80s package_id=%s content_len=%d",
-            doc_type, title, package_id, len(content or ""),
+            doc_type,
+            title,
+            package_id,
+            len(content or ""),
         )
         try:
             # -- Micro-purchase guardrail (FAR 13.2) --
@@ -1843,16 +1960,27 @@ def _build_subagent_doc_tools(
                 return _prereq_block
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                _fut = _pool.submit(tool_dispatch["create_document"], parsed, tenant_id, scoped_session_id)
+                _fut = _pool.submit(
+                    tool_dispatch["create_document"],
+                    parsed,
+                    tenant_id,
+                    scoped_session_id,
+                )
                 try:
                     result = _fut.result(timeout=_DOC_TOOL_TIMEOUT)
                 except concurrent.futures.TimeoutError:
-                    logger.error("create_document TIMEOUT after %ds (subagent): doc_type=%s", _DOC_TOOL_TIMEOUT, doc_type)
-                    return json.dumps({
-                        "error": f"Document creation timed out after {_DOC_TOOL_TIMEOUT}s — likely an AWS connectivity issue. Try again.",
-                        "tool": "create_document",
-                        "timeout": True,
-                    })
+                    logger.error(
+                        "create_document TIMEOUT after %ds (subagent): doc_type=%s",
+                        _DOC_TOOL_TIMEOUT,
+                        doc_type,
+                    )
+                    return json.dumps(
+                        {
+                            "error": f"Document creation timed out after {_DOC_TOOL_TIMEOUT}s — likely an AWS connectivity issue. Try again.",
+                            "tool": "create_document",
+                            "timeout": True,
+                        }
+                    )
             _emit("create_document", result)
             logger.info("create_document_tool DONE (subagent): doc_type=%s", doc_type)
             return json.dumps(result, indent=2, default=str)
@@ -1873,9 +2001,15 @@ def _build_subagent_doc_tools(
             edits: List of edit objects, each with 'search_text' and 'replacement_text'
             checkbox_edits: List of checkbox edit objects, each with 'label_text' and 'checked' (bool)
         """
-        parsed = {"document_key": document_key, "edits": edits or [], "checkbox_edits": checkbox_edits or []}
+        parsed = {
+            "document_key": document_key,
+            "edits": edits or [],
+            "checkbox_edits": checkbox_edits or [],
+        }
         try:
-            result = tool_dispatch["edit_docx_document"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["edit_docx_document"](
+                parsed, tenant_id, scoped_session_id
+            )
             _emit("edit_docx_document", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -1893,7 +2027,9 @@ class _SubagentEventForwarder:
     in real-time (instead of the frontend showing only loading dots).
     """
 
-    def __init__(self, parent_name: str, rq: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+    def __init__(
+        self, parent_name: str, rq: asyncio.Queue, loop: asyncio.AbstractEventLoop
+    ):
         self.parent_name = parent_name
         self.rq = rq
         self.loop = loop
@@ -1907,29 +2043,32 @@ class _SubagentEventForwarder:
         event = kwargs.get("event", {})
         if isinstance(event, dict):
             tool_use = (
-                event.get("contentBlockStart", {})
-                .get("start", {})
-                .get("toolUse")
+                event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
             )
             if tool_use:
                 tid = tool_use.get("toolUseId", "")
                 tname = tool_use.get("name", "")
                 if tid and tid not in self._seen_tool_ids:
                     self._seen_tool_ids.add(tid)
-                    self._push({
-                        "type": "tool_use",
-                        "name": tname,
-                        "input": {},
-                        "tool_use_id": tid,
-                    })
+                    self._push(
+                        {
+                            "type": "tool_use",
+                            "name": tname,
+                            "input": {},
+                            "tool_use_id": tid,
+                        }
+                    )
                     display_parent = self.parent_name.replace("_", " ").title()
                     from .telemetry.status_messages import get_tool_status_message
+
                     status = get_tool_status_message(tname, {})
-                    self._push({
-                        "type": "agent_status",
-                        "status": f"{display_parent}: {status}",
-                        "detail": tname,
-                    })
+                    self._push(
+                        {
+                            "type": "agent_status",
+                            "status": f"{display_parent}: {status}",
+                            "detail": tname,
+                        }
+                    )
 
         # --- Reasoning / extended thinking ---
         reasoning = kwargs.get("reasoningText")
@@ -1988,7 +2127,8 @@ def _make_subagent_tool(
             tools=all_tools,
             callback_handler=(
                 _SubagentEventForwarder(safe_name, result_queue, loop)
-                if result_queue and loop else None
+                if result_queue and loop
+                else None
             ),
             trace_attributes=_build_trace_attrs(
                 tenant_id=tenant_id,
@@ -2005,19 +2145,20 @@ def _make_subagent_tool(
             truncated = raw[:3000] + "..." if len(raw) > 3000 else raw
             loop.call_soon_threadsafe(
                 result_queue.put_nowait,
-                {"type": "tool_result", "name": safe_name, "result": {"report": truncated}},
+                {
+                    "type": "tool_result",
+                    "name": safe_name,
+                    "result": {"report": truncated},
+                },
             )
 
         return raw
 
     # Override docstring (required for Strands schema extraction)
     subagent_tool.__doc__ = (
-        f"{description}\n\n"
-        f"Args:\n"
-        f"    query: The question or task for this specialist"
+        f"{description}\n\nArgs:\n    query: The question or task for this specialist"
     )
     return subagent_tool
-
 
 
 # -- Progressive Disclosure @tools ------------------------------------
@@ -2154,23 +2295,27 @@ def _build_end_of_turn_state(package_context, tenant_id: str) -> list[dict]:
         completed = len(checklist.get("completed", []))
         progress_pct = int((completed / total) * 100) if total > 0 else 0
 
-        return [{
-            "type": "state_update",
-            "state_type": "checklist_update",
-            "package_id": pkg_id,
-            "checklist": checklist,
-            "progress_pct": progress_pct,
-            "phase": pkg.get("status", "drafting"),
-            "title": pkg.get("title", ""),
-            "acquisition_method": pkg.get("acquisition_method"),
-            "contract_type": pkg.get("contract_type"),
-        }]
+        return [
+            {
+                "type": "state_update",
+                "state_type": "checklist_update",
+                "package_id": pkg_id,
+                "checklist": checklist,
+                "progress_pct": progress_pct,
+                "phase": pkg.get("status", "drafting"),
+                "title": pkg.get("title", ""),
+                "acquisition_method": pkg.get("acquisition_method"),
+                "contract_type": pkg.get("contract_type"),
+            }
+        ]
     except Exception:
         logger.debug("_build_end_of_turn_state failed (non-critical)", exc_info=True)
         return []
 
 
-def _build_state_updates(tool_result: dict, tool_name: str, tenant_id: str) -> list[dict]:
+def _build_state_updates(
+    tool_result: dict, tool_name: str, tenant_id: str
+) -> list[dict]:
     """Build state_update dicts for yield paths (fast-path / forced-doc).
 
     Returns a list of dicts that can be yielded directly as SSE chunks.
@@ -2192,22 +2337,26 @@ def _build_state_updates(tool_result: dict, tool_name: str, tenant_id: str) -> l
 
         if tool_name == "create_document":
             doc_type = tool_result.get("doc_type") or tool_result.get("document_type")
-            events.append({
+            events.append(
+                {
+                    "type": "state_update",
+                    "state_type": "document_ready",
+                    "package_id": package_id,
+                    "doc_type": doc_type,
+                    "checklist": checklist,
+                    "progress_pct": progress_pct,
+                }
+            )
+
+        events.append(
+            {
                 "type": "state_update",
-                "state_type": "document_ready",
+                "state_type": "checklist_update",
                 "package_id": package_id,
-                "doc_type": doc_type,
                 "checklist": checklist,
                 "progress_pct": progress_pct,
-            })
-
-        events.append({
-            "type": "state_update",
-            "state_type": "checklist_update",
-            "package_id": package_id,
-            "checklist": checklist,
-            "progress_pct": progress_pct,
-        })
+            }
+        )
 
         return events
     except Exception:
@@ -2231,11 +2380,13 @@ def _make_list_skills_tool(
         if category in ("", "skills"):
             skills_list = []
             for name, entry in SKILLS.items():
-                skills_list.append({
-                    "name": name,
-                    "description": entry.get("description", ""),
-                    "triggers": entry.get("triggers", []),
-                })
+                skills_list.append(
+                    {
+                        "name": name,
+                        "description": entry.get("description", ""),
+                        "triggers": entry.get("triggers", []),
+                    }
+                )
             result["skills"] = skills_list
 
         if category in ("", "agents"):
@@ -2243,11 +2394,13 @@ def _make_list_skills_tool(
             for name, entry in AGENTS.items():
                 if name == "supervisor":
                     continue
-                agents_list.append({
-                    "name": name,
-                    "description": entry.get("description", ""),
-                    "triggers": entry.get("triggers", []),
-                })
+                agents_list.append(
+                    {
+                        "name": name,
+                        "description": entry.get("description", ""),
+                        "triggers": entry.get("triggers", []),
+                    }
+                )
             result["agents"] = agents_list
 
         if category in ("", "data"):
@@ -2256,11 +2409,13 @@ def _make_list_skills_tool(
             data_list = []
             if isinstance(data_index, dict):
                 for name, meta in data_index.items():
-                    data_list.append({
-                        "name": name,
-                        "description": meta.get("description", ""),
-                        "sections": meta.get("sections", []),
-                    })
+                    data_list.append(
+                        {
+                            "name": name,
+                            "description": meta.get("description", ""),
+                            "sections": meta.get("sections", []),
+                        }
+                    )
             result["data"] = data_list
 
         out = json.dumps(result, indent=2)
@@ -2284,10 +2439,12 @@ def _make_load_skill_tool(
         entry = PLUGIN_CONTENTS.get(name)
         if not entry:
             available = sorted(PLUGIN_CONTENTS.keys())
-            out = json.dumps({
-                "error": f"No skill or agent named '{name}'",
-                "available": available,
-            })
+            out = json.dumps(
+                {
+                    "error": f"No skill or agent named '{name}'",
+                    "available": available,
+                }
+            )
         else:
             out = entry["body"]
         _emit_tool_result("load_skill", out, result_queue, loop)
@@ -2321,10 +2478,12 @@ def _make_load_data_tool(
 
         meta = data_index.get(name)
         if not meta:
-            out = json.dumps({
-                "error": f"No data file named '{name}'",
-                "available": sorted(data_index.keys()),
-            })
+            out = json.dumps(
+                {
+                    "error": f"No data file named '{name}'",
+                    "available": sorted(data_index.keys()),
+                }
+            )
             _emit_tool_result("load_data", out, result_queue, loop)
             return out
 
@@ -2346,10 +2505,12 @@ def _make_load_data_tool(
         if section:
             value = data.get(section)
             if value is None:
-                out = json.dumps({
-                    "error": f"Section '{section}' not found in '{name}'",
-                    "available_sections": list(data.keys()),
-                })
+                out = json.dumps(
+                    {
+                        "error": f"Section '{section}' not found in '{name}'",
+                        "available_sections": list(data.keys()),
+                    }
+                )
                 _emit_tool_result("load_data", out, result_queue, loop)
                 return out
             out = json.dumps({section: value}, indent=2, default=str)
@@ -2368,6 +2529,7 @@ def _make_load_data_tool(
 # causing Pydantic schema mismatch with Bedrock models.  Each tool now
 # exposes named parameters so the Strands-generated schema matches what
 # Bedrock models actually send (e.g. {"operation": "list"} not {"params": "..."}).
+
 
 def _build_all_service_tools(
     tenant_id: str,
@@ -2399,10 +2561,18 @@ def _build_all_service_tools(
             return
         emit_result = result
         if name != "create_document" and isinstance(result, dict):
-            text_val = result.get("content") or result.get("text") or result.get("result")
+            text_val = (
+                result.get("content") or result.get("text") or result.get("result")
+            )
             if isinstance(text_val, str) and len(text_val) > 2000:
                 emit_result = {**result}
-                key = "content" if "content" in result else "text" if "text" in result else "result"
+                key = (
+                    "content"
+                    if "content" in result
+                    else "text"
+                    if "text" in result
+                    else "result"
+                )
                 emit_result[key] = text_val[:2000] + "..."
         loop.call_soon_threadsafe(
             result_queue.put_nowait,
@@ -2419,7 +2589,14 @@ def _build_all_service_tools(
 
     # ---- 1. s3_document_ops ----
     @tool(name="s3_document_ops")
-    def s3_document_ops_tool(operation: str, bucket: str = "", key: str = "", content: str = "", destination_key: str = "", expiry_seconds: int = 3600) -> str:
+    def s3_document_ops_tool(
+        operation: str,
+        bucket: str = "",
+        key: str = "",
+        content: str = "",
+        destination_key: str = "",
+        expiry_seconds: int = 3600,
+    ) -> str:
         """Read, write, list, delete, copy, rename, move, check existence, or generate presigned URLs for documents in S3 scoped per-tenant.
 
         Args:
@@ -2432,11 +2609,21 @@ def _build_all_service_tools(
         """
         set_log_context(**_log_ctx)
         import time as _time_mod
+
         _tool_t0 = _time_mod.perf_counter()
         _tool_success = True
-        parsed = {"operation": operation, "bucket": bucket, "key": key, "content": content, "destination_key": destination_key, "expiry_seconds": expiry_seconds}
+        parsed = {
+            "operation": operation,
+            "bucket": bucket,
+            "key": key,
+            "content": content,
+            "destination_key": destination_key,
+            "expiry_seconds": expiry_seconds,
+        }
         try:
-            result = tool_dispatch["s3_document_ops"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["s3_document_ops"](
+                parsed, tenant_id, scoped_session_id
+            )
             _emit("s3_document_ops", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2447,13 +2634,28 @@ def _build_all_service_tools(
             _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
             try:
                 from .telemetry.cloudwatch_emitter import emit_tool_completed
-                emit_tool_completed(tenant_id, user_id, session_id or "", "s3_document_ops", _tool_dur, _tool_success)
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "s3_document_ops",
+                    _tool_dur,
+                    _tool_success,
+                )
             except Exception:
                 pass
 
     # ---- 2. dynamodb_intake ----
     @tool(name="dynamodb_intake")
-    def dynamodb_intake_tool(operation: str, table: str = "eagle", item_id: str = "", data: dict | None = None, item_ids: str = "", items: str = "") -> str:
+    def dynamodb_intake_tool(
+        operation: str,
+        table: str = "eagle",
+        item_id: str = "",
+        data: dict | None = None,
+        item_ids: str = "",
+        items: str = "",
+    ) -> str:
         """Create, read, update, delete, list, query, count, batch_get, or batch_write intake records in DynamoDB.
 
         Args:
@@ -2466,9 +2668,17 @@ def _build_all_service_tools(
         """
         set_log_context(**_log_ctx)
         import time as _time_mod
+
         _tool_t0 = _time_mod.perf_counter()
         _tool_success = True
-        parsed = {"operation": operation, "table": table, "item_id": item_id, "data": data or {}, "item_ids": item_ids, "items": items}
+        parsed = {
+            "operation": operation,
+            "table": table,
+            "item_id": item_id,
+            "data": data or {},
+            "item_ids": item_ids,
+            "items": items,
+        }
         try:
             result = tool_dispatch["dynamodb_intake"](parsed, tenant_id)
             _emit("dynamodb_intake", result)
@@ -2481,7 +2691,15 @@ def _build_all_service_tools(
             _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
             try:
                 from .telemetry.cloudwatch_emitter import emit_tool_completed
-                emit_tool_completed(tenant_id, user_id, session_id or "", "dynamodb_intake", _tool_dur, _tool_success)
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "dynamodb_intake",
+                    _tool_dur,
+                    _tool_success,
+                )
             except Exception:
                 pass
 
@@ -2513,17 +2731,26 @@ def _build_all_service_tools(
         """
         set_log_context(**_log_ctx)  # Restore logging context in tool thread
         import time as _time_mod
+
         _tool_t0 = _time_mod.perf_counter()
         _tool_success = True
         parsed = {
-            "doc_type": doc_type, "title": title, "content": content,
-            "data": data, "package_id": package_id,
-            "output_format": output_format, "update_existing_key": update_existing_key,
+            "doc_type": doc_type,
+            "title": title,
+            "content": content,
+            "data": data,
+            "package_id": package_id,
+            "output_format": output_format,
+            "update_existing_key": update_existing_key,
             "template_id": template_id,
         }
         logger.info(
             "create_document_tool ENTRY (service): doc_type=%s title=%.80s package_id=%s content_len=%d session=%s",
-            doc_type, title, package_id, len(content or ""), session_id or "",
+            doc_type,
+            title,
+            package_id,
+            len(content or ""),
+            session_id or "",
         )
         try:
             # -- Micro-purchase guardrail (FAR 13.2) --
@@ -2587,7 +2814,10 @@ def _build_all_service_tools(
             if not parsed.get("package_id"):
                 try:
                     from decimal import Decimal as _Dec
-                    from app.package_store import list_packages as _list_pkgs, create_package as _create_pkg
+                    from app.package_store import (
+                        list_packages as _list_pkgs,
+                        create_package as _create_pkg,
+                    )
 
                     # Extract owner from session_id (format: tenant#tier#user#session)
                     _owner = ""
@@ -2599,7 +2829,9 @@ def _build_all_service_tools(
                     # First: check if a package already exists for this session
                     _session_pkg = None
                     if session_id:
-                        _existing_pkgs = _list_pkgs(tenant_id, owner_user_id=_owner or None)
+                        _existing_pkgs = _list_pkgs(
+                            tenant_id, owner_user_id=_owner or None
+                        )
                         for _p in _existing_pkgs:
                             if _p.get("session_id") == session_id:
                                 _session_pkg = _p
@@ -2615,11 +2847,21 @@ def _build_all_service_tools(
                     else:
                         # Create new package only if none exists for this session
                         _data = parsed.get("data") or {}
-                        _est = _data.get("estimated_value") or _data.get("total_value") or 0
+                        _est = (
+                            _data.get("estimated_value")
+                            or _data.get("total_value")
+                            or 0
+                        )
                         # Extract a meaningful title: prefer requirement description
                         # over generic document title (e.g. "Statement of Work")
-                        _desc = str(_data.get("description") or _data.get("requirement_description") or "")
-                        _title = _desc.split(".")[0].strip()[:60] if _desc.strip() else ""
+                        _desc = str(
+                            _data.get("description")
+                            or _data.get("requirement_description")
+                            or ""
+                        )
+                        _title = (
+                            _desc.split(".")[0].strip()[:60] if _desc.strip() else ""
+                        )
                         _title = _title or parsed.get("title") or "Acquisition Package"
                         _req_type = _data.get("requirement_type") or "services"
                         _pkg = _create_pkg(
@@ -2641,9 +2883,18 @@ def _build_all_service_tools(
                             )
                             # Emit initial package state
                             if result_queue and loop:
-                                _emit_package_state(_pkg, "manage_package", tenant_id, result_queue, loop)
+                                _emit_package_state(
+                                    _pkg,
+                                    "manage_package",
+                                    tenant_id,
+                                    result_queue,
+                                    loop,
+                                )
                 except Exception:
-                    logger.debug("Auto-create package in create_document failed (non-critical)", exc_info=True)
+                    logger.debug(
+                        "Auto-create package in create_document failed (non-critical)",
+                        exc_info=True,
+                    )
 
             # Auto-detect existing document: if package_id + doc_type are known
             # and no update_existing_key was provided, check for an existing doc
@@ -2654,38 +2905,55 @@ def _build_all_service_tools(
             if _pkg_id and _dt and not _upd_key:
                 try:
                     existing = tool_dispatch["get_latest_document"](
-                        {"package_id": _pkg_id, "doc_type": _dt}, tenant_id,
+                        {"package_id": _pkg_id, "doc_type": _dt},
+                        tenant_id,
                     )
                     existing_s3_key = (existing.get("document") or {}).get("s3_key", "")
                     if existing_s3_key:
                         parsed["update_existing_key"] = existing_s3_key
                         logger.info(
                             "create_document: existing %s found in package %s — routing to update (%s)",
-                            _dt, _pkg_id, existing_s3_key,
+                            _dt,
+                            _pkg_id,
+                            existing_s3_key,
                         )
                 except Exception:
                     pass  # No existing doc or lookup failed — create new
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                _fut = _pool.submit(tool_dispatch["create_document"], parsed, tenant_id, scoped_session_id)
+                _fut = _pool.submit(
+                    tool_dispatch["create_document"],
+                    parsed,
+                    tenant_id,
+                    scoped_session_id,
+                )
                 try:
                     result = _fut.result(timeout=_DOC_TOOL_TIMEOUT)
                 except concurrent.futures.TimeoutError:
-                    logger.error("create_document TIMEOUT after %ds (service): doc_type=%s", _DOC_TOOL_TIMEOUT, doc_type)
-                    return json.dumps({
-                        "error": f"Document creation timed out after {_DOC_TOOL_TIMEOUT}s — likely an AWS connectivity issue. Try again.",
-                        "tool": "create_document",
-                        "timeout": True,
-                    })
+                    logger.error(
+                        "create_document TIMEOUT after %ds (service): doc_type=%s",
+                        _DOC_TOOL_TIMEOUT,
+                        doc_type,
+                    )
+                    return json.dumps(
+                        {
+                            "error": f"Document creation timed out after {_DOC_TOOL_TIMEOUT}s — likely an AWS connectivity issue. Try again.",
+                            "tool": "create_document",
+                            "timeout": True,
+                        }
+                    )
             _emit("create_document", result)
             logger.info(
                 "create_document_tool DONE (service): doc_type=%s package_id=%s success=%s",
-                parsed.get("doc_type"), parsed.get("package_id"),
+                parsed.get("doc_type"),
+                parsed.get("package_id"),
                 "error" not in (result if isinstance(result, dict) else {}),
             )
 
             if result_queue and loop and isinstance(result, dict):
-                _emit_package_state(result, "create_document", tenant_id, result_queue, loop)
+                _emit_package_state(
+                    result, "create_document", tenant_id, result_queue, loop
+                )
 
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
@@ -2694,10 +2962,23 @@ def _build_all_service_tools(
             return json.dumps({"error": str(exc), "tool": "create_document"})
         finally:
             _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
-            logger.info("create_document_tool TIMING: doc_type=%s duration_ms=%d success=%s", doc_type, _tool_dur, _tool_success)
+            logger.info(
+                "create_document_tool TIMING: doc_type=%s duration_ms=%d success=%s",
+                doc_type,
+                _tool_dur,
+                _tool_success,
+            )
             try:
                 from .telemetry.cloudwatch_emitter import emit_tool_completed
-                emit_tool_completed(tenant_id, user_id, session_id or "", "create_document", _tool_dur, _tool_success)
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "create_document",
+                    _tool_dur,
+                    _tool_success,
+                )
             except Exception:
                 pass
 
@@ -2717,13 +2998,21 @@ def _build_all_service_tools(
             edits: List of edit objects, each with 'search_text' and 'replacement_text'
             checkbox_edits: List of checkbox edit objects, each with 'label_text' and 'checked' (bool)
         """
-        parsed = {"document_key": document_key, "edits": edits or [], "checkbox_edits": checkbox_edits or []}
+        parsed = {
+            "document_key": document_key,
+            "edits": edits or [],
+            "checkbox_edits": checkbox_edits or [],
+        }
         try:
-            result = tool_dispatch["edit_docx_document"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["edit_docx_document"](
+                parsed, tenant_id, scoped_session_id
+            )
             _emit("edit_docx_document", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
-            logger.error("Service tool edit_docx_document failed: %s", exc, exc_info=True)
+            logger.error(
+                "Service tool edit_docx_document failed: %s", exc, exc_info=True
+            )
             return json.dumps({"error": str(exc), "tool": "edit_docx_document"})
 
     # ---- 5. get_intake_status ----
@@ -2736,16 +3025,22 @@ def _build_all_service_tools(
         """
         parsed = {"intake_id": intake_id}
         try:
-            result = tool_dispatch["get_intake_status"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["get_intake_status"](
+                parsed, tenant_id, scoped_session_id
+            )
             _emit("get_intake_status", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
-            logger.error("Service tool get_intake_status failed: %s", exc, exc_info=True)
+            logger.error(
+                "Service tool get_intake_status failed: %s", exc, exc_info=True
+            )
             return json.dumps({"error": str(exc), "tool": "get_intake_status"})
 
     # ---- 6. intake_workflow ----
     @tool(name="intake_workflow")
-    def intake_workflow_tool(action: str, intake_id: str = "", data: dict | None = None) -> str:
+    def intake_workflow_tool(
+        action: str, intake_id: str = "", data: dict | None = None
+    ) -> str:
         """Manage the acquisition intake workflow: start, advance, status, complete, reset.
 
         Args:
@@ -2791,10 +3086,16 @@ def _build_all_service_tools(
             visibility: Skill visibility — 'private' or 'shared'
         """
         parsed = {
-            "action": action, "skill_id": skill_id, "name": name,
-            "display_name": display_name, "description": description,
-            "prompt_body": prompt_body, "triggers": triggers or [],
-            "tools": tools_list or [], "model": model, "visibility": visibility,
+            "action": action,
+            "skill_id": skill_id,
+            "name": name,
+            "display_name": display_name,
+            "description": description,
+            "prompt_body": prompt_body,
+            "triggers": triggers or [],
+            "tools": tools_list or [],
+            "model": model,
+            "visibility": visibility,
         }
         try:
             result = tool_dispatch["manage_skills"](parsed, tenant_id)
@@ -2821,8 +3122,10 @@ def _build_all_service_tools(
             is_append: Whether to append to existing prompt (default false)
         """
         parsed = {
-            "action": action, "agent_name": agent_name,
-            "prompt_body": prompt_body, "is_append": is_append,
+            "action": action,
+            "agent_name": agent_name,
+            "prompt_body": prompt_body,
+            "is_append": is_append,
         }
         try:
             result = tool_dispatch["manage_prompts"](parsed, tenant_id)
@@ -2851,8 +3154,10 @@ def _build_all_service_tools(
             scope: Template scope — 'shared' or user-specific identifier
         """
         parsed = {
-            "action": action, "doc_type": doc_type,
-            "template_body": template_body, "display_name": display_name,
+            "action": action,
+            "doc_type": doc_type,
+            "template_body": template_body,
+            "display_name": display_name,
             "user_id": scope,
         }
         try:
@@ -2865,7 +3170,9 @@ def _build_all_service_tools(
 
     # ---- 10. document_changelog_search ----
     @tool(name="document_changelog_search")
-    def document_changelog_search_tool(package_id: str, doc_type: str = "", limit: int = 20) -> str:
+    def document_changelog_search_tool(
+        package_id: str, doc_type: str = "", limit: int = 20
+    ) -> str:
         """Search changelog history for a document or package.
 
         Args:
@@ -2879,7 +3186,9 @@ def _build_all_service_tools(
             _emit("document_changelog_search", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
-            logger.error("Service tool document_changelog_search failed: %s", exc, exc_info=True)
+            logger.error(
+                "Service tool document_changelog_search failed: %s", exc, exc_info=True
+            )
             return json.dumps({"error": str(exc), "tool": "document_changelog_search"})
 
     # ---- 11. get_latest_document ----
@@ -2899,7 +3208,9 @@ def _build_all_service_tools(
             _emit("get_latest_document", result)
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
-            logger.error("Service tool get_latest_document failed: %s", exc, exc_info=True)
+            logger.error(
+                "Service tool get_latest_document failed: %s", exc, exc_info=True
+            )
             return json.dumps({"error": str(exc), "tool": "get_latest_document"})
 
     # ---- 12. finalize_package (emits package state) ----
@@ -2916,7 +3227,9 @@ def _build_all_service_tools(
             result = tool_dispatch["finalize_package"](parsed, tenant_id)
             _emit("finalize_package", result)
             if result_queue and loop and isinstance(result, dict):
-                _emit_package_state(result, "finalize_package", tenant_id, result_queue, loop)
+                _emit_package_state(
+                    result, "finalize_package", tenant_id, result_queue, loop
+                )
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
             logger.error("Service tool finalize_package failed: %s", exc, exc_info=True)
@@ -2947,10 +3260,15 @@ def _build_all_service_tools(
             prefix: Log group name prefix filter (for 'list_groups' operation)
         """
         parsed = {
-            "operation": operation, "log_group": log_group,
-            "filter_pattern": filter_pattern, "start_time": start_time,
-            "end_time": end_time, "limit": limit, "user_id": user_id,
-            "query": query, "prefix": prefix,
+            "operation": operation,
+            "log_group": log_group,
+            "filter_pattern": filter_pattern,
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": limit,
+            "user_id": user_id,
+            "query": query,
+            "prefix": prefix,
         }
         try:
             result = tool_dispatch["cloudwatch_logs"](parsed, tenant_id)
@@ -2990,12 +3308,18 @@ def _build_all_service_tools(
             limit: Maximum traces to return (default 20, max 100)
         """
         parsed = {
-            "operation": operation, "trace_id": trace_id,
-            "user_id_filter": user_id_filter, "session_id_filter": session_id_filter,
-            "tags_filter": tags_filter, "start_time": start_time,
-            "end_time": end_time, "limit": limit, "user_id": user_id,
+            "operation": operation,
+            "trace_id": trace_id,
+            "user_id_filter": user_id_filter,
+            "session_id_filter": session_id_filter,
+            "tags_filter": tags_filter,
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": limit,
+            "user_id": user_id,
         }
         import time as _time_mod
+
         _tool_t0 = _time_mod.perf_counter()
         _tool_success = True
         try:
@@ -3010,7 +3334,15 @@ def _build_all_service_tools(
             _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
             try:
                 from .telemetry.cloudwatch_emitter import emit_tool_completed
-                emit_tool_completed(tenant_id, user_id, session_id or "", "langfuse_traces", _tool_dur, _tool_success)
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "langfuse_traces",
+                    _tool_dur,
+                    _tool_success,
+                )
             except Exception:
                 pass
 
@@ -3043,20 +3375,30 @@ def _build_all_service_tools(
             keyword: Keyword search term
         """
         parsed = {
-            "operation": operation, "contract_value": contract_value,
-            "acquisition_method": acquisition_method, "contract_type": contract_type,
-            "is_it": is_it, "is_small_business": is_small_business,
-            "is_rd": is_rd, "is_human_subjects": is_human_subjects,
-            "is_services": is_services, "keyword": keyword,
+            "operation": operation,
+            "contract_value": contract_value,
+            "acquisition_method": acquisition_method,
+            "contract_type": contract_type,
+            "is_it": is_it,
+            "is_small_business": is_small_business,
+            "is_rd": is_rd,
+            "is_human_subjects": is_human_subjects,
+            "is_services": is_services,
+            "keyword": keyword,
         }
         try:
             _emit_input("query_compliance_matrix", parsed)
             result = execute_operation(parsed)
             out = json.dumps(result, indent=2, default=str)
-            _emit("query_compliance_matrix", result if isinstance(result, dict) else {"result": result})
+            _emit(
+                "query_compliance_matrix",
+                result if isinstance(result, dict) else {"result": result},
+            )
             return out
         except Exception as exc:
-            logger.error("Service tool query_compliance_matrix failed: %s", exc, exc_info=True)
+            logger.error(
+                "Service tool query_compliance_matrix failed: %s", exc, exc_info=True
+            )
             return json.dumps({"error": str(exc), "tool": "query_compliance_matrix"})
 
     # ---- 15. manage_package (emits package state) ----
@@ -3074,10 +3416,10 @@ def _build_all_service_tools(
         updates: dict | None = None,
         status: str = "",
     ) -> str:
-        """Create, read, update, or list acquisition packages. Packages track required/completed documents, checklist progress, and lifecycle status. Call 'create' after gathering intake info to activate the checklist panel.
+        """Create, read, update, delete, clone, or list acquisition packages. Packages track required/completed documents, checklist progress, and lifecycle status. Call 'create' after gathering intake info to activate the checklist panel.
 
         Args:
-            operation: Package operation — 'create', 'get', 'update', 'list', or 'checklist'
+            operation: Package operation — 'create', 'get', 'update', 'delete', 'list', 'checklist', 'clone', or 'exports'
             package_id: Package ID for get/update/checklist (e.g. PKG-2026-0001)
             title: Package title (for create)
             requirement_type: Requirement type — services, supplies, IT, construction, R&D (for create)
@@ -3091,35 +3433,46 @@ def _build_all_service_tools(
         """
         set_log_context(**_log_ctx)
         import time as _time_mod
+
         _tool_t0 = _time_mod.perf_counter()
         _tool_success = True
         parsed = {
-            "operation": operation, "package_id": package_id,
-            "title": title, "requirement_type": requirement_type,
+            "operation": operation,
+            "package_id": package_id,
+            "title": title,
+            "requirement_type": requirement_type,
             "estimated_value": estimated_value,
             "acquisition_method": acquisition_method,
             "contract_type": contract_type,
             "contract_vehicle": contract_vehicle,
-            "notes": notes, "updates": updates or {},
+            "notes": notes,
+            "updates": updates or {},
             "status": status,
         }
         try:
-            result = tool_dispatch["manage_package"](parsed, tenant_id, scoped_session_id)
+            result = tool_dispatch["manage_package"](
+                parsed, tenant_id, scoped_session_id
+            )
             _emit("manage_package", result)
 
             # Emit SSE state_update for create/update/checklist operations
             if result_queue and loop and isinstance(result, dict):
                 pkg_id = result.get("package_id")
                 if pkg_id and operation in ("create", "update"):
-                    _emit_package_state(result, "manage_package", tenant_id, result_queue, loop)
+                    _emit_package_state(
+                        result, "manage_package", tenant_id, result_queue, loop
+                    )
 
                     # Also emit initial package_created event for create
                     if operation == "create":
                         from app.package_store import get_package_checklist
+
                         checklist = get_package_checklist(tenant_id, pkg_id)
                         total = len(checklist.get("required", []))
                         completed = len(checklist.get("completed", []))
-                        progress_pct = int((completed / total) * 100) if total > 0 else 0
+                        progress_pct = (
+                            int((completed / total) * 100) if total > 0 else 0
+                        )
                         loop.call_soon_threadsafe(
                             result_queue.put_nowait,
                             {
@@ -3145,7 +3498,15 @@ def _build_all_service_tools(
             _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
             try:
                 from .telemetry.cloudwatch_emitter import emit_tool_completed
-                emit_tool_completed(tenant_id, user_id, session_id or "", "manage_package", _tool_dur, _tool_success)
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "manage_package",
+                    _tool_dur,
+                    _tool_success,
+                )
             except Exception:
                 pass
 
@@ -3167,17 +3528,22 @@ def _build_all_service_tools(
         """
         set_log_context(**_log_ctx)
         import time as _time_mod
+
         _tool_t0 = _time_mod.perf_counter()
         _tool_success = True
         try:
             import re
             from datetime import datetime
 
-            if not html_content or not html_content.strip().lower().startswith("<!doctype"):
-                return json.dumps({
-                    "error": "html_content must be a complete HTML document starting with <!DOCTYPE html>",
-                    "tool": "generate_html_playground",
-                })
+            if not html_content or not html_content.strip().lower().startswith(
+                "<!doctype"
+            ):
+                return json.dumps(
+                    {
+                        "error": "html_content must be a complete HTML document starting with <!DOCTYPE html>",
+                        "tool": "generate_html_playground",
+                    }
+                )
 
             safe_title = re.sub(r"[^\w\-]", "_", title)[:50]
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -3189,8 +3555,15 @@ def _build_all_service_tools(
             # Upload to S3
             import boto3
             from botocore.config import Config as BotoConfig
-            _s3_timeout = BotoConfig(connect_timeout=10, read_timeout=30, retries={"max_attempts": 2})
-            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"), config=_s3_timeout)
+
+            _s3_timeout = BotoConfig(
+                connect_timeout=10, read_timeout=30, retries={"max_attempts": 2}
+            )
+            s3 = boto3.client(
+                "s3",
+                region_name=os.getenv("AWS_REGION", "us-east-1"),
+                config=_s3_timeout,
+            )
             _bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
             s3.put_object(
                 Bucket=_bucket,
@@ -3221,18 +3594,30 @@ def _build_all_service_tools(
             _emit("generate_html_playground", result)
             logger.info(
                 "generate_html_playground DONE: title=%s s3_key=%s size=%d",
-                title, s3_key, len(content_bytes),
+                title,
+                s3_key,
+                len(content_bytes),
             )
             return json.dumps(result, indent=2, default=str)
         except Exception as exc:
             _tool_success = False
-            logger.error("Service tool generate_html_playground failed: %s", exc, exc_info=True)
+            logger.error(
+                "Service tool generate_html_playground failed: %s", exc, exc_info=True
+            )
             return json.dumps({"error": str(exc), "tool": "generate_html_playground"})
         finally:
             _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
             try:
                 from .telemetry.cloudwatch_emitter import emit_tool_completed
-                emit_tool_completed(tenant_id, user_id, session_id or "", "generate_html_playground", _tool_dur, _tool_success)
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "generate_html_playground",
+                    _tool_dur,
+                    _tool_success,
+                )
             except Exception:
                 pass
 
@@ -3288,8 +3673,14 @@ def _build_kb_service_tools(
 
     def _emit(name: str, result: dict) -> None:
         if result_queue and loop:
-            truncated_result = {k: (v[:3000] + "..." if isinstance(v, str) and len(v) > 3000 else v)
-                                for k, v in result.items()} if isinstance(result, dict) else result
+            truncated_result = (
+                {
+                    k: (v[:3000] + "..." if isinstance(v, str) and len(v) > 3000 else v)
+                    for k, v in result.items()
+                }
+                if isinstance(result, dict)
+                else result
+            )
             loop.call_soon_threadsafe(
                 result_queue.put_nowait,
                 {"type": "tool_result", "name": name, "result": truncated_result},
@@ -3330,11 +3721,19 @@ def _build_kb_service_tools(
             keywords: List of keyword filters
             limit: Maximum results to return (default 10)
         """
-        params = {k: v for k, v in {
-            "query": query, "topic": topic, "document_type": document_type,
-            "agent": agent, "authority_level": authority_level,
-            "keywords": keywords, "limit": limit,
-        }.items() if v}
+        params = {
+            k: v
+            for k, v in {
+                "query": query,
+                "topic": topic,
+                "document_type": document_type,
+                "agent": agent,
+                "authority_level": authority_level,
+                "keywords": keywords,
+                "limit": limit,
+            }.items()
+            if v
+        }
         _emit_input("knowledge_search", params)
         _kb_tools_called.add("knowledge_search")
         result = exec_knowledge_search(params, tenant_id, session_id)
@@ -3368,14 +3767,18 @@ def _build_kb_service_tools(
                 "CASCADE VIOLATION: web_search called without prior KB lookup "
                 "(session=%s, query='%s'). The research cascade requires "
                 "knowledge_search or search_far BEFORE web_search.",
-                session_id, query[:100],
+                session_id,
+                query[:100],
             )
-            return json.dumps({
-                "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
-                         "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
-                "query": query,
-                "action_required": "Call knowledge_search or search_far with this query first.",
-            }, indent=2)
+            return json.dumps(
+                {
+                    "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
+                    "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
+                    "query": query,
+                    "action_required": "Call knowledge_search or search_far with this query first.",
+                },
+                indent=2,
+            )
         _emit_input("web_search", {"query": query})
         result = exec_web_search(query)
         _emit("web_search", result)
@@ -3393,7 +3796,13 @@ def _build_kb_service_tools(
         _emit("web_fetch", result)
         return json.dumps(result, indent=2, default=str)
 
-    return [search_far, knowledge_search, knowledge_fetch, web_search_tool, web_fetch_tool]
+    return [
+        search_far,
+        knowledge_search,
+        knowledge_fetch,
+        web_search_tool,
+        web_fetch_tool,
+    ]
 
 
 def _build_service_tools(
@@ -3407,13 +3816,18 @@ def _build_service_tools(
 ) -> list:
     """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session."""
     tools = _build_all_service_tools(
-        tenant_id, user_id, session_id,
+        tenant_id,
+        user_id,
+        session_id,
         prompt_context=prompt_context,
         package_context=package_context,
-        result_queue=result_queue, loop=loop,
+        result_queue=result_queue,
+        loop=loop,
     )
     # Add KB tools with proper named parameters
-    tools.extend(_build_kb_service_tools(tenant_id, user_id, session_id, result_queue, loop))
+    tools.extend(
+        _build_kb_service_tools(tenant_id, user_id, session_id, result_queue, loop)
+    )
     # Add progressive disclosure tools
     tools.append(_make_list_skills_tool(result_queue, loop))
     tools.append(_make_load_skill_tool(result_queue, loop))
@@ -3422,6 +3836,7 @@ def _build_service_tools(
 
 
 # -- build_skill_tools() ---------------------------------------------
+
 
 def build_skill_tools(
     tier: str = "advanced",
@@ -3447,7 +3862,9 @@ def build_skill_tools(
     tools = []
 
     # Build doc tools once — only given to subagents that need them
-    _doc_tools = _build_subagent_doc_tools(tenant_id, user_id, session_id, result_queue, loop)
+    _doc_tools = _build_subagent_doc_tools(
+        tenant_id, user_id, session_id, result_queue, loop
+    )
     # Subagents that get document creation/editing capabilities
     _DOC_TOOL_AGENTS = {"market-intelligence"}
 
@@ -3460,7 +3877,10 @@ def build_skill_tools(
         if workspace_id:
             try:
                 from .workspace_override_store import resolve_skill
-                prompt_body, _source = resolve_skill(tenant_id, user_id, workspace_id, name)
+
+                prompt_body, _source = resolve_skill(
+                    tenant_id, user_id, workspace_id, name
+                )
             except Exception as exc:
                 logger.warning(
                     "workspace_override_store.resolve_skill failed for %s: %s -- using bundled",
@@ -3473,28 +3893,33 @@ def build_skill_tools(
         if not prompt_body:
             entry = PLUGIN_CONTENTS.get(meta["skill_key"])
             if not entry:
-                logger.warning("Plugin content not found for %s (key=%s)", name, meta["skill_key"])
+                logger.warning(
+                    "Plugin content not found for %s (key=%s)", name, meta["skill_key"]
+                )
                 continue
             prompt_body = entry["body"]
 
         extra = _doc_tools if name in _DOC_TOOL_AGENTS else None
 
-        tools.append(_make_subagent_tool(
-            skill_name=name,
-            description=meta["description"],
-            prompt_body=_truncate_skill(prompt_body),
-            result_queue=result_queue,
-            loop=loop,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            tier=tier,
-            session_id=session_id,
-            extra_tools=extra,
-        ))
+        tools.append(
+            _make_subagent_tool(
+                skill_name=name,
+                description=meta["description"],
+                prompt_body=_truncate_skill(prompt_body),
+                result_queue=result_queue,
+                loop=loop,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                tier=tier,
+                session_id=session_id,
+                extra_tools=extra,
+            )
+        )
 
     # Merge active user-created SKILL# items
     try:
         from .skill_store import list_active_skills
+
         user_skills = list_active_skills(tenant_id)
         for skill in user_skills:
             name = skill.get("name", "")
@@ -3505,24 +3930,31 @@ def build_skill_tools(
             skill_prompt = skill.get("prompt_body", "")
             if not skill_prompt:
                 continue
-            tools.append(_make_subagent_tool(
-                skill_name=name,
-                description=skill.get("description", f"{name} specialist"),
-                prompt_body=_truncate_skill(skill_prompt),
-                result_queue=result_queue,
-                loop=loop,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                tier=tier,
-                session_id=session_id,
-            ))
+            tools.append(
+                _make_subagent_tool(
+                    skill_name=name,
+                    description=skill.get("description", f"{name} specialist"),
+                    prompt_body=_truncate_skill(skill_prompt),
+                    result_queue=result_queue,
+                    loop=loop,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    tier=tier,
+                    session_id=session_id,
+                )
+            )
     except Exception as exc:
-        logger.warning("skill_store.list_active_skills failed for %s: %s -- skipping user skills", tenant_id, exc)
+        logger.warning(
+            "skill_store.list_active_skills failed for %s: %s -- skipping user skills",
+            tenant_id,
+            exc,
+        )
 
     return tools
 
 
 # -- Document Section Hints (injected into supervisor prompt) --------
+
 
 def _build_doc_type_section_hints() -> str:
     """Build concise section hints for each doc type, for the supervisor prompt.
@@ -3531,6 +3963,7 @@ def _build_doc_type_section_hints() -> str:
     """
     try:
         from app.template_schema import load_template_schemas
+
         schemas = load_template_schemas()
     except Exception:
         return ""
@@ -3538,7 +3971,11 @@ def _build_doc_type_section_hints() -> str:
     lines = []
     # Only include the primary doc types with rich schemas
     priority_types = [
-        "sow", "igce", "acquisition_plan", "market_research", "justification",
+        "sow",
+        "igce",
+        "acquisition_plan",
+        "market_research",
+        "justification",
     ]
     for dt in priority_types:
         schema = schemas.get(dt)
@@ -3591,7 +4028,10 @@ def _build_supervisor_prompt_body(
     if workspace_id:
         try:
             from .workspace_override_store import resolve_agent
-            base_prompt, _source = resolve_agent(tenant_id, user_id, workspace_id, "supervisor")
+
+            base_prompt, _source = resolve_agent(
+                tenant_id, user_id, workspace_id, "supervisor"
+            )
         except Exception as exc:
             logger.warning(
                 "workspace_override_store.resolve_agent failed for supervisor: %s -- using bundled",
@@ -3600,7 +4040,11 @@ def _build_supervisor_prompt_body(
 
     if not base_prompt:
         supervisor_entry = AGENTS.get("supervisor")
-        base_prompt = supervisor_entry["body"].strip() if supervisor_entry else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
+        base_prompt = (
+            supervisor_entry["body"].strip()
+            if supervisor_entry
+            else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
+        )
 
     # Build tier-gated slash commands block
     _tier_rank = {"basic": 0, "advanced": 1, "premium": 2}
@@ -3809,7 +4253,9 @@ def build_supervisor_prompt(
     if entry and now < entry[0]:
         body = entry[1]
     else:
-        body = _build_supervisor_prompt_body(tenant_id, user_id, tier, agent_names, workspace_id)
+        body = _build_supervisor_prompt_body(
+            tenant_id, user_id, tier, agent_names, workspace_id
+        )
         _supervisor_prompt_cache[cache_key] = (now + _PROMPT_CACHE_TTL, body)
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S UTC")
@@ -3820,6 +4266,7 @@ def build_supervisor_prompt(
 
 
 # -- SDK Query Wrappers (same signatures as sdk_agentic_service.py) --
+
 
 def _to_strands_messages(anthropic_messages: list[dict]) -> list[dict]:
     """Convert Anthropic-format messages to Strands Message format.
@@ -3888,8 +4335,14 @@ async def sdk_query(
             yield ResultMessage(result=result["message"], usage={})
             return
         if "error" in result:
-            yield AssistantMessage(content=[TextBlock(text=f"Document generation failed: {result['error']}")])
-            yield ResultMessage(result=f"Document generation failed: {result['error']}", usage={})
+            yield AssistantMessage(
+                content=[
+                    TextBlock(text=f"Document generation failed: {result['error']}")
+                ]
+            )
+            yield ResultMessage(
+                result=f"Document generation failed: {result['error']}", usage={}
+            )
             return
 
         text = (
@@ -3913,14 +4366,23 @@ async def sdk_query(
     if not resolved_workspace_id:
         try:
             from .workspace_store import get_or_create_default
+
             ws = get_or_create_default(tenant_id, user_id)
             resolved_workspace_id = ws.get("workspace_id")
         except Exception as exc:
-            logger.warning("workspace_store.get_or_create_default failed: %s -- using bundled prompts", exc)
+            logger.warning(
+                "workspace_store.get_or_create_default failed: %s -- using bundled prompts",
+                exc,
+            )
 
     # Fire preload concurrently with sync tool-building
     from .session_preloader import preload_session_context, format_context_for_prompt
-    _pkg_id = package_context.package_id if package_context and package_context.is_package_mode else None
+
+    _pkg_id = (
+        package_context.package_id
+        if package_context and package_context.is_package_mode
+        else None
+    )
     _preload_task = asyncio.create_task(
         preload_session_context(tenant_id, user_id, package_id=_pkg_id),
     )
@@ -3965,13 +4427,19 @@ async def sdk_query(
     if session_id:
         try:
             from .session_store import load_compaction_state
+
             compaction_state = load_compaction_state(session_id, tenant_id, user_id)
             if compaction_state:
-                summary_prefix = conv_manager.restore_from_session(compaction_state) or []
+                summary_prefix = (
+                    conv_manager.restore_from_session(compaction_state) or []
+                )
                 if summary_prefix:
                     strands_history = summary_prefix + strands_history
         except Exception:
-            logger.warning("Failed to restore compaction state for session=%s, starting fresh", session_id)
+            logger.warning(
+                "Failed to restore compaction state for session=%s, starting fresh",
+                session_id,
+            )
 
     _ensure_langfuse_exporter()
     supervisor = Agent(
@@ -4005,7 +4473,11 @@ async def sdk_query(
             )
             _root_span = _lf_ctx.__enter__()
             _root_span.update(
-                metadata={"tenant_id": tenant_id, "tier": tier, "session_id": session_id},
+                metadata={
+                    "tenant_id": tenant_id,
+                    "tier": tier,
+                    "session_id": session_id,
+                },
             )
             _langfuse_client.propagate_attributes(
                 session_id=session_id,
@@ -4040,15 +4512,19 @@ async def sdk_query(
             cm_state = conv_manager.get_state()
             if cm_state.get("summary_message"):
                 from .session_store import save_compaction_state
+
                 await asyncio.to_thread(
                     save_compaction_state, session_id, tenant_id, user_id, cm_state
                 )
                 logger.info(
                     "Compaction: summarized %d messages for session=%s",
-                    conv_manager.removed_message_count, session_id,
+                    conv_manager.removed_message_count,
+                    session_id,
                 )
         except Exception:
-            logger.warning("Failed to persist compaction state for session=%s", session_id)
+            logger.warning(
+                "Failed to persist compaction state for session=%s", session_id
+            )
 
     # Explicitly register sessionId (and tags) in Langfuse via REST API.
     # OTEL span attribute langfuse.session.id is set, but Langfuse's OTEL
@@ -4057,6 +4533,7 @@ async def sdk_query(
     if session_id and supervisor.trace_span:
         try:
             from opentelemetry.trace import format_trace_id
+
             span_ctx = supervisor.trace_span.get_span_context()
             if span_ctx and span_ctx.is_valid:
                 await _langfuse_set_session(
@@ -4155,7 +4632,12 @@ async def sdk_query_streaming(
         result = fast_path["result"]
         if fast_path.get("guardrail"):
             yield {"type": "text", "data": result["message"]}
-            yield {"type": "complete", "text": result["message"], "tools_called": [], "usage": {}}
+            yield {
+                "type": "complete",
+                "text": result["message"],
+                "tools_called": [],
+                "usage": {},
+            }
             return
         if "error" in result:
             yield {"type": "error", "error": result["error"]}
@@ -4177,7 +4659,11 @@ async def sdk_query_streaming(
             "type": "complete",
             "text": text,
             "tools_called": ["create_document"],
-            "usage": {"tools_called": 1, "tools": ["create_document"], "fast_path": True},
+            "usage": {
+                "tools_called": 1,
+                "tools": ["create_document"],
+                "fast_path": True,
+            },
         }
         return
 
@@ -4186,6 +4672,7 @@ async def sdk_query_streaming(
     if not resolved_workspace_id:
         try:
             from .workspace_store import get_or_create_default
+
             ws = get_or_create_default(tenant_id, user_id)
             resolved_workspace_id = ws.get("workspace_id")
         except Exception as exc:
@@ -4200,7 +4687,12 @@ async def sdk_query_streaming(
 
     # Fire preload concurrently with sync tool-building
     from .session_preloader import preload_session_context, format_context_for_prompt
-    _pkg_id = package_context.package_id if package_context and package_context.is_package_mode else None
+
+    _pkg_id = (
+        package_context.package_id
+        if package_context and package_context.is_package_mode
+        else None
+    )
     _preload_task = asyncio.create_task(
         preload_session_context(tenant_id, user_id, package_id=_pkg_id),
     )
@@ -4248,19 +4740,26 @@ async def sdk_query_streaming(
     if session_id:
         try:
             from .session_store import load_compaction_state
+
             compaction_state = load_compaction_state(session_id, tenant_id, user_id)
             if compaction_state:
-                summary_prefix = conv_manager.restore_from_session(compaction_state) or []
+                summary_prefix = (
+                    conv_manager.restore_from_session(compaction_state) or []
+                )
                 if summary_prefix:
                     strands_history = summary_prefix + strands_history
         except Exception:
-            logger.warning("Failed to restore compaction state for session=%s, starting fresh", session_id)
+            logger.warning(
+                "Failed to restore compaction state for session=%s, starting fresh",
+                session_id,
+            )
 
     _ensure_langfuse_exporter()
 
     # Emit trace.started telemetry
     try:
         from .telemetry.cloudwatch_emitter import emit_trace_started
+
         emit_trace_started(tenant_id, user_id, session_id or "", prompt)
     except Exception:
         logger.debug("Failed to emit trace.started", exc_info=True)
@@ -4284,6 +4783,7 @@ async def sdk_query_streaming(
 
     # Yield chunks via stream_async — SDK bridges sync→async internally
     import time as _time
+
     _agent_start = _time.perf_counter()
     full_text_parts: list[str] = []
     tools_called: list[str] = []
@@ -4321,7 +4821,11 @@ async def sdk_query_streaming(
             )
             _root_span = _lf_ctx.__enter__()
             _root_span.update(
-                metadata={"tenant_id": tenant_id, "tier": tier, "session_id": session_id},
+                metadata={
+                    "tenant_id": tenant_id,
+                    "tier": tier,
+                    "session_id": session_id,
+                },
             )
             _langfuse_client.propagate_attributes(
                 session_id=session_id,
@@ -4363,11 +4867,19 @@ async def sdk_query_streaming(
 
             if not done:
                 # Emit periodic status while waiting for model output
-                if (_time.perf_counter() - _last_visible_yield) > _STALE_STATUS_INTERVAL:
-                    _stale_detail = "Preparing documents..." if any(
-                        "create_document" in str(tc) for tc in tools_called
-                    ) else "Working..."
-                    yield {"type": "agent_status", "status": _stale_detail, "detail": "model_generating"}
+                if (
+                    _time.perf_counter() - _last_visible_yield
+                ) > _STALE_STATUS_INTERVAL:
+                    _stale_detail = (
+                        "Preparing documents..."
+                        if any("create_document" in str(tc) for tc in tools_called)
+                        else "Working..."
+                    )
+                    yield {
+                        "type": "agent_status",
+                        "status": _stale_detail,
+                        "detail": "model_generating",
+                    }
                     _last_visible_yield = _time.perf_counter()
                 continue  # Timeout — loop back to drain again
 
@@ -4428,8 +4940,10 @@ async def sdk_query_streaming(
                     tool_name = current_tool.get("name", "")
                     tools_called.append(tool_name)
                     from .telemetry.status_messages import (
-                        is_subagent_tool, get_tool_status_message,
+                        is_subagent_tool,
+                        get_tool_status_message,
                     )
+
                     if is_subagent_tool(tool_name):
                         display = tool_name.replace("_", " ").title()
                         yield {
@@ -4456,8 +4970,7 @@ async def sdk_query_streaming(
             cbs_event = event.get("event", {})
             if isinstance(cbs_event, dict):
                 cbs_tool = (
-                    cbs_event
-                    .get("contentBlockStart", {})
+                    cbs_event.get("contentBlockStart", {})
                     .get("start", {})
                     .get("toolUse")
                 )
@@ -4468,8 +4981,10 @@ async def sdk_query_streaming(
                         tool_name = cbs_tool.get("name", "")
                         tools_called.append(tool_name)
                         from .telemetry.status_messages import (
-                            is_subagent_tool, get_tool_status_message,
+                            is_subagent_tool,
+                            get_tool_status_message,
                         )
+
                         if is_subagent_tool(tool_name):
                             display = tool_name.replace("_", " ").title()
                             yield {
@@ -4508,22 +5023,29 @@ async def sdk_query_streaming(
         _elapsed = int((_time.perf_counter() - _agent_start) * 1000)
         logger.warning(
             "stream_async GeneratorExit (client disconnect): session=%s elapsed_ms=%d tools_called=%s",
-            session_id, _elapsed, tools_called,
+            session_id,
+            _elapsed,
+            tools_called,
         )
         # Persist partial work so "continue" sees prior research
         if session_id and (full_text_parts or tools_called):
             try:
                 partial_content = []
                 if full_text_parts:
-                    partial_content.append({
-                        "type": "text",
-                        "text": "".join(full_text_parts),
-                    })
+                    partial_content.append(
+                        {
+                            "type": "text",
+                            "text": "".join(full_text_parts),
+                        }
+                    )
                 from .session_store import add_message
+
                 add_message(
                     session_id=session_id,
                     role="assistant",
-                    content=partial_content if partial_content else "[interrupted — no text accumulated]",
+                    content=partial_content
+                    if partial_content
+                    else "[interrupted — no text accumulated]",
                     tenant_id=tenant_id,
                     user_id=user_id,
                     metadata={
@@ -4534,15 +5056,25 @@ async def sdk_query_streaming(
                 )
                 logger.info(
                     "Persisted partial work on disconnect: session=%s text_parts=%d tools=%s",
-                    session_id, len(full_text_parts), tools_called,
+                    session_id,
+                    len(full_text_parts),
+                    tools_called,
                 )
             except Exception:
-                logger.warning("Failed to persist partial work on disconnect: session=%s", session_id)
+                logger.warning(
+                    "Failed to persist partial work on disconnect: session=%s",
+                    session_id,
+                )
         return  # Stream was abandoned — skip cleanup yields
     except Exception as exc:
         from strands.types.exceptions import ContextWindowOverflowException
+
         if isinstance(exc, ContextWindowOverflowException):
-            logger.error("Context window overflow unrecoverable for session=%s: %s", session_id, exc)
+            logger.error(
+                "Context window overflow unrecoverable for session=%s: %s",
+                session_id,
+                exc,
+            )
             error_holder.append(exc)
             yield {
                 "type": "text",
@@ -4557,6 +5089,7 @@ async def sdk_query_streaming(
             logger.error("stream_async error: %s", exc)
         # Classify and tag the Langfuse trace for filtering
         from .telemetry.langfuse_client import notify_trace_error
+
         notify_trace_error(session_id or "", str(exc))
 
     # Final drain of any remaining tool results
@@ -4569,15 +5102,19 @@ async def sdk_query_streaming(
             cm_state = conv_manager.get_state()
             if cm_state.get("summary_message"):
                 from .session_store import save_compaction_state
+
                 await asyncio.to_thread(
                     save_compaction_state, session_id, tenant_id, user_id, cm_state
                 )
                 logger.info(
                     "Compaction: summarized %d messages for session=%s",
-                    conv_manager.removed_message_count, session_id,
+                    conv_manager.removed_message_count,
+                    session_id,
                 )
         except Exception:
-            logger.warning("Failed to persist compaction state for session=%s", session_id)
+            logger.warning(
+                "Failed to persist compaction state for session=%s", session_id
+            )
 
     # Extract usage from result
     usage = {}
@@ -4619,9 +5156,15 @@ async def sdk_query_streaming(
         if forced_doc is not None:
             tools_called.append("create_document")
             yield {"type": "tool_use", "name": "create_document"}
-            yield {"type": "tool_result", "name": "create_document", "result": forced_doc["result"]}
+            yield {
+                "type": "tool_result",
+                "name": "create_document",
+                "result": forced_doc["result"],
+            }
             # Emit package state update for forced document creation
-            for state_evt in _build_state_updates(forced_doc["result"], "create_document", tenant_id):
+            for state_evt in _build_state_updates(
+                forced_doc["result"], "create_document", tenant_id
+            ):
                 yield state_evt
             if not full_text_parts:
                 summary = (
@@ -4635,6 +5178,7 @@ async def sdk_query_streaming(
     if session_id and supervisor.trace_span:
         try:
             from opentelemetry.trace import format_trace_id
+
             span_ctx = supervisor.trace_span.get_span_context()
             if span_ctx and span_ctx.is_valid:
                 asyncio.ensure_future(
@@ -4652,6 +5196,7 @@ async def sdk_query_streaming(
     _agent_duration_ms = int((_time.perf_counter() - _agent_start) * 1000)
     try:
         from .telemetry.cloudwatch_emitter import emit_telemetry_event
+
         emit_telemetry_event(
             event_type="agent.timing",
             tenant_id=tenant_id,
@@ -4670,15 +5215,18 @@ async def sdk_query_streaming(
     # Emit trace.completed telemetry
     try:
         from .telemetry.cloudwatch_emitter import emit_trace_completed
-        emit_trace_completed({
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "session_id": session_id or "",
-            "duration_ms": _agent_duration_ms,
-            "total_input_tokens": usage.get("inputTokens", 0),
-            "total_output_tokens": usage.get("outputTokens", 0),
-            "tools_called": tools_called,
-        })
+
+        emit_trace_completed(
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "session_id": session_id or "",
+                "duration_ms": _agent_duration_ms,
+                "total_input_tokens": usage.get("inputTokens", 0),
+                "total_output_tokens": usage.get("outputTokens", 0),
+                "tools_called": tools_called,
+            }
+        )
     except Exception:
         logger.debug("Failed to emit trace.completed", exc_info=True)
 

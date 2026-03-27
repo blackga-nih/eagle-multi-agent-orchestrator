@@ -17,7 +17,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..admin_auth import get_admin_user, verify_tenant_admin
 from ..admin_cost_service import AdminCostService
-from ..admin_service import get_dashboard_stats, get_top_users, get_user_stats, check_rate_limit
+from ..admin_service import (
+    get_dashboard_stats,
+    get_top_users,
+    get_user_stats,
+    check_rate_limit,
+)
 from ..audit_store import write_audit
 from ..cognito_auth import UserContext
 from ..config_store import delete_config, list_config, put_config, _config_cache
@@ -32,7 +37,13 @@ from ..plugin_store import (
     list_plugin_entities,
     put_plugin_item,
 )
-from ..prompt_store import _prompt_cache, delete_prompt, get_prompt, list_tenant_prompts, put_prompt
+from ..prompt_store import (
+    _prompt_cache,
+    delete_prompt,
+    get_prompt,
+    list_tenant_prompts,
+    put_prompt,
+)
 from ..template_store import _template_cache
 
 from .dependencies import get_user_from_header, get_session_context
@@ -71,7 +82,9 @@ def _apply_json_patch(obj: dict, patch: list) -> dict:
             if operation == "replace":
                 target = result
                 for part in parts[:-1]:
-                    target = target[int(part)] if isinstance(target, list) else target[part]
+                    target = (
+                        target[int(part)] if isinstance(target, list) else target[part]
+                    )
                 last = parts[-1]
                 if isinstance(target, list):
                     target[int(last)] = op["value"]
@@ -80,7 +93,9 @@ def _apply_json_patch(obj: dict, patch: list) -> dict:
             elif operation == "add":
                 target = result
                 for part in parts[:-1]:
-                    target = target[int(part)] if isinstance(target, list) else target[part]
+                    target = (
+                        target[int(part)] if isinstance(target, list) else target[part]
+                    )
                 last = parts[-1]
                 if isinstance(target, list):
                     target.append(op["value"])
@@ -89,7 +104,9 @@ def _apply_json_patch(obj: dict, patch: list) -> dict:
             elif operation == "remove":
                 target = result
                 for part in parts[:-1]:
-                    target = target[int(part)] if isinstance(target, list) else target[part]
+                    target = (
+                        target[int(part)] if isinstance(target, list) else target[part]
+                    )
                 last = parts[-1]
                 if isinstance(target, list):
                     del target[int(last)]
@@ -104,9 +121,14 @@ def _regenerate_html_arrays(matrix: dict) -> None:
     """Replace THRESHOLDS and TYPES JS arrays in contract-requirements-matrix.html."""
     import re as _re
 
-    html_path = Path(__file__).resolve().parent.parent.parent.parent / "contract-requirements-matrix.html"
+    html_path = (
+        Path(__file__).resolve().parent.parent.parent.parent
+        / "contract-requirements-matrix.html"
+    )
     if not html_path.exists():
-        logger.warning("contract-requirements-matrix.html not found, skipping HTML regeneration")
+        logger.warning(
+            "contract-requirements-matrix.html not found, skipping HTML regeneration"
+        )
         return
 
     html = html_path.read_text(encoding="utf-8")
@@ -116,7 +138,7 @@ def _regenerate_html_arrays(matrix: dict) -> None:
     for t in matrix.get("thresholds", []):
         thresholds_js += (
             f'  {{ id: "{t["id"]}", label: "{t["label"]}", '
-            f'maxValue: {t.get("maxValue", "null")}, '
+            f"maxValue: {t.get('maxValue', 'null')}, "
             f'description: "{t.get("description", "")}" }},\n'
         )
     thresholds_js += "];"
@@ -150,9 +172,15 @@ def _obs_duration_ms(o: dict) -> int:
         try:
             from datetime import datetime as _dt
 
-            for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f+00:00"):
+            for fmt in (
+                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%SZ",
+                "%Y-%m-%dT%H:%M:%S.%f+00:00",
+            ):
                 try:
-                    s = _dt.strptime(start.replace("+00:00", "Z").rstrip("Z") + "Z", fmt)
+                    s = _dt.strptime(
+                        start.replace("+00:00", "Z").rstrip("Z") + "Z", fmt
+                    )
                     e = _dt.strptime(end.replace("+00:00", "Z").rstrip("Z") + "Z", fmt)
                     return int((e - s).total_seconds() * 1000)
                 except ValueError:
@@ -198,7 +226,9 @@ def _get_result_error(result: Any) -> Optional[str]:
     return None
 
 
-def _sanitize_result_error(result: Dict[str, Any], fallback_error: str) -> Dict[str, Any]:
+def _sanitize_result_error(
+    result: Dict[str, Any], fallback_error: str
+) -> Dict[str, Any]:
     sanitized = dict(result)
     sanitized["error"] = fallback_error
     return sanitized
@@ -222,7 +252,8 @@ async def api_list_kb_reviews(
         ddb = _get_dynamo()
         table = ddb.Table(table_name)
         resp = table.scan(
-            FilterExpression=Attr("PK").begins_with("KB_REVIEW#") & Attr("status").eq(status),
+            FilterExpression=Attr("PK").begins_with("KB_REVIEW#")
+            & Attr("status").eq(status),
         )
         reviews = resp.get("Items", [])
         reviews.sort(key=lambda r: r.get("created_at", ""), reverse=True)
@@ -263,13 +294,20 @@ async def api_approve_kb_review(
     proposed_diff = item.get("proposed_diff", [])
 
     # Apply diff to matrix.json (file on disk relative to this server)
-    matrix_path = Path(__file__).resolve().parent.parent.parent.parent / "eagle-plugin" / "data" / "matrix.json"
+    matrix_path = (
+        Path(__file__).resolve().parent.parent.parent.parent
+        / "eagle-plugin"
+        / "data"
+        / "matrix.json"
+    )
     if matrix_path.exists():
         try:
             matrix = _json.loads(matrix_path.read_text(encoding="utf-8"))
             matrix = _apply_json_patch(matrix, proposed_diff)
             matrix["version"] = datetime.utcnow().strftime("%Y-%m-%d")
-            matrix_path.write_text(_json.dumps(matrix, indent=2, ensure_ascii=False), encoding="utf-8")
+            matrix_path.write_text(
+                _json.dumps(matrix, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
             logger.info("matrix.json updated after KB review %s", review_id)
 
             _regenerate_html_arrays(matrix)
@@ -281,9 +319,15 @@ async def api_approve_kb_review(
     # Move S3 doc from pending/ to approved/
     old_key = item.get("s3_key", "")
     if old_key and old_key.startswith("eagle-knowledge-base/pending/"):
-        new_key = old_key.replace("eagle-knowledge-base/pending/", "eagle-knowledge-base/approved/")
+        new_key = old_key.replace(
+            "eagle-knowledge-base/pending/", "eagle-knowledge-base/approved/"
+        )
         try:
-            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": old_key}, Key=new_key)
+            s3.copy_object(
+                Bucket=bucket,
+                CopySource={"Bucket": bucket, "Key": old_key},
+                Key=new_key,
+            )
             s3.delete_object(Bucket=bucket, Key=old_key)
         except ClientError as e:
             logger.warning("S3 move failed: %s", e)
@@ -326,9 +370,15 @@ async def api_reject_kb_review(
 
     old_key = item.get("s3_key", "")
     if old_key and old_key.startswith("eagle-knowledge-base/pending/"):
-        new_key = old_key.replace("eagle-knowledge-base/pending/", "eagle-knowledge-base/rejected/")
+        new_key = old_key.replace(
+            "eagle-knowledge-base/pending/", "eagle-knowledge-base/rejected/"
+        )
         try:
-            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": old_key}, Key=new_key)
+            s3.copy_object(
+                Bucket=bucket,
+                CopySource={"Bucket": bucket, "Key": old_key},
+                Key=new_key,
+            )
             s3.delete_object(Bucket=bucket, Key=old_key)
         except ClientError as e:
             logger.warning("S3 move failed: %s", e)
@@ -432,17 +482,23 @@ async def api_admin_tools(
                     pass
 
     tools = []
-    for name, s in sorted(tool_stats.items(), key=lambda x: x[1]["call_count"], reverse=True):
+    for name, s in sorted(
+        tool_stats.items(), key=lambda x: x[1]["call_count"], reverse=True
+    ):
         total = s["call_count"]
-        tools.append({
-            "name": name,
-            "call_count": total,
-            "success_count": s["success_count"],
-            "error_count": s["error_count"],
-            "success_rate": round(s["success_count"] / total * 100, 1) if total else 100,
-            "avg_duration_ms": round(s["total_ms"] / total) if total else 0,
-            "recent_errors": s["recent_errors"],
-        })
+        tools.append(
+            {
+                "name": name,
+                "call_count": total,
+                "success_count": s["success_count"],
+                "error_count": s["error_count"],
+                "success_rate": round(s["success_count"] / total * 100, 1)
+                if total
+                else 100,
+                "avg_duration_ms": round(s["total_ms"] / total) if total else 0,
+                "recent_errors": s["recent_errors"],
+            }
+        )
 
     return {"tools": tools, "period": period}
 
@@ -490,27 +546,39 @@ async def get_admin_traces(
     data = result.get("data", [])
     traces = []
     for t in data:
-        traces.append({
-            "trace_id": t.get("id", ""),
-            "name": t.get("name", ""),
-            "session_id": t.get("sessionId", ""),
-            "user_id": t.get("userId", ""),
-            "created_at": t.get("timestamp", ""),
-            "updated_at": t.get("updatedAt", ""),
-            "duration_ms": _langfuse_latency_ms(t),
-            "total_input_tokens": t.get("usage", {}).get("input", 0) if t.get("usage") else 0,
-            "total_output_tokens": t.get("usage", {}).get("output", 0) if t.get("usage") else 0,
-            "total_tokens": t.get("usage", {}).get("total", 0) if t.get("usage") else 0,
-            "total_cost_usd": float(t.get("usage", {}).get("totalCost", 0) or 0) if t.get("usage") else 0,
-            "tags": t.get("tags", []),
-            "metadata": t.get("metadata", {}),
-            "status": "error" if t.get("level") == "ERROR" else "success",
-            "environment": _extract_env_from_trace(t.get("tags", []), t.get("metadata")),
-            "input": _truncate(t.get("input"), 200),
-            "output": _truncate(t.get("output"), 200),
-            "observation_count": t.get("observationCount", 0),
-            "langfuse_url": _langfuse_url(t.get("id", "")),
-        })
+        traces.append(
+            {
+                "trace_id": t.get("id", ""),
+                "name": t.get("name", ""),
+                "session_id": t.get("sessionId", ""),
+                "user_id": t.get("userId", ""),
+                "created_at": t.get("timestamp", ""),
+                "updated_at": t.get("updatedAt", ""),
+                "duration_ms": _langfuse_latency_ms(t),
+                "total_input_tokens": t.get("usage", {}).get("input", 0)
+                if t.get("usage")
+                else 0,
+                "total_output_tokens": t.get("usage", {}).get("output", 0)
+                if t.get("usage")
+                else 0,
+                "total_tokens": t.get("usage", {}).get("total", 0)
+                if t.get("usage")
+                else 0,
+                "total_cost_usd": float(t.get("usage", {}).get("totalCost", 0) or 0)
+                if t.get("usage")
+                else 0,
+                "tags": t.get("tags", []),
+                "metadata": t.get("metadata", {}),
+                "status": "error" if t.get("level") == "ERROR" else "success",
+                "environment": _extract_env_from_trace(
+                    t.get("tags", []), t.get("metadata")
+                ),
+                "input": _truncate(t.get("input"), 200),
+                "output": _truncate(t.get("output"), 200),
+                "observation_count": t.get("observationCount", 0),
+                "langfuse_url": _langfuse_url(t.get("id", "")),
+            }
+        )
     return {
         "traces": traces,
         "meta": result.get("meta", {}),
@@ -524,7 +592,11 @@ async def get_admin_trace_detail(
     admin_user: dict = Depends(get_admin_user),
 ):
     """Get single trace detail + observations from Langfuse (admin only)."""
-    from ..telemetry.langfuse_client import get_trace, langfuse_trace_url, list_observations
+    from ..telemetry.langfuse_client import (
+        get_trace,
+        langfuse_trace_url,
+        list_observations,
+    )
 
     trace = await get_trace(trace_id)
     if not trace:
@@ -537,23 +609,31 @@ async def get_admin_trace_detail(
 
     observations = []
     for o in raw_obs:
-        observations.append({
-            "id": o.get("id", ""),
-            "name": o.get("name", ""),
-            "type": o.get("type", ""),
-            "start_time": o.get("startTime", ""),
-            "end_time": o.get("endTime", ""),
-            "duration_ms": _obs_duration_ms(o),
-            "model": o.get("model", ""),
-            "input_tokens": o.get("usage", {}).get("input", 0) if o.get("usage") else 0,
-            "output_tokens": o.get("usage", {}).get("output", 0) if o.get("usage") else 0,
-            "total_cost": float(o.get("usage", {}).get("totalCost", 0) or 0) if o.get("usage") else 0,
-            "input": _truncate(o.get("input"), 500),
-            "output": _truncate(o.get("output"), 500),
-            "metadata": o.get("metadata", {}),
-            "level": o.get("level", "DEFAULT"),
-            "status_message": o.get("statusMessage", ""),
-        })
+        observations.append(
+            {
+                "id": o.get("id", ""),
+                "name": o.get("name", ""),
+                "type": o.get("type", ""),
+                "start_time": o.get("startTime", ""),
+                "end_time": o.get("endTime", ""),
+                "duration_ms": _obs_duration_ms(o),
+                "model": o.get("model", ""),
+                "input_tokens": o.get("usage", {}).get("input", 0)
+                if o.get("usage")
+                else 0,
+                "output_tokens": o.get("usage", {}).get("output", 0)
+                if o.get("usage")
+                else 0,
+                "total_cost": float(o.get("usage", {}).get("totalCost", 0) or 0)
+                if o.get("usage")
+                else 0,
+                "input": _truncate(o.get("input"), 500),
+                "output": _truncate(o.get("output"), 500),
+                "metadata": o.get("metadata", {}),
+                "level": o.get("level", "DEFAULT"),
+                "status_message": o.get("statusMessage", ""),
+            }
+        )
 
     return {
         "trace_id": trace.get("id", ""),
@@ -562,13 +642,21 @@ async def get_admin_trace_detail(
         "user_id": trace.get("userId", ""),
         "created_at": trace.get("timestamp", ""),
         "duration_ms": _langfuse_latency_ms(trace),
-        "total_input_tokens": trace.get("usage", {}).get("input", 0) if trace.get("usage") else 0,
-        "total_output_tokens": trace.get("usage", {}).get("output", 0) if trace.get("usage") else 0,
-        "total_cost_usd": float(trace.get("usage", {}).get("totalCost", 0) or 0) if trace.get("usage") else 0,
+        "total_input_tokens": trace.get("usage", {}).get("input", 0)
+        if trace.get("usage")
+        else 0,
+        "total_output_tokens": trace.get("usage", {}).get("output", 0)
+        if trace.get("usage")
+        else 0,
+        "total_cost_usd": float(trace.get("usage", {}).get("totalCost", 0) or 0)
+        if trace.get("usage")
+        else 0,
         "tags": trace.get("tags", []),
         "metadata": trace.get("metadata", {}),
         "status": "error" if trace.get("level") == "ERROR" else "success",
-        "environment": _extract_env_from_trace(trace.get("tags", []), trace.get("metadata")),
+        "environment": _extract_env_from_trace(
+            trace.get("tags", []), trace.get("metadata")
+        ),
         "input": trace.get("input"),
         "output": trace.get("output"),
         "observations": observations,
@@ -601,9 +689,13 @@ async def get_admin_traces_summary(
     avg_latency = sum(latencies) / len(latencies) if latencies else 0
 
     total_cost = sum(
-        float(t.get("usage", {}).get("totalCost", 0) or 0) for t in data if t.get("usage")
+        float(t.get("usage", {}).get("totalCost", 0) or 0)
+        for t in data
+        if t.get("usage")
     )
-    total_tokens = sum(t.get("usage", {}).get("total", 0) for t in data if t.get("usage"))
+    total_tokens = sum(
+        t.get("usage", {}).get("total", 0) for t in data if t.get("usage")
+    )
 
     by_user: dict[str, int] = {}
     by_session: dict[str, int] = {}
@@ -664,7 +756,9 @@ async def get_admin_tenant_overall_cost(
     """1. Overall Tenant Cost - Admin Only."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await admin_cost_service.get_tenant_overall_cost(tenant_id, start_date, end_date)
+    costs = await admin_cost_service.get_tenant_overall_cost(
+        tenant_id, start_date, end_date
+    )
     return costs
 
 
@@ -677,7 +771,9 @@ async def get_admin_per_user_cost(
     """2. Per User Cost - Admin Only."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await admin_cost_service.get_tenant_per_user_cost(tenant_id, start_date, end_date)
+    costs = await admin_cost_service.get_tenant_per_user_cost(
+        tenant_id, start_date, end_date
+    )
     return costs
 
 
@@ -690,7 +786,9 @@ async def get_admin_service_wise_cost(
     """3. Overall Tenant Service-wise Consumption Cost - Admin Only."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await admin_cost_service.get_tenant_service_wise_cost(tenant_id, start_date, end_date)
+    costs = await admin_cost_service.get_tenant_service_wise_cost(
+        tenant_id, start_date, end_date
+    )
     return costs
 
 
@@ -704,7 +802,9 @@ async def get_admin_user_service_cost(
     """4. User Service-wise Consumption Cost - Admin Only."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await admin_cost_service.get_user_service_wise_cost(tenant_id, user_id, start_date, end_date)
+    costs = await admin_cost_service.get_user_service_wise_cost(
+        tenant_id, user_id, start_date, end_date
+    )
     return costs
 
 
@@ -715,14 +815,19 @@ async def get_comprehensive_admin_report(
     admin_user: dict = Depends(verify_tenant_admin),
 ):
     """Comprehensive Admin Cost Report - All 4 breakdowns."""
-    report = await admin_cost_service.generate_comprehensive_admin_report(tenant_id, days)
+    report = await admin_cost_service.generate_comprehensive_admin_report(
+        tenant_id, days
+    )
     return report
 
 
 @router.get("/my-tenants")
 async def get_admin_tenants(admin_user: dict = Depends(get_admin_user)):
     """Get tenants where current user has admin access."""
-    return {"admin_email": admin_user["email"], "admin_tenants": admin_user["admin_tenants"]}
+    return {
+        "admin_email": admin_user["email"],
+        "admin_tenants": admin_user["admin_tenants"],
+    }
 
 
 @router.post("/add-to-group")
@@ -754,7 +859,10 @@ async def add_user_to_admin_group(request: dict):
             Username=email,
             GroupName=f"{tenant_id}-admins",
         )
-        return {"success": True, "message": f"Added {email} to {tenant_id}-admins group"}
+        return {
+            "success": True,
+            "message": f"Added {email} to {tenant_id}-admins group",
+        }
     except Exception as e:
         logger.error("Failed to add user to admin group: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to add user to admin group")
@@ -813,7 +921,11 @@ async def admin_plugin_status(user: UserContext = Depends(get_user_from_header))
     templates = list_plugin_entities("templates")
     return {
         "manifest": manifest,
-        "counts": {"agents": len(agents), "skills": len(skills), "templates": len(templates)},
+        "counts": {
+            "agents": len(agents),
+            "skills": len(skills),
+            "templates": len(templates),
+        },
     }
 
 
@@ -835,7 +947,9 @@ async def admin_get_plugin_entity(
     """Get a single PLUGIN# entity by type and name."""
     item = get_plugin_item(entity_type, name)
     if not item:
-        raise HTTPException(status_code=404, detail=f"Plugin entity not found: {entity_type}/{name}")
+        raise HTTPException(
+            status_code=404, detail=f"Plugin entity not found: {entity_type}/{name}"
+        )
     return item
 
 

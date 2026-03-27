@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _seven_year_ttl() -> int:
     """Return Unix epoch seconds 7 years from now."""
     return ttl_timestamp(days=365 * 7)
@@ -42,6 +43,7 @@ def _normalize_change_source(change_source: str) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def write_changelog_entry(
     tenant_id: str,
@@ -160,6 +162,7 @@ def list_changelog_entries(
 # Document-key-based changelog (for workspace/standalone documents)
 # ---------------------------------------------------------------------------
 
+
 def write_document_changelog_entry(
     tenant_id: str,
     document_key: str,
@@ -227,7 +230,9 @@ def write_document_changelog_entry(
             actor_user_id,
         )
     except (ClientError, BotoCoreError) as exc:
-        logger.error("changelog_store: failed to write document changelog entry: %s", exc)
+        logger.error(
+            "changelog_store: failed to write document changelog entry: %s", exc
+        )
         raise
 
     return item
@@ -262,7 +267,9 @@ def list_document_changelog_entries(
         )
         return items
     except (ClientError, BotoCoreError) as exc:
-        logger.error("changelog_store: failed to list document changelog entries: %s", exc)
+        logger.error(
+            "changelog_store: failed to list document changelog entries: %s", exc
+        )
         raise
 
 

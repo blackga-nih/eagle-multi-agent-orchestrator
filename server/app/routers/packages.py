@@ -23,10 +23,17 @@ from ..document_service import (
     get_document_download_url,
 )
 from ..document_store import get_document, get_document_history, list_package_documents
-from ..package_context_service import clear_active_package, detect_package_from_session, resolve_context, set_active_package
+from ..package_context_service import (
+    clear_active_package,
+    detect_package_from_session,
+    resolve_context,
+    set_active_package,
+)
 from ..package_store import (
     approve_package,
+    clone_package,
     create_package,
+    delete_package,
     get_package,
     get_package_checklist,
     list_packages,
@@ -159,19 +166,96 @@ async def approve_package_endpoint(
     return pkg
 
 
+@router.delete("/{package_id}")
+async def delete_package_endpoint(
+    package_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Delete a package (only intake/drafting status)."""
+    pkg = delete_package(user.tenant_id, package_id)
+    if not pkg:
+        raise HTTPException(
+            status_code=404,
+            detail="Package not found or cannot be deleted",
+        )
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="package",
+        entity_name=package_id,
+        event_type="delete",
+        actor_user_id=user.user_id,
+    )
+    return {"deleted": True, "package_id": package_id}
+
+
+@router.post("/{package_id}/clone")
+async def clone_package_endpoint(
+    package_id: str,
+    body: dict = {},
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Clone a package with new ID, copying metadata but not documents."""
+    new_title = body.get("title")
+    pkg = clone_package(
+        user.tenant_id, package_id, new_title,
+        owner_user_id=user.user_id,
+    )
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Source package not found")
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="package",
+        entity_name=pkg["package_id"],
+        event_type="clone",
+        actor_user_id=user.user_id,
+    )
+    return pkg
+
+
+@router.get("/{package_id}/exports")
+async def list_package_exports_endpoint(
+    package_id: str,
+    limit: int = 50,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List export history for a package."""
+    from ..export_store import list_exports
+
+    exports = list_exports(user.tenant_id, package_id=package_id, limit=limit)
+    return {"exports": exports, "count": len(exports)}
+
+
 @router.get("/{package_id}/export/zip")
 async def export_package_zip_endpoint(
     package_id: str,
     format: str = "docx",
     save_to_workspace: bool = False,
+    doc_types: str | None = None,
+    format_map: str | None = None,
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Download all package documents as a ZIP archive."""
+    """Download package documents as a ZIP archive.
+
+    Query params:
+        format: Default export format (docx, pdf, md). Default: docx
+        doc_types: Comma-separated doc types to include (e.g. sow,igce). Default: all
+        format_map: JSON per-doc format overrides (e.g. {"sow":"pdf","igce":"md"})
+        save_to_workspace: Save ZIP to user workspace in S3
+    """
+    import json as _json
     import logging
+
     from ..db_client import get_s3
-    from ..document_export import export_package_zip
+    from ..document_export import export_package_zip as _export_zip
 
     logger = logging.getLogger("eagle.packages")
+
+    parsed_format_map = None
+    if format_map:
+        try:
+            parsed_format_map = _json.loads(format_map)
+        except _json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="format_map must be valid JSON")
 
     lookup_package = _resolve_main_override("get_package", get_package)
     list_docs = _resolve_main_override("list_package_documents", list_package_documents)
@@ -182,13 +266,13 @@ async def export_package_zip_endpoint(
 
     docs = list_docs(user.tenant_id, package_id)
     if not docs:
-        raise HTTPException(status_code=404, detail="No documents found for this package")
+        raise HTTPException(
+            status_code=404, detail="No documents found for this package"
+        )
 
-    # Fetch content from S3 for each document (content is stored in S3, not DynamoDB)
     s3 = get_s3()
     docs_with_content = []
     for doc in docs:
-        # If content already present (e.g. from test mocks), use it directly
         if doc.get("content"):
             docs_with_content.append(doc)
             continue
@@ -196,8 +280,11 @@ async def export_package_zip_endpoint(
         s3_key = doc.get("s3_key")
         s3_bucket = doc.get("s3_bucket")
         if not s3_key or not s3_bucket:
-            logger.warning("Document %s/%s missing s3_key or s3_bucket, skipping",
-                           doc.get("doc_type"), doc.get("version"))
+            logger.warning(
+                "Document %s/%s missing s3_key or s3_bucket, skipping",
+                doc.get("doc_type"),
+                doc.get("version"),
+            )
             continue
 
         try:
@@ -208,7 +295,10 @@ async def export_package_zip_endpoint(
                 doc["content"] = raw_content.decode("utf-8")
             else:
                 doc["_binary"] = raw_content
-                doc["filename"] = f"{doc.get('doc_type', 'doc')}_{doc.get('title', 'document')}.{file_type}"
+                doc["filename"] = (
+                    f"{doc.get('doc_type', 'doc')}"
+                    f"_{doc.get('title', 'document')}.{file_type}"
+                )
             docs_with_content.append(doc)
         except Exception as e:
             logger.warning("Failed to fetch S3 content for %s: %s", s3_key, e)
@@ -216,7 +306,41 @@ async def export_package_zip_endpoint(
     if not docs_with_content:
         raise HTTPException(status_code=404, detail="No documents with content found")
 
-    result = export_package_zip(docs_with_content, pkg.get("title", "Package"), format)
+    # Selective export filter
+    if doc_types:
+        requested = {dt.strip() for dt in doc_types.split(",")}
+        docs_with_content = [
+            d for d in docs_with_content
+            if d.get("doc_type") in requested
+        ]
+        if not docs_with_content:
+            raise HTTPException(
+                status_code=404,
+                detail="No documents matching requested doc_types",
+            )
+
+    result = _export_zip(
+        docs_with_content, pkg.get("title", "Package"), format,
+        package_metadata=pkg, format_map=parsed_format_map,
+    )
+
+    # Record export (non-fatal)
+    try:
+        from ..export_store import record_export
+
+        record_export(
+            tenant_id=user.tenant_id,
+            package_id=package_id,
+            user_id=user.user_id,
+            export_format=format,
+            doc_types_included=[
+                d.get("doc_type", "unknown")
+                for d in docs_with_content
+            ],
+            file_size=result["size_bytes"],
+        )
+    except Exception as e:
+        logger.warning("Failed to record export: %s", e)
 
     headers = {
         "Content-Disposition": f'attachment; filename="{result["filename"]}"',
@@ -224,10 +348,15 @@ async def export_package_zip_endpoint(
     if save_to_workspace:
         try:
             from .documents import _save_export_to_workspace
+
             s3_key = _save_export_to_workspace(
-                user.tenant_id, user.user_id, result["filename"],
-                result["data"], result["content_type"],
-                pkg.get("title", "Package"), "zip",
+                user.tenant_id,
+                user.user_id,
+                result["filename"],
+                result["data"],
+                result["content_type"],
+                pkg.get("title", "Package"),
+                "zip",
             )
             headers["X-S3-Key"] = s3_key
         except Exception as e:
@@ -323,7 +452,9 @@ async def create_document_endpoint(
     )
     if not result.success:
         status = 404 if result.error and "not found" in result.error.lower() else 500
-        raise HTTPException(status_code=status, detail=result.error or "Document creation failed")
+        raise HTTPException(
+            status_code=status, detail=result.error or "Document creation failed"
+        )
 
     doc = get_document(user.tenant_id, package_id, body["doc_type"], result.version)
     if doc:
@@ -369,10 +500,23 @@ async def get_document_endpoint(
     version: Optional[int] = None,
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Get a specific document (latest version by default)."""
+    """Get a specific document (latest version by default).
+
+    Includes a presigned download_url for the document's S3 content.
+    """
     doc = get_document(user.tenant_id, package_id, doc_type, version)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    # Always include a download URL so the frontend doesn't need a separate call
+    if doc.get("s3_key") and not doc.get("download_url"):
+        url = get_document_download_url(
+            tenant_id=user.tenant_id,
+            package_id=package_id,
+            doc_type=doc_type,
+            version=doc.get("version"),
+        )
+        if url:
+            doc["download_url"] = url
     return doc
 
 

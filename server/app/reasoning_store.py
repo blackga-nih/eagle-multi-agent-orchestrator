@@ -5,6 +5,7 @@ Supports three levels of reasoning entries:
 - **Section-level** (SectionEntry): tracks document section omissions/gaps
 - **Justification-level** (JustificationEntry): records key acquisition decisions
 """
+
 from __future__ import annotations
 
 import json
@@ -21,30 +22,32 @@ logger = logging.getLogger("eagle.reasoning")
 @dataclass
 class ReasoningEntry:
     timestamp: str
-    event_type: str       # "tool_call", "compliance_check", "recommendation"
+    event_type: str  # "tool_call", "compliance_check", "recommendation"
     tool_name: str
-    reasoning: str        # Why this action was taken
-    determination: str    # What was decided
+    reasoning: str  # Why this action was taken
+    determination: str  # What was decided
     data: dict
-    confidence: str       # "high", "medium", "low"
+    confidence: str  # "high", "medium", "low"
 
 
 @dataclass
 class SectionEntry:
     """Section-level reasoning for document Appendix A (Omissions & Gaps)."""
+
     section_name: str
-    status: str           # "complete", "partial", "omitted", "default"
-    reason: str           # Why this status
-    info_needed: str      # What would complete this section
+    status: str  # "complete", "partial", "omitted", "default"
+    reason: str  # Why this status
+    info_needed: str  # What would complete this section
 
 
 @dataclass
 class JustificationEntry:
     """Key acquisition decision for document Appendix B (AI Rationale)."""
-    decision: str         # e.g., "Contract Type -> FFP"
-    reasoning: str        # 2-3 sentence explanation
-    far_basis: str        # FAR/HHSAR citation
-    confidence: str       # "high", "medium", "low"
+
+    decision: str  # e.g., "Contract Type -> FFP"
+    reasoning: str  # 2-3 sentence explanation
+    far_basis: str  # FAR/HHSAR citation
+    confidence: str  # "high", "medium", "low"
 
 
 class ReasoningLog:
@@ -67,15 +70,17 @@ class ReasoningLog:
         data: Optional[dict] = None,
         confidence: str = "high",
     ):
-        self.entries.append(ReasoningEntry(
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            event_type=event_type,
-            tool_name=tool_name,
-            reasoning=reasoning,
-            determination=determination,
-            data=data or {},
-            confidence=confidence,
-        ))
+        self.entries.append(
+            ReasoningEntry(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                event_type=event_type,
+                tool_name=tool_name,
+                reasoning=reasoning,
+                determination=determination,
+                data=data or {},
+                confidence=confidence,
+            )
+        )
 
     def add_section(
         self,
@@ -85,12 +90,14 @@ class ReasoningLog:
         info_needed: str = "",
     ):
         """Add a section-level omission/gap entry for Appendix A."""
-        self.section_entries.append(SectionEntry(
-            section_name=section_name,
-            status=status,
-            reason=reason,
-            info_needed=info_needed,
-        ))
+        self.section_entries.append(
+            SectionEntry(
+                section_name=section_name,
+                status=status,
+                reason=reason,
+                info_needed=info_needed,
+            )
+        )
 
     def add_justification(
         self,
@@ -100,12 +107,14 @@ class ReasoningLog:
         confidence: str = "high",
     ):
         """Add a key acquisition decision entry for Appendix B."""
-        self.justification_entries.append(JustificationEntry(
-            decision=decision,
-            reasoning=reasoning,
-            far_basis=far_basis,
-            confidence=confidence,
-        ))
+        self.justification_entries.append(
+            JustificationEntry(
+                decision=decision,
+                reasoning=reasoning,
+                far_basis=far_basis,
+                confidence=confidence,
+            )
+        )
 
     def to_json(self) -> list[dict]:
         return [asdict(e) for e in self.entries]
@@ -179,26 +188,32 @@ class ReasoningLog:
 
     def save(self):
         """Persist to DynamoDB as REASONING#{session_id}."""
-        if not self.entries and not self.section_entries and not self.justification_entries:
+        if (
+            not self.entries
+            and not self.section_entries
+            and not self.justification_entries
+        ):
             return
         table = get_table()
-        table.put_item(Item={
-            "PK": f"SESSION#{self.session_id}",
-            "SK": f"REASONING#{self.session_id}",
-            "tenant_id": self.tenant_id,
-            "user_id": self.user_id,
-            "reasoning_entries": json.dumps(self.to_json(), default=str),
-            "section_entries": json.dumps(
-                [asdict(e) for e in self.section_entries], default=str
-            ),
-            "justification_entries": json.dumps(
-                [asdict(e) for e in self.justification_entries], default=str
-            ),
-            "entry_count": len(self.entries),
-            "section_count": len(self.section_entries),
-            "justification_count": len(self.justification_entries),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        table.put_item(
+            Item={
+                "PK": f"SESSION#{self.session_id}",
+                "SK": f"REASONING#{self.session_id}",
+                "tenant_id": self.tenant_id,
+                "user_id": self.user_id,
+                "reasoning_entries": json.dumps(self.to_json(), default=str),
+                "section_entries": json.dumps(
+                    [asdict(e) for e in self.section_entries], default=str
+                ),
+                "justification_entries": json.dumps(
+                    [asdict(e) for e in self.justification_entries], default=str
+                ),
+                "entry_count": len(self.entries),
+                "section_count": len(self.section_entries),
+                "justification_count": len(self.justification_entries),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     @classmethod
     def load(cls, session_id: str, tenant_id: str, user_id: str) -> ReasoningLog:
@@ -206,10 +221,12 @@ class ReasoningLog:
         log = cls(session_id, tenant_id, user_id)
         try:
             table = get_table()
-            resp = table.get_item(Key={
-                "PK": f"SESSION#{session_id}",
-                "SK": f"REASONING#{session_id}",
-            })
+            resp = table.get_item(
+                Key={
+                    "PK": f"SESSION#{session_id}",
+                    "SK": f"REASONING#{session_id}",
+                }
+            )
             item = resp.get("Item")
             if not item:
                 return log

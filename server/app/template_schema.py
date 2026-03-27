@@ -11,6 +11,7 @@ Provides:
   - build_section_guidance(): Build concise AI prompt text
   - validate_completeness(): Check generated content against schema
 """
+
 from __future__ import annotations
 
 import json
@@ -40,9 +41,11 @@ _MD_FILENAME_TO_DOCTYPE = {
 
 # ── Data Models ──
 
+
 @dataclass
 class SectionField:
     """A placeholder field within a template section."""
+
     name: str
     required: bool = True
     field_type: str = "text"  # "text" | "list" | "table" | "checkbox"
@@ -51,8 +54,9 @@ class SectionField:
 @dataclass
 class ClauseReference:
     """A FAR/DFARS/HHSAR clause citation on a template or section."""
-    clause_number: str          # "FAR 52.219-9" or "FAR 19.702"
-    title: str                  # "Small Business Subcontracting Plan"
+
+    clause_number: str  # "FAR 52.219-9" or "FAR 19.702"
+    title: str  # "Small Business Subcontracting Plan"
     applicability: str = "required"  # "required" | "conditional" | "recommended"
     condition: Optional[str] = None  # When conditional: "contract_value > 750000"
     note: Optional[str] = None
@@ -61,9 +65,10 @@ class ClauseReference:
 @dataclass
 class TemplateSection:
     """A section within a document template."""
-    number: str           # "1", "1.1", "PART 1"
-    title: str            # "BACKGROUND AND PURPOSE"
-    description: str = "" # First paragraph after heading (auto-extracted)
+
+    number: str  # "1", "1.1", "PART 1"
+    title: str  # "BACKGROUND AND PURPOSE"
+    description: str = ""  # First paragraph after heading (auto-extracted)
     fields: list[SectionField] = field(default_factory=list)
     subsections: list[TemplateSection] = field(default_factory=list)
     has_table: bool = False
@@ -73,6 +78,7 @@ class TemplateSection:
 @dataclass
 class TemplateSchema:
     """Complete schema for a document template."""
+
     doc_type: str
     title: str
     sections: list[TemplateSection] = field(default_factory=list)
@@ -85,6 +91,7 @@ class TemplateSchema:
 @dataclass
 class CompletenessReport:
     """Result of validating document content against its schema."""
+
     doc_type: str
     total_sections: int
     filled_sections: int
@@ -96,6 +103,7 @@ class CompletenessReport:
 @dataclass
 class ClauseCoverageReport:
     """Result of analyzing clause coverage for a template."""
+
     doc_type: str
     total_clauses_referenced: int
     far_parts_covered: list[str]
@@ -108,8 +116,12 @@ class ClauseCoverageReport:
 
 # Patterns for section headings
 _HEADING_RE = re.compile(r"^(#{2,3})\s+(.+)$", re.MULTILINE)
-_PART_RE = re.compile(r"^(#{2,3})\s+(?:PART\s+)?(\d+(?:\.\d+)*)[:\s.\-)]+\s*(.+)$", re.MULTILINE)
-_NUMBERED_RE = re.compile(r"^(#{2,3})\s+(\d+(?:\.\d+)*)[.:\s)\-]+\s*(.+)$", re.MULTILINE)
+_PART_RE = re.compile(
+    r"^(#{2,3})\s+(?:PART\s+)?(\d+(?:\.\d+)*)[:\s.\-)]+\s*(.+)$", re.MULTILINE
+)
+_NUMBERED_RE = re.compile(
+    r"^(#{2,3})\s+(\d+(?:\.\d+)*)[.:\s)\-]+\s*(.+)$", re.MULTILINE
+)
 _TASK_RE = re.compile(r"^(#{2,3})\s+Task\s+(\d+)[:\s]+\s*(.+)$", re.MULTILINE)
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 _TABLE_RE = re.compile(r"^\|.+\|.+\|", re.MULTILINE)
@@ -136,9 +148,7 @@ def parse_template_schema(markdown: str, doc_type: str) -> TemplateSchema:
         raw_title = m.group(2).strip()
 
         # Try to extract section number
-        num_match = re.match(
-            r"(?:PART\s+)?(\d+(?:\.\d+)*)[.:\s)\-]+\s*(.+)", raw_title
-        )
+        num_match = re.match(r"(?:PART\s+)?(\d+(?:\.\d+)*)[.:\s)\-]+\s*(.+)", raw_title)
         task_match = re.match(r"Task\s+(\d+)[:\s]+\s*(.+)", raw_title)
 
         if num_match:
@@ -174,7 +184,11 @@ def parse_template_schema(markdown: str, doc_type: str) -> TemplateSchema:
         description = ""
         for line in body_text.split("\n"):
             stripped = line.strip()
-            if stripped and not stripped.startswith("|") and not stripped.startswith("---"):
+            if (
+                stripped
+                and not stripped.startswith("|")
+                and not stripped.startswith("---")
+            ):
                 if not _PLACEHOLDER_RE.search(stripped) or len(stripped) > 60:
                     description = stripped[:200]
                     break
@@ -283,10 +297,14 @@ def load_template_schemas() -> dict[str, TemplateSchema]:
                 schemas[doc_type] = schema
                 logger.debug(
                     "Loaded markdown schema for %s: %d sections, %d fields",
-                    doc_type, len(schema.sections), schema.total_fields,
+                    doc_type,
+                    len(schema.sections),
+                    schema.total_fields,
                 )
             except Exception as e:
-                logger.warning("Failed to parse markdown template %s: %s", md_file.name, e)
+                logger.warning(
+                    "Failed to parse markdown template %s: %s", md_file.name, e
+                )
 
     # 2. Extracted JSON metadata (lower priority — don't override markdown)
     if METADATA_DIR.exists():
@@ -298,7 +316,8 @@ def load_template_schemas() -> dict[str, TemplateSchema]:
                 schemas[schema.doc_type] = schema
                 logger.debug(
                     "Loaded JSON schema for %s: %d sections",
-                    schema.doc_type, len(schema.sections),
+                    schema.doc_type,
+                    len(schema.sections),
                 )
 
     logger.info("Loaded %d template schemas", len(schemas))
@@ -316,6 +335,7 @@ def _ensure_schemas_loaded() -> None:
 
 
 # ── Section Guidance Builder ──
+
 
 def build_section_guidance(doc_type: str) -> str:
     """Build concise AI prompt text listing sections and key fields.
@@ -353,8 +373,11 @@ def get_all_section_guidance() -> dict[str, str]:
 
 # ── Completeness Validator ──
 
+
 def validate_completeness(
-    doc_type: str, content: str, threshold: float = 0.7,
+    doc_type: str,
+    content: str,
+    threshold: float = 0.7,
 ) -> CompletenessReport:
     """Check each schema section against generated content.
 
@@ -374,8 +397,11 @@ def validate_completeness(
     schema = TEMPLATE_SCHEMAS.get(doc_type)
     if not schema:
         return CompletenessReport(
-            doc_type=doc_type, total_sections=0, filled_sections=0,
-            completeness_pct=0.0, is_complete=False,
+            doc_type=doc_type,
+            total_sections=0,
+            filled_sections=0,
+            completeness_pct=0.0,
+            is_complete=False,
         )
 
     content_lower = content.lower()
@@ -390,7 +416,11 @@ def validate_completeness(
         if section_filled:
             filled += 1
         else:
-            label = f"{section.number}. {section.title}" if section.number else section.title
+            label = (
+                f"{section.number}. {section.title}"
+                if section.number
+                else section.title
+            )
             missing.append(label)
 
     pct = (filled / total * 100) if total > 0 else 0.0
@@ -404,11 +434,15 @@ def validate_completeness(
     )
 
 
-def _is_section_filled(section: TemplateSection, content: str, content_lower: str) -> bool:
+def _is_section_filled(
+    section: TemplateSection, content: str, content_lower: str
+) -> bool:
     """Check if a section appears to be filled in the content."""
     # Check 1: Section title should appear in content
     title_words = [w for w in section.title.lower().split() if len(w) > 3]
-    title_present = any(w in content_lower for w in title_words) if title_words else True
+    title_present = (
+        any(w in content_lower for w in title_words) if title_words else True
+    )
 
     if not title_present:
         return False
@@ -416,8 +450,7 @@ def _is_section_filled(section: TemplateSection, content: str, content_lower: st
     # Check 2: Placeholders should NOT still be present as {{NAME}}
     if section.fields:
         unfilled_count = sum(
-            1 for f in section.fields
-            if "{{" + f.name + "}}" in content
+            1 for f in section.fields if "{{" + f.name + "}}" in content
         )
         # If ANY field is still a raw placeholder, section is not fully filled
         if unfilled_count > 0:
@@ -533,12 +566,14 @@ def get_clause_coverage(template_filename: str) -> ClauseCoverageReport:
         if clauses:
             sections_with += 1
             for c in clauses:
-                clause_list.append({
-                    "clause_number": c.get("clause_number", ""),
-                    "title": c.get("title", ""),
-                    "section_number": sec_num,
-                    "applicability": c.get("applicability", "required"),
-                })
+                clause_list.append(
+                    {
+                        "clause_number": c.get("clause_number", ""),
+                        "title": c.get("title", ""),
+                        "section_number": sec_num,
+                        "applicability": c.get("applicability", "required"),
+                    }
+                )
                 # Extract FAR part number
                 part = _extract_far_part(c.get("clause_number", ""))
                 if part:
@@ -547,12 +582,14 @@ def get_clause_coverage(template_filename: str) -> ClauseCoverageReport:
             sections_without += 1
 
     for c in ref_data.get("template_level_clauses", []):
-        clause_list.append({
-            "clause_number": c.get("clause_number", ""),
-            "title": c.get("title", ""),
-            "section_number": "template_level",
-            "applicability": c.get("applicability", "required"),
-        })
+        clause_list.append(
+            {
+                "clause_number": c.get("clause_number", ""),
+                "title": c.get("title", ""),
+                "section_number": "template_level",
+                "applicability": c.get("applicability", "required"),
+            }
+        )
         part = _extract_far_part(c.get("clause_number", ""))
         if part:
             far_parts.add(part)

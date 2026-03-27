@@ -4,6 +4,7 @@ Trace store — routes to local file store or DynamoDB based on TRACE_STORE env 
 Set TRACE_STORE=local (default) to use a local JSON file (no AWS needed).
 Set TRACE_STORE=dynamodb to use the existing 'eagle' DynamoDB table.
 """
+
 import os
 
 _TRACE_STORE_BACKEND = os.getenv("TRACE_STORE", "local").lower()

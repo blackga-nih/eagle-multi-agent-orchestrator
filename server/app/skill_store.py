@@ -15,6 +15,7 @@ Status lifecycle:
     draft -> review -> active -> disabled
     draft or disabled -> (deleted)
 """
+
 import time
 import uuid
 import logging
@@ -200,7 +201,9 @@ def get_skill(tenant_id: str, skill_id: str) -> Optional[Dict[str, Any]]:
             return item
         return None
     except (ClientError, BotoCoreError) as exc:
-        logger.error("skill_store.get_skill failed [%s/%s]: %s", tenant_id, skill_id, exc)
+        logger.error(
+            "skill_store.get_skill failed [%s/%s]: %s", tenant_id, skill_id, exc
+        )
         return None
 
 
@@ -217,7 +220,9 @@ def update_skill(
     """
     existing = get_skill(tenant_id, skill_id)
     if existing is None:
-        logger.warning("skill_store.update_skill: skill not found [%s/%s]", tenant_id, skill_id)
+        logger.warning(
+            "skill_store.update_skill: skill not found [%s/%s]", tenant_id, skill_id
+        )
         return None
 
     # Merge only allowed fields
@@ -243,10 +248,15 @@ def update_skill(
         get_table().put_item(Item=updated)
         _cache_set(tenant_id, skill_id, updated)
         logger.debug(
-            "skill_store.update_skill: [%s/%s] v%s", tenant_id, skill_id, updated["version"]
+            "skill_store.update_skill: [%s/%s] v%s",
+            tenant_id,
+            skill_id,
+            updated["version"],
         )
     except (ClientError, BotoCoreError) as exc:
-        logger.error("skill_store.update_skill failed [%s/%s]: %s", tenant_id, skill_id, exc)
+        logger.error(
+            "skill_store.update_skill failed [%s/%s]: %s", tenant_id, skill_id, exc
+        )
         return None
 
     return updated
@@ -263,7 +273,9 @@ def _transition_status(
     existing = get_skill(tenant_id, skill_id)
     if existing is None:
         logger.warning(
-            "skill_store._transition_status: skill not found [%s/%s]", tenant_id, skill_id
+            "skill_store._transition_status: skill not found [%s/%s]",
+            tenant_id,
+            skill_id,
         )
         return None
 
@@ -293,11 +305,18 @@ def _transition_status(
         _cache_invalidate(tenant_id, skill_id)
         _cache_set(tenant_id, skill_id, updated)
         logger.debug(
-            "skill_store: status %s->%s [%s/%s]", from_status, to_status, tenant_id, skill_id
+            "skill_store: status %s->%s [%s/%s]",
+            from_status,
+            to_status,
+            tenant_id,
+            skill_id,
         )
     except (ClientError, BotoCoreError) as exc:
         logger.error(
-            "skill_store._transition_status failed [%s/%s]: %s", tenant_id, skill_id, exc
+            "skill_store._transition_status failed [%s/%s]: %s",
+            tenant_id,
+            skill_id,
+            exc,
         )
         return None
 
@@ -309,7 +328,9 @@ def submit_for_review(tenant_id: str, skill_id: str) -> Optional[Dict[str, Any]]
 
     Returns the updated item or None if the skill does not exist or is not in draft status.
     """
-    return _transition_status(tenant_id, skill_id, from_status="draft", to_status="review")
+    return _transition_status(
+        tenant_id, skill_id, from_status="draft", to_status="review"
+    )
 
 
 def publish_skill(tenant_id: str, skill_id: str) -> Optional[Dict[str, Any]]:
@@ -318,7 +339,11 @@ def publish_skill(tenant_id: str, skill_id: str) -> Optional[Dict[str, Any]]:
     Returns the updated item or None if the skill does not exist or is not in review status.
     """
     return _transition_status(
-        tenant_id, skill_id, from_status="review", to_status="active", set_published_at=True
+        tenant_id,
+        skill_id,
+        from_status="review",
+        to_status="active",
+        set_published_at=True,
     )
 
 
@@ -327,7 +352,9 @@ def disable_skill(tenant_id: str, skill_id: str) -> Optional[Dict[str, Any]]:
 
     Returns the updated item or None if the skill does not exist or is not in active status.
     """
-    return _transition_status(tenant_id, skill_id, from_status="active", to_status="disabled")
+    return _transition_status(
+        tenant_id, skill_id, from_status="active", to_status="disabled"
+    )
 
 
 def delete_skill(tenant_id: str, skill_id: str) -> bool:
@@ -337,7 +364,9 @@ def delete_skill(tenant_id: str, skill_id: str) -> bool:
     """
     existing = get_skill(tenant_id, skill_id)
     if existing is None:
-        logger.warning("skill_store.delete_skill: skill not found [%s/%s]", tenant_id, skill_id)
+        logger.warning(
+            "skill_store.delete_skill: skill not found [%s/%s]", tenant_id, skill_id
+        )
         return False
 
     current_status = existing.get("status")
@@ -361,7 +390,9 @@ def delete_skill(tenant_id: str, skill_id: str) -> bool:
         logger.debug("skill_store.delete_skill: deleted [%s/%s]", tenant_id, skill_id)
         return True
     except (ClientError, BotoCoreError) as exc:
-        logger.error("skill_store.delete_skill failed [%s/%s]: %s", tenant_id, skill_id, exc)
+        logger.error(
+            "skill_store.delete_skill failed [%s/%s]: %s", tenant_id, skill_id, exc
+        )
         return False
 
 
@@ -379,16 +410,14 @@ def list_skills(
         if status is not None:
             response = table.query(
                 KeyConditionExpression=(
-                    Key("PK").eq(f"SKILL#{tenant_id}")
-                    & Key("SK").begins_with("SKILL#")
+                    Key("PK").eq(f"SKILL#{tenant_id}") & Key("SK").begins_with("SKILL#")
                 ),
                 FilterExpression=Attr("status").eq(status),
             )
         else:
             response = table.query(
                 KeyConditionExpression=(
-                    Key("PK").eq(f"SKILL#{tenant_id}")
-                    & Key("SK").begins_with("SKILL#")
+                    Key("PK").eq(f"SKILL#{tenant_id}") & Key("SK").begins_with("SKILL#")
                 ),
             )
         return [dict(item) for item in response.get("Items", [])]

@@ -6,6 +6,7 @@ and serializes to JSON for persistence and display.
 
 Promoted from server/tests/test_eagle_sdk_eval.py TraceCollector class.
 """
+
 import json
 import time
 import logging
@@ -111,13 +112,15 @@ class TraceCollector:
             total_in = input_t + cache_create + cache_read
             self.total_input_tokens += total_in
             self.total_output_tokens += output_t
-            self.result_messages.append({
-                "input_tokens": input_t,
-                "output_tokens": output_t,
-                "cache_creation_input_tokens": cache_create,
-                "cache_read_input_tokens": cache_read,
-                "total_input_effective": total_in,
-            })
+            self.result_messages.append(
+                {
+                    "input_tokens": input_t,
+                    "output_tokens": output_t,
+                    "cache_creation_input_tokens": cache_create,
+                    "cache_read_input_tokens": cache_read,
+                    "total_input_effective": total_in,
+                }
+            )
             self._log(
                 f"{prefix}[ResultMessage/usage] "
                 f"{input_t}+{cache_create}cache_create+{cache_read}cache_read in / {output_t} out"
@@ -163,7 +166,9 @@ class TraceCollector:
                     subagent = inp.get("subagent_type", inp.get("description", "?"))
                     if subagent not in self.agents_delegated:
                         self.agents_delegated.append(subagent)
-                    self._log(f"{prefix}[{msg_type}/ToolUseBlock] SUBAGENT -> {subagent}")
+                    self._log(
+                        f"{prefix}[{msg_type}/ToolUseBlock] SUBAGENT -> {subagent}"
+                    )
                 else:
                     if name not in self.tools_called:
                         self.tools_called.append(name)
@@ -244,35 +249,46 @@ class TraceCollector:
                     for block in message.content:
                         bc = type(block).__name__
                         if bc == "TextBlock":
-                            blocks.append({
-                                "type": "text",
-                                "text": getattr(block, "text", ""),
-                            })
+                            blocks.append(
+                                {
+                                    "type": "text",
+                                    "text": getattr(block, "text", ""),
+                                }
+                            )
                         elif bc == "ThinkingBlock":
-                            blocks.append({
-                                "type": "thinking",
-                                "text": getattr(
-                                    block, "thinking", getattr(block, "text", "")
-                                ),
-                            })
+                            blocks.append(
+                                {
+                                    "type": "thinking",
+                                    "text": getattr(
+                                        block, "thinking", getattr(block, "text", "")
+                                    ),
+                                }
+                            )
                         elif bc == "ToolUseBlock":
-                            blocks.append({
-                                "type": "tool_use",
-                                "tool": getattr(block, "name", ""),
-                                "id": getattr(block, "id", ""),
-                                "input": getattr(block, "input", {}),
-                            })
+                            blocks.append(
+                                {
+                                    "type": "tool_use",
+                                    "tool": getattr(block, "name", ""),
+                                    "id": getattr(block, "id", ""),
+                                    "input": getattr(block, "input", {}),
+                                }
+                            )
                         elif bc == "ToolResultBlock":
                             content = getattr(block, "content", "")
-                            blocks.append({
-                                "type": "tool_result",
-                                "tool_use_id": getattr(block, "tool_use_id", ""),
-                                "content": str(content)[:2000] if content else "",
-                            })
+                            blocks.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": getattr(block, "tool_use_id", ""),
+                                    "content": str(content)[:2000] if content else "",
+                                }
+                            )
                 item["content"] = blocks
 
                 # Preserve subagent context
-                if hasattr(message, "parent_tool_use_id") and message.parent_tool_use_id:
+                if (
+                    hasattr(message, "parent_tool_use_id")
+                    and message.parent_tool_use_id
+                ):
                     item["parent_tool_use_id"] = message.parent_tool_use_id
 
             trace.append(item)

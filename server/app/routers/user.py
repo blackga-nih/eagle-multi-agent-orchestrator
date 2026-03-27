@@ -29,7 +29,9 @@ def _get_result_error(result: Any) -> Optional[str]:
     return None
 
 
-def _sanitize_result_error(result: Dict[str, Any], fallback_error: str) -> Dict[str, Any]:
+def _sanitize_result_error(
+    result: Dict[str, Any], fallback_error: str
+) -> Dict[str, Any]:
     sanitized = dict(result)
     sanitized["error"] = fallback_error
     return sanitized

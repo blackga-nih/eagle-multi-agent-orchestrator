@@ -29,7 +29,10 @@ from ..cognito_auth import UserContext
 from ..db_client import get_s3, get_table
 from ..document_export import export_document, ExportDependencyError
 from ..document_store import get_document
-from ..document_service import create_package_document_version, get_document_markdown_s3_key
+from ..document_service import (
+    create_package_document_version,
+    get_document_markdown_s3_key,
+)
 from ..doc_type_registry import normalize_doc_type
 from ..document_classification_service import classify_document, extract_text_preview
 from ..package_store import get_package
@@ -48,11 +51,13 @@ _S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
 _BINARY_FILE_EXTENSIONS = {"doc", "docx", "pdf", "xls", "xlsx"}
 _TEXT_FILE_EXTENSIONS = {"md", "txt", "json", "csv", "html"}
 ALLOWED_UPLOAD_MIME_TYPES = {
-    "application/pdf", "application/msword",
+    "application/pdf",
+    "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
-    "text/plain", "text/markdown",
+    "text/plain",
+    "text/markdown",
 }
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 
@@ -86,7 +91,9 @@ def _get_document_metadata(
 ) -> Optional[Dict[str, Any]]:
     """Read package-document metadata through the compatibility alias when patched."""
     main_module = sys.modules.get("app.main")
-    override = getattr(main_module, "get_document", None) if main_module is not None else None
+    override = (
+        getattr(main_module, "get_document", None) if main_module is not None else None
+    )
     if callable(override) and override is not get_document:
         return override(tenant_id, package_id, doc_type, version)
     return get_document(tenant_id, package_id, doc_type, version)
@@ -132,8 +139,12 @@ def _is_binary_document(name: str, content_type: Optional[str]) -> bool:
         return False
     if "json" in lowered or "markdown" in lowered or "csv" in lowered:
         return False
-    if ("officedocument" in lowered or lowered == "application/pdf"
-            or lowered == "application/msword" or lowered == "application/vnd.ms-excel"):
+    if (
+        "officedocument" in lowered
+        or lowered == "application/pdf"
+        or lowered == "application/msword"
+        or lowered == "application/vnd.ms-excel"
+    ):
         return True
     return ext not in _TEXT_FILE_EXTENSIONS and bool(ext)
 
@@ -152,12 +163,18 @@ def _extract_binary_preview_payload(name: str, raw_bytes: bytes) -> dict[str, An
         from ..spreadsheet_edit_service import extract_xlsx_preview_payload
 
         return extract_xlsx_preview_payload(raw_bytes)
-    return {"content": None, "preview_blocks": [], "preview_sheets": [], "preview_mode": "none"}
+    return {
+        "content": None,
+        "preview_blocks": [],
+        "preview_sheets": [],
+        "preview_mode": "none",
+    }
 
 
 def _is_allowed_document_key(doc_key: str, tenant_id: str, user_id: str) -> bool:
-    return (doc_key.startswith(f"eagle/{tenant_id}/{user_id}/")
-            or doc_key.startswith(f"eagle/{tenant_id}/packages/"))
+    return doc_key.startswith(f"eagle/{tenant_id}/{user_id}/") or doc_key.startswith(
+        f"eagle/{tenant_id}/packages/"
+    )
 
 
 def _extract_package_document_ref(doc_key: str) -> Optional[dict[str, Any]]:
@@ -244,7 +261,9 @@ def _build_document_response(
         "is_binary": is_binary,
         "download_url": download_url,
         "size_bytes": response.get("ContentLength", 0),
-        "last_modified": response.get("LastModified").isoformat() if response.get("LastModified") else None,
+        "last_modified": response.get("LastModified").isoformat()
+        if response.get("LastModified")
+        else None,
         "package_id": package_id,
         "document_type": doc_type,
         "version": version,
@@ -329,7 +348,9 @@ def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> Non
 
 def _get_upload(tenant_id: str, upload_id: str) -> Optional[Dict[str, Any]]:
     table = get_table()
-    resp = table.get_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
+    resp = table.get_item(
+        Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"}
+    )
     return resp.get("Item")
 
 
@@ -363,9 +384,15 @@ def _resolve_export_content(req: ExportRequest, tenant_id: str, user_id: str) ->
             response = s3.get_object(Bucket=_S3_BUCKET, Key=req.doc_key)
         except ClientError as exc:
             if exc.response["Error"]["Code"] == "NoSuchKey":
-                raise HTTPException(status_code=404, detail="Document not found") from exc
-            logger.error("S3 export fetch error for %s: %s", req.doc_key, exc, exc_info=True)
-            raise HTTPException(status_code=500, detail="Failed to retrieve export source") from exc
+                raise HTTPException(
+                    status_code=404, detail="Document not found"
+                ) from exc
+            logger.error(
+                "S3 export fetch error for %s: %s", req.doc_key, exc, exc_info=True
+            )
+            raise HTTPException(
+                status_code=500, detail="Failed to retrieve export source"
+            ) from exc
 
         content_type = response.get("ContentType") or _guess_content_type(req.doc_key)
         if not _is_binary_document(req.doc_key, content_type):
@@ -398,7 +425,9 @@ def _resolve_export_content(req: ExportRequest, tenant_id: str, user_id: str) ->
     try:
         return base64.b64decode(req.content_b64).decode("utf-8")
     except (ValueError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=400, detail="Invalid content_b64 payload") from exc
+        raise HTTPException(
+            status_code=400, detail="Invalid content_b64 payload"
+        ) from exc
 
 
 class DocumentUpdateRequest(BaseModel):
@@ -427,14 +456,21 @@ class AssignToPackageRequest(BaseModel):
 
 
 def _save_export_to_workspace(
-    tenant_id: str, user_id: str, filename: str,
-    data: bytes, content_type: str, title: str, fmt: str,
+    tenant_id: str,
+    user_id: str,
+    filename: str,
+    data: bytes,
+    content_type: str,
+    title: str,
+    fmt: str,
 ) -> str:
     """Save exported file to user's workspace in S3. Returns the S3 key."""
     from ..changelog_store import write_document_changelog_entry
 
     s3_key = f"eagle/{tenant_id}/{user_id}/exports/{filename}"
-    get_s3().put_object(Bucket=_S3_BUCKET, Key=s3_key, Body=data, ContentType=content_type)
+    get_s3().put_object(
+        Bucket=_S3_BUCKET, Key=s3_key, Body=data, ContentType=content_type
+    )
     write_document_changelog_entry(
         tenant_id=tenant_id,
         document_key=s3_key,
@@ -448,10 +484,16 @@ def _save_export_to_workspace(
 
 
 @router.post("/export")
-async def api_export_document(req: ExportRequest, user: UserContext = Depends(get_user_from_header)):
+async def api_export_document(
+    req: ExportRequest, user: UserContext = Depends(get_user_from_header)
+):
     """Export content to DOCX, PDF, or Markdown."""
     try:
-        result = export_document(_resolve_export_content(req, user.tenant_id, user.user_id), req.format, req.title)
+        result = export_document(
+            _resolve_export_content(req, user.tenant_id, user.user_id),
+            req.format,
+            req.title,
+        )
         headers = {
             "Content-Disposition": f'attachment; filename="{result["filename"]}"',
             "X-File-Size": str(result["size_bytes"]),
@@ -459,8 +501,13 @@ async def api_export_document(req: ExportRequest, user: UserContext = Depends(ge
         if req.save_to_workspace:
             try:
                 s3_key = _save_export_to_workspace(
-                    user.tenant_id, user.user_id, result["filename"],
-                    result["data"], result["content_type"], req.title, req.format,
+                    user.tenant_id,
+                    user.user_id,
+                    result["filename"],
+                    result["data"],
+                    result["content_type"],
+                    req.title,
+                    req.format,
                 )
                 headers["X-S3-Key"] = s3_key
             except Exception as e:
@@ -479,7 +526,9 @@ async def api_export_document(req: ExportRequest, user: UserContext = Depends(ge
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Export error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during export")
+        raise HTTPException(
+            status_code=500, detail="Internal server error during export"
+        )
 
 
 @router.get("/export/{session_id}")
@@ -511,14 +560,18 @@ async def api_export_session(
         return StreamingResponse(
             io.BytesIO(result["data"]),
             media_type=result["content_type"],
-            headers={"Content-Disposition": f'attachment; filename="{result["filename"]}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{result["filename"]}"'
+            },
         )
     except ExportDependencyError as e:
         logger.error("Session export dependency error: %s", e)
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error("Session export error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during session export")
+        raise HTTPException(
+            status_code=500, detail="Internal server error during session export"
+        )
 
 
 @router.get("")
@@ -540,13 +593,15 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
             name = key.split("/")[-1]
             if not name:
                 continue
-            documents.append({
-                "key": key,
-                "name": name,
-                "size_bytes": obj["Size"],
-                "last_modified": obj["LastModified"].isoformat(),
-                "type": _get_doc_type(name),
-            })
+            documents.append(
+                {
+                    "key": key,
+                    "name": name,
+                    "size_bytes": obj["Size"],
+                    "last_modified": obj["LastModified"].isoformat(),
+                    "type": _get_doc_type(name),
+                }
+            )
         return {"documents": documents, "bucket": bucket, "prefix": prefix}
     except ClientError as e:
         logger.error("S3 list error: %s", e, exc_info=True)
@@ -554,7 +609,9 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
 
 
 @router.get("/presign")
-async def api_presign_document(key: str, user: UserContext = Depends(get_user_from_header)):
+async def api_presign_document(
+    key: str, user: UserContext = Depends(get_user_from_header)
+):
     """Generate a time-limited presigned URL for an S3 document."""
     from botocore.exceptions import ClientError
 
@@ -566,7 +623,9 @@ async def api_presign_document(key: str, user: UserContext = Depends(get_user_fr
     bucket = _S3_BUCKET
     try:
         s3 = get_s3()
-        url = s3.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600)
+        url = s3.generate_presigned_url(
+            "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
+        )
         return {"url": url, "key": key, "expires_in": 3600}
     except ClientError as e:
         logger.error("Presign error: %s", e)
@@ -608,7 +667,9 @@ async def api_upload_document(
         logger.error("S3 upload error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to upload document")
 
-    extract_preview = _resolve_main_override("extract_text_preview", extract_text_preview)
+    extract_preview = _resolve_main_override(
+        "extract_text_preview", extract_text_preview
+    )
     classify = _resolve_main_override("classify_document", classify_document)
     persist_upload = _resolve_main_override("_put_upload", _put_upload)
 
@@ -617,7 +678,9 @@ async def api_upload_document(
 
     from ..document_markdown_service import convert_to_markdown
 
-    markdown_content = convert_to_markdown(body, content_type, file.filename or safe_name)
+    markdown_content = convert_to_markdown(
+        body, content_type, file.filename or safe_name
+    )
 
     quality_score = None
     if markdown_content and classification.doc_type not in ("unknown", None):
@@ -625,7 +688,10 @@ async def api_upload_document(
             from ..template_standardizer import standardize_template as _standardize
 
             std_result = _standardize(
-                body, file.filename or safe_name, content_type, classification.doc_type,
+                body,
+                file.filename or safe_name,
+                content_type,
+                classification.doc_type,
             )
             if std_result.success and std_result.quality_score > 50:
                 markdown_content = std_result.markdown
@@ -654,24 +720,32 @@ async def api_upload_document(
         if pkg:
             package_context = {"mode": "package", "package_id": package_id}
 
-    persist_upload(tenant_id, upload_id, {
-        "tenant_id": tenant_id,
-        "user_id": user_id,
-        "s3_bucket": bucket,
-        "s3_key": key,
-        "filename": safe_name,
-        "original_filename": file.filename,
-        "content_type": content_type,
-        "size_bytes": len(body),
-        "classification": classification.to_dict(),
-        "session_id": session_id,
-        "markdown_s3_key": markdown_s3_key,
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-    })
+    persist_upload(
+        tenant_id,
+        upload_id,
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "s3_bucket": bucket,
+            "s3_key": key,
+            "filename": safe_name,
+            "original_filename": file.filename,
+            "content_type": content_type,
+            "size_bytes": len(body),
+            "classification": classification.to_dict(),
+            "session_id": session_id,
+            "markdown_s3_key": markdown_s3_key,
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        },
+    )
 
     logger.info(
         "Uploaded %s -> s3://%s/%s (upload_id=%s, classified=%s)",
-        safe_name, bucket, key, upload_id, classification.doc_type,
+        safe_name,
+        bucket,
+        key,
+        upload_id,
+        classification.doc_type,
     )
 
     return {
@@ -707,26 +781,41 @@ async def assign_upload_to_package(
     if not upload_meta:
         raise HTTPException(status_code=404, detail="Upload not found or expired")
 
-    if upload_meta["tenant_id"] != user.tenant_id or upload_meta["user_id"] != user.user_id:
+    if (
+        upload_meta["tenant_id"] != user.tenant_id
+        or upload_meta["user_id"] != user.user_id
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     pkg = lookup_package(user.tenant_id, body.package_id)
     if not pkg:
-        raise HTTPException(status_code=404, detail=f"Package {body.package_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Package {body.package_id} not found"
+        )
 
-    raw_doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
-    doc_type = normalize_doc_type(raw_doc_type) if raw_doc_type != "unknown" else "unknown"
+    raw_doc_type = body.doc_type or upload_meta["classification"].get(
+        "doc_type", "unknown"
+    )
+    doc_type = (
+        normalize_doc_type(raw_doc_type) if raw_doc_type != "unknown" else "unknown"
+    )
     if doc_type == "unknown" or doc_type == "":
         raise HTTPException(
             status_code=400,
             detail="Document type could not be determined. Please specify doc_type.",
         )
 
-    title = body.title or upload_meta["classification"].get("suggested_title") or upload_meta["filename"]
+    title = (
+        body.title
+        or upload_meta["classification"].get("suggested_title")
+        or upload_meta["filename"]
+    )
 
     try:
         s3 = get_s3()
-        response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=upload_meta["s3_key"])
+        response = s3.get_object(
+            Bucket=upload_meta["s3_bucket"], Key=upload_meta["s3_key"]
+        )
         content = response["Body"].read()
     except ClientError as e:
         logger.error("S3 fetch error for upload %s: %s", upload_id, e)
@@ -736,8 +825,12 @@ async def assign_upload_to_package(
     markdown_s3_key = upload_meta.get("markdown_s3_key")
     if markdown_s3_key:
         try:
-            md_response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=markdown_s3_key)
-            markdown_content = md_response["Body"].read().decode("utf-8", errors="replace")
+            md_response = s3.get_object(
+                Bucket=upload_meta["s3_bucket"], Key=markdown_s3_key
+            )
+            markdown_content = (
+                md_response["Body"].read().decode("utf-8", errors="replace")
+            )
         except ClientError:
             logger.debug("Could not fetch markdown sibling for upload %s", upload_id)
 
@@ -781,10 +874,18 @@ async def assign_upload_to_package(
     )
 
     if not result.success:
-        raise HTTPException(status_code=500, detail=result.error or "Failed to create document")
+        raise HTTPException(
+            status_code=500, detail=result.error or "Failed to create document"
+        )
 
     delete_upload(user.tenant_id, upload_id)
-    logger.info("Assigned upload %s to package %s as %s v%s", upload_id, body.package_id, doc_type, result.version)
+    logger.info(
+        "Assigned upload %s to package %s as %s v%s",
+        upload_id,
+        body.package_id,
+        doc_type,
+        result.version,
+    )
     return result.to_dict()
 
 
@@ -905,7 +1006,9 @@ async def api_get_document(
                     content = sidecar_content
                     preview_mode = "markdown_sidecar"
                 else:
-                    preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
+                    preview_payload = _extract_binary_preview_payload(
+                        doc_key, raw_bytes
+                    )
                     content = preview_payload.get("content")
                     preview_blocks = preview_payload.get("preview_blocks", [])
                     preview_sheets = preview_payload.get("preview_sheets", [])
@@ -934,7 +1037,9 @@ async def api_get_document(
                 package_ref["version"],
             )
             if metadata:
-                result["document_id"] = metadata.get("document_id", result["document_id"])
+                result["document_id"] = metadata.get(
+                    "document_id", result["document_id"]
+                )
                 result["title"] = metadata.get("title", result.get("title"))
                 result["file_type"] = metadata.get("file_type", result["file_type"])
                 result["version"] = metadata.get("version", result["version"])
@@ -978,7 +1083,9 @@ async def api_update_document(
     if is_package_doc:
         package_ref = _extract_package_document_ref(doc_key)
         if not package_ref:
-            raise HTTPException(status_code=400, detail="Invalid package document key format")
+            raise HTTPException(
+                status_code=400, detail="Invalid package document key format"
+            )
 
         package_id = package_ref["package_id"]
         doc_type = package_ref["doc_type"]
@@ -1001,7 +1108,10 @@ async def api_update_document(
         )
 
         if not result.success:
-            raise HTTPException(status_code=500, detail=result.error or "Failed to create document version")
+            raise HTTPException(
+                status_code=500,
+                detail=result.error or "Failed to create document version",
+            )
 
         return {
             "success": True,
@@ -1021,6 +1131,7 @@ async def api_update_document(
             )
 
             from ..changelog_store import write_document_changelog_entry
+
             try:
                 write_document_changelog_entry(
                     tenant_id=tenant_id,
@@ -1031,7 +1142,9 @@ async def api_update_document(
                     actor_user_id=user_id,
                 )
             except Exception as cl_err:
-                logger.warning("Failed to write changelog for workspace doc: %s", cl_err)
+                logger.warning(
+                    "Failed to write changelog for workspace doc: %s", cl_err
+                )
 
             return {
                 "success": True,

@@ -213,6 +213,24 @@ dev-frontend:
     unset FASTAPI_URL
     cd client && npm run dev
 
+# ── Format ──────────────────────────────────────────────────
+
+# Format all code (Python + TypeScript)
+format: format-py format-ts
+
+# Format Python with ruff
+format-py:
+    cd server && python -m ruff format app/
+
+# Format TypeScript/JS with Prettier
+format-ts:
+    cd client && npx prettier --write .
+
+# Check formatting without modifying files (CI-friendly)
+format-check:
+    cd server && python -m ruff format --check app/
+    cd client && npx prettier --check .
+
 # ── Lint ────────────────────────────────────────────────────
 
 # Run all linters (Python + TypeScript)

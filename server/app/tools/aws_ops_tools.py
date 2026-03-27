@@ -14,10 +14,14 @@ from ..document_key_utils import is_tenant_scoped_key
 from ..session_scope import extract_user_id
 
 
-def exec_s3_document_ops(params: dict, tenant_id: str, session_id: str | None = None) -> dict:
+def exec_s3_document_ops(
+    params: dict, tenant_id: str, session_id: str | None = None
+) -> dict:
     """Real S3 operations scoped per-user."""
     operation = params.get("operation", "list")
-    bucket = params.get("bucket") or os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = params.get("bucket") or os.getenv(
+        "S3_BUCKET", "eagle-documents-695681773636-dev"
+    )
     key = params.get("key", "")
     content = params.get("content", "")
     user_id = extract_user_id(session_id)
@@ -95,7 +99,9 @@ def exec_s3_document_ops(params: dict, tenant_id: str, session_id: str | None = 
             if not key:
                 return {"error": "Missing 'key' (source) parameter for copy operation"}
             if not destination_key:
-                return {"error": "Missing 'destination_key' parameter for copy operation"}
+                return {
+                    "error": "Missing 'destination_key' parameter for copy operation"
+                }
             if not is_tenant_scoped_key(key, tenant_id):
                 key = prefix + key
             if not is_tenant_scoped_key(destination_key, tenant_id):
@@ -117,9 +123,13 @@ def exec_s3_document_ops(params: dict, tenant_id: str, session_id: str | None = 
         if operation in ("rename", "move"):
             destination_key = params.get("destination_key", "")
             if not key:
-                return {"error": "Missing 'key' (source) parameter for rename operation"}
+                return {
+                    "error": "Missing 'key' (source) parameter for rename operation"
+                }
             if not destination_key:
-                return {"error": "Missing 'destination_key' parameter for rename operation"}
+                return {
+                    "error": "Missing 'destination_key' parameter for rename operation"
+                }
             if not is_tenant_scoped_key(key, tenant_id):
                 key = prefix + key
             if not is_tenant_scoped_key(destination_key, tenant_id):
@@ -151,7 +161,9 @@ def exec_s3_document_ops(params: dict, tenant_id: str, session_id: str | None = 
                     "key": key,
                     "exists": True,
                     "size_bytes": resp.get("ContentLength", 0),
-                    "last_modified": resp.get("LastModified", "").isoformat() if hasattr(resp.get("LastModified", ""), "isoformat") else str(resp.get("LastModified", "")),
+                    "last_modified": resp.get("LastModified", "").isoformat()
+                    if hasattr(resp.get("LastModified", ""), "isoformat")
+                    else str(resp.get("LastModified", "")),
                     "content_type": resp.get("ContentType", "unknown"),
                 }
             except ClientError as head_exc:
@@ -178,7 +190,9 @@ def exec_s3_document_ops(params: dict, tenant_id: str, session_id: str | None = 
                 "expires_in_seconds": expiry_seconds,
             }
 
-        return {"error": f"Unknown operation: {operation}. Use list, read, write, delete, copy, rename, move, exists, or presign."}
+        return {
+            "error": f"Unknown operation: {operation}. Use list, read, write, delete, copy, rename, move, exists, or presign."
+        }
 
     except ClientError as exc:
         error_code = exc.response["Error"]["Code"]
@@ -221,12 +235,19 @@ def exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
                 **{k: v for k, v in data.items() if k not in ("PK", "SK")},
             }
             table.put_item(Item=item)
-            return {"operation": "create", "item_id": item_id, "status": "created", "item": item}
+            return {
+                "operation": "create",
+                "item_id": item_id,
+                "status": "created",
+                "item": item,
+            }
 
         if operation == "read":
             if not item_id:
                 return {"error": "Missing 'item_id' for read operation"}
-            resp = table.get_item(Key={"PK": f"INTAKE#{tenant_id}", "SK": f"INTAKE#{item_id}"})
+            resp = table.get_item(
+                Key={"PK": f"INTAKE#{tenant_id}", "SK": f"INTAKE#{item_id}"}
+            )
             item = resp.get("Item")
             if not item:
                 return {"error": f"Intake record not found: {item_id}"}
@@ -259,19 +280,33 @@ def exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
                 ExpressionAttributeNames=expr_names,
                 ExpressionAttributeValues=expr_values,
             )
-            return {"operation": "update", "item_id": item_id, "status": "updated", "fields_updated": list(data.keys())}
+            return {
+                "operation": "update",
+                "item_id": item_id,
+                "status": "updated",
+                "fields_updated": list(data.keys()),
+            }
 
         if operation in ("list", "query"):
             from boto3.dynamodb.conditions import Key as DDBKey
 
-            resp = table.query(KeyConditionExpression=DDBKey("PK").eq(f"INTAKE#{tenant_id}"))
+            resp = table.query(
+                KeyConditionExpression=DDBKey("PK").eq(f"INTAKE#{tenant_id}")
+            )
             items = [_serialize_ddb_item(item) for item in resp.get("Items", [])]
-            return {"operation": "list", "tenant_id": tenant_id, "count": len(items), "items": items}
+            return {
+                "operation": "list",
+                "tenant_id": tenant_id,
+                "count": len(items),
+                "items": items,
+            }
 
         if operation == "delete":
             if not item_id:
                 return {"error": "Missing 'item_id' for delete operation"}
-            table.delete_item(Key={"PK": f"INTAKE#{tenant_id}", "SK": f"INTAKE#{item_id}"})
+            table.delete_item(
+                Key={"PK": f"INTAKE#{tenant_id}", "SK": f"INTAKE#{item_id}"}
+            )
             return {"operation": "delete", "item_id": item_id, "status": "deleted"}
 
         if operation == "count":
@@ -281,19 +316,35 @@ def exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
                 KeyConditionExpression=DDBKey("PK").eq(f"INTAKE#{tenant_id}"),
                 Select="COUNT",
             )
-            return {"operation": "count", "tenant_id": tenant_id, "count": resp.get("Count", 0)}
+            return {
+                "operation": "count",
+                "tenant_id": tenant_id,
+                "count": resp.get("Count", 0),
+            }
 
         if operation == "batch_get":
             item_ids_raw = params.get("item_ids", "")
             if not item_ids_raw:
-                return {"error": "Missing 'item_ids' for batch_get (comma-separated IDs)"}
+                return {
+                    "error": "Missing 'item_ids' for batch_get (comma-separated IDs)"
+                }
             ids = [i.strip() for i in item_ids_raw.split(",") if i.strip()]
             if len(ids) > 100:
                 return {"error": "batch_get supports max 100 items"}
             keys = [{"PK": f"INTAKE#{tenant_id}", "SK": f"INTAKE#{i}"} for i in ids]
-            resp = get_dynamodb().batch_get_item(RequestItems={table_name: {"Keys": keys}})
-            items = [_serialize_ddb_item(item) for item in resp.get("Responses", {}).get(table_name, [])]
-            return {"operation": "batch_get", "requested": len(ids), "found": len(items), "items": items}
+            resp = get_dynamodb().batch_get_item(
+                RequestItems={table_name: {"Keys": keys}}
+            )
+            items = [
+                _serialize_ddb_item(item)
+                for item in resp.get("Responses", {}).get(table_name, [])
+            ]
+            return {
+                "operation": "batch_get",
+                "requested": len(ids),
+                "found": len(items),
+                "items": items,
+            }
 
         if operation == "batch_write":
             items_data = params.get("items", [])
@@ -301,6 +352,7 @@ def exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
                 return {"error": "Missing 'items' for batch_write (list of dicts)"}
             if isinstance(items_data, str):
                 import json as _json
+
                 try:
                     items_data = _json.loads(items_data)
                 except _json.JSONDecodeError:
@@ -321,9 +373,15 @@ def exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
                 }
                 put_requests.append({"PutRequest": {"Item": item}})
             get_dynamodb().batch_write_item(RequestItems={table_name: put_requests})
-            return {"operation": "batch_write", "count": len(put_requests), "status": "created"}
+            return {
+                "operation": "batch_write",
+                "count": len(put_requests),
+                "status": "created",
+            }
 
-        return {"error": f"Unknown operation: {operation}. Use create, read, update, delete, list, query, count, batch_get, or batch_write."}
+        return {
+            "error": f"Unknown operation: {operation}. Use create, read, update, delete, list, query, count, batch_get, or batch_write."
+        }
 
     except ClientError as exc:
         error_code = exc.response["Error"]["Code"]
@@ -335,7 +393,9 @@ def exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
                 "suggestion": "The IAM user may not have the required DynamoDB permissions. Contact your administrator.",
             }
         if error_code == "ResourceNotFoundException":
-            return {"error": f"DynamoDB table '{table_name}' not found. It may need to be created."}
+            return {
+                "error": f"DynamoDB table '{table_name}' not found. It may need to be created."
+            }
         return {"error": f"DynamoDB error ({error_code}): {error_msg}"}
     except BotoCoreError as exc:
         return {"error": f"AWS connection error: {str(exc)}"}
@@ -391,10 +451,20 @@ def exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
                 limit=min(limit, 100),
             )
             events = [
-                {"timestamp": event["timestamp"], "message": event["message"][:500], "logStreamName": event.get("logStreamName", "")}
+                {
+                    "timestamp": event["timestamp"],
+                    "message": event["message"][:500],
+                    "logStreamName": event.get("logStreamName", ""),
+                }
                 for event in resp.get("events", [])
             ]
-            return {"operation": "search", "log_group": log_group, "filter_pattern": scoped_pattern, "event_count": len(events), "events": events}
+            return {
+                "operation": "search",
+                "log_group": log_group,
+                "filter_pattern": scoped_pattern,
+                "event_count": len(events),
+                "events": events,
+            }
 
         if operation == "recent":
             kwargs = {
@@ -407,26 +477,49 @@ def exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
                 kwargs["filterPattern"] = f'"{user_id}"'
             resp = logs.filter_log_events(**kwargs)
             events = [
-                {"timestamp": event["timestamp"], "message": event["message"][:500], "logStreamName": event.get("logStreamName", "")}
+                {
+                    "timestamp": event["timestamp"],
+                    "message": event["message"][:500],
+                    "logStreamName": event.get("logStreamName", ""),
+                }
                 for event in resp.get("events", [])
             ]
-            result = {"operation": "recent", "log_group": log_group, "event_count": len(events), "events": events}
+            result = {
+                "operation": "recent",
+                "log_group": log_group,
+                "event_count": len(events),
+                "events": events,
+            }
             if user_id:
                 result["user_id_filter"] = user_id
             return result
 
         if operation == "get_stream":
-            resp = logs.describe_log_streams(logGroupName=log_group, orderBy="LastEventTime", descending=True, limit=5)
+            resp = logs.describe_log_streams(
+                logGroupName=log_group,
+                orderBy="LastEventTime",
+                descending=True,
+                limit=5,
+            )
             streams = [
-                {"logStreamName": stream["logStreamName"], "lastEventTimestamp": stream.get("lastEventTimestamp", 0)}
+                {
+                    "logStreamName": stream["logStreamName"],
+                    "lastEventTimestamp": stream.get("lastEventTimestamp", 0),
+                }
                 for stream in resp.get("logStreams", [])
             ]
-            return {"operation": "get_stream", "log_group": log_group, "streams": streams}
+            return {
+                "operation": "get_stream",
+                "log_group": log_group,
+                "streams": streams,
+            }
 
         if operation == "insights":
             query = params.get("query", "")
             if not query:
-                return {"error": "Missing 'query' parameter for insights operation (CloudWatch Logs Insights query string)"}
+                return {
+                    "error": "Missing 'query' parameter for insights operation (CloudWatch Logs Insights query string)"
+                }
             query_id = logs.start_query(
                 logGroupName=log_group,
                 startTime=start_time // 1000,
@@ -436,6 +529,7 @@ def exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
             )["queryId"]
             # Poll for results (max 10 attempts, 1s apart)
             import time as _time_mod
+
             results = []
             status = "Running"
             for _ in range(10):
@@ -472,9 +566,15 @@ def exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
                 }
                 for g in resp.get("logGroups", [])
             ]
-            return {"operation": "list_groups", "count": len(groups), "log_groups": groups}
+            return {
+                "operation": "list_groups",
+                "count": len(groups),
+                "log_groups": groups,
+            }
 
-        return {"error": f"Unknown operation: {operation}. Use search, recent, get_stream, insights, or list_groups."}
+        return {
+            "error": f"Unknown operation: {operation}. Use search, recent, get_stream, insights, or list_groups."
+        }
 
     except ClientError as exc:
         error_code = exc.response["Error"]["Code"]
@@ -490,6 +590,8 @@ def exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
         return {"error": f"CloudWatch error ({error_code}): {error_msg}"}
     except BotoCoreError as exc:
         return {"error": f"AWS connection error: {str(exc)}"}
+
+
 def _serialize_ddb_item(item: dict) -> dict:
     from decimal import Decimal
 

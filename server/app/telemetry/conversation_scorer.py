@@ -68,7 +68,16 @@ def score_conversation(
         score += 15
 
     # 3. Document generated if requested (+15)
-    doc_keywords = ["generate", "create", "draft", "write", "produce", "sow", "igce", "document"]
+    doc_keywords = [
+        "generate",
+        "create",
+        "draft",
+        "write",
+        "produce",
+        "sow",
+        "igce",
+        "document",
+    ]
     user_wants_doc = any(kw in user_message.lower() for kw in doc_keywords)
     doc_tools = ["generate_document", "create_document", "export_document"]
     doc_generated = any(t in (tools_called or []) for t in doc_tools)

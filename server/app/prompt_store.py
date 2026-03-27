@@ -20,6 +20,7 @@ Attributes:
     updated_by  str     — principal that wrote the record (e.g. "admin", "api-key-xyz")
     ttl         int     — optional Unix epoch expiry (DynamoDB TTL attribute)
 """
+
 from __future__ import annotations
 
 import time
@@ -64,6 +65,7 @@ def _cache_invalidate(tenant_id: str, agent_name: str) -> None:
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────
+
 
 def put_prompt(
     tenant_id: str,
@@ -202,9 +204,7 @@ def list_tenant_prompts(tenant_id: str) -> List[Dict[str, Any]]:
     try:
         table = get_table()
         response = table.query(
-            KeyConditionExpression=(
-                "PK = :pk AND begins_with(SK, :sk_prefix)"
-            ),
+            KeyConditionExpression=("PK = :pk AND begins_with(SK, :sk_prefix)"),
             ExpressionAttributeValues={
                 ":pk": f"PROMPT#{tenant_id}",
                 ":sk_prefix": "PROMPT#",
@@ -212,7 +212,5 @@ def list_tenant_prompts(tenant_id: str) -> List[Dict[str, Any]]:
         )
         return [dict(i) for i in response.get("Items", [])]
     except (ClientError, BotoCoreError) as exc:
-        logger.error(
-            "prompt_store.list_tenant_prompts failed [%s]: %s", tenant_id, exc
-        )
+        logger.error("prompt_store.list_tenant_prompts failed [%s]: %s", tenant_id, exc)
         return []

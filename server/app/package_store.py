@@ -6,6 +6,7 @@ PK:  PACKAGE#{tenant_id}
 SK:  PACKAGE#{package_id}
 GSI: GSI1PK = TENANT#{tenant_id}, GSI1SK = PACKAGE#{status}#{created_at}
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,7 +28,12 @@ _SIMPLIFIED_THRESHOLD = Decimal("350000")
 
 # -- Required documents by acquisition pathway ------------------------------
 _REQUIRED_DOCS: dict[str, list[str]] = {
-    "micro_purchase": ["son_products", "price_reasonableness", "required_sources", "purchase_request"],
+    "micro_purchase": [
+        "son_products",
+        "price_reasonableness",
+        "required_sources",
+        "purchase_request",
+    ],
     "simplified": ["igce"],
     "full_competition": ["sow", "igce", "market_research", "acquisition_plan"],
     "sole_source": ["sow", "igce", "justification"],
@@ -81,8 +87,14 @@ _UPDATABLE_FIELDS = {
 
 # -- Generic titles that should be replaced, not incorporated ---------------
 _GENERIC_TITLES = {
-    "acquisition package", "acquisition", "test", "untitled",
-    "new package", "package", "draft", "untitled acquisition",
+    "acquisition package",
+    "acquisition",
+    "test",
+    "untitled",
+    "new package",
+    "package",
+    "draft",
+    "untitled acquisition",
 }
 
 
@@ -152,7 +164,9 @@ def compute_required_docs(
     try:
         from .compliance_matrix import get_requirements
 
-        am = _ACQUISITION_METHOD_ALIASES.get(acquisition_method.lower(), acquisition_method.lower())
+        am = _ACQUISITION_METHOD_ALIASES.get(
+            acquisition_method.lower(), acquisition_method.lower()
+        )
         ct = _CONTRACT_TYPE_ALIASES.get(contract_type.lower(), contract_type.lower())
 
         result = get_requirements(
@@ -265,7 +279,7 @@ def _next_package_id(tenant_id: str) -> str:
         pkg_id: str = item.get("package_id", "")
         if pkg_id.startswith(prefix):
             try:
-                seq = int(pkg_id[len(prefix):])
+                seq = int(pkg_id[len(prefix) :])
                 if seq > max_seq:
                     max_seq = seq
             except ValueError:
@@ -373,6 +387,7 @@ def create_package(
             compute_threshold_tier,
             compute_approval_level,
         )
+
         item["system_tags"] = compute_package_tags(item)
         item["threshold_tier"] = compute_threshold_tier(float(estimated_value))
         item["approval_level"] = compute_approval_level(
@@ -412,9 +427,7 @@ def get_package(tenant_id: str, package_id: str) -> Optional[dict]:
     return _serialize(item)
 
 
-def update_package(
-    tenant_id: str, package_id: str, updates: dict
-) -> Optional[dict]:
+def update_package(tenant_id: str, package_id: str, updates: dict) -> Optional[dict]:
     """Apply a partial update to an existing package.
 
     Only fields in _UPDATABLE_FIELDS are accepted; others are silently
@@ -454,7 +467,9 @@ def update_package(
 
         if "required_documents" not in updates:
             # Prefer dynamic calculation when method+type are available
-            method = allowed.get("acquisition_method") or existing.get("acquisition_method")
+            method = allowed.get("acquisition_method") or existing.get(
+                "acquisition_method"
+            )
             ctype = allowed.get("contract_type") or existing.get("contract_type")
             flags = allowed.get("flags") or existing.get("flags")
             if method and ctype:
@@ -468,10 +483,18 @@ def update_package(
     _title_triggers = {"estimated_value", "requirement_type", "contract_vehicle"}
     if _title_triggers & allowed.keys() and "title" not in allowed:
         orig_title = existing.get("original_title") or existing.get("title", "")
-        ev = Decimal(str(allowed.get("estimated_value", existing.get("estimated_value", 0))))
-        new_req_type = allowed.get("requirement_type") or existing.get("requirement_type")
-        new_vehicle = allowed.get("contract_vehicle") or existing.get("contract_vehicle")
-        allowed["title"] = _generate_descriptive_title(orig_title, new_req_type, ev, new_vehicle)
+        ev = Decimal(
+            str(allowed.get("estimated_value", existing.get("estimated_value", 0)))
+        )
+        new_req_type = allowed.get("requirement_type") or existing.get(
+            "requirement_type"
+        )
+        new_vehicle = allowed.get("contract_vehicle") or existing.get(
+            "contract_vehicle"
+        )
+        allowed["title"] = _generate_descriptive_title(
+            orig_title, new_req_type, ev, new_vehicle
+        )
 
     now = now_iso()
     allowed["updated_at"] = now
@@ -713,6 +736,82 @@ def close_package(tenant_id: str, package_id: str) -> Optional[dict]:
     return update_package(tenant_id, package_id, {"status": "closed"})
 
 
+def delete_package(tenant_id: str, package_id: str) -> Optional[dict]:
+    """Delete a package record from DynamoDB.
+
+    Only packages in 'intake' or 'drafting' status may be deleted.
+    Does NOT delete associated documents from S3.
+    Returns the deleted package dict, or None if not found or status
+    does not permit deletion.
+    """
+    pkg = get_package(tenant_id, package_id)
+    if pkg is None:
+        logger.warning(
+            "delete_package: not found (tenant=%s, pkg=%s)",
+            tenant_id, package_id,
+        )
+        return None
+
+    if pkg.get("status") not in ("intake", "drafting"):
+        logger.warning(
+            "delete_package: cannot delete package in status %r (tenant=%s, pkg=%s)",
+            pkg.get("status"), tenant_id, package_id,
+        )
+        return None
+
+    try:
+        get_table().delete_item(
+            Key={"PK": f"PACKAGE#{tenant_id}", "SK": f"PACKAGE#{package_id}"},
+        )
+    except (ClientError, BotoCoreError):
+        logger.exception(
+            "delete_package failed (tenant=%s, pkg=%s)",
+            tenant_id, package_id,
+        )
+        raise
+
+    logger.info("Deleted package %s for tenant %s", package_id, tenant_id)
+    return pkg
+
+
+def clone_package(
+    tenant_id: str,
+    source_package_id: str,
+    new_title: str | None = None,
+    owner_user_id: str | None = None,
+) -> Optional[dict]:
+    """Clone a package by copying its metadata with a new ID.
+
+    Copies: requirement_type, estimated_value, acquisition_method,
+    contract_type, contract_vehicle, flags, notes.
+    Does NOT clone: documents, approval chains, or status.
+    New package starts at 'intake' with empty completed_documents.
+    """
+    source = get_package(tenant_id, source_package_id)
+    if source is None:
+        logger.warning(
+            "clone_package: source not found (tenant=%s, pkg=%s)",
+            tenant_id, source_package_id,
+        )
+        return None
+
+    title = new_title or f"{source.get('title', 'Package')} (Copy)"
+    estimated_value = Decimal(str(source.get("estimated_value", 0)))
+
+    return create_package(
+        tenant_id=tenant_id,
+        owner_user_id=owner_user_id or source.get("owner_user_id", ""),
+        title=title,
+        requirement_type=source.get("requirement_type", "services"),
+        estimated_value=estimated_value,
+        notes=source.get("notes", ""),
+        contract_vehicle=source.get("contract_vehicle"),
+        acquisition_method=source.get("acquisition_method"),
+        contract_type=source.get("contract_type"),
+        flags=source.get("flags"),
+    )
+
+
 def validate_package_completeness(tenant_id: str, package_id: str) -> dict:
     """AI-powered completeness check for an acquisition package.
 
@@ -749,10 +848,12 @@ def validate_package_completeness(tenant_id: str, package_id: str) -> dict:
         content = doc.get("content") or doc.get("preview") or ""
         markers = _has_unfilled_markers(content)
         if markers:
-            unfilled_templates.append({
-                "doc_type": doc_type,
-                "markers": markers[:10],  # cap at 10
-            })
+            unfilled_templates.append(
+                {
+                    "doc_type": doc_type,
+                    "markers": markers[:10],  # cap at 10
+                }
+            )
 
     # 4. Compliance warnings via compliance matrix
     compliance_warnings: list[str] = []
@@ -780,12 +881,28 @@ def validate_package_completeness(tenant_id: str, package_id: str) -> dict:
         and len(unfilled_templates) == 0
     )
 
-    recommendation = "Package is complete and ready for submission." if ready else (
-        "Package has outstanding items. "
-        + (f"{len(missing_documents)} missing document(s). " if missing_documents else "")
-        + (f"{len(draft_documents)} document(s) still in draft. " if draft_documents else "")
-        + (f"{len(unfilled_templates)} document(s) with unfilled placeholders." if unfilled_templates else "")
-    ).strip()
+    recommendation = (
+        "Package is complete and ready for submission."
+        if ready
+        else (
+            "Package has outstanding items. "
+            + (
+                f"{len(missing_documents)} missing document(s). "
+                if missing_documents
+                else ""
+            )
+            + (
+                f"{len(draft_documents)} document(s) still in draft. "
+                if draft_documents
+                else ""
+            )
+            + (
+                f"{len(unfilled_templates)} document(s) with unfilled placeholders."
+                if unfilled_templates
+                else ""
+            )
+        ).strip()
+    )
 
     return {
         "ready": ready,
@@ -852,4 +969,3 @@ def recompute_package_metadata(tenant_id: str, package_id: str) -> Optional[dict
     }
 
     return update_package(tenant_id, package_id, updates)
-

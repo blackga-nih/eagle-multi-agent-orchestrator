@@ -8,6 +8,7 @@ context-aware from the very first message.
 All fetches are wrapped in a 500ms timeout — on failure or timeout,
 defaults are returned so the agent functions identically to before.
 """
+
 import asyncio
 import logging
 from dataclasses import dataclass, field
@@ -21,8 +22,8 @@ class PreloadedContext:
     """Container for session-start preloaded data."""
 
     preferences: dict = field(default_factory=dict)
-    package: Optional[dict] = None          # package metadata
-    checklist: Optional[dict] = None        # required / completed / missing
+    package: Optional[dict] = None  # package metadata
+    checklist: Optional[dict] = None  # required / completed / missing
     documents: list[dict] = field(default_factory=list)
     feature_flags: dict = field(default_factory=dict)
 
@@ -31,8 +32,10 @@ class PreloadedContext:
 # Internal fetch helpers (sync — run via asyncio.to_thread)
 # ---------------------------------------------------------------------------
 
+
 def _fetch_preferences(tenant_id: str, user_id: str) -> dict:
     from .pref_store import get_prefs
+
     return get_prefs(tenant_id, user_id)
 
 
@@ -48,11 +51,14 @@ def _fetch_package_and_docs(tenant_id: str, package_id: str) -> dict:
 
 def _fetch_feature_flags() -> dict:
     from .config_store import get_feature_flags
+
     return get_feature_flags()
 
 
 def _warm_template_cache(
-    tenant_id: str, user_id: str, missing_doc_types: list[str],
+    tenant_id: str,
+    user_id: str,
+    missing_doc_types: list[str],
 ) -> None:
     """Pre-resolve templates for missing documents to warm the 60s cache."""
     from .template_store import resolve_template
@@ -67,6 +73,7 @@ def _warm_template_cache(
 # ---------------------------------------------------------------------------
 # Public async API
 # ---------------------------------------------------------------------------
+
 
 async def preload_session_context(
     tenant_id: str,
@@ -83,14 +90,18 @@ async def preload_session_context(
 
     async def _load_prefs() -> None:
         ctx.preferences = await asyncio.to_thread(
-            _fetch_preferences, tenant_id, user_id,
+            _fetch_preferences,
+            tenant_id,
+            user_id,
         )
 
     async def _load_package() -> None:
         if not package_id:
             return
         result = await asyncio.to_thread(
-            _fetch_package_and_docs, tenant_id, package_id,
+            _fetch_package_and_docs,
+            tenant_id,
+            package_id,
         )
         ctx.package = result["package"]
         ctx.checklist = result["checklist"]
@@ -100,7 +111,10 @@ async def preload_session_context(
         missing = (ctx.checklist or {}).get("missing", [])
         if missing:
             await asyncio.to_thread(
-                _warm_template_cache, tenant_id, user_id, missing,
+                _warm_template_cache,
+                tenant_id,
+                user_id,
+                missing,
             )
 
     async def _load_flags() -> None:
@@ -125,6 +139,7 @@ async def preload_session_context(
 # ---------------------------------------------------------------------------
 # Prompt formatting
 # ---------------------------------------------------------------------------
+
 
 def format_context_for_prompt(ctx: PreloadedContext) -> str:
     """Render PreloadedContext as a terse block for the system prompt.
@@ -163,7 +178,10 @@ def format_context_for_prompt(ctx: PreloadedContext) -> str:
         doc_info: dict[str, dict] = {}
         for doc in ctx.documents:
             dt = doc.get("doc_type", "")
-            doc_info[dt] = {"version": doc.get("version", 1), "s3_key": doc.get("s3_key", "")}
+            doc_info[dt] = {
+                "version": doc.get("version", 1),
+                "s3_key": doc.get("s3_key", ""),
+            }
 
         def _fmt_doc(d: str) -> str:
             info = doc_info.get(d, {})
@@ -171,13 +189,13 @@ def format_context_for_prompt(ctx: PreloadedContext) -> str:
             key = info.get("s3_key", "")
             return f"{d} (v{v}, key={key})" if key else f"{d} (v{v})"
 
-        completed_str = ", ".join(
-            _fmt_doc(d) for d in completed
-        ) if completed else "none"
+        completed_str = (
+            ", ".join(_fmt_doc(d) for d in completed) if completed else "none"
+        )
         missing_str = ", ".join(missing) if missing else "none"
 
         parts.append(
-            f"Active Package: {pkg_id} \"{title}\" ({pathway}, ${value})\n"
+            f'Active Package: {pkg_id} "{title}" ({pathway}, ${value})\n'
             f"  Completed: {completed_str}\n"
             f"  Missing: {missing_str}\n"
             f"  Status: {status}"

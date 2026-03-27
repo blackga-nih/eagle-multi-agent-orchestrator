@@ -12,12 +12,18 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..cognito_auth import UserContext
 from ..workspace_store import (
-    get_or_create_default, create_workspace, get_workspace,
-    list_workspaces, activate_workspace, delete_workspace,
+    get_or_create_default,
+    create_workspace,
+    get_workspace,
+    list_workspaces,
+    activate_workspace,
+    delete_workspace,
 )
 from ..workspace_override_store import (
-    put_override, list_overrides,
-    delete_override, delete_all_overrides,
+    put_override,
+    list_overrides,
+    delete_override,
+    delete_all_overrides,
 )
 from .dependencies import get_user_from_header
 
@@ -51,7 +57,9 @@ async def create_user_workspace(
 
 
 @router.get("/active")
-async def get_active_workspace_endpoint(user: UserContext = Depends(get_user_from_header)):
+async def get_active_workspace_endpoint(
+    user: UserContext = Depends(get_user_from_header),
+):
     """Return the currently active workspace (auto-provisions Default if none exists)."""
     return get_or_create_default(user.tenant_id, user.user_id)
 

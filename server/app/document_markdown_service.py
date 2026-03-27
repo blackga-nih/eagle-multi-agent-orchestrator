@@ -41,7 +41,10 @@ def convert_to_markdown(
             return _pdf_to_markdown(body)
 
         # DOCX
-        if content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        if (
+            content_type
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ):
             return _docx_to_markdown(body)
 
         # Legacy DOC
@@ -139,10 +142,7 @@ def _convert_paragraph(element, doc, parts: list[str]) -> None:
             style_name = p_style.get(qn("w:val"), "")
 
     # Extract text
-    text = "".join(
-        node.text or ""
-        for node in element.iter(qn("w:t"))
-    )
+    text = "".join(node.text or "" for node in element.iter(qn("w:t")))
 
     if not text.strip():
         if parts and parts[-1] != "":
@@ -190,10 +190,7 @@ def _convert_table(element, doc, parts: list[str]) -> None:
     for tr in element.iter(qn("w:tr")):
         cells: list[str] = []
         for tc in tr.iter(qn("w:tc")):
-            cell_text = " ".join(
-                node.text or ""
-                for node in tc.iter(qn("w:t"))
-            ).strip()
+            cell_text = " ".join(node.text or "" for node in tc.iter(qn("w:t"))).strip()
             cells.append(cell_text)
         if cells:
             rows.append(cells)

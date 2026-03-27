@@ -67,11 +67,13 @@ async def api_list_sessions(
         for sid, msgs in _SESSIONS.items():
             user_msgs = [m for m in msgs if m.get("role") == "user"]
             first_msg = user_msgs[0]["content"][:60] if user_msgs else "Empty"
-            sessions.append({
-                "session_id": sid,
-                "message_count": len(msgs),
-                "preview": first_msg,
-            })
+            sessions.append(
+                {
+                    "session_id": sid,
+                    "message_count": len(msgs),
+                    "preview": first_msg,
+                }
+            )
 
     return {"sessions": sessions, "count": len(sessions)}
 

@@ -9,6 +9,7 @@ Created: 2026-03-19 (Phase 2 refactor)
 Usage:
     from app.db_client import get_table, get_s3, get_logs, item_to_dict, now_iso
 """
+
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -24,6 +25,7 @@ EAGLE_S3_BUCKET = os.getenv("EAGLE_S3_BUCKET", "eagle-documents")
 
 
 # ── AWS Clients (cached singletons) ──────────────────────────────────────────
+
 
 @lru_cache(maxsize=1)
 def get_dynamodb():
@@ -51,6 +53,7 @@ def get_table():
 
 # ── Utility Functions ────────────────────────────────────────────────────────
 
+
 def item_to_dict(item: dict) -> dict:
     """
     Convert DynamoDB item to plain dict, handling Decimal types.
@@ -58,6 +61,7 @@ def item_to_dict(item: dict) -> dict:
     DynamoDB returns numbers as Decimal objects which aren't JSON serializable.
     This recursively converts them to int or float as appropriate.
     """
+
     def convert(obj: Any) -> Any:
         if isinstance(obj, Decimal):
             # Convert to int if it's a whole number, otherwise float
@@ -87,4 +91,5 @@ def ttl_timestamp(days: int) -> int:
         Unix timestamp in seconds
     """
     from datetime import timedelta
+
     return int((datetime.now(timezone.utc) + timedelta(days=days)).timestamp())

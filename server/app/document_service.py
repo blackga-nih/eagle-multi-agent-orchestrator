@@ -10,6 +10,7 @@ Orchestrates the creation of versioned package documents with:
 This is the single source of truth for package document creation,
 used by both the chat tool path and the package API path.
 """
+
 from __future__ import annotations
 
 import os
@@ -63,7 +64,8 @@ class DocumentResult:
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
-            k: v for k, v in {
+            k: v
+            for k, v in {
                 "success": self.success,
                 "document_id": self.document_id,
                 "package_id": self.package_id,
@@ -77,7 +79,8 @@ class DocumentResult:
                 "word_count": self.word_count,
                 "created_at": self.created_at,
                 "error": self.error,
-            }.items() if v is not None
+            }.items()
+            if v is not None
         }
 
 
@@ -124,7 +127,7 @@ def create_package_document_version(
     if not pkg:
         return DocumentResult(
             success=False,
-            error=f"Package {package_id} not found for tenant {tenant_id}"
+            error=f"Package {package_id} not found for tenant {tenant_id}",
         )
 
     # Calculate content hash for idempotency
@@ -139,7 +142,8 @@ def create_package_document_version(
     if existing:
         logger.info(
             "Document with same content already exists: %s v%s",
-            doc_type, existing.get("version")
+            doc_type,
+            existing.get("version"),
         )
         return DocumentResult(
             success=True,
@@ -193,11 +197,13 @@ def create_package_document_version(
 
     if s3_error:
         # Mark DynamoDB record as failed
-        _update_document_status(tenant_id, package_id, doc_type, next_version, "failed", s3_error)
+        _update_document_status(
+            tenant_id, package_id, doc_type, next_version, "failed", s3_error
+        )
         return DocumentResult(
             success=False,
             document_id=document_id,
-            error=f"S3 upload failed: {s3_error}"
+            error=f"S3 upload failed: {s3_error}",
         )
 
     # Step 2b: Upload markdown sibling if available
@@ -213,7 +219,10 @@ def create_package_document_version(
 
     # Step 2c: Persist markdown_s3_key and tags to DynamoDB record
     _update_document_metadata(
-        tenant_id, package_id, doc_type, next_version,
+        tenant_id,
+        package_id,
+        doc_type,
+        next_version,
         markdown_s3_key=markdown_s3_key,
         system_tags=system_tags,
         far_tags=far_tags,
@@ -247,8 +256,7 @@ def create_package_document_version(
     )
 
     logger.info(
-        "Created document %s v%s for package %s",
-        doc_type, next_version, package_id
+        "Created document %s v%s for package %s", doc_type, next_version, package_id
     )
 
     return DocumentResult(
@@ -356,6 +364,7 @@ def finalize_document(
 
 
 # --- Internal helpers ---
+
 
 def _create_document_record(
     tenant_id: str,
@@ -560,9 +569,7 @@ def _supersede_prior_versions(
                     ExpressionAttributeValues={":superseded": "superseded"},
                 )
             except (ClientError, BotoCoreError) as e:
-                logger.warning(
-                    "Failed to supersede version %s: %s", doc["version"], e
-                )
+                logger.warning("Failed to supersede version %s: %s", doc["version"], e)
 
 
 def _update_package_checklist(
@@ -628,6 +635,7 @@ def _find_by_content_hash(
 def _sanitize_filename(name: str) -> str:
     """Sanitize a string for use in S3 keys."""
     import re
+
     # Replace spaces with hyphens, remove non-alphanumeric except hyphens/underscores
     sanitized = re.sub(r"[^\w\s-]", "", name)
     sanitized = re.sub(r"\s+", "-", sanitized)

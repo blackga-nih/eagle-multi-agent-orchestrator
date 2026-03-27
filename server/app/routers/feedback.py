@@ -52,6 +52,7 @@ def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
         log_group = os.environ.get("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
         region = os.environ.get("AWS_REGION", "us-east-1")
         import boto3
+
         client = boto3.client("logs", region_name=region)
         now_ms = int(time.time() * 1000)
         day_ms = 24 * 60 * 60 * 1000
@@ -101,9 +102,13 @@ async def api_submit_feedback(
         last_message_id=last_message_id,
     )
     notify_feedback(
-        tenant_id=user.tenant_id, user_id=user.user_id, tier=user.tier,
-        session_id=session_id, feedback_text=feedback_text,
-        feedback_type=body.get("feedback_type", "general"), page=page,
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        tier=user.tier,
+        session_id=session_id,
+        feedback_text=feedback_text,
+        feedback_type=body.get("feedback_type", "general"),
+        page=page,
     )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 

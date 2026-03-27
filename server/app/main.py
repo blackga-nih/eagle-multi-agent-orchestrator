@@ -4,20 +4,33 @@ Full-featured FastAPI application merging:
 - Original multi-tenant architecture (SSE streaming, admin HTML pages, tenant costs)
 - EAGLE option1-simple (Anthropic SDK, document export, S3 browser, admin dashboard, WebSocket)
 """
+
 import os as _os
 from pathlib import Path as _Path
 from dotenv import load_dotenv
+
 # Load .env from project root (parent of app/) — must happen before any other imports
 _env_path = _Path(__file__).resolve().parent.parent / ".env"
 print(f"[EAGLE STARTUP] .env path: {_env_path} exists={_env_path.exists()}")
 if _env_path.exists():
     load_dotenv(str(_env_path), override=True)
-    print(f"[EAGLE STARTUP] Loaded .env, ANTHROPIC_API_KEY set={bool(_os.getenv('ANTHROPIC_API_KEY'))}, DEV_MODE={_os.getenv('DEV_MODE')}")
+    print(
+        f"[EAGLE STARTUP] Loaded .env, ANTHROPIC_API_KEY set={bool(_os.getenv('ANTHROPIC_API_KEY'))}, DEV_MODE={_os.getenv('DEV_MODE')}"
+    )
 else:
     load_dotenv(override=True)
     print(f"[EAGLE STARTUP] No .env found at {_env_path}, using defaults")
 
-from fastapi import FastAPI, HTTPException, Request, Header, Depends, WebSocket, UploadFile, File
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Request,
+    Header,
+    Depends,
+    WebSocket,
+    UploadFile,
+    File,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketDisconnect
 from pydantic import BaseModel
@@ -38,13 +51,19 @@ from .subscription_service import SubscriptionService
 from .admin_cost_service import AdminCostService
 from .document_classification_service import classify_document, extract_text_preview
 from .document_export import ExportDependencyError, export_document
-from .document_service import create_package_document_version, get_document_markdown_s3_key
+from .document_service import (
+    create_package_document_version,
+    get_document_markdown_s3_key,
+)
 from .document_store import get_document
 from .document_key_utils import is_allowed_document_key, extract_package_document_ref
 from .doc_type_registry import normalize_doc_type
 from .spreadsheet_edit_service import extract_xlsx_preview_payload
 from .spreadsheet_edit_service import save_xlsx_preview_edits
-from .document_ai_edit_service import extract_docx_preview_payload, save_docx_preview_edits
+from .document_ai_edit_service import (
+    extract_docx_preview_payload,
+    save_docx_preview_edits,
+)
 from .routers.admin import router as admin_router
 from .routers.admin import (
     GENERIC_ANALYTICS_ERROR,
@@ -61,7 +80,10 @@ from .routers.chat import (
     set_sessions_ref as set_chat_sessions_ref,
     set_telemetry_ref as set_chat_telemetry_ref,
 )
-from .routers.documents import router as documents_router, set_sessions_ref as set_documents_sessions_ref
+from .routers.documents import (
+    router as documents_router,
+    set_sessions_ref as set_documents_sessions_ref,
+)
 from .routers.documents import GENERIC_EDIT_ERROR
 from .routers.feedback import router as feedback_router
 from .routers.health import router as health_router
@@ -69,11 +91,17 @@ from .routers.commands import router as commands_router
 from .routers.mcp import router as mcp_router
 from .routers.packages import router as packages_router
 from .routers.packages import compat_router as packages_compat_router
-from .routers.sessions import router as sessions_router, set_sessions_ref as set_sessions_router_ref
+from .routers.sessions import (
+    router as sessions_router,
+    set_sessions_ref as set_sessions_router_ref,
+)
 from .routers.skills import router as skills_router
 from .routers.tags import router as tags_router
 from .routers.tenants import router as tenants_router
-from .routers.templates import router as templates_router, compat_router as templates_compat_router
+from .routers.templates import (
+    router as templates_router,
+    compat_router as templates_compat_router,
+)
 from .routers.user import router as user_router
 from .routers.workspaces import router as workspaces_router
 from .routers.dependencies import get_user_from_header, get_session_context
@@ -115,10 +143,12 @@ from .daily_scheduler import start_scheduler, stop_scheduler
 
 # ── Logging ──────────────────────────────────────────────────────────
 from .telemetry.log_context import configure_logging
+
 configure_logging(level=logging.INFO)
 logger = logging.getLogger("eagle")
 # Compatibility note: REQUIRE_AUTH is still the controlling auth flag, even
 # though the guarded endpoint implementations now live in router modules.
+
 
 @asynccontextmanager
 async def _lifespan(app):
@@ -129,6 +159,7 @@ async def _lifespan(app):
     # Warm config cache so first request avoids cold-start DynamoDB read
     try:
         from .config_store import list_config
+
         list_config()
     except Exception:
         pass
@@ -154,6 +185,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ── Request Timing Middleware ─────────────────────────────────────────
 @app.middleware("http")
@@ -188,8 +220,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         # for unmatched paths. App-level 404s use specific messages like
         # "Document not found", "Session not found", etc.
         is_unknown_route = (
-            request.url.path.startswith("/api/")
-            and exc.detail == "Not Found"
+            request.url.path.startswith("/api/") and exc.detail == "Not Found"
         )
         logger.info(
             "http_404",
@@ -202,6 +233,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         )
         if is_unknown_route:
             from .telemetry.log_context import _tenant_id, _user_id
+
             notify_suspicious(
                 "404",
                 f"{request.method} {request.url.path}",
@@ -215,9 +247,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Handle unhandled exceptions — send webhook with traceback, return 500."""
     import traceback
+
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     notify_error(request=request, status_code=500, exception=exc, traceback_str=tb)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # ── Initialize existing services ─────────────────────────────────────
 subscription_service = SubscriptionService()
@@ -240,7 +274,9 @@ set_chat_telemetry_ref(TELEMETRY_LOG)
 
 
 def _log_telemetry(entry: dict):
-    entry.setdefault("timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+    entry.setdefault(
+        "timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
     TELEMETRY_LOG.append(entry)
     logger.info(json.dumps(entry, default=str))
 
@@ -250,6 +286,7 @@ def _log_telemetry(entry: dict):
 # ══════════════════════════════════════════════════════════════════════
 
 # ── REST chat endpoint (EAGLE - Anthropic SDK) ───────────────────────
+
 
 class EagleChatRequest(BaseModel):
     message: str
@@ -268,7 +305,9 @@ class EagleChatResponse(BaseModel):
 
 
 @app.post("/api/chat", response_model=EagleChatResponse)
-async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_from_header)):
+async def api_chat(
+    req: EagleChatRequest, user: UserContext = Depends(get_user_from_header)
+):
     """REST chat endpoint using EAGLE Anthropic SDK with cost tracking."""
     start = time.time()
     tenant_id, user_id, session_id = get_session_context(user, req.session_id)
@@ -340,13 +379,22 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
                         _tools_called.append(getattr(_block, "name", ""))
             elif _msg_type == "ResultMessage":
                 _raw = getattr(_sdk_msg, "usage", {})
-                _usage = _raw if isinstance(_raw, dict) else {
-                    "input_tokens": getattr(_raw, "input_tokens", 0),
-                    "output_tokens": getattr(_raw, "output_tokens", 0),
-                }
+                _usage = (
+                    _raw
+                    if isinstance(_raw, dict)
+                    else {
+                        "input_tokens": getattr(_raw, "input_tokens", 0),
+                        "output_tokens": getattr(_raw, "output_tokens", 0),
+                    }
+                )
                 _final_text = str(getattr(_sdk_msg, "result", "") or "")
         _response_text = "".join(_text_parts) or _final_text
-        result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": _tools_called}
+        result = {
+            "text": _response_text,
+            "usage": _usage,
+            "model": MODEL,
+            "tools_called": _tools_called,
+        }
 
         # Store response
         if USE_PERSISTENT_SESSIONS:
@@ -363,26 +411,31 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         cost = calculate_cost(input_tokens, output_tokens)
 
         record_request_cost(
-            tenant_id, user_id, session_id,
-            input_tokens, output_tokens,
+            tenant_id,
+            user_id,
+            session_id,
+            input_tokens,
+            output_tokens,
             model=result.get("model", MODEL),
             tools_used=result.get("tools_called", []),
-            response_time_ms=elapsed_ms
+            response_time_ms=elapsed_ms,
         )
 
-        _log_telemetry({
-            "event": "chat_request",
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "session_id": session_id,
-            "endpoint": "rest",
-            "tokens_in": input_tokens,
-            "tokens_out": output_tokens,
-            "cost_usd": cost,
-            "tools_called": result.get("tools_called", []),
-            "response_time_ms": elapsed_ms,
-            "model": result.get("model", ""),
-        })
+        _log_telemetry(
+            {
+                "event": "chat_request",
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "session_id": session_id,
+                "endpoint": "rest",
+                "tokens_in": input_tokens,
+                "tokens_out": output_tokens,
+                "cost_usd": cost,
+                "tools_called": result.get("tools_called", []),
+                "response_time_ms": elapsed_ms,
+                "model": result.get("model", ""),
+            }
+        )
 
         return EagleChatResponse(
             response=result["text"],
@@ -395,15 +448,17 @@ async def api_chat(req: EagleChatRequest, user: UserContext = Depends(get_user_f
         )
     except Exception as e:
         logger.error("REST chat error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error processing chat request")
+        raise HTTPException(
+            status_code=500, detail="Internal server error processing chat request"
+        )
 
 
 # ── Session management endpoints (EAGLE enhanced) ────────────────────
 
+
 @app.get("/api/sessions")
 async def api_list_sessions(
-    limit: int = 50,
-    user: UserContext = Depends(get_user_from_header)
+    limit: int = 50, user: UserContext = Depends(get_user_from_header)
 ):
     """List sessions for the current user."""
     tenant_id, user_id, _ = get_session_context(user)
@@ -415,19 +470,20 @@ async def api_list_sessions(
         for sid, msgs in SESSIONS.items():
             user_msgs = [m for m in msgs if m.get("role") == "user"]
             first_msg = user_msgs[0]["content"][:60] if user_msgs else "Empty"
-            sessions.append({
-                "session_id": sid,
-                "message_count": len(msgs),
-                "preview": first_msg,
-            })
+            sessions.append(
+                {
+                    "session_id": sid,
+                    "message_count": len(msgs),
+                    "preview": first_msg,
+                }
+            )
 
     return {"sessions": sessions, "count": len(sessions)}
 
 
 @app.post("/api/sessions")
 async def api_create_session(
-    title: Optional[str] = None,
-    user: UserContext = Depends(get_user_from_header)
+    title: Optional[str] = None, user: UserContext = Depends(get_user_from_header)
 ):
     """Create a new session."""
     tenant_id, user_id, _ = get_session_context(user)
@@ -444,8 +500,7 @@ async def api_create_session(
 
 @app.get("/api/sessions/{session_id}")
 async def api_get_session(
-    session_id: str,
-    user: UserContext = Depends(get_user_from_header)
+    session_id: str, user: UserContext = Depends(get_user_from_header)
 ):
     """Get session details."""
     tenant_id, user_id, _ = get_session_context(user)
@@ -471,7 +526,7 @@ class UpdateSessionRequest(BaseModel):
 async def api_update_session(
     session_id: str,
     req: UpdateSessionRequest,
-    user: UserContext = Depends(get_user_from_header)
+    user: UserContext = Depends(get_user_from_header),
 ):
     """Update session title or metadata."""
     tenant_id, user_id, _ = get_session_context(user)
@@ -501,8 +556,7 @@ async def api_update_session(
 
 @app.delete("/api/sessions/{session_id}")
 async def api_delete_session(
-    session_id: str,
-    user: UserContext = Depends(get_user_from_header)
+    session_id: str, user: UserContext = Depends(get_user_from_header)
 ):
     """Delete a session."""
     tenant_id, user_id, _ = get_session_context(user)
@@ -522,9 +576,7 @@ async def api_delete_session(
 
 @app.get("/api/sessions/{session_id}/messages")
 async def api_get_messages(
-    session_id: str,
-    limit: int = 100,
-    user: UserContext = Depends(get_user_from_header)
+    session_id: str, limit: int = 100, user: UserContext = Depends(get_user_from_header)
 ):
     """Get messages for a session."""
     tenant_id, user_id, _ = get_session_context(user)
@@ -556,6 +608,7 @@ async def api_get_session_context(
             package_id = meta.get("active_package_id")
 
     from .session_preloader import preload_session_context
+
     ctx = await preload_session_context(tenant_id, user_id, package_id=package_id)
 
     result: dict = {"preferences": ctx.preferences, "feature_flags": ctx.feature_flags}
@@ -572,6 +625,7 @@ async def api_get_session_context(
 
 
 # ── Document export endpoints ────────────────────────────────────────
+
 
 class ExportRequest(BaseModel):
     doc_key: Optional[str] = None
@@ -595,9 +649,15 @@ def _resolve_export_content(req: ExportRequest, tenant_id: str, user_id: str) ->
             response = s3.get_object(Bucket=_S3_BUCKET, Key=req.doc_key)
         except ClientError as exc:
             if exc.response["Error"]["Code"] == "NoSuchKey":
-                raise HTTPException(status_code=404, detail="Document not found") from exc
-            logger.error("S3 export fetch error for %s: %s", req.doc_key, exc, exc_info=True)
-            raise HTTPException(status_code=500, detail="Failed to retrieve export source") from exc
+                raise HTTPException(
+                    status_code=404, detail="Document not found"
+                ) from exc
+            logger.error(
+                "S3 export fetch error for %s: %s", req.doc_key, exc, exc_info=True
+            )
+            raise HTTPException(
+                status_code=500, detail="Failed to retrieve export source"
+            ) from exc
 
         content_type = response.get("ContentType") or _guess_content_type(req.doc_key)
         if not _is_binary_document(req.doc_key, content_type):
@@ -630,14 +690,22 @@ def _resolve_export_content(req: ExportRequest, tenant_id: str, user_id: str) ->
     try:
         return base64.b64decode(req.content_b64).decode("utf-8")
     except (ValueError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=400, detail="Invalid content_b64 payload") from exc
+        raise HTTPException(
+            status_code=400, detail="Invalid content_b64 payload"
+        ) from exc
 
 
 @app.post("/api/documents/export")
-async def api_export_document(req: ExportRequest, user: UserContext = Depends(get_user_from_header)):
+async def api_export_document(
+    req: ExportRequest, user: UserContext = Depends(get_user_from_header)
+):
     """Export content to DOCX, PDF, or Markdown."""
     try:
-        result = export_document(_resolve_export_content(req, user.tenant_id, user.user_id), req.format, req.title)
+        result = export_document(
+            _resolve_export_content(req, user.tenant_id, user.user_id),
+            req.format,
+            req.title,
+        )
 
         return StreamingResponse(
             io.BytesIO(result["data"]),
@@ -645,7 +713,7 @@ async def api_export_document(req: ExportRequest, user: UserContext = Depends(ge
             headers={
                 "Content-Disposition": f'attachment; filename="{result["filename"]}"',
                 "X-File-Size": str(result["size_bytes"]),
-            }
+            },
         )
     except ExportDependencyError as e:
         logger.error("Export dependency error: %s", e)
@@ -655,14 +723,16 @@ async def api_export_document(req: ExportRequest, user: UserContext = Depends(ge
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Export error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during export")
+        raise HTTPException(
+            status_code=500, detail="Internal server error during export"
+        )
 
 
 @app.get("/api/documents/export/{session_id}")
 async def api_export_session(
     session_id: str,
     format: str = "docx",
-    user: UserContext = Depends(get_user_from_header)
+    user: UserContext = Depends(get_user_from_header),
 ):
     """Export an entire session conversation."""
     tenant_id, user_id, _ = get_session_context(user)
@@ -692,14 +762,16 @@ async def api_export_session(
             media_type=result["content_type"],
             headers={
                 "Content-Disposition": f'attachment; filename="{result["filename"]}"',
-            }
+            },
         )
     except ExportDependencyError as e:
         logger.error("Session export dependency error: %s", e)
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error("Session export error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during session export")
+        raise HTTPException(
+            status_code=500, detail="Internal server error during session export"
+        )
 
 
 # ── S3 Document Browser ──────────────────────────────────────────────
@@ -761,7 +833,12 @@ def _extract_binary_preview_payload(name: str, raw_bytes: bytes) -> dict[str, An
         return extract_docx_preview_payload(raw_bytes)
     if ext == "xlsx":
         return extract_xlsx_preview_payload(raw_bytes)
-    return {"content": None, "preview_blocks": [], "preview_sheets": [], "preview_mode": "none"}
+    return {
+        "content": None,
+        "preview_blocks": [],
+        "preview_sheets": [],
+        "preview_mode": "none",
+    }
 
 
 _is_allowed_document_key = is_allowed_document_key
@@ -792,7 +869,12 @@ def _build_document_response(
     document_id = doc_key
     template_provenance = None
     if package_ref and version is not None:
-        metadata = get_document(package_ref["tenant_id"], package_ref["package_id"], package_ref["doc_type"], version)
+        metadata = get_document(
+            package_ref["tenant_id"],
+            package_ref["package_id"],
+            package_ref["doc_type"],
+            version,
+        )
         if metadata:
             title = metadata.get("title")
             document_id = metadata.get("document_id", document_id)
@@ -815,7 +897,9 @@ def _build_document_response(
         "is_binary": is_binary,
         "download_url": download_url,
         "size_bytes": response.get("ContentLength", 0),
-        "last_modified": response.get("LastModified").isoformat() if response.get("LastModified") else None,
+        "last_modified": response.get("LastModified").isoformat()
+        if response.get("LastModified")
+        else None,
         "package_id": package_id,
         "document_type": doc_type,
         "version": version,
@@ -893,13 +977,15 @@ async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
             name = key.split("/")[-1]
             if not name:
                 continue
-            documents.append({
-                "key": key,
-                "name": name,
-                "size_bytes": obj["Size"],
-                "last_modified": obj["LastModified"].isoformat(),
-                "type": _get_doc_type(name),
-            })
+            documents.append(
+                {
+                    "key": key,
+                    "name": name,
+                    "size_bytes": obj["Size"],
+                    "last_modified": obj["LastModified"].isoformat(),
+                    "type": _get_doc_type(name),
+                }
+            )
 
         return {"documents": documents, "bucket": bucket, "prefix": prefix}
     except ClientError as e:
@@ -955,7 +1041,9 @@ async def api_get_document(
                     content = sidecar_content
                     preview_mode = "markdown_sidecar"
                 else:
-                    preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
+                    preview_payload = _extract_binary_preview_payload(
+                        doc_key, raw_bytes
+                    )
                     content = preview_payload.get("content")
                     preview_blocks = preview_payload.get("preview_blocks", [])
                     preview_sheets = preview_payload.get("preview_sheets", [])
@@ -1046,7 +1134,9 @@ async def api_update_document(
 
         package_ref = _extract_package_document_ref(doc_key)
         if not package_ref:
-            raise HTTPException(status_code=400, detail="Invalid package document key format")
+            raise HTTPException(
+                status_code=400, detail="Invalid package document key format"
+            )
 
         package_id = package_ref["package_id"]
         doc_type = package_ref["doc_type"]
@@ -1069,7 +1159,10 @@ async def api_update_document(
         )
 
         if not result.success:
-            raise HTTPException(status_code=500, detail=result.error or "Failed to create document version")
+            raise HTTPException(
+                status_code=500,
+                detail=result.error or "Failed to create document version",
+            )
 
         return {
             "success": True,
@@ -1091,6 +1184,7 @@ async def api_update_document(
 
             # Write changelog entry for workspace document
             from app.changelog_store import write_document_changelog_entry
+
             try:
                 write_document_changelog_entry(
                     tenant_id=tenant_id,
@@ -1101,7 +1195,9 @@ async def api_update_document(
                     actor_user_id=user_id,
                 )
             except Exception as cl_err:
-                logger.warning("Failed to write changelog for workspace doc: %s", cl_err)
+                logger.warning(
+                    "Failed to write changelog for workspace doc: %s", cl_err
+                )
 
             return {
                 "success": True,
@@ -1181,6 +1277,7 @@ async def api_update_xlsx_preview_document(
 
 # ── S3 Presigned URL ─────────────────────────────────────────────────
 
+
 @app.get("/api/documents/presign")
 async def api_presign_document(
     key: str,
@@ -1214,11 +1311,13 @@ async def api_presign_document(
 # ── User document upload ─────────────────────────────────────────────
 
 ALLOWED_UPLOAD_MIME_TYPES = {
-    "application/pdf", "application/msword",
+    "application/pdf",
+    "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
     "application/vnd.ms-excel",  # .xls
-    "text/plain", "text/markdown",
+    "text/plain",
+    "text/markdown",
 }
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 
@@ -1240,9 +1339,10 @@ def _coerce_dynamodb_value(value: Any) -> Any:
 def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> None:
     """Store upload metadata in DynamoDB with 24-hour TTL."""
     import boto3
-    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
-        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-    )
+
+    table = boto3.resource(
+        "dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")
+    ).Table(os.getenv("EAGLE_SESSIONS_TABLE", "eagle"))
     item = {
         "PK": f"UPLOAD#{tenant_id}",
         "SK": f"UPLOAD#{upload_id}",
@@ -1255,19 +1355,23 @@ def _put_upload(tenant_id: str, upload_id: str, metadata: Dict[str, Any]) -> Non
 def _get_upload(tenant_id: str, upload_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve upload metadata from DynamoDB. Returns None if expired/missing."""
     import boto3
-    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
-        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
+
+    table = boto3.resource(
+        "dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")
+    ).Table(os.getenv("EAGLE_SESSIONS_TABLE", "eagle"))
+    resp = table.get_item(
+        Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"}
     )
-    resp = table.get_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
     return resp.get("Item")
 
 
 def _delete_upload(tenant_id: str, upload_id: str) -> None:
     """Remove upload metadata from DynamoDB."""
     import boto3
-    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")).Table(
-        os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
-    )
+
+    table = boto3.resource(
+        "dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")
+    ).Table(os.getenv("EAGLE_SESSIONS_TABLE", "eagle"))
     table.delete_item(Key={"PK": f"UPLOAD#{tenant_id}", "SK": f"UPLOAD#{upload_id}"})
 
 
@@ -1291,7 +1395,7 @@ async def api_upload_document(
     if content_type not in ALLOWED_UPLOAD_MIME_TYPES:
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported file type: {content_type}. Accepted: PDF, Word, plain text, Markdown."
+            detail=f"Unsupported file type: {content_type}. Accepted: PDF, Word, plain text, Markdown.",
         )
 
     body = await file.read()
@@ -1324,15 +1428,22 @@ async def api_upload_document(
 
     # Convert to markdown for persistence
     from .document_markdown_service import convert_to_markdown
-    markdown_content = convert_to_markdown(body, content_type, file.filename or safe_name)
+
+    markdown_content = convert_to_markdown(
+        body, content_type, file.filename or safe_name
+    )
 
     # Auto-standardize markdown via Bedrock AI
     quality_score = None
     if markdown_content and classification.doc_type not in ("unknown", None):
         try:
             from .template_standardizer import standardize_template as _standardize
+
             std_result = _standardize(
-                body, file.filename or safe_name, content_type, classification.doc_type,
+                body,
+                file.filename or safe_name,
+                content_type,
+                classification.doc_type,
             )
             if std_result.success and std_result.quality_score > 50:
                 markdown_content = std_result.markdown
@@ -1346,7 +1457,12 @@ async def api_upload_document(
         md_key = f"{key}.parsed.md"
         try:
             s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
-            s3.put_object(Bucket=bucket, Key=md_key, Body=markdown_content.encode("utf-8"), ContentType="text/markdown")
+            s3.put_object(
+                Bucket=bucket,
+                Key=md_key,
+                Body=markdown_content.encode("utf-8"),
+                ContentType="text/markdown",
+            )
             markdown_s3_key = md_key
         except ClientError as e:
             logger.warning("Failed to upload markdown sibling: %s", e)
@@ -1359,24 +1475,32 @@ async def api_upload_document(
             package_context = {"mode": "package", "package_id": package_id}
 
     # Store upload metadata for later assignment
-    _put_upload(tenant_id, upload_id, {
-        "tenant_id": tenant_id,
-        "user_id": user_id,
-        "s3_bucket": bucket,
-        "s3_key": key,
-        "filename": safe_name,
-        "original_filename": file.filename,
-        "content_type": content_type,
-        "size_bytes": len(body),
-        "classification": classification.to_dict(),
-        "session_id": session_id,
-        "markdown_s3_key": markdown_s3_key,
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-    })
+    _put_upload(
+        tenant_id,
+        upload_id,
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "s3_bucket": bucket,
+            "s3_key": key,
+            "filename": safe_name,
+            "original_filename": file.filename,
+            "content_type": content_type,
+            "size_bytes": len(body),
+            "classification": classification.to_dict(),
+            "session_id": session_id,
+            "markdown_s3_key": markdown_s3_key,
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        },
+    )
 
     logger.info(
         "Uploaded %s → s3://%s/%s (upload_id=%s, classified=%s)",
-        safe_name, bucket, key, upload_id, classification.doc_type
+        safe_name,
+        bucket,
+        key,
+        upload_id,
+        classification.doc_type,
     )
 
     return {
@@ -1393,6 +1517,7 @@ async def api_upload_document(
 
 class AssignToPackageRequest(BaseModel):
     """Request body for assigning an uploaded document to a package."""
+
     package_id: str
     doc_type: Optional[str] = None
     title: Optional[str] = None
@@ -1417,17 +1542,26 @@ async def assign_upload_to_package(
         raise HTTPException(status_code=404, detail="Upload not found or expired")
 
     # Verify ownership
-    if upload_meta["tenant_id"] != user.tenant_id or upload_meta["user_id"] != user.user_id:
+    if (
+        upload_meta["tenant_id"] != user.tenant_id
+        or upload_meta["user_id"] != user.user_id
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Verify package exists
     pkg = get_package(user.tenant_id, body.package_id)
     if not pkg:
-        raise HTTPException(status_code=404, detail=f"Package {body.package_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Package {body.package_id} not found"
+        )
 
     # Determine doc_type (from request or classification) and normalize
-    raw_doc_type = body.doc_type or upload_meta["classification"].get("doc_type", "unknown")
-    doc_type = normalize_doc_type(raw_doc_type) if raw_doc_type != "unknown" else "unknown"
+    raw_doc_type = body.doc_type or upload_meta["classification"].get(
+        "doc_type", "unknown"
+    )
+    doc_type = (
+        normalize_doc_type(raw_doc_type) if raw_doc_type != "unknown" else "unknown"
+    )
     if doc_type == "unknown" or doc_type == "":
         raise HTTPException(
             status_code=400,
@@ -1435,12 +1569,18 @@ async def assign_upload_to_package(
         )
 
     # Determine title
-    title = body.title or upload_meta["classification"].get("suggested_title") or upload_meta["filename"]
+    title = (
+        body.title
+        or upload_meta["classification"].get("suggested_title")
+        or upload_meta["filename"]
+    )
 
     # Fetch file content from S3
     try:
         s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
-        response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=upload_meta["s3_key"])
+        response = s3.get_object(
+            Bucket=upload_meta["s3_bucket"], Key=upload_meta["s3_key"]
+        )
         content = response["Body"].read()
     except ClientError as e:
         logger.error("S3 fetch error for upload %s: %s", upload_id, e)
@@ -1451,13 +1591,22 @@ async def assign_upload_to_package(
     markdown_s3_key = upload_meta.get("markdown_s3_key")
     if markdown_s3_key:
         try:
-            md_response = s3.get_object(Bucket=upload_meta["s3_bucket"], Key=markdown_s3_key)
-            markdown_content = md_response["Body"].read().decode("utf-8", errors="replace")
+            md_response = s3.get_object(
+                Bucket=upload_meta["s3_bucket"], Key=markdown_s3_key
+            )
+            markdown_content = (
+                md_response["Body"].read().decode("utf-8", errors="replace")
+            )
         except ClientError:
             logger.debug("Could not fetch markdown sibling for upload %s", upload_id)
 
     # Compute auto-tags from template metadata
-    from .tag_computation import compute_document_tags, compute_far_tags_from_template, compute_completeness_pct
+    from .tag_computation import (
+        compute_document_tags,
+        compute_far_tags_from_template,
+        compute_completeness_pct,
+    )
+
     doc_stub = {"doc_type": doc_type, "title": title}
     system_tags = compute_document_tags(doc_stub, pkg)
     far_tags = compute_far_tags_from_template(doc_type)
@@ -1494,14 +1643,19 @@ async def assign_upload_to_package(
     )
 
     if not result.success:
-        raise HTTPException(status_code=500, detail=result.error or "Failed to create document")
+        raise HTTPException(
+            status_code=500, detail=result.error or "Failed to create document"
+        )
 
     # Clean up upload registry
     _delete_upload(user.tenant_id, upload_id)
 
     logger.info(
         "Assigned upload %s to package %s as %s v%s",
-        upload_id, body.package_id, doc_type, result.version
+        upload_id,
+        body.package_id,
+        doc_type,
+        result.version,
     )
 
     return result.to_dict()
@@ -1509,8 +1663,10 @@ async def assign_upload_to_package(
 
 # ── Admin KB review endpoints ─────────────────────────────────────────
 
+
 def _get_dynamo():
     import boto3
+
     return boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
 
@@ -1521,12 +1677,14 @@ async def api_list_kb_reviews(
 ):
     """List KB review records from DynamoDB (admin only)."""
     from boto3.dynamodb.conditions import Attr
+
     table_name = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
     try:
         ddb = _get_dynamo()
         table = ddb.Table(table_name)
         resp = table.scan(
-            FilterExpression=Attr("PK").begins_with("KB_REVIEW#") & Attr("status").eq(status),
+            FilterExpression=Attr("PK").begins_with("KB_REVIEW#")
+            & Attr("status").eq(status),
         )
         reviews = resp.get("Items", [])
         reviews.sort(key=lambda r: r.get("created_at", ""), reverse=True)
@@ -1568,13 +1726,20 @@ async def api_approve_kb_review(
     proposed_diff = item.get("proposed_diff", [])
 
     # Apply diff to matrix.json (file on disk relative to this server)
-    matrix_path = _Path(__file__).resolve().parent.parent.parent.parent / "eagle-plugin" / "data" / "matrix.json"
+    matrix_path = (
+        _Path(__file__).resolve().parent.parent.parent.parent
+        / "eagle-plugin"
+        / "data"
+        / "matrix.json"
+    )
     if matrix_path.exists():
         try:
             matrix = _json.loads(matrix_path.read_text(encoding="utf-8"))
             matrix = _apply_json_patch(matrix, proposed_diff)
             matrix["version"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            matrix_path.write_text(_json.dumps(matrix, indent=2, ensure_ascii=False), encoding="utf-8")
+            matrix_path.write_text(
+                _json.dumps(matrix, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
             logger.info("matrix.json updated after KB review %s", review_id)
 
             # Regenerate HTML THRESHOLDS/TYPES arrays
@@ -1587,9 +1752,15 @@ async def api_approve_kb_review(
     # Move S3 doc from pending/ to approved/
     old_key = item.get("s3_key", "")
     if old_key and old_key.startswith("eagle-knowledge-base/pending/"):
-        new_key = old_key.replace("eagle-knowledge-base/pending/", "eagle-knowledge-base/approved/")
+        new_key = old_key.replace(
+            "eagle-knowledge-base/pending/", "eagle-knowledge-base/approved/"
+        )
         try:
-            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": old_key}, Key=new_key)
+            s3.copy_object(
+                Bucket=bucket,
+                CopySource={"Bucket": bucket, "Key": old_key},
+                Key=new_key,
+            )
             s3.delete_object(Bucket=bucket, Key=old_key)
         except ClientError as e:
             logger.warning("S3 move failed: %s", e)
@@ -1635,9 +1806,15 @@ async def api_reject_kb_review(
     # Move S3 doc from pending/ to rejected/
     old_key = item.get("s3_key", "")
     if old_key and old_key.startswith("eagle-knowledge-base/pending/"):
-        new_key = old_key.replace("eagle-knowledge-base/pending/", "eagle-knowledge-base/rejected/")
+        new_key = old_key.replace(
+            "eagle-knowledge-base/pending/", "eagle-knowledge-base/rejected/"
+        )
         try:
-            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": old_key}, Key=new_key)
+            s3.copy_object(
+                Bucket=bucket,
+                CopySource={"Bucket": bucket, "Key": old_key},
+                Key=new_key,
+            )
             s3.delete_object(Bucket=bucket, Key=old_key)
         except ClientError as e:
             logger.warning("S3 move failed: %s", e)
@@ -1654,6 +1831,7 @@ async def api_reject_kb_review(
 
 # ── Knowledge Base browse endpoints ──────────────────────────────────
 
+
 @app.get("/api/knowledge-base")
 async def api_list_knowledge_base(
     topic: Optional[str] = None,
@@ -1669,9 +1847,15 @@ async def api_list_knowledge_base(
     # If free-text query provided, delegate to the existing search tool
     if query:
         from .tools.knowledge_tools import exec_knowledge_search
+
         result = exec_knowledge_search(
-            {"query": query, "topic": topic, "document_type": document_type,
-             "agent": agent, "limit": limit},
+            {
+                "query": query,
+                "topic": topic,
+                "document_type": document_type,
+                "agent": agent,
+                "limit": limit,
+            },
             tenant_id=user.tenant_id,
         )
         return {"documents": result.get("results", []), "count": result.get("count", 0)}
@@ -1708,22 +1892,24 @@ async def api_list_knowledge_base(
 
         documents = []
         for item in items:
-            documents.append({
-                "document_id": item.get("document_id", ""),
-                "title": item.get("title", ""),
-                "summary": item.get("summary", ""),
-                "document_type": item.get("document_type", ""),
-                "primary_topic": item.get("primary_topic", ""),
-                "primary_agent": item.get("primary_agent", ""),
-                "authority_level": item.get("authority_level", ""),
-                "keywords": item.get("keywords", [])[:10],
-                "s3_key": item.get("s3_key", ""),
-                "confidence_score": float(item.get("confidence_score", 0)),
-                "word_count": int(item.get("word_count", 0)),
-                "page_count": int(item.get("page_count", 0)),
-                "file_type": item.get("file_type", ""),
-                "last_updated": item.get("last_updated", ""),
-            })
+            documents.append(
+                {
+                    "document_id": item.get("document_id", ""),
+                    "title": item.get("title", ""),
+                    "summary": item.get("summary", ""),
+                    "document_type": item.get("document_type", ""),
+                    "primary_topic": item.get("primary_topic", ""),
+                    "primary_agent": item.get("primary_agent", ""),
+                    "authority_level": item.get("authority_level", ""),
+                    "keywords": item.get("keywords", [])[:10],
+                    "s3_key": item.get("s3_key", ""),
+                    "confidence_score": float(item.get("confidence_score", 0)),
+                    "word_count": int(item.get("word_count", 0)),
+                    "page_count": int(item.get("page_count", 0)),
+                    "file_type": item.get("file_type", ""),
+                    "last_updated": item.get("last_updated", ""),
+                }
+            )
 
         return {"documents": documents, "count": len(documents)}
     except Exception as e:
@@ -1766,13 +1952,19 @@ async def api_knowledge_base_stats(
 
         return {
             "total": len(items),
-            "by_topic": dict(sorted(by_topic.items(), key=lambda x: x[1], reverse=True)),
+            "by_topic": dict(
+                sorted(by_topic.items(), key=lambda x: x[1], reverse=True)
+            ),
             "by_type": dict(sorted(by_type.items(), key=lambda x: x[1], reverse=True)),
-            "by_agent": dict(sorted(by_agent.items(), key=lambda x: x[1], reverse=True)),
+            "by_agent": dict(
+                sorted(by_agent.items(), key=lambda x: x[1], reverse=True)
+            ),
         }
     except Exception as e:
         logger.error("Knowledge base stats error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to get knowledge base stats")
+        raise HTTPException(
+            status_code=500, detail="Failed to get knowledge base stats"
+        )
 
 
 @app.get("/api/knowledge-base/document/{s3_key:path}")
@@ -1814,18 +2006,25 @@ async def api_kb_plugin_data(
             fpath = data_dir / name
             if fpath.exists():
                 content = _json.loads(fpath.read_text(encoding="utf-8"))
-                item_count = len(content) if isinstance(content, list) else len(content.keys())
-                files.append({
-                    "name": name,
-                    "description": description,
-                    "size_bytes": fpath.stat().st_size,
-                    "item_count": item_count,
-                })
+                item_count = (
+                    len(content) if isinstance(content, list) else len(content.keys())
+                )
+                files.append(
+                    {
+                        "name": name,
+                        "description": description,
+                        "size_bytes": fpath.stat().st_size,
+                        "item_count": item_count,
+                    }
+                )
         return {"files": files}
 
     # Validate filename to prevent path traversal
     if file not in _PLUGIN_DATA_FILES:
-        raise HTTPException(status_code=400, detail=f"Invalid file. Allowed: {list(_PLUGIN_DATA_FILES.keys())}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file. Allowed: {list(_PLUGIN_DATA_FILES.keys())}",
+        )
 
     fpath = data_dir / file
     if not fpath.exists():
@@ -1839,6 +2038,7 @@ async def api_kb_plugin_data(
 def _apply_json_patch(obj: dict, patch: list) -> dict:
     """Apply a simplified JSON Patch (RFC 6902) to a dict. Supports replace, add, remove."""
     import copy
+
     result = copy.deepcopy(obj)
     for op in patch:
         operation = op.get("op")
@@ -1848,7 +2048,9 @@ def _apply_json_patch(obj: dict, patch: list) -> dict:
             if operation == "replace":
                 target = result
                 for part in parts[:-1]:
-                    target = target[int(part)] if isinstance(target, list) else target[part]
+                    target = (
+                        target[int(part)] if isinstance(target, list) else target[part]
+                    )
                 last = parts[-1]
                 if isinstance(target, list):
                     target[int(last)] = op["value"]
@@ -1857,7 +2059,9 @@ def _apply_json_patch(obj: dict, patch: list) -> dict:
             elif operation == "add":
                 target = result
                 for part in parts[:-1]:
-                    target = target[int(part)] if isinstance(target, list) else target[part]
+                    target = (
+                        target[int(part)] if isinstance(target, list) else target[part]
+                    )
                 last = parts[-1]
                 if isinstance(target, list):
                     target.append(op["value"])
@@ -1866,7 +2070,9 @@ def _apply_json_patch(obj: dict, patch: list) -> dict:
             elif operation == "remove":
                 target = result
                 for part in parts[:-1]:
-                    target = target[int(part)] if isinstance(target, list) else target[part]
+                    target = (
+                        target[int(part)] if isinstance(target, list) else target[part]
+                    )
                 last = parts[-1]
                 if isinstance(target, list):
                     del target[int(last)]
@@ -1882,9 +2088,14 @@ def _regenerate_html_arrays(matrix: dict) -> None:
     import json as _json
     import re as _re
 
-    html_path = _Path(__file__).resolve().parent.parent.parent.parent / "contract-requirements-matrix.html"
+    html_path = (
+        _Path(__file__).resolve().parent.parent.parent.parent
+        / "contract-requirements-matrix.html"
+    )
     if not html_path.exists():
-        logger.warning("contract-requirements-matrix.html not found, skipping HTML regeneration")
+        logger.warning(
+            "contract-requirements-matrix.html not found, skipping HTML regeneration"
+        )
         return
 
     html = html_path.read_text(encoding="utf-8")
@@ -1901,8 +2112,12 @@ def _regenerate_html_arrays(matrix: dict) -> None:
     # Build new TYPES array from contract_types
     types_js = "const TYPES = [\n"
     for ct in matrix.get("contract_types", []):
-        parts = [f"id: {_json.dumps(ct['id'])}", f"label: {_json.dumps(ct['label'])}",
-                 f"risk: {ct['risk']}", f"category: {_json.dumps(ct['category'])}"]
+        parts = [
+            f"id: {_json.dumps(ct['id'])}",
+            f"label: {_json.dumps(ct['label'])}",
+            f"risk: {ct['risk']}",
+            f"category: {_json.dumps(ct['category'])}",
+        ]
         if ct.get("fee_cap"):
             parts.append(f"feeCap: {_json.dumps(ct['fee_cap'])}")
         if ct.get("prereqs"):
@@ -1931,17 +2146,29 @@ def _get_doc_type(name: str) -> str:
     # Content-based matching first (order: specific before general)
     if "igce" in name_lower or "ige" in name_lower:
         return "igce"
-    elif "sow" in name_lower or "statement-of-work" in name_lower or "statement_of_work" in name_lower:
+    elif (
+        "sow" in name_lower
+        or "statement-of-work" in name_lower
+        or "statement_of_work" in name_lower
+    ):
         return "sow"
-    elif "son" in name_lower and ("product" in name_lower or "service" in name_lower or "need" in name_lower):
+    elif "son" in name_lower and (
+        "product" in name_lower or "service" in name_lower or "need" in name_lower
+    ):
         return "son_products" if "product" in name_lower else "son_services"
     elif "market" in name_lower and "research" in name_lower:
         return "market_research"
-    elif "justification" in name_lower or "j&a" in name_lower or "j_and_a" in name_lower:
+    elif (
+        "justification" in name_lower or "j&a" in name_lower or "j_and_a" in name_lower
+    ):
         return "justification"
     elif "acquisition" in name_lower and "plan" in name_lower:
         return "acquisition_plan"
-    elif "cor" in name_lower and ("appointment" in name_lower or "designation" in name_lower or "certification" in name_lower):
+    elif "cor" in name_lower and (
+        "appointment" in name_lower
+        or "designation" in name_lower
+        or "certification" in name_lower
+    ):
         return "cor_certification"
     elif "buy" in name_lower and "american" in name_lower:
         return "buy_american"
@@ -1966,10 +2193,10 @@ def _get_doc_type(name: str) -> str:
 
 # ── EAGLE Admin & Analytics endpoints ────────────────────────────────
 
+
 @app.get("/api/admin/dashboard")
 async def api_admin_dashboard(
-    days: int = 30,
-    user: UserContext = Depends(get_user_from_header)
+    days: int = 30, user: UserContext = Depends(get_user_from_header)
 ):
     """Get admin dashboard statistics."""
     tenant_id = user.tenant_id
@@ -1980,9 +2207,7 @@ async def api_admin_dashboard(
 
 @app.get("/api/admin/users")
 async def api_admin_users(
-    days: int = 30,
-    limit: int = 10,
-    user: UserContext = Depends(get_user_from_header)
+    days: int = 30, limit: int = 10, user: UserContext = Depends(get_user_from_header)
 ):
     """Get top users by usage."""
     tenant_id = user.tenant_id
@@ -1993,7 +2218,7 @@ async def api_admin_users(
 async def api_admin_user_stats(
     target_user_id: str,
     days: int = 30,
-    user: UserContext = Depends(get_user_from_header)
+    user: UserContext = Depends(get_user_from_header),
 ):
     """Get stats for a specific user."""
     tenant_id = user.tenant_id
@@ -2029,7 +2254,13 @@ async def api_admin_tools(
             if not name or name in ("agent", "supervisor"):
                 continue
             if name not in tool_stats:
-                tool_stats[name] = {"call_count": 0, "success_count": 0, "error_count": 0, "total_ms": 0, "recent_errors": []}
+                tool_stats[name] = {
+                    "call_count": 0,
+                    "success_count": 0,
+                    "error_count": 0,
+                    "total_ms": 0,
+                    "recent_errors": [],
+                }
             s = tool_stats[name]
             s["call_count"] += 1
             level = obs.get("level", "DEFAULT")
@@ -2046,6 +2277,7 @@ async def api_admin_tools(
             if start and end:
                 try:
                     from datetime import datetime as dt
+
                     s_dt = dt.fromisoformat(start.replace("Z", "+00:00"))
                     e_dt = dt.fromisoformat(end.replace("Z", "+00:00"))
                     s["total_ms"] += int((e_dt - s_dt).total_seconds() * 1000)
@@ -2053,17 +2285,23 @@ async def api_admin_tools(
                     pass
 
     tools = []
-    for name, s in sorted(tool_stats.items(), key=lambda x: x[1]["call_count"], reverse=True):
+    for name, s in sorted(
+        tool_stats.items(), key=lambda x: x[1]["call_count"], reverse=True
+    ):
         total = s["call_count"]
-        tools.append({
-            "name": name,
-            "call_count": total,
-            "success_count": s["success_count"],
-            "error_count": s["error_count"],
-            "success_rate": round(s["success_count"] / total * 100, 1) if total else 100,
-            "avg_duration_ms": round(s["total_ms"] / total) if total else 0,
-            "recent_errors": s["recent_errors"],
-        })
+        tools.append(
+            {
+                "name": name,
+                "call_count": total,
+                "success_count": s["success_count"],
+                "error_count": s["error_count"],
+                "success_rate": round(s["success_count"] / total * 100, 1)
+                if total
+                else 100,
+                "avg_duration_ms": round(s["total_ms"] / total) if total else 0,
+                "recent_errors": s["recent_errors"],
+            }
+        )
 
     return {"tools": tools, "period": period}
 
@@ -2079,6 +2317,7 @@ async def api_check_rate_limit(user: UserContext = Depends(get_user_from_header)
 
 # ── User endpoints ───────────────────────────────────────────────────
 
+
 @app.get("/api/user/me")
 async def api_user_me(user: UserContext = Depends(get_user_from_header)):
     """Get current user info."""
@@ -2087,8 +2326,7 @@ async def api_user_me(user: UserContext = Depends(get_user_from_header)):
 
 @app.get("/api/user/usage")
 async def api_user_usage(
-    days: int = 30,
-    user: UserContext = Depends(get_user_from_header)
+    days: int = 30, user: UserContext = Depends(get_user_from_header)
 ):
     """Get usage summary for current user."""
     tenant_id = user.tenant_id
@@ -2099,6 +2337,7 @@ async def api_user_usage(
 
 # ── Feedback endpoint ────────────────────────────────────────────────
 
+
 def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
     """Return up to 50 recent CloudWatch log events matching session_id (non-fatal)."""
     if not session_id:
@@ -2107,6 +2346,7 @@ def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
         log_group = os.environ.get("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
         region = os.environ.get("AWS_REGION", "us-east-1")
         import boto3
+
         client = boto3.client("logs", region_name=region)
         now_ms = int(time.time() * 1000)
         day_ms = 24 * 60 * 60 * 1000
@@ -2131,8 +2371,14 @@ async def api_submit_feedback(
     """Record user feedback with conversation snapshot and recent CloudWatch logs."""
     user, auth_error = extract_user_context(authorization)
     if REQUIRE_AUTH and user.user_id == "anonymous":
-        logger.warning("feedback: auth failed — %s (token present: %s)", auth_error, bool(authorization))
-        raise HTTPException(status_code=401, detail=auth_error or "Authentication required")
+        logger.warning(
+            "feedback: auth failed — %s (token present: %s)",
+            auth_error,
+            bool(authorization),
+        )
+        raise HTTPException(
+            status_code=401, detail=auth_error or "Authentication required"
+        )
 
     body = await request.json()
     session_id = body.get("session_id", "")
@@ -2158,9 +2404,13 @@ async def api_submit_feedback(
         last_message_id=last_message_id,
     )
     notify_feedback(
-        tenant_id=user.tenant_id, user_id=user.user_id, tier=user.tier,
-        session_id=session_id, feedback_text=feedback_text,
-        feedback_type=body.get("feedback_type", "general"), page=page,
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        tier=user.tier,
+        session_id=session_id,
+        feedback_text=feedback_text,
+        feedback_type=body.get("feedback_type", "general"),
+        page=page,
     )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 
@@ -2171,6 +2421,7 @@ class MessageFeedbackRequest(BaseModel):
     feedback_type: str  # "thumbs_up" | "thumbs_down"
     comment: Optional[str] = ""
 
+
 @app.post("/api/feedback/message")
 async def api_submit_message_feedback(
     req: MessageFeedbackRequest,
@@ -2178,7 +2429,9 @@ async def api_submit_message_feedback(
 ):
     """Record thumbs up/down feedback for a specific message."""
     if req.feedback_type not in ("thumbs_up", "thumbs_down"):
-        raise HTTPException(status_code=400, detail="feedback_type must be 'thumbs_up' or 'thumbs_down'")
+        raise HTTPException(
+            status_code=400, detail="feedback_type must be 'thumbs_up' or 'thumbs_down'"
+        )
 
     feedback_store.write_message_feedback(
         tenant_id=user.tenant_id,
@@ -2193,6 +2446,7 @@ async def api_submit_message_feedback(
 
 # ── Analytics ingestion endpoint ─────────────────────────────────────
 
+
 @app.post("/api/analytics/events")
 async def api_analytics_events(request: Request):
     """Ingest batched analytics events — writes to CloudWatch."""
@@ -2203,6 +2457,7 @@ async def api_analytics_events(request: Request):
             return {"status": "ok", "ingested": 0}
 
         from .telemetry.cloudwatch_emitter import emit_telemetry_event
+
         for event in events[:100]:  # Cap at 100 per batch
             emit_telemetry_event(
                 event_type=f"analytics.{event.get('event', 'unknown')}",
@@ -2221,6 +2476,7 @@ async def api_analytics_events(request: Request):
 
 # ── Telemetry endpoint ───────────────────────────────────────────────
 
+
 @app.get("/api/telemetry")
 async def api_telemetry(limit: int = 50):
     """Return recent telemetry entries."""
@@ -2233,7 +2489,8 @@ async def api_telemetry(limit: int = 50):
     total_cost = sum(e.get("cost_usd", 0) for e in chat_entries)
     avg_response = (
         sum(e.get("response_time_ms", 0) for e in chat_entries) / len(chat_entries)
-        if chat_entries else 0
+        if chat_entries
+        else 0
     )
     all_tools = []
     for e in chat_entries:
@@ -2255,16 +2512,19 @@ async def api_telemetry(limit: int = 50):
 
 # ── Tools info endpoint ──────────────────────────────────────────────
 
+
 @app.get("/api/tools")
 async def api_tools():
     """List available EAGLE tools."""
     tools = []
     for tool in EAGLE_TOOLS:
-        tools.append({
-            "name": tool["name"],
-            "description": tool["description"],
-            "parameters": tool.get("input_schema", {}),
-        })
+        tools.append(
+            {
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": tool.get("input_schema", {}),
+            }
+        )
     return {"tools": tools, "count": len(tools)}
 
 
@@ -2285,7 +2545,9 @@ async def websocket_chat(ws: WebSocket):
     user_id = user.user_id
 
     logger.info("WebSocket connected: %s", default_session_id)
-    await ws.send_json({"type": "connected", "chatId": default_session_id, "user": user.to_dict()})
+    await ws.send_json(
+        {"type": "connected", "chatId": default_session_id, "user": user.to_dict()}
+    )
 
     try:
         while True:
@@ -2297,15 +2559,19 @@ async def websocket_chat(ws: WebSocket):
                 user, error = extract_user_context(token)
                 tenant_id = user.tenant_id
                 user_id = user.user_id
-                await ws.send_json({
-                    "type": "authenticated",
-                    "user": user.to_dict(),
-                    "error": error,
-                })
+                await ws.send_json(
+                    {
+                        "type": "authenticated",
+                        "user": user.to_dict(),
+                        "error": error,
+                    }
+                )
                 continue
 
             if msg_type != "chat.send":
-                await ws.send_json({"type": "error", "message": f"Unknown type: {msg_type}"})
+                await ws.send_json(
+                    {"type": "error", "message": f"Unknown type: {msg_type}"}
+                )
                 continue
 
             user_message = data.get("message", "").strip()
@@ -2317,7 +2583,13 @@ async def websocket_chat(ws: WebSocket):
 
             rate_check = check_rate_limit(tenant_id, user_id, user.tier)
             if not rate_check["allowed"]:
-                await ws.send_json({"type": "error", "message": rate_check["reason"], "rate_limited": True})
+                await ws.send_json(
+                    {
+                        "type": "error",
+                        "message": rate_check["reason"],
+                        "rate_limited": True,
+                    }
+                )
                 continue
 
             if USE_PERSISTENT_SESSIONS:
@@ -2338,24 +2610,31 @@ async def websocket_chat(ws: WebSocket):
             tools_called = []
 
             try:
+
                 async def on_text(delta: str):
                     await ws.send_json({"type": "delta", "text": delta})
 
                 async def on_tool_use(tool_name: str, tool_input: dict):
                     tools_called.append(tool_name)
-                    await ws.send_json({
-                        "type": "tool_use",
-                        "tool": tool_name,
-                        "input": tool_input,
-                    })
+                    await ws.send_json(
+                        {
+                            "type": "tool_use",
+                            "tool": tool_name,
+                            "input": tool_input,
+                        }
+                    )
 
                 async def on_tool_result(tool_name: str, output: str):
-                    display_output = output[:2000] + "..." if len(output) > 2000 else output
-                    await ws.send_json({
-                        "type": "tool_result",
-                        "tool": tool_name,
-                        "output": display_output,
-                    })
+                    display_output = (
+                        output[:2000] + "..." if len(output) > 2000 else output
+                    )
+                    await ws.send_json(
+                        {
+                            "type": "tool_result",
+                            "tool": tool_name,
+                            "output": display_output,
+                        }
+                    )
 
                 _text_parts: list[str] = []
                 _usage: dict = {}
@@ -2378,21 +2657,35 @@ async def websocket_chat(ws: WebSocket):
                                 await on_text(_block.text)
                             elif _bt == "tool_use":
                                 tools_called.append(getattr(_block, "name", ""))
-                                await on_tool_use(getattr(_block, "name", ""), getattr(_block, "input", {}))
+                                await on_tool_use(
+                                    getattr(_block, "name", ""),
+                                    getattr(_block, "input", {}),
+                                )
                     elif _msg_type == "ResultMessage":
                         _raw = getattr(_sdk_msg, "usage", {})
-                        _usage = _raw if isinstance(_raw, dict) else {
-                            "input_tokens": getattr(_raw, "input_tokens", 0),
-                            "output_tokens": getattr(_raw, "output_tokens", 0),
-                        }
+                        _usage = (
+                            _raw
+                            if isinstance(_raw, dict)
+                            else {
+                                "input_tokens": getattr(_raw, "input_tokens", 0),
+                                "output_tokens": getattr(_raw, "output_tokens", 0),
+                            }
+                        )
                         _final_text = str(getattr(_sdk_msg, "result", "") or "")
                 _response_text = "".join(_text_parts) or _final_text
                 if _response_text and not _text_parts:
                     await on_text(_response_text)
-                result = {"text": _response_text, "usage": _usage, "model": MODEL, "tools_called": tools_called}
+                result = {
+                    "text": _response_text,
+                    "usage": _usage,
+                    "model": MODEL,
+                    "tools_called": tools_called,
+                }
 
                 if USE_PERSISTENT_SESSIONS:
-                    add_message(session_id, "assistant", result["text"], tenant_id, user_id)
+                    add_message(
+                        session_id, "assistant", result["text"], tenant_id, user_id
+                    )
                 else:
                     messages.append({"role": "assistant", "content": result["text"]})
 
@@ -2404,48 +2697,59 @@ async def websocket_chat(ws: WebSocket):
                 cost = calculate_cost(input_tokens, output_tokens)
 
                 record_request_cost(
-                    tenant_id, user_id, session_id,
-                    input_tokens, output_tokens,
+                    tenant_id,
+                    user_id,
+                    session_id,
+                    input_tokens,
+                    output_tokens,
                     model=result.get("model", MODEL),
                     tools_used=result.get("tools_called", []),
-                    response_time_ms=elapsed_ms
+                    response_time_ms=elapsed_ms,
                 )
 
-                await ws.send_json({
-                    "type": "final",
-                    "text": result["text"],
-                    "session_id": session_id,
-                    "usage": usage,
-                    "model": result.get("model", ""),
-                    "tools_called": result.get("tools_called", []),
-                    "response_time_ms": elapsed_ms,
-                    "cost_usd": cost,
-                })
+                await ws.send_json(
+                    {
+                        "type": "final",
+                        "text": result["text"],
+                        "session_id": session_id,
+                        "usage": usage,
+                        "model": result.get("model", ""),
+                        "tools_called": result.get("tools_called", []),
+                        "response_time_ms": elapsed_ms,
+                        "cost_usd": cost,
+                    }
+                )
 
-                _log_telemetry({
-                    "event": "chat_request",
-                    "tenant_id": tenant_id,
-                    "user_id": user_id,
-                    "session_id": session_id,
-                    "endpoint": "websocket",
-                    "tokens_in": input_tokens,
-                    "tokens_out": output_tokens,
-                    "cost_usd": cost,
-                    "tools_called": result.get("tools_called", []),
-                    "response_time_ms": elapsed_ms,
-                    "model": result.get("model", ""),
-                })
+                _log_telemetry(
+                    {
+                        "event": "chat_request",
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "endpoint": "websocket",
+                        "tokens_in": input_tokens,
+                        "tokens_out": output_tokens,
+                        "cost_usd": cost,
+                        "tools_called": result.get("tools_called", []),
+                        "response_time_ms": elapsed_ms,
+                        "model": result.get("model", ""),
+                    }
+                )
 
             except Exception as e:
                 logger.error("Stream error: %s", e, exc_info=True)
-                await ws.send_json({"type": "error", "message": "Internal error processing stream"})
+                await ws.send_json(
+                    {"type": "error", "message": "Internal error processing stream"}
+                )
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: %s", default_session_id)
     except Exception as e:
         logger.error("WebSocket error: %s", e, exc_info=True)
         try:
-            await ws.send_json({"type": "error", "message": "WebSocket connection error"})
+            await ws.send_json(
+                {"type": "error", "message": "WebSocket connection error"}
+            )
         except Exception:
             pass
 
@@ -2456,8 +2760,11 @@ async def websocket_chat(ws: WebSocket):
 
 # ── Tenant usage & cost endpoints ────────────────────────────────────
 
+
 @app.get("/api/tenants/{tenant_id}/usage")
-async def get_tenant_usage(tenant_id: str, current_user: dict = Depends(get_current_user)):
+async def get_tenant_usage(
+    tenant_id: str, current_user: dict = Depends(get_current_user)
+):
     """Get usage metrics for authenticated tenant"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -2467,7 +2774,9 @@ async def get_tenant_usage(tenant_id: str, current_user: dict = Depends(get_curr
 
 
 @app.get("/api/tenants/{tenant_id}/costs")
-async def get_tenant_costs(tenant_id: str, days: int = 30, current_user: dict = Depends(get_current_user)):
+async def get_tenant_costs(
+    tenant_id: str, days: int = 30, current_user: dict = Depends(get_current_user)
+):
     """Get cost attribution for tenant"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -2478,18 +2787,27 @@ async def get_tenant_costs(tenant_id: str, days: int = 30, current_user: dict = 
 
 
 @app.get("/api/tenants/{tenant_id}/users/{user_id}/costs")
-async def get_user_costs(tenant_id: str, user_id: str, days: int = 30, current_user: dict = Depends(get_current_user)):
+async def get_user_costs(
+    tenant_id: str,
+    user_id: str,
+    days: int = 30,
+    current_user: dict = Depends(get_current_user),
+):
     """Get cost attribution for specific user"""
     if tenant_id != current_user["tenant_id"] or user_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await cost_service.calculate_user_costs(tenant_id, user_id, start_date, end_date)
+    costs = await cost_service.calculate_user_costs(
+        tenant_id, user_id, start_date, end_date
+    )
     return costs
 
 
 @app.get("/api/tenants/{tenant_id}/subscription")
-async def get_subscription_info(tenant_id: str, current_user: dict = Depends(get_current_user)):
+async def get_subscription_info(
+    tenant_id: str, current_user: dict = Depends(get_current_user)
+):
     """Get subscription tier information and usage limits"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -2502,23 +2820,24 @@ async def get_subscription_info(tenant_id: str, current_user: dict = Depends(get
         "subscription_tier": tier.value,
         "limits": limits.dict(),
         "current_usage": usage.dict(),
-        "limit_status": usage_limits
+        "limit_status": usage_limits,
     }
 
 
 @app.get("/api/tenants/{tenant_id}/sessions")
-async def get_tenant_sessions(tenant_id: str, current_user: dict = Depends(get_current_user)):
+async def get_tenant_sessions(
+    tenant_id: str, current_user: dict = Depends(get_current_user)
+):
     """Get all sessions for authenticated tenant"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    return {
-        "tenant_id": tenant_id,
-        "sessions": list_tenant_sessions(tenant_id)
-    }
+    return {"tenant_id": tenant_id, "sessions": list_tenant_sessions(tenant_id)}
 
 
 @app.get("/api/tenants/{tenant_id}/analytics")
-async def get_tenant_analytics(tenant_id: str, current_user: dict = Depends(get_current_user)):
+async def get_tenant_analytics(
+    tenant_id: str, current_user: dict = Depends(get_current_user)
+):
     """Get enhanced analytics with trace data for authenticated tenant"""
     if tenant_id != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -2532,17 +2851,31 @@ async def get_tenant_analytics(tenant_id: str, current_user: dict = Depends(get_
         "total_interactions": usage_data.get("total_messages", 0),
         "active_sessions": usage_data.get("sessions", 0),
         "processing_patterns": {
-            "agent_invocations": len([m for m in usage_data.get("metrics", []) if m.get("metric_type") == "agent_invocation"]),
-            "trace_analyses": len([m for m in usage_data.get("metrics", []) if m.get("metric_type") == "trace_analysis"])
+            "agent_invocations": len(
+                [
+                    m
+                    for m in usage_data.get("metrics", [])
+                    if m.get("metric_type") == "agent_invocation"
+                ]
+            ),
+            "trace_analyses": len(
+                [
+                    m
+                    for m in usage_data.get("metrics", [])
+                    if m.get("metric_type") == "trace_analysis"
+                ]
+            ),
         },
         "resource_breakdown": {
             "model_invocations": usage_data.get("total_messages", 0),
             "knowledge_base_queries": 0,
-            "action_group_calls": 0
+            "action_group_calls": 0,
         },
         "tier_specific_metrics": {
-            "mcp_tools_available": subscription_service.get_tier_limits(tier).mcp_server_access,
-            "usage_limits": subscription_service.get_tier_limits(tier).dict()
+            "mcp_tools_available": subscription_service.get_tier_limits(
+                tier
+            ).mcp_server_access,
+            "usage_limits": subscription_service.get_tier_limits(tier).dict(),
         },
     }
     if usage_data.get("error"):
@@ -2552,33 +2885,47 @@ async def get_tenant_analytics(tenant_id: str, current_user: dict = Depends(get_
 
 # ── Weather MCP endpoints (compatibility) ────────────────────────────
 
+
 @app.get("/api/mcp/weather/tools")
 async def get_available_weather_tools(current_user: dict = Depends(get_current_user)):
     """Get available weather MCP tools for current subscription tier"""
     try:
         from .weather_mcp_service import WeatherMCPClient
+
         weather_client = WeatherMCPClient()
         tier = current_user["subscription_tier"]
         weather_tools = await weather_client.get_available_weather_tools(tier)
         return {"subscription_tier": tier.value, "weather_tools": weather_tools}
     except ImportError:
-        return {"subscription_tier": "unknown", "weather_tools": [], "note": "Weather MCP not available"}
+        return {
+            "subscription_tier": "unknown",
+            "weather_tools": [],
+            "note": "Weather MCP not available",
+        }
 
 
 @app.post("/api/mcp/weather/{tool_name}")
-async def execute_weather_mcp_tool(tool_name: str, arguments: dict, current_user: dict = Depends(get_current_user)):
+async def execute_weather_mcp_tool(
+    tool_name: str, arguments: dict, current_user: dict = Depends(get_current_user)
+):
     """Execute weather MCP tool if subscription tier allows it"""
     try:
         from .weather_mcp_service import WeatherMCPClient
+
         weather_client = WeatherMCPClient()
         tier = current_user["subscription_tier"]
         result = await weather_client.execute_weather_tool(tool_name, arguments, tier)
-        return {"tool_name": tool_name, "subscription_tier": tier.value, "result": result}
+        return {
+            "tool_name": tool_name,
+            "subscription_tier": tier.value,
+            "result": result,
+        }
     except ImportError:
         raise HTTPException(status_code=503, detail="Weather MCP service not available")
 
 
 # ── Admin Langfuse trace endpoints ────────────────────────────────────
+
 
 @app.get("/api/admin/traces")
 async def get_admin_traces(
@@ -2610,27 +2957,39 @@ async def get_admin_traces(
     data = result.get("data", [])
     traces = []
     for t in data:
-        traces.append({
-            "trace_id": t.get("id", ""),
-            "name": t.get("name", ""),
-            "session_id": t.get("sessionId", ""),
-            "user_id": t.get("userId", ""),
-            "created_at": t.get("timestamp", ""),
-            "updated_at": t.get("updatedAt", ""),
-            "duration_ms": _langfuse_latency_ms(t),
-            "total_input_tokens": t.get("usage", {}).get("input", 0) if t.get("usage") else 0,
-            "total_output_tokens": t.get("usage", {}).get("output", 0) if t.get("usage") else 0,
-            "total_tokens": t.get("usage", {}).get("total", 0) if t.get("usage") else 0,
-            "total_cost_usd": float(t.get("usage", {}).get("totalCost", 0) or 0) if t.get("usage") else 0,
-            "tags": t.get("tags", []),
-            "metadata": t.get("metadata", {}),
-            "status": "error" if t.get("level") == "ERROR" else "success",
-            "environment": _extract_env_from_trace(t.get("tags", []), t.get("metadata")),
-            "input": _truncate(t.get("input"), 200),
-            "output": _truncate(t.get("output"), 200),
-            "observation_count": t.get("observationCount", 0),
-            "langfuse_url": _langfuse_url(t.get("id", "")),
-        })
+        traces.append(
+            {
+                "trace_id": t.get("id", ""),
+                "name": t.get("name", ""),
+                "session_id": t.get("sessionId", ""),
+                "user_id": t.get("userId", ""),
+                "created_at": t.get("timestamp", ""),
+                "updated_at": t.get("updatedAt", ""),
+                "duration_ms": _langfuse_latency_ms(t),
+                "total_input_tokens": t.get("usage", {}).get("input", 0)
+                if t.get("usage")
+                else 0,
+                "total_output_tokens": t.get("usage", {}).get("output", 0)
+                if t.get("usage")
+                else 0,
+                "total_tokens": t.get("usage", {}).get("total", 0)
+                if t.get("usage")
+                else 0,
+                "total_cost_usd": float(t.get("usage", {}).get("totalCost", 0) or 0)
+                if t.get("usage")
+                else 0,
+                "tags": t.get("tags", []),
+                "metadata": t.get("metadata", {}),
+                "status": "error" if t.get("level") == "ERROR" else "success",
+                "environment": _extract_env_from_trace(
+                    t.get("tags", []), t.get("metadata")
+                ),
+                "input": _truncate(t.get("input"), 200),
+                "output": _truncate(t.get("output"), 200),
+                "observation_count": t.get("observationCount", 0),
+                "langfuse_url": _langfuse_url(t.get("id", "")),
+            }
+        )
     response = {
         "traces": traces,
         "meta": result.get("meta", {}),
@@ -2647,7 +3006,11 @@ async def get_admin_trace_detail(
     admin_user: dict = Depends(get_admin_user),
 ):
     """Get single trace detail + observations from Langfuse (admin only)."""
-    from .telemetry.langfuse_client import get_trace, list_observations, langfuse_trace_url
+    from .telemetry.langfuse_client import (
+        get_trace,
+        list_observations,
+        langfuse_trace_url,
+    )
 
     trace = await get_trace(trace_id)
     if not trace:
@@ -2661,23 +3024,31 @@ async def get_admin_trace_detail(
 
     observations = []
     for o in raw_obs:
-        observations.append({
-            "id": o.get("id", ""),
-            "name": o.get("name", ""),
-            "type": o.get("type", ""),
-            "start_time": o.get("startTime", ""),
-            "end_time": o.get("endTime", ""),
-            "duration_ms": _obs_duration_ms(o),
-            "model": o.get("model", ""),
-            "input_tokens": o.get("usage", {}).get("input", 0) if o.get("usage") else 0,
-            "output_tokens": o.get("usage", {}).get("output", 0) if o.get("usage") else 0,
-            "total_cost": float(o.get("usage", {}).get("totalCost", 0) or 0) if o.get("usage") else 0,
-            "input": _truncate(o.get("input"), 500),
-            "output": _truncate(o.get("output"), 500),
-            "metadata": o.get("metadata", {}),
-            "level": o.get("level", "DEFAULT"),
-            "status_message": o.get("statusMessage", ""),
-        })
+        observations.append(
+            {
+                "id": o.get("id", ""),
+                "name": o.get("name", ""),
+                "type": o.get("type", ""),
+                "start_time": o.get("startTime", ""),
+                "end_time": o.get("endTime", ""),
+                "duration_ms": _obs_duration_ms(o),
+                "model": o.get("model", ""),
+                "input_tokens": o.get("usage", {}).get("input", 0)
+                if o.get("usage")
+                else 0,
+                "output_tokens": o.get("usage", {}).get("output", 0)
+                if o.get("usage")
+                else 0,
+                "total_cost": float(o.get("usage", {}).get("totalCost", 0) or 0)
+                if o.get("usage")
+                else 0,
+                "input": _truncate(o.get("input"), 500),
+                "output": _truncate(o.get("output"), 500),
+                "metadata": o.get("metadata", {}),
+                "level": o.get("level", "DEFAULT"),
+                "status_message": o.get("statusMessage", ""),
+            }
+        )
 
     return {
         "trace_id": trace.get("id", ""),
@@ -2686,13 +3057,21 @@ async def get_admin_trace_detail(
         "user_id": trace.get("userId", ""),
         "created_at": trace.get("timestamp", ""),
         "duration_ms": _langfuse_latency_ms(trace),
-        "total_input_tokens": trace.get("usage", {}).get("input", 0) if trace.get("usage") else 0,
-        "total_output_tokens": trace.get("usage", {}).get("output", 0) if trace.get("usage") else 0,
-        "total_cost_usd": float(trace.get("usage", {}).get("totalCost", 0) or 0) if trace.get("usage") else 0,
+        "total_input_tokens": trace.get("usage", {}).get("input", 0)
+        if trace.get("usage")
+        else 0,
+        "total_output_tokens": trace.get("usage", {}).get("output", 0)
+        if trace.get("usage")
+        else 0,
+        "total_cost_usd": float(trace.get("usage", {}).get("totalCost", 0) or 0)
+        if trace.get("usage")
+        else 0,
         "tags": trace.get("tags", []),
         "metadata": trace.get("metadata", {}),
         "status": "error" if trace.get("level") == "ERROR" else "success",
-        "environment": _extract_env_from_trace(trace.get("tags", []), trace.get("metadata")),
+        "environment": _extract_env_from_trace(
+            trace.get("tags", []), trace.get("metadata")
+        ),
         "input": trace.get("input"),
         "output": trace.get("output"),
         "observations": observations,
@@ -2727,7 +3106,8 @@ async def get_admin_traces_summary(
 
     total_cost = sum(
         float(t.get("usage", {}).get("totalCost", 0) or 0)
-        for t in data if t.get("usage")
+        for t in data
+        if t.get("usage")
     )
 
     # Tool failure breakdown from tags
@@ -2764,10 +3144,17 @@ def _obs_duration_ms(o: dict) -> int:
     if start and end:
         try:
             from datetime import datetime as _dt
+
             # Handle ISO timestamps with Z or +00:00
-            for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f+00:00"):
+            for fmt in (
+                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%SZ",
+                "%Y-%m-%dT%H:%M:%S.%f+00:00",
+            ):
                 try:
-                    s = _dt.strptime(start.replace("+00:00", "Z").rstrip("Z") + "Z", fmt)
+                    s = _dt.strptime(
+                        start.replace("+00:00", "Z").rstrip("Z") + "Z", fmt
+                    )
                     e = _dt.strptime(end.replace("+00:00", "Z").rstrip("Z") + "Z", fmt)
                     return int((e - s).total_seconds() * 1000)
                 except ValueError:
@@ -2779,7 +3166,7 @@ def _obs_duration_ms(o: dict) -> int:
 
 def _extract_env_from_trace(tags: list, metadata: dict = None) -> str:
     """Extract environment from tags (['env:local']) or OTEL metadata ({'eagle.environment': 'local'})."""
-    for tag in (tags or []):
+    for tag in tags or []:
         if isinstance(tag, str) and tag.startswith("env:"):
             return tag[4:]
     if metadata:
@@ -2802,20 +3189,26 @@ def _truncate(value: Any, max_len: int = 200) -> Any:
 def _langfuse_url(trace_id: str) -> str:
     """Build Langfuse UI link."""
     from .telemetry.langfuse_client import langfuse_trace_url
+
     return langfuse_trace_url(trace_id)
 
 
 # ── Admin cost report endpoints (original) ───────────────────────────
 
+
 @app.get("/api/admin/cost-report")
-async def get_cost_report(tenant_id: str = None, days: int = 30, admin_user: dict = Depends(get_admin_user)):
+async def get_cost_report(
+    tenant_id: str = None, days: int = 30, admin_user: dict = Depends(get_admin_user)
+):
     """Generate comprehensive cost report (admin only)"""
     report = await cost_service.generate_cost_report(tenant_id, days)
     return report
 
 
 @app.get("/api/admin/tier-costs/{tier}")
-async def get_tier_costs(tier: str, days: int = 30, admin_user: dict = Depends(get_admin_user)):
+async def get_tier_costs(
+    tier: str, days: int = 30, admin_user: dict = Depends(get_admin_user)
+):
     """Get cost breakdown by subscription tier (admin only)"""
     subscription_tier = SubscriptionTier(tier)
     costs = await cost_service.get_subscription_tier_costs(subscription_tier, days)
@@ -2824,46 +3217,70 @@ async def get_tier_costs(tier: str, days: int = 30, admin_user: dict = Depends(g
 
 # ── Admin-Only Granular Cost Endpoints (preserved) ───────────────────
 
+
 @app.get("/api/admin/tenants/{tenant_id}/overall-cost")
-async def get_admin_tenant_overall_cost(tenant_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)):
+async def get_admin_tenant_overall_cost(
+    tenant_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)
+):
     """1. Overall Tenant Cost - Admin Only"""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await admin_cost_service.get_tenant_overall_cost(tenant_id, start_date, end_date)
+    costs = await admin_cost_service.get_tenant_overall_cost(
+        tenant_id, start_date, end_date
+    )
     return costs
 
 
 @app.get("/api/admin/tenants/{tenant_id}/per-user-cost")
-async def get_admin_per_user_cost(tenant_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)):
+async def get_admin_per_user_cost(
+    tenant_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)
+):
     """2. Per User Cost - Admin Only"""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await admin_cost_service.get_tenant_per_user_cost(tenant_id, start_date, end_date)
+    costs = await admin_cost_service.get_tenant_per_user_cost(
+        tenant_id, start_date, end_date
+    )
     return costs
 
 
 @app.get("/api/admin/tenants/{tenant_id}/service-wise-cost")
-async def get_admin_service_wise_cost(tenant_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)):
+async def get_admin_service_wise_cost(
+    tenant_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)
+):
     """3. Overall Tenant Service-wise Consumption Cost - Admin Only"""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await admin_cost_service.get_tenant_service_wise_cost(tenant_id, start_date, end_date)
+    costs = await admin_cost_service.get_tenant_service_wise_cost(
+        tenant_id, start_date, end_date
+    )
     return costs
 
 
 @app.get("/api/admin/tenants/{tenant_id}/users/{user_id}/service-cost")
-async def get_admin_user_service_cost(tenant_id: str, user_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)):
+async def get_admin_user_service_cost(
+    tenant_id: str,
+    user_id: str,
+    days: int = 30,
+    admin_user: dict = Depends(verify_tenant_admin),
+):
     """4. User Service-wise Consumption Cost - Admin Only"""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await admin_cost_service.get_user_service_wise_cost(tenant_id, user_id, start_date, end_date)
+    costs = await admin_cost_service.get_user_service_wise_cost(
+        tenant_id, user_id, start_date, end_date
+    )
     return costs
 
 
 @app.get("/api/admin/tenants/{tenant_id}/comprehensive-report")
-async def get_comprehensive_admin_report(tenant_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)):
+async def get_comprehensive_admin_report(
+    tenant_id: str, days: int = 30, admin_user: dict = Depends(verify_tenant_admin)
+):
     """Comprehensive Admin Cost Report - All 4 breakdowns"""
-    report = await admin_cost_service.generate_comprehensive_admin_report(tenant_id, days)
+    report = await admin_cost_service.generate_comprehensive_admin_report(
+        tenant_id, days
+    )
     return report
 
 
@@ -2872,7 +3289,7 @@ async def get_admin_tenants(admin_user: dict = Depends(get_admin_user)):
     """Get tenants where current user has admin access"""
     return {
         "admin_email": admin_user["email"],
-        "admin_tenants": admin_user["admin_tenants"]
+        "admin_tenants": admin_user["admin_tenants"],
     }
 
 
@@ -2894,7 +3311,7 @@ async def add_user_to_admin_group(request: dict):
         admin_service_instance.cognito_client.create_group(
             GroupName=group_name,
             UserPoolId=admin_service_instance.user_pool_id,
-            Description=f"{tenant_id.title()} Administrators"
+            Description=f"{tenant_id.title()} Administrators",
         )
     except Exception:
         pass
@@ -2903,9 +3320,12 @@ async def add_user_to_admin_group(request: dict):
         admin_service_instance.cognito_client.admin_add_user_to_group(
             UserPoolId=admin_service_instance.user_pool_id,
             Username=email,
-            GroupName=f"{tenant_id}-admins"
+            GroupName=f"{tenant_id}-admins",
         )
-        return {"success": True, "message": f"Added {email} to {tenant_id}-admins group"}
+        return {
+            "success": True,
+            "message": f"Added {email} to {tenant_id}-admins group",
+        }
     except Exception as e:
         logger.error("Failed to add user to admin group: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to add user to admin group")
@@ -2944,6 +3364,7 @@ app.include_router(streaming_router)
 # HEALTH CHECK (frontend now served by Next.js on port 3000)
 # ══════════════════════════════════════════════════════════════════════
 
+
 @app.get("/api/ping")
 async def ping():
     """Lightweight liveness probe — no I/O, no dependencies."""
@@ -2963,6 +3384,7 @@ def create_app(enabled_routers: Optional[List[str]] = None) -> FastAPI:
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("APP_PORT", "8000"))
     # Bind to localhost for security - use reverse proxy for external access
     uvicorn.run(app, host="127.0.0.1", port=port)

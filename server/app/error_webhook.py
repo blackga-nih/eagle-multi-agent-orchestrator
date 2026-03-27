@@ -45,6 +45,7 @@ ENVIRONMENT: str = app_config.environment
 
 # ── Token-bucket rate limiter ────────────────────────────────────────
 
+
 class _TokenBucket:
     """Simple token-bucket rate limiter (not thread-safe — fine for asyncio)."""
 
@@ -69,7 +70,9 @@ _rate_limiter = _TokenBucket(RATE_LIMIT)
 
 # Log configuration at import time so CloudWatch shows webhook is wired up
 if WEBHOOK_ENABLED:
-    logger.info("Error webhook configured: url=%s env=%s", WEBHOOK_URL[:60], ENVIRONMENT)
+    logger.info(
+        "Error webhook configured: url=%s env=%s", WEBHOOK_URL[:60], ENVIRONMENT
+    )
 
 # ── httpx.AsyncClient (lazy-init) ───────────────────────────────────
 
@@ -96,6 +99,7 @@ async def close_webhook_client() -> None:
 
 # ── Filtering ────────────────────────────────────────────────────────
 
+
 def _should_report(status_code: int, path: str) -> bool:
     if status_code < MIN_STATUS:
         return False
@@ -105,6 +109,7 @@ def _should_report(status_code: int, path: str) -> bool:
 
 
 # ── Core send ────────────────────────────────────────────────────────
+
 
 async def send_error_webhook(payload: dict) -> None:
     """POST payload to webhook URL. Fire-and-forget — never raises."""
@@ -119,7 +124,11 @@ async def send_error_webhook(payload: dict) -> None:
         client = _get_client()
         resp = await client.post(WEBHOOK_URL, json=payload)
         if resp.status_code >= 300:
-            logger.warning("Error webhook non-2xx: status=%d body=%s", resp.status_code, resp.text[:200])
+            logger.warning(
+                "Error webhook non-2xx: status=%d body=%s",
+                resp.status_code,
+                resp.text[:200],
+            )
         else:
             logger.debug("Error webhook sent: status=%d", resp.status_code)
     except httpx.TimeoutException:
@@ -129,6 +138,7 @@ async def send_error_webhook(payload: dict) -> None:
 
 
 # ── Public API ───────────────────────────────────────────────────────
+
 
 def _build_payload(
     path: str,

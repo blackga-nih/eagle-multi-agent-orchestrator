@@ -18,6 +18,7 @@ Known keys and defaults:
     "skill_cache_ttl" -> 60
     "feature_flags"   -> {"streaming_v2": True, "user_skills": False, "mcp_enabled": False}
 """
+
 import json
 import logging
 import time
@@ -246,6 +247,7 @@ def get_feature_flags() -> Dict[str, bool]:
     if isinstance(value, dict):
         return value
     logger.warning(
-        "config_store.get_feature_flags: unexpected type %s - using default", type(value)
+        "config_store.get_feature_flags: unexpected type %s - using default",
+        type(value),
     )
     return dict(_DEFAULTS["feature_flags"])

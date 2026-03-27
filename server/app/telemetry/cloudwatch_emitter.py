@@ -4,6 +4,7 @@ CloudWatch structured log emitter for telemetry events.
 Uses the existing CloudWatch Logs integration. Emits structured JSON
 that can be queried with CloudWatch Insights.
 """
+
 import json
 import logging
 import os
@@ -63,17 +64,21 @@ def emit_telemetry_event(
 
     try:
         client = get_logs()
-        stream_name = f"telemetry/{session_id}" if session_id else f"telemetry/{tenant_id}"
+        stream_name = (
+            f"telemetry/{session_id}" if session_id else f"telemetry/{tenant_id}"
+        )
 
         _ensure_log_group_and_stream(client, stream_name)
 
         client.put_log_events(
             logGroupName=LOG_GROUP,
             logStreamName=stream_name,
-            logEvents=[{
-                "timestamp": event["timestamp"],
-                "message": json.dumps(event, default=str),
-            }],
+            logEvents=[
+                {
+                    "timestamp": event["timestamp"],
+                    "message": json.dumps(event, default=str),
+                }
+            ],
         )
     except (ClientError, BotoCoreError, Exception) as e:
         # Telemetry should never break the main flow

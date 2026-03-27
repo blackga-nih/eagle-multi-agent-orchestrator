@@ -40,6 +40,7 @@ except ImportError:
     # Allow running outside the package (e.g., in tests)
     import sys
     import os
+
     _app_dir = os.path.dirname(os.path.abspath(__file__))
     if _app_dir not in sys.path:
         sys.path.insert(0, _app_dir)

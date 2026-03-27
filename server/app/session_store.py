@@ -2,6 +2,7 @@
 Session Store with DynamoDB Persistence
 Handles conversation history, session resume, and cross-device sync.
 """
+
 import os
 import json
 import time
@@ -49,6 +50,7 @@ def _invalidate_cache(session_id: str):
 
 # ── Session Key Helpers ──────────────────────────────────────────────
 
+
 def build_session_key(tenant_id: str, user_id: str, session_id: str) -> str:
     """Build a composite session key for multi-tenant isolation."""
     return f"SESSION#{tenant_id}#{user_id}#{session_id}"
@@ -69,6 +71,7 @@ def parse_session_key(key: str) -> Dict[str, str]:
 def generate_session_id(user_id: str = "anonymous") -> str:
     """Generate a unique session ID."""
     import uuid
+
     timestamp = int(time.time() * 1000)
     unique = uuid.uuid4().hex[:8]
     return f"s-{timestamp}-{unique}"
@@ -76,12 +79,13 @@ def generate_session_id(user_id: str = "anonymous") -> str:
 
 # ── Session CRUD Operations ──────────────────────────────────────────
 
+
 def create_session(
     tenant_id: str = "default",
     user_id: str = "anonymous",
     session_id: Optional[str] = None,
     title: Optional[str] = None,
-    metadata: Optional[Dict] = None
+    metadata: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """
     Create a new session in DynamoDB.
@@ -129,9 +133,7 @@ def create_session(
 
 
 def get_session(
-    session_id: str,
-    tenant_id: str = "default",
-    user_id: str = "anonymous"
+    session_id: str, tenant_id: str = "default", user_id: str = "anonymous"
 ) -> Optional[Dict[str, Any]]:
     """
     Get a session by ID.
@@ -167,7 +169,7 @@ def update_session(
     session_id: str,
     tenant_id: str = "default",
     user_id: str = "anonymous",
-    updates: Optional[Dict] = None
+    updates: Optional[Dict] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Update session metadata.
@@ -201,7 +203,7 @@ def update_session(
             UpdateExpression="SET " + ", ".join(update_parts),
             ExpressionAttributeNames=expr_names,
             ExpressionAttributeValues=expr_values,
-            ReturnValues="ALL_NEW"
+            ReturnValues="ALL_NEW",
         )
         item = response.get("Attributes", {})
         _update_cache(session_id, item)
@@ -212,9 +214,7 @@ def update_session(
 
 
 def delete_session(
-    session_id: str,
-    tenant_id: str = "default",
-    user_id: str = "anonymous"
+    session_id: str, tenant_id: str = "default", user_id: str = "anonymous"
 ) -> bool:
     """
     Delete a session and its messages.
@@ -237,7 +237,7 @@ def delete_session(
                 ":pk": f"SESSION#{tenant_id}#{user_id}",
                 ":sk_prefix": f"MSG#{session_id}#",
             },
-            ProjectionExpression="PK, SK"
+            ProjectionExpression="PK, SK",
         )
 
         with table.batch_writer() as batch:
@@ -256,7 +256,7 @@ def list_sessions(
     tenant_id: str = "default",
     user_id: str = "anonymous",
     limit: int = 50,
-    status: Optional[str] = None
+    status: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     List sessions for a user.
@@ -283,7 +283,7 @@ def list_sessions(
             FilterExpression=filter_expr if filter_expr else None,
             ExpressionAttributeNames={"#status": "status"} if status else None,
             ScanIndexForward=False,  # Descending order
-            Limit=limit
+            Limit=limit,
         )
 
         sessions = [_serialize_item(item) for item in response.get("Items", [])]
@@ -295,13 +295,14 @@ def list_sessions(
 
 # ── Message Operations ───────────────────────────────────────────────
 
+
 def add_message(
     session_id: str,
     role: str,
     content: Any,
     tenant_id: str = "default",
     user_id: str = "anonymous",
-    metadata: Optional[Dict] = None
+    metadata: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """
     Add a message to a session.
@@ -345,7 +346,7 @@ def add_message(
                 ":upd": now.isoformat(),
                 ":zero": 0,
                 ":one": 1,
-            }
+            },
         )
 
         return _serialize_item(message)
@@ -359,7 +360,7 @@ def get_messages(
     tenant_id: str = "default",
     user_id: str = "anonymous",
     limit: int = 100,
-    before: Optional[str] = None
+    before: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Get messages for a session.
@@ -383,7 +384,7 @@ def get_messages(
             KeyConditionExpression=key_condition,
             ExpressionAttributeValues=expr_values,
             ScanIndexForward=True,  # Ascending order
-            Limit=limit
+            Limit=limit,
         )
 
         messages = []
@@ -407,7 +408,7 @@ def get_messages_for_anthropic(
     session_id: str,
     tenant_id: str = "default",
     user_id: str = "anonymous",
-    limit: int = 100
+    limit: int = 100,
 ) -> List[Dict[str, Any]]:
     """
     Get messages in Anthropic API format.
@@ -433,6 +434,7 @@ def get_messages_for_anthropic(
 # ── Compaction State Persistence ─────────────────────────────────────
 # Stores/restores SummarizingConversationManager state so summaries
 # survive across requests within a session.
+
 
 def save_compaction_state(
     session_id: str,
@@ -469,6 +471,7 @@ def load_compaction_state(
 
 # ── Usage Tracking ───────────────────────────────────────────────────
 
+
 def record_usage(
     session_id: str,
     tenant_id: str = "default",
@@ -476,7 +479,7 @@ def record_usage(
     input_tokens: int = 0,
     output_tokens: int = 0,
     model: str = "",
-    cost_usd: float = 0.0
+    cost_usd: float = 0.0,
 ):
     """
     Record token usage for a session.
@@ -512,16 +515,13 @@ def record_usage(
             ExpressionAttributeValues={
                 ":zero": 0,
                 ":tokens": input_tokens + output_tokens,
-            }
+            },
         )
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to record usage: %s", e)
 
 
-def get_usage_summary(
-    tenant_id: str = "default",
-    days: int = 30
-) -> Dict[str, Any]:
+def get_usage_summary(tenant_id: str = "default", days: int = 30) -> Dict[str, Any]:
     """
     Get usage summary for a tenant.
     """
@@ -536,7 +536,7 @@ def get_usage_summary(
             ExpressionAttributeValues={
                 ":pk": f"USAGE#{tenant_id}",
                 ":start": f"USAGE#{start_date}",
-            }
+            },
         )
 
         items = response.get("Items", [])
@@ -550,7 +550,12 @@ def get_usage_summary(
         for item in items:
             date = item.get("date", "unknown")
             if date not in by_date:
-                by_date[date] = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0, "requests": 0}
+                by_date[date] = {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0,
+                    "requests": 0,
+                }
             by_date[date]["input_tokens"] += int(item.get("input_tokens", 0))
             by_date[date]["output_tokens"] += int(item.get("output_tokens", 0))
             by_date[date]["cost_usd"] += float(item.get("cost_usd", 0))
@@ -583,10 +588,9 @@ def get_usage_summary(
 
 # ── Tenant-Level Queries (Admin/Cost Services) ──────────────────────
 
+
 def get_usage_metrics(
-    tenant_id: str,
-    start_date: datetime,
-    end_date: datetime
+    tenant_id: str, start_date: datetime, end_date: datetime
 ) -> List[Dict[str, Any]]:
     """Query USAGE# records for a tenant within a date range."""
     try:
@@ -597,7 +601,7 @@ def get_usage_metrics(
                 ":pk": f"USAGE#{tenant_id}",
                 ":start": f"USAGE#{start_date.strftime('%Y-%m-%d')}",
                 ":end": f"USAGE#{end_date.strftime('%Y-%m-%d')}~",
-            }
+            },
         )
         return [_serialize_item(i) for i in response.get("Items", [])]
     except (ClientError, BotoCoreError) as e:
@@ -676,7 +680,7 @@ def store_cost_metric(
     session_id: str,
     metric_type: str,
     value: float,
-    **metadata
+    **metadata,
 ) -> None:
     """Store a cost/usage metric in the eagle table."""
     now = datetime.utcnow()
@@ -712,7 +716,7 @@ def get_tenant_usage_overview(tenant_id: str) -> Dict[str, Any]:
             KeyConditionExpression="PK = :pk",
             ExpressionAttributeValues={":pk": f"USAGE#{tenant_id}"},
             ScanIndexForward=False,
-            Limit=50
+            Limit=50,
         )
         metrics = [_serialize_item(i) for i in usage_resp.get("Items", [])]
 
@@ -784,26 +788,29 @@ def put_subscription_usage(
     daily_usage: int,
     monthly_usage: int,
     active_sessions: int,
-    last_reset_date: str
+    last_reset_date: str,
 ) -> None:
     """Store subscription usage counters for a tenant/tier."""
     try:
         table = get_table()
-        table.put_item(Item={
-            "PK": f"SUB#{tenant_id}",
-            "SK": f"SUB#{tier}#current",
-            "tenant_id": tenant_id,
-            "tier": tier,
-            "daily_usage": daily_usage,
-            "monthly_usage": monthly_usage,
-            "active_sessions": active_sessions,
-            "last_reset_date": last_reset_date,
-        })
+        table.put_item(
+            Item={
+                "PK": f"SUB#{tenant_id}",
+                "SK": f"SUB#{tier}#current",
+                "tenant_id": tenant_id,
+                "tier": tier,
+                "daily_usage": daily_usage,
+                "monthly_usage": monthly_usage,
+                "active_sessions": active_sessions,
+                "last_reset_date": last_reset_date,
+            }
+        )
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to put subscription usage: %s", e)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _serialize_item(item: Dict) -> Dict:
     """Convert DynamoDB item to JSON-serializable dict."""

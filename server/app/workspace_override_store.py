@@ -17,6 +17,7 @@ Resolution chain (highest → lowest priority):
   3. PROMPT#global / PROMPT#{agent_name}                        ← prompt_store (platform admin)
   4. PLUGIN#agents / PLUGIN#{name}                              ← plugin_store (canonical DynamoDB)
 """
+
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -31,6 +32,7 @@ logger = logging.getLogger("eagle.workspace_override_store")
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────
+
 
 def put_override(
     tenant_id: str,
@@ -73,15 +75,29 @@ def put_override(
 
     try:
         get_table().put_item(Item=item)
-        logger.debug("workspace_override_store.put_override: [%s/%s/%s] %s#%s v%s", tenant_id, user_id, workspace_id, entity_type, name, version)
+        logger.debug(
+            "workspace_override_store.put_override: [%s/%s/%s] %s#%s v%s",
+            tenant_id,
+            user_id,
+            workspace_id,
+            entity_type,
+            name,
+            version,
+        )
 
         # Keep workspace override_count accurate
         if not existing:
             from .workspace_store import increment_override_count
+
             increment_override_count(tenant_id, user_id, workspace_id, delta=1)
 
     except (ClientError, BotoCoreError) as e:
-        logger.error("workspace_override_store.put_override failed [%s#%s]: %s", entity_type, name, e)
+        logger.error(
+            "workspace_override_store.put_override failed [%s#%s]: %s",
+            entity_type,
+            name,
+            e,
+        )
 
     return item
 
@@ -104,7 +120,12 @@ def get_override(
         item = resp.get("Item")
         return dict(item) if item else None
     except (ClientError, BotoCoreError) as e:
-        logger.error("workspace_override_store.get_override failed [%s#%s]: %s", entity_type, name, e)
+        logger.error(
+            "workspace_override_store.get_override failed [%s#%s]: %s",
+            entity_type,
+            name,
+            e,
+        )
         return None
 
 
@@ -128,12 +149,16 @@ def list_overrides(
                 )
             )
         else:
-            resp = get_table().query(
-                KeyConditionExpression=Key("PK").eq(pk)
-            )
+            resp = get_table().query(KeyConditionExpression=Key("PK").eq(pk))
         return [dict(i) for i in resp.get("Items", [])]
     except (ClientError, BotoCoreError) as e:
-        logger.error("workspace_override_store.list_overrides failed [%s/%s/%s]: %s", tenant_id, user_id, workspace_id, e)
+        logger.error(
+            "workspace_override_store.list_overrides failed [%s/%s/%s]: %s",
+            tenant_id,
+            user_id,
+            workspace_id,
+            e,
+        )
         return []
 
 
@@ -157,11 +182,21 @@ def delete_override(
             }
         )
         from .workspace_store import increment_override_count
+
         increment_override_count(tenant_id, user_id, workspace_id, delta=-1)
-        logger.debug("workspace_override_store.delete_override: [%s#%s] — reset to default", entity_type, name)
+        logger.debug(
+            "workspace_override_store.delete_override: [%s#%s] — reset to default",
+            entity_type,
+            name,
+        )
         return True
     except (ClientError, BotoCoreError) as e:
-        logger.error("workspace_override_store.delete_override failed [%s#%s]: %s", entity_type, name, e)
+        logger.error(
+            "workspace_override_store.delete_override failed [%s#%s]: %s",
+            entity_type,
+            name,
+            e,
+        )
         return False
 
 
@@ -186,13 +221,21 @@ def delete_all_overrides(
 
     if deleted:
         from .workspace_store import update_workspace
+
         update_workspace(tenant_id, user_id, workspace_id, {"override_count": 0})
-        logger.info("workspace_override_store.delete_all_overrides: cleared %d overrides for [%s/%s/%s]", deleted, tenant_id, user_id, workspace_id)
+        logger.info(
+            "workspace_override_store.delete_all_overrides: cleared %d overrides for [%s/%s/%s]",
+            deleted,
+            tenant_id,
+            user_id,
+            workspace_id,
+        )
 
     return deleted
 
 
 # ── Resolution Chain ─────────────────────────────────────────────────
+
 
 def resolve_agent(
     tenant_id: str,
@@ -222,6 +265,7 @@ def resolve_agent(
     # If prompt_store is not yet implemented, fall through to PLUGIN#.
     try:
         from .prompt_store import resolve_prompt  # type: ignore[import]
+
         prompt_content = resolve_prompt(tenant_id, agent_name)
         if prompt_content:
             return prompt_content, "prompt"
@@ -278,6 +322,7 @@ def resolve_config(
     override = get_override(tenant_id, user_id, workspace_id, "CONFIG", key)
     if override:
         import json
+
         content = override.get("content", "")
         try:
             return json.loads(content)
@@ -287,6 +332,7 @@ def resolve_config(
     # Fall through to config_store (imported lazily)
     try:
         from .config_store import get_config  # type: ignore[import]
+
         val = get_config(key)
         if val is not None:
             return val

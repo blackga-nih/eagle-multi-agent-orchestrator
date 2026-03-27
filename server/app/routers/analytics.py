@@ -23,6 +23,7 @@ async def api_analytics_events(request: Request):
             return {"status": "ok", "ingested": 0}
 
         from ..telemetry.cloudwatch_emitter import emit_telemetry_event
+
         for event in events[:100]:  # Cap at 100 per batch
             emit_telemetry_event(
                 event_type=f"analytics.{event.get('event', 'unknown')}",

@@ -12,6 +12,7 @@ GSI1 projection:
     GSI1PK: TENANT#{tenant_id}
     GSI1SK: WORKSPACE#{user_id}#{workspace_id}
 """
+
 import time
 import uuid
 import logging
@@ -43,7 +44,10 @@ def _ws_cache_get(tenant_id: str, user_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _ws_cache_set(tenant_id: str, user_id: str, item: Dict[str, Any]) -> None:
-    _workspace_cache[_ws_cache_key(tenant_id, user_id)] = {"ts": time.time(), "item": item}
+    _workspace_cache[_ws_cache_key(tenant_id, user_id)] = {
+        "ts": time.time(),
+        "item": item,
+    }
 
 
 def _ws_cache_invalidate(tenant_id: str, user_id: str) -> None:
@@ -51,6 +55,7 @@ def _ws_cache_invalidate(tenant_id: str, user_id: str) -> None:
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────
+
 
 def create_workspace(
     tenant_id: str,
@@ -221,7 +226,10 @@ def delete_workspace(
     if not ws:
         return False
     if ws.get("is_default"):
-        logger.warning("workspace_store.delete: refused to delete default workspace [%s]", workspace_id)
+        logger.warning(
+            "workspace_store.delete: refused to delete default workspace [%s]",
+            workspace_id,
+        )
         return False
 
     try:
@@ -239,6 +247,7 @@ def delete_workspace(
 
 
 # ── Auto-Provisioning ─────────────────────────────────────────────────
+
 
 def get_or_create_default(tenant_id: str, user_id: str) -> Dict[str, Any]:
     """Return the active workspace for the user, creating a Default if none exists.
@@ -267,7 +276,11 @@ def get_or_create_default(tenant_id: str, user_id: str) -> Dict[str, Any]:
         return result
 
     # No workspaces at all — provision the Default workspace
-    logger.info("workspace_store: auto-provisioning Default workspace for [%s/%s]", tenant_id, user_id)
+    logger.info(
+        "workspace_store: auto-provisioning Default workspace for [%s/%s]",
+        tenant_id,
+        user_id,
+    )
     result = create_workspace(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -281,6 +294,7 @@ def get_or_create_default(tenant_id: str, user_id: str) -> Dict[str, Any]:
 
 
 # ── Internal Helpers ─────────────────────────────────────────────────
+
 
 def _deactivate_all(tenant_id: str, user_id: str) -> None:
     """Set is_active=False on every workspace for this user."""
@@ -299,10 +313,16 @@ def _deactivate_all(tenant_id: str, user_id: str) -> None:
                     ExpressionAttributeValues={":f": False, ":now": now},
                 )
             except (ClientError, BotoCoreError) as e:
-                logger.warning("workspace_store._deactivate_all failed for [%s]: %s", ws["workspace_id"], e)
+                logger.warning(
+                    "workspace_store._deactivate_all failed for [%s]: %s",
+                    ws["workspace_id"],
+                    e,
+                )
 
 
-def increment_override_count(tenant_id: str, user_id: str, workspace_id: str, delta: int = 1) -> None:
+def increment_override_count(
+    tenant_id: str, user_id: str, workspace_id: str, delta: int = 1
+) -> None:
     """Increment (or decrement) the override_count on a workspace record."""
     try:
         get_table().update_item(

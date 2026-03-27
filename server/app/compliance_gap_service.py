@@ -3,6 +3,7 @@
 Given package parameters (value, method, type), determines which compliance requirements
 are covered by templates, which have gaps, and which are only partially covered.
 """
+
 from __future__ import annotations
 
 import logging
@@ -64,12 +65,15 @@ def analyze_compliance_gaps(
     # Load all clause references
     try:
         from app.template_schema import load_all_clause_references
+
         all_refs = load_all_clause_references()
     except Exception:
         all_refs = {}
 
     # Build a set of all clauses covered by templates, keyed by clause number
-    template_clause_coverage: dict[str, list[str]] = {}  # clause_number -> [template_filenames]
+    template_clause_coverage: dict[
+        str, list[str]
+    ] = {}  # clause_number -> [template_filenames]
     for filename, ref_data in all_refs.items():
         for sec_data in ref_data.get("section_clause_map", {}).values():
             for clause in sec_data.get("clauses", []):
@@ -204,6 +208,8 @@ def _find_clause_in_coverage(
     """
     clause_lower = clause.lower()
     for covered_clause in coverage:
-        if covered_clause.lower().startswith(clause_lower) or clause_lower.startswith(covered_clause.lower()):
+        if covered_clause.lower().startswith(clause_lower) or clause_lower.startswith(
+            covered_clause.lower()
+        ):
             return True
     return False

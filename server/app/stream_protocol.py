@@ -6,6 +6,7 @@ for the multi-tenant architecture. Provides structured SSE (Server-Sent Events)
 streaming with agent identification, supporting multi-agent orchestration
 scenarios including handoffs, tool use, and reasoning transparency.
 """
+
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -81,7 +82,9 @@ class StreamEvent:
         for f in self.__dataclass_fields__:
             val = getattr(self, f)
             if val is not None:
-                data[f] = _sanitize_for_json(val) if isinstance(val, (dict, list)) else val
+                data[f] = (
+                    _sanitize_for_json(val) if isinstance(val, (dict, list)) else val
+                )
         data["type"] = self.type.value
         return data
 
@@ -213,12 +216,20 @@ class MultiAgentStreamWriter:
         await queue.put(event.to_sse())
 
     async def write_tool_input_delta(
-        self, queue, tool_use_id: str, delta: str, tool_name: str = "",
+        self,
+        queue,
+        tool_use_id: str,
+        delta: str,
+        tool_name: str = "",
     ):
         """Emit a TOOL_INPUT_DELTA event with streaming tool input tokens."""
         event = self._create_event(
             StreamEventType.TOOL_INPUT_DELTA,
-            metadata={"tool_use_id": tool_use_id, "delta": delta, "tool_name": tool_name},
+            metadata={
+                "tool_use_id": tool_use_id,
+                "delta": delta,
+                "tool_name": tool_name,
+            },
         )
         await queue.put(event.to_sse())
 

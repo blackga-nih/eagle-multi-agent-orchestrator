@@ -36,7 +36,9 @@ def _get_result_error(result: Any) -> Optional[str]:
     return None
 
 
-def _sanitize_result_error(result: Dict[str, Any], fallback_error: str) -> Dict[str, Any]:
+def _sanitize_result_error(
+    result: Dict[str, Any], fallback_error: str
+) -> Dict[str, Any]:
     sanitized = dict(result)
     sanitized["error"] = fallback_error
     return sanitized
@@ -82,7 +84,9 @@ async def get_user_costs(
         raise HTTPException(status_code=403, detail="Access denied")
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
-    costs = await _cost_service.calculate_user_costs(tenant_id, user_id, start_date, end_date)
+    costs = await _cost_service.calculate_user_costs(
+        tenant_id, user_id, start_date, end_date
+    )
     return costs
 
 
@@ -139,14 +143,20 @@ async def get_tenant_analytics(
         "total_interactions": usage_data.get("total_messages", 0),
         "active_sessions": usage_data.get("sessions", 0),
         "processing_patterns": {
-            "agent_invocations": len([
-                m for m in usage_data.get("metrics", [])
-                if m.get("metric_type") == "agent_invocation"
-            ]),
-            "trace_analyses": len([
-                m for m in usage_data.get("metrics", [])
-                if m.get("metric_type") == "trace_analysis"
-            ]),
+            "agent_invocations": len(
+                [
+                    m
+                    for m in usage_data.get("metrics", [])
+                    if m.get("metric_type") == "agent_invocation"
+                ]
+            ),
+            "trace_analyses": len(
+                [
+                    m
+                    for m in usage_data.get("metrics", [])
+                    if m.get("metric_type") == "trace_analysis"
+                ]
+            ),
         },
         "resource_breakdown": {
             "model_invocations": usage_data.get("total_messages", 0),
@@ -154,7 +164,9 @@ async def get_tenant_analytics(
             "action_group_calls": 0,
         },
         "tier_specific_metrics": {
-            "mcp_tools_available": _subscription_service.get_tier_limits(tier).mcp_server_access,
+            "mcp_tools_available": _subscription_service.get_tier_limits(
+                tier
+            ).mcp_server_access,
             "usage_limits": _subscription_service.get_tier_limits(tier).dict(),
         },
     }

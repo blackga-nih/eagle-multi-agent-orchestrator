@@ -2,6 +2,7 @@
 Admin Service
 Dashboard analytics, cost tracking, and user management.
 """
+
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
@@ -24,6 +25,7 @@ GENERIC_RATE_LIMIT_ERROR = "Rate limit status is temporarily unavailable."
 
 # ── Cost Calculation ─────────────────────────────────────────────────
 
+
 def calculate_cost(input_tokens: int, output_tokens: int) -> float:
     """Calculate cost in USD for given token counts."""
     input_cost = (input_tokens / 1000) * COST_INPUT_PER_1K
@@ -39,14 +41,14 @@ def record_request_cost(
     output_tokens: int,
     model: str = "claude-sonnet-4-20250514",
     tools_used: Optional[List[str]] = None,
-    response_time_ms: int = 0
+    response_time_ms: int = 0,
 ):
     """
     Record cost and usage for a single request.
     """
     now = datetime.utcnow()
     cost = calculate_cost(input_tokens, output_tokens)
-    
+
     # Cost record
     cost_record = {
         "PK": f"COST#{tenant_id}",
@@ -65,19 +67,23 @@ def record_request_cost(
         "date": now.strftime("%Y-%m-%d"),
         "hour": now.hour,
     }
-    
+
     try:
         table = get_table()
         table.put_item(Item=cost_record)
-        
+
         # Update daily aggregate
-        _update_daily_aggregate(tenant_id, now.strftime("%Y-%m-%d"), input_tokens, output_tokens, cost)
-        
+        _update_daily_aggregate(
+            tenant_id, now.strftime("%Y-%m-%d"), input_tokens, output_tokens, cost
+        )
+
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to record cost: %s", e)
 
 
-def _update_daily_aggregate(tenant_id: str, date: str, input_tokens: int, output_tokens: int, cost: float):
+def _update_daily_aggregate(
+    tenant_id: str, date: str, input_tokens: int, output_tokens: int, cost: float
+):
     """Update daily aggregate counters."""
     try:
         table = get_table()
@@ -101,7 +107,7 @@ def _update_daily_aggregate(tenant_id: str, date: str, input_tokens: int, output
                 ":cost": Decimal(str(cost)),
                 ":one": 1,
                 ":now": datetime.utcnow().isoformat(),
-            }
+            },
         )
     except Exception as e:
         logger.warning("Failed to update daily aggregate: %s", e)
@@ -109,34 +115,35 @@ def _update_daily_aggregate(tenant_id: str, date: str, input_tokens: int, output
 
 # ── Dashboard Analytics ──────────────────────────────────────────────
 
+
 def get_dashboard_stats(tenant_id: str = "default", days: int = 30) -> Dict[str, Any]:
     """
     Get dashboard statistics for a tenant.
-    
+
     Returns summary stats and daily breakdowns.
     """
     try:
         table = get_table()
-        
+
         # Get daily aggregates
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-        
+
         response = table.query(
             KeyConditionExpression="PK = :pk AND SK >= :start",
             ExpressionAttributeValues={
                 ":pk": f"AGG#{tenant_id}",
                 ":start": f"DAILY#{start_date}",
-            }
+            },
         )
-        
+
         daily_data = [item_to_dict(i) for i in response.get("Items", [])]
-        
+
         # Calculate totals
         total_input = sum(d.get("input_tokens", 0) for d in daily_data)
         total_output = sum(d.get("output_tokens", 0) for d in daily_data)
         total_cost = sum(d.get("total_cost", 0) for d in daily_data)
         total_requests = sum(d.get("request_count", 0) for d in daily_data)
-        
+
         # Get active sessions count
         sessions_response = table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :prefix)",
@@ -144,22 +151,24 @@ def get_dashboard_stats(tenant_id: str = "default", days: int = 30) -> Dict[str,
                 ":pk": f"SESSION#{tenant_id}#",
                 ":prefix": "SESSION#",
             },
-            Select="COUNT"
+            Select="COUNT",
         )
         active_sessions = sessions_response.get("Count", 0)
-        
+
         # Format daily data for charts
         chart_data = []
         for d in sorted(daily_data, key=lambda x: x.get("SK", "")):
             date = d.get("SK", "").replace("DAILY#", "")
-            chart_data.append({
-                "date": date,
-                "input_tokens": d.get("input_tokens", 0),
-                "output_tokens": d.get("output_tokens", 0),
-                "cost": round(d.get("total_cost", 0), 4),
-                "requests": d.get("request_count", 0),
-            })
-        
+            chart_data.append(
+                {
+                    "date": date,
+                    "input_tokens": d.get("input_tokens", 0),
+                    "output_tokens": d.get("output_tokens", 0),
+                    "cost": round(d.get("total_cost", 0), 4),
+                    "requests": d.get("request_count", 0),
+                }
+            )
+
         return {
             "tenant_id": tenant_id,
             "period_days": days,
@@ -170,13 +179,15 @@ def get_dashboard_stats(tenant_id: str = "default", days: int = 30) -> Dict[str,
                 "total_cost_usd": round(total_cost, 4),
                 "total_requests": total_requests,
                 "active_sessions": active_sessions,
-                "avg_tokens_per_request": round((total_input + total_output) / max(total_requests, 1)),
+                "avg_tokens_per_request": round(
+                    (total_input + total_output) / max(total_requests, 1)
+                ),
                 "avg_cost_per_request": round(total_cost / max(total_requests, 1), 4),
             },
             "daily": chart_data,
             "generated_at": datetime.utcnow().isoformat(),
         }
-        
+
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to get dashboard stats: %s", e)
         return {
@@ -201,9 +212,9 @@ def get_user_stats(tenant_id: str, user_id: str, days: int = 30) -> Dict[str, An
     """
     try:
         table = get_table()
-        
+
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-        
+
         # Query cost records for this user
         response = table.query(
             KeyConditionExpression="PK = :pk AND SK >= :start",
@@ -212,15 +223,15 @@ def get_user_stats(tenant_id: str, user_id: str, days: int = 30) -> Dict[str, An
                 ":pk": f"COST#{tenant_id}",
                 ":start": f"COST#{start_date}",
                 ":user": user_id,
-            }
+            },
         )
-        
+
         records = [item_to_dict(i) for i in response.get("Items", [])]
-        
+
         total_input = sum(r.get("input_tokens", 0) for r in records)
         total_output = sum(r.get("output_tokens", 0) for r in records)
         total_cost = sum(r.get("cost_usd", 0) for r in records)
-        
+
         # Group by session
         by_session = {}
         for r in records:
@@ -230,7 +241,7 @@ def get_user_stats(tenant_id: str, user_id: str, days: int = 30) -> Dict[str, An
             by_session[sid]["tokens"] += r.get("total_tokens", 0)
             by_session[sid]["cost"] += r.get("cost_usd", 0)
             by_session[sid]["requests"] += 1
-        
+
         return {
             "tenant_id": tenant_id,
             "user_id": user_id,
@@ -245,29 +256,31 @@ def get_user_stats(tenant_id: str, user_id: str, days: int = 30) -> Dict[str, An
             },
             "by_session": by_session,
         }
-        
+
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to get user stats: %s", e)
         return {"error": GENERIC_ANALYTICS_ERROR}
 
 
-def get_top_users(tenant_id: str, days: int = 30, limit: int = 10) -> List[Dict[str, Any]]:
+def get_top_users(
+    tenant_id: str, days: int = 30, limit: int = 10
+) -> List[Dict[str, Any]]:
     """
     Get top users by usage for a tenant.
     """
     try:
         table = get_table()
-        
+
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-        
+
         response = table.query(
             KeyConditionExpression="PK = :pk AND SK >= :start",
             ExpressionAttributeValues={
                 ":pk": f"COST#{tenant_id}",
                 ":start": f"COST#{start_date}",
-            }
+            },
         )
-        
+
         # Aggregate by user
         by_user = {}
         for item in response.get("Items", []):
@@ -282,11 +295,13 @@ def get_top_users(tenant_id: str, days: int = 30, limit: int = 10) -> List[Dict[
             by_user[user_id]["total_tokens"] += int(item.get("total_tokens", 0))
             by_user[user_id]["total_cost"] += float(item.get("cost_usd", 0))
             by_user[user_id]["request_count"] += 1
-        
+
         # Sort by cost and return top N
-        sorted_users = sorted(by_user.values(), key=lambda x: x["total_cost"], reverse=True)
+        sorted_users = sorted(
+            by_user.values(), key=lambda x: x["total_cost"], reverse=True
+        )
         return sorted_users[:limit]
-        
+
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to get top users: %s", e)
         return []
@@ -294,40 +309,41 @@ def get_top_users(tenant_id: str, days: int = 30, limit: int = 10) -> List[Dict[
 
 # ── Tool Usage Analytics ─────────────────────────────────────────────
 
+
 def get_tool_usage(tenant_id: str, days: int = 30) -> Dict[str, Any]:
     """
     Get tool usage breakdown.
     """
     try:
         table = get_table()
-        
+
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-        
+
         response = table.query(
             KeyConditionExpression="PK = :pk AND SK >= :start",
             ExpressionAttributeValues={
                 ":pk": f"COST#{tenant_id}",
                 ":start": f"COST#{start_date}",
-            }
+            },
         )
-        
+
         # Count tool usage
         tool_counts = {}
         for item in response.get("Items", []):
             tools = item.get("tools_used", [])
             for tool in tools:
                 tool_counts[tool] = tool_counts.get(tool, 0) + 1
-        
+
         # Sort by usage
         sorted_tools = sorted(tool_counts.items(), key=lambda x: x[1], reverse=True)
-        
+
         return {
             "tenant_id": tenant_id,
             "period_days": days,
             "tools": [{"name": t[0], "count": t[1]} for t in sorted_tools],
             "total_tool_calls": sum(tool_counts.values()),
         }
-        
+
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to get tool usage: %s", e)
         return {"error": GENERIC_ANALYTICS_ERROR}
@@ -344,22 +360,24 @@ RATE_LIMITS = {
 }
 
 
-def check_rate_limit(tenant_id: str, user_id: str, tier: str = "free") -> Dict[str, Any]:
+def check_rate_limit(
+    tenant_id: str, user_id: str, tier: str = "free"
+) -> Dict[str, Any]:
     """
     Check if user is within rate limits.
-    
+
     Returns:
         Dict with: allowed, reason, usage, limits
     """
     limits = RATE_LIMITS.get(tier.lower(), RATE_LIMITS["free"])
-    
+
     try:
         table = get_table()
-        
+
         now = datetime.utcnow()
         hour_start = now.replace(minute=0, second=0, microsecond=0)
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         # Count requests in current hour
         hour_response = table.query(
             KeyConditionExpression="PK = :pk AND SK >= :start",
@@ -369,10 +387,10 @@ def check_rate_limit(tenant_id: str, user_id: str, tier: str = "free") -> Dict[s
                 ":start": f"COST#{hour_start.strftime('%Y-%m-%d')}#{int(hour_start.timestamp() * 1000)}",
                 ":user": user_id,
             },
-            Select="COUNT"
+            Select="COUNT",
         )
         requests_this_hour = hour_response.get("Count", 0)
-        
+
         # Count tokens today
         day_response = table.query(
             KeyConditionExpression="PK = :pk AND SK >= :start",
@@ -381,41 +399,53 @@ def check_rate_limit(tenant_id: str, user_id: str, tier: str = "free") -> Dict[s
                 ":pk": f"COST#{tenant_id}",
                 ":start": f"COST#{day_start.strftime('%Y-%m-%d')}",
                 ":user": user_id,
-            }
+            },
         )
-        
-        tokens_today = sum(int(i.get("total_tokens", 0)) for i in day_response.get("Items", []))
-        
+
+        tokens_today = sum(
+            int(i.get("total_tokens", 0)) for i in day_response.get("Items", [])
+        )
+
         # Check limits
         if requests_this_hour >= limits["requests_per_hour"]:
             return {
                 "allowed": False,
                 "reason": f"Rate limit exceeded: {requests_this_hour}/{limits['requests_per_hour']} requests/hour",
-                "usage": {"requests_this_hour": requests_this_hour, "tokens_today": tokens_today},
+                "usage": {
+                    "requests_this_hour": requests_this_hour,
+                    "tokens_today": tokens_today,
+                },
                 "limits": limits,
                 "retry_after_seconds": 3600 - (now.minute * 60 + now.second),
             }
-        
+
         if tokens_today >= limits["tokens_per_day"]:
             return {
                 "allowed": False,
                 "reason": f"Token limit exceeded: {tokens_today}/{limits['tokens_per_day']} tokens/day",
-                "usage": {"requests_this_hour": requests_this_hour, "tokens_today": tokens_today},
+                "usage": {
+                    "requests_this_hour": requests_this_hour,
+                    "tokens_today": tokens_today,
+                },
                 "limits": limits,
-                "retry_after_seconds": 86400 - (now.hour * 3600 + now.minute * 60 + now.second),
+                "retry_after_seconds": 86400
+                - (now.hour * 3600 + now.minute * 60 + now.second),
             }
-        
+
         return {
             "allowed": True,
             "reason": None,
-            "usage": {"requests_this_hour": requests_this_hour, "tokens_today": tokens_today},
+            "usage": {
+                "requests_this_hour": requests_this_hour,
+                "tokens_today": tokens_today,
+            },
             "limits": limits,
             "remaining": {
                 "requests_this_hour": limits["requests_per_hour"] - requests_this_hour,
                 "tokens_today": limits["tokens_per_day"] - tokens_today,
             },
         }
-        
+
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to check rate limit: %s", e)
         # Allow on error (fail open)

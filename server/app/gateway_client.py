@@ -12,6 +12,7 @@ Protocol:
   5. Send chat.send request
   6. Receive chat events (delta, final, error) as {type:"event", event:"chat", payload:{state, message}}
 """
+
 import asyncio
 import json
 import logging
@@ -25,7 +26,9 @@ import websockets
 logger = logging.getLogger("eagle.gateway")
 
 GATEWAY_URL = os.getenv("OPENCLAW_GATEWAY_URL", "ws://localhost:18789")
-GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN", "f25cd1c6a865d62023226f4bb663bfcff0dd5ab28c155d82")
+GATEWAY_TOKEN = os.getenv(
+    "OPENCLAW_GATEWAY_TOKEN", "f25cd1c6a865d62023226f4bb663bfcff0dd5ab28c155d82"
+)
 
 
 async def _gateway_handshake(ws) -> str:
@@ -37,29 +40,33 @@ async def _gateway_handshake(ws) -> str:
 
     # Step 2: Handshake
     connect_id = str(uuid4())
-    await ws.send(json.dumps({
-        "type": "req",
-        "id": connect_id,
-        "method": "connect",
-        "params": {
-            "minProtocol": 3,
-            "maxProtocol": 3,
-            "client": {
-                "id": "gateway-client",
-                "version": "1.0.0",
-                "platform": "linux",
-                "mode": "backend",
-            },
-            "role": "operator",
-            "scopes": ["operator.read", "operator.write"],
-            "caps": [],
-            "commands": [],
-            "permissions": {},
-            "auth": {"token": GATEWAY_TOKEN},
-            "locale": "en-US",
-            "userAgent": "eagle-agent/1.0.0",
-        },
-    }))
+    await ws.send(
+        json.dumps(
+            {
+                "type": "req",
+                "id": connect_id,
+                "method": "connect",
+                "params": {
+                    "minProtocol": 3,
+                    "maxProtocol": 3,
+                    "client": {
+                        "id": "gateway-client",
+                        "version": "1.0.0",
+                        "platform": "linux",
+                        "mode": "backend",
+                    },
+                    "role": "operator",
+                    "scopes": ["operator.read", "operator.write"],
+                    "caps": [],
+                    "commands": [],
+                    "permissions": {},
+                    "auth": {"token": GATEWAY_TOKEN},
+                    "locale": "en-US",
+                    "userAgent": "eagle-agent/1.0.0",
+                },
+            }
+        )
+    )
 
     # Wait for handshake response (skip other events)
     for _ in range(20):
@@ -95,16 +102,20 @@ async def chat_via_gateway(
                 full_message = f"<system>{system_prompt}</system>\n\n{message}"
 
             msg_id = str(uuid4())
-            await ws.send(json.dumps({
-                "type": "req",
-                "id": msg_id,
-                "method": "chat.send",
-                "params": {
-                    "message": full_message,
-                    "sessionKey": session_key,
-                    "idempotencyKey": str(uuid4()),
-                },
-            }))
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "req",
+                        "id": msg_id,
+                        "method": "chat.send",
+                        "params": {
+                            "message": full_message,
+                            "sessionKey": session_key,
+                            "idempotencyKey": str(uuid4()),
+                        },
+                    }
+                )
+            )
 
             # Collect streaming response — deltas carry cumulative text,
             # so we track previous length to extract incremental chunks.
@@ -127,7 +138,10 @@ async def chat_via_gateway(
                 event_name = frame.get("event", "")
 
                 if frame_type == "res" and frame.get("id") == msg_id:
-                    logger.debug("Chat started: runId=%s", frame.get("payload", {}).get("runId", ""))
+                    logger.debug(
+                        "Chat started: runId=%s",
+                        frame.get("payload", {}).get("runId", ""),
+                    )
                     continue
 
                 if frame_type == "event" and event_name == "chat":
@@ -191,23 +205,27 @@ async def chat_via_gateway_stream(
       {"type": "error", "message": "..."}
     """
     start = time.time()
-    full_text = ""          # cumulative text so far
-    prev_text_len = 0       # length already sent to caller
+    full_text = ""  # cumulative text so far
+    prev_text_len = 0  # length already sent to caller
     try:
         async with websockets.connect(GATEWAY_URL, open_timeout=10) as ws:
             await _gateway_handshake(ws)
 
             msg_id = str(uuid4())
-            await ws.send(json.dumps({
-                "type": "req",
-                "id": msg_id,
-                "method": "chat.send",
-                "params": {
-                    "message": message,
-                    "sessionKey": session_key,
-                    "idempotencyKey": str(uuid4()),
-                },
-            }))
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "req",
+                        "id": msg_id,
+                        "method": "chat.send",
+                        "params": {
+                            "message": message,
+                            "sessionKey": session_key,
+                            "idempotencyKey": str(uuid4()),
+                        },
+                    }
+                )
+            )
 
             deadline = time.time() + timeout_seconds
 
@@ -225,7 +243,12 @@ async def chat_via_gateway_stream(
                 # Ack for chat.send
                 if frame_type == "res" and frame.get("id") == msg_id:
                     if not frame.get("ok", True):
-                        yield {"type": "error", "message": frame.get("error", {}).get("message", "Request rejected")}
+                        yield {
+                            "type": "error",
+                            "message": frame.get("error", {}).get(
+                                "message", "Request rejected"
+                            ),
+                        }
                         return
                     continue
 
@@ -242,7 +265,11 @@ async def chat_via_gateway_stream(
                             prev_text_len = len(delta_text)
                             yield {"type": "delta", "text": new_chunk}
                         for tc in _extract_tools(payload):
-                            yield {"type": "tool_use", "name": tc["tool"], "input": tc["input"]}
+                            yield {
+                                "type": "tool_use",
+                                "name": tc["tool"],
+                                "input": tc["input"],
+                            }
 
                     elif state == "final":
                         final_text = _extract_text(payload)
@@ -270,6 +297,7 @@ async def chat_via_gateway_stream(
 
 # ── helpers ──────────────────────────────────────────────────────────
 
+
 def _extract_text(payload: dict) -> str:
     """Pull text from a chat event payload."""
     msg_data = payload.get("message", {})
@@ -290,5 +318,7 @@ def _extract_tools(payload: dict) -> list:
     tools = []
     for block in content_blocks:
         if isinstance(block, dict) and block.get("type") == "tool_use":
-            tools.append({"tool": block.get("name", ""), "input": block.get("input", {})})
+            tools.append(
+                {"tool": block.get("name", ""), "input": block.get("input", {})}
+            )
     return tools

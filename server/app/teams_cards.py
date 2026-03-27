@@ -62,12 +62,14 @@ def _card(
         },
     ]
     if body_text:
-        card_body.append({
-            "type": "TextBlock",
-            "text": body_text,
-            "wrap": True,
-            "spacing": "Medium",
-        })
+        card_body.append(
+            {
+                "type": "TextBlock",
+                "text": body_text,
+                "wrap": True,
+                "spacing": "Medium",
+            }
+        )
 
     card: dict = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -82,6 +84,7 @@ def _card(
 
 
 # ── Public card builders ─────────────────────────────────────────────
+
 
 def error_card(
     environment: str,
@@ -231,15 +234,19 @@ def morning_report_card(
     if commit_count > 15:
         commit_lines.append(f"*...and {commit_count - 15} more*")
 
-    body_text = "\n\n".join(commit_lines) if commit_lines else "*No commits in this period.*"
+    body_text = (
+        "\n\n".join(commit_lines) if commit_lines else "*No commits in this period.*"
+    )
 
     actions = []
     if repo_url:
-        actions.append({
-            "type": "Action.OpenUrl",
-            "title": "View on GitHub",
-            "url": repo_url,
-        })
+        actions.append(
+            {
+                "type": "Action.OpenUrl",
+                "title": "View on GitHub",
+                "url": repo_url,
+            }
+        )
 
     return _card(
         title=f"EAGLE | Morning Report — {date}",
@@ -273,8 +280,14 @@ def deploy_report_card(
     non_fail = ("PASS", "SKIP", "CANCEL")
     all_pass = all(r["status"] in non_fail for r in results)
     deploy_ok = all(v in non_fail for v in deploy_status.values())
-    cancelled = any(r["status"] == "CANCEL" for r in results) or any(v == "CANCEL" for v in deploy_status.values())
-    style = "warning" if cancelled else ("good" if (all_pass and deploy_ok) else "attention")
+    cancelled = any(r["status"] == "CANCEL" for r in results) or any(
+        v == "CANCEL" for v in deploy_status.values()
+    )
+    style = (
+        "warning"
+        if cancelled
+        else ("good" if (all_pass and deploy_ok) else "attention")
+    )
 
     facts = [
         {"title": "Commit", "value": commit_sha[:10]},
@@ -286,7 +299,11 @@ def deploy_report_card(
     # Validation ladder
     ladder_lines = []
     for r in results:
-        icon = "PASS" if r["status"] == "PASS" else ("SKIP" if r["status"] == "SKIP" else "FAIL")
+        icon = (
+            "PASS"
+            if r["status"] == "PASS"
+            else ("SKIP" if r["status"] == "SKIP" else "FAIL")
+        )
         detail = f" — {r['detail']}" if r.get("detail") else ""
         ladder_lines.append(f"**{r['level']}** {r['name']}: {icon}{detail}")
 
@@ -324,7 +341,9 @@ def deploy_report_card(
 
     actions = []
     if run_url:
-        actions.append({"type": "Action.OpenUrl", "title": "View Run on GitHub", "url": run_url})
+        actions.append(
+            {"type": "Action.OpenUrl", "title": "View Run on GitHub", "url": run_url}
+        )
     if pr_url:
         actions.append({"type": "Action.OpenUrl", "title": "View PR", "url": pr_url})
 
@@ -387,9 +406,17 @@ def eval_report_card(
 
     actions = []
     if langfuse_url:
-        actions.append({"type": "Action.OpenUrl", "title": "Langfuse Traces", "url": langfuse_url})
+        actions.append(
+            {"type": "Action.OpenUrl", "title": "Langfuse Traces", "url": langfuse_url}
+        )
     if cloudwatch_url:
-        actions.append({"type": "Action.OpenUrl", "title": "CloudWatch Logs", "url": cloudwatch_url})
+        actions.append(
+            {
+                "type": "Action.OpenUrl",
+                "title": "CloudWatch Logs",
+                "url": cloudwatch_url,
+            }
+        )
 
     status_label = "All Pass" if all_pass else f"{len(failed_tests)} Failed"
     return _card(

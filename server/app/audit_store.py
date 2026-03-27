@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _seven_year_ttl() -> int:
     """Return Unix epoch seconds 7 years from now."""
     return ttl_timestamp(days=365 * 7)
@@ -43,6 +44,7 @@ def _to_json_str(value: Any) -> str | None:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def write_audit(
     tenant_id: str,

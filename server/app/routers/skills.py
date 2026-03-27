@@ -12,8 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..cognito_auth import UserContext
 from ..skill_store import (
-    create_skill, get_skill, update_skill, list_skills,
-    submit_for_review, publish_skill, delete_skill,
+    create_skill,
+    get_skill,
+    update_skill,
+    list_skills,
+    submit_for_review,
+    publish_skill,
+    delete_skill,
 )
 from ..audit_store import write_audit
 from .dependencies import get_user_from_header

@@ -39,7 +39,9 @@ from .create_document_support import (
 from ..session_scope import extract_user_id
 
 
-def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str | None = None) -> dict:
+def exec_create_document(
+    params: dict[str, Any], tenant_id: str, session_id: str | None = None
+) -> dict:
     """Generate acquisition documents and save to S3.
 
     Uses official S3 templates when available (DOCX/XLSX), falling back to
@@ -72,7 +74,9 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
     data = raw_data if isinstance(raw_data, dict) else {}
     ai_content = params.get("content")
     package_id = params.get("package_id")
-    output_format = params.get("output_format") or _default_output_format_for_doc_type(doc_type)
+    output_format = params.get("output_format") or _default_output_format_for_doc_type(
+        doc_type
+    )
     timestamp = time.strftime("%Y%m%d_%H%M%S")
 
     data = _augment_document_data_from_context(doc_type, title, data, session_id)
@@ -83,18 +87,32 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
         current_content = data.get("current_content")
         edit_request = str(data.get("edit_request", "") or "")
         if isinstance(current_content, str) and edit_request:
-            inline_edited_content = _apply_sow_clear_edits(current_content, edit_request)
+            inline_edited_content = _apply_sow_clear_edits(
+                current_content, edit_request
+            )
 
     valid_doc_types = {
-        "sow", "igce", "market_research", "justification", "acquisition_plan",
-        "eval_criteria", "security_checklist", "section_508", "cor_certification",
+        "sow",
+        "igce",
+        "market_research",
+        "justification",
+        "acquisition_plan",
+        "eval_criteria",
+        "security_checklist",
+        "section_508",
+        "cor_certification",
         "contract_type_justification",
         # Micro-purchase / simplified package documents
-        "son_products", "son_services", "purchase_request",
-        "price_reasonableness", "required_sources",
+        "son_products",
+        "son_services",
+        "purchase_request",
+        "price_reasonableness",
+        "required_sources",
     }
     if doc_type not in valid_doc_types:
-        return {"error": f"Unknown document type: {doc_type}. Supported: {', '.join(sorted(valid_doc_types))}."}
+        return {
+            "error": f"Unknown document type: {doc_type}. Supported: {', '.join(sorted(valid_doc_types))}."
+        }
 
     markdown_generators = {
         "sow": _generate_sow,
@@ -126,7 +144,9 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
 
         try:
             service = TemplateService(tenant_id, user_id, markdown_generators)
-            template_result = service.generate_document(doc_type, title, data, output_format)
+            template_result = service.generate_document(
+                doc_type, title, data, output_format
+            )
             if template_result.success:
                 preview = template_result.preview or ""
                 if not _looks_like_unfilled_template_preview(doc_type, preview):
@@ -140,7 +160,9 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
                         doc_type,
                     )
         except Exception:
-            logger.debug("Template population alongside AI content failed, using AI markdown")
+            logger.debug(
+                "Template population alongside AI content failed, using AI markdown"
+            )
     else:
         try:
             service = TemplateService(tenant_id, user_id, markdown_generators)
@@ -154,13 +176,17 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
                     source = "markdown_fallback"
                     template_path = None
                 else:
-                    return {"error": f"No generator available for {doc_type}: {result.error}"}
+                    return {
+                        "error": f"No generator available for {doc_type}: {result.error}"
+                    }
             else:
                 file_type = result.file_type
                 source = result.source
                 template_path = result.template_path
 
-                if _looks_like_unfilled_template_preview(doc_type, result.preview or ""):
+                if _looks_like_unfilled_template_preview(
+                    doc_type, result.preview or ""
+                ):
                     generator = markdown_generators.get(doc_type)
                     if generator:
                         content = generator(title, data)
@@ -186,7 +212,9 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
                         content = result.preview or ""
 
         except ImportError as exc:
-            logger.warning("Template libraries unavailable: %s, using markdown fallback", exc)
+            logger.warning(
+                "Template libraries unavailable: %s, using markdown fallback", exc
+            )
             generator = markdown_generators.get(doc_type)
             if generator:
                 content = generator(title, data)
@@ -200,7 +228,8 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
     ext = file_type if file_type in ("docx", "xlsx") else "md"
     bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     content_to_store = (
-        result.content if result and result.success and file_type in ("docx", "xlsx")
+        result.content
+        if result and result.success and file_type in ("docx", "xlsx")
         else content
     )
 
@@ -293,7 +322,9 @@ def exec_create_document(params: dict[str, Any], tenant_id: str, session_id: str
                 except Exception:
                     logger.debug("Failed to save markdown sidecar for %s", s3_key)
         else:
-            s3.put_object(Bucket=bucket, Key=s3_key, Body=content_to_store.encode("utf-8"))
+            s3.put_object(
+                Bucket=bucket, Key=s3_key, Body=content_to_store.encode("utf-8")
+            )
         save_status = "saved"
         save_location = f"s3://{bucket}/{s3_key}"
     except (ClientError, BotoCoreError) as exc:

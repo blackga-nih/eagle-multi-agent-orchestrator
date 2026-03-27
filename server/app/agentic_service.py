@@ -18,6 +18,7 @@ Refactoring plan:
 
 See docs/refactor_0319.md for full refactoring guide.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -48,7 +49,12 @@ logger = logging.getLogger("eagle.agent")
 # ── Configuration ────────────────────────────────────────────────────
 _USE_BEDROCK = os.getenv("USE_BEDROCK", "false").lower() == "true"
 _BEDROCK_REGION = os.getenv("AWS_REGION", "us-east-1")
-MODEL = os.getenv("ANTHROPIC_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0" if _USE_BEDROCK else "claude-haiku-4-5-20251001")
+MODEL = os.getenv(
+    "ANTHROPIC_MODEL",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    if _USE_BEDROCK
+    else "claude-haiku-4-5-20251001",
+)
 
 SYSTEM_PROMPT = (
     # ── 1. Identity & Mission ──────────────────────────────────────────
@@ -58,7 +64,6 @@ SYSTEM_PROMPT = (
     "need identification through document generation and package submission. "
     "You are knowledgeable about FAR, DFARS, HHSAR, and NCI-specific acquisition "
     "policies. Be professional, precise, and proactively helpful.\n\n"
-
     # ── 2. Intake Philosophy ───────────────────────────────────────────
     "INTAKE PHILOSOPHY: Act like 'Trish' — a senior contracting expert who "
     "intuitively knows what to do with any package. Don't require users to "
@@ -68,7 +73,6 @@ SYSTEM_PROMPT = (
     "(3) Determine the pathway — acquisition type, contract type, competition "
     "strategy, and required documents. (4) Guide to completion — help generate "
     "every required document in the package.\n\n"
-
     # ── 3. Five-Phase Intake Workflow ──────────────────────────────────
     "FIVE-PHASE INTAKE WORKFLOW:\n"
     "  Phase 1 — Minimal Intake: Collect requirement description, estimated cost "
@@ -82,7 +86,6 @@ SYSTEM_PROMPT = (
     "acquisition type and generate them.\n"
     "  Phase 5 — Summary & Handoff: Produce acquisition summary with "
     "determination table, document checklist, and next steps.\n\n"
-
     # ── 4. Key Thresholds ─────────────────────────────────────────────
     "KEY THRESHOLDS:\n"
     "  Micro-Purchase Threshold (MPT): $15,000 — minimal documentation\n"
@@ -90,7 +93,6 @@ SYSTEM_PROMPT = (
     "  Cost/Pricing Data: $750,000 — certified cost data required above\n"
     "  8(a) Sole Source: $4M (services/non-mfg), $7M (manufacturing)\n"
     "  Davis-Bacon: $25,000 — wage requirements apply for services\n\n"
-
     # ── 5. Specialist Lenses ──────────────────────────────────────────
     "SPECIALIST PERSPECTIVES — Apply these lenses when reviewing acquisitions:\n\n"
     "Legal Counsel Lens: Assess legal risks in acquisition strategies. Consider "
@@ -109,7 +111,6 @@ SYSTEM_PROMPT = (
     "accountability. Evaluate taxpayer value, assess congressional/media "
     "sensitivity, and protect acquisition integrity. Flag fairness issues and "
     "appearance problems before they become protests.\n\n"
-
     # ── 6. Document Types ─────────────────────────────────────────────
     "DOCUMENT TYPES AVAILABLE VIA create_document TOOL:\n"
     "  sow — Statement of Work\n"
@@ -122,7 +123,6 @@ SYSTEM_PROMPT = (
     "  section_508 — Section 508 Compliance Statement (accessibility)\n"
     "  cor_certification — COR Certification (nominee, FAC-COR level, duties)\n"
     "  contract_type_justification — Contract Type Justification (D&F elements)\n\n"
-
     # ── 7. Tool Usage ─────────────────────────────────────────────────
     "TOOL USAGE GUIDANCE:\n"
     "You have access to real AWS-backed tools for document storage (S3), "
@@ -175,7 +175,9 @@ def _get_s3():
 def _get_dynamodb():
     global _dynamodb_resource
     if _dynamodb_resource is None:
-        _dynamodb_resource = boto3.resource("dynamodb", region_name="us-east-1", config=_AWS_TIMEOUT)
+        _dynamodb_resource = boto3.resource(
+            "dynamodb", region_name="us-east-1", config=_AWS_TIMEOUT
+        )
     return _dynamodb_resource
 
 
@@ -304,7 +306,11 @@ def _extract_first_money_value(text: str) -> str | None:
     if m:
         return m.group(0)
 
-    m = re.search(r"\b[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:million|billion|k|m)\b", text, flags=re.IGNORECASE)
+    m = re.search(
+        r"\b[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:million|billion|k|m)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
     if m:
         return m.group(0)
 
@@ -316,7 +322,11 @@ def _extract_period(text: str) -> str | None:
     if not text:
         return None
 
-    m = re.search(r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})", text, flags=re.IGNORECASE)
+    m = re.search(
+        r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})",
+        text,
+        flags=re.IGNORECASE,
+    )
     if m:
         return m.group(0).strip()
     return None
@@ -401,7 +411,11 @@ def _augment_document_data_from_context(
 
     # Separate user messages from assistant analysis
     user_msgs = [m for m in context_messages if not m.startswith("[ASSISTANT] ")]
-    assistant_msgs = [m.removeprefix("[ASSISTANT] ") for m in context_messages if m.startswith("[ASSISTANT] ")]
+    assistant_msgs = [
+        m.removeprefix("[ASSISTANT] ")
+        for m in context_messages
+        if m.startswith("[ASSISTANT] ")
+    ]
 
     # Filter out short generation trigger commands ("Generate the SOW...")
     # so we use actual requirement content, not the trigger.
@@ -435,7 +449,9 @@ def _augment_document_data_from_context(
 
     parsed_sections = _extract_section_bullets("\n".join(context_messages[-3:]))
 
-    project_description = " ".join(parsed_sections.get("project_description", [])).strip()
+    project_description = " ".join(
+        parsed_sections.get("project_description", [])
+    ).strip()
     if project_description:
         existing_desc = str(merged.get("description", "")).strip()
         if (
@@ -449,9 +465,14 @@ def _augment_document_data_from_context(
     if parsed_sections.get("deliverables"):
         merged.setdefault("deliverables", parsed_sections["deliverables"][:15])
     if parsed_sections.get("security"):
-        merged.setdefault("security_requirements", "; ".join(parsed_sections["security"])[:600])
+        merged.setdefault(
+            "security_requirements", "; ".join(parsed_sections["security"])[:600]
+        )
     if parsed_sections.get("environment_tiers"):
-        merged.setdefault("place_of_performance", "; ".join(parsed_sections["environment_tiers"])[:300])
+        merged.setdefault(
+            "place_of_performance",
+            "; ".join(parsed_sections["environment_tiers"])[:300],
+        )
 
     # Minimal doc-type hints for better first-pass drafts.
     if doc_type == "igce":
@@ -483,13 +504,15 @@ def _augment_document_data_from_context(
     if assistant_msgs:
         # Filter out messages that look like system prompt leakage
         clean_assistant = [
-            m for m in assistant_msgs
+            m
+            for m in assistant_msgs
             if not re.search(
                 r"Your task is to create a detailed summary|"
                 r"You are an? .{0,30}(?:assistant|agent|specialist)|"
                 r"SYSTEM PROMPT|"
                 r"<instructions>",
-                m[:200], re.IGNORECASE,
+                m[:200],
+                re.IGNORECASE,
             )
         ]
         source = clean_assistant or assistant_msgs
@@ -541,7 +564,10 @@ _TITLE_DOC_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bmarket\s+research\b", re.IGNORECASE), "market_research"),
     (re.compile(r"\bacquisition\s+plan\b", re.IGNORECASE), "acquisition_plan"),
     (
-        re.compile(r"\b(j\s*(?:&|and)\s*a|justification(?:\s*&\s*approval)?|sole\s+source)\b", re.IGNORECASE),
+        re.compile(
+            r"\b(j\s*(?:&|and)\s*a|justification(?:\s*&\s*approval)?|sole\s+source)\b",
+            re.IGNORECASE,
+        ),
         "justification",
     ),
     # RFP sections
@@ -561,12 +587,17 @@ def _infer_doc_type_from_title(title: str) -> str | None:
 
 
 def _normalize_create_document_doc_type(raw_doc_type: Any, title: str) -> str:
-    requested = str(raw_doc_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    requested = (
+        str(raw_doc_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    )
     normalized = _DOC_TYPE_ALIASES.get(requested, requested)
     inferred = _infer_doc_type_from_title(title)
 
     if normalized == "sow" and inferred == "igce":
-        logger.info("Overriding create_document doc_type from sow to igce based on title=%r", title)
+        logger.info(
+            "Overriding create_document doc_type from sow to igce based on title=%r",
+            title,
+        )
         return inferred
     if normalized:
         return normalized
@@ -594,6 +625,7 @@ def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
     # Schema-based validation (preferred)
     try:
         from app.template_registry import validate_document_completeness
+
         report = validate_document_completeness(doc_type, preview)
         if report is not None:
             # If less than 30% sections filled, it's an unfilled template
@@ -603,6 +635,7 @@ def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
 
     # Fallback: remaining {{PLACEHOLDER}} tokens mean population failed
     import re as _re
+
     if _re.search(r"\{\{[A-Z_]{3,}\}\}", preview):
         return True
 
@@ -671,10 +704,7 @@ def _extract_sow_clear_targets(edit_request: str) -> list[str]:
 
     # Guardrail: only auto-clear when user explicitly asks to clear/blank.
     clear_intent = (
-        "clear" in req
-        or "blank" in req
-        or "to be completed" in req
-        or "remove" in req
+        "clear" in req or "blank" in req or "to be completed" in req or "remove" in req
     )
     if not clear_intent:
         return []
@@ -728,7 +758,11 @@ def _apply_sow_clear_edits(current_content: str, edit_request: str) -> str | Non
 
     for idx, heading_match in enumerate(heading_matches):
         heading_end = heading_match.end()
-        next_start = heading_matches[idx + 1].start() if idx + 1 < len(heading_matches) else len(current_content)
+        next_start = (
+            heading_matches[idx + 1].start()
+            if idx + 1 < len(heading_matches)
+            else len(current_content)
+        )
 
         heading_text = heading_match.group(1).strip().lower()
         body_text = current_content[heading_end:next_start]
@@ -901,10 +935,16 @@ EAGLE_TOOLS = [
                 "doc_type": {
                     "type": "string",
                     "enum": [
-                        "sow", "igce", "market_research", "justification",
-                        "acquisition_plan", "eval_criteria", "security_checklist",
-                        "section_508", "cor_certification",
-                        "contract_type_justification"
+                        "sow",
+                        "igce",
+                        "market_research",
+                        "justification",
+                        "acquisition_plan",
+                        "eval_criteria",
+                        "security_checklist",
+                        "section_508",
+                        "cor_certification",
+                        "contract_type_justification",
                     ],
                     "description": "Type of acquisition document to generate",
                 },
@@ -1098,10 +1138,13 @@ EAGLE_TOOLS = [
 
 # ── Tool Execution Handlers ──────────────────────────────────────────
 
+
 def _exec_s3_document_ops(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Real S3 operations scoped per-user."""
     operation = params.get("operation", "list")
-    bucket = params.get("bucket") or os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    bucket = params.get("bucket") or os.getenv(
+        "S3_BUCKET", "eagle-documents-695681773636-dev"
+    )
     key = params.get("key", "")
     content = params.get("content", "")
     # Per-user prefix: eagle/{tenant}/{user}/
@@ -1116,11 +1159,13 @@ def _exec_s3_document_ops(params: dict, tenant_id: str, session_id: str = None) 
             objects = resp.get("Contents", [])
             files = []
             for obj in objects:
-                files.append({
-                    "key": obj["Key"],
-                    "size_bytes": obj["Size"],
-                    "last_modified": obj["LastModified"].isoformat(),
-                })
+                files.append(
+                    {
+                        "key": obj["Key"],
+                        "size_bytes": obj["Size"],
+                        "last_modified": obj["LastModified"].isoformat(),
+                    }
+                )
             return {
                 "operation": "list",
                 "bucket": bucket,
@@ -1166,7 +1211,9 @@ def _exec_s3_document_ops(params: dict, tenant_id: str, session_id: str = None) 
             }
 
         else:
-            return {"error": f"Unknown operation: {operation}. Use list, read, or write."}
+            return {
+                "error": f"Unknown operation: {operation}. Use list, read, or write."
+            }
 
     except ClientError as e:
         error_code = e.response["Error"]["Code"]
@@ -1258,10 +1305,16 @@ def _exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
                 ExpressionAttributeNames=expr_names,
                 ExpressionAttributeValues=expr_values,
             )
-            return {"operation": "update", "item_id": item_id, "status": "updated", "fields_updated": list(data.keys())}
+            return {
+                "operation": "update",
+                "item_id": item_id,
+                "status": "updated",
+                "fields_updated": list(data.keys()),
+            }
 
         elif operation in ("list", "query"):
             from boto3.dynamodb.conditions import Key as DDBKey
+
             resp = table.query(
                 KeyConditionExpression=DDBKey("PK").eq(f"INTAKE#{tenant_id}")
             )
@@ -1274,7 +1327,9 @@ def _exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
             }
 
         else:
-            return {"error": f"Unknown operation: {operation}. Use create, read, update, list, or query."}
+            return {
+                "error": f"Unknown operation: {operation}. Use create, read, update, list, or query."
+            }
 
     except ClientError as e:
         error_code = e.response["Error"]["Code"]
@@ -1286,7 +1341,9 @@ def _exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
                 "suggestion": "The IAM user may not have the required DynamoDB permissions. Contact your administrator.",
             }
         elif error_code == "ResourceNotFoundException":
-            return {"error": f"DynamoDB table '{table_name}' not found. It may need to be created."}
+            return {
+                "error": f"DynamoDB table '{table_name}' not found. It may need to be created."
+            }
         else:
             return {"error": f"DynamoDB error ({error_code}): {error_msg}"}
     except BotoCoreError as e:
@@ -1296,6 +1353,7 @@ def _exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
 def _serialize_ddb_item(item: dict) -> dict:
     """Convert DynamoDB item to JSON-serializable dict."""
     from decimal import Decimal
+
     result = {}
     for k, v in item.items():
         if isinstance(v, Decimal):
@@ -1361,7 +1419,11 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
                 limit=min(limit, 100),
             )
             events = [
-                {"timestamp": e["timestamp"], "message": e["message"][:500], "logStreamName": e.get("logStreamName", "")}
+                {
+                    "timestamp": e["timestamp"],
+                    "message": e["message"][:500],
+                    "logStreamName": e.get("logStreamName", ""),
+                }
                 for e in resp.get("events", [])
             ]
             return {
@@ -1389,7 +1451,11 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
 
             resp = logs.filter_log_events(**kwargs)
             events = [
-                {"timestamp": e["timestamp"], "message": e["message"][:500], "logStreamName": e.get("logStreamName", "")}
+                {
+                    "timestamp": e["timestamp"],
+                    "message": e["message"][:500],
+                    "logStreamName": e.get("logStreamName", ""),
+                }
                 for e in resp.get("events", [])
             ]
             result = {
@@ -1410,7 +1476,10 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
                 limit=5,
             )
             streams = [
-                {"logStreamName": s["logStreamName"], "lastEventTimestamp": s.get("lastEventTimestamp", 0)}
+                {
+                    "logStreamName": s["logStreamName"],
+                    "lastEventTimestamp": s.get("lastEventTimestamp", 0),
+                }
                 for s in resp.get("logStreams", [])
             ]
             return {
@@ -1420,7 +1489,9 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
             }
 
         else:
-            return {"error": f"Unknown operation: {operation}. Use search, recent, or get_stream."}
+            return {
+                "error": f"Unknown operation: {operation}. Use search, recent, or get_stream."
+            }
 
     except ClientError as e:
         error_code = e.response["Error"]["Code"]
@@ -1442,6 +1513,7 @@ def _exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Langfuse trace query tool
 # ---------------------------------------------------------------------------
+
 
 def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
     """Query Langfuse traces for system diagnostics.
@@ -1477,6 +1549,7 @@ def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
                 multipliers = {"m": 60, "h": 3600, "d": 86400}
                 offset_sec = num * multipliers.get(unit, 3600)
                 from datetime import datetime, timezone, timedelta
+
                 dt = datetime.now(timezone.utc) - timedelta(seconds=offset_sec)
                 return dt.isoformat()
             except (ValueError, IndexError):
@@ -1496,25 +1569,33 @@ def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
             "session_id": t.get("sessionId", ""),
             "user_id": t.get("userId", ""),
             "duration_ms": t.get("latency"),
-            "status": "error" if t.get("level") == "ERROR" or t.get("statusMessage") else "success",
+            "status": "error"
+            if t.get("level") == "ERROR" or t.get("statusMessage")
+            else "success",
             "status_message": (t.get("statusMessage") or "")[:500],
             "total_cost_usd": t.get("totalCost"),
-            "input_tokens": t.get("usage", {}).get("input", 0) if isinstance(t.get("usage"), dict) else 0,
-            "output_tokens": t.get("usage", {}).get("output", 0) if isinstance(t.get("usage"), dict) else 0,
+            "input_tokens": t.get("usage", {}).get("input", 0)
+            if isinstance(t.get("usage"), dict)
+            else 0,
+            "output_tokens": t.get("usage", {}).get("output", 0)
+            if isinstance(t.get("usage"), dict)
+            else 0,
             "tags": t.get("tags", []),
             "langfuse_url": langfuse_trace_url(t["id"]) if t.get("id") else "",
         }
 
     try:
         if operation == "list_recent":
-            result = asyncio.run(list_traces(
-                limit=limit,
-                user_id=user_id_filter or None,
-                session_id=session_id_filter or None,
-                tags=tags,
-                from_timestamp=from_ts,
-                to_timestamp=to_ts,
-            ))
+            result = asyncio.run(
+                list_traces(
+                    limit=limit,
+                    user_id=user_id_filter or None,
+                    session_id=session_id_filter or None,
+                    tags=tags,
+                    from_timestamp=from_ts,
+                    to_timestamp=to_ts,
+                )
+            )
             if result.get("error"):
                 return {"error": result["error"]}
             traces = [_truncate_trace(t) for t in result.get("data", [])]
@@ -1530,7 +1611,9 @@ def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
                 return {"error": "trace_id is required for get_trace operation"}
             trace = asyncio.run(get_trace(trace_id))
             if not trace:
-                return {"error": f"Trace {trace_id} not found or Langfuse not configured"}
+                return {
+                    "error": f"Trace {trace_id} not found or Langfuse not configured"
+                }
             obs_result = asyncio.run(list_observations(trace_id=trace_id, limit=50))
             observations = [
                 {
@@ -1541,8 +1624,12 @@ def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
                     "end_time": o.get("endTime", ""),
                     "status_message": (o.get("statusMessage") or "")[:500],
                     "model": o.get("model", ""),
-                    "input_tokens": o.get("usage", {}).get("input", 0) if isinstance(o.get("usage"), dict) else 0,
-                    "output_tokens": o.get("usage", {}).get("output", 0) if isinstance(o.get("usage"), dict) else 0,
+                    "input_tokens": o.get("usage", {}).get("input", 0)
+                    if isinstance(o.get("usage"), dict)
+                    else 0,
+                    "output_tokens": o.get("usage", {}).get("output", 0)
+                    if isinstance(o.get("usage"), dict)
+                    else 0,
                 }
                 for o in obs_result.get("data", [])
             ]
@@ -1552,13 +1639,15 @@ def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
 
         elif operation == "search_errors":
             # Fetch recent traces and filter for errors
-            result = asyncio.run(list_traces(
-                limit=limit,
-                user_id=user_id_filter or None,
-                session_id=session_id_filter or None,
-                from_timestamp=from_ts or _resolve_time("-1h") or None,
-                to_timestamp=to_ts,
-            ))
+            result = asyncio.run(
+                list_traces(
+                    limit=limit,
+                    user_id=user_id_filter or None,
+                    session_id=session_id_filter or None,
+                    from_timestamp=from_ts or _resolve_time("-1h") or None,
+                    to_timestamp=to_ts,
+                )
+            )
             if result.get("error"):
                 return {"error": result["error"]}
             error_traces = []
@@ -1566,7 +1655,10 @@ def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
             for t in result.get("data", []):
                 status_msg = t.get("statusMessage") or ""
                 level = t.get("level", "")
-                has_error_tag = any("error:" in tag or "severity:" in tag for tag in (t.get("tags") or []))
+                has_error_tag = any(
+                    "error:" in tag or "severity:" in tag
+                    for tag in (t.get("tags") or [])
+                )
                 if status_msg or level == "ERROR" or has_error_tag:
                     info = classify_error(status_msg)
                     entry = _truncate_trace(t)
@@ -1585,10 +1677,12 @@ def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
         elif operation == "health_summary":
             # Aggregate trace stats over the last hour
             from_1h = _resolve_time("-1h")
-            result = asyncio.run(list_traces(
-                limit=100,
-                from_timestamp=from_1h or None,
-            ))
+            result = asyncio.run(
+                list_traces(
+                    limit=100,
+                    from_timestamp=from_1h or None,
+                )
+            )
             if result.get("error"):
                 return {"error": result["error"]}
             traces = result.get("data", [])
@@ -1618,13 +1712,17 @@ def _exec_langfuse_traces(params: dict, tenant_id: str) -> dict:
                 "total_available": result.get("meta", {}).get("totalItems", 0),
                 "error_count": errors,
                 "error_rate": f"{(errors / total * 100):.1f}%" if total > 0 else "0%",
-                "avg_latency_ms": round(total_latency / latency_count) if latency_count > 0 else None,
+                "avg_latency_ms": round(total_latency / latency_count)
+                if latency_count > 0
+                else None,
                 "total_cost_usd": round(total_cost, 4),
                 "error_categories": error_categories,
             }
 
         else:
-            return {"error": f"Unknown operation: {operation}. Use list_recent, get_trace, search_errors, or health_summary."}
+            return {
+                "error": f"Unknown operation: {operation}. Use list_recent, get_trace, search_errors, or health_summary."
+            }
 
     except Exception as exc:
         logger.error("langfuse_traces tool failed: %s", exc, exc_info=True)
@@ -1642,10 +1740,14 @@ def _exec_search_far(params: dict, tenant_id: str) -> dict:
 
     if not results:
         results = [
-            {"part": "1", "section": "1.102", "title": "Statement of Guiding Principles",
-             "summary": "Deliver best value to the Government, satisfy the customer, minimize administrative costs, conduct business with integrity.",
-             "applicability": "All federal acquisitions",
-             "s3_keys": []},
+            {
+                "part": "1",
+                "section": "1.102",
+                "title": "Statement of Guiding Principles",
+                "summary": "Deliver best value to the Government, satisfy the customer, minimize administrative costs, conduct business with integrity.",
+                "applicability": "All federal acquisitions",
+                "s3_keys": [],
+            },
         ]
 
     return {
@@ -1666,258 +1768,594 @@ def _exec_search_far_LEGACY(params: dict, tenant_id: str) -> dict:
     # Comprehensive FAR database
     far_database = [
         # Part 1 - Federal Acquisition Regulations System
-        {"part": "1", "section": "1.102", "title": "Statement of Guiding Principles for the Federal Acquisition System",
-         "summary": "The vision for the Federal acquisition system is to deliver on a timely basis the best value product or service to the customer, while maintaining the public's trust and fulfilling public policy objectives.",
-         "applicability": "All federal acquisitions",
-         "keywords": ["principles", "vision", "best value", "public trust", "policy"]},
-        {"part": "1", "section": "1.602-1", "title": "Authority of Contracting Officers",
-         "summary": "Contracting officers have authority to enter into, administer, or terminate contracts and make related determinations and findings. They may bind the Government only to the extent of the authority delegated to them.",
-         "applicability": "All contracting officers",
-         "keywords": ["authority", "contracting officer", "delegation", "binding"]},
-
+        {
+            "part": "1",
+            "section": "1.102",
+            "title": "Statement of Guiding Principles for the Federal Acquisition System",
+            "summary": "The vision for the Federal acquisition system is to deliver on a timely basis the best value product or service to the customer, while maintaining the public's trust and fulfilling public policy objectives.",
+            "applicability": "All federal acquisitions",
+            "keywords": [
+                "principles",
+                "vision",
+                "best value",
+                "public trust",
+                "policy",
+            ],
+        },
+        {
+            "part": "1",
+            "section": "1.602-1",
+            "title": "Authority of Contracting Officers",
+            "summary": "Contracting officers have authority to enter into, administer, or terminate contracts and make related determinations and findings. They may bind the Government only to the extent of the authority delegated to them.",
+            "applicability": "All contracting officers",
+            "keywords": ["authority", "contracting officer", "delegation", "binding"],
+        },
         # Part 2 - Definitions of Words and Terms
-        {"part": "2", "section": "2.101", "title": "Definitions",
-         "summary": "Micro-purchase threshold: $10,000 ($25,000 for DoD contingency operations, $20,000 for acquisitions inside the US, $35,000 for acquisitions outside the US). Simplified Acquisition Threshold (SAT): $250,000. Commercial product/service definitions provided.",
-         "applicability": "All acquisitions — defines key thresholds",
-         "keywords": ["micro-purchase", "threshold", "simplified", "sat", "definitions", "commercial", "$10,000", "$250,000"]},
-
+        {
+            "part": "2",
+            "section": "2.101",
+            "title": "Definitions",
+            "summary": "Micro-purchase threshold: $10,000 ($25,000 for DoD contingency operations, $20,000 for acquisitions inside the US, $35,000 for acquisitions outside the US). Simplified Acquisition Threshold (SAT): $250,000. Commercial product/service definitions provided.",
+            "applicability": "All acquisitions — defines key thresholds",
+            "keywords": [
+                "micro-purchase",
+                "threshold",
+                "simplified",
+                "sat",
+                "definitions",
+                "commercial",
+                "$10,000",
+                "$250,000",
+            ],
+        },
         # Part 3 - Improper Business Practices
-        {"part": "3", "section": "3.104", "title": "Procurement Integrity",
-         "summary": "Prohibits disclosure of contractor bid/proposal information and source selection information. Restricts employment contacts between Government officials and offerors. Violations may result in criminal penalties.",
-         "applicability": "All competitive acquisitions",
-         "keywords": ["integrity", "disclosure", "bid", "source selection", "ethics"]},
-
+        {
+            "part": "3",
+            "section": "3.104",
+            "title": "Procurement Integrity",
+            "summary": "Prohibits disclosure of contractor bid/proposal information and source selection information. Restricts employment contacts between Government officials and offerors. Violations may result in criminal penalties.",
+            "applicability": "All competitive acquisitions",
+            "keywords": [
+                "integrity",
+                "disclosure",
+                "bid",
+                "source selection",
+                "ethics",
+            ],
+        },
         # Part 4 - Administrative Matters
-        {"part": "4", "section": "4.606", "title": "Reporting Data (FPDS)",
-         "summary": "Contract actions reported to Federal Procurement Data System (FPDS) within 3 business days of execution. Required for actions over micro-purchase threshold.",
-         "applicability": "Actions above micro-purchase threshold",
-         "keywords": ["fpds", "reporting", "data", "contract action"]},
-        {"part": "4", "section": "4.1102", "title": "System for Award Management (SAM)",
-         "summary": "Prospective contractors must be registered in SAM prior to award of any contract. Contracting officers must verify registration before award.",
-         "applicability": "All awards",
-         "keywords": ["sam", "registration", "award", "verification"]},
-
+        {
+            "part": "4",
+            "section": "4.606",
+            "title": "Reporting Data (FPDS)",
+            "summary": "Contract actions reported to Federal Procurement Data System (FPDS) within 3 business days of execution. Required for actions over micro-purchase threshold.",
+            "applicability": "Actions above micro-purchase threshold",
+            "keywords": ["fpds", "reporting", "data", "contract action"],
+        },
+        {
+            "part": "4",
+            "section": "4.1102",
+            "title": "System for Award Management (SAM)",
+            "summary": "Prospective contractors must be registered in SAM prior to award of any contract. Contracting officers must verify registration before award.",
+            "applicability": "All awards",
+            "keywords": ["sam", "registration", "award", "verification"],
+        },
         # Part 5 - Publicizing Contract Actions
-        {"part": "5", "section": "5.101", "title": "Methods of Disseminating Information",
-         "summary": "Synopsis required on SAM.gov (formerly FedBizOpps) for acquisitions exceeding $25,000. 15-day response time for most actions, 30 days for sealed bidding, 45 days for competitive proposals when certified cost or pricing data required.",
-         "applicability": "Acquisitions above $25,000",
-         "keywords": ["synopsis", "publicize", "sam.gov", "fedbizopps", "notice"]},
-
+        {
+            "part": "5",
+            "section": "5.101",
+            "title": "Methods of Disseminating Information",
+            "summary": "Synopsis required on SAM.gov (formerly FedBizOpps) for acquisitions exceeding $25,000. 15-day response time for most actions, 30 days for sealed bidding, 45 days for competitive proposals when certified cost or pricing data required.",
+            "applicability": "Acquisitions above $25,000",
+            "keywords": ["synopsis", "publicize", "sam.gov", "fedbizopps", "notice"],
+        },
         # Part 6 - Competition Requirements
-        {"part": "6", "section": "6.101", "title": "Policy — Full and Open Competition",
-         "summary": "Contracting officers shall promote and provide for full and open competition. Must solicit from as many sources as practicable to ensure competition.",
-         "applicability": "All acquisitions above SAT",
-         "keywords": ["competition", "full and open", "sources", "policy"]},
-        {"part": "6", "section": "6.302", "title": "Circumstances Permitting Other Than Full and Open Competition",
-         "summary": "Seven exceptions: (1) Only one responsible source/unique supply, (2) Unusual and compelling urgency, (3) Industrial mobilization/expert services, (4) International agreement, (5) Authorized/required by statute, (6) National security, (7) Public interest determination by agency head.",
-         "applicability": "Sole source or limited competition situations",
-         "keywords": ["sole source", "competition", "exception", "j&a", "justification", "urgency", "unique"]},
-        {"part": "6", "section": "6.303", "title": "Justifications (J&A)",
-         "summary": "Written Justification and Approval (J&A) required for other than full and open competition. Must include: description of supplies, nature of action, authority cited, demonstration that proposed contractor's capabilities are unique, market research, any other facts, listing of sources solicited, actions to remove barriers to competition.",
-         "applicability": "All sole source or limited competition actions",
-         "keywords": ["justification", "j&a", "sole source", "approval", "written"]},
-        {"part": "6", "section": "6.304", "title": "Approval of Justifications",
-         "summary": "Approval thresholds: ≤$750K by Contracting Officer, ≤$15M by Competition Advocate, ≤$75M by Head of Procuring Activity, ≤$100M by Senior Procurement Executive, >$100M by agency head (non-delegable).",
-         "applicability": "All J&A approvals",
-         "keywords": ["approval", "threshold", "j&a", "competition advocate", "authority"]},
-
+        {
+            "part": "6",
+            "section": "6.101",
+            "title": "Policy — Full and Open Competition",
+            "summary": "Contracting officers shall promote and provide for full and open competition. Must solicit from as many sources as practicable to ensure competition.",
+            "applicability": "All acquisitions above SAT",
+            "keywords": ["competition", "full and open", "sources", "policy"],
+        },
+        {
+            "part": "6",
+            "section": "6.302",
+            "title": "Circumstances Permitting Other Than Full and Open Competition",
+            "summary": "Seven exceptions: (1) Only one responsible source/unique supply, (2) Unusual and compelling urgency, (3) Industrial mobilization/expert services, (4) International agreement, (5) Authorized/required by statute, (6) National security, (7) Public interest determination by agency head.",
+            "applicability": "Sole source or limited competition situations",
+            "keywords": [
+                "sole source",
+                "competition",
+                "exception",
+                "j&a",
+                "justification",
+                "urgency",
+                "unique",
+            ],
+        },
+        {
+            "part": "6",
+            "section": "6.303",
+            "title": "Justifications (J&A)",
+            "summary": "Written Justification and Approval (J&A) required for other than full and open competition. Must include: description of supplies, nature of action, authority cited, demonstration that proposed contractor's capabilities are unique, market research, any other facts, listing of sources solicited, actions to remove barriers to competition.",
+            "applicability": "All sole source or limited competition actions",
+            "keywords": ["justification", "j&a", "sole source", "approval", "written"],
+        },
+        {
+            "part": "6",
+            "section": "6.304",
+            "title": "Approval of Justifications",
+            "summary": "Approval thresholds: ≤$750K by Contracting Officer, ≤$15M by Competition Advocate, ≤$75M by Head of Procuring Activity, ≤$100M by Senior Procurement Executive, >$100M by agency head (non-delegable).",
+            "applicability": "All J&A approvals",
+            "keywords": [
+                "approval",
+                "threshold",
+                "j&a",
+                "competition advocate",
+                "authority",
+            ],
+        },
         # Part 7 - Acquisition Planning
-        {"part": "7", "section": "7.102", "title": "Policy — Acquisition Planning",
-         "summary": "Agencies shall perform acquisition planning and conduct market research for all acquisitions to promote and provide for full and open competition, or when full and open competition is not required, to promote competition to the maximum extent practicable.",
-         "applicability": "All acquisitions",
-         "keywords": ["planning", "market research", "strategy"]},
-        {"part": "7", "section": "7.105", "title": "Contents of Written Acquisition Plans",
-         "summary": "Written acquisition plan required for acquisitions of supplies/services with estimated value exceeding $7M for new contracts or $50M for task/delivery orders. Plan includes: statement of need, cost, period of performance, trade-offs, risks, acquisition streamlining.",
-         "applicability": "Major acquisitions",
-         "keywords": ["acquisition plan", "written", "contents", "requirement"]},
-
+        {
+            "part": "7",
+            "section": "7.102",
+            "title": "Policy — Acquisition Planning",
+            "summary": "Agencies shall perform acquisition planning and conduct market research for all acquisitions to promote and provide for full and open competition, or when full and open competition is not required, to promote competition to the maximum extent practicable.",
+            "applicability": "All acquisitions",
+            "keywords": ["planning", "market research", "strategy"],
+        },
+        {
+            "part": "7",
+            "section": "7.105",
+            "title": "Contents of Written Acquisition Plans",
+            "summary": "Written acquisition plan required for acquisitions of supplies/services with estimated value exceeding $7M for new contracts or $50M for task/delivery orders. Plan includes: statement of need, cost, period of performance, trade-offs, risks, acquisition streamlining.",
+            "applicability": "Major acquisitions",
+            "keywords": ["acquisition plan", "written", "contents", "requirement"],
+        },
         # Part 8 - Required Sources of Supplies and Services
-        {"part": "8", "section": "8.405", "title": "Ordering Procedures for Federal Supply Schedules",
-         "summary": "GSA Schedule ordering: micro-purchase (one source), $10K-$250K (consider 3+ schedule contractors), >$250K (request quotes from enough sources). Must consider small business. Fair opportunity required for BPAs.",
-         "applicability": "GSA Schedule orders",
-         "keywords": ["gsa", "schedule", "ordering", "federal supply", "bpa"]},
-
+        {
+            "part": "8",
+            "section": "8.405",
+            "title": "Ordering Procedures for Federal Supply Schedules",
+            "summary": "GSA Schedule ordering: micro-purchase (one source), $10K-$250K (consider 3+ schedule contractors), >$250K (request quotes from enough sources). Must consider small business. Fair opportunity required for BPAs.",
+            "applicability": "GSA Schedule orders",
+            "keywords": ["gsa", "schedule", "ordering", "federal supply", "bpa"],
+        },
         # Part 9 - Contractor Qualifications
-        {"part": "9", "section": "9.104-1", "title": "General Standards of Responsibility",
-         "summary": "Prospective contractor must have: adequate financial resources, ability to comply with delivery schedule, satisfactory performance record, satisfactory record of integrity, necessary organization/experience/accounting/operational controls, necessary equipment/facilities, be otherwise qualified and eligible.",
-         "applicability": "All awards",
-         "keywords": ["responsibility", "financial", "performance", "integrity", "qualified"]},
-
+        {
+            "part": "9",
+            "section": "9.104-1",
+            "title": "General Standards of Responsibility",
+            "summary": "Prospective contractor must have: adequate financial resources, ability to comply with delivery schedule, satisfactory performance record, satisfactory record of integrity, necessary organization/experience/accounting/operational controls, necessary equipment/facilities, be otherwise qualified and eligible.",
+            "applicability": "All awards",
+            "keywords": [
+                "responsibility",
+                "financial",
+                "performance",
+                "integrity",
+                "qualified",
+            ],
+        },
         # Part 10 - Market Research
-        {"part": "10", "section": "10.001", "title": "Policy — Market Research",
-         "summary": "Agencies must conduct market research appropriate to the circumstances before developing new requirements, before soliciting offers, and before awarding task/delivery orders. Used to determine if commercial products/services can meet needs.",
-         "applicability": "All acquisitions",
-         "keywords": ["market research", "commercial", "requirement", "sources"]},
-        {"part": "10", "section": "10.002", "title": "Procedures for Market Research",
-         "summary": "Techniques include: contacting knowledgeable individuals, reviewing published market research, publishing RFIs, querying GSA/government databases, participating in industry conferences, reviewing catalogs, and conducting interchange meetings with industry.",
-         "applicability": "All acquisitions",
-         "keywords": ["market research", "procedure", "rfi", "sources sought", "industry"]},
-
+        {
+            "part": "10",
+            "section": "10.001",
+            "title": "Policy — Market Research",
+            "summary": "Agencies must conduct market research appropriate to the circumstances before developing new requirements, before soliciting offers, and before awarding task/delivery orders. Used to determine if commercial products/services can meet needs.",
+            "applicability": "All acquisitions",
+            "keywords": ["market research", "commercial", "requirement", "sources"],
+        },
+        {
+            "part": "10",
+            "section": "10.002",
+            "title": "Procedures for Market Research",
+            "summary": "Techniques include: contacting knowledgeable individuals, reviewing published market research, publishing RFIs, querying GSA/government databases, participating in industry conferences, reviewing catalogs, and conducting interchange meetings with industry.",
+            "applicability": "All acquisitions",
+            "keywords": [
+                "market research",
+                "procedure",
+                "rfi",
+                "sources sought",
+                "industry",
+            ],
+        },
         # Part 11 - Describing Agency Needs
-        {"part": "11", "section": "11.002", "title": "Policy for Describing Agency Needs",
-         "summary": "Agencies should define requirements using market research. Use performance specifications rather than design specifications to the maximum extent practicable. State requirements in terms of functions, performance, or essential physical characteristics.",
-         "applicability": "All requirements",
-         "keywords": ["requirements", "performance", "specifications", "needs", "medical", "equipment"]},
-
+        {
+            "part": "11",
+            "section": "11.002",
+            "title": "Policy for Describing Agency Needs",
+            "summary": "Agencies should define requirements using market research. Use performance specifications rather than design specifications to the maximum extent practicable. State requirements in terms of functions, performance, or essential physical characteristics.",
+            "applicability": "All requirements",
+            "keywords": [
+                "requirements",
+                "performance",
+                "specifications",
+                "needs",
+                "medical",
+                "equipment",
+            ],
+        },
         # Part 12 - Acquisition of Commercial Products/Services
-        {"part": "12", "section": "12.000", "title": "Scope of Part — Commercial Acquisition",
-         "summary": "Establishes acquisition policies and procedures for commercial products, commercial services, and COTS items. Agencies shall acquire commercial items when available to meet needs.",
-         "applicability": "Commercial acquisitions",
-         "keywords": ["commercial", "cots", "products", "services", "streamlined"]},
-        {"part": "12", "section": "12.207", "title": "Contract Type for Commercial Items",
-         "summary": "Firm-Fixed-Price (FFP) contracts or Fixed-Price with Economic Price Adjustment (FP-EPA) are preferred for commercial products and services. T&M/LH contracts may be used only if no other type is suitable and if approved at one level above the CO.",
-         "applicability": "Commercial item acquisitions",
-         "keywords": ["contract type", "ffp", "fixed price", "commercial", "time and materials"]},
-        {"part": "12", "section": "12.602", "title": "Streamlined Evaluation for Commercial Items",
-         "summary": "Evaluation of commercial items shall be based on past performance, price, and technical approach. Simplified evaluation procedures are encouraged. Oral presentations may replace written proposals.",
-         "applicability": "Commercial acquisitions",
-         "keywords": ["evaluation", "commercial", "streamlined", "past performance"]},
-
+        {
+            "part": "12",
+            "section": "12.000",
+            "title": "Scope of Part — Commercial Acquisition",
+            "summary": "Establishes acquisition policies and procedures for commercial products, commercial services, and COTS items. Agencies shall acquire commercial items when available to meet needs.",
+            "applicability": "Commercial acquisitions",
+            "keywords": ["commercial", "cots", "products", "services", "streamlined"],
+        },
+        {
+            "part": "12",
+            "section": "12.207",
+            "title": "Contract Type for Commercial Items",
+            "summary": "Firm-Fixed-Price (FFP) contracts or Fixed-Price with Economic Price Adjustment (FP-EPA) are preferred for commercial products and services. T&M/LH contracts may be used only if no other type is suitable and if approved at one level above the CO.",
+            "applicability": "Commercial item acquisitions",
+            "keywords": [
+                "contract type",
+                "ffp",
+                "fixed price",
+                "commercial",
+                "time and materials",
+            ],
+        },
+        {
+            "part": "12",
+            "section": "12.602",
+            "title": "Streamlined Evaluation for Commercial Items",
+            "summary": "Evaluation of commercial items shall be based on past performance, price, and technical approach. Simplified evaluation procedures are encouraged. Oral presentations may replace written proposals.",
+            "applicability": "Commercial acquisitions",
+            "keywords": ["evaluation", "commercial", "streamlined", "past performance"],
+        },
         # Part 13 - Simplified Acquisition Procedures
-        {"part": "13", "section": "13.000", "title": "Scope of Part — Simplified Acquisition Procedures",
-         "summary": "Simplified acquisition procedures (SAP) apply to acquisitions at or below the Simplified Acquisition Threshold ($250,000). Promotes competition, efficiency, and economy while reducing administrative burden. Government-wide purchase card is the preferred method for micro-purchases.",
-         "applicability": "Acquisitions ≤ $250,000",
-         "keywords": ["simplified", "sap", "threshold", "purchase card", "micro-purchase", "small purchase"]},
-        {"part": "13", "section": "13.003", "title": "Policy for Simplified Acquisition",
-         "summary": "Agencies shall use simplified acquisition procedures to the maximum extent practicable for acquisitions at or below the SAT. Promotes competition, efficiency, economy. Supports small business participation.",
-         "applicability": "Acquisitions ≤ SAT",
-         "keywords": ["simplified", "policy", "small business", "efficiency"]},
-        {"part": "13", "section": "13.106-1", "title": "Soliciting Competition Under SAP",
-         "summary": "For purchases above micro-purchase threshold: promote competition to maximum extent practicable. Consider at least 3 sources. Oral solicitations acceptable. No synopsis required under $25,000. Small business set-aside rules apply.",
-         "applicability": "SAP above micro-purchase threshold",
-         "keywords": ["competition", "soliciting", "sources", "oral", "simplified"]},
-        {"part": "13", "section": "13.500", "title": "Test Program for Certain Commercial Products (Subpart 13.5)",
-         "summary": "Allows use of simplified procedures for acquisitions of commercial products and services exceeding the SAT but not exceeding $7.5M ($15M for acquisitions as described in 13.500(c)).",
-         "applicability": "Commercial items $250K - $7.5M",
-         "keywords": ["test program", "commercial", "simplified", "subpart 13.5"]},
-
+        {
+            "part": "13",
+            "section": "13.000",
+            "title": "Scope of Part — Simplified Acquisition Procedures",
+            "summary": "Simplified acquisition procedures (SAP) apply to acquisitions at or below the Simplified Acquisition Threshold ($250,000). Promotes competition, efficiency, and economy while reducing administrative burden. Government-wide purchase card is the preferred method for micro-purchases.",
+            "applicability": "Acquisitions ≤ $250,000",
+            "keywords": [
+                "simplified",
+                "sap",
+                "threshold",
+                "purchase card",
+                "micro-purchase",
+                "small purchase",
+            ],
+        },
+        {
+            "part": "13",
+            "section": "13.003",
+            "title": "Policy for Simplified Acquisition",
+            "summary": "Agencies shall use simplified acquisition procedures to the maximum extent practicable for acquisitions at or below the SAT. Promotes competition, efficiency, economy. Supports small business participation.",
+            "applicability": "Acquisitions ≤ SAT",
+            "keywords": ["simplified", "policy", "small business", "efficiency"],
+        },
+        {
+            "part": "13",
+            "section": "13.106-1",
+            "title": "Soliciting Competition Under SAP",
+            "summary": "For purchases above micro-purchase threshold: promote competition to maximum extent practicable. Consider at least 3 sources. Oral solicitations acceptable. No synopsis required under $25,000. Small business set-aside rules apply.",
+            "applicability": "SAP above micro-purchase threshold",
+            "keywords": ["competition", "soliciting", "sources", "oral", "simplified"],
+        },
+        {
+            "part": "13",
+            "section": "13.500",
+            "title": "Test Program for Certain Commercial Products (Subpart 13.5)",
+            "summary": "Allows use of simplified procedures for acquisitions of commercial products and services exceeding the SAT but not exceeding $7.5M ($15M for acquisitions as described in 13.500(c)).",
+            "applicability": "Commercial items $250K - $7.5M",
+            "keywords": ["test program", "commercial", "simplified", "subpart 13.5"],
+        },
         # Part 14 - Sealed Bidding
-        {"part": "14", "section": "14.101", "title": "Elements of Sealed Bidding",
-         "summary": "Four elements: (1) Preparation of IFB describing Government requirements, (2) Publicizing the IFB, (3) Public opening of bids at time and place stated, (4) Award to responsible bidder whose bid conforms to IFB and is most advantageous (price and price-related factors).",
-         "applicability": "Sealed bid acquisitions",
-         "keywords": ["sealed bidding", "ifb", "invitation", "bid", "public opening"]},
-
+        {
+            "part": "14",
+            "section": "14.101",
+            "title": "Elements of Sealed Bidding",
+            "summary": "Four elements: (1) Preparation of IFB describing Government requirements, (2) Publicizing the IFB, (3) Public opening of bids at time and place stated, (4) Award to responsible bidder whose bid conforms to IFB and is most advantageous (price and price-related factors).",
+            "applicability": "Sealed bid acquisitions",
+            "keywords": [
+                "sealed bidding",
+                "ifb",
+                "invitation",
+                "bid",
+                "public opening",
+            ],
+        },
         # Part 15 - Contracting by Negotiation
-        {"part": "15", "section": "15.101", "title": "Best Value Continuum",
-         "summary": "Range from Lowest Price Technically Acceptable (LPTA) to tradeoff. In tradeoff: non-price factors can justify paying a higher price. Use LPTA when best value to the Government results from selection of technically acceptable proposal at lowest price. Source selection authority decides.",
-         "applicability": "Negotiated acquisitions",
-         "keywords": ["best value", "lpta", "tradeoff", "evaluation", "negotiation", "price"]},
-        {"part": "15", "section": "15.304", "title": "Evaluation Factors and Significant Subfactors",
-         "summary": "Evaluation factors must: (a) represent key areas of importance/emphasis, (b) support meaningful comparison, (c) include price/cost as a factor. Past performance shall be evaluated unless waived. Small disadvantaged business participation may be evaluated.",
-         "applicability": "All competitive negotiated acquisitions",
-         "keywords": ["evaluation factors", "criteria", "price", "past performance", "technical"]},
-        {"part": "15", "section": "15.404-1", "title": "Proposal Analysis Techniques",
-         "summary": "Price analysis (comparing proposed prices to each other, historical, published, or independent estimates). Cost analysis (evaluating separate cost elements and profit). Certified cost or pricing data required when exceeding $2M threshold (Truth in Negotiations Act — TINA).",
-         "applicability": "Price/cost proposals",
-         "keywords": ["price analysis", "cost analysis", "tina", "certified", "proposal", "cost estimate"]},
-
+        {
+            "part": "15",
+            "section": "15.101",
+            "title": "Best Value Continuum",
+            "summary": "Range from Lowest Price Technically Acceptable (LPTA) to tradeoff. In tradeoff: non-price factors can justify paying a higher price. Use LPTA when best value to the Government results from selection of technically acceptable proposal at lowest price. Source selection authority decides.",
+            "applicability": "Negotiated acquisitions",
+            "keywords": [
+                "best value",
+                "lpta",
+                "tradeoff",
+                "evaluation",
+                "negotiation",
+                "price",
+            ],
+        },
+        {
+            "part": "15",
+            "section": "15.304",
+            "title": "Evaluation Factors and Significant Subfactors",
+            "summary": "Evaluation factors must: (a) represent key areas of importance/emphasis, (b) support meaningful comparison, (c) include price/cost as a factor. Past performance shall be evaluated unless waived. Small disadvantaged business participation may be evaluated.",
+            "applicability": "All competitive negotiated acquisitions",
+            "keywords": [
+                "evaluation factors",
+                "criteria",
+                "price",
+                "past performance",
+                "technical",
+            ],
+        },
+        {
+            "part": "15",
+            "section": "15.404-1",
+            "title": "Proposal Analysis Techniques",
+            "summary": "Price analysis (comparing proposed prices to each other, historical, published, or independent estimates). Cost analysis (evaluating separate cost elements and profit). Certified cost or pricing data required when exceeding $2M threshold (Truth in Negotiations Act — TINA).",
+            "applicability": "Price/cost proposals",
+            "keywords": [
+                "price analysis",
+                "cost analysis",
+                "tina",
+                "certified",
+                "proposal",
+                "cost estimate",
+            ],
+        },
         # Part 16 - Types of Contracts
-        {"part": "16", "section": "16.102", "title": "Policies for Contract Types",
-         "summary": "Selecting contract type requires negotiation and is a matter requiring judgment. Fixed-price types provide maximum incentive for cost control. Cost-reimbursement types place risk of cost overrun on Government. A firm-fixed-price contract is preferred when risk involved is minimal.",
-         "applicability": "All contracts",
-         "keywords": ["contract type", "fixed price", "cost reimbursement", "risk", "selection"]},
-        {"part": "16", "section": "16.601", "title": "Time-and-Materials Contracts",
-         "summary": "T&M contracts provide for acquiring supplies/services on the basis of direct labor hours at specified rates and actual cost of materials. Use only when it is not possible to estimate the extent or duration of work or costs with sufficient accuracy. Requires D&F approved one level above CO.",
-         "applicability": "When FFP not feasible",
-         "keywords": ["time and materials", "t&m", "labor hours", "rates"]},
-
+        {
+            "part": "16",
+            "section": "16.102",
+            "title": "Policies for Contract Types",
+            "summary": "Selecting contract type requires negotiation and is a matter requiring judgment. Fixed-price types provide maximum incentive for cost control. Cost-reimbursement types place risk of cost overrun on Government. A firm-fixed-price contract is preferred when risk involved is minimal.",
+            "applicability": "All contracts",
+            "keywords": [
+                "contract type",
+                "fixed price",
+                "cost reimbursement",
+                "risk",
+                "selection",
+            ],
+        },
+        {
+            "part": "16",
+            "section": "16.601",
+            "title": "Time-and-Materials Contracts",
+            "summary": "T&M contracts provide for acquiring supplies/services on the basis of direct labor hours at specified rates and actual cost of materials. Use only when it is not possible to estimate the extent or duration of work or costs with sufficient accuracy. Requires D&F approved one level above CO.",
+            "applicability": "When FFP not feasible",
+            "keywords": ["time and materials", "t&m", "labor hours", "rates"],
+        },
         # Part 19 - Small Business Programs
-        {"part": "19", "section": "19.201", "title": "General Policy for Small Business",
-         "summary": "It is the policy of the Government to provide maximum practicable opportunities to small business concerns, veteran-owned, service-disabled veteran-owned, HUBZone, small disadvantaged, and women-owned small business concerns.",
-         "applicability": "All acquisitions",
-         "keywords": ["small business", "set-aside", "policy", "opportunity"]},
-        {"part": "19", "section": "19.502-2", "title": "Total Small Business Set-Asides",
-         "summary": "Set aside for small business if: (a) there is a reasonable expectation of receiving offers from two or more responsible small business concerns, and (b) award will be made at fair market prices. Applies to acquisitions between micro-purchase threshold and SAT automatically.",
-         "applicability": "Acquisitions above micro-purchase threshold",
-         "keywords": ["set-aside", "small business", "total", "automatic", "competition"]},
-        {"part": "19", "section": "19.805", "title": "8(a) Competitive Requirements",
-         "summary": "Competitive 8(a) acquisitions required above $4.5M (services) or $7M (manufacturing). Below those thresholds, sole source 8(a) awards permitted. Must have an approved offering letter from SBA.",
-         "applicability": "8(a) program acquisitions",
-         "keywords": ["8a", "competitive", "sba", "sole source", "small disadvantaged"]},
-        {"part": "19", "section": "19.1305", "title": "HUBZone Set-Aside Procedures",
-         "summary": "Set aside for HUBZone small business if reasonable expectation of two or more responsible HUBZone offers at fair market price. Contracting officer must verify HUBZone status in SAM.",
-         "applicability": "HUBZone acquisitions",
-         "keywords": ["hubzone", "set-aside", "historically underutilized"]},
-        {"part": "19", "section": "19.1405", "title": "Service-Disabled Veteran-Owned SB Set-Asides",
-         "summary": "Contracting officer may set aside acquisitions for SDVOSB if there is a reasonable expectation of receiving offers from two or more SDVOSB concerns at fair market prices.",
-         "applicability": "SDVOSB acquisitions",
-         "keywords": ["sdvosb", "veteran", "service-disabled", "set-aside"]},
-        {"part": "19", "section": "19.1505", "title": "Women-Owned Small Business Set-Asides (WOSB)",
-         "summary": "Contracting officer may set aside for WOSB/EDWOSB in designated NAICS codes where WOSB are underrepresented or substantially underrepresented.",
-         "applicability": "WOSB program acquisitions",
-         "keywords": ["wosb", "women-owned", "edwosb", "set-aside"]},
-
+        {
+            "part": "19",
+            "section": "19.201",
+            "title": "General Policy for Small Business",
+            "summary": "It is the policy of the Government to provide maximum practicable opportunities to small business concerns, veteran-owned, service-disabled veteran-owned, HUBZone, small disadvantaged, and women-owned small business concerns.",
+            "applicability": "All acquisitions",
+            "keywords": ["small business", "set-aside", "policy", "opportunity"],
+        },
+        {
+            "part": "19",
+            "section": "19.502-2",
+            "title": "Total Small Business Set-Asides",
+            "summary": "Set aside for small business if: (a) there is a reasonable expectation of receiving offers from two or more responsible small business concerns, and (b) award will be made at fair market prices. Applies to acquisitions between micro-purchase threshold and SAT automatically.",
+            "applicability": "Acquisitions above micro-purchase threshold",
+            "keywords": [
+                "set-aside",
+                "small business",
+                "total",
+                "automatic",
+                "competition",
+            ],
+        },
+        {
+            "part": "19",
+            "section": "19.805",
+            "title": "8(a) Competitive Requirements",
+            "summary": "Competitive 8(a) acquisitions required above $4.5M (services) or $7M (manufacturing). Below those thresholds, sole source 8(a) awards permitted. Must have an approved offering letter from SBA.",
+            "applicability": "8(a) program acquisitions",
+            "keywords": [
+                "8a",
+                "competitive",
+                "sba",
+                "sole source",
+                "small disadvantaged",
+            ],
+        },
+        {
+            "part": "19",
+            "section": "19.1305",
+            "title": "HUBZone Set-Aside Procedures",
+            "summary": "Set aside for HUBZone small business if reasonable expectation of two or more responsible HUBZone offers at fair market price. Contracting officer must verify HUBZone status in SAM.",
+            "applicability": "HUBZone acquisitions",
+            "keywords": ["hubzone", "set-aside", "historically underutilized"],
+        },
+        {
+            "part": "19",
+            "section": "19.1405",
+            "title": "Service-Disabled Veteran-Owned SB Set-Asides",
+            "summary": "Contracting officer may set aside acquisitions for SDVOSB if there is a reasonable expectation of receiving offers from two or more SDVOSB concerns at fair market prices.",
+            "applicability": "SDVOSB acquisitions",
+            "keywords": ["sdvosb", "veteran", "service-disabled", "set-aside"],
+        },
+        {
+            "part": "19",
+            "section": "19.1505",
+            "title": "Women-Owned Small Business Set-Asides (WOSB)",
+            "summary": "Contracting officer may set aside for WOSB/EDWOSB in designated NAICS codes where WOSB are underrepresented or substantially underrepresented.",
+            "applicability": "WOSB program acquisitions",
+            "keywords": ["wosb", "women-owned", "edwosb", "set-aside"],
+        },
         # Part 22 - Application of Labor Laws
-        {"part": "22", "section": "22.406", "title": "Davis-Bacon Act Administration",
-         "summary": "Requires payment of prevailing wages to laborers and mechanics on federally funded construction contracts exceeding $2,000. Contracting officer must include applicable wage determinations from DOL.",
-         "applicability": "Construction contracts > $2,000",
-         "keywords": ["davis-bacon", "prevailing wage", "construction", "labor"]},
-        {"part": "22", "section": "22.1003", "title": "Service Contract Labor Standards",
-         "summary": "Service Contract Act requires payment of prevailing wages and fringe benefits to service employees on contracts exceeding $2,500. Applicable to service contracts performed in the US.",
-         "applicability": "Service contracts > $2,500",
-         "keywords": ["service contract act", "prevailing wage", "labor standards", "fringe benefits"]},
-
+        {
+            "part": "22",
+            "section": "22.406",
+            "title": "Davis-Bacon Act Administration",
+            "summary": "Requires payment of prevailing wages to laborers and mechanics on federally funded construction contracts exceeding $2,000. Contracting officer must include applicable wage determinations from DOL.",
+            "applicability": "Construction contracts > $2,000",
+            "keywords": ["davis-bacon", "prevailing wage", "construction", "labor"],
+        },
+        {
+            "part": "22",
+            "section": "22.1003",
+            "title": "Service Contract Labor Standards",
+            "summary": "Service Contract Act requires payment of prevailing wages and fringe benefits to service employees on contracts exceeding $2,500. Applicable to service contracts performed in the US.",
+            "applicability": "Service contracts > $2,500",
+            "keywords": [
+                "service contract act",
+                "prevailing wage",
+                "labor standards",
+                "fringe benefits",
+            ],
+        },
         # Part 25 - Foreign Acquisition
-        {"part": "25", "section": "25.101", "title": "Buy American Act — Supplies",
-         "summary": "Buy American Act restricts acquisition of foreign supplies. Domestic end products required unless an exception applies (public interest, unreasonable cost, non-availability, trade agreements). Evaluation preference of 20-30% for domestic products.",
-         "applicability": "Supply contracts",
-         "keywords": ["buy american", "domestic", "foreign", "supplies", "trade agreements"]},
-
+        {
+            "part": "25",
+            "section": "25.101",
+            "title": "Buy American Act — Supplies",
+            "summary": "Buy American Act restricts acquisition of foreign supplies. Domestic end products required unless an exception applies (public interest, unreasonable cost, non-availability, trade agreements). Evaluation preference of 20-30% for domestic products.",
+            "applicability": "Supply contracts",
+            "keywords": [
+                "buy american",
+                "domestic",
+                "foreign",
+                "supplies",
+                "trade agreements",
+            ],
+        },
         # Part 31 - Contract Cost Principles
-        {"part": "31", "section": "31.205", "title": "Selected Costs (Cost Principles)",
-         "summary": "Determines allowability of specific cost categories: compensation, travel, insurance, depreciation, independent R&D. Key disallowable costs: entertainment, alcohol, lobbying, fines/penalties, bad debts.",
-         "applicability": "Cost-reimbursement and T&M contracts",
-         "keywords": ["allowable", "cost principles", "compensation", "travel", "overhead"]},
-
+        {
+            "part": "31",
+            "section": "31.205",
+            "title": "Selected Costs (Cost Principles)",
+            "summary": "Determines allowability of specific cost categories: compensation, travel, insurance, depreciation, independent R&D. Key disallowable costs: entertainment, alcohol, lobbying, fines/penalties, bad debts.",
+            "applicability": "Cost-reimbursement and T&M contracts",
+            "keywords": [
+                "allowable",
+                "cost principles",
+                "compensation",
+                "travel",
+                "overhead",
+            ],
+        },
         # Part 32 - Contract Financing
-        {"part": "32", "section": "32.006", "title": "Reduction or Suspension of Contract Payments",
-         "summary": "Agency head may reduce or suspend payments upon substantial evidence of fraud. Contracting officer may withhold further payments pending resolution. Contractor entitled to 90% of approved payment requests on cost-reimbursement contracts.",
-         "applicability": "All contracts with financing",
-         "keywords": ["payment", "financing", "suspension", "fraud"]},
-
+        {
+            "part": "32",
+            "section": "32.006",
+            "title": "Reduction or Suspension of Contract Payments",
+            "summary": "Agency head may reduce or suspend payments upon substantial evidence of fraud. Contracting officer may withhold further payments pending resolution. Contractor entitled to 90% of approved payment requests on cost-reimbursement contracts.",
+            "applicability": "All contracts with financing",
+            "keywords": ["payment", "financing", "suspension", "fraud"],
+        },
         # Part 36 - Construction and Architect-Engineer Contracts
-        {"part": "36", "section": "36.602", "title": "Selection of Firms for A-E Contracts",
-         "summary": "Brooks Act requires selection based on demonstrated competence and qualifications. Price is NOT a selection factor. Negotiate fair and reasonable price with most qualified firm.",
-         "applicability": "Architect-Engineer contracts",
-         "keywords": ["architect", "engineer", "a-e", "brooks act", "qualifications"]},
-
+        {
+            "part": "36",
+            "section": "36.602",
+            "title": "Selection of Firms for A-E Contracts",
+            "summary": "Brooks Act requires selection based on demonstrated competence and qualifications. Price is NOT a selection factor. Negotiate fair and reasonable price with most qualified firm.",
+            "applicability": "Architect-Engineer contracts",
+            "keywords": [
+                "architect",
+                "engineer",
+                "a-e",
+                "brooks act",
+                "qualifications",
+            ],
+        },
         # Part 37 - Service Contracting
-        {"part": "37", "section": "37.102", "title": "Policy for Service Contracts",
-         "summary": "Performance-Based Acquisition (PBA) methods preferred. Define requirements in terms of results, not process. Use measurable performance standards and quality assurance surveillance plans (QASP). Incentivize excellent performance.",
-         "applicability": "Service acquisitions",
-         "keywords": ["service", "performance-based", "pba", "qasp", "standards"]},
-
+        {
+            "part": "37",
+            "section": "37.102",
+            "title": "Policy for Service Contracts",
+            "summary": "Performance-Based Acquisition (PBA) methods preferred. Define requirements in terms of results, not process. Use measurable performance standards and quality assurance surveillance plans (QASP). Incentivize excellent performance.",
+            "applicability": "Service acquisitions",
+            "keywords": ["service", "performance-based", "pba", "qasp", "standards"],
+        },
         # Part 42 - Contract Administration
-        {"part": "42", "section": "42.302", "title": "Contract Administration Functions",
-         "summary": "COR duties include: monitoring contractor performance, reviewing and approving invoices, maintaining documentation, reporting performance issues. COR must be designated in writing with specific duties.",
-         "applicability": "Post-award contract administration",
-         "keywords": ["administration", "cor", "monitoring", "performance", "invoice"]},
-
+        {
+            "part": "42",
+            "section": "42.302",
+            "title": "Contract Administration Functions",
+            "summary": "COR duties include: monitoring contractor performance, reviewing and approving invoices, maintaining documentation, reporting performance issues. COR must be designated in writing with specific duties.",
+            "applicability": "Post-award contract administration",
+            "keywords": [
+                "administration",
+                "cor",
+                "monitoring",
+                "performance",
+                "invoice",
+            ],
+        },
         # Part 46 - Quality Assurance
-        {"part": "46", "section": "46.202-4", "title": "Higher-Level Quality Standards",
-         "summary": "May require ISO 9001, ISO 13485 (medical devices), or equivalent quality management certifications. Contracting officer determines appropriate quality level based on criticality of supply/service.",
-         "applicability": "Complex or critical acquisitions",
-         "keywords": ["quality", "iso", "13485", "medical", "device", "standards", "certification"]},
-
+        {
+            "part": "46",
+            "section": "46.202-4",
+            "title": "Higher-Level Quality Standards",
+            "summary": "May require ISO 9001, ISO 13485 (medical devices), or equivalent quality management certifications. Contracting officer determines appropriate quality level based on criticality of supply/service.",
+            "applicability": "Complex or critical acquisitions",
+            "keywords": [
+                "quality",
+                "iso",
+                "13485",
+                "medical",
+                "device",
+                "standards",
+                "certification",
+            ],
+        },
         # Part 52 - Solicitation Provisions and Contract Clauses
-        {"part": "52", "section": "52.212-1", "title": "Instructions to Offerors — Commercial Products/Services",
-         "summary": "Standard instructions for offerors on commercial acquisitions. Simplified provisions. Technical proposal, past performance information, and price proposal typically required. Electronic submissions generally accepted.",
-         "applicability": "Commercial acquisitions (FAR Part 12)",
-         "keywords": ["instructions", "offeror", "commercial", "provision", "proposal"]},
-        {"part": "52", "section": "52.212-4", "title": "Contract Terms and Conditions — Commercial Products/Services",
-         "summary": "Standard commercial contract terms including: inspection/acceptance, assignment, disputes, payment, excusable delays, termination for cause/convenience. Tailorable through addenda.",
-         "applicability": "Commercial contracts",
-         "keywords": ["terms", "conditions", "commercial", "clause", "termination"]},
-
+        {
+            "part": "52",
+            "section": "52.212-1",
+            "title": "Instructions to Offerors — Commercial Products/Services",
+            "summary": "Standard instructions for offerors on commercial acquisitions. Simplified provisions. Technical proposal, past performance information, and price proposal typically required. Electronic submissions generally accepted.",
+            "applicability": "Commercial acquisitions (FAR Part 12)",
+            "keywords": [
+                "instructions",
+                "offeror",
+                "commercial",
+                "provision",
+                "proposal",
+            ],
+        },
+        {
+            "part": "52",
+            "section": "52.212-4",
+            "title": "Contract Terms and Conditions — Commercial Products/Services",
+            "summary": "Standard commercial contract terms including: inspection/acceptance, assignment, disputes, payment, excusable delays, termination for cause/convenience. Tailorable through addenda.",
+            "applicability": "Commercial contracts",
+            "keywords": ["terms", "conditions", "commercial", "clause", "termination"],
+        },
         # HHS/NIH Specific
-        {"part": "HHSAR", "section": "352.270-5", "title": "HHS-Specific Acquisition Requirements",
-         "summary": "Health and Human Services Acquisition Regulation supplements. Includes special clauses for research contracts, patient care, use of human subjects, animal welfare, and conflict of interest requirements specific to HHS/NIH.",
-         "applicability": "HHS/NIH acquisitions",
-         "keywords": ["hhs", "nih", "hhsar", "health", "research", "medical", "human subjects"]},
-        {"part": "HHSAR", "section": "352.239-74", "title": "Electronic and Information Technology Accessibility (Section 508)",
-         "summary": "Requires that all electronic and information technology (EIT) products and services meet Section 508 accessibility standards. Applies to all HHS IT acquisitions.",
-         "applicability": "HHS IT acquisitions",
-         "keywords": ["508", "accessibility", "eit", "electronic", "it", "hhs"]},
+        {
+            "part": "HHSAR",
+            "section": "352.270-5",
+            "title": "HHS-Specific Acquisition Requirements",
+            "summary": "Health and Human Services Acquisition Regulation supplements. Includes special clauses for research contracts, patient care, use of human subjects, animal welfare, and conflict of interest requirements specific to HHS/NIH.",
+            "applicability": "HHS/NIH acquisitions",
+            "keywords": [
+                "hhs",
+                "nih",
+                "hhsar",
+                "health",
+                "research",
+                "medical",
+                "human subjects",
+            ],
+        },
+        {
+            "part": "HHSAR",
+            "section": "352.239-74",
+            "title": "Electronic and Information Technology Accessibility (Section 508)",
+            "summary": "Requires that all electronic and information technology (EIT) products and services meet Section 508 accessibility standards. Applies to all HHS IT acquisitions.",
+            "applicability": "HHS IT acquisitions",
+            "keywords": ["508", "accessibility", "eit", "electronic", "it", "hhs"],
+        },
     ]
 
     # Search logic
@@ -1931,7 +2369,9 @@ def _exec_search_far_LEGACY(params: dict, tenant_id: str) -> dict:
 
         # Score based on keyword matches
         score = 0
-        text_fields = (entry["summary"] + " " + entry["title"] + " " + " ".join(entry["keywords"])).lower()
+        text_fields = (
+            entry["summary"] + " " + entry["title"] + " " + " ".join(entry["keywords"])
+        ).lower()
         for term in query_terms:
             if term in text_fields:
                 score += 1
@@ -1948,23 +2388,33 @@ def _exec_search_far_LEGACY(params: dict, tenant_id: str) -> dict:
     # Remove score and limit results
     clauses = []
     for r in results[:15]:
-        clauses.append({
-            "part": r["part"],
-            "section": r["section"],
-            "title": r["title"],
-            "summary": r["summary"],
-            "applicability": r["applicability"],
-        })
+        clauses.append(
+            {
+                "part": r["part"],
+                "section": r["section"],
+                "title": r["title"],
+                "summary": r["summary"],
+                "applicability": r["applicability"],
+            }
+        )
 
     # Fallback if no results
     if not clauses:
         clauses = [
-            {"part": "1", "section": "1.102", "title": "Statement of Guiding Principles",
-             "summary": "Deliver best value to the Government, satisfy the customer, minimize administrative costs, conduct business with integrity.",
-             "applicability": "All federal acquisitions"},
-            {"part": "10", "section": "10.001", "title": "Market Research Policy",
-             "summary": "Agencies must conduct market research before developing requirements and before soliciting offers.",
-             "applicability": "All acquisitions"},
+            {
+                "part": "1",
+                "section": "1.102",
+                "title": "Statement of Guiding Principles",
+                "summary": "Deliver best value to the Government, satisfy the customer, minimize administrative costs, conduct business with integrity.",
+                "applicability": "All federal acquisitions",
+            },
+            {
+                "part": "10",
+                "section": "10.001",
+                "title": "Market Research Policy",
+                "summary": "Agencies must conduct market research before developing requirements and before soliciting offers.",
+                "applicability": "All acquisitions",
+            },
         ]
 
     return {
@@ -1992,7 +2442,9 @@ def _update_document_content(
     if not doc_key:
         return {"error": "update_existing_key is required but empty"}
     if not content:
-        return {"error": "content is required for update. Provide the full document markdown in the content parameter."}
+        return {
+            "error": "content is required for update. Provide the full document markdown in the content parameter."
+        }
 
     user_id = _extract_user_id(session_id)
     bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
@@ -2013,7 +2465,11 @@ def _update_document_content(
             pkg_idx = parts.index("packages")
             package_id = parts[pkg_idx + 1]
             filename = parts[-1]
-            doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
+            doc_type = (
+                filename.split("_v")[0]
+                if "_v" in filename
+                else filename.rsplit(".", 1)[0]
+            )
             title = doc_type.replace("_", " ").title()
         except (ValueError, IndexError):
             return {"error": "Invalid package document key format"}
@@ -2073,9 +2529,15 @@ def _update_document_content(
             return {"error": f"Failed to save document: {str(e)}"}
 
 
-def _exec_edit_docx_document(params: dict, tenant_id: str, session_id: str = None) -> dict:
+def _exec_edit_docx_document(
+    params: dict, tenant_id: str, session_id: str = None
+) -> dict:
     """Apply targeted edits to an existing DOCX document."""
-    from app.document_ai_edit_service import DocxCheckboxEdit, DocxEdit, edit_docx_document
+    from app.document_ai_edit_service import (
+        DocxCheckboxEdit,
+        DocxEdit,
+        edit_docx_document,
+    )
 
     doc_key = params.get("document_key", "")
     edits_input = params.get("edits") or []
@@ -2095,7 +2557,9 @@ def _exec_edit_docx_document(params: dict, tenant_id: str, session_id: str = Non
         replacement_text = str(edit.get("replacement_text", "") or "")
         if not search_text:
             return {"error": f"edit #{idx} is missing search_text"}
-        edits.append(DocxEdit(search_text=search_text, replacement_text=replacement_text))
+        edits.append(
+            DocxEdit(search_text=search_text, replacement_text=replacement_text)
+        )
 
     checkbox_edits: list[DocxCheckboxEdit] = []
     for idx, edit in enumerate(checkbox_edits_input, start=1):
@@ -2154,7 +2618,9 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     data = raw_data if isinstance(raw_data, dict) else {}
     ai_content = params.get("content")  # AI-provided full document markdown
     package_id = params.get("package_id")
-    output_format = params.get("output_format") or _default_output_format_for_doc_type(doc_type)
+    output_format = params.get("output_format") or _default_output_format_for_doc_type(
+        doc_type
+    )
     timestamp = time.strftime("%Y%m%d_%H%M%S")
 
     # Enrich missing/partial document fields from recent session context so
@@ -2163,6 +2629,7 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
 
     # Normalize AI-sent field names to canonical placeholder_map names
     from app.template_registry import normalize_field_names
+
     data = normalize_field_names(data, doc_type)
 
     # Document-viewer edit flow: when current content + explicit clear request is
@@ -2173,16 +2640,27 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
         current_content = data.get("current_content")
         edit_request = str(data.get("edit_request", "") or "")
         if isinstance(current_content, str) and edit_request:
-            inline_edited_content = _apply_sow_clear_edits(current_content, edit_request)
+            inline_edited_content = _apply_sow_clear_edits(
+                current_content, edit_request
+            )
 
     # Validate doc_type
     valid_doc_types = {
-        "sow", "igce", "market_research", "justification", "acquisition_plan",
-        "eval_criteria", "security_checklist", "section_508", "cor_certification",
+        "sow",
+        "igce",
+        "market_research",
+        "justification",
+        "acquisition_plan",
+        "eval_criteria",
+        "security_checklist",
+        "section_508",
+        "cor_certification",
         "contract_type_justification",
     }
     if doc_type not in valid_doc_types:
-        return {"error": f"Unknown document type: {doc_type}. Supported: {', '.join(sorted(valid_doc_types))}."}
+        return {
+            "error": f"Unknown document type: {doc_type}. Supported: {', '.join(sorted(valid_doc_types))}."
+        }
 
     # Map doc_type to markdown generator functions (for fallback)
     markdown_generators = {
@@ -2218,7 +2696,9 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
         # Still attempt template population for branded DOCX output
         try:
             service = TemplateService(tenant_id, user_id, markdown_generators)
-            template_result = service.generate_document(doc_type, title, data, output_format)
+            template_result = service.generate_document(
+                doc_type, title, data, output_format
+            )
             if template_result.success:
                 preview = template_result.preview or ""
                 if not _looks_like_unfilled_template_preview(doc_type, preview):
@@ -2233,7 +2713,9 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
                         doc_type,
                     )
         except Exception:
-            logger.debug("Template population alongside AI content failed, using AI markdown")
+            logger.debug(
+                "Template population alongside AI content failed, using AI markdown"
+            )
     else:
         # No AI content — try template-based generation, then markdown fallback
         try:
@@ -2248,14 +2730,18 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
                     source = "markdown_fallback"
                     template_path = None
                 else:
-                    return {"error": f"No generator available for {doc_type}: {result.error}"}
+                    return {
+                        "error": f"No generator available for {doc_type}: {result.error}"
+                    }
             else:
                 file_type = result.file_type
                 source = result.source
                 template_path = result.template_path
 
                 # Detect unfilled templates and fall back to markdown
-                if _looks_like_unfilled_template_preview(doc_type, result.preview or ""):
+                if _looks_like_unfilled_template_preview(
+                    doc_type, result.preview or ""
+                ):
                     generator = markdown_generators.get(doc_type)
                     if generator:
                         content = generator(title, data)
@@ -2284,7 +2770,9 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
                         content = result.preview or ""
 
         except ImportError as e:
-            logger.warning("Template libraries unavailable: %s, using markdown fallback", e)
+            logger.warning(
+                "Template libraries unavailable: %s, using markdown fallback", e
+            )
             generator = markdown_generators.get(doc_type)
             if generator:
                 content = generator(title, data)
@@ -2299,7 +2787,8 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
     ext = file_type if file_type in ("docx", "xlsx") else "md"
     bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     content_to_store = (
-        result.content if result and result.success and file_type in ("docx", "xlsx")
+        result.content
+        if result and result.success and file_type in ("docx", "xlsx")
         else content
     )
 
@@ -2315,7 +2804,7 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
             "doc_type": doc_type,
         }
         # Enrich from TemplateResult if available
-        if result and hasattr(result, 'template_path') and result.template_path:
+        if result and hasattr(result, "template_path") and result.template_path:
             _template_provenance["template_id"] = result.template_path
 
     # Inject provenance metadata section into document content
@@ -2400,7 +2889,9 @@ def _exec_create_document(params: dict, tenant_id: str, session_id: str = None) 
                     logger.debug("Failed to save markdown sidecar for %s", s3_key)
         else:
             # Save markdown content
-            s3.put_object(Bucket=bucket, Key=s3_key, Body=content_to_store.encode("utf-8"))
+            s3.put_object(
+                Bucket=bucket, Key=s3_key, Body=content_to_store.encode("utf-8")
+            )
         save_status = "saved"
         save_location = f"s3://{bucket}/{s3_key}"
     except (ClientError, BotoCoreError) as e:
@@ -2486,16 +2977,18 @@ def _append_provenance_metadata(
     for field, value in rows:
         table_lines.append(f"| **{field}** | {value} |")
 
-    metadata_section = "\n".join([
-        "",
-        "---",
-        "",
-        "## Document Metadata",
-        "",
-        *table_lines,
-        "",
-        "*This is a draft document. Review and customize before official use.*",
-    ])
+    metadata_section = "\n".join(
+        [
+            "",
+            "---",
+            "",
+            "## Document Metadata",
+            "",
+            *table_lines,
+            "",
+            "*This is a draft document. Review and customize before official use.*",
+        ]
+    )
 
     return content.rstrip() + "\n" + metadata_section + "\n"
 
@@ -2561,10 +3054,7 @@ def _extract_sow_sections_from_history(
     if assistant_texts:
         best = max(assistant_texts[-4:], key=len)
         # Extract first meaningful paragraph (skip greetings)
-        paragraphs = [
-            p.strip() for p in best.split("\n\n")
-            if len(p.strip()) > 50
-        ]
+        paragraphs = [p.strip() for p in best.split("\n\n") if len(p.strip()) > 50]
         if paragraphs:
             bg_parts.append(paragraphs[0][:500])
 
@@ -2575,18 +3065,24 @@ def _generate_sow(title: str, data: dict) -> str:
     desc = data.get("description", "the required supplies/services")
     pop = data.get("period_of_performance", "12 months from date of award")
     conv_ctx = data.get("conversation_context", "")
-    deliverables = data.get("deliverables", [
-        "Project Management Plan — within 30 days of award",
-        "Monthly Status Reports — NLT 5th business day of each month",
-        "Final Delivery/Acceptance Report — within 30 days of contract completion",
-    ])
-    tasks = data.get("tasks", [
-        "Planning and Requirements Analysis",
-        "Implementation and Delivery",
-        "Testing and Quality Assurance",
-        "Training and Knowledge Transfer",
-        "Ongoing Support and Maintenance",
-    ])
+    deliverables = data.get(
+        "deliverables",
+        [
+            "Project Management Plan — within 30 days of award",
+            "Monthly Status Reports — NLT 5th business day of each month",
+            "Final Delivery/Acceptance Report — within 30 days of contract completion",
+        ],
+    )
+    tasks = data.get(
+        "tasks",
+        [
+            "Planning and Requirements Analysis",
+            "Implementation and Delivery",
+            "Testing and Quality Assurance",
+            "Training and Knowledge Transfer",
+            "Ongoing Support and Maintenance",
+        ],
+    )
 
     # Build scope from conversation history when available, falling back
     # to the explicit scope field or a standard template sentence.
@@ -2598,7 +3094,8 @@ def _generate_sow(title: str, data: dict) -> str:
         # Synthesize scope and background from the full conversation so the
         # document reflects what was actually discussed, not a stub.
         scope_parts, bg_parts = _extract_sow_sections_from_history(
-            conv_history, desc,
+            conv_history,
+            desc,
         )
         if scope_parts:
             scope_override = "\n".join(scope_parts)
@@ -2617,8 +3114,12 @@ def _generate_sow(title: str, data: dict) -> str:
     security_req = data.get("security_requirements", "")
     place = data.get("place_of_performance", "")
 
-    deliverables_text = "\n".join(f"   {i+1}. {d}" for i, d in enumerate(deliverables))
-    tasks_text = "\n".join(f"   5.{i+1} Task {i+1}: {t}" for i, t in enumerate(tasks))
+    deliverables_text = "\n".join(
+        f"   {i + 1}. {d}" for i, d in enumerate(deliverables)
+    )
+    tasks_text = "\n".join(
+        f"   5.{i + 1} Task {i + 1}: {t}" for i, t in enumerate(tasks)
+    )
 
     # Include conversation context as an appendix section when available
     # so the document captures intake details, agent analysis, and recommendations
@@ -2634,19 +3135,27 @@ and should be incorporated into the final document:
 {conv_ctx[:2500]}
 """
 
-    security_section = security_req if security_req else "[To be determined based on data sensitivity and access requirements]"
-    place_section = place if place else (
-        "National Cancer Institute\n"
-        "National Institutes of Health\n"
-        "Bethesda, MD 20892\n\n"
-        "[Or as otherwise specified in the contract]"
+    security_section = (
+        security_req
+        if security_req
+        else "[To be determined based on data sensitivity and access requirements]"
+    )
+    place_section = (
+        place
+        if place
+        else (
+            "National Cancer Institute\n"
+            "National Institutes of Health\n"
+            "Bethesda, MD 20892\n\n"
+            "[Or as otherwise specified in the contract]"
+        )
     )
 
     return f"""# STATEMENT OF WORK (SOW)
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Document Status:** DRAFT — Generated {time.strftime('%Y-%m-%d %H:%M UTC')}
+**Document Status:** DRAFT — Generated {time.strftime("%Y-%m-%d %H:%M UTC")}
 
 ---
 
@@ -2723,13 +3232,15 @@ def _generate_igce(title: str, data: dict) -> str:
     contingency = subtotal * (contingency_rate / 100)
     grand_total = subtotal + overhead + contingency
 
-    items_table = "\n".join(rows) if rows else "| [No line items provided] | - | - | - |"
+    items_table = (
+        "\n".join(rows) if rows else "| [No line items provided] | - | - | - |"
+    )
 
     return f"""# INDEPENDENT GOVERNMENT COST ESTIMATE (IGCE)
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Prepared:** {time.strftime('%Y-%m-%d')}
+**Prepared:** {time.strftime("%Y-%m-%d")}
 **Document Status:** DRAFT — For Budget Planning Purposes
 
 ---
@@ -2797,7 +3308,7 @@ def _generate_market_research(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **NAICS Code:** {naics}
 **Document Status:** DRAFT
 
@@ -2855,7 +3366,7 @@ def _generate_justification(title: str, data: dict) -> str:
 ### {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Estimated Value:** {value}
 **Document Status:** DRAFT
 
@@ -2935,7 +3446,7 @@ def _generate_acquisition_plan(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Estimated Value:** {value}
 **Document Status:** DRAFT
 
@@ -3014,19 +3525,34 @@ Best value tradeoff or lowest price technically acceptable as appropriate.
 
 def _generate_eval_criteria(title: str, data: dict) -> str:
     """Generate Evaluation Criteria document."""
-    factors = data.get("factors", [
-        {"name": "Technical Approach", "weight": "Most Important"},
-        {"name": "Past Performance", "weight": "Important"},
-        {"name": "Price", "weight": "Least Important"},
-    ])
+    factors = data.get(
+        "factors",
+        [
+            {"name": "Technical Approach", "weight": "Most Important"},
+            {"name": "Past Performance", "weight": "Important"},
+            {"name": "Price", "weight": "Least Important"},
+        ],
+    )
     method = data.get("evaluation_method", "Best Value Tradeoff")
-    rating_scale = data.get("rating_scale", [
-        ("Outstanding", "Exceeds requirements; very high probability of success"),
-        ("Good", "Meets requirements; high probability of success"),
-        ("Acceptable", "Meets minimum requirements; reasonable probability of success"),
-        ("Marginal", "Does not clearly meet some requirements; low probability of success"),
-        ("Unacceptable", "Fails to meet minimum requirements; no probability of success"),
-    ])
+    rating_scale = data.get(
+        "rating_scale",
+        [
+            ("Outstanding", "Exceeds requirements; very high probability of success"),
+            ("Good", "Meets requirements; high probability of success"),
+            (
+                "Acceptable",
+                "Meets minimum requirements; reasonable probability of success",
+            ),
+            (
+                "Marginal",
+                "Does not clearly meet some requirements; low probability of success",
+            ),
+            (
+                "Unacceptable",
+                "Fails to meet minimum requirements; no probability of success",
+            ),
+        ],
+    )
 
     factors_text = ""
     for i, f in enumerate(factors, 1):
@@ -3042,7 +3568,7 @@ def _generate_eval_criteria(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Evaluation Method:** {method}
 **Document Status:** DRAFT
 
@@ -3087,7 +3613,7 @@ def _generate_security_checklist(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Document Status:** DRAFT
 
 ---
@@ -3102,7 +3628,7 @@ def _generate_security_checklist(title: str, data: dict) -> str:
 | 4 | Is FISMA compliance required? | | | |
 | 5 | Are security clearances required? | | | |
 | 6 | Will data leave NIH facilities or networks? | | | |
-| 7 | Are cloud services involved? | {'[x]' if cloud_services else '[ ]'} | {'[ ]' if cloud_services else '[x]'} | |
+| 7 | Are cloud services involved? | {"[x]" if cloud_services else "[ ]"} | {"[ ]" if cloud_services else "[x]"} | |
 | 8 | Is FedRAMP authorization required? | | | |
 | 9 | Will contractor develop or modify software? | | | |
 | 10 | Are there data encryption requirements? | | | |
@@ -3149,9 +3675,12 @@ def _generate_section_508(title: str, data: dict) -> str:
 
     product_checklist = ""
     all_types = [
-        "Software Applications", "Web-based Information",
-        "Telecommunications Products", "Video and Multimedia",
-        "Self-Contained Products", "Desktop and Portable Computers",
+        "Software Applications",
+        "Web-based Information",
+        "Telecommunications Products",
+        "Video and Multimedia",
+        "Self-Contained Products",
+        "Desktop and Portable Computers",
         "Electronic Documents",
     ]
     for pt in all_types:
@@ -3162,7 +3691,7 @@ def _generate_section_508(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Document Status:** DRAFT
 
 ---
@@ -3180,7 +3709,7 @@ Does this acquisition include Electronic and Information Technology (EIT)?
 
 ## 3. EXCEPTION DETERMINATION
 
-**Exception Claimed:** {'Yes' if exception_claimed else 'No'}
+**Exception Claimed:** {"Yes" if exception_claimed else "No"}
 
 | Exception Type | Applicable |
 |---------------|------------|
@@ -3226,7 +3755,7 @@ def _generate_cor_certification(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Contract Number:** {contract_number}
 **Document Status:** DRAFT
 
@@ -3247,9 +3776,9 @@ def _generate_cor_certification(title: str, data: dict) -> str:
 
 | Level | Requirements | Applicable |
 |-------|-------------|------------|
-| I | 8 hours CLC training, low-risk contracts | {'[x]' if fac_cor_level == 'I' else '[ ]'} |
-| II | 40 hours CLC training, moderate-risk contracts | {'[x]' if fac_cor_level == 'II' else '[ ]'} |
-| III | 60 hours CLC training, high-risk contracts | {'[x]' if fac_cor_level == 'III' else '[ ]'} |
+| I | 8 hours CLC training, low-risk contracts | {"[x]" if fac_cor_level == "I" else "[ ]"} |
+| II | 40 hours CLC training, moderate-risk contracts | {"[x]" if fac_cor_level == "II" else "[ ]"} |
+| III | 60 hours CLC training, high-risk contracts | {"[x]" if fac_cor_level == "III" else "[ ]"} |
 
 ## 3. DELEGATED DUTIES
 
@@ -3298,7 +3827,7 @@ def _generate_contract_type_justification(title: str, data: dict) -> str:
 ### {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Estimated Value:** {value}
 **Recommended Contract Type:** {contract_type}
 **Document Status:** DRAFT
@@ -3315,10 +3844,10 @@ def _generate_contract_type_justification(title: str, data: dict) -> str:
 
 | Contract Type | Risk to Govt | Risk to Contractor | Recommended |
 |--------------|-------------|-------------------|-------------|
-| Firm-Fixed-Price (FFP) | Low | High | {'[x]' if 'fixed' in contract_type.lower() else '[ ]'} |
-| Time & Materials (T&M) | High | Low | {'[x]' if 't&m' in contract_type.lower() or 'time' in contract_type.lower() else '[ ]'} |
-| Cost-Reimbursement (CR) | High | Low | {'[x]' if 'cost' in contract_type.lower() else '[ ]'} |
-| Labor-Hour (LH) | Moderate | Moderate | {'[x]' if 'labor' in contract_type.lower() else '[ ]'} |
+| Firm-Fixed-Price (FFP) | Low | High | {"[x]" if "fixed" in contract_type.lower() else "[ ]"} |
+| Time & Materials (T&M) | High | Low | {"[x]" if "t&m" in contract_type.lower() or "time" in contract_type.lower() else "[ ]"} |
+| Cost-Reimbursement (CR) | High | Low | {"[x]" if "cost" in contract_type.lower() else "[ ]"} |
+| Labor-Hour (LH) | Moderate | Moderate | {"[x]" if "labor" in contract_type.lower() else "[ ]"} |
 
 ### 1.3 Rationale for Contract Type Selection
 
@@ -3359,7 +3888,9 @@ is in the best interest of the Government for this acquisition because:
 """
 
 
-def _exec_get_intake_status(params: dict, tenant_id: str, session_id: str = None) -> dict:
+def _exec_get_intake_status(
+    params: dict, tenant_id: str, session_id: str = None
+) -> dict:
     """Check intake status — queries DynamoDB and S3 for completeness."""
     intake_id = params.get("intake_id", "")
     user_id = _extract_user_id(session_id)
@@ -3377,16 +3908,27 @@ def _exec_get_intake_status(params: dict, tenant_id: str, session_id: str = None
         for obj in resp.get("Contents", []):
             key = obj["Key"]
             name = key.split("/")[-1]
-            existing_docs.append({
-                "key": key,
-                "name": name,
-                "size": obj["Size"],
-                "last_modified": obj["LastModified"].isoformat(),
-            })
+            existing_docs.append(
+                {
+                    "key": key,
+                    "name": name,
+                    "size": obj["Size"],
+                    "last_modified": obj["LastModified"].isoformat(),
+                }
+            )
             # Detect document types
-            for dt in ("sow", "igce", "market_research", "justification",
-                        "acquisition_plan", "eval_criteria", "security_checklist",
-                        "section_508", "cor_certification", "contract_type_justification"):
+            for dt in (
+                "sow",
+                "igce",
+                "market_research",
+                "justification",
+                "acquisition_plan",
+                "eval_criteria",
+                "security_checklist",
+                "section_508",
+                "cor_certification",
+                "contract_type_justification",
+            ):
                 if dt in name.lower():
                     doc_types_found.add(dt)
     except (ClientError, BotoCoreError) as e:
@@ -3396,6 +3938,7 @@ def _exec_get_intake_status(params: dict, tenant_id: str, session_id: str = None
     intake_records = []
     try:
         from boto3.dynamodb.conditions import Key as DDBKey
+
         ddb = _get_dynamodb()
         table = ddb.Table("eagle")
         resp = table.query(
@@ -3421,19 +3964,38 @@ def _exec_get_intake_status(params: dict, tenant_id: str, session_id: str = None
 
     # These doc types are conditional — only required in certain situations
     conditional_docs = {
-        "justification", "eval_criteria", "security_checklist",
-        "section_508", "contract_type_justification",
+        "justification",
+        "eval_criteria",
+        "security_checklist",
+        "section_508",
+        "contract_type_justification",
     }
 
     completed = []
     pending = []
     for doc_key, doc_name in required_docs.items():
         if doc_key in doc_types_found:
-            completed.append({"document": doc_name, "type": doc_key, "status": "✅ Complete"})
+            completed.append(
+                {"document": doc_name, "type": doc_key, "status": "✅ Complete"}
+            )
         elif doc_key in conditional_docs:
-            pending.append({"document": doc_name, "type": doc_key, "status": "🔲 Conditional", "priority": "Conditional"})
+            pending.append(
+                {
+                    "document": doc_name,
+                    "type": doc_key,
+                    "status": "🔲 Conditional",
+                    "priority": "Conditional",
+                }
+            )
         else:
-            pending.append({"document": doc_name, "type": doc_key, "status": "🔲 Not Started", "priority": "High"})
+            pending.append(
+                {
+                    "document": doc_name,
+                    "type": doc_key,
+                    "status": "🔲 Not Started",
+                    "priority": "High",
+                }
+            )
 
     total = len(required_docs) - len(conditional_docs)  # Exclude conditional docs
     done = len([c for c in completed if c["type"] not in conditional_docs])
@@ -3447,7 +4009,9 @@ def _exec_get_intake_status(params: dict, tenant_id: str, session_id: str = None
         "documents_pending": pending,
         "existing_files": existing_docs,
         "intake_records": intake_records[:10],
-        "next_action": pending[0]["document"] if pending else "All required documents complete!",
+        "next_action": pending[0]["document"]
+        if pending
+        else "All required documents complete!",
         "estimated_completion": "Depends on remaining document generation",
     }
 
@@ -3459,29 +4023,62 @@ WORKFLOW_STAGES = [
         "id": "requirements",
         "name": "Requirements Gathering",
         "description": "Collect acquisition details: what, why, when, how much",
-        "fields": ["title", "description", "estimated_value", "period_of_performance", "urgency"],
-        "next_actions": ["Describe the acquisition need", "Provide estimated value", "Specify timeline"],
+        "fields": [
+            "title",
+            "description",
+            "estimated_value",
+            "period_of_performance",
+            "urgency",
+        ],
+        "next_actions": [
+            "Describe the acquisition need",
+            "Provide estimated value",
+            "Specify timeline",
+        ],
     },
     {
         "id": "compliance",
         "name": "Compliance Check",
         "description": "Verify FAR/DFAR requirements and acquisition thresholds",
-        "fields": ["acquisition_type", "threshold", "competition_required", "far_citations", "small_business"],
-        "next_actions": ["Search FAR for applicable regulations", "Determine acquisition type", "Check competition requirements"],
+        "fields": [
+            "acquisition_type",
+            "threshold",
+            "competition_required",
+            "far_citations",
+            "small_business",
+        ],
+        "next_actions": [
+            "Search FAR for applicable regulations",
+            "Determine acquisition type",
+            "Check competition requirements",
+        ],
     },
     {
         "id": "documents",
         "name": "Document Generation",
         "description": "Generate required acquisition documents",
-        "fields": ["sow_generated", "igce_generated", "market_research_generated", "justification_generated"],
-        "next_actions": ["Generate Statement of Work", "Generate IGCE", "Generate Market Research"],
+        "fields": [
+            "sow_generated",
+            "igce_generated",
+            "market_research_generated",
+            "justification_generated",
+        ],
+        "next_actions": [
+            "Generate Statement of Work",
+            "Generate IGCE",
+            "Generate Market Research",
+        ],
     },
     {
         "id": "review",
         "name": "Review & Submit",
         "description": "Final review and package submission",
         "fields": ["reviewed_by", "review_notes", "submitted_at", "approval_status"],
-        "next_actions": ["Review all documents", "Add any notes", "Submit for approval"],
+        "next_actions": [
+            "Review all documents",
+            "Add any notes",
+            "Submit for approval",
+        ],
     },
 ]
 
@@ -3491,24 +4088,24 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
     action = params.get("action", "status")
     intake_id = params.get("intake_id")
     data = params.get("data", {})
-    
+
     # In-memory workflow state (would be DynamoDB in production)
     # For demo, we use a simple file-based approach
     workflow_file = f"/tmp/eagle_workflow_{tenant_id}.json"
-    
+
     def load_workflow() -> dict:
         try:
             with open(workflow_file, "r") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-    
+
     def save_workflow(state: dict):
         with open(workflow_file, "w") as f:
             json.dump(state, f, indent=2, default=str)
-    
+
     workflows = load_workflow()
-    
+
     if action == "start":
         # Create a new intake workflow
         new_id = f"EAGLE-{tenant_id[:8]}-{int(time.time()) % 100000:05d}"
@@ -3523,7 +4120,7 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
             "data": data,
         }
         save_workflow(workflows)
-        
+
         stage = WORKFLOW_STAGES[0]
         return {
             "action": "started",
@@ -3538,7 +4135,7 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
             "fields_to_collect": stage["fields"],
             "tip": "Provide the acquisition details, and I'll guide you through each step.",
         }
-    
+
     elif action == "status":
         # Get current workflow status
         if not intake_id:
@@ -3549,16 +4146,20 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
                     "hint": "Try: 'Start a new intake for cloud services'",
                 }
             intake_id = list(workflows.keys())[-1]
-        
+
         wf = workflows.get(intake_id)
         if not wf:
             return {"error": f"Intake {intake_id} not found"}
-        
+
         current_idx = wf.get("current_stage", 0)
-        stage = WORKFLOW_STAGES[current_idx] if current_idx < len(WORKFLOW_STAGES) else None
-        
-        progress_bar = "".join(["✅" if i < current_idx else "🔲" for i in range(len(WORKFLOW_STAGES))])
-        
+        stage = (
+            WORKFLOW_STAGES[current_idx] if current_idx < len(WORKFLOW_STAGES) else None
+        )
+
+        progress_bar = "".join(
+            ["✅" if i < current_idx else "🔲" for i in range(len(WORKFLOW_STAGES))]
+        )
+
         return {
             "intake_id": intake_id,
             "status": wf.get("status", "in_progress"),
@@ -3568,37 +4169,45 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
                 "number": current_idx + 1,
                 "name": stage["name"] if stage else "Complete",
                 "description": stage["description"] if stage else "All stages complete",
-            } if stage else {"name": "Complete", "description": "Workflow finished"},
+            }
+            if stage
+            else {"name": "Complete", "description": "Workflow finished"},
             "stages_completed": wf.get("stages_completed", []),
-            "next_actions": stage["next_actions"] if stage else ["Submit for final approval"],
+            "next_actions": stage["next_actions"]
+            if stage
+            else ["Submit for final approval"],
             "data_collected": wf.get("data", {}),
             "created_at": wf.get("created_at"),
         }
-    
+
     elif action == "advance":
         # Move to next stage
         if not intake_id:
             if not workflows:
-                return {"error": "No active workflow. Start one first with action='start'"}
+                return {
+                    "error": "No active workflow. Start one first with action='start'"
+                }
             intake_id = list(workflows.keys())[-1]
-        
+
         wf = workflows.get(intake_id)
         if not wf:
             return {"error": f"Intake {intake_id} not found"}
-        
+
         current_idx = wf.get("current_stage", 0)
-        
+
         # Save stage data
         if data:
             wf.setdefault("data", {}).update(data)
-        
+
         # Mark current stage complete
         completed_stage = WORKFLOW_STAGES[current_idx]["name"]
-        wf.setdefault("stages_completed", []).append({
-            "stage": completed_stage,
-            "completed_at": datetime.utcnow().isoformat(),
-        })
-        
+        wf.setdefault("stages_completed", []).append(
+            {
+                "stage": completed_stage,
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+        )
+
         # Advance to next stage
         next_idx = current_idx + 1
         if next_idx >= len(WORKFLOW_STAGES):
@@ -3606,7 +4215,7 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
             wf["status"] = "ready_for_review"
             wf["stage_name"] = "Complete"
             save_workflow(workflows)
-            
+
             return {
                 "action": "workflow_complete",
                 "intake_id": intake_id,
@@ -3619,14 +4228,16 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
                     "Submit for supervisor approval",
                 ],
             }
-        
+
         wf["current_stage"] = next_idx
         wf["stage_name"] = WORKFLOW_STAGES[next_idx]["name"]
         save_workflow(workflows)
-        
+
         next_stage = WORKFLOW_STAGES[next_idx]
-        progress_bar = "".join(["✅" if i <= current_idx else "🔲" for i in range(len(WORKFLOW_STAGES))])
-        
+        progress_bar = "".join(
+            ["✅" if i <= current_idx else "🔲" for i in range(len(WORKFLOW_STAGES))]
+        )
+
         return {
             "action": "advanced",
             "intake_id": intake_id,
@@ -3641,24 +4252,24 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
             "next_actions": next_stage["next_actions"],
             "fields_to_collect": next_stage["fields"],
         }
-    
+
     elif action == "complete":
         # Mark workflow as submitted
         if not intake_id:
             if not workflows:
                 return {"error": "No active workflow"}
             intake_id = list(workflows.keys())[-1]
-        
+
         wf = workflows.get(intake_id)
         if not wf:
             return {"error": f"Intake {intake_id} not found"}
-        
+
         wf["status"] = "submitted"
         wf["submitted_at"] = datetime.utcnow().isoformat()
         if data:
             wf.setdefault("data", {}).update(data)
         save_workflow(workflows)
-        
+
         return {
             "action": "submitted",
             "intake_id": intake_id,
@@ -3675,18 +4286,21 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
                 "Estimated review time: 2-3 business days",
             ],
         }
-    
+
     elif action == "reset":
         # Reset/delete a workflow
         if intake_id and intake_id in workflows:
             del workflows[intake_id]
             save_workflow(workflows)
-            return {"action": "reset", "message": f"Workflow {intake_id} has been reset"}
+            return {
+                "action": "reset",
+                "message": f"Workflow {intake_id} has been reset",
+            }
         else:
             workflows.clear()
             save_workflow(workflows)
             return {"action": "reset", "message": "All workflows cleared"}
-    
+
     else:
         return {
             "error": f"Unknown action: {action}",
@@ -3695,6 +4309,7 @@ def _exec_intake_workflow(params: dict, tenant_id: str) -> dict:
 
 
 # ── Compliance Matrix Handler ────────────────────────────────────────
+
 
 def _exec_query_compliance_matrix(params: dict, tenant_id: str) -> dict:
     """Execute a compliance matrix operation (read-only, no tenant scoping)."""
@@ -3709,12 +4324,20 @@ def _exec_query_compliance_matrix(params: dict, tenant_id: str) -> dict:
 
 # ── Admin CRUD Tool Handlers ─────────────────────────────────────────
 
+
 def _exec_manage_skills(params: dict, tenant_id: str) -> dict:
     """CRUD handler for custom skills — wraps skill_store functions."""
     from app.skill_store import (
-        create_skill, get_skill, update_skill, list_skills,
-        delete_skill, publish_skill, submit_for_review, disable_skill,
+        create_skill,
+        get_skill,
+        update_skill,
+        list_skills,
+        delete_skill,
+        publish_skill,
+        submit_for_review,
+        disable_skill,
     )
+
     action = params.get("action", "list")
 
     if action == "list":
@@ -3726,7 +4349,11 @@ def _exec_manage_skills(params: dict, tenant_id: str) -> dict:
         if not skill_id:
             return {"error": "skill_id is required for get"}
         item = get_skill(tenant_id, skill_id)
-        return {"action": "get", "skill": item} if item else {"error": f"Skill {skill_id} not found"}
+        return (
+            {"action": "get", "skill": item}
+            if item
+            else {"error": f"Skill {skill_id} not found"}
+        )
 
     if action == "create":
         required = ["name", "display_name", "description", "prompt_body"]
@@ -3753,7 +4380,11 @@ def _exec_manage_skills(params: dict, tenant_id: str) -> dict:
             return {"error": "skill_id is required for update"}
         updates = {k: v for k, v in params.items() if k not in ("action", "skill_id")}
         item = update_skill(tenant_id, skill_id, updates)
-        return {"action": "update", "skill": item} if item else {"error": f"Skill {skill_id} not found or no updatable fields"}
+        return (
+            {"action": "update", "skill": item}
+            if item
+            else {"error": f"Skill {skill_id} not found or no updatable fields"}
+        )
 
     if action == "delete":
         skill_id = params.get("skill_id")
@@ -3767,30 +4398,49 @@ def _exec_manage_skills(params: dict, tenant_id: str) -> dict:
         if not skill_id:
             return {"error": "skill_id is required for submit"}
         item = submit_for_review(tenant_id, skill_id)
-        return {"action": "submit", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in draft status"}
+        return (
+            {"action": "submit", "skill": item}
+            if item
+            else {"error": f"Skill {skill_id} not found or not in draft status"}
+        )
 
     if action == "publish":
         skill_id = params.get("skill_id")
         if not skill_id:
             return {"error": "skill_id is required for publish"}
         item = publish_skill(tenant_id, skill_id)
-        return {"action": "publish", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in review status"}
+        return (
+            {"action": "publish", "skill": item}
+            if item
+            else {"error": f"Skill {skill_id} not found or not in review status"}
+        )
 
     if action == "disable":
         skill_id = params.get("skill_id")
         if not skill_id:
             return {"error": "skill_id is required for disable"}
         item = disable_skill(tenant_id, skill_id)
-        return {"action": "disable", "skill": item} if item else {"error": f"Skill {skill_id} not found or not in active status"}
+        return (
+            {"action": "disable", "skill": item}
+            if item
+            else {"error": f"Skill {skill_id} not found or not in active status"}
+        )
 
-    return {"error": f"Unknown action: {action}. Valid: list, get, create, update, delete, submit, publish, disable"}
+    return {
+        "error": f"Unknown action: {action}. Valid: list, get, create, update, delete, submit, publish, disable"
+    }
 
 
 def _exec_manage_prompts(params: dict, tenant_id: str) -> dict:
     """CRUD handler for agent prompt overrides — wraps prompt_store functions."""
     from app.prompt_store import (
-        put_prompt, get_prompt, delete_prompt, list_tenant_prompts, resolve_prompt,
+        put_prompt,
+        get_prompt,
+        delete_prompt,
+        list_tenant_prompts,
+        resolve_prompt,
     )
+
     action = params.get("action", "list")
 
     if action == "list":
@@ -3802,7 +4452,11 @@ def _exec_manage_prompts(params: dict, tenant_id: str) -> dict:
         if not agent_name:
             return {"error": "agent_name is required for get"}
         item = get_prompt(tenant_id, agent_name)
-        return {"action": "get", "prompt": item} if item else {"error": f"No prompt override for agent '{agent_name}'"}
+        return (
+            {"action": "get", "prompt": item}
+            if item
+            else {"error": f"No prompt override for agent '{agent_name}'"}
+        )
 
     if action == "set":
         agent_name = params.get("agent_name")
@@ -3831,14 +4485,21 @@ def _exec_manage_prompts(params: dict, tenant_id: str) -> dict:
         body = resolve_prompt(tenant_id, agent_name)
         return {"action": "resolve", "agent_name": agent_name, "resolved_body": body}
 
-    return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
+    return {
+        "error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"
+    }
 
 
 def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
     """CRUD handler for document templates — wraps template_store functions."""
     from app.template_store import (
-        put_template, get_template, delete_template, list_tenant_templates, resolve_template,
+        put_template,
+        get_template,
+        delete_template,
+        list_tenant_templates,
+        resolve_template,
     )
+
     action = params.get("action", "list")
 
     if action == "list":
@@ -3849,8 +4510,14 @@ def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
         doc_type = params.get("doc_type")
         if not doc_type:
             return {"error": "doc_type is required for get"}
-        item = get_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
-        return {"action": "get", "template": item} if item else {"error": f"No template for doc_type '{doc_type}'"}
+        item = get_template(
+            tenant_id, doc_type, user_id=params.get("user_id", "shared")
+        )
+        return (
+            {"action": "get", "template": item}
+            if item
+            else {"error": f"No template for doc_type '{doc_type}'"}
+        )
 
     if action == "set":
         doc_type = params.get("doc_type")
@@ -3870,17 +4537,29 @@ def _exec_manage_templates(params: dict, tenant_id: str) -> dict:
         doc_type = params.get("doc_type")
         if not doc_type:
             return {"error": "doc_type is required for delete"}
-        ok = delete_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
+        ok = delete_template(
+            tenant_id, doc_type, user_id=params.get("user_id", "shared")
+        )
         return {"action": "delete", "deleted": ok, "doc_type": doc_type}
 
     if action == "resolve":
         doc_type = params.get("doc_type")
         if not doc_type:
             return {"error": "doc_type is required for resolve"}
-        body, source, metadata = resolve_template(tenant_id, doc_type, user_id=params.get("user_id", "shared"))
-        return {"action": "resolve", "doc_type": doc_type, "resolved_body": body, "source": source, "metadata": metadata}
+        body, source, metadata = resolve_template(
+            tenant_id, doc_type, user_id=params.get("user_id", "shared")
+        )
+        return {
+            "action": "resolve",
+            "doc_type": doc_type,
+            "resolved_body": body,
+            "source": source,
+            "metadata": metadata,
+        }
 
-    return {"error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"}
+    return {
+        "error": f"Unknown action: {action}. Valid: list, get, set, delete, resolve"
+    }
 
 
 def _exec_document_changelog_search(params: dict, tenant_id: str) -> dict:
@@ -3975,7 +4654,9 @@ def _exec_finalize_package(params: dict, tenant_id: str) -> dict:
             result["status"] = "review"
         else:
             result["submitted"] = False
-            result["submit_error"] = "Package could not be submitted (may not be in drafting status)"
+            result["submit_error"] = (
+                "Package could not be submitted (may not be in drafting status)"
+            )
 
     return result
 
@@ -4006,7 +4687,7 @@ def _backfill_completed_docs(
         found: dict[str, str] = {}  # doc_type → s3_key (latest)
         for obj in contents:
             key = obj["Key"]
-            filename = key[len(prefix):]  # e.g. "sow_20260325_203000.md"
+            filename = key[len(prefix) :]  # e.g. "sow_20260325_203000.md"
             parts = filename.split("_", 1)
             if parts:
                 dt = parts[0].lower()
@@ -4034,7 +4715,7 @@ def _backfill_completed_docs(
                     package_id=pkg_id,
                     doc_type=doc_type,
                     content=content,
-                    title=f"{doc_type.replace('_', ' ').title()} (linked)",
+                    title=f"{doc_type.replace('_', ' ').title()}",
                     file_type=s3_key.rsplit(".", 1)[-1] if "." in s3_key else "md",
                     created_by_user_id=owner,
                     session_id=session_id,
@@ -4046,10 +4727,14 @@ def _backfill_completed_docs(
                         new_required.append(doc_type)
                     logger.info(
                         "Backfilled %s from %s into package %s",
-                        doc_type, s3_key, pkg_id,
+                        doc_type,
+                        s3_key,
+                        pkg_id,
                     )
             except Exception:
-                logger.debug("Backfill failed for %s: %s", doc_type, s3_key, exc_info=True)
+                logger.debug(
+                    "Backfill failed for %s: %s", doc_type, s3_key, exc_info=True
+                )
 
         updates: dict = {}
         if completed != list(package.get("completed_documents", [])):
@@ -4065,8 +4750,11 @@ def _backfill_completed_docs(
 def _exec_manage_package(params: dict, tenant_id: str, session_id: str = None) -> dict:
     """Create, read, update, list, or get checklist for acquisition packages."""
     from app.package_store import (
-        create_package, get_package, update_package,
-        list_packages, get_package_checklist,
+        create_package,
+        get_package,
+        update_package,
+        list_packages,
+        get_package_checklist,
     )
     from decimal import Decimal
 
@@ -4115,9 +4803,16 @@ def _exec_manage_package(params: dict, tenant_id: str, session_id: str = None) -
             return {"error": "package_id is required for update operation"}
         updates = params.get("updates", {})
         # Also accept top-level fields as updates
-        for field in ("title", "requirement_type", "estimated_value",
-                      "acquisition_method", "contract_type", "contract_vehicle",
-                      "notes", "status"):
+        for field in (
+            "title",
+            "requirement_type",
+            "estimated_value",
+            "acquisition_method",
+            "contract_type",
+            "contract_vehicle",
+            "notes",
+            "status",
+        ):
             val = params.get(field)
             if val and field not in updates:
                 updates[field] = val
@@ -4142,7 +4837,9 @@ def _exec_manage_package(params: dict, tenant_id: str, session_id: str = None) -
         return checklist
 
     else:
-        return {"error": f"Unknown operation: {operation}. Use create, get, update, list, or checklist."}
+        return {
+            "error": f"Unknown operation: {operation}. Use create, get, update, list, or checklist."
+        }
 
 
 # ── Tool Dispatch ────────────────────────────────────────────────────
@@ -4176,7 +4873,13 @@ TOOL_DISPATCH = {
 }
 
 # Tools that need session_id for per-user scoping
-TOOLS_NEEDING_SESSION = {"s3_document_ops", "create_document", "edit_docx_document", "get_intake_status", "manage_package"}
+TOOLS_NEEDING_SESSION = {
+    "s3_document_ops",
+    "create_document",
+    "edit_docx_document",
+    "get_intake_status",
+    "manage_package",
+}
 
 
 def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> str:
@@ -4193,16 +4896,19 @@ def execute_tool(tool_name: str, tool_input: dict, session_id: str = None) -> st
             return json.dumps(result, indent=2, default=str)
         except Exception as e:
             logger.error("Tool execution error (%s): %s", tool_name, e, exc_info=True)
-            return json.dumps({
-                "error": f"Tool execution failed: {str(e)}",
-                "tool": tool_name,
-                "suggestion": "Try again or use a different approach.",
-            })
+            return json.dumps(
+                {
+                    "error": f"Tool execution failed: {str(e)}",
+                    "tool": tool_name,
+                    "suggestion": "Try again or use a different approach.",
+                }
+            )
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
 
 # ── Anthropic Client ─────────────────────────────────────────────────
+
 
 def get_client() -> Any:
     """Create an Anthropic client.
@@ -4281,11 +4987,13 @@ async def stream_chat(
                 for event in stream:
                     if event.type == "content_block_start":
                         if event.content_block.type == "tool_use":
-                            tool_uses.append({
-                                "id": event.content_block.id,
-                                "name": event.content_block.name,
-                                "input_json": "",
-                            })
+                            tool_uses.append(
+                                {
+                                    "id": event.content_block.id,
+                                    "name": event.content_block.name,
+                                    "input_json": "",
+                                }
+                            )
                     elif event.type == "content_block_delta":
                         if event.delta.type == "text_delta":
                             current_text += event.delta.text
@@ -4322,12 +5030,14 @@ async def stream_chat(
                 tool_input = json.loads(tu["input_json"]) if tu["input_json"] else {}
             except json.JSONDecodeError:
                 tool_input = {}
-            assistant_content.append({
-                "type": "tool_use",
-                "id": tu["id"],
-                "name": tu["name"],
-                "input": tool_input,
-            })
+            assistant_content.append(
+                {
+                    "type": "tool_use",
+                    "id": tu["id"],
+                    "name": tu["name"],
+                    "input": tool_input,
+                }
+            )
 
         messages.append({"role": "assistant", "content": assistant_content})
 
@@ -4348,11 +5058,13 @@ async def stream_chat(
             if on_tool_result:
                 await on_tool_result(tu["name"], output)
 
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tu["id"],
-                "content": output,
-            })
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tu["id"],
+                    "content": output,
+                }
+            )
 
         messages.append({"role": "user", "content": tool_results})
 

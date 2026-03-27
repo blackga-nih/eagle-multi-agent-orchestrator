@@ -80,7 +80,11 @@ def _extract_first_money_value(text: str) -> str | None:
     if match:
         return match.group(0)
 
-    match = re.search(r"\b[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:million|billion|k|m)\b", text, flags=re.IGNORECASE)
+    match = re.search(
+        r"\b[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:million|billion|k|m)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
     if match:
         return match.group(0)
     return None
@@ -89,7 +93,11 @@ def _extract_first_money_value(text: str) -> str | None:
 def _extract_period(text: str) -> str | None:
     if not text:
         return None
-    match = re.search(r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})", text, flags=re.IGNORECASE)
+    match = re.search(
+        r"\b\d+\s*(?:month|months|year|years)\b(?:[^.,;\n]{0,40})",
+        text,
+        flags=re.IGNORECASE,
+    )
     if match:
         return match.group(0).strip()
     return None
@@ -154,7 +162,11 @@ def _augment_document_data_from_context(
         return merged
 
     user_msgs = [m for m in context_messages if not m.startswith("[ASSISTANT] ")]
-    assistant_msgs = [m.removeprefix("[ASSISTANT] ") for m in context_messages if m.startswith("[ASSISTANT] ")]
+    assistant_msgs = [
+        m.removeprefix("[ASSISTANT] ")
+        for m in context_messages
+        if m.startswith("[ASSISTANT] ")
+    ]
     substantive_user_msgs = [m for m in user_msgs if not _is_generation_trigger(m)]
     last_user_text = (substantive_user_msgs or user_msgs)[-1] if user_msgs else ""
     context_blob = " ".join(context_messages[-8:])
@@ -180,19 +192,30 @@ def _augment_document_data_from_context(
         merged.setdefault("timeline", period)
 
     parsed_sections = _extract_section_bullets("\n".join(context_messages[-3:]))
-    project_description = " ".join(parsed_sections.get("project_description", [])).strip()
+    project_description = " ".join(
+        parsed_sections.get("project_description", [])
+    ).strip()
     if project_description:
         existing_desc = str(merged.get("description", "")).strip()
-        if not existing_desc or "project description" in existing_desc.lower() or len(existing_desc) > 320:
+        if (
+            not existing_desc
+            or "project description" in existing_desc.lower()
+            or len(existing_desc) > 320
+        ):
             merged["description"] = project_description[:500]
         merged.setdefault("requirement", project_description[:500])
         merged.setdefault("objective", project_description[:500])
     if parsed_sections.get("deliverables"):
         merged.setdefault("deliverables", parsed_sections["deliverables"][:15])
     if parsed_sections.get("security"):
-        merged.setdefault("security_requirements", "; ".join(parsed_sections["security"])[:600])
+        merged.setdefault(
+            "security_requirements", "; ".join(parsed_sections["security"])[:600]
+        )
     if parsed_sections.get("environment_tiers"):
-        merged.setdefault("place_of_performance", "; ".join(parsed_sections["environment_tiers"])[:300])
+        merged.setdefault(
+            "place_of_performance",
+            "; ".join(parsed_sections["environment_tiers"])[:300],
+        )
 
     if doc_type == "igce":
         merged.setdefault("item_name", title or "Primary acquisition item")
@@ -205,13 +228,16 @@ def _augment_document_data_from_context(
         if combined_tasks:
             merged.setdefault("tasks", combined_tasks)
         if scope_items:
-            merged.setdefault("scope", "\n".join(f"- {item}" for item in scope_items[:10]))
+            merged.setdefault(
+                "scope", "\n".join(f"- {item}" for item in scope_items[:10])
+            )
         elif substantive_user_msgs:
             merged.setdefault("scope", max(substantive_user_msgs[-6:], key=len)[:500])
 
     if assistant_msgs:
         clean_assistant = [
-            msg for msg in assistant_msgs
+            msg
+            for msg in assistant_msgs
             if not re.search(
                 r"Your task is to create a detailed summary|"
                 r"You are an? .{0,30}(?:assistant|agent|specialist)|"
@@ -247,10 +273,22 @@ _DOC_TYPE_ALIASES = {
 
 _TITLE_DOC_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(statement\s+of\s+work|sow)\b", re.IGNORECASE), "sow"),
-    (re.compile(r"\b(igce|ige|independent\s+government\s+(?:cost\s+)?estimate|cost\s+estimate)\b", re.IGNORECASE), "igce"),
+    (
+        re.compile(
+            r"\b(igce|ige|independent\s+government\s+(?:cost\s+)?estimate|cost\s+estimate)\b",
+            re.IGNORECASE,
+        ),
+        "igce",
+    ),
     (re.compile(r"\bmarket\s+research\b", re.IGNORECASE), "market_research"),
     (re.compile(r"\bacquisition\s+plan\b", re.IGNORECASE), "acquisition_plan"),
-    (re.compile(r"\b(j\s*(?:&|and)\s*a|justification(?:\s*&\s*approval)?|sole\s+source)\b", re.IGNORECASE), "justification"),
+    (
+        re.compile(
+            r"\b(j\s*(?:&|and)\s*a|justification(?:\s*&\s*approval)?|sole\s+source)\b",
+            re.IGNORECASE,
+        ),
+        "justification",
+    ),
 ]
 
 
@@ -264,12 +302,17 @@ def _infer_doc_type_from_title(title: str) -> str | None:
 
 
 def _normalize_create_document_doc_type(raw_doc_type: Any, title: str) -> str:
-    requested = str(raw_doc_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    requested = (
+        str(raw_doc_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    )
     normalized = _DOC_TYPE_ALIASES.get(requested, requested)
     inferred = _infer_doc_type_from_title(title)
 
     if normalized == "sow" and inferred == "igce":
-        logger.info("Overriding create_document doc_type from sow to igce based on title=%r", title)
+        logger.info(
+            "Overriding create_document doc_type from sow to igce based on title=%r",
+            title,
+        )
         return inferred
     if normalized:
         return normalized
@@ -332,7 +375,14 @@ def _looks_like_unfilled_template_preview(doc_type: str, preview: str) -> bool:
             "[contract number]",
         ],
     }.get(doc_type, [])
-    return sum(1 for marker in markers if marker.lower() in " ".join(preview.lower().split())) >= 2
+    return (
+        sum(
+            1
+            for marker in markers
+            if marker.lower() in " ".join(preview.lower().split())
+        )
+        >= 2
+    )
 
 
 _SOW_SECTION_HINTS: dict[str, str] = {
@@ -353,7 +403,9 @@ def _extract_sow_clear_targets(edit_request: str) -> list[str]:
     req = (edit_request or "").strip().lower()
     if not req:
         return []
-    clear_intent = "clear" in req or "blank" in req or "to be completed" in req or "remove" in req
+    clear_intent = (
+        "clear" in req or "blank" in req or "to be completed" in req or "remove" in req
+    )
     if not clear_intent:
         return []
 
@@ -401,7 +453,11 @@ def _apply_sow_clear_edits(current_content: str, edit_request: str) -> str | Non
 
     for idx, heading_match in enumerate(heading_matches):
         heading_end = heading_match.end()
-        next_start = heading_matches[idx + 1].start() if idx + 1 < len(heading_matches) else len(current_content)
+        next_start = (
+            heading_matches[idx + 1].start()
+            if idx + 1 < len(heading_matches)
+            else len(current_content)
+        )
         heading_text = heading_match.group(1).strip().lower()
         body_text = current_content[heading_end:next_start]
         rebuilt.append(current_content[cursor:heading_end])
@@ -428,7 +484,9 @@ def _update_document_content(
     if not doc_key:
         return {"error": "update_existing_key is required but empty"}
     if not content:
-        return {"error": "content is required for update. Provide the full document markdown in the content parameter."}
+        return {
+            "error": "content is required for update. Provide the full document markdown in the content parameter."
+        }
 
     user_id = extract_user_id(session_id)
     bucket = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
@@ -444,7 +502,11 @@ def _update_document_content(
             pkg_idx = parts.index("packages")
             package_id = parts[pkg_idx + 1]
             filename = parts[-1]
-            doc_type = filename.split("_v")[0] if "_v" in filename else filename.rsplit(".", 1)[0]
+            doc_type = (
+                filename.split("_v")[0]
+                if "_v" in filename
+                else filename.rsplit(".", 1)[0]
+            )
             title = doc_type.replace("_", " ").title()
         except (ValueError, IndexError):
             return {"error": "Invalid package document key format"}
@@ -490,13 +552,20 @@ def _update_document_content(
             actor_user_id=user_id,
             session_id=session_id,
         )
-        return {"success": True, "mode": "update_workspace", "key": doc_key, "message": "Document updated"}
+        return {
+            "success": True,
+            "mode": "update_workspace",
+            "key": doc_key,
+            "message": "Document updated",
+        }
     except Exception as exc:
         logger.warning("Failed to update workspace document %s: %s", doc_key, exc)
         return {"error": f"Failed to update document: {exc}"}
 
 
-def _extract_sow_sections_from_history(history: list[dict], description: str) -> tuple[list[str], list[str]]:
+def _extract_sow_sections_from_history(
+    history: list[dict], description: str
+) -> tuple[list[str], list[str]]:
     scope_parts: list[str] = []
     bg_parts: list[str] = []
     user_texts: list[str] = []
@@ -531,7 +600,11 @@ def _extract_sow_sections_from_history(history: list[dict], description: str) ->
                 scope_parts.append(f"- {user_text[:300].rstrip('.')}")
 
     if assistant_texts:
-        paragraphs = [part.strip() for part in max(assistant_texts[-4:], key=len).split("\n\n") if len(part.strip()) > 50]
+        paragraphs = [
+            part.strip()
+            for part in max(assistant_texts[-4:], key=len).split("\n\n")
+            if len(part.strip()) > 50
+        ]
         if paragraphs:
             bg_parts.append(paragraphs[0][:500])
     return scope_parts, bg_parts
@@ -577,16 +650,18 @@ def _append_provenance_metadata(
     for field, value in rows:
         table_lines.append(f"| **{field}** | {value} |")
 
-    metadata_section = "\n".join([
-        "",
-        "---",
-        "",
-        "## Document Metadata",
-        "",
-        *table_lines,
-        "",
-        "*This is a draft document. Review and customize before official use.*",
-    ])
+    metadata_section = "\n".join(
+        [
+            "",
+            "---",
+            "",
+            "## Document Metadata",
+            "",
+            *table_lines,
+            "",
+            "*This is a draft document. Review and customize before official use.*",
+        ]
+    )
 
     return content.rstrip() + "\n" + metadata_section + "\n"
 
@@ -635,8 +710,12 @@ def _generate_sow(title: str, data: dict) -> str:
 
     security_req = data.get("security_requirements", "")
     place = data.get("place_of_performance", "")
-    deliverables_text = "\n".join(f"   {idx+1}. {item}" for idx, item in enumerate(deliverables))
-    tasks_text = "\n".join(f"   5.{idx+1} Task {idx+1}: {item}" for idx, item in enumerate(tasks))
+    deliverables_text = "\n".join(
+        f"   {idx + 1}. {item}" for idx, item in enumerate(deliverables)
+    )
+    tasks_text = "\n".join(
+        f"   5.{idx + 1} Task {idx + 1}: {item}" for idx, item in enumerate(tasks)
+    )
     context_section = ""
     if conv_ctx:
         context_section = f"""
@@ -649,14 +728,22 @@ and should be incorporated into the final document:
 {conv_ctx[:2500]}
 """
 
-    security_section = security_req if security_req else "[To be determined based on data sensitivity and access requirements]"
-    place_section = place if place else "National Cancer Institute\nNational Institutes of Health\nBethesda, MD 20892\n\n[Or as otherwise specified in the contract]"
+    security_section = (
+        security_req
+        if security_req
+        else "[To be determined based on data sensitivity and access requirements]"
+    )
+    place_section = (
+        place
+        if place
+        else "National Cancer Institute\nNational Institutes of Health\nBethesda, MD 20892\n\n[Or as otherwise specified in the contract]"
+    )
 
     return f"""# STATEMENT OF WORK (SOW)
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Document Status:** DRAFT — Generated {time.strftime('%Y-%m-%d %H:%M UTC')}
+**Document Status:** DRAFT — Generated {time.strftime("%Y-%m-%d %H:%M UTC")}
 
 ---
 
@@ -730,12 +817,14 @@ def _generate_igce(title: str, data: dict) -> str:
     overhead = subtotal * (overhead_rate / 100)
     contingency = subtotal * (contingency_rate / 100)
     grand_total = subtotal + overhead + contingency
-    items_table = "\n".join(rows) if rows else "| [No line items provided] | - | - | - |"
+    items_table = (
+        "\n".join(rows) if rows else "| [No line items provided] | - | - | - |"
+    )
     return f"""# INDEPENDENT GOVERNMENT COST ESTIMATE (IGCE)
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Prepared:** {time.strftime('%Y-%m-%d')}
+**Prepared:** {time.strftime("%Y-%m-%d")}
 **Document Status:** DRAFT — For Budget Planning Purposes
 
 ---
@@ -801,7 +890,7 @@ def _generate_market_research(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **NAICS Code:** {naics}
 **Document Status:** DRAFT
 
@@ -858,7 +947,7 @@ def _generate_justification(title: str, data: dict) -> str:
 ### {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Estimated Value:** {value}
 **Document Status:** DRAFT
 
@@ -933,7 +1022,7 @@ def _generate_acquisition_plan(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Estimated Value:** {value}
 **Document Status:** DRAFT
 
@@ -1025,14 +1114,25 @@ def _generate_eval_criteria(title: str, data: dict) -> str:
         [
             ("Outstanding", "Exceeds requirements; very high probability of success"),
             ("Good", "Meets requirements; high probability of success"),
-            ("Acceptable", "Meets minimum requirements; reasonable probability of success"),
-            ("Marginal", "Does not clearly meet some requirements; low probability of success"),
-            ("Unacceptable", "Fails to meet minimum requirements; no probability of success"),
+            (
+                "Acceptable",
+                "Meets minimum requirements; reasonable probability of success",
+            ),
+            (
+                "Marginal",
+                "Does not clearly meet some requirements; low probability of success",
+            ),
+            (
+                "Unacceptable",
+                "Fails to meet minimum requirements; no probability of success",
+            ),
         ],
     )
     factors_text = ""
     for idx, factor in enumerate(factors, 1):
-        name = factor if isinstance(factor, str) else factor.get("name", f"Factor {idx}")
+        name = (
+            factor if isinstance(factor, str) else factor.get("name", f"Factor {idx}")
+        )
         weight = "" if isinstance(factor, str) else f" ({factor.get('weight', '')})"
         factors_text += f"### Factor {idx}: {name}{weight}\n\n[Detailed description of evaluation criteria]\n\n"
     scale_text = "".join(f"| {rating} | {desc} |\n" for rating, desc in rating_scale)
@@ -1040,7 +1140,7 @@ def _generate_eval_criteria(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Evaluation Method:** {method}
 **Document Status:** DRAFT
 
@@ -1083,7 +1183,7 @@ def _generate_security_checklist(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Document Status:** DRAFT
 
 ---
@@ -1098,7 +1198,7 @@ def _generate_security_checklist(title: str, data: dict) -> str:
 | 4 | Is FISMA compliance required? | | | |
 | 5 | Are security clearances required? | | | |
 | 6 | Will data leave NIH facilities or networks? | | | |
-| 7 | Are cloud services involved? | {'[x]' if cloud_services else '[ ]'} | {'[ ]' if cloud_services else '[x]'} | |
+| 7 | Are cloud services involved? | {"[x]" if cloud_services else "[ ]"} | {"[ ]" if cloud_services else "[x]"} | |
 | 8 | Is FedRAMP authorization required? | | | |
 | 9 | Will contractor develop or modify software? | | | |
 | 10 | Are there data encryption requirements? | | | |
@@ -1150,12 +1250,15 @@ def _generate_section_508(title: str, data: dict) -> str:
         "Desktop and Portable Computers",
         "Electronic Documents",
     ]
-    product_checklist = "".join(f"- {'[x]' if product_type in product_types else '[ ]'} {product_type}\n" for product_type in all_types)
+    product_checklist = "".join(
+        f"- {'[x]' if product_type in product_types else '[ ]'} {product_type}\n"
+        for product_type in all_types
+    )
     return f"""# SECTION 508 COMPLIANCE STATEMENT
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Document Status:** DRAFT
 
 ---
@@ -1173,7 +1276,7 @@ Does this acquisition include Electronic and Information Technology (EIT)?
 
 ## 3. EXCEPTION DETERMINATION
 
-**Exception Claimed:** {'Yes' if exception_claimed else 'No'}
+**Exception Claimed:** {"Yes" if exception_claimed else "No"}
 
 | Exception Type | Applicable |
 |---------------|------------|
@@ -1217,7 +1320,7 @@ def _generate_cor_certification(title: str, data: dict) -> str:
 ## {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Contract Number:** {contract_number}
 **Document Status:** DRAFT
 
@@ -1238,9 +1341,9 @@ def _generate_cor_certification(title: str, data: dict) -> str:
 
 | Level | Requirements | Applicable |
 |-------|-------------|------------|
-| I | 8 hours CLC training, low-risk contracts | {'[x]' if fac_cor_level == 'I' else '[ ]'} |
-| II | 40 hours CLC training, moderate-risk contracts | {'[x]' if fac_cor_level == 'II' else '[ ]'} |
-| III | 60 hours CLC training, high-risk contracts | {'[x]' if fac_cor_level == 'III' else '[ ]'} |
+| I | 8 hours CLC training, low-risk contracts | {"[x]" if fac_cor_level == "I" else "[ ]"} |
+| II | 40 hours CLC training, moderate-risk contracts | {"[x]" if fac_cor_level == "II" else "[ ]"} |
+| III | 60 hours CLC training, high-risk contracts | {"[x]" if fac_cor_level == "III" else "[ ]"} |
 
 ## 3. DELEGATED DUTIES
 
@@ -1287,7 +1390,7 @@ def _generate_contract_type_justification(title: str, data: dict) -> str:
 ### {title}
 ### National Cancer Institute (NCI)
 
-**Date:** {time.strftime('%Y-%m-%d')}
+**Date:** {time.strftime("%Y-%m-%d")}
 **Estimated Value:** {value}
 **Recommended Contract Type:** {contract_type}
 **Document Status:** DRAFT
@@ -1304,10 +1407,10 @@ def _generate_contract_type_justification(title: str, data: dict) -> str:
 
 | Contract Type | Risk to Govt | Risk to Contractor | Recommended |
 |--------------|-------------|-------------------|-------------|
-| Firm-Fixed-Price (FFP) | Low | High | {'[x]' if 'fixed' in contract_type.lower() else '[ ]'} |
-| Time & Materials (T&M) | High | Low | {'[x]' if 't&m' in contract_type.lower() or 'time' in contract_type.lower() else '[ ]'} |
-| Cost-Reimbursement (CR) | High | Low | {'[x]' if 'cost' in contract_type.lower() else '[ ]'} |
-| Labor-Hour (LH) | Moderate | Moderate | {'[x]' if 'labor' in contract_type.lower() else '[ ]'} |
+| Firm-Fixed-Price (FFP) | Low | High | {"[x]" if "fixed" in contract_type.lower() else "[ ]"} |
+| Time & Materials (T&M) | High | Low | {"[x]" if "t&m" in contract_type.lower() or "time" in contract_type.lower() else "[ ]"} |
+| Cost-Reimbursement (CR) | High | Low | {"[x]" if "cost" in contract_type.lower() else "[ ]"} |
+| Labor-Hour (LH) | Moderate | Moderate | {"[x]" if "labor" in contract_type.lower() else "[ ]"} |
 
 ### 1.3 Rationale for Contract Type Selection
 

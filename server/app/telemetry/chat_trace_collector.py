@@ -8,6 +8,7 @@ shape so DynamoDB and CloudWatch persistence work unchanged.
 
 No claude_agent_sdk dependency — pure Python.
 """
+
 import time
 import logging
 from typing import Optional
@@ -35,7 +36,9 @@ _DEFAULT_PRICING = {"input": 0.001, "output": 0.005}
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Estimate cost in USD from model name and token counts."""
     pricing = MODEL_PRICING.get(model, _DEFAULT_PRICING)
-    return (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1000.0
+    return (
+        input_tokens * pricing["input"] + output_tokens * pricing["output"]
+    ) / 1000.0
 
 
 class ChatTraceCollector:
@@ -95,7 +98,9 @@ class ChatTraceCollector:
             "name": f"tool.{tool_name}",
             "span_type": "tool",
             "start_time": time.time(),
-            "input_data": {k: str(v)[:500] for k, v in tool_input.items()} if tool_input else {},
+            "input_data": {k: str(v)[:500] for k, v in tool_input.items()}
+            if tool_input
+            else {},
         }
 
     def end_tool_span(self, tool_name: str, output: str = ""):
@@ -139,11 +144,13 @@ class ChatTraceCollector:
         """Serialize spans as a JSON-safe trace list."""
         trace = []
         for span in self._completed_spans:
-            trace.append({
-                "type": "tool_span",
-                "name": span.get("name", ""),
-                "duration_ms": span.get("duration_ms"),
-                "input": span.get("input_data"),
-                "output": span.get("output_data", "")[:500],
-            })
+            trace.append(
+                {
+                    "type": "tool_span",
+                    "name": span.get("name", ""),
+                    "duration_ms": span.get("duration_ms"),
+                    "input": span.get("input_data"),
+                    "output": span.get("output_data", "")[:500],
+                }
+            )
         return trace

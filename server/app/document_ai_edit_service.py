@@ -211,7 +211,9 @@ def _extract_docx_preview_blocks(docx_bytes: bytes) -> list[DocxPreviewBlock]:
 
 
 def _extract_text_preview_blocks(text: str) -> list[DocxPreviewBlock]:
-    chunks = [chunk.strip() for chunk in re.split(r"\n\s*\n", text.strip()) if chunk.strip()]
+    chunks = [
+        chunk.strip() for chunk in re.split(r"\n\s*\n", text.strip()) if chunk.strip()
+    ]
     blocks: list[DocxPreviewBlock] = []
     for idx, chunk in enumerate(chunks):
         heading_match = re.match(r"^(#{1,6})\s+(.*)$", chunk, re.DOTALL)
@@ -235,7 +237,9 @@ def _extract_text_preview_blocks(text: str) -> list[DocxPreviewBlock]:
                 )
             )
         else:
-            blocks.append(DocxPreviewBlock(block_id=f"t:{idx}", kind="paragraph", text=chunk))
+            blocks.append(
+                DocxPreviewBlock(block_id=f"t:{idx}", kind="paragraph", text=chunk)
+            )
     return blocks
 
 
@@ -282,11 +286,19 @@ def _iter_document_paragraphs(doc) -> Iterable:
                     yield para
 
     for section in doc.sections:
-        for header in [section.header, section.first_page_header, section.even_page_header]:
+        for header in [
+            section.header,
+            section.first_page_header,
+            section.even_page_header,
+        ]:
             if header:
                 for para in header.paragraphs:
                     yield para
-        for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+        for footer in [
+            section.footer,
+            section.first_page_footer,
+            section.even_page_footer,
+        ]:
             if footer:
                 for para in footer.paragraphs:
                     yield para
@@ -392,7 +404,9 @@ def apply_docx_edits(
     return output.getvalue(), applied, missing
 
 
-def apply_docx_block_edits(docx_bytes: bytes, preview_blocks: list[dict], preview_mode: str) -> tuple[bytes, int]:
+def apply_docx_block_edits(
+    docx_bytes: bytes, preview_blocks: list[dict], preview_mode: str
+) -> tuple[bytes, int]:
     """Apply browser-side block edits back to either a true DOCX or text fallback artifact."""
     if preview_mode == "text_fallback":
         blocks = [
@@ -401,7 +415,9 @@ def apply_docx_block_edits(docx_bytes: bytes, preview_blocks: list[dict], previe
                 kind=str(block.get("kind", "paragraph")),
                 text=str(block.get("text", "")),
                 level=int(block["level"]) if block.get("level") is not None else None,
-                checked=bool(block["checked"]) if block.get("checked") is not None else None,
+                checked=bool(block["checked"])
+                if block.get("checked") is not None
+                else None,
             )
             for block in preview_blocks
         ]
@@ -429,7 +445,11 @@ def apply_docx_block_edits(docx_bytes: bytes, preview_blocks: list[dict], previe
         next_text = str(block.get("text", ""))
         next_checked = block.get("checked")
 
-        if kind == "checkbox" and isinstance(next_checked, bool) and next_checked != current_checked:
+        if (
+            kind == "checkbox"
+            and isinstance(next_checked, bool)
+            and next_checked != current_checked
+        ):
             if _set_checkbox_state_in_paragraph(para, next_checked):
                 applied += 1
 
@@ -440,8 +460,6 @@ def apply_docx_block_edits(docx_bytes: bytes, preview_blocks: list[dict], previe
     output = io.BytesIO()
     doc.save(output)
     return output.getvalue(), applied
-
-
 
 
 def edit_docx_document(
@@ -473,7 +491,9 @@ def edit_docx_document(
         return {"error": f"Failed to load DOCX: {exc}"}
 
     try:
-        updated_bytes, applied_count, missing = apply_docx_edits(original_bytes, edits, checkbox_edits)
+        updated_bytes, applied_count, missing = apply_docx_edits(
+            original_bytes, edits, checkbox_edits
+        )
     except Exception as exc:
         logger.error("Failed to apply DOCX edits: %s", exc, exc_info=True)
         return {"error": f"Failed to apply DOCX edits: {exc}"}
@@ -587,15 +607,22 @@ def save_docx_preview_edits(
     try:
         response = s3.get_object(Bucket=S3_BUCKET, Key=doc_key)
         original_bytes = response["Body"].read()
-        content_type = response.get("ContentType") or "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        content_type = (
+            response.get("ContentType")
+            or "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
     except (ClientError, BotoCoreError) as exc:
         logger.error("Failed to load DOCX preview artifact: %s", exc, exc_info=True)
         return {"error": "Failed to load document."}
 
     try:
-        updated_bytes, applied_count = apply_docx_block_edits(original_bytes, preview_blocks, preview_mode)
+        updated_bytes, applied_count = apply_docx_block_edits(
+            original_bytes, preview_blocks, preview_mode
+        )
     except Exception as exc:
-        logger.error("Failed to apply structured DOCX preview edits: %s", exc, exc_info=True)
+        logger.error(
+            "Failed to apply structured DOCX preview edits: %s", exc, exc_info=True
+        )
         return {"error": "Failed to apply preview edits."}
 
     if applied_count == 0:
@@ -661,7 +688,9 @@ def save_docx_preview_edits(
             actor_user_id=user_id or "user",
         )
     except Exception as exc:
-        logger.error("Failed to save workspace DOCX preview edits: %s", exc, exc_info=True)
+        logger.error(
+            "Failed to save workspace DOCX preview edits: %s", exc, exc_info=True
+        )
         return {"error": "Failed to save document."}
 
     return {

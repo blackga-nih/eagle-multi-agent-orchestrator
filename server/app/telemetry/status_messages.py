@@ -82,7 +82,8 @@ def get_agent_display_name(agent_name: str) -> str:
 
 # Subagent tool names use underscores (skill_name.replace("-", "_"))
 _SUBAGENT_TOOL_NAMES = {
-    name.replace("-", "_") for name in list(AGENT_DISPLAY_NAMES) + list(SKILL_DISPLAY_NAMES)
+    name.replace("-", "_")
+    for name in list(AGENT_DISPLAY_NAMES) + list(SKILL_DISPLAY_NAMES)
     if name != "supervisor"
 }
 
