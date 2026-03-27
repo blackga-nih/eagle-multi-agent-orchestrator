@@ -76,7 +76,109 @@ def exec_s3_document_ops(params: dict, tenant_id: str, session_id: str | None = 
                 "message": f"Document written to s3://{bucket}/{key}",
             }
 
-        return {"error": f"Unknown operation: {operation}. Use list, read, or write."}
+        if operation == "delete":
+            if not key:
+                return {"error": "Missing 'key' parameter for delete operation"}
+            if not is_tenant_scoped_key(key, tenant_id):
+                key = prefix + key
+            s3.delete_object(Bucket=bucket, Key=key)
+            return {
+                "operation": "delete",
+                "key": key,
+                "bucket": bucket,
+                "status": "success",
+                "message": f"Deleted s3://{bucket}/{key}",
+            }
+
+        if operation == "copy":
+            destination_key = params.get("destination_key", "")
+            if not key:
+                return {"error": "Missing 'key' (source) parameter for copy operation"}
+            if not destination_key:
+                return {"error": "Missing 'destination_key' parameter for copy operation"}
+            if not is_tenant_scoped_key(key, tenant_id):
+                key = prefix + key
+            if not is_tenant_scoped_key(destination_key, tenant_id):
+                destination_key = prefix + destination_key
+            s3.copy_object(
+                CopySource={"Bucket": bucket, "Key": key},
+                Bucket=bucket,
+                Key=destination_key,
+            )
+            return {
+                "operation": "copy",
+                "source_key": key,
+                "destination_key": destination_key,
+                "bucket": bucket,
+                "status": "success",
+                "message": f"Copied to s3://{bucket}/{destination_key}",
+            }
+
+        if operation in ("rename", "move"):
+            destination_key = params.get("destination_key", "")
+            if not key:
+                return {"error": "Missing 'key' (source) parameter for rename operation"}
+            if not destination_key:
+                return {"error": "Missing 'destination_key' parameter for rename operation"}
+            if not is_tenant_scoped_key(key, tenant_id):
+                key = prefix + key
+            if not is_tenant_scoped_key(destination_key, tenant_id):
+                destination_key = prefix + destination_key
+            s3.copy_object(
+                CopySource={"Bucket": bucket, "Key": key},
+                Bucket=bucket,
+                Key=destination_key,
+            )
+            s3.delete_object(Bucket=bucket, Key=key)
+            return {
+                "operation": "rename",
+                "source_key": key,
+                "destination_key": destination_key,
+                "bucket": bucket,
+                "status": "success",
+                "message": f"Renamed to s3://{bucket}/{destination_key}",
+            }
+
+        if operation == "exists":
+            if not key:
+                return {"error": "Missing 'key' parameter for exists operation"}
+            if not is_tenant_scoped_key(key, tenant_id):
+                key = prefix + key
+            try:
+                resp = s3.head_object(Bucket=bucket, Key=key)
+                return {
+                    "operation": "exists",
+                    "key": key,
+                    "exists": True,
+                    "size_bytes": resp.get("ContentLength", 0),
+                    "last_modified": resp.get("LastModified", "").isoformat() if hasattr(resp.get("LastModified", ""), "isoformat") else str(resp.get("LastModified", "")),
+                    "content_type": resp.get("ContentType", "unknown"),
+                }
+            except ClientError as head_exc:
+                if head_exc.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                    return {"operation": "exists", "key": key, "exists": False}
+                raise
+
+        if operation == "presign":
+            if not key:
+                return {"error": "Missing 'key' parameter for presign operation"}
+            if not is_tenant_scoped_key(key, tenant_id):
+                key = prefix + key
+            expiry_seconds = int(params.get("expiry_seconds", 3600))
+            url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key},
+                ExpiresIn=expiry_seconds,
+            )
+            return {
+                "operation": "presign",
+                "key": key,
+                "bucket": bucket,
+                "url": url,
+                "expires_in_seconds": expiry_seconds,
+            }
+
+        return {"error": f"Unknown operation: {operation}. Use list, read, write, delete, copy, rename, move, exists, or presign."}
 
     except ClientError as exc:
         error_code = exc.response["Error"]["Code"]
@@ -166,7 +268,62 @@ def exec_dynamodb_intake(params: dict, tenant_id: str) -> dict:
             items = [_serialize_ddb_item(item) for item in resp.get("Items", [])]
             return {"operation": "list", "tenant_id": tenant_id, "count": len(items), "items": items}
 
-        return {"error": f"Unknown operation: {operation}. Use create, read, update, list, or query."}
+        if operation == "delete":
+            if not item_id:
+                return {"error": "Missing 'item_id' for delete operation"}
+            table.delete_item(Key={"PK": f"INTAKE#{tenant_id}", "SK": f"INTAKE#{item_id}"})
+            return {"operation": "delete", "item_id": item_id, "status": "deleted"}
+
+        if operation == "count":
+            from boto3.dynamodb.conditions import Key as DDBKey
+
+            resp = table.query(
+                KeyConditionExpression=DDBKey("PK").eq(f"INTAKE#{tenant_id}"),
+                Select="COUNT",
+            )
+            return {"operation": "count", "tenant_id": tenant_id, "count": resp.get("Count", 0)}
+
+        if operation == "batch_get":
+            item_ids_raw = params.get("item_ids", "")
+            if not item_ids_raw:
+                return {"error": "Missing 'item_ids' for batch_get (comma-separated IDs)"}
+            ids = [i.strip() for i in item_ids_raw.split(",") if i.strip()]
+            if len(ids) > 100:
+                return {"error": "batch_get supports max 100 items"}
+            keys = [{"PK": f"INTAKE#{tenant_id}", "SK": f"INTAKE#{i}"} for i in ids]
+            resp = get_dynamodb().batch_get_item(RequestItems={table_name: {"Keys": keys}})
+            items = [_serialize_ddb_item(item) for item in resp.get("Responses", {}).get(table_name, [])]
+            return {"operation": "batch_get", "requested": len(ids), "found": len(items), "items": items}
+
+        if operation == "batch_write":
+            items_data = params.get("items", [])
+            if not items_data:
+                return {"error": "Missing 'items' for batch_write (list of dicts)"}
+            if isinstance(items_data, str):
+                import json as _json
+                try:
+                    items_data = _json.loads(items_data)
+                except _json.JSONDecodeError:
+                    return {"error": "Invalid JSON in 'items' parameter"}
+            if len(items_data) > 25:
+                return {"error": "batch_write supports max 25 items per call"}
+            put_requests = []
+            for item_data in items_data:
+                bid = item_data.get("item_id", str(uuid.uuid4())[:8])
+                item = {
+                    "PK": f"INTAKE#{tenant_id}",
+                    "SK": f"INTAKE#{bid}",
+                    "item_id": bid,
+                    "tenant_id": tenant_id,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "status": "draft",
+                    **{k: v for k, v in item_data.items() if k not in ("PK", "SK")},
+                }
+                put_requests.append({"PutRequest": {"Item": item}})
+            get_dynamodb().batch_write_item(RequestItems={table_name: put_requests})
+            return {"operation": "batch_write", "count": len(put_requests), "status": "created"}
+
+        return {"error": f"Unknown operation: {operation}. Use create, read, update, delete, list, query, count, batch_get, or batch_write."}
 
     except ClientError as exc:
         error_code = exc.response["Error"]["Code"]
@@ -266,7 +423,58 @@ def exec_cloudwatch_logs(params: dict, tenant_id: str) -> dict:
             ]
             return {"operation": "get_stream", "log_group": log_group, "streams": streams}
 
-        return {"error": f"Unknown operation: {operation}. Use search, recent, or get_stream."}
+        if operation == "insights":
+            query = params.get("query", "")
+            if not query:
+                return {"error": "Missing 'query' parameter for insights operation (CloudWatch Logs Insights query string)"}
+            query_id = logs.start_query(
+                logGroupName=log_group,
+                startTime=start_time // 1000,
+                endTime=end_time // 1000,
+                queryString=query,
+                limit=min(limit, 1000),
+            )["queryId"]
+            # Poll for results (max 10 attempts, 1s apart)
+            import time as _time_mod
+            results = []
+            status = "Running"
+            for _ in range(10):
+                _time_mod.sleep(1)
+                resp = logs.get_query_results(queryId=query_id)
+                status = resp.get("status", "Unknown")
+                if status in ("Complete", "Failed", "Cancelled"):
+                    results = resp.get("results", [])
+                    break
+            formatted = []
+            for row in results[:100]:
+                formatted.append({field["field"]: field["value"] for field in row})
+            return {
+                "operation": "insights",
+                "log_group": log_group,
+                "query": query,
+                "status": status,
+                "result_count": len(formatted),
+                "results": formatted,
+            }
+
+        if operation == "list_groups":
+            prefix_filter = params.get("prefix", "")
+            kwargs = {"limit": min(limit, 50)}
+            if prefix_filter:
+                kwargs["logGroupNamePrefix"] = prefix_filter
+            resp = logs.describe_log_groups(**kwargs)
+            groups = [
+                {
+                    "logGroupName": g["logGroupName"],
+                    "storedBytes": g.get("storedBytes", 0),
+                    "retentionInDays": g.get("retentionInDays"),
+                    "creationTime": g.get("creationTime", 0),
+                }
+                for g in resp.get("logGroups", [])
+            ]
+            return {"operation": "list_groups", "count": len(groups), "log_groups": groups}
+
+        return {"error": f"Unknown operation: {operation}. Use search, recent, get_stream, insights, or list_groups."}
 
     except ClientError as exc:
         error_code = exc.response["Error"]["Code"]

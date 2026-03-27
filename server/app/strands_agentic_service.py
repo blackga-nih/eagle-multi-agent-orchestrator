@@ -2419,20 +2419,22 @@ def _build_all_service_tools(
 
     # ---- 1. s3_document_ops ----
     @tool(name="s3_document_ops")
-    def s3_document_ops_tool(operation: str, bucket: str = "", key: str = "", content: str = "") -> str:
-        """Read, write, or list documents in S3 scoped per-tenant. Operations: list, read, write.
+    def s3_document_ops_tool(operation: str, bucket: str = "", key: str = "", content: str = "", destination_key: str = "", expiry_seconds: int = 3600) -> str:
+        """Read, write, list, delete, copy, rename, move, check existence, or generate presigned URLs for documents in S3 scoped per-tenant.
 
         Args:
-            operation: S3 operation — 'list', 'read', or 'write'
+            operation: S3 operation — 'list', 'read', 'write', 'delete', 'copy', 'rename', 'move', 'exists', or 'presign'
             bucket: S3 bucket name (defaults to tenant bucket)
-            key: S3 object key path
+            key: S3 object key path (source key for copy/rename)
             content: Content to write (for 'write' operation)
+            destination_key: Target key for copy/rename/move operations
+            expiry_seconds: URL expiry in seconds for presign operation (default 3600)
         """
         set_log_context(**_log_ctx)
         import time as _time_mod
         _tool_t0 = _time_mod.perf_counter()
         _tool_success = True
-        parsed = {"operation": operation, "bucket": bucket, "key": key, "content": content}
+        parsed = {"operation": operation, "bucket": bucket, "key": key, "content": content, "destination_key": destination_key, "expiry_seconds": expiry_seconds}
         try:
             result = tool_dispatch["s3_document_ops"](parsed, tenant_id, scoped_session_id)
             _emit("s3_document_ops", result)
@@ -2451,20 +2453,22 @@ def _build_all_service_tools(
 
     # ---- 2. dynamodb_intake ----
     @tool(name="dynamodb_intake")
-    def dynamodb_intake_tool(operation: str, table: str = "eagle", item_id: str = "", data: dict | None = None) -> str:
-        """Create, read, update, list, or query intake records in DynamoDB. Operations: create, read, update, list, query.
+    def dynamodb_intake_tool(operation: str, table: str = "eagle", item_id: str = "", data: dict | None = None, item_ids: str = "", items: str = "") -> str:
+        """Create, read, update, delete, list, query, count, batch_get, or batch_write intake records in DynamoDB.
 
         Args:
-            operation: DynamoDB operation — 'create', 'read', 'update', 'list', or 'query'
+            operation: DynamoDB operation — 'create', 'read', 'update', 'delete', 'list', 'query', 'count', 'batch_get', or 'batch_write'
             table: DynamoDB table name (default 'eagle')
-            item_id: Item identifier for read/update operations
+            item_id: Item identifier for read/update/delete operations
             data: Data payload for create/update operations
+            item_ids: Comma-separated item IDs for batch_get (e.g. 'id1,id2,id3')
+            items: JSON array string of items for batch_write
         """
         set_log_context(**_log_ctx)
         import time as _time_mod
         _tool_t0 = _time_mod.perf_counter()
         _tool_success = True
-        parsed = {"operation": operation, "table": table, "item_id": item_id, "data": data or {}}
+        parsed = {"operation": operation, "table": table, "item_id": item_id, "data": data or {}, "item_ids": item_ids, "items": items}
         try:
             result = tool_dispatch["dynamodb_intake"](parsed, tenant_id)
             _emit("dynamodb_intake", result)
@@ -2927,21 +2931,26 @@ def _build_all_service_tools(
         start_time: str = "",
         end_time: str = "",
         limit: int = 50,
+        query: str = "",
+        prefix: str = "",
     ) -> str:
-        """Query CloudWatch Logs for application monitoring. Operations: recent, search, filter.
+        """Query CloudWatch Logs for application monitoring. Operations: recent, search, get_stream, insights, list_groups.
 
         Args:
-            operation: Log operation — 'recent', 'search', or 'filter'
+            operation: Log operation — 'recent', 'search', 'get_stream', 'insights', or 'list_groups'
             log_group: CloudWatch log group path (default '/eagle/app')
             filter_pattern: CloudWatch filter pattern expression
             start_time: Start time — ISO 8601 or relative like '-1h', '-30m'
             end_time: End time — ISO 8601 or relative
             limit: Maximum log entries to return (default 50)
+            query: CloudWatch Logs Insights query string (for 'insights' operation)
+            prefix: Log group name prefix filter (for 'list_groups' operation)
         """
         parsed = {
             "operation": operation, "log_group": log_group,
             "filter_pattern": filter_pattern, "start_time": start_time,
             "end_time": end_time, "limit": limit, "user_id": user_id,
+            "query": query, "prefix": prefix,
         }
         try:
             result = tool_dispatch["cloudwatch_logs"](parsed, tenant_id)
