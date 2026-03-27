@@ -1,0 +1,429 @@
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EAGLE Chat - Option B: Elevated Edge</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,400&display=swap');
+:root {
+  --navy: #003366;
+  --navy-light: #004488;
+  --blue-accent: #2196F3;
+  --bg-main: #FAFBFD;
+  --border: #E2E8F0;
+  --text-main: #0F172A;
+  --text-muted: #475569;
+  --text-light: #94A3B8;
+}
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, .font-serif-display {
+  font-family: 'Newsreader', serif;
+}
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+/* Rotating gradient border */
+@property --gradient-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.hover-shiny {
+  --shiny-bg: #FAFBFD;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.hover-shiny:hover {
+  background: linear-gradient(var(--shiny-bg), var(--shiny-bg)) padding-box,
+  conic-gradient(from var(--gradient-angle), transparent 20%, #2196F3 50%, transparent 80%) border-box !important;
+  border-color: transparent !important;
+  animation: border-spin 3s linear infinite;
+  box-shadow: 0 12px 40px -12px rgba(33, 150, 243, 0.15);
+  transform: translateY(-4px);
+}
+@keyframes border-spin {
+  from { --gradient-angle: 0deg; }
+  to { --gradient-angle: 360deg; }
+}
+/* Card lift */
+.card-lift {
+  transition: all 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 48px -12px rgba(0, 51, 102, 0.12);
+}
+/* Input elevated */
+.input-elevated {
+  background: white;
+  border: 1.5px solid #E2E8F0;
+  transition: all 0.3s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.input-elevated:focus {
+  outline: none;
+  border-color: var(--blue-accent);
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.12), 0 8px 24px -4px rgba(0, 51, 102, 0.08);
+}
+/* Pill with gradient border on hover */
+.pill-glow {
+  position: relative;
+  background: white;
+  border: 1px solid #E2E8F0;
+  transition: all 0.3s ease;
+}
+.pill-glow:hover {
+  border-color: #2196F3;
+  color: #003366;
+  background: #EFF6FF;
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.08);
+  transform: translateY(-1px);
+}
+/* Reveal */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.reveal { animation: fadeUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.reveal-d1 { animation-delay: 0.12s; }
+.reveal-d2 { animation-delay: 0.24s; }
+.reveal-d3 { animation-delay: 0.36s; }
+.reveal-d4 { animation-delay: 0.48s; }
+/* Message bubbles */
+.msg-assistant {
+  background: white;
+  border: 1px solid #E2E8F0;
+  border-radius: 20px 20px 20px 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+}
+.msg-user {
+  background: linear-gradient(135deg, #003366 0%, #004488 100%);
+  color: white;
+  border-radius: 20px 20px 4px 20px;
+  box-shadow: 0 4px 16px -4px rgba(0, 51, 102, 0.25);
+}
+/* Send button */
+.send-btn-v2 {
+  background: #003366;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+.send-btn-v2::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: conic-gradient(from var(--gradient-angle), transparent 30%, #2196F3 50%, transparent 70%);
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.send-btn-v2:hover:not(:disabled) {
+  box-shadow: 0 8px 24px -4px rgba(0, 51, 102, 0.35);
+  transform: translateY(-2px);
+}
+.send-btn-v2:hover:not(:disabled)::before {
+  opacity: 1;
+  animation: border-spin 3s linear infinite;
+}
+/* Divider with label */
+.divider-label {
+  display: flex; align-items: center; gap: 12px;
+  color: #94A3B8; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.divider-label::before, .divider-label::after {
+  content: ''; flex: 1; height: 1px; background: #E2E8F0;
+}
+/* Eagle badge */
+.eagle-badge {
+  background: linear-gradient(135deg, #003366 0%, #1a5276 50%, #2196F3 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+/* Ambient dots pattern */
+.dot-pattern {
+  background-image: radial-gradient(circle, #E2E8F0 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+</style></head>
+<body class="h-screen overflow-hidden">
+
+  <div class="h-full flex">
+    <!-- Sidebar -->
+    <div class="w-[260px] bg-white border-r border-[#E2E8F0] flex flex-col shrink-0">
+      <div class="p-4 border-b border-[#E2E8F0]">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-[#003366] to-[#2196F3] flex items-center justify-center shadow-md">
+            <span class="text-lg">&#129413;</span>
+          </div>
+          <div>
+            <div class="font-serif-display font-semibold text-[#003366] text-base leading-tight">EAGLE</div>
+            <div class="text-[9px] font-bold uppercase tracking-widest text-[#94A3B8]">NCI Acquisition AI</div>
+          </div>
+        </div>
+      </div>
+      <div class="p-3">
+        <button class="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold text-[#003366] bg-[#F0F4F8] border border-[#E2E8F0] rounded-xl hover:bg-[#003366] hover:text-white hover:border-[#003366] transition-all group">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="group-hover:rotate-90 transition-transform"><path d="M12 5v14M5 12h14"/></svg>
+          New Session
+        </button>
+      </div>
+      <div class="flex-1 px-3 space-y-0.5 overflow-y-auto">
+        <div class="px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">Today</div>
+        <div class="px-3 py-2.5 rounded-xl bg-[#EFF6FF] text-xs font-medium text-[#003366] border border-[#BFDBFE]">SOW for IT Services</div>
+        <div class="px-3 py-2.5 rounded-xl text-xs text-[#475569] hover:bg-[#F8FAFC] transition-colors cursor-pointer">FAR Search: Thresholds</div>
+        <div class="px-3 py-2.5 rounded-xl text-xs text-[#475569] hover:bg-[#F8FAFC] transition-colors cursor-pointer">IGCE Medical Equipment</div>
+      </div>
+    </div>
+
+    <!-- Main chat -->
+    <div class="flex-1 flex flex-col min-w-0">
+
+      <!-- Welcome state -->
+      <div class="flex-1 flex flex-col items-center justify-center p-8 gap-6 text-center dot-pattern">
+        <!-- Eagle badge -->
+        <div class="reveal">
+          <div class="w-20 h-20 rounded-2xl bg-white border border-[#E2E8F0] shadow-lg flex items-center justify-center mx-auto mb-4">
+            <span class="text-[42px]">&#129413;</span>
+          </div>
+          <h2 class="text-5xl font-serif-display font-medium tracking-tight leading-tight">
+            <span class="eagle-badge">EAGLE</span>
+          </h2>
+          <p class="text-xs font-bold uppercase tracking-[0.2em] text-[#94A3B8] mt-2">Enterprise Acquisition Guide & Learning Engine</p>
+        </div>
+
+        <p class="text-sm text-[#475569] max-w-md leading-relaxed reveal reveal-d1">
+          AI-powered acquisition assistance for NCI contracting officers,
+          program managers, and procurement professionals.
+        </p>
+
+        <!-- Feature cards — with rotating border on hover -->
+        <div class="grid grid-cols-2 gap-3 mt-2 max-w-md w-full reveal reveal-d2">
+          <div class="hover-shiny card-lift rounded-2xl p-5 bg-white border border-[#E2E8F0] text-left cursor-pointer">
+            <div class="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center mb-3">
+              <span class="text-xl">&#128203;</span>
+            </div>
+            <div class="text-sm font-semibold text-[#003366]">Acquisition Intake</div>
+            <div class="text-[11px] text-[#94A3B8] mt-1">Guided package creation</div>
+          </div>
+          <div class="hover-shiny card-lift rounded-2xl p-5 bg-white border border-[#E2E8F0] text-left cursor-pointer">
+            <div class="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center mb-3">
+              <span class="text-xl">&#128221;</span>
+            </div>
+            <div class="text-sm font-semibold text-[#003366]">Generate Documents</div>
+            <div class="text-[11px] text-[#94A3B8] mt-1">SOW, IGCE, AP drafts</div>
+          </div>
+          <div class="hover-shiny card-lift rounded-2xl p-5 bg-white border border-[#E2E8F0] text-left cursor-pointer">
+            <div class="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center mb-3">
+              <span class="text-xl">&#128218;</span>
+            </div>
+            <div class="text-sm font-semibold text-[#003366]">FAR/DFARS Search</div>
+            <div class="text-[11px] text-[#94A3B8] mt-1">Regulation lookup</div>
+          </div>
+          <div class="hover-shiny card-lift rounded-2xl p-5 bg-white border border-[#E2E8F0] text-left cursor-pointer">
+            <div class="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center mb-3">
+              <span class="text-xl">&#128176;</span>
+            </div>
+            <div class="text-sm font-semibold text-[#003366]">Cost Estimation</div>
+            <div class="text-[11px] text-[#94A3B8] mt-1">IGCE cost builder</div>
+          </div>
+        </div>
+
+        <div class="divider-label w-full max-w-md reveal reveal-d3">or ask anything</div>
+      </div>
+
+      <!-- Footer input -->
+      <footer class="bg-white border-t border-[#E2E8F0] px-6 py-4 shrink-0">
+        <div class="max-w-3xl mx-auto">
+          <!-- Quick action pills -->
+          <div class="flex items-center gap-1.5 mb-2.5 flex-wrap">
+            <button class="pill-glow px-3 py-1.5 text-[11px] font-medium text-[#475569] rounded-full whitespace-nowrap">
+              &#127381; New Intake
+            </button>
+            <button class="pill-glow px-3 py-1.5 text-[11px] font-medium text-[#475569] rounded-full whitespace-nowrap">
+              &#128196; Generate SOW
+            </button>
+            <button class="pill-glow px-3 py-1.5 text-[11px] font-medium text-[#475569] rounded-full whitespace-nowrap">
+              &#128218; Search FAR
+            </button>
+            <button class="pill-glow px-3 py-1.5 text-[11px] font-medium text-[#475569] rounded-full whitespace-nowrap">
+              &#128176; Cost Estimate
+            </button>
+            <button class="pill-glow px-3 py-1.5 text-[11px] font-medium text-[#475569] rounded-full whitespace-nowrap">
+              &#127970; Small Business
+            </button>
+          </div>
+
+          <div class="relative flex items-end gap-3">
+            <textarea
+              rows="1"
+              placeholder="Ask EAGLE about acquisitions, type / or press Ctrl+K for commands..."
+              class="input-elevated flex-1 resize-none px-4 py-3 rounded-2xl text-sm leading-relaxed"
+              style="max-height: 160px"
+            ></textarea>
+            <button class="send-btn-v2 p-3.5 text-white rounded-2xl shadow-md shrink-0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </div>
+          <p class="text-center text-[10px] text-[#94A3B8] mt-2.5 tracking-wide font-medium">
+            EAGLE &middot; National Cancer Institute &middot; <span class="text-[#2196F3]">Ctrl+K</span> for commands
+          </p>
+        </div>
+      </footer>
+    </div>
+
+    <!-- Activity panel -->
+    <div class="w-[300px] bg-[#FAFBFD] border-l border-[#E2E8F0] flex flex-col shrink-0">
+      <div class="px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between bg-white">
+        <span class="text-xs font-bold uppercase tracking-widest text-[#94A3B8]">Activity</span>
+        <div class="flex gap-1">
+          <span class="px-2.5 py-1 text-[10px] font-semibold text-[#003366] bg-[#EFF6FF] rounded-lg border border-[#BFDBFE] cursor-pointer">Logs</span>
+          <span class="px-2.5 py-1 text-[10px] font-semibold text-[#94A3B8] rounded-lg cursor-pointer hover:bg-[#F8FAFC]">Docs</span>
+          <span class="px-2.5 py-1 text-[10px] font-semibold text-[#94A3B8] rounded-lg cursor-pointer hover:bg-[#F8FAFC]">Trace</span>
+        </div>
+      </div>
+      <div class="flex-1 flex items-center justify-center p-4">
+        <div class="text-center">
+          <div class="w-12 h-12 rounded-xl bg-[#F0F4F8] border border-[#E2E8F0] flex items-center justify-center mx-auto mb-3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </div>
+          <p class="text-xs text-[#94A3B8]">Send a message to see<br>agent activity here</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Conversation overlay -->
+  <div id="convo-overlay" style="display:none" class="fixed inset-0 z-50 bg-[#FAFBFD]">
+    <div class="h-full flex">
+      <!-- Sidebar -->
+      <div class="w-[260px] bg-white border-r border-[#E2E8F0] flex flex-col shrink-0">
+        <div class="p-4 border-b border-[#E2E8F0]">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-[#003366] to-[#2196F3] flex items-center justify-center shadow-md">
+              <span class="text-lg">&#129413;</span>
+            </div>
+            <div class="font-serif-display font-semibold text-[#003366] text-base">EAGLE</div>
+          </div>
+        </div>
+        <div class="flex-1"></div>
+      </div>
+
+      <!-- Messages -->
+      <div class="flex-1 flex flex-col min-w-0">
+        <div class="flex-1 overflow-y-auto p-6 space-y-5">
+          <!-- User -->
+          <div class="flex justify-end reveal">
+            <div class="msg-user px-5 py-3.5 max-w-[65%]">
+              <p class="text-sm leading-relaxed">Generate a Statement of Work for a new IT services contract at NCI. The contract should cover cloud migration services, approximately $2M over 3 years.</p>
+            </div>
+          </div>
+          <!-- Assistant -->
+          <div class="flex justify-start reveal reveal-d1">
+            <div class="flex gap-3 max-w-[72%]">
+              <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-[#003366] to-[#2196F3] flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5 shadow-md">
+                <span class="text-sm">&#129413;</span>
+              </div>
+              <div class="msg-assistant px-5 py-4">
+                <p class="text-sm text-[#0F172A] leading-relaxed mb-3">I'll draft a Statement of Work for your NCI cloud migration contract. Here's what I've identified:</p>
+
+                <!-- Structured data card -->
+                <div class="rounded-xl border border-[#E2E8F0] overflow-hidden mb-3">
+                  <div class="px-4 py-2 bg-gradient-to-r from-[#003366] to-[#004488] text-white">
+                    <span class="text-[10px] font-bold uppercase tracking-widest">SOW Parameters</span>
+                  </div>
+                  <div class="p-4 space-y-2 bg-[#FAFBFD]">
+                    <div class="flex justify-between text-xs">
+                      <span class="font-semibold text-[#0F172A]">Contract Type</span>
+                      <span class="text-[#475569]">IT Services - Cloud Migration</span>
+                    </div>
+                    <div class="h-px bg-[#E2E8F0]"></div>
+                    <div class="flex justify-between text-xs">
+                      <span class="font-semibold text-[#0F172A]">Total Value</span>
+                      <span class="text-[#475569]">$2,000,000</span>
+                    </div>
+                    <div class="h-px bg-[#E2E8F0]"></div>
+                    <div class="flex justify-between text-xs">
+                      <span class="font-semibold text-[#0F172A]">Period of Performance</span>
+                      <span class="text-[#475569]">3 Years (Base + 2 Options)</span>
+                    </div>
+                    <div class="h-px bg-[#E2E8F0]"></div>
+                    <div class="flex justify-between text-xs">
+                      <span class="font-semibold text-[#0F172A]">Agency</span>
+                      <span class="text-[#475569]">NCI / NIH / HHS</span>
+                    </div>
+                  </div>
+                </div>
+
+                <p class="text-sm text-[#0F172A] leading-relaxed">Drafting the full SOW with scope, deliverables, performance standards, and FAR/DFARS compliance sections...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="bg-white border-t border-[#E2E8F0] px-6 py-4 shrink-0">
+          <div class="max-w-3xl mx-auto">
+            <div class="flex items-center gap-1.5 mb-2.5">
+              <button class="pill-glow px-3 py-1.5 text-[11px] font-medium text-[#475569] rounded-full">&#127381; New Intake</button>
+              <button class="pill-glow px-3 py-1.5 text-[11px] font-medium text-[#475569] rounded-full">&#128196; Generate SOW</button>
+            </div>
+            <div class="relative flex items-end gap-3">
+              <textarea rows="1" placeholder="Continue the conversation..." class="input-elevated flex-1 resize-none px-4 py-3 rounded-2xl text-sm leading-relaxed"></textarea>
+              <button class="send-btn-v2 p-3.5 text-white rounded-2xl shadow-md shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+            <p class="text-center text-[10px] text-[#94A3B8] mt-2.5 tracking-wide font-medium">EAGLE &middot; National Cancer Institute</p>
+          </div>
+        </footer>
+      </div>
+
+      <!-- Activity panel -->
+      <div class="w-[300px] bg-[#FAFBFD] border-l border-[#E2E8F0] flex flex-col shrink-0">
+        <div class="px-4 py-3 border-b border-[#E2E8F0] bg-white">
+          <span class="text-xs font-bold uppercase tracking-widest text-[#94A3B8]">Activity</span>
+        </div>
+        <div class="flex-1 p-3 space-y-2 text-xs overflow-y-auto">
+          <div class="p-3 rounded-xl bg-white border border-[#E2E8F0] shadow-sm">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-1.5 h-1.5 rounded-full bg-[#2196F3]"></div>
+              <span class="text-[10px] font-bold text-[#003366] uppercase tracking-wider">Supervisor</span>
+            </div>
+            <p class="text-[#475569] pl-3.5">Routing to document_specialist...</p>
+          </div>
+          <div class="p-3 rounded-xl bg-white border border-[#E2E8F0] shadow-sm">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-1.5 h-1.5 rounded-full bg-amber-400"></div>
+              <span class="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Tool: create_document</span>
+            </div>
+            <p class="text-[#475569] pl-3.5">type: sow, format: docx</p>
+          </div>
+          <div class="p-3 rounded-xl bg-white border border-[#E2E8F0] shadow-sm">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+              <span class="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Complete</span>
+            </div>
+            <p class="text-[#475569] pl-3.5">SOW draft ready for review</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toggle -->
+  <button onclick="document.getElementById('convo-overlay').style.display = document.getElementById('convo-overlay').style.display === 'none' ? 'block' : 'none'"
+    class="fixed bottom-4 right-4 z-[999] px-4 py-2 bg-[#003366] text-white text-xs font-semibold rounded-full shadow-lg hover:bg-[#004488] transition-all">
+    Toggle: Welcome / Conversation
+  </button>
+</body></html>
