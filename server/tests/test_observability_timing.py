@@ -347,7 +347,7 @@ class TestCloudWatchEmitterEventTypes:
         """tool.timing events should include tool_name and duration_ms."""
         from app.telemetry.cloudwatch_emitter import emit_telemetry_event
 
-        with patch("app.telemetry.cloudwatch_emitter._get_client") as mock_client:
+        with patch("app.telemetry.cloudwatch_emitter.get_logs") as mock_client:
             mock_logs = MagicMock()
             mock_client.return_value = mock_logs
 
@@ -374,7 +374,7 @@ class TestCloudWatchEmitterEventTypes:
         """stream.timing events should include duration_ms and tools_count."""
         from app.telemetry.cloudwatch_emitter import emit_telemetry_event
 
-        with patch("app.telemetry.cloudwatch_emitter._get_client") as mock_client:
+        with patch("app.telemetry.cloudwatch_emitter.get_logs") as mock_client:
             mock_logs = MagicMock()
             mock_client.return_value = mock_logs
 

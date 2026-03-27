@@ -44,7 +44,7 @@ def test_exec_knowledge_search_returns_filtered_results(monkeypatch):
     }
     ddb = MagicMock()
     ddb.Table.return_value = table
-    monkeypatch.setattr(kt, "_get_dynamodb", lambda: ddb)
+    monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
 
     result = kt.exec_knowledge_search(
         {"document_type": "guidance", "keywords": ["sole source"], "limit": 5},
@@ -64,7 +64,7 @@ def test_exec_knowledge_search_handles_dynamodb_error(monkeypatch):
     )
     ddb = MagicMock()
     ddb.Table.return_value = table
-    monkeypatch.setattr(kt, "_get_dynamodb", lambda: ddb)
+    monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
 
     result = kt.exec_knowledge_search({"limit": 2}, tenant_id="dev-tenant")
 
@@ -79,7 +79,7 @@ def test_exec_knowledge_fetch_returns_content(monkeypatch):
 
     s3 = MagicMock()
     s3.get_object.return_value = {"Body": body}
-    monkeypatch.setattr(kt, "_get_s3", lambda: s3)
+    monkeypatch.setattr(kt, "get_s3", lambda: s3)
 
     result = kt.exec_knowledge_fetch({"s3_key": "kb/doc-a.md"}, tenant_id="dev-tenant")
 
@@ -95,7 +95,7 @@ def test_exec_knowledge_fetch_handles_missing_key(monkeypatch):
     s3 = MagicMock()
     s3.exceptions.NoSuchKey = NoSuchKeyError
     s3.get_object.side_effect = NoSuchKeyError("missing")
-    monkeypatch.setattr(kt, "_get_s3", lambda: s3)
+    monkeypatch.setattr(kt, "get_s3", lambda: s3)
 
     result = kt.exec_knowledge_fetch({"s3_key": "kb/missing.md"}, tenant_id="dev-tenant")
 
@@ -110,7 +110,7 @@ def test_exec_knowledge_fetch_truncates_large_content(monkeypatch):
 
     s3 = MagicMock()
     s3.get_object.return_value = {"Body": body}
-    monkeypatch.setattr(kt, "_get_s3", lambda: s3)
+    monkeypatch.setattr(kt, "get_s3", lambda: s3)
 
     result = kt.exec_knowledge_fetch({"s3_key": "kb/large.md"}, tenant_id="dev-tenant")
 
@@ -145,7 +145,7 @@ def test_exec_knowledge_search_query_matches_document_id(monkeypatch):
     }
     ddb = MagicMock()
     ddb.Table.return_value = table
-    monkeypatch.setattr(kt, "_get_dynamodb", lambda: ddb)
+    monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
 
     result = kt.exec_knowledge_search(
         {"query": "B-302358"},
@@ -167,7 +167,7 @@ def test_exec_knowledge_search_query_matches_title(monkeypatch):
     }
     ddb = MagicMock()
     ddb.Table.return_value = table
-    monkeypatch.setattr(kt, "_get_dynamodb", lambda: ddb)
+    monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
 
     result = kt.exec_knowledge_search(
         {"query": "IDIQ Minimum"},
@@ -188,7 +188,7 @@ def test_exec_knowledge_search_query_case_insensitive(monkeypatch):
     }
     ddb = MagicMock()
     ddb.Table.return_value = table
-    monkeypatch.setattr(kt, "_get_dynamodb", lambda: ddb)
+    monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
 
     # Lowercase query should match uppercase document_id
     result = kt.exec_knowledge_search(
@@ -210,7 +210,7 @@ def test_exec_knowledge_search_query_combined_with_topic_filter(monkeypatch):
     }
     ddb = MagicMock()
     ddb.Table.return_value = table
-    monkeypatch.setattr(kt, "_get_dynamodb", lambda: ddb)
+    monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
 
     # Search with both query and topic
     result = kt.exec_knowledge_search(
@@ -232,7 +232,7 @@ def test_exec_knowledge_search_query_no_match_returns_empty(monkeypatch):
     }
     ddb = MagicMock()
     ddb.Table.return_value = table
-    monkeypatch.setattr(kt, "_get_dynamodb", lambda: ddb)
+    monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
 
     result = kt.exec_knowledge_search(
         {"query": "B-999999"},
@@ -257,7 +257,7 @@ def test_exec_knowledge_search_query_matches_summary(monkeypatch):
 
     ddb = MagicMock()
     ddb.Table.return_value = table
-    monkeypatch.setattr(kt, "_get_dynamodb", lambda: ddb)
+    monkeypatch.setattr(kt, "get_dynamodb", lambda: ddb)
 
     result = kt.exec_knowledge_search(
         {"query": "B-302358"},

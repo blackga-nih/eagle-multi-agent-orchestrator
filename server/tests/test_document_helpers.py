@@ -441,7 +441,9 @@ class TestMarkdownSidecarFallback:
 
     def test_sidecar_preferred_when_available(self):
         s3 = self._build_s3_with_sidecar("# SOW\n\nRich markdown content from AI")
-        with patch("boto3.client", return_value=s3):
+        import app.db_client as _db
+        _db.get_s3.cache_clear()
+        with patch("app.db_client.get_s3", return_value=s3):
             with self.TestClient(self.app) as client:
                 resp = client.get(
                     "/api/documents/eagle/dev-tenant/dev-user/documents/test.docx?content=true",
@@ -454,7 +456,9 @@ class TestMarkdownSidecarFallback:
 
     def test_falls_back_to_binary_when_no_sidecar(self):
         s3 = self._build_s3_with_sidecar(None)
-        with patch("boto3.client", return_value=s3):
+        import app.db_client as _db
+        _db.get_s3.cache_clear()
+        with patch("app.db_client.get_s3", return_value=s3):
             with self.TestClient(self.app) as client:
                 resp = client.get(
                     "/api/documents/eagle/dev-tenant/dev-user/documents/test.docx?content=true",

@@ -290,7 +290,7 @@ class TestTemplateService:
         assert result.file_type == "md"
         assert "Eval Criteria: Test Eval" in result.preview
 
-    @patch("app.template_service._get_s3")
+    @patch("app.template_service.get_s3")
     def test_template_not_found_falls_back_to_markdown(self, mock_s3, mock_generators):
         """Missing S3 template should fall back to markdown."""
         from botocore.exceptions import ClientError
@@ -376,7 +376,7 @@ class TestTemplateServiceIntegration:
         except ImportError:
             pytest.skip("agentic_service generators not available")
 
-    @patch("app.template_service._get_s3")
+    @patch("app.template_service.get_s3")
     def test_full_fallback_flow(self, mock_s3, real_generators):
         """Test complete fallback flow with real generators."""
         from botocore.exceptions import ClientError
@@ -402,7 +402,7 @@ class TestTemplateServiceIntegration:
         assert "Cloud Migration Services" in result.preview
         assert "STATEMENT OF WORK" in result.preview
 
-    @patch("app.template_service._get_s3")
+    @patch("app.template_service.get_s3")
     def test_igce_fallback_with_line_items(self, mock_s3, real_generators):
         """Test IGCE generation with line items data."""
         from botocore.exceptions import ClientError

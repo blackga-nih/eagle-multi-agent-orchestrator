@@ -74,8 +74,8 @@ class TestListS3Templates:
         ]
         paginator = _build_paginator_mock([objects])
 
-        with patch("app.template_registry.boto3") as mock_boto3:
-            mock_boto3.client.return_value = self._patch_s3(paginator)
+        with patch("app.template_registry.get_s3") as mock_get_s3:
+            mock_get_s3.return_value = self._patch_s3(paginator)
             results = list_s3_templates()
 
         assert len(results) == 2
@@ -99,15 +99,14 @@ class TestListS3Templates:
         objects = [_make_s3_object(f"{prefix}/statement-of-work-template-eagle-v2.docx")]
         paginator = _build_paginator_mock([objects])
 
-        with patch("app.template_registry.boto3") as mock_boto3:
-            mock_client = self._patch_s3(paginator)
-            mock_boto3.client.return_value = mock_client
+        with patch("app.template_registry.get_s3") as mock_get_s3:
+            mock_get_s3.return_value = self._patch_s3(paginator)
 
             list_s3_templates()
             list_s3_templates()
 
-            # boto3.client should have been called only once
-            assert mock_boto3.client.call_count == 1
+            # get_s3 should have been called only once (cached)
+            assert mock_get_s3.call_count == 1
 
     def test_refresh_bypasses_cache(self):
         """Calling list_s3_templates(refresh=True) re-fetches from S3."""
@@ -117,15 +116,14 @@ class TestListS3Templates:
         objects = [_make_s3_object(f"{prefix}/statement-of-work-template-eagle-v2.docx")]
         paginator = _build_paginator_mock([objects])
 
-        with patch("app.template_registry.boto3") as mock_boto3:
-            mock_client = self._patch_s3(paginator)
-            mock_boto3.client.return_value = mock_client
+        with patch("app.template_registry.get_s3") as mock_get_s3:
+            mock_get_s3.return_value = self._patch_s3(paginator)
 
             list_s3_templates()
             list_s3_templates(refresh=True)
 
-            # Second call with refresh=True should create a new S3 client
-            assert mock_boto3.client.call_count == 2
+            # Second call with refresh=True should re-fetch
+            assert mock_get_s3.call_count == 2
 
     def test_phase_filter_works(self):
         """phase_filter='planning' returns only templates whose category phase is 'planning'."""
@@ -140,8 +138,8 @@ class TestListS3Templates:
         ]
         paginator = _build_paginator_mock([objects])
 
-        with patch("app.template_registry.boto3") as mock_boto3:
-            mock_boto3.client.return_value = self._patch_s3(paginator)
+        with patch("app.template_registry.get_s3") as mock_get_s3:
+            mock_get_s3.return_value = self._patch_s3(paginator)
             results = list_s3_templates(phase_filter="planning")
 
         # Only the SOW (planning phase) should survive the filter
@@ -163,8 +161,8 @@ class TestListS3Templates:
         ]
         paginator = _build_paginator_mock([objects])
 
-        with patch("app.template_registry.boto3") as mock_boto3:
-            mock_boto3.client.return_value = self._patch_s3(paginator)
+        with patch("app.template_registry.get_s3") as mock_get_s3:
+            mock_get_s3.return_value = self._patch_s3(paginator)
             results = list_s3_templates()
 
         filenames = [t["filename"] for t in results]

@@ -9,7 +9,7 @@ import pytest
 
 class TestCloudWatchEmitter:
 
-    @patch("app.telemetry.cloudwatch_emitter._get_client")
+    @patch("app.telemetry.cloudwatch_emitter.get_logs")
     def test_emits_to_eagle_app_log_group(self, mock_get_client):
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -18,7 +18,7 @@ class TestCloudWatchEmitter:
         call_args = mock_client.put_log_events.call_args
         assert call_args.kwargs["logGroupName"] == "/eagle/telemetry"
 
-    @patch("app.telemetry.cloudwatch_emitter._get_client")
+    @patch("app.telemetry.cloudwatch_emitter.get_logs")
     def test_stream_name_uses_session_id(self, mock_get_client):
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -31,7 +31,7 @@ class TestCloudWatchEmitter:
         )
         assert "sess-abc" in stream
 
-    @patch("app.telemetry.cloudwatch_emitter._get_client")
+    @patch("app.telemetry.cloudwatch_emitter.get_logs")
     def test_stream_name_falls_back_to_tenant(self, mock_get_client):
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -41,7 +41,7 @@ class TestCloudWatchEmitter:
         stream = call_args.kwargs.get("logStreamName", "")
         assert "t1" in stream
 
-    @patch("app.telemetry.cloudwatch_emitter._get_client")
+    @patch("app.telemetry.cloudwatch_emitter.get_logs")
     def test_handles_already_exists(self, mock_get_client):
         from botocore.exceptions import ClientError
         mock_client = MagicMock()
@@ -56,7 +56,7 @@ class TestCloudWatchEmitter:
         emit_telemetry_event("test", "t1", {}, "s1", "u1")
         mock_client.put_log_events.assert_called_once()
 
-    @patch("app.telemetry.cloudwatch_emitter._get_client")
+    @patch("app.telemetry.cloudwatch_emitter.get_logs")
     def test_swallows_put_failure(self, mock_get_client):
         mock_client = MagicMock()
         mock_client.put_log_events.side_effect = Exception("CloudWatch down")

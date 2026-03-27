@@ -212,7 +212,9 @@ def test_get_document_returns_binary_metadata_for_canonical_package_doc():
     app = main_module.app
     s3 = _build_s3_mock()
 
-    with patch("boto3.client", return_value=s3), patch(
+    import app.db_client as _db
+    _db.get_s3.cache_clear()
+    with patch("app.db_client.get_s3", return_value=s3), patch(
         "app.routers.documents.get_document",
         return_value={
             "document_id": "doc-123",
@@ -258,7 +260,9 @@ def test_get_document_still_returns_inline_content_for_text_documents():
     app = main_module.app
     s3 = _build_s3_mock()
 
-    with patch("boto3.client", return_value=s3):
+    import app.db_client as _db
+    _db.get_s3.cache_clear()
+    with patch("app.db_client.get_s3", return_value=s3):
         with TestClient(app) as client:
             resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/test.md?content=true", headers=_auth_header())
 
@@ -275,7 +279,9 @@ def test_get_document_returns_read_only_preview_for_xlsx():
     app = main_module.app
     s3 = _build_s3_mock()
 
-    with patch("boto3.client", return_value=s3):
+    import app.db_client as _db
+    _db.get_s3.cache_clear()
+    with patch("app.db_client.get_s3", return_value=s3):
         with TestClient(app) as client:
             resp = client.get("/api/documents/eagle/dev-tenant/dev-user/documents/igce_20260316_120000.xlsx?content=true", headers=_auth_header())
 
@@ -300,8 +306,8 @@ def test_post_docx_edit_updates_workspace_docx_preview_blocks():
     # Patch _get_s3 via the function's own globals (module reload makes
     # the canonical edit service module the correct patch target.
     _save_fn = docx_service.save_docx_preview_edits
-    _orig_get_s3 = _save_fn.__globals__["_get_s3"]
-    _save_fn.__globals__["_get_s3"] = lambda: s3
+    _orig_get_s3 = _save_fn.__globals__["get_s3"]
+    _save_fn.__globals__["get_s3"] = lambda: s3
 
     try:
         with patch("boto3.client", return_value=s3), patch.dict(
@@ -321,7 +327,7 @@ def test_post_docx_edit_updates_workspace_docx_preview_blocks():
                     headers=headers,
                 )
     finally:
-        _save_fn.__globals__["_get_s3"] = _orig_get_s3
+        _save_fn.__globals__["get_s3"] = _orig_get_s3
 
     assert save_resp.status_code == 200
     data = save_resp.json()
@@ -339,8 +345,8 @@ def test_post_xlsx_edit_updates_workspace_xlsx_preview_cells():
     # Patch _get_s3 via the function's own globals (module reload makes
     # the canonical spreadsheet service module the correct patch target.
     _save_fn = xlsx_service.save_xlsx_preview_edits
-    _orig_get_s3 = _save_fn.__globals__["_get_s3"]
-    _save_fn.__globals__["_get_s3"] = lambda: s3
+    _orig_get_s3 = _save_fn.__globals__["get_s3"]
+    _save_fn.__globals__["get_s3"] = lambda: s3
 
     try:
         with patch("boto3.client", return_value=s3), patch.dict(
@@ -364,7 +370,7 @@ def test_post_xlsx_edit_updates_workspace_xlsx_preview_cells():
                     headers=headers,
                 )
     finally:
-        _save_fn.__globals__["_get_s3"] = _orig_get_s3
+        _save_fn.__globals__["get_s3"] = _orig_get_s3
 
     assert save_resp.status_code == 200
     data = save_resp.json()

@@ -73,7 +73,7 @@ def test_save_xlsx_preview_edits_versions_package_doc():
     s3 = MagicMock()
     s3.get_object.return_value = {"Body": io.BytesIO(xlsx_bytes)}
 
-    with patch("app.spreadsheet_edit_service._get_s3", return_value=s3), patch(
+    with patch("app.spreadsheet_edit_service.get_s3", return_value=s3), patch(
         "app.spreadsheet_edit_service.get_document",
         return_value={"title": "IGCE", "template_id": "tmpl-xlsx"},
     ), patch(
