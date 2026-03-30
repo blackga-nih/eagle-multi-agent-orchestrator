@@ -186,6 +186,7 @@ export class EagleCiCdStack extends cdk.Stack {
         'logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents',
         'logs:DescribeLogStreams', 'logs:FilterLogEvents', 'logs:GetLogEvents',
         'logs:DescribeLogGroups',
+        'logs:StartQuery', 'logs:StopQuery', 'logs:GetQueryResults',
       ],
       resources: [
         `arn:aws:logs:${config.region}:${this.account}:log-group:/eagle/*`,

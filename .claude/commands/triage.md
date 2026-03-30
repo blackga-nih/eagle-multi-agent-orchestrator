@@ -180,17 +180,43 @@ window_hours = {'1h': 1, '4h': 4, '24h': 24, '7d': 168}
 hours = window_hours.get('${TIME_WINDOW}', 24)
 from_ts = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
+async def _req(client, url, **kw):
+    for attempt in range(4):
+        r = await client.get(url, **kw)
+        if r.status_code == 429 or r.status_code >= 500:
+            if attempt < 3:
+                wait = 2 ** attempt
+                ra = r.headers.get('Retry-After')
+                if ra and ra.isdigit(): wait = max(wait, int(ra))
+                import asyncio as _a; await _a.sleep(wait)
+                continue
+            r.raise_for_status()
+        return r
+    return r
+
 async def fetch():
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(f'{host}/api/public/traces',
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await _req(client, f'{host}/api/public/traces',
             params={'limit': 100, 'fromTimestamp': from_ts},
             headers={'Authorization': auth})
         traces = resp.json()
 
         error_traces = []
+        orphan_count = 0
         all_traces = traces.get('data', [])
         for t in all_traces:
-            obs_resp = await client.get(f'{host}/api/public/observations',
+            # Filter orphan stream traces (client disconnect before span close)
+            is_orphan = (
+                t.get('name', '').startswith('eagle-stream-')
+                and not t.get('sessionId')
+                and (t.get('totalCost', 0) or 0) == 0
+                and t.get('output') is None
+            )
+            if is_orphan:
+                orphan_count += 1
+                continue
+
+            obs_resp = await _req(client, f'{host}/api/public/observations',
                 params={'traceId': t['id'], 'limit': 20},
                 headers={'Authorization': auth})
             obs = obs_resp.json().get('data', [])
@@ -210,7 +236,7 @@ async def fetch():
                 })
 
         total = len(all_traces)
-        successful = total - len(error_traces)
+        successful = total - len(error_traces) - orphan_count
         avg_latency = sum(t.get('latency', 0) or 0 for t in all_traces) / max(total, 1)
         total_cost = sum(t.get('totalCost', 0) or 0 for t in all_traces)
         unique_users = len(set(t.get('userId', '') for t in all_traces if t.get('userId')))
@@ -219,6 +245,7 @@ async def fetch():
             'total_traces': total,
             'successful': successful,
             'error_count': len(error_traces),
+            'orphan_traces_filtered': orphan_count,
             'error_traces': error_traces,
             'avg_latency_ms': round(avg_latency),
             'total_cost_usd': round(total_cost, 4),
@@ -260,6 +287,7 @@ asyncio.run(fetch())
 | `ValidationException` | Bad model request | ACTIONABLE |
 | Repeated "Hello" inputs with ERROR | Retry loops / expired SSO | ACTIONABLE |
 | `output: null` with cost=0 | Auth/infra failure | ACTIONABLE |
+| `eagle-stream-*` name AND no `sessionId` AND `totalCost`=0 AND `output` is null | Orphan stream trace (client disconnect before span close) | Noise |
 
 ### Feedback Patterns
 
