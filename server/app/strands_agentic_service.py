@@ -313,6 +313,7 @@ class ResultMessage:
 _NCI_ACCOUNT = "695681773636"
 _SONNET = "us.anthropic.claude-sonnet-4-6"
 _HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+_NOVA_PRO = "us.amazon.nova-pro-v1:0"
 
 
 def _default_model() -> str:
@@ -357,6 +358,16 @@ _model = BedrockModel(
     cache_tools="default",
     cache_config=CacheConfig(strategy="auto"),
 )
+
+# Fallback model — used when primary model returns ServiceUnavailableException.
+# Nova Pro has high availability and supports the same Converse API.
+FALLBACK_MODEL_ID = os.getenv("EAGLE_BEDROCK_FALLBACK_MODEL_ID", _NOVA_PRO)
+_fallback_model = BedrockModel(
+    model_id=FALLBACK_MODEL_ID,
+    region_name=os.getenv("AWS_REGION", "us-east-1"),
+    boto_client_config=_bedrock_client_config,
+)
+logger.info("EAGLE fallback model: %s", FALLBACK_MODEL_ID)
 
 # Tier-gated tool access (preserved from sdk_agentic_service.py)
 # Note: Strands subagents don't use CLI tools like Read/Glob/Grep.
@@ -4886,7 +4897,7 @@ async def sdk_query_streaming(
                     _stale_detail = (
                         "Preparing documents..."
                         if any("create_document" in str(tc) for tc in tools_called)
-                        else "Working..."
+                        else "Reconnecting..."
                     )
                     yield {
                         "type": "agent_status",
@@ -5080,9 +5091,83 @@ async def sdk_query_streaming(
                 )
         return  # Stream was abandoned — skip cleanup yields
     except Exception as exc:
+        from botocore.exceptions import ClientError
         from strands.types.exceptions import ContextWindowOverflowException
 
-        if isinstance(exc, ContextWindowOverflowException):
+        # --- Fallback to alternate model on ServiceUnavailableException ---
+        _is_service_unavailable = (
+            isinstance(exc, ClientError)
+            and exc.response.get("Error", {}).get("Code") == "ServiceUnavailableException"
+        ) or "ServiceUnavailableException" in str(exc)
+
+        if _is_service_unavailable and FALLBACK_MODEL_ID:
+            logger.warning(
+                "Primary model %s unavailable, falling back to %s: session=%s error=%s",
+                MODEL, FALLBACK_MODEL_ID, session_id, exc,
+            )
+            yield {
+                "type": "agent_status",
+                "status": "Switching to backup model...",
+                "detail": "model_fallback",
+            }
+            try:
+                fallback_supervisor = Agent(
+                    model=_fallback_model,
+                    system_prompt=system_prompt,
+                    tools=skill_tools + service_tools,
+                    callback_handler=None,
+                    messages=strands_history or None,
+                    conversation_manager=conv_manager,
+                    trace_attributes=_build_trace_attrs(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        tier=tier,
+                        session_id=session_id or "",
+                        username=username or "",
+                        eval_tags=tags,
+                    ),
+                )
+                _fallback_iter = fallback_supervisor.stream_async(prompt).__aiter__()
+                _fb_pending: asyncio.Task | None = None
+                _fb_done = False
+                while not _fb_done:
+                    if _fb_pending is None:
+                        _fb_pending = asyncio.ensure_future(_fallback_iter.__anext__())
+                    fb_ready, _ = await asyncio.wait({_fb_pending}, timeout=0.5)
+                    for tool_result_chunk in _drain_tool_results():
+                        yield tool_result_chunk
+                    if not fb_ready:
+                        continue
+                    try:
+                        fb_event = _fb_pending.result()
+                    except StopAsyncIteration:
+                        _fb_done = True
+                        break
+                    _fb_pending = None
+                    fb_data = fb_event.get("data")
+                    if fb_data and isinstance(fb_data, str):
+                        full_text_parts.append(fb_data)
+                        yield {"type": "text", "data": fb_data}
+                        continue
+                    fb_raw = fb_event.get("event", {})
+                    if isinstance(fb_raw, dict):
+                        fb_reasoning = fb_raw.get("contentBlockDelta", {}).get("delta", {}).get("reasoningContent", {}).get("text", "")
+                        if fb_reasoning:
+                            yield {"type": "reasoning", "data": fb_reasoning}
+                            continue
+                    fb_tool = fb_event.get("current_tool_use")
+                    if fb_tool and isinstance(fb_tool, dict):
+                        fb_tool_name = fb_tool.get("name", "")
+                        tools_called.append(fb_tool_name)
+                        yield {"type": "tool_use", "name": fb_tool_name, "input": {}, "tool_use_id": fb_tool.get("toolUseId", "")}
+                        continue
+                    if "result" in fb_event and hasattr(fb_event.get("result"), "metrics"):
+                        agent_result = fb_event["result"]
+                logger.info("Fallback model %s succeeded for session=%s", FALLBACK_MODEL_ID, session_id)
+            except Exception as fallback_exc:
+                error_holder.append(fallback_exc)
+                logger.error("Fallback model %s also failed: session=%s error=%s", FALLBACK_MODEL_ID, session_id, fallback_exc)
+        elif isinstance(exc, ContextWindowOverflowException):
             logger.error(
                 "Context window overflow unrecoverable for session=%s: %s",
                 session_id,
