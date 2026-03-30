@@ -20,13 +20,15 @@ def test_resolve_model_id_prefers_first_non_empty_env(monkeypatch):
 
 
 def test_model_chain_exists():
-    """The module should expose a model chain with Sonnet 4.6 as default primary."""
+    """The module should expose a model chain with Haiku as last resort."""
     from app import strands_agentic_service as service
 
     assert hasattr(service, "_MODEL_CHAIN_IDS")
     assert len(service._MODEL_CHAIN_IDS) >= 4
-    # Last model should always be Haiku (last resort)
-    assert "haiku" in service._MODEL_CHAIN_IDS[-1]
+    # Default chain always ends with Haiku (env override may reorder runtime chain)
+    assert "haiku" in service._DEFAULT_MODEL_CHAIN[-1]
+    # Runtime chain always contains Haiku
+    assert any("haiku" in mid for mid in service._MODEL_CHAIN_IDS)
 
 
 @pytest.mark.asyncio
