@@ -14,7 +14,7 @@ Environment variables:
     BASE_URL              — Deployed ALB URL (default: http://localhost:3000)
     EAGLE_TEST_EMAIL      — Cognito test user email
     EAGLE_TEST_PASSWORD   — Cognito test user password
-    E2E_JUDGE_MODEL       — Vision judge model (default: us.anthropic.claude-sonnet-4-6-20250514-v1:0)
+    E2E_JUDGE_MODEL       — Vision judge model (default: us.anthropic.claude-sonnet-4-6)
     E2E_JUDGE_CACHE_TTL_DAYS — Cache TTL in days (default: 7)
 """
 

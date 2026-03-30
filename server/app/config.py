@@ -20,8 +20,22 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+DEFAULT_BEDROCK_SONNET_MODEL = "us.anthropic.claude-sonnet-4-6"
+DEFAULT_BEDROCK_HAIKU_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+DEFAULT_ANTHROPIC_SONNET_MODEL = "claude-sonnet-4-6"
+DEFAULT_ANTHROPIC_HAIKU_MODEL = "claude-haiku-4-5-20251001"
+
 
 # ── Helper Functions ─────────────────────────────────────────────────────────
+
+
+def resolve_model_id(*env_vars: str, default: str) -> str:
+    """Return the first non-empty model env var, otherwise default."""
+    for env_var in env_vars:
+        value = os.getenv(env_var)
+        if value:
+            return value
+    return default
 
 
 def _bool(env_var: str, default: str = "false") -> bool:
@@ -156,7 +170,7 @@ class SessionConfig:
 class ModelConfig:
     """AI model configuration."""
 
-    anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    anthropic_model: str = os.getenv("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_HAIKU_MODEL)
     sdk_model: str = os.getenv("EAGLE_SDK_MODEL", "haiku")
     knowledge_search_model: str = os.getenv(
         "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-3-haiku-20240307-v1:0"

@@ -31,7 +31,7 @@ from eagle_skill_constants import SKILL_CONSTANTS
 
 # ── Config ───────────────────────────────────────────────────────────
 
-MODEL_ID = os.environ.get("STRANDS_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
+MODEL_ID = os.environ.get("STRANDS_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 REGION = "us-east-1"
 
 # Lazy model — created on first use to avoid crashing at import time without AWS creds

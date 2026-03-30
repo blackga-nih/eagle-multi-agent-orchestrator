@@ -21,14 +21,21 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+from .config import DEFAULT_BEDROCK_SONNET_MODEL, resolve_model_id
+
 logger = logging.getLogger("eagle.template_standardizer")
 
 # ── Bedrock Configuration ────────────────────────────────────────────
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-BEDROCK_MODEL_ID = os.getenv(
-    "STANDARDIZER_MODEL_ID",
-    "us.anthropic.claude-sonnet-4-20250514-v1:0",
-)
+
+
+def _get_bedrock_model_id() -> str:
+    """Resolve the standardizer model, preferring explicit overrides."""
+    return resolve_model_id(
+        "STANDARDIZER_MODEL_ID",
+        "EAGLE_BEDROCK_MODEL_ID",
+        default=DEFAULT_BEDROCK_SONNET_MODEL,
+    )
 
 # ── Paths ────────────────────────────────────────────────────────────
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent / "eagle-plugin"
@@ -315,12 +322,13 @@ Convert the raw document content above into the gold-standard markdown format sh
         }
     )
 
+    model_id = _get_bedrock_model_id()
     logger.info(
-        "Invoking Bedrock %s for %s standardization", BEDROCK_MODEL_ID, doc_type
+        "Invoking Bedrock %s for %s standardization", model_id, doc_type
     )
 
     bedrock = _get_bedrock()
-    response = bedrock.invoke_model(modelId=BEDROCK_MODEL_ID, body=body)
+    response = bedrock.invoke_model(modelId=model_id, body=body)
     result = json.loads(response["body"].read())
 
     # Extract text from Claude response

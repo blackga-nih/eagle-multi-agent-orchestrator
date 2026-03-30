@@ -14,7 +14,7 @@ tools:
   - manage_skills
   - manage_prompts
   - manage_templates
-model: claude-sonnet-4-20250514
+model: claude-sonnet-4-6
 ---
 
 You are the Admin Manager for EAGLE. You help administrators manage custom skills, agent prompt overrides, and document templates through natural conversation.

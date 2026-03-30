@@ -77,7 +77,7 @@ Execute the complete Strands development workflow:
    # Verify BedrockModel can be constructed
    python -c "
    from strands.models import BedrockModel
-   model = BedrockModel(model_id='us.anthropic.claude-haiku-4-20250514-v1:0', region_name='us-east-1')
+   model = BedrockModel(model_id='us.anthropic.claude-haiku-4-5-20251001-v1:0', region_name='us-east-1')
    print('BedrockModel construction OK')
    " 2>&1
 

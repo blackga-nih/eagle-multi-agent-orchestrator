@@ -13,24 +13,35 @@ import time
 import logging
 from typing import Optional
 
+from ..config import DEFAULT_ANTHROPIC_SONNET_MODEL, DEFAULT_BEDROCK_SONNET_MODEL
+
 logger = logging.getLogger("eagle.telemetry")
 
 # Simple per-1K-token pricing lookup (USD)
 # Update when model pricing changes.
+_SONNET_PRICING = {"input": 0.003, "output": 0.015}
+_HAIKU_PRICING = {"input": 0.001, "output": 0.005}
+_OPUS_PRICING = {"input": 0.015, "output": 0.075}
+
 MODEL_PRICING = {
     # Haiku 4.5
-    "claude-haiku-4-5-20251001": {"input": 0.001, "output": 0.005},
-    "us.anthropic.claude-haiku-4-5-20251001-v1:0": {"input": 0.001, "output": 0.005},
-    # Sonnet 4
-    "claude-sonnet-4-20250514": {"input": 0.003, "output": 0.015},
-    "us.anthropic.claude-sonnet-4-20250514-v1:0": {"input": 0.003, "output": 0.015},
+    "claude-haiku-4-5-20251001": _HAIKU_PRICING,
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0": _HAIKU_PRICING,
+    # Sonnet 4.6
+    DEFAULT_ANTHROPIC_SONNET_MODEL: _SONNET_PRICING,
+    "anthropic.claude-sonnet-4-6": _SONNET_PRICING,
+    DEFAULT_BEDROCK_SONNET_MODEL: _SONNET_PRICING,
+    "global.anthropic.claude-sonnet-4-6": _SONNET_PRICING,
+    # Sonnet 4 legacy
+    "claude-sonnet-4-20250514": _SONNET_PRICING,
+    "us.anthropic.claude-sonnet-4-20250514-v1:0": _SONNET_PRICING,
     # Opus 4
-    "claude-opus-4-20250514": {"input": 0.015, "output": 0.075},
-    "us.anthropic.claude-opus-4-20250514-v1:0": {"input": 0.015, "output": 0.075},
+    "claude-opus-4-20250514": _OPUS_PRICING,
+    "us.anthropic.claude-opus-4-20250514-v1:0": _OPUS_PRICING,
 }
 
 # Fallback pricing (Haiku-class)
-_DEFAULT_PRICING = {"input": 0.001, "output": 0.005}
+_DEFAULT_PRICING = _HAIKU_PRICING
 
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:

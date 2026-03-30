@@ -66,7 +66,7 @@ def generate_example(doc_type: str, model) -> dict:
     messages = [{"role": "user", "content": [{"text": prompt}]}]
     try:
         response = model.converse(
-            modelId=os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-20250514"),
+            modelId=os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
             messages=messages,
             system=[{"text": _SYSTEM_PROMPT}],
             inferenceConfig={

@@ -1,9 +1,6 @@
 """
 EAGLE - Strands-Based Agentic Service with Skill->Subagent Orchestration
 
-Drop-in replacement for sdk_agentic_service.py. Same function signatures,
-Strands Agents SDK under the hood instead of Claude Agent SDK.
-
 Architecture:
   Supervisor (Agent + @tool subagents)
     |- oa-intake (@tool -> Agent, fresh per-call)
@@ -13,12 +10,8 @@ Architecture:
     |- public-interest (@tool -> Agent, fresh per-call)
     +- document-generator (@tool -> Agent, fresh per-call)
 
-Key differences from sdk_agentic_service.py:
-  - No subprocess — Strands runs in-process via boto3 converse
-  - No credential bridging — boto3 handles SSO/IAM natively
-  - AgentDefinition -> @tool-wrapped Agent()
-  - ClaudeAgentOptions -> Agent() constructor
-  - query() async generator -> agent() sync call + adapter yield
+Runs in-process via Strands Agents SDK (boto3 converse). boto3 handles
+SSO/IAM natively — no subprocess or credential bridging needed.
 """
 
 import asyncio
@@ -44,7 +37,7 @@ if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
 # When imported directly (e.g. eval test runner), relative imports (.tools,
-# .agentic_service, etc.) fail because there's no parent package context.
+# relative imports fail because there's no parent package context.
 # Bootstrap the 'app' package so all `from .xxx` imports work everywhere.
 if __package__ is None or __package__ == "":
     _app_dir = os.path.dirname(os.path.abspath(__file__))
@@ -58,6 +51,7 @@ if __package__ is None or __package__ == "":
     __package__ = "app"
 
 from eagle_skill_constants import AGENTS, COMMANDS, SKILLS, PLUGIN_CONTENTS
+from .config import DEFAULT_BEDROCK_HAIKU_MODEL, DEFAULT_BEDROCK_SONNET_MODEL
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
 from .tools.web_fetch import exec_web_fetch
 from .tools.web_search import exec_web_search
@@ -311,8 +305,8 @@ class ResultMessage:
 # and Haiku 4.5 on any other account (personal dev, CI, etc.).
 
 _NCI_ACCOUNT = "695681773636"
-_SONNET = "us.anthropic.claude-sonnet-4-6"
-_HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+_SONNET = DEFAULT_BEDROCK_SONNET_MODEL
+_HAIKU = DEFAULT_BEDROCK_HAIKU_MODEL
 _NOVA_PRO = "us.amazon.nova-pro-v1:0"
 
 
@@ -369,10 +363,9 @@ _fallback_model = BedrockModel(
 )
 logger.info("EAGLE fallback model: %s", FALLBACK_MODEL_ID)
 
-# Tier-gated tool access (preserved from sdk_agentic_service.py)
-# Note: Strands subagents don't use CLI tools like Read/Glob/Grep.
-# These are kept for compatibility; in Strands, tool access is managed
-# via the @tool functions registered on the Agent.
+# Tier-gated tool access.
+# Strands subagents don't use CLI tools like Read/Glob/Grep — tool access
+# is managed via the @tool functions registered on the Agent.
 TIER_TOOLS = {
     "basic": [],
     "advanced": ["Read", "Glob", "Grep"],
@@ -537,7 +530,7 @@ async def _maybe_fast_path_greeting(prompt: str) -> dict | None:
     return {
         "text": output_text,
         "usage": usage,
-        "model": MODEL,
+        "model": model_id,
         "elapsed_ms": elapsed_ms,
     }
 
@@ -3956,7 +3949,7 @@ def build_skill_tools(
 ) -> list:
     """Build @tool-wrapped subagent functions from skill registry.
 
-    Same 4-layer prompt resolution as sdk_agentic_service.build_skill_agents():
+    4-layer prompt resolution:
       1. Workspace override (workspace_override_store)
       2. DynamoDB PLUGIN# canonical (plugin_store)
       3. Bundled eagle-plugin/ files (PLUGIN_CONTENTS)
@@ -4371,7 +4364,7 @@ def build_supervisor_prompt(
     return f"{header}\n\n{body}"
 
 
-# -- SDK Query Wrappers (same signatures as sdk_agentic_service.py) --
+# -- SDK Query Wrappers --
 
 
 def _to_strands_messages(anthropic_messages: list[dict]) -> list[dict]:
@@ -4409,7 +4402,7 @@ async def sdk_query(
 ) -> AsyncGenerator[Any, None]:
     """Run a supervisor query with skill subagents (Strands implementation).
 
-    Same signature as sdk_agentic_service.sdk_query(). Yields adapter objects
+    Yields adapter objects
     that match the AssistantMessage/ResultMessage interface expected by callers.
 
     Args:
@@ -5510,7 +5503,7 @@ async def sdk_query_single_skill(
 ) -> AsyncGenerator[Any, None]:
     """Run a query directly against a single skill (no supervisor).
 
-    Same signature as sdk_agentic_service.sdk_query_single_skill().
+    Run a single skill directly (no supervisor).
     Direct Agent call with skill content as system_prompt.
 
     Args:

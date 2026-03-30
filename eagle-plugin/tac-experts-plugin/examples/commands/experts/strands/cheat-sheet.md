@@ -16,7 +16,7 @@ from strands import Agent
 from strands.models import BedrockModel
 
 model = BedrockModel(
-    model_id="us.anthropic.claude-haiku-4-20250514-v1:0",
+    model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
     region_name="us-east-1",
 )
 
@@ -54,7 +54,7 @@ print(result)  # "4"
 # Module-level: create ONCE, reuse everywhere
 # Saves ~50-200ms per request (boto3 client creation)
 _model = BedrockModel(
-    model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+    model_id="us.anthropic.claude-sonnet-4-6",
     region_name="us-east-1",
 )
 
@@ -109,7 +109,7 @@ def stateful_tool(query: str, tool_context) -> str:
 from strands import Agent, tool
 from strands.models import BedrockModel
 
-_model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
+_model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-6")
 
 @tool(name="legal_counsel")
 def legal_counsel(query: str) -> str:
@@ -326,7 +326,7 @@ from strands.models import BedrockModel
 from app.sdk_agentic_service import sdk_query, sdk_query_single_skill
 
 _model = BedrockModel(
-    model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+    model_id="us.anthropic.claude-sonnet-4-6",
     region_name="us-east-1",
 )
 

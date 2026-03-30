@@ -90,11 +90,11 @@ print(f'ARN: {ident[\"Arn\"]}')
 python -c "
 from strands.models import BedrockModel
 model = BedrockModel(
-    model_id='us.anthropic.claude-haiku-4-20250514-v1:0',
+    model_id='us.anthropic.claude-haiku-4-5-20251001-v1:0',
     region_name='us-east-1',
 )
 print(f'BedrockModel: OK')
-print(f'Model ID: us.anthropic.claude-haiku-4-20250514-v1:0')
+print(f'Model ID: us.anthropic.claude-haiku-4-5-20251001-v1:0')
 print(f'Region: us-east-1')
 " 2>&1
 
@@ -117,7 +117,7 @@ from strands import Agent
 from strands.models import BedrockModel
 
 model = BedrockModel(
-    model_id='us.anthropic.claude-haiku-4-20250514-v1:0',
+    model_id='us.anthropic.claude-haiku-4-5-20251001-v1:0',
     region_name='us-east-1',
 )
 
@@ -153,7 +153,7 @@ def add_numbers(a: int, b: int) -> str:
     return str(a + b)
 
 model = BedrockModel(
-    model_id='us.anthropic.claude-haiku-4-20250514-v1:0',
+    model_id='us.anthropic.claude-haiku-4-5-20251001-v1:0',
     region_name='us-east-1',
 )
 

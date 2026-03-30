@@ -1097,7 +1097,7 @@ export default function SkillsPage() {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., us.anthropic.claude-sonnet-4-20250514"
+                  placeholder="e.g., us.anthropic.claude-sonnet-4-6"
                   value={newSkill.model}
                   onChange={(e) => setNewSkill((p) => ({ ...p, model: e.target.value }))}
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"

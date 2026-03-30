@@ -57,7 +57,7 @@ if os.path.exists(_env_file):
                 _ev = _ev.strip().strip('"').strip("'")
                 if _ek not in os.environ:  # Never override vars already set (e.g. AWS_PROFILE)
                     os.environ[_ek] = _ev
-from agentic_service import execute_tool
+from app.tools.legacy_dispatch import execute_tool
 
 from strands import Agent, tool
 from strands.models import BedrockModel
@@ -93,9 +93,9 @@ except ImportError:
 
 _parser = argparse.ArgumentParser(description="EAGLE Strands Evaluation Suite")
 _parser.add_argument(
-    "--model", default="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+    "--model", default="us.anthropic.claude-haiku-4-5-20251001-v1:0",
     help="Override Bedrock model ID for ALL test invocations "
-         "(default: us.anthropic.claude-3-5-haiku-20241022-v1:0).",
+         "(default: us.anthropic.claude-haiku-4-5-20251001-v1:0).",
 )
 _parser.add_argument(
     "--async", dest="run_async", action="store_true",

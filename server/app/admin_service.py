@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from botocore.exceptions import ClientError, BotoCoreError
 
+from .config import DEFAULT_BEDROCK_SONNET_MODEL, resolve_model_id
 from .db_client import get_table, item_to_dict
 from .config import cost as cost_config
 
@@ -39,7 +40,7 @@ def record_request_cost(
     session_id: str,
     input_tokens: int,
     output_tokens: int,
-    model: str = "claude-sonnet-4-20250514",
+    model: Optional[str] = None,
     tools_used: Optional[List[str]] = None,
     response_time_ms: int = 0,
 ):
@@ -48,6 +49,10 @@ def record_request_cost(
     """
     now = datetime.utcnow()
     cost = calculate_cost(input_tokens, output_tokens)
+    resolved_model = model or resolve_model_id(
+        "EAGLE_BEDROCK_MODEL_ID",
+        default=DEFAULT_BEDROCK_SONNET_MODEL,
+    )
 
     # Cost record
     cost_record = {
@@ -60,7 +65,7 @@ def record_request_cost(
         "output_tokens": output_tokens,
         "total_tokens": input_tokens + output_tokens,
         "cost_usd": Decimal(str(cost)),
-        "model": model,
+        "model": resolved_model,
         "tools_used": tools_used or [],
         "response_time_ms": response_time_ms,
         "created_at": now.isoformat(),

@@ -28,7 +28,7 @@ from .e2e_judge_prompts import get_prompt
 logger = logging.getLogger(__name__)
 
 # Default: Claude Sonnet for vision quality.
-DEFAULT_JUDGE_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+DEFAULT_JUDGE_MODEL = "us.anthropic.claude-sonnet-4-6"
 
 
 class VisionJudge:
