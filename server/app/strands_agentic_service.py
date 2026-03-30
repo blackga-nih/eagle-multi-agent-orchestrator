@@ -461,6 +461,88 @@ def _build_conversation_manager(tier: str) -> SummarizingConversationManager:
     )
 
 
+# ---------------------------------------------------------------------------
+# Fast-path: trivial / greeting messages bypass Strands Agent entirely
+# ---------------------------------------------------------------------------
+# Regex matches common greetings and trivial messages. When hit, we call
+# Bedrock converse() directly with a tiny system prompt — no 14K-token
+# supervisor prompt, no 18 tool schemas, no Strands overhead. Response
+# arrives in ~1-2s instead of 45-120s.
+
+_TRIVIAL_RE = re.compile(
+    r"^(hi|hello|hey|good\s*(morning|afternoon|evening)|thanks|thank\s*you|"
+    r"ok|okay|yes|no|sure|bye|goodbye|howdy|sup|yo|hola|greetings|"
+    r"what'?s up|whats up|how are you|how'?s it going)\s*[?!.,]*$",
+    re.IGNORECASE,
+)
+
+_GREETING_SYSTEM_PROMPT = (
+    "You are EAGLE, the Enhanced Acquisition Guidance and Learning Engine "
+    "for the NIH/NCI Office of Acquisitions. Respond briefly and warmly to "
+    "the user's greeting. Mention that you can help with acquisitions, FAR "
+    "regulations, document generation, and compliance guidance. Keep it to "
+    "2-3 sentences."
+)
+
+# Lazily-initialised boto3 bedrock-runtime client for the greeting fast-path.
+_greeting_bedrock_client = None
+
+
+def _get_greeting_bedrock_client():
+    global _greeting_bedrock_client
+    if _greeting_bedrock_client is None:
+        import boto3
+
+        _greeting_bedrock_client = boto3.client(
+            "bedrock-runtime",
+            region_name=os.getenv("AWS_REGION", "us-east-1"),
+        )
+    return _greeting_bedrock_client
+
+
+async def _maybe_fast_path_greeting(prompt: str) -> dict | None:
+    """Return a direct Bedrock response for trivial messages, or None.
+
+    When the prompt matches _TRIVIAL_RE, calls Bedrock converse() directly
+    (no tools, no Strands Agent) with a minimal system prompt.  This cuts
+    latency from 45-120s to ~1-2s for messages like "hi" or "thanks".
+    """
+    if not _TRIVIAL_RE.match(prompt.strip()):
+        return None
+
+    import asyncio
+    import time as _t
+
+    t0 = _t.perf_counter()
+    client = _get_greeting_bedrock_client()
+    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", MODEL)
+
+    try:
+        resp = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: client.converse(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                system=[{"text": _GREETING_SYSTEM_PROMPT}],
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Greeting fast-path failed, falling through: %s", exc)
+        return None
+
+    output_text = resp["output"]["message"]["content"][0]["text"]
+    usage = resp.get("usage", {})
+    elapsed_ms = int((_t.perf_counter() - t0) * 1000)
+    logger.info("Greeting fast-path responded in %dms", elapsed_ms)
+    return {
+        "text": output_text,
+        "usage": usage,
+        "model": MODEL,
+        "elapsed_ms": elapsed_ms,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Fast-path document generation for explicit "generate document" requests.
 # This avoids long multi-tool loops for straightforward document creation asks.
 _DOC_TYPE_HINTS: list[tuple[str, list[str]]] = [
@@ -4345,6 +4427,17 @@ async def sdk_query(
     Yields:
         AssistantMessage and ResultMessage adapter objects
     """
+    # --- Greeting / trivial message fast-path (bypasses Strands entirely) ---
+    greeting_result = await _maybe_fast_path_greeting(prompt)
+    if greeting_result is not None:
+        yield AssistantMessage(content=[TextBlock(text=greeting_result["text"])])
+        yield ResultMessage(
+            result=greeting_result["text"],
+            usage=greeting_result.get("usage", {}),
+        )
+        return
+
+    # --- Document generation fast-path ---
     fast_path = await _maybe_fast_path_document_generation(
         prompt=prompt,
         tenant_id=tenant_id,
@@ -4645,6 +4738,20 @@ async def sdk_query_streaming(
     internally. Factory tools push results via an asyncio.Queue that
     is drained between stream events.
     """
+    # --- Greeting / trivial message fast-path (bypasses Strands entirely) ---
+    greeting_result = await _maybe_fast_path_greeting(prompt)
+    if greeting_result is not None:
+        yield {"type": "text", "data": greeting_result["text"]}
+        yield {
+            "type": "complete",
+            "text": greeting_result["text"],
+            "tools_called": [],
+            "usage": greeting_result.get("usage", {}),
+            "fast_path": True,
+        }
+        return
+
+    # --- Document generation fast-path ---
     fast_path = await _maybe_fast_path_document_generation(
         prompt=prompt,
         tenant_id=tenant_id,
