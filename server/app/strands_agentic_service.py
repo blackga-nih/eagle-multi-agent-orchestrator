@@ -492,17 +492,18 @@ _ENABLE_STARTUP_PROBE = os.getenv("EAGLE_CB_STARTUP_PROBE", "true").lower() in (
 
 
 def _run_startup_probe():
-    """Probe each model in the chain with a trivial request."""
+    """Probe each model in the chain with a trivial request (parallel)."""
     import boto3
 
     probe_client = boto3.client(
         "bedrock-runtime",
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         config=Config(
-            connect_timeout=5, read_timeout=15, retries={"max_attempts": 1}
+            connect_timeout=3, read_timeout=8, retries={"max_attempts": 1}
         ),
     )
-    for mid in _MODEL_CHAIN_IDS:
+
+    def _probe_one(mid: str) -> None:
         try:
             probe_client.converse(
                 modelId=mid,
@@ -511,10 +512,14 @@ def _run_startup_probe():
             )
             logger.info("startup_probe: %s OK", mid)
         except Exception as exc:
-            # Hit threshold immediately so circuit opens
             for _ in range(_CB_FAILURE_THRESHOLD):
                 _circuit_breaker.record_failure(mid)
             logger.warning("startup_probe: %s FAILED: %s", mid, exc)
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=len(_MODEL_CHAIN_IDS), thread_name_prefix="cb-probe"
+    ) as pool:
+        list(pool.map(_probe_one, dict.fromkeys(_MODEL_CHAIN_IDS)))
 
 
 if _ENABLE_STARTUP_PROBE:
@@ -577,19 +582,26 @@ EAGLE_SUMMARIZATION_PROMPT = (
 )
 
 # Haiku model for low-cost summarization (used by SummarizingConversationManager).
-# Summarization is a straightforward text task — no need for Sonnet.
-_summarization_model = BedrockModel(
-    model_id=_HAIKU,
-    region_name=os.getenv("AWS_REGION", "us-east-1"),
-    boto_client_config=_bedrock_client_config,
-)
+# Lazy-initialized on first compaction to avoid import-time overhead.
+_summarization_agent: Agent | None = None
 
-_summarization_agent = Agent(
-    model=_summarization_model,
-    system_prompt=EAGLE_SUMMARIZATION_PROMPT,
-    tools=[],
-    callback_handler=None,
-)
+
+def _get_summarization_agent() -> Agent:
+    """Return the summarization agent, creating it on first use."""
+    global _summarization_agent
+    if _summarization_agent is None:
+        _summarization_model = BedrockModel(
+            model_id=_HAIKU,
+            region_name=os.getenv("AWS_REGION", "us-east-1"),
+            boto_client_config=_bedrock_client_config,
+        )
+        _summarization_agent = Agent(
+            model=_summarization_model,
+            system_prompt=EAGLE_SUMMARIZATION_PROMPT,
+            tools=[],
+            callback_handler=None,
+        )
+    return _summarization_agent
 
 # Per-tier compaction aggressiveness and DynamoDB message load limits.
 # Basic: aggressive (lower budget). Premium: gentle (full context).
@@ -612,7 +624,7 @@ def _build_conversation_manager(tier: str) -> SummarizingConversationManager:
     return SummarizingConversationManager(
         summary_ratio=cfg["summary_ratio"],
         preserve_recent_messages=cfg["preserve_recent"],
-        summarization_agent=_summarization_agent,
+        summarization_agent=_get_summarization_agent(),
     )
 
 
