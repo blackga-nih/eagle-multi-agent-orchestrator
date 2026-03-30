@@ -216,6 +216,8 @@ jobs:
 
     - name: Run unit tests
       id: pytest
+      env:
+        EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-haiku-4-5-20251001-v1:0
       run: |
         cd server
         python -m pytest tests/ -v \
