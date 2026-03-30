@@ -17,7 +17,7 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from functools import lru_cache
+import threading
 
 from ..db_client import get_dynamodb, get_s3, AWS_REGION
 
@@ -286,10 +286,21 @@ SEARCH_MODEL_ID = os.environ.get(
 )
 
 
-@lru_cache(maxsize=1)
+_bedrock_local = threading.local()
+
+
 def _get_bedrock_runtime():
-    """Get Bedrock runtime client for knowledge search."""
-    return boto3.client("bedrock-runtime", region_name=AWS_REGION)
+    """Get Bedrock runtime client for knowledge search (thread-local).
+
+    Uses threading.local() instead of @lru_cache to avoid sharing a boto3
+    client with internal _thread.lock objects across threads.  When Strands
+    SDK runs @tool functions via asyncio.to_thread() and OTEL threading
+    instrumentation propagates context, copy.deepcopy on shared locks causes
+    TypeError/RecursionError.
+    """
+    if not hasattr(_bedrock_local, "client"):
+        _bedrock_local.client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+    return _bedrock_local.client
 
 
 # ══════════════════════════════════════════════════════════════════════════════

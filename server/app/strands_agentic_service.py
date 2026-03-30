@@ -1786,8 +1786,15 @@ def _build_subagent_kb_tools(
         }
         _emit_input("knowledge_search", params)
         _kb_tools_called.add("knowledge_search")
-        result = exec_knowledge_search(params, tenant_id, session_id)
-        return json.dumps(result, indent=2, default=str)
+        try:
+            result = exec_knowledge_search(params, tenant_id, session_id)
+            return json.dumps(result, indent=2, default=str)
+        except (TypeError, RecursionError) as e:
+            logger.error("knowledge_search serialization error: %s", e)
+            err = f"Serialization error: {type(e).__name__}"
+            return json.dumps(
+                {"results": [], "count": 0, "error": err}
+            )
 
     @tool(name="knowledge_fetch")
     def kb_fetch(s3_key: str) -> str:
@@ -3736,9 +3743,15 @@ def _build_kb_service_tools(
         }
         _emit_input("knowledge_search", params)
         _kb_tools_called.add("knowledge_search")
-        result = exec_knowledge_search(params, tenant_id, session_id)
-        _emit("knowledge_search", result)
-        return json.dumps(result, indent=2, default=str)
+        try:
+            result = exec_knowledge_search(params, tenant_id, session_id)
+            _emit("knowledge_search", result)
+            return json.dumps(result, indent=2, default=str)
+        except (TypeError, RecursionError) as e:
+            logger.error("knowledge_search serialization error: %s", e)
+            fallback = {"results": [], "count": 0, "error": f"Serialization error: {type(e).__name__}"}
+            _emit("knowledge_search", fallback)
+            return json.dumps(fallback)
 
     @tool(name="knowledge_fetch")
     def knowledge_fetch(s3_key: str) -> str:
