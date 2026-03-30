@@ -52,7 +52,9 @@ permissions:
 env:
   AWS_REGION: us-east-1
   CDK_DIR: infrastructure/cdk-eagle
-  EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-sonnet-4-6
+  # Sonnet 4.6 cross-region timing out 100% (2026-03-30). Using Haiku until stable.
+  # To restore: us.anthropic.claude-sonnet-4-6
+  EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-haiku-4-5-20251001-v1:0
 
 jobs:
   # ── Resolve environment-specific variables ───────────────────

@@ -301,8 +301,9 @@ class ResultMessage:
 
 # -- Model Selection -------------------------------------------------
 # If EAGLE_BEDROCK_MODEL_ID is explicitly set, use it.
-# Otherwise, default to Sonnet 4.6 on the NCI account (695681773636)
-# and Haiku 4.5 on any other account (personal dev, CI, etc.).
+# Default to Haiku — Sonnet 4.6 cross-region inference is consistently
+# timing out (100% TTFT failures as of 2026-03-30). Switch back to
+# Sonnet once Bedrock stabilises by setting EAGLE_BEDROCK_MODEL_ID.
 
 _NCI_ACCOUNT = "695681773636"
 _SONNET = DEFAULT_BEDROCK_SONNET_MODEL
@@ -314,13 +315,7 @@ def _default_model() -> str:
     env_model = os.getenv("EAGLE_BEDROCK_MODEL_ID")
     if env_model:
         return env_model
-    try:
-        import boto3
-
-        account = boto3.client("sts").get_caller_identity()["Account"]
-        return _SONNET if account == _NCI_ACCOUNT else _HAIKU
-    except Exception:
-        return _HAIKU
+    return _HAIKU
 
 
 MODEL = _default_model()
