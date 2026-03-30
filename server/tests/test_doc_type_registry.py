@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import pathlib
 from pathlib import Path
+
+import pytest
 
 from app.doc_type_registry import (
     ALL_DOC_TYPES,
@@ -12,10 +15,13 @@ from app.doc_type_registry import (
     get_template_categories,
 )
 
+_INDEX_PATH = pathlib.Path(__file__).resolve().parents[2] / "eagle-plugin" / "data" / "template-metadata" / "_index.json"
+
 
 class TestAllDocTypes:
     """Verify ALL_DOC_TYPES matches the template index."""
 
+    @pytest.mark.skipif(not _INDEX_PATH.exists(), reason="_index.json not in repo (generated locally)")
     def test_all_22_index_categories_present(self):
         index_path = Path(__file__).resolve().parent.parent.parent / "eagle-plugin" / "data" / "template-metadata" / "_index.json"
         with open(index_path, encoding="utf-8") as f:
