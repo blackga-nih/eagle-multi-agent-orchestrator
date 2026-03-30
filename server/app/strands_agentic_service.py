@@ -56,7 +56,6 @@ from .config import (
     DEFAULT_BEDROCK_SONNET_46_MODEL,
     DEFAULT_BEDROCK_SONNET_45_MODEL,
     DEFAULT_BEDROCK_SONNET_40_MODEL,
-    DEFAULT_BEDROCK_SONNET_MODEL,
 )
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
 from .tools.web_fetch import exec_web_fetch

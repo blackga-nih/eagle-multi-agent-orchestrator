@@ -52,9 +52,10 @@ permissions:
 env:
   AWS_REGION: us-east-1
   CDK_DIR: infrastructure/cdk-eagle
-  # Sonnet 4.6 cross-region timing out 100% (2026-03-30). Using Haiku until stable.
-  # To restore: us.anthropic.claude-sonnet-4-6
-  EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-haiku-4-5-20251001-v1:0
+  # Model selection managed by circuit breaker in strands_agentic_service.py.
+  # Chain: Sonnet 4.6 → 4.5 → 4.0 → Haiku (auto-fallback on failures).
+  # Set EAGLE_BEDROCK_MODEL_ID to override the primary (position 0) model.
+  # EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-sonnet-4-6
 
 jobs:
   # ── Resolve environment-specific variables ───────────────────
@@ -227,7 +228,9 @@ jobs:
     - name: Run unit tests
       id: pytest
       env:
+        # Use Haiku for CI unit tests (fast, cheap). Circuit breaker manages prod.
         EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-haiku-4-5-20251001-v1:0
+        EAGLE_CB_STARTUP_PROBE: "false"
       run: |
         cd server
         python -m pytest tests/ -v \
@@ -560,8 +563,8 @@ jobs:
             td.pop(key, None)
 
         env = td['containerDefinitions'][0].get('environment', [])
+        # Model selection managed by circuit breaker — remove any stale override
         env = [e for e in env if e['name'] != 'EAGLE_BEDROCK_MODEL_ID']
-        env.append({'name': 'EAGLE_BEDROCK_MODEL_ID', 'value': '${{ env.EAGLE_BEDROCK_MODEL_ID }}'})
 
         # Inject Langfuse credentials from GitHub Secrets
         for var_name in ['LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY', 'LANGFUSE_HOST']:
@@ -577,7 +580,7 @@ jobs:
 
         with open('/tmp/new_td.json', 'w') as f:
             json.dump(td, f)
-        print("Task def updated: image=${{ steps.ecr.outputs.uri }}:${{ github.sha }}, model=${{ env.EAGLE_BEDROCK_MODEL_ID }}")
+        print("Task def updated: image=${{ steps.ecr.outputs.uri }}:${{ github.sha }}, model=circuit-breaker-managed")
         PYEOF
 
         NEW_TD_ARN=$(aws ecs register-task-definition \

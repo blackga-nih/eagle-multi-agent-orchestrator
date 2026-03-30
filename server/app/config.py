@@ -20,8 +20,12 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-DEFAULT_BEDROCK_SONNET_MODEL = "us.anthropic.claude-sonnet-4-6"
+DEFAULT_BEDROCK_SONNET_46_MODEL = "us.anthropic.claude-sonnet-4-6"
+DEFAULT_BEDROCK_SONNET_45_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+DEFAULT_BEDROCK_SONNET_40_MODEL = "us.anthropic.claude-sonnet-4-20250514-v1:0"
 DEFAULT_BEDROCK_HAIKU_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+# Backward-compat aliases
+DEFAULT_BEDROCK_SONNET_MODEL = DEFAULT_BEDROCK_SONNET_46_MODEL
 DEFAULT_ANTHROPIC_SONNET_MODEL = "claude-sonnet-4-6"
 DEFAULT_ANTHROPIC_HAIKU_MODEL = "claude-haiku-4-5-20251001"
 

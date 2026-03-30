@@ -18,6 +18,16 @@ router = APIRouter(prefix="/api", tags=["health"])
 async def health_check():
     """Backend health check endpoint."""
     knowledge_base = check_knowledge_base_health()
+
+    # Circuit breaker status (lazy import to avoid circular deps at module load)
+    cb_status = {}
+    try:
+        from ..strands_agentic_service import _circuit_breaker
+
+        cb_status = _circuit_breaker.get_status()
+    except Exception:
+        pass
+
     return {
         "status": "healthy",
         "service": "eagle-backend",
@@ -32,5 +42,6 @@ async def health_check():
             "knowledge_document_bucket": knowledge_base["document_bucket"]["ok"],
         },
         "knowledge_base": knowledge_base,
+        "circuit_breaker": cb_status,
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
