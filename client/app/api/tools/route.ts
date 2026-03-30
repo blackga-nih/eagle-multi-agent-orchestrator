@@ -13,16 +13,13 @@ export async function GET() {
     if (!response.ok) {
       return NextResponse.json(
         { error: `Backend returned ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
     const data = await response.json();
     return NextResponse.json(data);
   } catch {
-    return NextResponse.json(
-      { error: 'Cannot connect to backend' },
-      { status: 503 }
-    );
+    return NextResponse.json({ error: 'Cannot connect to backend' }, { status: 503 });
   }
 }

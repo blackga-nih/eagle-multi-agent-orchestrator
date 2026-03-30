@@ -40,10 +40,16 @@ export async function GET(
   } catch (error) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       return NextResponse.json(
-        { error: 'Cannot connect to backend', details: `Ensure FastAPI is running at ${FASTAPI_URL}` },
+        {
+          error: 'Cannot connect to backend',
+          details: `Ensure FastAPI is running at ${FASTAPI_URL}`,
+        },
         { status: 503 },
       );
     }
-    return NextResponse.json({ error: 'Internal server error', details: String(error) }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Internal server error', details: String(error) },
+      { status: 500 },
+    );
   }
 }

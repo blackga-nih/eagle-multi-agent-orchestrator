@@ -102,29 +102,35 @@ export const pluginApi = {
 // ---------------------------------------------------------------------------
 
 export const workspaceApi = {
-  list: (getToken: GetToken) =>
-    apiGet<Workspace[]>(getToken, '/api/workspace'),
+  list: (getToken: GetToken) => apiGet<Workspace[]>(getToken, '/api/workspace'),
 
   create: (getToken: GetToken, body: CreateWorkspaceBody) =>
     apiPost<Workspace>(getToken, '/api/workspace', body),
 
-  get: (getToken: GetToken, id: string) =>
-    apiGet<Workspace>(getToken, `/api/workspace/${id}`),
+  get: (getToken: GetToken, id: string) => apiGet<Workspace>(getToken, `/api/workspace/${id}`),
 
-  getActive: (getToken: GetToken) =>
-    apiGet<Workspace>(getToken, '/api/workspace/active'),
+  getActive: (getToken: GetToken) => apiGet<Workspace>(getToken, '/api/workspace/active'),
 
   activate: (getToken: GetToken, id: string) =>
     apiPut<Workspace>(getToken, `/api/workspace/${id}/activate`),
 
-  delete: (getToken: GetToken, id: string) =>
-    apiDelete(getToken, `/api/workspace/${id}`),
+  delete: (getToken: GetToken, id: string) => apiDelete(getToken, `/api/workspace/${id}`),
 
   listOverrides: (getToken: GetToken, id: string) =>
     apiGet<WorkspaceOverride[]>(getToken, `/api/workspace/${id}/overrides`),
 
-  setOverride: (getToken: GetToken, id: string, entityType: string, name: string, body: SetOverrideBody) =>
-    apiPut<WorkspaceOverride>(getToken, `/api/workspace/${id}/overrides/${entityType}/${name}`, body),
+  setOverride: (
+    getToken: GetToken,
+    id: string,
+    entityType: string,
+    name: string,
+    body: SetOverrideBody,
+  ) =>
+    apiPut<WorkspaceOverride>(
+      getToken,
+      `/api/workspace/${id}/overrides/${entityType}/${name}`,
+      body,
+    ),
 
   deleteOverride: (getToken: GetToken, id: string, entityType: string, name: string) =>
     apiDelete(getToken, `/api/workspace/${id}/overrides/${entityType}/${name}`),
@@ -138,8 +144,7 @@ export const workspaceApi = {
 // ---------------------------------------------------------------------------
 
 export const promptApi = {
-  list: (getToken: GetToken) =>
-    apiGet<PromptOverride[]>(getToken, '/api/admin/prompts'),
+  list: (getToken: GetToken) => apiGet<PromptOverride[]>(getToken, '/api/admin/prompts'),
 
   set: (getToken: GetToken, agentName: string, body: SetPromptBody) =>
     apiPut<PromptOverride>(getToken, `/api/admin/prompts/${agentName}`, body),
@@ -159,8 +164,7 @@ export const skillApi = {
   create: (getToken: GetToken, body: CreateSkillBody) =>
     apiPost<CustomSkill>(getToken, '/api/skills', body),
 
-  get: (getToken: GetToken, id: string) =>
-    apiGet<CustomSkill>(getToken, `/api/skills/${id}`),
+  get: (getToken: GetToken, id: string) => apiGet<CustomSkill>(getToken, `/api/skills/${id}`),
 
   update: (getToken: GetToken, id: string, body: Partial<CreateSkillBody>) =>
     apiPut<CustomSkill>(getToken, `/api/skills/${id}`, body),
@@ -171,8 +175,7 @@ export const skillApi = {
   publish: (getToken: GetToken, id: string) =>
     apiPost<CustomSkill>(getToken, `/api/skills/${id}/publish`, {}),
 
-  delete: (getToken: GetToken, id: string) =>
-    apiDelete(getToken, `/api/skills/${id}`),
+  delete: (getToken: GetToken, id: string) => apiDelete(getToken, `/api/skills/${id}`),
 };
 
 // ---------------------------------------------------------------------------
@@ -189,8 +192,7 @@ export const templateApi = {
   create: (getToken: GetToken, docType: string, body: CreateTemplateBody) =>
     apiPost<TemplateEntity>(getToken, `/api/templates/${docType}`, body),
 
-  delete: (getToken: GetToken, docType: string) =>
-    apiDelete(getToken, `/api/templates/${docType}`),
+  delete: (getToken: GetToken, docType: string) => apiDelete(getToken, `/api/templates/${docType}`),
 
   // S3 Template Library
   listS3: (getToken: GetToken, phase?: string, refresh?: boolean) => {
@@ -205,8 +207,14 @@ export const templateApi = {
     apiPost<CopyTemplateResponse>(getToken, '/api/templates/s3/copy', body),
 
   previewS3: (getToken: GetToken, s3Key: string) =>
-    apiGet<S3TemplatePreviewResponse>(getToken, `/api/templates/s3/preview?s3_key=${encodeURIComponent(s3Key)}`),
+    apiGet<S3TemplatePreviewResponse>(
+      getToken,
+      `/api/templates/s3/preview?s3_key=${encodeURIComponent(s3Key)}`,
+    ),
 
   getS3DownloadUrl: (getToken: GetToken, s3Key: string) =>
-    apiGet<S3TemplateDownloadResponse>(getToken, `/api/templates/s3/download-url?s3_key=${encodeURIComponent(s3Key)}`),
+    apiGet<S3TemplateDownloadResponse>(
+      getToken,
+      `/api/templates/s3/download-url?s3_key=${encodeURIComponent(s3Key)}`,
+    ),
 };

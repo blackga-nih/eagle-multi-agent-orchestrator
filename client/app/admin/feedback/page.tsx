@@ -55,7 +55,9 @@ export default function FeedbackPage() {
     }
   }, [getToken]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   return (
     <AuthGuard>
@@ -66,10 +68,7 @@ export default function FeedbackPage() {
             <PageHeader
               title="Message Feedback"
               description="Per-message thumbs up/down feedback from users"
-              breadcrumbs={[
-                { label: 'Admin', href: '/admin' },
-                { label: 'Feedback' },
-              ]}
+              breadcrumbs={[{ label: 'Admin', href: '/admin' }, { label: 'Feedback' }]}
               actions={
                 <button
                   onClick={fetchData}
@@ -147,7 +146,9 @@ export default function FeedbackPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-sm font-medium text-gray-900">{item.user_id}</span>
-                          <span className="text-xs text-gray-400">{new Date(item.created_at).toLocaleString()}</span>
+                          <span className="text-xs text-gray-400">
+                            {new Date(item.created_at).toLocaleString()}
+                          </span>
                         </div>
                         <p className="text-xs text-gray-500 truncate">
                           Session: {item.session_id} / Message: {item.message_id}

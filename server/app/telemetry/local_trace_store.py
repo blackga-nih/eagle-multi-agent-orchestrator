@@ -6,6 +6,7 @@ No DynamoDB or AWS credentials required.
 
 Activate by setting: TRACE_STORE=local
 """
+
 import json
 import logging
 import os

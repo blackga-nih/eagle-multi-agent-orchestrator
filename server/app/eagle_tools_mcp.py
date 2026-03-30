@@ -40,6 +40,7 @@ except ImportError:
     # Allow running outside the package (e.g., in tests)
     import sys
     import os
+
     _app_dir = os.path.dirname(os.path.abspath(__file__))
     if _app_dir not in sys.path:
         sys.path.insert(0, _app_dir)
@@ -57,6 +58,8 @@ class S3DocumentOpsInput:
     key: str = ""
     content: str = ""
     prefix: str = ""
+    destination_key: str = ""
+    expiry_seconds: int = 3600
 
 
 @dataclass
@@ -65,10 +68,14 @@ class DynamoDBIntakeInput:
     intake_id: str = ""
     tenant_id: str = ""
     data: dict = None
+    item_ids: str = ""
+    items: list = None
 
     def __post_init__(self):
         if self.data is None:
             self.data = {}
+        if self.items is None:
+            self.items = []
 
 
 @dataclass
@@ -78,6 +85,7 @@ class CloudWatchLogsInput:
     log_stream: str = ""
     query: str = ""
     limit: int = 20
+    prefix: str = ""
 
 
 @dataclass
@@ -142,7 +150,7 @@ def create_eagle_mcp_server(
 
     @tool(
         "s3_document_ops",
-        "Read, write, or list acquisition documents in the EAGLE S3 document store.",
+        "Read, write, list, delete, copy, rename, move, check existence, or generate presigned URLs for acquisition documents in the EAGLE S3 document store.",
         S3DocumentOpsInput,
     )
     async def s3_document_ops_tool(inp: S3DocumentOpsInput) -> dict[str, Any]:
@@ -151,13 +159,15 @@ def create_eagle_mcp_server(
             "key": inp.key,
             "content": inp.content,
             "prefix": inp.prefix,
+            "destination_key": inp.destination_key,
+            "expiry_seconds": inp.expiry_seconds,
         }
         result_json = _execute_tool("s3_document_ops", tool_input, _session_id)
         return {"content": [{"type": "text", "text": result_json}]}
 
     @tool(
         "dynamodb_intake",
-        "Create, read, update, or list intake records in the EAGLE DynamoDB table.",
+        "Create, read, update, delete, list, query, count, batch_get, or batch_write intake records in the EAGLE DynamoDB table.",
         DynamoDBIntakeInput,
     )
     async def dynamodb_intake_tool(inp: DynamoDBIntakeInput) -> dict[str, Any]:
@@ -166,13 +176,15 @@ def create_eagle_mcp_server(
             "intake_id": inp.intake_id,
             "tenant_id": _tenant_id,
             "data": inp.data,
+            "item_ids": inp.item_ids,
+            "items": inp.items,
         }
         result_json = _execute_tool("dynamodb_intake", tool_input, _session_id)
         return {"content": [{"type": "text", "text": result_json}]}
 
     @tool(
         "cloudwatch_logs",
-        "Search or read CloudWatch log streams for EAGLE audit trails and session logs.",
+        "Search, read, run Logs Insights queries, or list log groups for EAGLE audit trails and session logs.",
         CloudWatchLogsInput,
     )
     async def cloudwatch_logs_tool(inp: CloudWatchLogsInput) -> dict[str, Any]:
@@ -182,6 +194,7 @@ def create_eagle_mcp_server(
             "log_stream": inp.log_stream,
             "query": inp.query,
             "limit": inp.limit,
+            "prefix": inp.prefix,
         }
         result_json = _execute_tool("cloudwatch_logs", tool_input, _session_id)
         return {"content": [{"type": "text", "text": result_json}]}

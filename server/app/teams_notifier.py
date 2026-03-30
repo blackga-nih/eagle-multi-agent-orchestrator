@@ -45,6 +45,7 @@ ENVIRONMENT: str = os.getenv("EAGLE_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev"
 
 # ── Token-bucket rate limiter (per category) ─────────────────────────
 
+
 class _TokenBucket:
     """Simple token-bucket rate limiter (not thread-safe — fine for asyncio)."""
 
@@ -102,6 +103,7 @@ async def close_notifier_client() -> None:
 
 # ── Core send ────────────────────────────────────────────────────────
 
+
 async def _send(payload: dict, category: str) -> None:
     """POST payload to webhook URL. Fire-and-forget — never raises."""
     if not WEBHOOK_ENABLED or not WEBHOOK_URL:
@@ -118,10 +120,14 @@ async def _send(payload: dict, category: str) -> None:
         if resp.status_code >= 300:
             logger.warning(
                 "Teams notifier non-2xx: category=%s status=%d body=%s",
-                category, resp.status_code, resp.text[:200],
+                category,
+                resp.status_code,
+                resp.text[:200],
             )
         else:
-            logger.debug("Teams notifier sent: category=%s status=%d", category, resp.status_code)
+            logger.debug(
+                "Teams notifier sent: category=%s status=%d", category, resp.status_code
+            )
     except httpx.TimeoutException:
         logger.warning("Teams notifier timed out (category=%s)", category)
     except Exception:
@@ -135,10 +141,13 @@ def _fire(payload: dict, category: str) -> None:
         loop.create_task(_send(payload, category))
     except RuntimeError:
         # No running event loop — skip silently
-        logger.debug("Teams notifier: no event loop, skipping %s notification", category)
+        logger.debug(
+            "Teams notifier: no event loop, skipping %s notification", category
+        )
 
 
 # ── Public API ───────────────────────────────────────────────────────
+
 
 def notify_feedback(
     tenant_id: str,
@@ -219,7 +228,11 @@ async def send_daily_summary() -> None:
                 pass
 
         yesterday = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        fb_breakdown = ", ".join(f"{c} {t}" for t, c in feedback_types.items()) if feedback_types else "none"
+        fb_breakdown = (
+            ", ".join(f"{c} {t}" for t, c in feedback_types.items())
+            if feedback_types
+            else "none"
+        )
 
         from .teams_cards import daily_summary_card
 
@@ -243,7 +256,10 @@ def notify_startup() -> None:
     hostname = platform.node()
     is_ecs = os.getenv("ECS_CONTAINER_METADATA_URI") is not None
     logger.info(
-        "Teams notifier configured: url=%s env=%s ecs=%s", WEBHOOK_URL[:60], ENVIRONMENT, is_ecs,
+        "Teams notifier configured: url=%s env=%s ecs=%s",
+        WEBHOOK_URL[:60],
+        ENVIRONMENT,
+        is_ecs,
     )
     if not is_ecs:
         logger.info("Teams notifier: skipping startup notification (local dev)")

@@ -46,7 +46,7 @@ export function getReviewStatusClass(status: ReviewStatus): string {
 
 export const AGENT_COLORS: Record<string, AgentColorScheme> = {
   // Supervisor Agent - Gray (orchestration layer)
-  'supervisor': {
+  supervisor: {
     bg: 'bg-gray-50',
     text: 'text-gray-700',
     border: 'border-gray-200',
@@ -54,7 +54,7 @@ export const AGENT_COLORS: Record<string, AgentColorScheme> = {
     icon: 'bg-gray-600',
     gradient: 'from-gray-500 to-gray-600',
   },
-  
+
   // OA Intake Agent - Blue (primary interaction)
   'oa-intake': {
     bg: 'bg-blue-50',
@@ -64,7 +64,7 @@ export const AGENT_COLORS: Record<string, AgentColorScheme> = {
     icon: 'bg-blue-600',
     gradient: 'from-blue-500 to-blue-600',
   },
-  
+
   // Knowledge Retrieval Agent - Green (RAG/search)
   'knowledge-retrieval': {
     bg: 'bg-green-50',
@@ -74,7 +74,7 @@ export const AGENT_COLORS: Record<string, AgentColorScheme> = {
     icon: 'bg-green-600',
     gradient: 'from-green-500 to-green-600',
   },
-  
+
   // Document Generator Agent - Purple (document creation)
   'document-generator': {
     bg: 'bg-purple-50',
@@ -84,9 +84,9 @@ export const AGENT_COLORS: Record<string, AgentColorScheme> = {
     icon: 'bg-purple-600',
     gradient: 'from-purple-500 to-purple-600',
   },
-  
+
   // EAGLE Root Agent - Blue (primary)
-  'eagle': {
+  eagle: {
     bg: 'bg-blue-50',
     text: 'text-blue-700',
     border: 'border-blue-200',
@@ -154,7 +154,7 @@ export const AGENT_COLORS: Record<string, AgentColorScheme> = {
   },
 
   // Default/Unknown - Amber (fallback)
-  'default': {
+  default: {
     bg: 'bg-amber-50',
     text: 'text-amber-700',
     border: 'border-amber-200',
@@ -165,11 +165,11 @@ export const AGENT_COLORS: Record<string, AgentColorScheme> = {
 };
 
 export const AGENT_NAMES: Record<string, string> = {
-  'supervisor': 'Supervisor',
+  supervisor: 'Supervisor',
   'oa-intake': 'OA Intake Agent',
   'knowledge-retrieval': 'Knowledge Retrieval',
   'document-generator': 'Document Generator',
-  'eagle': 'EAGLE',
+  eagle: 'EAGLE',
   'legal-counsel': 'Legal Counsel',
   'market-intelligence': 'Market Intelligence',
   'tech-translator': 'Tech Translator',
@@ -180,11 +180,11 @@ export const AGENT_NAMES: Record<string, string> = {
 };
 
 export const AGENT_ICONS: Record<string, string> = {
-  'supervisor': 'S',
-  'oa-intake': 'E',  // EAGLE
+  supervisor: 'S',
+  'oa-intake': 'E', // EAGLE
   'knowledge-retrieval': 'K',
   'document-generator': 'D',
-  'eagle': 'E',
+  eagle: 'E',
   'legal-counsel': 'L',
   'market-intelligence': 'M',
   'tech-translator': 'T',
@@ -205,5 +205,3 @@ export function getAgentName(agentId: string): string {
 export function getAgentIcon(agentId: string): string {
   return AGENT_ICONS[agentId] || agentId.charAt(0).toUpperCase();
 }
-
-

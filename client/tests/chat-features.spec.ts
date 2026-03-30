@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Chat Features', () => {
-
   // ─── Activity Panel ──────────────────────────────────────────────────
 
   test.describe('Activity Panel', () => {
@@ -131,7 +130,11 @@ test.describe('Chat Features', () => {
       try {
         // Wait for at least one tool-use indicator to appear (subagent or service tool)
         await expect(
-          page.locator('text=/Searching FAR|Policy|Compliance|Market|Legal|Technical|Intake|Document/i').first()
+          page
+            .locator(
+              'text=/Searching FAR|Policy|Compliance|Market|Legal|Technical|Intake|Document/i',
+            )
+            .first(),
         ).toBeVisible({ timeout: 30_000 });
       } catch {
         // Tool use display is best-effort — not all queries trigger visible tool cards.

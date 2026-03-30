@@ -45,20 +45,37 @@ FILENAME_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "justification",
     ),
     # Acquisition Plan
-    (re.compile(r"\b(acquisition[-_\s]?plan|streamlined[-_\s]?acquisition[-_\s]?plan)\b", re.IGNORECASE), "acquisition_plan"),
-
+    (
+        re.compile(
+            r"\b(acquisition[-_\s]?plan|streamlined[-_\s]?acquisition[-_\s]?plan)\b",
+            re.IGNORECASE,
+        ),
+        "acquisition_plan",
+    ),
     # ── Extended types (17 additional categories) ─────────────────────
     # NOTE: Use (?:^|[\W_]) instead of \b for patterns that appear in
     # filenames with underscore separators, since Python's \b treats _ as
     # a word character and won't match at _X boundaries.
     # Statement of Need — Products (must come before generic SON match)
     (re.compile(r"(?:^|[\W_])son[-_\s.].*product", re.IGNORECASE), "son_products"),
-    (re.compile(r"statement[-_\s]?of[-_\s]?need[-_\s.].*product", re.IGNORECASE), "son_products"),
+    (
+        re.compile(r"statement[-_\s]?of[-_\s]?need[-_\s.].*product", re.IGNORECASE),
+        "son_products",
+    ),
     # Statement of Need — Services
     (re.compile(r"(?:^|[\W_])son[-_\s.].*service", re.IGNORECASE), "son_services"),
-    (re.compile(r"statement[-_\s]?of[-_\s]?need[-_\s.].*service", re.IGNORECASE), "son_services"),
+    (
+        re.compile(r"statement[-_\s]?of[-_\s]?need[-_\s.].*service", re.IGNORECASE),
+        "son_services",
+    ),
     # COR Certification / Appointment
-    (re.compile(r"(?:^|[\W_])cor[-_\s]?(?:appointment|certification|memorandum)", re.IGNORECASE), "cor_certification"),
+    (
+        re.compile(
+            r"(?:^|[\W_])cor[-_\s]?(?:appointment|certification|memorandum)",
+            re.IGNORECASE,
+        ),
+        "cor_certification",
+    ),
     (re.compile(r"appointment[-_\s]?memorandum", re.IGNORECASE), "cor_certification"),
     # Buy American Act
     (re.compile(r"buy[-_\s]?american", re.IGNORECASE), "buy_american"),
@@ -72,24 +89,48 @@ FILENAME_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"conference[-_\s.].*waiver", re.IGNORECASE), "conference_waiver"),
     # Conference Request
     (re.compile(r"conference[-_\s.].*request", re.IGNORECASE), "conference_request"),
-    (re.compile(r"conference[-_\s.].*grant[-_\s]?request", re.IGNORECASE), "conference_request"),
+    (
+        re.compile(r"conference[-_\s.].*grant[-_\s]?request", re.IGNORECASE),
+        "conference_request",
+    ),
     (re.compile(r"conference[-_\s.].*approval", re.IGNORECASE), "conference_request"),
     # Promotional Item
     (re.compile(r"promotional[-_\s]?item", re.IGNORECASE), "promotional_item"),
     # Exemption Determination
-    (re.compile(r"exemption[-_\s]?determination", re.IGNORECASE), "exemption_determination"),
+    (
+        re.compile(r"exemption[-_\s]?determination", re.IGNORECASE),
+        "exemption_determination",
+    ),
     # Mandatory Use Waiver
-    (re.compile(r"mandatory[-_\s]?use[-_\s]?waiver", re.IGNORECASE), "mandatory_use_waiver"),
+    (
+        re.compile(r"mandatory[-_\s]?use[-_\s]?waiver", re.IGNORECASE),
+        "mandatory_use_waiver",
+    ),
     # GFP Form
     (re.compile(r"(?:^|[\W_])gfp[-_\s]?form", re.IGNORECASE), "gfp_form"),
-    (re.compile(r"government[-_\s]?furnished[-_\s]?property", re.IGNORECASE), "gfp_form"),
+    (
+        re.compile(r"government[-_\s]?furnished[-_\s]?property", re.IGNORECASE),
+        "gfp_form",
+    ),
     # BPA Call Order
-    (re.compile(r"(?:^|[\W_])bpa[-_\s]?call[-_\s]?order", re.IGNORECASE), "bpa_call_order"),
-    (re.compile(r"blanket[-_\s]?purchase[-_\s]?agreement", re.IGNORECASE), "bpa_call_order"),
+    (
+        re.compile(r"(?:^|[\W_])bpa[-_\s]?call[-_\s]?order", re.IGNORECASE),
+        "bpa_call_order",
+    ),
+    (
+        re.compile(r"blanket[-_\s]?purchase[-_\s]?agreement", re.IGNORECASE),
+        "bpa_call_order",
+    ),
     (re.compile(r"(?:^|[\W_])bpa[-_\s]?callorder", re.IGNORECASE), "bpa_call_order"),
     # Technical Questionnaire (handles common misspelling "questionnare")
-    (re.compile(r"technical[-_\s]?questionnai?r?e", re.IGNORECASE), "technical_questionnaire"),
-    (re.compile(r"project[-_\s]?officer.*questionnai?r?e", re.IGNORECASE), "technical_questionnaire"),
+    (
+        re.compile(r"technical[-_\s]?questionnai?r?e", re.IGNORECASE),
+        "technical_questionnaire",
+    ),
+    (
+        re.compile(r"project[-_\s]?officer.*questionnai?r?e", re.IGNORECASE),
+        "technical_questionnaire",
+    ),
     # Quotation Abstract
     (re.compile(r"quotation[-_\s]?abstract", re.IGNORECASE), "quotation_abstract"),
     # Receiving Report
@@ -107,43 +148,98 @@ CONTENT_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     # SOW indicators
     (re.compile(r"\bstatement\s+of\s+work\b", re.IGNORECASE), "sow", 0.9),
     (re.compile(r"\bperiod\s+of\s+performance\b", re.IGNORECASE), "sow", 0.7),
-    (re.compile(r"\bdeliverables?\b.*\btasks?\b", re.IGNORECASE | re.DOTALL), "sow", 0.6),
+    (
+        re.compile(r"\bdeliverables?\b.*\btasks?\b", re.IGNORECASE | re.DOTALL),
+        "sow",
+        0.6,
+    ),
     (re.compile(r"\bscope\s+of\s+work\b", re.IGNORECASE), "sow", 0.8),
     # IGCE indicators
-    (re.compile(r"\bindependent\s+government\s+(?:cost\s+)?estimate\b", re.IGNORECASE), "igce", 0.95),
+    (
+        re.compile(
+            r"\bindependent\s+government\s+(?:cost\s+)?estimate\b", re.IGNORECASE
+        ),
+        "igce",
+        0.95,
+    ),
     (re.compile(r"\bigce\b", re.IGNORECASE), "igce", 0.9),
-    (re.compile(r"\blabor\s+(?:hours?|rates?)\b.*\bcost\b", re.IGNORECASE | re.DOTALL), "igce", 0.7),
-    (re.compile(r"\btotal\s+estimated\s+(?:cost|price)\b", re.IGNORECASE), "igce", 0.75),
+    (
+        re.compile(
+            r"\blabor\s+(?:hours?|rates?)\b.*\bcost\b", re.IGNORECASE | re.DOTALL
+        ),
+        "igce",
+        0.7,
+    ),
+    (
+        re.compile(r"\btotal\s+estimated\s+(?:cost|price)\b", re.IGNORECASE),
+        "igce",
+        0.75,
+    ),
     # Market Research indicators
     (re.compile(r"\bmarket\s+research\b", re.IGNORECASE), "market_research", 0.9),
     (re.compile(r"\bvendor\s+analysis\b", re.IGNORECASE), "market_research", 0.8),
     (re.compile(r"\bcompetitive\s+landscape\b", re.IGNORECASE), "market_research", 0.7),
     # Justification indicators
-    (re.compile(r"\bjustification\s+(?:&|and)\s+approval\b", re.IGNORECASE), "justification", 0.95),
-    (re.compile(r"\bsole\s+source\s+justification\b", re.IGNORECASE), "justification", 0.9),
+    (
+        re.compile(r"\bjustification\s+(?:&|and)\s+approval\b", re.IGNORECASE),
+        "justification",
+        0.95,
+    ),
+    (
+        re.compile(r"\bsole\s+source\s+justification\b", re.IGNORECASE),
+        "justification",
+        0.9,
+    ),
     (re.compile(r"\bfar\s+6\.3", re.IGNORECASE), "justification", 0.8),
     # Acquisition Plan indicators
     (re.compile(r"\bacquisition\s+plan\b", re.IGNORECASE), "acquisition_plan", 0.9),
-    (re.compile(r"\bacquisition\s+strategy\b", re.IGNORECASE), "acquisition_plan", 0.85),
-    (re.compile(r"\bcontract\s+type\s+selection\b", re.IGNORECASE), "acquisition_plan", 0.75),
-
+    (
+        re.compile(r"\bacquisition\s+strategy\b", re.IGNORECASE),
+        "acquisition_plan",
+        0.85,
+    ),
+    (
+        re.compile(r"\bcontract\s+type\s+selection\b", re.IGNORECASE),
+        "acquisition_plan",
+        0.75,
+    ),
     # ── Extended types ────────────────────────────────────────────────
     # SON Products
-    (re.compile(r"\bstatement\s+of\s+need\b.*\bproduct", re.IGNORECASE | re.DOTALL), "son_products", 0.9),
+    (
+        re.compile(r"\bstatement\s+of\s+need\b.*\bproduct", re.IGNORECASE | re.DOTALL),
+        "son_products",
+        0.9,
+    ),
     (re.compile(r"\bequipment\s+and\s+supplies\b", re.IGNORECASE), "son_products", 0.8),
     # SON Services
-    (re.compile(r"\bstatement\s+of\s+need\b.*\bservice", re.IGNORECASE | re.DOTALL), "son_services", 0.9),
+    (
+        re.compile(r"\bstatement\s+of\s+need\b.*\bservice", re.IGNORECASE | re.DOTALL),
+        "son_services",
+        0.9,
+    ),
     (re.compile(r"\bcatalog\s+pricing\b", re.IGNORECASE), "son_services", 0.75),
     # COR Certification
     (re.compile(r"\bcor\s+appointment\b", re.IGNORECASE), "cor_certification", 0.95),
-    (re.compile(r"\bcontracting\s+officer\s+representative\b", re.IGNORECASE), "cor_certification", 0.9),
+    (
+        re.compile(r"\bcontracting\s+officer\s+representative\b", re.IGNORECASE),
+        "cor_certification",
+        0.9,
+    ),
     (re.compile(r"\bfac[-\s]?cor\s+level\b", re.IGNORECASE), "cor_certification", 0.85),
     # Buy American
     (re.compile(r"\bbuy\s+american\b", re.IGNORECASE), "buy_american", 0.9),
-    (re.compile(r"\bnon[-\s]?availability\s+determination\b", re.IGNORECASE), "buy_american", 0.85),
+    (
+        re.compile(r"\bnon[-\s]?availability\s+determination\b", re.IGNORECASE),
+        "buy_american",
+        0.85,
+    ),
     # Subcontracting Plan
     (re.compile(r"\bsubcontracting\s+plan\b", re.IGNORECASE), "subk_plan", 0.9),
-    (re.compile(r"\bsmall\s+business\s+subcontracting\b", re.IGNORECASE), "subk_plan", 0.85),
+    (
+        re.compile(r"\bsmall\s+business\s+subcontracting\b", re.IGNORECASE),
+        "subk_plan",
+        0.85,
+    ),
     # Subcontracting Review
     (re.compile(r"\bsubcontracting\s+review\b", re.IGNORECASE), "subk_review", 0.9),
     # Conference Request
@@ -151,22 +247,52 @@ CONTENT_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     (re.compile(r"\bnih\s+conference\b", re.IGNORECASE), "conference_request", 0.8),
     # Conference Waiver
     (re.compile(r"\bconference\s+waiver\b", re.IGNORECASE), "conference_waiver", 0.9),
-    (re.compile(r"\brequest\s+for\s+waiver\b.*\bconference\b", re.IGNORECASE | re.DOTALL), "conference_waiver", 0.85),
+    (
+        re.compile(
+            r"\brequest\s+for\s+waiver\b.*\bconference\b", re.IGNORECASE | re.DOTALL
+        ),
+        "conference_waiver",
+        0.85,
+    ),
     # Promotional Item
     (re.compile(r"\bpromotional\s+item\b", re.IGNORECASE), "promotional_item", 0.9),
     # Exemption Determination
-    (re.compile(r"\bexemption\s+determination\b", re.IGNORECASE), "exemption_determination", 0.9),
+    (
+        re.compile(r"\bexemption\s+determination\b", re.IGNORECASE),
+        "exemption_determination",
+        0.9,
+    ),
     # Mandatory Use Waiver
-    (re.compile(r"\bmandatory[-\s]?use\s+waiver\b", re.IGNORECASE), "mandatory_use_waiver", 0.9),
+    (
+        re.compile(r"\bmandatory[-\s]?use\s+waiver\b", re.IGNORECASE),
+        "mandatory_use_waiver",
+        0.9,
+    ),
     # GFP Form
-    (re.compile(r"\bgovernment\s+furnished\s+property\b", re.IGNORECASE), "gfp_form", 0.9),
+    (
+        re.compile(r"\bgovernment\s+furnished\s+property\b", re.IGNORECASE),
+        "gfp_form",
+        0.9,
+    ),
     (re.compile(r"\bgfp\b", re.IGNORECASE), "gfp_form", 0.7),
     # BPA Call Order
     (re.compile(r"\bbpa\s+call\s+order\b", re.IGNORECASE), "bpa_call_order", 0.9),
-    (re.compile(r"\bblanket\s+purchase\s+agreement\b", re.IGNORECASE), "bpa_call_order", 0.85),
+    (
+        re.compile(r"\bblanket\s+purchase\s+agreement\b", re.IGNORECASE),
+        "bpa_call_order",
+        0.85,
+    ),
     # Technical Questionnaire
-    (re.compile(r"\btechnical\s+questionnai?r?e\b", re.IGNORECASE), "technical_questionnaire", 0.9),
-    (re.compile(r"\bproject\s+officer\b", re.IGNORECASE), "technical_questionnaire", 0.6),
+    (
+        re.compile(r"\btechnical\s+questionnai?r?e\b", re.IGNORECASE),
+        "technical_questionnaire",
+        0.9,
+    ),
+    (
+        re.compile(r"\bproject\s+officer\b", re.IGNORECASE),
+        "technical_questionnaire",
+        0.6,
+    ),
     # Quotation Abstract
     (re.compile(r"\bquotation\s+abstract\b", re.IGNORECASE), "quotation_abstract", 0.9),
     # Receiving Report
@@ -257,7 +383,12 @@ def classify_document(
     # Try filename first (fast path)
     result = classify_by_filename(filename)
     if result:
-        logger.info("Classified %s as %s via filename (confidence=%.2f)", filename, result.doc_type, result.confidence)
+        logger.info(
+            "Classified %s as %s via filename (confidence=%.2f)",
+            filename,
+            result.doc_type,
+            result.confidence,
+        )
         return result
 
     # Fall back to content analysis
@@ -265,7 +396,12 @@ def classify_document(
         result = classify_by_content(content_preview)
         if result:
             result.suggested_title = _clean_filename_for_title(filename)
-            logger.info("Classified %s as %s via content (confidence=%.2f)", filename, result.doc_type, result.confidence)
+            logger.info(
+                "Classified %s as %s via content (confidence=%.2f)",
+                filename,
+                result.doc_type,
+                result.confidence,
+            )
             return result
 
     # Unknown type
@@ -304,7 +440,10 @@ def extract_text_preview(
             return _extract_pdf_text(body, max_chars)
 
         # DOCX
-        if content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        if (
+            content_type
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ):
             return _extract_docx_text(body, max_chars)
 
         # XLSX

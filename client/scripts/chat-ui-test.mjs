@@ -17,11 +17,11 @@ function ss(name) {
   const page = await context.newPage();
 
   const consoleMessages = [];
-  page.on('console', msg => {
+  page.on('console', (msg) => {
     consoleMessages.push({ type: msg.type(), text: msg.text() });
     if (msg.type() === 'error') console.log(`[CONSOLE ERROR] ${msg.text()}`);
   });
-  page.on('pageerror', err => {
+  page.on('pageerror', (err) => {
     consoleMessages.push({ type: 'pageerror', text: err.message });
     console.log(`[PAGE ERROR] ${err.message}`);
   });
@@ -44,7 +44,10 @@ function ss(name) {
 
   // === STEP 3: Snapshot interactive elements ===
   console.log('\n=== Step 3: Interactive elements snapshot ===');
-  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const bodyText = await page
+    .locator('body')
+    .innerText()
+    .catch(() => '');
 
   // Find all buttons
   const buttons = await page.locator('button').all();
@@ -54,12 +57,16 @@ function ss(name) {
     const ariaLabel = await buttons[i].getAttribute('aria-label').catch(() => '');
     const visible = await buttons[i].isVisible().catch(() => false);
     if (visible && (text.trim() || ariaLabel)) {
-      console.log(`  Button[${i}]: text="${text.trim().substring(0, 60)}" aria="${ariaLabel || ''}"`);
+      console.log(
+        `  Button[${i}]: text="${text.trim().substring(0, 60)}" aria="${ariaLabel || ''}"`,
+      );
     }
   }
 
   // Find tabs
-  const tabs = await page.locator('[role="tab"], [data-state="active"], [data-state="inactive"]').all();
+  const tabs = await page
+    .locator('[role="tab"], [data-state="active"], [data-state="inactive"]')
+    .all();
   console.log(`\nFound ${tabs.length} tab-like elements:`);
   for (const tab of tabs) {
     const text = await tab.innerText().catch(() => '');
@@ -68,11 +75,22 @@ function ss(name) {
   }
 
   // Find inputs/textareas
-  const inputs = await page.locator('textarea, input[type="text"], [contenteditable="true"], [role="textbox"]').all();
+  const inputs = await page
+    .locator('textarea, input[type="text"], [contenteditable="true"], [role="textbox"]')
+    .all();
   console.log(`\nFound ${inputs.length} input elements`);
 
   // Look for specific text patterns
-  const patterns = ['Current', 'History', 'Logs', 'Documents', 'Notifications', 'Activity', 'Checklist', 'Summary'];
+  const patterns = [
+    'Current',
+    'History',
+    'Logs',
+    'Documents',
+    'Notifications',
+    'Activity',
+    'Checklist',
+    'Summary',
+  ];
   console.log('\nText pattern search in page:');
   for (const p of patterns) {
     const found = bodyText.includes(p);
@@ -83,7 +101,9 @@ function ss(name) {
   console.log('\n=== Step 4: Right panel tabs ===');
 
   // Try to find "Current" tab
-  let currentTab = await page.locator('button:has-text("Current"), [role="tab"]:has-text("Current")').first();
+  let currentTab = await page
+    .locator('button:has-text("Current"), [role="tab"]:has-text("Current")')
+    .first();
   let currentTabVisible = await currentTab.isVisible().catch(() => false);
   if (currentTabVisible) {
     console.log('Found "Current" tab - clicking it');
@@ -97,7 +117,9 @@ function ss(name) {
   }
 
   // Try "History" tab
-  let historyTab = await page.locator('button:has-text("History"), [role="tab"]:has-text("History")').first();
+  let historyTab = await page
+    .locator('button:has-text("History"), [role="tab"]:has-text("History")')
+    .first();
   let historyTabVisible = await historyTab.isVisible().catch(() => false);
   if (historyTabVisible) {
     console.log('Found "History" tab - clicking it');
@@ -110,7 +132,9 @@ function ss(name) {
   }
 
   // Try "Logs" tab
-  let logsTab = await page.locator('button:has-text("Logs"), [role="tab"]:has-text("Logs")').first();
+  let logsTab = await page
+    .locator('button:has-text("Logs"), [role="tab"]:has-text("Logs")')
+    .first();
   let logsTabVisible = await logsTab.isVisible().catch(() => false);
   if (logsTabVisible) {
     console.log('Found "Logs" tab - clicking it');
@@ -133,7 +157,9 @@ function ss(name) {
   console.log('Saved: chat-welcome.png');
 
   // Look for suggested prompts
-  const suggestElements = await page.locator('[class*="suggest"], [class*="prompt"], [class*="quick"], [class*="starter"]').all();
+  const suggestElements = await page
+    .locator('[class*="suggest"], [class*="prompt"], [class*="quick"], [class*="starter"]')
+    .all();
   console.log(`Suggested prompt elements: ${suggestElements.length}`);
   for (const el of suggestElements) {
     const text = await el.innerText().catch(() => '');
@@ -143,13 +169,19 @@ function ss(name) {
 
   // === STEP 6: Send acquisition message ===
   console.log('\n=== Step 6: Send test message ===');
-  const message = 'I need to start a new acquisition for a CT scanner, estimated value $250,000, needed within 6 months.';
+  const message =
+    'I need to start a new acquisition for a CT scanner, estimated value $250,000, needed within 6 months.';
 
-  const inputSelectors = ['textarea', 'input[type="text"]', '[contenteditable="true"]', '[role="textbox"]'];
+  const inputSelectors = [
+    'textarea',
+    'input[type="text"]',
+    '[contenteditable="true"]',
+    '[role="textbox"]',
+  ];
   let inputFound = false;
   for (const sel of inputSelectors) {
     const el = await page.$(sel);
-    if (el && await el.isVisible()) {
+    if (el && (await el.isVisible())) {
       console.log(`Found input with selector: ${sel}`);
       await el.click();
       await el.fill(message);
@@ -176,7 +208,8 @@ function ss(name) {
 
   // Wait remaining time, checking for response completion
   let responseComplete = false;
-  for (let i = 0; i < 21; i++) { // 21 * 5s = 105s more
+  for (let i = 0; i < 21; i++) {
+    // 21 * 5s = 105s more
     await page.waitForTimeout(5000);
     const elapsed = 15 + (i + 1) * 5;
 
@@ -193,7 +226,10 @@ function ss(name) {
     }
 
     // Also check for assistant message content
-    const currentBodyText = await page.locator('body').innerText().catch(() => '');
+    const currentBodyText = await page
+      .locator('body')
+      .innerText()
+      .catch(() => '');
     if (currentBodyText.includes('acquisition') && currentBodyText.includes('CT') && elapsed > 20) {
       // Give a few more seconds for streaming to finish
       await page.waitForTimeout(5000);
@@ -215,12 +251,17 @@ function ss(name) {
   console.log('Saved: chat-response.png');
 
   // Get updated body text
-  const bodyTextAfter = await page.locator('body').innerText().catch(() => '');
+  const bodyTextAfter = await page
+    .locator('body')
+    .innerText()
+    .catch(() => '');
 
   // === STEP 9: Check right panel after response ===
   console.log('\n=== Step 9: Right panel after response ===');
   // Click Current tab again if available
-  currentTab = await page.locator('button:has-text("Current"), [role="tab"]:has-text("Current")').first();
+  currentTab = await page
+    .locator('button:has-text("Current"), [role="tab"]:has-text("Current")')
+    .first();
   currentTabVisible = await currentTab.isVisible().catch(() => false);
   if (currentTabVisible) {
     await currentTab.click();
@@ -230,7 +271,15 @@ function ss(name) {
   console.log('Saved: chat-checklist-after.png');
 
   // Look for checklist items
-  const checklistPatterns = ['checklist', 'SOW', 'IGCE', 'Acquisition Plan', 'Market Research', 'J&A', 'requirement'];
+  const checklistPatterns = [
+    'checklist',
+    'SOW',
+    'IGCE',
+    'Acquisition Plan',
+    'Market Research',
+    'J&A',
+    'requirement',
+  ];
   console.log('\nChecklist/document pattern search after response:');
   for (const p of checklistPatterns) {
     const found = bodyTextAfter.toLowerCase().includes(p.toLowerCase());
@@ -239,7 +288,11 @@ function ss(name) {
 
   // === STEP 10: Look for inline forms ===
   console.log('\n=== Step 10: Inline forms check ===');
-  const formElements = await page.locator('form, [class*="form"], [class*="inline-form"], [class*="equipment"], [class*="funding"]').all();
+  const formElements = await page
+    .locator(
+      'form, [class*="form"], [class*="inline-form"], [class*="equipment"], [class*="funding"]',
+    )
+    .all();
   console.log(`Form-like elements: ${formElements.length}`);
   for (const el of formElements) {
     const text = await el.innerText().catch(() => '');
@@ -258,7 +311,15 @@ function ss(name) {
 
   // === STEP 11: Check for acquisition summary card ===
   console.log('\n=== Step 11: Acquisition summary / card check ===');
-  const summaryPatterns = ['summary', 'acquisition', '$250', '250,000', 'CT scanner', 'equipment', 'medical'];
+  const summaryPatterns = [
+    'summary',
+    'acquisition',
+    '$250',
+    '250,000',
+    'CT scanner',
+    'equipment',
+    'medical',
+  ];
   console.log('Summary/card pattern search:');
   for (const p of summaryPatterns) {
     const found = bodyTextAfter.toLowerCase().includes(p.toLowerCase());
@@ -280,7 +341,11 @@ function ss(name) {
     if (count > 0) {
       assistantFound = true;
       console.log(`Assistant response found via "${sel}" (${count} elements)`);
-      const text = await page.locator(sel).last().innerText().catch(() => '');
+      const text = await page
+        .locator(sel)
+        .last()
+        .innerText()
+        .catch(() => '');
       console.log(`  Last element text (first 500 chars): ${text.substring(0, 500)}`);
       break;
     }
@@ -298,7 +363,7 @@ function ss(name) {
 
   // === STEP 13: Check for errors ===
   console.log('\n=== Step 13: Error check ===');
-  const errors = consoleMessages.filter(m => m.type === 'error' || m.type === 'pageerror');
+  const errors = consoleMessages.filter((m) => m.type === 'error' || m.type === 'pageerror');
   console.log(`Total console errors: ${errors.length}`);
   errors.slice(0, 10).forEach((e, i) => console.log(`  [${i}] ${e.text.substring(0, 200)}`));
 

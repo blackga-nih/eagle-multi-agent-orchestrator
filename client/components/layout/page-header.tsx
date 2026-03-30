@@ -19,7 +19,7 @@ export default function PageHeader({
   backHref,
   backLabel = 'Back',
   actions,
-  breadcrumbs
+  breadcrumbs,
 }: PageHeaderProps) {
   return (
     <div className="mb-8">

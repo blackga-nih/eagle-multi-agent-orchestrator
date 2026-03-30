@@ -27,7 +27,9 @@ export default function PackageStatusPanel({ text }: { text: string }) {
   } catch {
     return (
       <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white max-h-64 overflow-y-auto">
-        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">{text}</pre>
+        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
+          {text}
+        </pre>
       </div>
     );
   }
@@ -44,31 +46,25 @@ export default function PackageStatusPanel({ text }: { text: string }) {
   return (
     <div className="border-t border-[#E5E9F0] bg-white px-3 py-2.5">
       <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">Package Update</span>
+        <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">
+          Package Update
+        </span>
         <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${statusColor}`}>
           {status}
         </span>
       </div>
 
       <p className="text-xs font-medium text-gray-900 truncate">{title}</p>
-      {data.package_id && (
-        <p className="text-[10px] text-gray-400 font-mono">{data.package_id}</p>
-      )}
+      {data.package_id && <p className="text-[10px] text-gray-400 font-mono">{data.package_id}</p>}
 
       {/* Key fields row */}
       <div className="flex items-center gap-3 mt-1.5 text-[10px] text-gray-500">
-        {data.requirement_type && (
-          <span>{data.requirement_type.replace(/_/g, ' ')}</span>
-        )}
+        {data.requirement_type && <span>{data.requirement_type.replace(/_/g, ' ')}</span>}
         {value && <span>{value}</span>}
-        {data.acquisition_method && (
-          <span className="uppercase">{data.acquisition_method}</span>
-        )}
+        {data.acquisition_method && <span className="uppercase">{data.acquisition_method}</span>}
       </div>
 
-      {data.message && (
-        <p className="text-[10px] text-gray-600 mt-1">{data.message}</p>
-      )}
+      {data.message && <p className="text-[10px] text-gray-600 mt-1">{data.message}</p>}
     </div>
   );
 }

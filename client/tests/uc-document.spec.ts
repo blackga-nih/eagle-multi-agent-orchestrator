@@ -25,7 +25,7 @@ test.describe('UC: Document Generation Workflow', () => {
 
     // Response should include SOW structural elements
     await expect(page.locator('main')).toContainText(
-      /statement of work|scope|deliverable|objective|requirement|performance|contract/i
+      /statement of work|scope|deliverable|objective|requirement|performance|contract/i,
     );
   });
 });

@@ -6,7 +6,9 @@ test.describe('Workflows Page', () => {
   });
 
   test('displays page header and structure', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Acquisition Packages', level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Acquisition Packages', level: 1 }),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'New Package' })).toBeVisible();
     await expect(page.getByPlaceholder('Search acquisition packages...')).toBeVisible();
   });
@@ -23,8 +25,11 @@ test.describe('Workflows Page', () => {
     // Wait for loading to complete — either packages appear or empty state shows
     await page.waitForTimeout(2000);
 
-    const hasPackages = await page.getByRole('heading', { level: 3 }).count() > 0;
-    const hasEmptyState = await page.getByText('No acquisition packages yet').isVisible().catch(() => false);
+    const hasPackages = (await page.getByRole('heading', { level: 3 }).count()) > 0;
+    const hasEmptyState = await page
+      .getByText('No acquisition packages yet')
+      .isVisible()
+      .catch(() => false);
 
     // Must show one or the other
     expect(hasPackages || hasEmptyState).toBe(true);

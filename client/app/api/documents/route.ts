@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
       console.error(`FastAPI /api/documents error: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Backend error: ${response.status}`, detail: errorText },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -74,13 +74,13 @@ export async function GET(request: NextRequest) {
           error: 'Cannot connect to backend',
           details: `Ensure FastAPI is running at ${FASTAPI_URL}`,
         },
-        { status: 503 }
+        { status: 503 },
       );
     }
 
     return NextResponse.json(
       { error: 'Internal server error', details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
 
-    const body = await request.json() as Record<string, unknown>;
+    const body = (await request.json()) as Record<string, unknown>;
 
     // Build headers - only include Authorization if present
     const headers: Record<string, string> = {
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       console.error(`FastAPI /api/documents/export error: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Backend error: ${response.status}`, detail: errorText },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -146,13 +146,13 @@ export async function POST(request: NextRequest) {
           error: 'Cannot connect to backend',
           details: `Ensure FastAPI is running at ${FASTAPI_URL}`,
         },
-        { status: 503 }
+        { status: 503 },
       );
     }
 
     return NextResponse.json(
       { error: 'Internal server error', details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -27,22 +27,16 @@ export async function GET(request: NextRequest) {
   const userId = searchParams.get('user_id');
 
   if (!userId) {
-    return NextResponse.json(
-      { error: 'Missing required parameter: user_id' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Missing required parameter: user_id' }, { status: 400 });
   }
 
   try {
     // Try backend first
-    const response = await fetch(
-      `${BACKEND_URL}/conversations/context?user_id=${userId}`,
-      {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(3000),
-      }
-    );
+    const response = await fetch(`${BACKEND_URL}/conversations/context?user_id=${userId}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(3000),
+    });
 
     if (response.ok) {
       const data = await response.json();
@@ -67,10 +61,7 @@ export async function PUT(request: NextRequest) {
     const { userId, context } = body;
 
     if (!userId) {
-      return NextResponse.json(
-        { error: 'Missing required field: userId' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing required field: userId' }, { status: 400 });
     }
 
     try {
@@ -121,12 +112,8 @@ export async function PUT(request: NextRequest) {
       context: userStore.sharedContext,
       lastUpdated: now,
     });
-
   } catch (error) {
     console.error('Context PUT error:', error);
-    return NextResponse.json(
-      { error: 'Failed to update context' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to update context' }, { status: 500 });
   }
 }

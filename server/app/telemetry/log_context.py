@@ -12,15 +12,20 @@ Usage in request handlers:
 The JSON formatter produces one-line JSON objects:
     {"ts":"2026-03-04T12:00:00","level":"INFO","logger":"eagle","tenant_id":"acme","user_id":"user-1","session_id":"s-123","msg":"..."}
 """
+
 import contextvars
 import json
 import logging
 from datetime import datetime, timezone
 
 # Context variables — set per-request, inherited by async tasks
-_tenant_id: contextvars.ContextVar[str] = contextvars.ContextVar("tenant_id", default="")
+_tenant_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "tenant_id", default=""
+)
 _user_id: contextvars.ContextVar[str] = contextvars.ContextVar("user_id", default="")
-_session_id: contextvars.ContextVar[str] = contextvars.ContextVar("session_id", default="")
+_session_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "session_id", default=""
+)
 
 
 def set_log_context(

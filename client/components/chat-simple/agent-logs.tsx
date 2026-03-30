@@ -17,22 +17,42 @@ function getToolMeta(name: string) {
 function summarizeToolInput(name: string, input: Record<string, unknown>): string {
   if (!input || Object.keys(input).length === 0) return '';
   switch (name) {
-    case 'think': { const t = String(input.thought ?? ''); return t.slice(0, 60) + (t.length > 60 ? '...' : ''); }
-    case 'search_far': return String(input.query ?? '');
-    case 'web_search': return String(input.query ?? '');
+    case 'think': {
+      const t = String(input.thought ?? '');
+      return t.slice(0, 60) + (t.length > 60 ? '...' : '');
+    }
+    case 'search_far':
+      return String(input.query ?? '');
+    case 'web_search':
+      return String(input.query ?? '');
     case 'web_fetch': {
       const u = String(input.url ?? '');
-      try { return new URL(u).hostname + new URL(u).pathname.slice(0, 30); } catch { return u.slice(0, 60); }
+      try {
+        return new URL(u).hostname + new URL(u).pathname.slice(0, 30);
+      } catch {
+        return u.slice(0, 60);
+      }
     }
-    case 'knowledge_search': return String(input.query ?? input.topic ?? '');
-    case 'knowledge_fetch': { const k = String(input.s3_key ?? ''); return k.split('/').pop() || k; }
+    case 'knowledge_search':
+      return String(input.query ?? input.topic ?? '');
+    case 'knowledge_fetch': {
+      const k = String(input.s3_key ?? '');
+      return k.split('/').pop() || k;
+    }
     case 'create_document': {
       const dt = String(input.doc_type ?? '').replace(/_/g, ' ');
       return input.title ? dt + ': ' + String(input.title) : dt;
     }
-    case 'edit_docx_document': { const k = String(input.document_key ?? ''); return k.split('/').pop() || k; }
-    case 'load_skill': return String(input.name ?? '');
-    default: { const q = String(input.query ?? input.prompt ?? input.message ?? ''); return q.slice(0, 60) + (q.length > 60 ? '...' : ''); }
+    case 'edit_docx_document': {
+      const k = String(input.document_key ?? '');
+      return k.split('/').pop() || k;
+    }
+    case 'load_skill':
+      return String(input.name ?? '');
+    default: {
+      const q = String(input.query ?? input.prompt ?? input.message ?? '');
+      return q.slice(0, 60) + (q.length > 60 ? '...' : '');
+    }
   }
 }
 
@@ -66,10 +86,19 @@ interface DisplayEntry {
 
 /** Subagent tool names (matches SSE viewer logic). */
 const SUBAGENT_TOOLS = new Set([
-  'oa_intake', 'legal_counsel', 'market_intelligence', 'tech_translator',
-  'tech_review', 'public_interest', 'compliance', 'policy_analyst',
-  'policy_librarian', 'policy_supervisor', 'document_generator',
-  'ingest_document', 'knowledge_retrieval',
+  'oa_intake',
+  'legal_counsel',
+  'market_intelligence',
+  'tech_translator',
+  'tech_review',
+  'public_interest',
+  'compliance',
+  'policy_analyst',
+  'policy_librarian',
+  'policy_supervisor',
+  'document_generator',
+  'ingest_document',
+  'knowledge_retrieval',
 ]);
 
 export function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
@@ -79,7 +108,7 @@ export function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
 
   function flushTextBuffer() {
     if (textBuffer.length === 0) return;
-    const merged = textBuffer.map(l => l.content ?? '').join('');
+    const merged = textBuffer.map((l) => l.content ?? '').join('');
     if (merged.trim() !== '') {
       entries.push({
         log: textBuffer[textBuffer.length - 1],
@@ -111,7 +140,11 @@ export function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
     const { log } = entry;
     if (log.type === 'tool_use' && log.tool_use && SUBAGENT_TOOLS.has(log.tool_use.name)) {
       openSubagents.add(log.tool_use.name);
-    } else if (log.type === 'tool_result' && log.tool_result && openSubagents.has(log.tool_result.name)) {
+    } else if (
+      log.type === 'tool_result' &&
+      log.tool_result &&
+      openSubagents.has(log.tool_result.name)
+    ) {
       openSubagents.delete(log.tool_result.name);
     } else if (openSubagents.size > 0) {
       // Any event while a subagent is open is nested
@@ -129,17 +162,17 @@ export function buildDisplayEntries(logs: AuditLogEntry[]): DisplayEntry[] {
 // ---------------------------------------------------------------------------
 
 const BADGE_STYLES: Record<string, string> = {
-  text:          'bg-[#E8F0FE] text-[#003366]',
-  tool_use:      'bg-[#E8F0FE] text-[#004488]',
-  tool_result:   'bg-[#F3EAFF] text-[#7740A4]',
-  agent_status:  'bg-[#FFF3E0] text-[#E65100]',
-  reasoning:     'bg-gray-100 text-gray-500',
-  handoff:       'bg-[#FFF3E0] text-[#E65100]',
-  complete:      'bg-gray-100 text-gray-500',
-  error:         'bg-[#FDECEA] text-[#BB0E3D]',
-  metadata:      'bg-gray-100 text-gray-400',
-  user_input:    'bg-[#E3F2FD] text-[#0B6ED7]',
-  elicitation:   'bg-[#E8F5E9] text-[#037F0C]',
+  text: 'bg-[#E8F0FE] text-[#003366]',
+  tool_use: 'bg-[#E8F0FE] text-[#004488]',
+  tool_result: 'bg-[#F3EAFF] text-[#7740A4]',
+  agent_status: 'bg-[#FFF3E0] text-[#E65100]',
+  reasoning: 'bg-gray-100 text-gray-500',
+  handoff: 'bg-[#FFF3E0] text-[#E65100]',
+  complete: 'bg-gray-100 text-gray-500',
+  error: 'bg-[#FDECEA] text-[#BB0E3D]',
+  metadata: 'bg-gray-100 text-gray-400',
+  user_input: 'bg-[#E3F2FD] text-[#0B6ED7]',
+  elicitation: 'bg-[#E8F5E9] text-[#037F0C]',
 };
 
 function getBadgeStyle(type: string) {
@@ -152,7 +185,12 @@ function getBadgeStyle(type: string) {
 
 function formatTime(timestamp: string): string {
   try {
-    return new Date(timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return new Date(timestamp).toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
   } catch {
     return '';
   }
@@ -162,18 +200,35 @@ function getSummary(entry: DisplayEntry): string {
   const { log } = entry;
   switch (log.type) {
     case 'text':
-      return (entry.mergedContent ?? log.content ?? '').slice(0, 60) + ((entry.mergedContent ?? log.content ?? '').length > 60 ? '...' : '');
+      return (
+        (entry.mergedContent ?? log.content ?? '').slice(0, 60) +
+        ((entry.mergedContent ?? log.content ?? '').length > 60 ? '...' : '')
+      );
     case 'tool_use': {
       if (!log.tool_use) return '';
       const tm = getToolMeta(log.tool_use.name);
-      const inp = summarizeToolInput(log.tool_use.name, (log.tool_use.input ?? {}) as Record<string, unknown>);
-      return tm.icon + ' ' + tm.label + (inp ? ' \u2014 "' + inp.slice(0, 40) + (inp.length > 40 ? '...' : '') + '"' : '');
+      const inp = summarizeToolInput(
+        log.tool_use.name,
+        (log.tool_use.input ?? {}) as Record<string, unknown>,
+      );
+      return (
+        tm.icon +
+        ' ' +
+        tm.label +
+        (inp ? ' \u2014 "' + inp.slice(0, 40) + (inp.length > 40 ? '...' : '') + '"' : '')
+      );
     }
     case 'tool_result': {
       if (!log.tool_result) return '';
       const trm = getToolMeta(log.tool_result.name);
       const detail = summarizeToolResult(log.tool_result.name, log.tool_result.result);
-      return (entry.nested ? '\u2514 ' : '') + trm.icon + ' ' + trm.label + (detail ? ' (' + detail + ')' : '');
+      return (
+        (entry.nested ? '\u2514 ' : '') +
+        trm.icon +
+        ' ' +
+        trm.label +
+        (detail ? ' (' + detail + ')' : '')
+      );
     }
     case 'agent_status':
       return (log.metadata as Record<string, string>)?.status ?? '';
@@ -204,7 +259,9 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
   const { log } = entry;
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [onClose]);
@@ -220,23 +277,36 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
   const meta = log.metadata as Record<string, unknown> | undefined;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
       <div
         data-testid="modal-agent-logs"
         className="bg-white rounded-xl shadow-2xl w-[80vw] max-h-[80vh] flex flex-col overflow-hidden border border-[#D8DEE6]"
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#D8DEE6]">
           <div className="flex items-center gap-2">
-            <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${getBadgeStyle(log.type)}`}>
-              {log.type === 'text' ? 'agent' : log.type === 'user_input' ? 'user' : log.type.replace('_', ' ')}
+            <span
+              className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${getBadgeStyle(log.type)}`}
+            >
+              {log.type === 'text'
+                ? 'agent'
+                : log.type === 'user_input'
+                  ? 'user'
+                  : log.type.replace('_', ' ')}
             </span>
             {log.tool_use && (
-              <span className="text-xs text-gray-800">{getToolMeta(log.tool_use.name).icon} {log.tool_use.name}</span>
+              <span className="text-xs text-gray-800">
+                {getToolMeta(log.tool_use.name).icon} {log.tool_use.name}
+              </span>
             )}
             {log.tool_result && (
-              <span className="text-xs text-gray-800">{getToolMeta(log.tool_result.name).icon} {log.tool_result.name}</span>
+              <span className="text-xs text-gray-800">
+                {getToolMeta(log.tool_result.name).icon} {log.tool_result.name}
+              </span>
             )}
             {entry.group.length > 1 && (
               <span className="text-[10px] text-gray-400">({entry.group.length} chunks)</span>
@@ -252,14 +322,19 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
 
         {/* Toggle bar */}
         <div className="flex items-center justify-end gap-2 px-4 py-2 border-b border-[#D8DEE6]">
-          <button onClick={handleCopy} className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-500 bg-[#F5F7FA] hover:bg-[#EDF0F4] rounded border border-[#D8DEE6] transition">
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-500 bg-[#F5F7FA] hover:bg-[#EDF0F4] rounded border border-[#D8DEE6] transition"
+          >
             {copied ? <Check className="w-3 h-3 text-[#037F0C]" /> : <Copy className="w-3 h-3" />}
             {copied ? 'Copied!' : 'Copy JSON'}
           </button>
           <button
             onClick={() => setShowRaw(!showRaw)}
             className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded border transition ${
-              showRaw ? 'bg-[#003366] text-white border-[#003366]' : 'text-gray-500 bg-[#F5F7FA] hover:bg-[#EDF0F4] border-[#D8DEE6]'
+              showRaw
+                ? 'bg-[#003366] text-white border-[#003366]'
+                : 'text-gray-500 bg-[#F5F7FA] hover:bg-[#EDF0F4] border-[#D8DEE6]'
             }`}
           >
             <Code className="w-3 h-3" />
@@ -294,10 +369,14 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
                 <div className="bg-[#F5F7FA] border border-[#D8DEE6] p-4 rounded-lg">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-lg">{getToolMeta(log.tool_use.name).icon}</span>
-                    <span className="font-bold text-[#004488] text-sm">{getToolMeta(log.tool_use.name).label}</span>
+                    <span className="font-bold text-[#004488] text-sm">
+                      {getToolMeta(log.tool_use.name).label}
+                    </span>
                     <span className="text-[10px] text-gray-400 font-mono">{log.tool_use.name}</span>
                   </div>
-                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Input</div>
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                    Input
+                  </div>
                   <pre className="bg-white border border-[#D8DEE6] p-3 rounded text-xs text-gray-800 font-mono whitespace-pre-wrap break-all">
                     {JSON.stringify(log.tool_use.input, null, 2)}
                   </pre>
@@ -309,11 +388,17 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
                 <div className="bg-[#F5F7FA] border border-[#D8DEE6] p-4 rounded-lg">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-lg">{getToolMeta(log.tool_result.name).icon}</span>
-                    <span className="font-bold text-[#7740A4] text-sm">{getToolMeta(log.tool_result.name).label}</span>
+                    <span className="font-bold text-[#7740A4] text-sm">
+                      {getToolMeta(log.tool_result.name).label}
+                    </span>
                   </div>
-                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Output</div>
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                    Output
+                  </div>
                   <pre className="bg-white border border-[#D8DEE6] p-3 rounded text-xs text-gray-800 font-mono whitespace-pre-wrap break-all max-h-[300px] overflow-y-auto">
-                    {typeof log.tool_result.result === 'string' ? log.tool_result.result : JSON.stringify(log.tool_result.result, null, 2)}
+                    {typeof log.tool_result.result === 'string'
+                      ? log.tool_result.result
+                      : JSON.stringify(log.tool_result.result, null, 2)}
                   </pre>
                 </div>
               )}
@@ -327,7 +412,9 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
                       {String(meta.target_agent ?? '')}
                     </span>
                   </div>
-                  {meta.reason ? <p className="text-sm text-gray-500 mt-2">{String(meta.reason)}</p> : null}
+                  {meta.reason ? (
+                    <p className="text-sm text-gray-500 mt-2">{String(meta.reason)}</p>
+                  ) : null}
                 </div>
               )}
 
@@ -335,7 +422,9 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
               {log.type === 'agent_status' && meta && (
                 <div className="bg-[#FFF3E0] border border-[#E65100]/20 p-4 rounded-lg">
                   <p className="text-sm text-[#E65100] font-medium">{String(meta.status ?? '')}</p>
-                  {meta.detail ? <p className="text-xs text-gray-400 mt-1">{String(meta.detail)}</p> : null}
+                  {meta.detail ? (
+                    <p className="text-xs text-gray-400 mt-1">{String(meta.detail)}</p>
+                  ) : null}
                 </div>
               )}
 
@@ -345,7 +434,9 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
                   {meta?.tool_timings ? (
                     <ToolTimingSummary metadata={meta} />
                   ) : (
-                    <pre className="text-xs text-gray-500 font-mono">{JSON.stringify(meta, null, 2)}</pre>
+                    <pre className="text-xs text-gray-500 font-mono">
+                      {JSON.stringify(meta, null, 2)}
+                    </pre>
                   )}
                 </div>
               )}
@@ -368,7 +459,11 @@ function LogDetailModal({ entry, onClose }: { entry: DisplayEntry; onClose: () =
 // Timeline Row
 // ---------------------------------------------------------------------------
 
-function TimelineRow({ entry, isSelected, onSelect }: {
+function TimelineRow({
+  entry,
+  isSelected,
+  onSelect,
+}: {
   entry: DisplayEntry;
   isSelected: boolean;
   onSelect: () => void;
@@ -379,30 +474,32 @@ function TimelineRow({ entry, isSelected, onSelect }: {
   return (
     <div
       className={`flex items-start gap-2.5 py-2 px-3 cursor-pointer border-l-[3px] transition-colors ${
-        isSelected
-          ? 'bg-[#E8F0FE] border-l-[#003366]'
-          : 'border-l-transparent hover:bg-[#F5F7FA]'
+        isSelected ? 'bg-[#E8F0FE] border-l-[#003366]' : 'border-l-transparent hover:bg-[#F5F7FA]'
       }`}
       style={nested ? { paddingLeft: '28px' } : undefined}
       onClick={onSelect}
     >
       {/* Badge */}
-      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider whitespace-nowrap min-w-[56px] text-center shrink-0 mt-0.5 ${
-        nested ? 'bg-[#FFF3E0] text-[#E65100] text-[8px]' : getBadgeStyle(log.type)
-      }`}>
-        {nested ? 'nested' : log.type === 'text' ? 'agent' : log.type === 'user_input' ? 'user' : log.type.replace('_', ' ')}
+      <span
+        className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider whitespace-nowrap min-w-[56px] text-center shrink-0 mt-0.5 ${
+          nested ? 'bg-[#FFF3E0] text-[#E65100] text-[8px]' : getBadgeStyle(log.type)
+        }`}
+      >
+        {nested
+          ? 'nested'
+          : log.type === 'text'
+            ? 'agent'
+            : log.type === 'user_input'
+              ? 'user'
+              : log.type.replace('_', ' ')}
       </span>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <div className="text-[12px] text-gray-800 truncate">
-          {summary}
-        </div>
+        <div className="text-[12px] text-gray-800 truncate">{summary}</div>
         <div className="text-[10px] text-gray-400 font-mono mt-0.5">
           {formatTime(log.timestamp)}
-          {nested && (
-            <span className="text-[#E65100] text-[9px] ml-2">via subagent</span>
-          )}
+          {nested && <span className="text-[#E65100] text-[9px] ml-2">via subagent</span>}
         </div>
       </div>
     </div>
@@ -429,14 +526,17 @@ export default function AgentLogs({ logs }: AgentLogsProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries.length]);
 
-  const selectedEntry = selectedIdx >= 0 && selectedIdx < entries.length ? entries[selectedIdx] : null;
+  const selectedEntry =
+    selectedIdx >= 0 && selectedIdx < entries.length ? entries[selectedIdx] : null;
 
   if (entries.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-48 text-center px-4">
         <div className="text-2xl mb-2">{'\u{1F4E1}'}</div>
         <p className="text-sm text-gray-500">No events yet</p>
-        <p className="text-xs text-gray-400 mt-1">Events will appear as the agent processes your request.</p>
+        <p className="text-xs text-gray-400 mt-1">
+          Events will appear as the agent processes your request.
+        </p>
       </div>
     );
   }
@@ -460,9 +560,7 @@ export default function AgentLogs({ logs }: AgentLogsProps) {
       </div>
 
       {/* Detail modal */}
-      {selectedEntry && (
-        <LogDetailModal entry={selectedEntry} onClose={() => setSelectedIdx(-1)} />
-      )}
+      {selectedEntry && <LogDetailModal entry={selectedEntry} onClose={() => setSelectedIdx(-1)} />}
     </>
   );
 }

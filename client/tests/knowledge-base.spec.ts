@@ -40,7 +40,10 @@ test.describe('Knowledge Base Page', () => {
     await page.getByRole('button', { name: /By Topic/i }).click();
 
     // Should show either folder items or a loading/empty state
-    const folderView = page.locator('button').filter({ hasText: /Compliance|Funding|Legal|General/i }).first();
+    const folderView = page
+      .locator('button')
+      .filter({ hasText: /Compliance|Funding|Legal|General/i })
+      .first();
     const emptyState = page.getByText(/No documents to display/i);
 
     await expect(folderView.or(emptyState)).toBeVisible({ timeout: 15000 });
@@ -49,7 +52,10 @@ test.describe('Knowledge Base Page', () => {
   test('switching to By Type tab shows folder view', async ({ page }) => {
     await page.getByRole('button', { name: /By Type/i }).click();
 
-    const folderView = page.locator('button').filter({ hasText: /Regulation|Guidance|Policy|Template/i }).first();
+    const folderView = page
+      .locator('button')
+      .filter({ hasText: /Regulation|Guidance|Policy|Template/i })
+      .first();
     const emptyState = page.getByText(/No documents to display/i);
 
     await expect(folderView.or(emptyState)).toBeVisible({ timeout: 15000 });

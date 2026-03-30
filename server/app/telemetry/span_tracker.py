@@ -4,6 +4,7 @@ SpanTracker — Lightweight span tracking using SDK hooks.
 No external dependencies. Uses SDK PreToolUse/PostToolUse/SubagentStart/SubagentStop
 hooks to build a span tree with timing data.
 """
+
 import time
 import logging
 from typing import Optional, Callable, Awaitable
@@ -15,6 +16,7 @@ logger = logging.getLogger("eagle.telemetry.spans")
 @dataclass
 class Span:
     """A single timed operation span."""
+
     name: str
     span_type: str  # "tool" | "agent"
     start_time: float = field(default_factory=time.time)
@@ -99,7 +101,9 @@ class SpanTracker:
         )
         self._completed_spans.append(span)
 
-        agent_name = span.input_data.get("agent", "unknown") if span.input_data else "unknown"
+        agent_name = (
+            span.input_data.get("agent", "unknown") if span.input_data else "unknown"
+        )
         if self.on_status:
             await self.on_status(
                 agent_name=agent_name,
@@ -117,12 +121,15 @@ class SpanTracker:
         span = Span(
             name=f"tool.{tool_name}",
             span_type="tool",
-            input_data=tool_input if isinstance(tool_input, dict) else {"raw": str(tool_input)[:500]},
+            input_data=tool_input
+            if isinstance(tool_input, dict)
+            else {"raw": str(tool_input)[:500]},
         )
         self._active_spans[tool_use_id] = span
 
         if self.on_status:
             from .status_messages import get_tool_status_message
+
             message = get_tool_status_message(tool_name, tool_input)
             await self.on_status(
                 agent_name=tool_name,
@@ -160,10 +167,28 @@ class SpanTracker:
         from claude_agent_sdk import HookMatcher
 
         return {
-            "SubagentStart": [HookMatcher(matcher="SubagentStart", hooks=[self.on_subagent_start], timeout=5000)],
-            "SubagentStop": [HookMatcher(matcher="SubagentStop", hooks=[self.on_subagent_stop], timeout=5000)],
-            "PreToolUse": [HookMatcher(matcher="PreToolUse", hooks=[self.on_pre_tool_use], timeout=5000)],
-            "PostToolUse": [HookMatcher(matcher="PostToolUse", hooks=[self.on_post_tool_use], timeout=5000)],
+            "SubagentStart": [
+                HookMatcher(
+                    matcher="SubagentStart",
+                    hooks=[self.on_subagent_start],
+                    timeout=5000,
+                )
+            ],
+            "SubagentStop": [
+                HookMatcher(
+                    matcher="SubagentStop", hooks=[self.on_subagent_stop], timeout=5000
+                )
+            ],
+            "PreToolUse": [
+                HookMatcher(
+                    matcher="PreToolUse", hooks=[self.on_pre_tool_use], timeout=5000
+                )
+            ],
+            "PostToolUse": [
+                HookMatcher(
+                    matcher="PostToolUse", hooks=[self.on_post_tool_use], timeout=5000
+                )
+            ],
         }
 
     def get_completed_spans(self) -> list[dict]:

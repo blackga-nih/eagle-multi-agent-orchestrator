@@ -15,12 +15,14 @@ Usage:
     if auth.require_auth:
         ...
 """
+
 import os
 from dataclasses import dataclass
 from typing import Optional
 
 
 # ── Helper Functions ─────────────────────────────────────────────────────────
+
 
 def _bool(env_var: str, default: str = "false") -> bool:
     """Parse boolean from environment variable."""
@@ -45,24 +47,31 @@ def _float(env_var: str, default: float) -> float:
 
 # ── Configuration Classes ────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class AWSConfig:
     """AWS infrastructure configuration."""
+
     region: str = os.getenv("AWS_REGION", "us-east-1")
     sessions_table: str = os.getenv("EAGLE_SESSIONS_TABLE", "eagle")
     s3_bucket: str = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
     metadata_table: str = os.getenv("METADATA_TABLE", "eagle-document-metadata-dev")
-    document_bucket: str = os.getenv("DOCUMENT_BUCKET", os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev"))
+    document_bucket: str = os.getenv(
+        "DOCUMENT_BUCKET", os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+    )
 
 
 @dataclass(frozen=True)
 class AuthConfig:
     """Authentication and authorization configuration."""
+
     require_auth: bool = _bool("REQUIRE_AUTH", "false")
     dev_mode: bool = _bool("DEV_MODE", "false")
     dev_user_id: str = os.getenv("DEV_USER_ID", "dev-user")
     dev_tenant_id: str = os.getenv("DEV_TENANT_ID", "dev-tenant")
-    cognito_region: str = os.getenv("COGNITO_REGION", os.getenv("AWS_REGION", "us-east-1"))
+    cognito_region: str = os.getenv(
+        "COGNITO_REGION", os.getenv("AWS_REGION", "us-east-1")
+    )
     cognito_user_pool_id: str = os.getenv("COGNITO_USER_POOL_ID", "")
     cognito_client_id: str = os.getenv("COGNITO_CLIENT_ID", "")
 
@@ -70,6 +79,7 @@ class AuthConfig:
 @dataclass(frozen=True)
 class BedrockConfig:
     """AWS Bedrock model configuration."""
+
     model_id: Optional[str] = os.getenv("EAGLE_BEDROCK_MODEL_ID")
     connect_timeout: int = _int("EAGLE_BEDROCK_CONNECT_TIMEOUT", 60)
     read_timeout: int = _int("EAGLE_BEDROCK_READ_TIMEOUT", 300)
@@ -81,6 +91,7 @@ class BedrockConfig:
 @dataclass(frozen=True)
 class CostConfig:
     """Token cost calculation configuration (Claude 3.5 Sonnet via Bedrock)."""
+
     input_per_1k: float = _float("COST_INPUT_PER_1K", 0.003)
     output_per_1k: float = _float("COST_OUTPUT_PER_1K", 0.015)
 
@@ -88,11 +99,14 @@ class CostConfig:
 @dataclass(frozen=True)
 class TelemetryConfig:
     """Observability and telemetry configuration."""
+
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: Optional[str] = os.getenv("LANGFUSE_SECRET_KEY")
     langfuse_host: str = os.getenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
     langfuse_project_id: str = os.getenv("LANGFUSE_PROJECT_ID", "")
-    cloudwatch_log_group: str = os.getenv("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
+    cloudwatch_log_group: str = os.getenv(
+        "EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry"
+    )
     trace_store_backend: str = os.getenv("TRACE_STORE", "local").lower()
     trace_ttl_days: int = _int("TRACE_TTL_DAYS", 30)
 
@@ -100,8 +114,11 @@ class TelemetryConfig:
 @dataclass(frozen=True)
 class WebhookConfig:
     """Webhook notification configuration."""
+
     # Teams notifications
-    teams_url: str = os.getenv("TEAMS_WEBHOOK_URL", os.getenv("TEAMS_QA_WEBHOOK_URL", ""))
+    teams_url: str = os.getenv(
+        "TEAMS_WEBHOOK_URL", os.getenv("TEAMS_QA_WEBHOOK_URL", "")
+    )
     teams_enabled: bool = _bool("TEAMS_WEBHOOK_ENABLED", "true")
     teams_timeout: float = _float("TEAMS_WEBHOOK_TIMEOUT", 5.0)
     teams_daily_summary_enabled: bool = _bool("TEAMS_DAILY_SUMMARY_ENABLED", "true")
@@ -120,12 +137,17 @@ class WebhookConfig:
         # Handle mutable default for exclude_paths
         if self.error_exclude_paths is None:
             paths = os.getenv("ERROR_WEBHOOK_EXCLUDE_PATHS", "/api/health")
-            object.__setattr__(self, 'error_exclude_paths', [p.strip() for p in paths.split(",") if p.strip()])
+            object.__setattr__(
+                self,
+                "error_exclude_paths",
+                [p.strip() for p in paths.split(",") if p.strip()],
+            )
 
 
 @dataclass(frozen=True)
 class SessionConfig:
     """Session management configuration."""
+
     ttl_days: int = _int("SESSION_TTL_DAYS", 30)
     use_persistent: bool = _bool("USE_PERSISTENT_SESSIONS", "true")
 
@@ -133,14 +155,18 @@ class SessionConfig:
 @dataclass(frozen=True)
 class ModelConfig:
     """AI model configuration."""
+
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
     sdk_model: str = os.getenv("EAGLE_SDK_MODEL", "haiku")
-    knowledge_search_model: str = os.getenv("KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-3-haiku-20240307-v1:0")
+    knowledge_search_model: str = os.getenv(
+        "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-3-haiku-20240307-v1:0"
+    )
 
 
 @dataclass(frozen=True)
 class AppConfig:
     """Application-level configuration."""
+
     environment: str = os.getenv("EAGLE_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev"))
     port: int = _int("APP_PORT", 8000)
     is_ecs: bool = os.getenv("ECS_CONTAINER_METADATA_URI") is not None
@@ -161,6 +187,7 @@ app = AppConfig()
 
 
 # ── Validation ───────────────────────────────────────────────────────────────
+
 
 def validate() -> list[str]:
     """

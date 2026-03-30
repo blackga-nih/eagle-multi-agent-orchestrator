@@ -6,8 +6,8 @@
 :root {
   --nci-blue: #003366;
   --nci-blue-light: #004488;
-  --user-bubble: #E3F2FD;
-  --user-border: #BBDEFB;
+  --user-bubble: #e3f2fd;
+  --user-border: #bbdefb;
 }
 
 /* ── Expertise Panel Animation ── */
@@ -42,7 +42,9 @@
 
 /* ── Typing indicator bounce ── */
 @keyframes bounce {
-  0%, 60%, 100% {
+  0%,
+  60%,
+  100% {
     transform: translateY(0);
   }
   30% {
@@ -87,8 +89,13 @@
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 /* ── Markdown styles inside message bubbles ── */

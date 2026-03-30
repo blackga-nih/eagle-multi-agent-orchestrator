@@ -16,6 +16,7 @@ async def get_available_weather_tools(current_user: dict = Depends(get_current_u
     """Get available weather MCP tools for current subscription tier."""
     try:
         from ..weather_mcp_service import WeatherMCPClient
+
         weather_client = WeatherMCPClient()
         tier = current_user["subscription_tier"]
         weather_tools = await weather_client.get_available_weather_tools(tier)
@@ -37,9 +38,14 @@ async def execute_weather_mcp_tool(
     """Execute weather MCP tool if subscription tier allows it."""
     try:
         from ..weather_mcp_service import WeatherMCPClient
+
         weather_client = WeatherMCPClient()
         tier = current_user["subscription_tier"]
         result = await weather_client.execute_weather_tool(tool_name, arguments, tier)
-        return {"tool_name": tool_name, "subscription_tier": tier.value, "result": result}
+        return {
+            "tool_name": tool_name,
+            "subscription_tier": tier.value,
+            "result": result,
+        }
     except ImportError:
         raise HTTPException(status_code=503, detail="Weather MCP service not available")

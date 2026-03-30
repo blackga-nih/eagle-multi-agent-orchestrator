@@ -9,6 +9,7 @@ Backed by three JSON data files in eagle-plugin/data/:
 
 All functions are read-only (no tenant state, no side effects).
 """
+
 from __future__ import annotations
 
 import json
@@ -37,15 +38,60 @@ _FAR_DATABASE: list[dict] = _load_json("far-database.json")
 # ---------------------------------------------------------------------------
 
 METHODS = [
-    {"id": "micro", "label": "Micro-Purchase", "sub": "FAR 13.2 — up to $15K", "far": "13.2"},
-    {"id": "sap", "label": "Simplified (SAP)", "sub": "FAR 13 — $15K to $350K", "far": "13"},
-    {"id": "negotiated", "label": "Negotiated", "sub": "FAR 15 — above $350K", "far": "15"},
-    {"id": "fss", "label": "FSS Direct Order", "sub": "FAR 8.4 — Schedule pricing", "far": "8.4"},
-    {"id": "bpa-est", "label": "BPA Establishment", "sub": "FAR 8.4 — Blanket agreement", "far": "8.4"},
-    {"id": "bpa-call", "label": "BPA Call Order", "sub": "FAR 8.4 — Order under BPA", "far": "8.4"},
-    {"id": "idiq", "label": "IDIQ Parent Award", "sub": "FAR 16.5 — Indefinite delivery", "far": "16.5"},
-    {"id": "idiq-order", "label": "IDIQ Task/Delivery Order", "sub": "FAR 16.5 — Order under IDIQ", "far": "16.5"},
-    {"id": "sole", "label": "Sole Source / J&A", "sub": "FAR 6.3 — Limited competition", "far": "6.3"},
+    {
+        "id": "micro",
+        "label": "Micro-Purchase",
+        "sub": "FAR 13.2 — up to $15K",
+        "far": "13.2",
+    },
+    {
+        "id": "sap",
+        "label": "Simplified (SAP)",
+        "sub": "FAR 13 — $15K to $350K",
+        "far": "13",
+    },
+    {
+        "id": "negotiated",
+        "label": "Negotiated",
+        "sub": "FAR 15 — above $350K",
+        "far": "15",
+    },
+    {
+        "id": "fss",
+        "label": "FSS Direct Order",
+        "sub": "FAR 8.4 — Schedule pricing",
+        "far": "8.4",
+    },
+    {
+        "id": "bpa-est",
+        "label": "BPA Establishment",
+        "sub": "FAR 8.4 — Blanket agreement",
+        "far": "8.4",
+    },
+    {
+        "id": "bpa-call",
+        "label": "BPA Call Order",
+        "sub": "FAR 8.4 — Order under BPA",
+        "far": "8.4",
+    },
+    {
+        "id": "idiq",
+        "label": "IDIQ Parent Award",
+        "sub": "FAR 16.5 — Indefinite delivery",
+        "far": "16.5",
+    },
+    {
+        "id": "idiq-order",
+        "label": "IDIQ Task/Delivery Order",
+        "sub": "FAR 16.5 — Order under IDIQ",
+        "far": "16.5",
+    },
+    {
+        "id": "sole",
+        "label": "Sole Source / J&A",
+        "sub": "FAR 6.3 — Limited competition",
+        "far": "6.3",
+    },
 ]
 
 TYPES = [
@@ -53,7 +99,12 @@ TYPES = [
     {"id": "fp-epa", "label": "FP w/ Economic Price Adj", "risk": 80, "category": "fp"},
     {"id": "fpi", "label": "Fixed-Price Incentive (FPI)", "risk": 65, "category": "fp"},
     {"id": "cpff", "label": "Cost-Plus-Fixed-Fee (CPFF)", "risk": 25, "category": "cr"},
-    {"id": "cpif", "label": "Cost-Plus-Incentive-Fee (CPIF)", "risk": 35, "category": "cr"},
+    {
+        "id": "cpif",
+        "label": "Cost-Plus-Incentive-Fee (CPIF)",
+        "risk": 35,
+        "category": "cr",
+    },
     {"id": "cpaf", "label": "Cost-Plus-Award-Fee (CPAF)", "risk": 20, "category": "cr"},
     {"id": "tm", "label": "Time & Materials (T&M)", "risk": 15, "category": "loe"},
     {"id": "lh", "label": "Labor-Hour (LH)", "risk": 15, "category": "loe"},
@@ -83,6 +134,7 @@ _TYPES_BY_ID = {t["id"]: t for t in TYPES}
 # Helper functions (ported from HTML)
 # ---------------------------------------------------------------------------
 
+
 def _ap_approval(v: float) -> str:
     if v > 150_000_000:
         return "HHS/OAP approval required (> $150M)"
@@ -106,6 +158,7 @@ def _ja_approval(v: float) -> str:
 # ---------------------------------------------------------------------------
 # Core: get_requirements()
 # ---------------------------------------------------------------------------
+
 
 def get_requirements(
     contract_value: float,
@@ -191,46 +244,94 @@ def get_requirements(
     docs: list[dict] = []
 
     # Purchase Request — always
-    docs.append({"name": "Purchase Request", "required": True, "note": "FAR 4.803(a)(1)"})
+    docs.append(
+        {"name": "Purchase Request", "required": True, "note": "FAR 4.803(a)(1)"}
+    )
 
     # SOW/PWS
     if m != "micro":
-        docs.append({
-            "name": "SOW / PWS" if is_services else "Statement of Need (SON)",
-            "required": True,
-            "note": "Performance-based with QASP (FAR 37.6)" if is_services else "Product specifications",
-        })
+        docs.append(
+            {
+                "name": "SOW / PWS" if is_services else "Statement of Need (SON)",
+                "required": True,
+                "note": "Performance-based with QASP (FAR 37.6)"
+                if is_services
+                else "Product specifications",
+            }
+        )
     else:
-        docs.append({"name": "SOW / PWS", "required": False, "note": "Not required for micro-purchase"})
+        docs.append(
+            {
+                "name": "SOW / PWS",
+                "required": False,
+                "note": "Not required for micro-purchase",
+            }
+        )
 
     # IGCE
-    docs.append({
-        "name": "IGCE",
-        "required": m != "micro",
-        "note": "Detailed breakdown required (HHSAM 307.105-71)" if v > 350_000 else "Sufficient detail/breakdown",
-    })
+    docs.append(
+        {
+            "name": "IGCE",
+            "required": m != "micro",
+            "note": "Detailed breakdown required (HHSAM 307.105-71)"
+            if v > 350_000
+            else "Sufficient detail/breakdown",
+        }
+    )
 
     # Market Research
     if v > 350_000:
-        docs.append({"name": "Market Research Report", "required": True, "note": "HHS template required (HHSAM 310.000)"})
+        docs.append(
+            {
+                "name": "Market Research Report",
+                "required": True,
+                "note": "HHS template required (HHSAM 310.000)",
+            }
+        )
     elif v > 15_000:
-        docs.append({"name": "Market Research", "required": True, "note": "Documented justification (less formal)"})
+        docs.append(
+            {
+                "name": "Market Research",
+                "required": True,
+                "note": "Documented justification (less formal)",
+            }
+        )
     else:
-        docs.append({"name": "Market Research", "required": False, "note": "Not required for micro-purchase"})
+        docs.append(
+            {
+                "name": "Market Research",
+                "required": False,
+                "note": "Not required for micro-purchase",
+            }
+        )
 
     # Acquisition Plan
     if v > 350_000:
-        docs.append({"name": "Acquisition Plan", "required": True, "note": _ap_approval(v)})
+        docs.append(
+            {"name": "Acquisition Plan", "required": True, "note": _ap_approval(v)}
+        )
     else:
-        docs.append({"name": "Acquisition Plan", "required": False, "note": "Not required below SAT ($350K)"})
+        docs.append(
+            {
+                "name": "Acquisition Plan",
+                "required": False,
+                "note": "Not required below SAT ($350K)",
+            }
+        )
 
     # J&A
-    needs_ja = m == "sole" or (m == "fss" and v > 350_000) or (m == "bpa-call" and v > 350_000)
-    docs.append({
-        "name": "J&A / Justification",
-        "required": needs_ja,
-        "note": _ja_approval(v) if needs_ja else "Only if sole source / limited competition",
-    })
+    needs_ja = (
+        m == "sole" or (m == "fss" and v > 350_000) or (m == "bpa-call" and v > 350_000)
+    )
+    docs.append(
+        {
+            "name": "J&A / Justification",
+            "required": needs_ja,
+            "note": _ja_approval(v)
+            if needs_ja
+            else "Only if sole source / limited competition",
+        }
+    )
 
     # D&F
     needs_df = is_loe or (is_cr and v > 350_000) or t == "fpi" or t == "cpaf"
@@ -240,15 +341,25 @@ def get_requirements(
         df_note = "Required for cost-reimbursement"
     else:
         df_note = "Required for incentive/award-fee"
-    docs.append({"name": "D&F (Determination & Findings)", "required": needs_df, "note": df_note})
+    docs.append(
+        {
+            "name": "D&F (Determination & Findings)",
+            "required": needs_df,
+            "note": df_note,
+        }
+    )
 
     # Source Selection Plan
     needs_ssp = m == "negotiated" and v > 350_000
-    docs.append({
-        "name": "Source Selection Plan",
-        "required": needs_ssp,
-        "note": "Evaluation factors with relative importance" if needs_ssp else "N/A for this method",
-    })
+    docs.append(
+        {
+            "name": "Source Selection Plan",
+            "required": needs_ssp,
+            "note": "Evaluation factors with relative importance"
+            if needs_ssp
+            else "N/A for this method",
+        }
+    )
 
     # Subcontracting Plan
     needs_subk = v > 750_000 and not is_sb
@@ -258,31 +369,59 @@ def get_requirements(
         subk_note = "Exempt - small business awardee"
     else:
         subk_note = "Below $750K threshold"
-    docs.append({"name": "Subcontracting Plan", "required": needs_subk, "note": subk_note})
+    docs.append(
+        {"name": "Subcontracting Plan", "required": needs_subk, "note": subk_note}
+    )
 
     # QASP
     needs_qasp = is_services and m != "micro"
-    docs.append({
-        "name": "QASP",
-        "required": needs_qasp,
-        "note": "Required for performance-based services (FAR 46)" if needs_qasp else "Products / micro-purchase",
-    })
+    docs.append(
+        {
+            "name": "QASP",
+            "required": needs_qasp,
+            "note": "Required for performance-based services (FAR 46)"
+            if needs_qasp
+            else "Products / micro-purchase",
+        }
+    )
 
     # SB Review
-    docs.append({
-        "name": "HHS-653 Small Business Review",
-        "required": v > 15_000,
-        "note": "Required > MPT (AA 2023-02 Amendment 3)" if v > 15_000 else "Below MPT",
-    })
+    docs.append(
+        {
+            "name": "HHS-653 Small Business Review",
+            "required": v > 15_000,
+            "note": "Required > MPT (AA 2023-02 Amendment 3)"
+            if v > 15_000
+            else "Below MPT",
+        }
+    )
 
     # IT-specific
     if is_it:
-        docs.append({"name": "IT Security & Privacy Certification", "required": True, "note": "HHSAM 339.101(c)(1)"})
-        docs.append({"name": "Section 508 ICT Evaluation", "required": v > 15_000, "note": "Required for IT > MPT"})
+        docs.append(
+            {
+                "name": "IT Security & Privacy Certification",
+                "required": True,
+                "note": "HHSAM 339.101(c)(1)",
+            }
+        )
+        docs.append(
+            {
+                "name": "Section 508 ICT Evaluation",
+                "required": v > 15_000,
+                "note": "Required for IT > MPT",
+            }
+        )
 
     # Human Subjects
     if is_hs:
-        docs.append({"name": "Human Subjects Provisions", "required": True, "note": "HHSAR 370.3, 45 CFR 46"})
+        docs.append(
+            {
+                "name": "Human Subjects Provisions",
+                "required": True,
+                "note": "HHSAR 370.3, 45 CFR 46",
+            }
+        )
 
     # --- Thresholds ---
     triggered = [th for th in THRESHOLD_TIERS if v >= th["value"]]
@@ -290,38 +429,86 @@ def get_requirements(
 
     # --- Compliance Items ---
     compliance: list[dict] = []
-    compliance.append({"name": "Section 889 Compliance", "status": "required", "note": "FAR 52.204-25 - all solicitations/contracts"})
-    compliance.append({"name": "BAA/TAA Checklist", "status": "required" if m != "micro" else "conditional", "note": "HHSAM 325.102-70"})
-    compliance.append({
-        "name": "SAM.gov Synopsis",
-        "status": "required" if v > 25_000 else "n/a",
-        "note": "Required > $25K (FAR 5.101)" if v > 25_000 else "Below $25K",
-    })
-    compliance.append({
-        "name": "CPARS Evaluation",
-        "status": "required" if v > 350_000 else "n/a",
-        "note": "Required > SAT" if v > 350_000 else "Below SAT",
-    })
-    compliance.append({
-        "name": "Congressional Notification",
-        "status": "required" if v > 4_500_000 else "n/a",
-        "note": "Required > $4.5M - email grantfax@hhs.gov" if v > 4_500_000 else "Below $4.5M",
-    })
-    compliance.append({
-        "name": "Certified Cost/Pricing Data (TINA)",
-        "status": "required" if v > 2_500_000 else "n/a",
-        "note": "Required > $2.5M (with exceptions)" if v > 2_500_000 else "Below $2.5M",
-    })
+    compliance.append(
+        {
+            "name": "Section 889 Compliance",
+            "status": "required",
+            "note": "FAR 52.204-25 - all solicitations/contracts",
+        }
+    )
+    compliance.append(
+        {
+            "name": "BAA/TAA Checklist",
+            "status": "required" if m != "micro" else "conditional",
+            "note": "HHSAM 325.102-70",
+        }
+    )
+    compliance.append(
+        {
+            "name": "SAM.gov Synopsis",
+            "status": "required" if v > 25_000 else "n/a",
+            "note": "Required > $25K (FAR 5.101)" if v > 25_000 else "Below $25K",
+        }
+    )
+    compliance.append(
+        {
+            "name": "CPARS Evaluation",
+            "status": "required" if v > 350_000 else "n/a",
+            "note": "Required > SAT" if v > 350_000 else "Below SAT",
+        }
+    )
+    compliance.append(
+        {
+            "name": "Congressional Notification",
+            "status": "required" if v > 4_500_000 else "n/a",
+            "note": "Required > $4.5M - email grantfax@hhs.gov"
+            if v > 4_500_000
+            else "Below $4.5M",
+        }
+    )
+    compliance.append(
+        {
+            "name": "Certified Cost/Pricing Data (TINA)",
+            "status": "required" if v > 2_500_000 else "n/a",
+            "note": "Required > $2.5M (with exceptions)"
+            if v > 2_500_000
+            else "Below $2.5M",
+        }
+    )
 
     if is_it:
-        compliance.append({"name": "Section 508 ICT Accessibility", "status": "required", "note": "Required for IT acquisitions"})
-        compliance.append({"name": "IT Security & Privacy Language", "status": "required", "note": "HHSAM Part 339.105"})
+        compliance.append(
+            {
+                "name": "Section 508 ICT Accessibility",
+                "status": "required",
+                "note": "Required for IT acquisitions",
+            }
+        )
+        compliance.append(
+            {
+                "name": "IT Security & Privacy Language",
+                "status": "required",
+                "note": "HHSAM Part 339.105",
+            }
+        )
 
     if is_hs:
-        compliance.append({"name": "Human Subjects Protection (45 CFR 46)", "status": "required", "note": "HHSAR 370.3"})
+        compliance.append(
+            {
+                "name": "Human Subjects Protection (45 CFR 46)",
+                "status": "required",
+                "note": "HHSAR 370.3",
+            }
+        )
 
     if is_services:
-        compliance.append({"name": "Severable Services <= 1yr/period", "status": "required", "note": "FAR 37.106(b), 32.703-3(b)"})
+        compliance.append(
+            {
+                "name": "Severable Services <= 1yr/period",
+                "status": "required",
+                "note": "FAR 37.106(b), 32.703-3(b)",
+            }
+        )
 
     # --- Competition Rules ---
     competition = ""
@@ -433,9 +620,16 @@ def get_requirements(
     if needs_ja:
         approvals.append({"type": "J&A", "authority": _ja_approval(v)})
     if needs_df:
-        approvals.append({"type": "D&F", "authority": "One level above CO" if is_loe else "CO"})
+        approvals.append(
+            {"type": "D&F", "authority": "One level above CO" if is_loe else "CO"}
+        )
     if v > 2_500_000:
-        approvals.append({"type": "TINA / Cost Data", "authority": "Certified cost or pricing data required"})
+        approvals.append(
+            {
+                "type": "TINA / Cost Data",
+                "authority": "Certified cost or pricing data required",
+            }
+        )
 
     return {
         "errors": errors,
@@ -446,7 +640,10 @@ def get_requirements(
         "thresholds_triggered": triggered,
         "thresholds_not_triggered": not_triggered,
         "timeline_estimate": {"min_weeks": time_min, "max_weeks": time_max},
-        "risk_allocation": {"contractor_risk_pct": risk_pct, "category": t_obj["category"]},
+        "risk_allocation": {
+            "contractor_risk_pct": risk_pct,
+            "category": t_obj["category"],
+        },
         "fee_caps": fee_caps,
         "pmr_checklist": pmr,
         "approvals_required": approvals,
@@ -458,6 +655,7 @@ def get_requirements(
 # ---------------------------------------------------------------------------
 # Operation: search_far
 # ---------------------------------------------------------------------------
+
 
 def search_far(keyword: str, parts: list[str] | None = None) -> list[dict]:
     """Keyword search across the FAR database entries.
@@ -479,12 +677,14 @@ def search_far(keyword: str, parts: list[str] | None = None) -> list[dict]:
     for entry in _FAR_DATABASE:
         if parts and entry.get("part") not in parts:
             continue
-        searchable = " ".join([
-            entry.get("title", ""),
-            entry.get("summary", ""),
-            entry.get("section", ""),
-            " ".join(entry.get("keywords", [])),
-        ]).lower()
+        searchable = " ".join(
+            [
+                entry.get("title", ""),
+                entry.get("summary", ""),
+                entry.get("section", ""),
+                " ".join(entry.get("keywords", [])),
+            ]
+        ).lower()
         score = sum(1 for t in terms if t in searchable)
         # Bonus for keyword exact matches
         entry_kw = [k.lower() for k in entry.get("keywords", [])]
@@ -499,6 +699,7 @@ def search_far(keyword: str, parts: list[str] | None = None) -> list[dict]:
 # Operation: suggest_vehicle
 # ---------------------------------------------------------------------------
 
+
 def suggest_vehicle(flags: dict | None = None) -> dict:
     """Recommend contract vehicles based on requirement flags.
 
@@ -512,43 +713,58 @@ def suggest_vehicle(flags: dict | None = None) -> dict:
     is_it = flags.get("is_it", False)
     is_services = flags.get("is_services", False)
 
-    recommendations = _VEHICLES_DATA.get("selection_guide", {}).get("recommendations", {})
+    recommendations = _VEHICLES_DATA.get("selection_guide", {}).get(
+        "recommendations", {}
+    )
     vehicles = _VEHICLES_DATA.get("vehicles", {})
 
     suggested: list[dict] = []
 
     if is_it and is_services:
         key = "it_services_complex"
-        suggested.append({
-            "recommendation": recommendations.get(key, ""),
-            "vehicle": "nitaac",
-            "detail": vehicles.get("nitaac", {}),
-        })
+        suggested.append(
+            {
+                "recommendation": recommendations.get(key, ""),
+                "vehicle": "nitaac",
+                "detail": vehicles.get("nitaac", {}),
+            }
+        )
     elif is_it:
         key = "it_commodities"
-        suggested.append({
-            "recommendation": recommendations.get(key, ""),
-            "vehicle": "gsa_schedules",
-            "detail": vehicles.get("gsa_schedules", {}),
-        })
+        suggested.append(
+            {
+                "recommendation": recommendations.get(key, ""),
+                "vehicle": "gsa_schedules",
+                "detail": vehicles.get("gsa_schedules", {}),
+            }
+        )
     elif is_services:
         key = "professional_services"
-        suggested.append({
-            "recommendation": recommendations.get(key, ""),
-            "vehicle": "gsa_schedules",
-            "detail": vehicles.get("gsa_schedules", {}),
-        })
+        suggested.append(
+            {
+                "recommendation": recommendations.get(key, ""),
+                "vehicle": "gsa_schedules",
+                "detail": vehicles.get("gsa_schedules", {}),
+            }
+        )
     else:
         key = "unique_requirements"
-        suggested.append({
-            "recommendation": recommendations.get(key, "Full and open competition"),
-            "vehicle": "open_competition",
-            "detail": {"name": "Full and Open Competition", "description": "Standard FAR Part 15 process"},
-        })
+        suggested.append(
+            {
+                "recommendation": recommendations.get(key, "Full and open competition"),
+                "vehicle": "open_competition",
+                "detail": {
+                    "name": "Full and Open Competition",
+                    "description": "Standard FAR Part 15 process",
+                },
+            }
+        )
 
     return {
         "suggested_vehicles": suggested,
-        "decision_factors": _VEHICLES_DATA.get("selection_guide", {}).get("decision_factors", []),
+        "decision_factors": _VEHICLES_DATA.get("selection_guide", {}).get(
+            "decision_factors", []
+        ),
         "notes": _VEHICLES_DATA.get("notes", []),
     }
 
@@ -556,6 +772,7 @@ def suggest_vehicle(flags: dict | None = None) -> dict:
 # ---------------------------------------------------------------------------
 # Dispatcher: execute_operation()
 # ---------------------------------------------------------------------------
+
 
 def execute_operation(params: dict) -> dict:
     """Dispatch a compliance matrix operation.
@@ -602,10 +819,14 @@ def execute_operation(params: dict) -> dict:
         return {"results": search_far(keyword, parts)}
 
     if op == "suggest_vehicle":
-        return suggest_vehicle(flags={
-            "is_it": params.get("is_it", False),
-            "is_services": params.get("is_services", False),
-            "is_small_business": params.get("is_small_business", False),
-        })
+        return suggest_vehicle(
+            flags={
+                "is_it": params.get("is_it", False),
+                "is_services": params.get("is_services", False),
+                "is_small_business": params.get("is_small_business", False),
+            }
+        )
 
-    return {"error": f"Unknown operation: {op}. Valid: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle"}
+    return {
+        "error": f"Unknown operation: {op}. Valid: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle"
+    }

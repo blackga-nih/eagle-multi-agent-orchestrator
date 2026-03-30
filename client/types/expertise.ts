@@ -7,8 +7,8 @@
 
 export interface CompletedIntake {
   intake_id: string;
-  acquisition_type: string;  // "equipment", "service", "supply", "it", "construction"
-  cost_category: string;     // "micro-purchase", "simplified", "negotiated"
+  acquisition_type: string; // "equipment", "service", "supply", "it", "construction"
+  cost_category: string; // "micro-purchase", "simplified", "negotiated"
   completed_at: string;
   completion_count: number;
 }
@@ -24,15 +24,15 @@ export interface DraftIntake {
 export interface ViewedWorkflow {
   workflow_id: string;
   workflow_type: string;
-  status: string;  // "in_progress", "pending_review", "approved", "completed"
+  status: string; // "in_progress", "pending_review", "approved", "completed"
   viewed_at: string;
   view_count: number;
 }
 
 export interface DocumentAction {
   document_id: string;
-  document_type: string;  // "SOW", "IGCE", "J&A", "Market Research", "Quote", etc.
-  action: string;         // "upload", "download", "view", "edit"
+  document_type: string; // "SOW", "IGCE", "J&A", "Market Research", "Quote", etc.
+  action: string; // "upload", "download", "view", "edit"
   acted_at: string;
   action_count: number;
 }

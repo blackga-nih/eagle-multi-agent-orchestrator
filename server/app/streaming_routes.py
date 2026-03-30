@@ -33,6 +33,7 @@ from .telemetry.log_context import set_log_context
 from .health_checks import check_knowledge_base_health
 
 import os
+
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ def _get_strands_runtime():
 
 class GenerateTitleRequest(BaseModel):
     """Request body for generating a session title."""
+
     message: str
     response_snippet: Optional[str] = None
 
@@ -68,6 +70,7 @@ def _emit_tool_timings(
     """Emit tool.timing events to CloudWatch (fire-and-forget, never raises)."""
     try:
         from .telemetry.cloudwatch_emitter import emit_telemetry_event
+
         for timing in tool_timings:
             emit_telemetry_event(
                 event_type="tool.timing",
@@ -105,6 +108,7 @@ def _emit_tool_failures(
     """Emit tool.error events to CloudWatch (fire-and-forget, never raises)."""
     try:
         from .telemetry.cloudwatch_emitter import emit_telemetry_event
+
         for failure in tool_failures:
             emit_telemetry_event(
                 event_type="tool.error",
@@ -155,9 +159,15 @@ async def stream_generator(
     # Persist user message to DynamoDB so conversation history works on next turn
     if session_id:
         try:
-            await asyncio.to_thread(add_message, session_id, "user", message, tenant_id, user_id)
+            await asyncio.to_thread(
+                add_message, session_id, "user", message, tenant_id, user_id
+            )
         except Exception:
-            logger.warning("Failed to persist user message for session=%s user=%s", session_id, user_id)
+            logger.warning(
+                "Failed to persist user message for session=%s user=%s",
+                session_id,
+                user_id,
+            )
 
     # Send initial metadata event (connection acknowledgement)
     await writer.write_text(sse_queue, "")
@@ -238,7 +248,9 @@ async def stream_generator(
                         tool_input = {"raw": tool_input} if tool_input else {}
                 # Track tool start time for duration calculation
                 if tool_name:
-                    _tool_start_times.setdefault(tool_name, []).append(time.perf_counter())
+                    _tool_start_times.setdefault(tool_name, []).append(
+                        time.perf_counter()
+                    )
                 tool_use_id = chunk.get("tool_use_id", "")
                 # Remember id so tool_input updates can reference it (FIFO per name)
                 if tool_name and tool_use_id:
@@ -262,7 +274,9 @@ async def stream_generator(
                 ti_id = id_queue.pop(0) if id_queue else ""
                 if ti_name and ti_input:
                     await writer.write_tool_use(
-                        sse_queue, ti_name, ti_input,
+                        sse_queue,
+                        ti_name,
+                        ti_input,
                         tool_use_id=ti_id,
                     )
                     yield await sse_queue.get()
@@ -270,30 +284,43 @@ async def stream_generator(
             elif chunk_type == "tool_result":
                 tr_name = chunk.get("name", "")
                 if not tr_name:
-                    logger.debug("Skipping empty-name tool_result: keys=%s", list(chunk.keys()))
+                    logger.debug(
+                        "Skipping empty-name tool_result: keys=%s", list(chunk.keys())
+                    )
                     continue
                 # Compute tool duration from start time
                 start_queue = _tool_start_times.get(tr_name, [])
                 start_t = start_queue.pop(0) if start_queue else None
-                duration_ms = int((time.perf_counter() - start_t) * 1000) if start_t is not None else None
+                duration_ms = (
+                    int((time.perf_counter() - start_t) * 1000)
+                    if start_t is not None
+                    else None
+                )
                 if duration_ms is not None:
-                    _tool_timings.append({
-                        "tool_name": tr_name,
-                        "duration_ms": duration_ms,
-                    })
+                    _tool_timings.append(
+                        {
+                            "tool_name": tr_name,
+                            "duration_ms": duration_ms,
+                        }
+                    )
                 # Detect tool failure from result content
                 result_data = chunk.get("result", {})
                 is_error = False
                 if isinstance(result_data, dict):
-                    is_error = result_data.get("is_error", False) or "error" in str(result_data.get("status", "")).lower()
+                    is_error = (
+                        result_data.get("is_error", False)
+                        or "error" in str(result_data.get("status", "")).lower()
+                    )
                 elif isinstance(result_data, str):
                     is_error = result_data.strip().lower().startswith("error")
                 if is_error:
-                    _tool_failures.append({
-                        "tool_name": tr_name,
-                        "error_message": str(result_data)[:500],
-                        "duration_ms": duration_ms,
-                    })
+                    _tool_failures.append(
+                        {
+                            "tool_name": tr_name,
+                            "error_message": str(result_data)[:500],
+                            "duration_ms": duration_ms,
+                        }
+                    )
                 await writer.write_tool_result(sse_queue, tr_name, result_data)
                 yield await sse_queue.get()
 
@@ -325,7 +352,10 @@ async def stream_generator(
                 tid_name = chunk.get("name", "")
                 if tid_delta and tid_id:
                     await writer.write_tool_input_delta(
-                        sse_queue, tid_id, tid_delta, tool_name=tid_name,
+                        sse_queue,
+                        tid_id,
+                        tid_delta,
+                        tool_name=tid_name,
                     )
                     yield await sse_queue.get()
 
@@ -353,7 +383,12 @@ async def stream_generator(
                 # Include tool failures for frontend visibility
                 if _tool_failures:
                     complete_metadata["tool_failures"] = _tool_failures
-                logger.debug("SSE complete: complete_text_len=%d full_parts=%d duration_ms=%d", len(complete_text), len(full_response_parts), duration_ms)
+                logger.debug(
+                    "SSE complete: complete_text_len=%d full_parts=%d duration_ms=%d",
+                    len(complete_text),
+                    len(full_response_parts),
+                    duration_ms,
+                )
                 if not full_response_parts and complete_text:
                     full_response_parts.append(complete_text)
                     await writer.write_text(sse_queue, complete_text)
@@ -362,7 +397,11 @@ async def stream_generator(
                 # Guaranteed fallback: never send blank response to frontend
                 if not full_response_parts:
                     fallback = "[No response generated. Please try again.]"
-                    logger.warning("No text generated for session=%s user=%s — emitting fallback", session_id, user_id)
+                    logger.warning(
+                        "No text generated for session=%s user=%s — emitting fallback",
+                        session_id,
+                        user_id,
+                    )
                     full_response_parts.append(fallback)
                     await writer.write_text(sse_queue, fallback)
                     yield await sse_queue.get()
@@ -371,21 +410,35 @@ async def stream_generator(
                 if session_id and full_response_parts:
                     try:
                         full_text = "".join(full_response_parts)
-                        await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
+                        await asyncio.to_thread(
+                            add_message,
+                            session_id,
+                            "assistant",
+                            full_text,
+                            tenant_id,
+                            user_id,
+                        )
                     except Exception:
-                        logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
+                        logger.warning(
+                            "Failed to persist assistant message for session=%s user=%s",
+                            session_id,
+                            user_id,
+                        )
                 await writer.write_complete(
                     sse_queue,
                     metadata=complete_metadata if complete_metadata else None,
                 )
                 yield await sse_queue.get()
                 # Emit tool timing telemetry to CloudWatch
-                _emit_tool_timings(_tool_timings, tenant_id, user_id, session_id, duration_ms)
+                _emit_tool_timings(
+                    _tool_timings, tenant_id, user_id, session_id, duration_ms
+                )
                 _emit_tool_failures(_tool_failures, tenant_id, user_id, session_id)
                 # Score conversation quality
                 try:
                     from .telemetry.conversation_scorer import score_conversation
                     from .telemetry.cloudwatch_emitter import emit_telemetry_event
+
                     quality = score_conversation(
                         completed=True,
                         error_count=0,
@@ -416,13 +469,18 @@ async def stream_generator(
                 error_msg = chunk.get("error", "Unknown error")
                 await writer.write_error(sse_queue, error_msg)
                 from .error_webhook import notify_streaming_error
+
                 notify_streaming_error(
-                    "/api/chat/stream", "POST",
+                    "/api/chat/stream",
+                    "POST",
                     Exception(error_msg),
-                    tenant_id=tenant_id, user_id=user_id, session_id=session_id or "",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    session_id=session_id or "",
                 )
                 # Classify and tag the Langfuse trace for filtering
                 from .telemetry.langfuse_client import notify_trace_error
+
                 notify_trace_error(session_id or "", error_msg)
                 yield await sse_queue.get()
                 return
@@ -431,28 +489,52 @@ async def stream_generator(
         if session_id and full_response_parts:
             try:
                 full_text = "".join(full_response_parts)
-                await asyncio.to_thread(add_message, session_id, "assistant", full_text, tenant_id, user_id)
+                await asyncio.to_thread(
+                    add_message, session_id, "assistant", full_text, tenant_id, user_id
+                )
             except Exception:
-                logger.warning("Failed to persist assistant message for session=%s user=%s", session_id, user_id)
+                logger.warning(
+                    "Failed to persist assistant message for session=%s user=%s",
+                    session_id,
+                    user_id,
+                )
         fallback_duration_ms = int((time.perf_counter() - stream_start) * 1000)
-        await writer.write_complete(sse_queue, metadata={"duration_ms": fallback_duration_ms})
+        await writer.write_complete(
+            sse_queue, metadata={"duration_ms": fallback_duration_ms}
+        )
         yield await sse_queue.get()
-        _emit_tool_timings(_tool_timings, tenant_id, user_id, session_id, fallback_duration_ms)
+        _emit_tool_timings(
+            _tool_timings, tenant_id, user_id, session_id, fallback_duration_ms
+        )
         _emit_tool_failures(_tool_failures, tenant_id, user_id, session_id)
 
     except asyncio.CancelledError:
-        logger.debug("Streaming client disconnected user=%s session=%s", user_id, session_id)
+        logger.debug(
+            "Streaming client disconnected user=%s session=%s", user_id, session_id
+        )
         return
     except Exception as e:
-        logger.error("Streaming chat error user=%s session=%s: %s", user_id, session_id, str(e), exc_info=True)
+        logger.error(
+            "Streaming chat error user=%s session=%s: %s",
+            user_id,
+            session_id,
+            str(e),
+            exc_info=True,
+        )
         await writer.write_error(sse_queue, str(e))
         from .error_webhook import notify_streaming_error
+
         notify_streaming_error(
-            "/api/chat/stream", "POST", e,
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id or "",
+            "/api/chat/stream",
+            "POST",
+            e,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id or "",
         )
         # Classify and tag the Langfuse trace for filtering
         from .telemetry.langfuse_client import notify_trace_error
+
         notify_trace_error(session_id or "", str(e))
         yield await sse_queue.get()
 
@@ -497,7 +579,9 @@ def create_streaming_router(
         # Authenticate using EAGLE cognito_auth (supports DEV_MODE bypass)
         user, error = extract_user_context(authorization)
         if REQUIRE_AUTH and user.user_id == "anonymous":
-            raise HTTPException(status_code=401, detail=error or "Authentication required")
+            raise HTTPException(
+                status_code=401, detail=error or "Authentication required"
+            )
 
         tenant_id = user.tenant_id
         user_id = user.user_id
@@ -509,7 +593,9 @@ def create_streaming_router(
             user_id = message.tenant_context.user_id or user_id
 
         # Set structured logging context so all downstream logs include user/tenant
-        set_log_context(tenant_id=tenant_id, user_id=user_id, session_id=message.session_id or "")
+        set_log_context(
+            tenant_id=tenant_id, user_id=user_id, session_id=message.session_id or ""
+        )
 
         # Load conversation history for multi-turn context (tier-based limits)
         history = []
@@ -517,9 +603,13 @@ def create_streaming_router(
             try:
                 from .session_store import get_messages_for_anthropic
                 from .strands_agentic_service import TIER_MESSAGE_LIMITS
+
                 msg_limit = TIER_MESSAGE_LIMITS.get(user.tier, 80)
                 history = get_messages_for_anthropic(
-                    message.session_id, tenant_id, user_id, limit=msg_limit,
+                    message.session_id,
+                    tenant_id,
+                    user_id,
+                    limit=msg_limit,
                 )
             except Exception:
                 pass
@@ -667,7 +757,10 @@ def create_streaming_router(
             ],
             "tools": [tool["name"] for tool in _get_strands_runtime().EAGLE_TOOLS],
             "features": {
-                "persistent_sessions": os.getenv("USE_PERSISTENT_SESSIONS", "true").lower() == "true",
+                "persistent_sessions": os.getenv(
+                    "USE_PERSISTENT_SESSIONS", "true"
+                ).lower()
+                == "true",
                 "auth_required": os.getenv("REQUIRE_AUTH", "false").lower() == "true",
                 "dev_mode": os.getenv("DEV_MODE", "false").lower() == "true",
             },

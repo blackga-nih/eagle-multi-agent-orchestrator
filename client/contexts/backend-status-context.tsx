@@ -40,11 +40,7 @@ export function BackendStatusProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => ({ backendConnected }), [backendConnected]);
 
-  return (
-    <BackendStatusContext.Provider value={value}>
-      {children}
-    </BackendStatusContext.Provider>
-  );
+  return <BackendStatusContext.Provider value={value}>{children}</BackendStatusContext.Provider>;
 }
 
 export function useBackendStatus(): BackendStatusContextValue {

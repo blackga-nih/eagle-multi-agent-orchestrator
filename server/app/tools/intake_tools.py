@@ -18,34 +18,69 @@ WORKFLOW_STAGES = [
         "id": "requirements",
         "name": "Requirements Gathering",
         "description": "Collect acquisition details: what, why, when, how much",
-        "fields": ["title", "description", "estimated_value", "period_of_performance", "urgency"],
-        "next_actions": ["Describe the acquisition need", "Provide estimated value", "Specify timeline"],
+        "fields": [
+            "title",
+            "description",
+            "estimated_value",
+            "period_of_performance",
+            "urgency",
+        ],
+        "next_actions": [
+            "Describe the acquisition need",
+            "Provide estimated value",
+            "Specify timeline",
+        ],
     },
     {
         "id": "compliance",
         "name": "Compliance Check",
         "description": "Verify FAR/DFAR requirements and acquisition thresholds",
-        "fields": ["acquisition_type", "threshold", "competition_required", "far_citations", "small_business"],
-        "next_actions": ["Search FAR for applicable regulations", "Determine acquisition type", "Check competition requirements"],
+        "fields": [
+            "acquisition_type",
+            "threshold",
+            "competition_required",
+            "far_citations",
+            "small_business",
+        ],
+        "next_actions": [
+            "Search FAR for applicable regulations",
+            "Determine acquisition type",
+            "Check competition requirements",
+        ],
     },
     {
         "id": "documents",
         "name": "Document Generation",
         "description": "Generate required acquisition documents",
-        "fields": ["sow_generated", "igce_generated", "market_research_generated", "justification_generated"],
-        "next_actions": ["Generate Statement of Work", "Generate IGCE", "Generate Market Research"],
+        "fields": [
+            "sow_generated",
+            "igce_generated",
+            "market_research_generated",
+            "justification_generated",
+        ],
+        "next_actions": [
+            "Generate Statement of Work",
+            "Generate IGCE",
+            "Generate Market Research",
+        ],
     },
     {
         "id": "review",
         "name": "Review & Submit",
         "description": "Final review and package submission",
         "fields": ["reviewed_by", "review_notes", "submitted_at", "approval_status"],
-        "next_actions": ["Review all documents", "Add any notes", "Submit for approval"],
+        "next_actions": [
+            "Review all documents",
+            "Add any notes",
+            "Submit for approval",
+        ],
     },
 ]
 
 
-def exec_get_intake_status(params: dict, tenant_id: str, session_id: str | None = None) -> dict:
+def exec_get_intake_status(
+    params: dict, tenant_id: str, session_id: str | None = None
+) -> dict:
     """Check intake status — queries DynamoDB and S3 for completeness."""
     intake_id = params.get("intake_id", "")
     user_id = extract_user_id(session_id)
@@ -71,9 +106,16 @@ def exec_get_intake_status(params: dict, tenant_id: str, session_id: str | None 
                 }
             )
             for doc_type in (
-                "sow", "igce", "market_research", "justification",
-                "acquisition_plan", "eval_criteria", "security_checklist",
-                "section_508", "cor_certification", "contract_type_justification",
+                "sow",
+                "igce",
+                "market_research",
+                "justification",
+                "acquisition_plan",
+                "eval_criteria",
+                "security_checklist",
+                "section_508",
+                "cor_certification",
+                "contract_type_justification",
             ):
                 if doc_type in name.lower():
                     doc_types_found.add(doc_type)
@@ -85,7 +127,9 @@ def exec_get_intake_status(params: dict, tenant_id: str, session_id: str | None 
         from boto3.dynamodb.conditions import Key as DDBKey
 
         table = get_dynamodb().Table("eagle")
-        resp = table.query(KeyConditionExpression=DDBKey("PK").eq(f"INTAKE#{tenant_id}"))
+        resp = table.query(
+            KeyConditionExpression=DDBKey("PK").eq(f"INTAKE#{tenant_id}")
+        )
         intake_records = [_serialize_ddb_item(item) for item in resp.get("Items", [])]
     except (ClientError, BotoCoreError):
         pass
@@ -103,18 +147,38 @@ def exec_get_intake_status(params: dict, tenant_id: str, session_id: str | None 
         "contract_type_justification": "Contract Type Justification",
     }
     conditional_docs = {
-        "justification", "eval_criteria", "security_checklist", "section_508", "contract_type_justification",
+        "justification",
+        "eval_criteria",
+        "security_checklist",
+        "section_508",
+        "contract_type_justification",
     }
 
     completed = []
     pending = []
     for doc_key, doc_name in required_docs.items():
         if doc_key in doc_types_found:
-            completed.append({"document": doc_name, "type": doc_key, "status": "✅ Complete"})
+            completed.append(
+                {"document": doc_name, "type": doc_key, "status": "✅ Complete"}
+            )
         elif doc_key in conditional_docs:
-            pending.append({"document": doc_name, "type": doc_key, "status": "🔲 Conditional", "priority": "Conditional"})
+            pending.append(
+                {
+                    "document": doc_name,
+                    "type": doc_key,
+                    "status": "🔲 Conditional",
+                    "priority": "Conditional",
+                }
+            )
         else:
-            pending.append({"document": doc_name, "type": doc_key, "status": "🔲 Not Started", "priority": "High"})
+            pending.append(
+                {
+                    "document": doc_name,
+                    "type": doc_key,
+                    "status": "🔲 Not Started",
+                    "priority": "High",
+                }
+            )
 
     total = len(required_docs) - len(conditional_docs)
     done = len([item for item in completed if item["type"] not in conditional_docs])
@@ -128,7 +192,9 @@ def exec_get_intake_status(params: dict, tenant_id: str, session_id: str | None 
         "documents_pending": pending,
         "existing_files": existing_docs,
         "intake_records": intake_records[:10],
-        "next_action": pending[0]["document"] if pending else "All required documents complete!",
+        "next_action": pending[0]["document"]
+        if pending
+        else "All required documents complete!",
         "estimated_completion": "Depends on remaining document generation",
     }
 
@@ -158,7 +224,11 @@ def exec_intake_workflow(params: dict, tenant_id: str) -> dict:
             "action": "started",
             "intake_id": new_id,
             "message": f"🚀 New intake workflow started: {new_id}",
-            "current_stage": {"number": 1, "name": stage["name"], "description": stage["description"]},
+            "current_stage": {
+                "number": 1,
+                "name": stage["name"],
+                "description": stage["description"],
+            },
             "next_actions": stage["next_actions"],
             "fields_to_collect": stage["fields"],
             "tip": "Provide the acquisition details, and I'll guide you through each step.",
@@ -176,8 +246,12 @@ def exec_intake_workflow(params: dict, tenant_id: str) -> dict:
         if not workflow:
             return {"error": f"Intake {intake_id} not found"}
         current_idx = workflow.get("current_stage", 0)
-        stage = WORKFLOW_STAGES[current_idx] if current_idx < len(WORKFLOW_STAGES) else None
-        progress_bar = "".join(["✅" if i < current_idx else "🔲" for i in range(len(WORKFLOW_STAGES))])
+        stage = (
+            WORKFLOW_STAGES[current_idx] if current_idx < len(WORKFLOW_STAGES) else None
+        )
+        progress_bar = "".join(
+            ["✅" if i < current_idx else "🔲" for i in range(len(WORKFLOW_STAGES))]
+        )
         return {
             "intake_id": intake_id,
             "status": workflow.get("status", "in_progress"),
@@ -187,9 +261,13 @@ def exec_intake_workflow(params: dict, tenant_id: str) -> dict:
                 "number": current_idx + 1,
                 "name": stage["name"] if stage else "Complete",
                 "description": stage["description"] if stage else "All stages complete",
-            } if stage else {"name": "Complete", "description": "Workflow finished"},
+            }
+            if stage
+            else {"name": "Complete", "description": "Workflow finished"},
             "stages_completed": workflow.get("stages_completed", []),
-            "next_actions": stage["next_actions"] if stage else ["Submit for final approval"],
+            "next_actions": stage["next_actions"]
+            if stage
+            else ["Submit for final approval"],
             "data_collected": workflow.get("data", {}),
             "created_at": workflow.get("created_at"),
         }
@@ -197,7 +275,9 @@ def exec_intake_workflow(params: dict, tenant_id: str) -> dict:
     if action == "advance":
         if not intake_id:
             if not workflows:
-                return {"error": "No active workflow. Start one first with action='start'"}
+                return {
+                    "error": "No active workflow. Start one first with action='start'"
+                }
             intake_id = list(workflows.keys())[-1]
         workflow = workflows.get(intake_id)
         if not workflow:
@@ -231,14 +311,20 @@ def exec_intake_workflow(params: dict, tenant_id: str) -> dict:
         workflow["stage_name"] = WORKFLOW_STAGES[next_idx]["name"]
         _save_workflow(tenant_id, workflows)
         next_stage = WORKFLOW_STAGES[next_idx]
-        progress_bar = "".join(["✅" if i <= current_idx else "🔲" for i in range(len(WORKFLOW_STAGES))])
+        progress_bar = "".join(
+            ["✅" if i <= current_idx else "🔲" for i in range(len(WORKFLOW_STAGES))]
+        )
         return {
             "action": "advanced",
             "intake_id": intake_id,
             "message": f"✅ Completed: {completed_stage}",
             "progress": f"{next_idx}/{len(WORKFLOW_STAGES)} stages",
             "progress_bar": progress_bar,
-            "current_stage": {"number": next_idx + 1, "name": next_stage["name"], "description": next_stage["description"]},
+            "current_stage": {
+                "number": next_idx + 1,
+                "name": next_stage["name"],
+                "description": next_stage["description"],
+            },
             "next_actions": next_stage["next_actions"],
             "fields_to_collect": next_stage["fields"],
         }
@@ -277,12 +363,18 @@ def exec_intake_workflow(params: dict, tenant_id: str) -> dict:
         if intake_id and intake_id in workflows:
             del workflows[intake_id]
             _save_workflow(tenant_id, workflows)
-            return {"action": "reset", "message": f"Workflow {intake_id} has been reset"}
+            return {
+                "action": "reset",
+                "message": f"Workflow {intake_id} has been reset",
+            }
         workflows.clear()
         _save_workflow(tenant_id, workflows)
         return {"action": "reset", "message": "All workflows cleared"}
 
-    return {"error": f"Unknown action: {action}", "valid_actions": ["start", "advance", "status", "complete", "reset"]}
+    return {
+        "error": f"Unknown action: {action}",
+        "valid_actions": ["start", "advance", "status", "complete", "reset"],
+    }
 
 
 def _workflow_file(tenant_id: str) -> str:
@@ -300,6 +392,8 @@ def _load_workflow(tenant_id: str) -> dict:
 def _save_workflow(tenant_id: str, state: dict) -> None:
     with open(_workflow_file(tenant_id), "w") as handle:
         json.dump(state, handle, indent=2, default=str)
+
+
 def _serialize_ddb_item(item: dict) -> dict:
     from decimal import Decimal
 

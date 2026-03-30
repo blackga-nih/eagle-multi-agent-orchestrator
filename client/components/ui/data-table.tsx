@@ -48,13 +48,13 @@ export default function DataTable<T>({
               >
                 <div className="flex items-center gap-1">
                   {col.header}
-                  {col.sortable && sortBy === col.key && (
-                    sortDirection === 'asc' ? (
+                  {col.sortable &&
+                    sortBy === col.key &&
+                    (sortDirection === 'asc' ? (
                       <ChevronUp className="w-4 h-4" />
                     ) : (
                       <ChevronDown className="w-4 h-4" />
-                    )
-                  )}
+                    ))}
                 </div>
               </th>
             ))}
@@ -76,7 +76,9 @@ export default function DataTable<T>({
               >
                 {columns.map((col) => (
                   <td key={col.key} className="px-4 py-3 text-sm text-gray-900">
-                    {col.render ? col.render(item) : String((item as Record<string, unknown>)[col.key] ?? '')}
+                    {col.render
+                      ? col.render(item)
+                      : String((item as Record<string, unknown>)[col.key] ?? '')}
                   </td>
                 ))}
               </tr>

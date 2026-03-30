@@ -32,7 +32,9 @@ export default function KnowledgeSearchPanel({ text }: { text: string }) {
     // Can't parse — fall back to raw
     return (
       <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white max-h-64 overflow-y-auto">
-        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">{text}</pre>
+        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
+          {text}
+        </pre>
       </div>
     );
   }
@@ -40,7 +42,9 @@ export default function KnowledgeSearchPanel({ text }: { text: string }) {
   return (
     <div className="border-t border-[#E5E9F0] bg-white">
       <div className="px-3 py-1.5 border-b border-gray-100 flex items-center gap-2">
-        <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">Knowledge Search</span>
+        <span className="text-[9px] font-bold uppercase text-blue-600 tracking-wider">
+          Knowledge Search
+        </span>
         <span className="text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
           {results.length} result{results.length !== 1 ? 's' : ''}
         </span>
@@ -68,9 +72,7 @@ export default function KnowledgeSearchPanel({ text }: { text: string }) {
                   </span>
                 )}
               </div>
-              {truncated && (
-                <p className="text-[10px] text-gray-500 mt-0.5">{truncated}</p>
-              )}
+              {truncated && <p className="text-[10px] text-gray-500 mt-0.5">{truncated}</p>}
             </div>
           );
         })}

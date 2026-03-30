@@ -6,6 +6,7 @@ Templates are stored in the eagle-knowledge-base bucket under:
 
 When a template is not available, the system falls back to markdown generation.
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,7 +23,9 @@ from .db_client import get_s3
 logger = logging.getLogger("eagle.template_registry")
 
 # ── S3 Location ───────────────────────────────────────────────────────
-TEMPLATE_BUCKET = os.getenv("TEMPLATE_BUCKET", os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev"))
+TEMPLATE_BUCKET = os.getenv(
+    "TEMPLATE_BUCKET", os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+)
 TEMPLATE_PREFIX = os.getenv(
     "TEMPLATE_PREFIX",
     "eagle-knowledge-base/approved/supervisor-core/essential-templates",
@@ -42,33 +45,107 @@ ACQUISITION_PHASES = {
 TEMPLATE_CATEGORIES: Dict[str, Dict[str, str]] = {
     "sow": {"phase": "planning", "use_case": "competitive", "group": "requirements"},
     "igce": {"phase": "planning", "use_case": "competitive", "group": "cost"},
-    "market_research": {"phase": "planning", "use_case": "competitive", "group": "research"},
-    "justification": {"phase": "planning", "use_case": "sole_source", "group": "justification"},
-    "acquisition_plan": {"phase": "planning", "use_case": "competitive", "group": "planning"},
-    "cor_certification": {"phase": "award", "use_case": "compliance", "group": "compliance"},
-    "son_products": {"phase": "intake", "use_case": "competitive", "group": "requirements"},
-    "son_services": {"phase": "intake", "use_case": "competitive", "group": "requirements"},
-    "buy_american": {"phase": "solicitation", "use_case": "compliance", "group": "compliance"},
+    "market_research": {
+        "phase": "planning",
+        "use_case": "competitive",
+        "group": "research",
+    },
+    "justification": {
+        "phase": "planning",
+        "use_case": "sole_source",
+        "group": "justification",
+    },
+    "acquisition_plan": {
+        "phase": "planning",
+        "use_case": "competitive",
+        "group": "planning",
+    },
+    "cor_certification": {
+        "phase": "award",
+        "use_case": "compliance",
+        "group": "compliance",
+    },
+    "son_products": {
+        "phase": "intake",
+        "use_case": "competitive",
+        "group": "requirements",
+    },
+    "son_services": {
+        "phase": "intake",
+        "use_case": "competitive",
+        "group": "requirements",
+    },
+    "buy_american": {
+        "phase": "solicitation",
+        "use_case": "compliance",
+        "group": "compliance",
+    },
     "subk_plan": {"phase": "award", "use_case": "competitive", "group": "compliance"},
-    "conference_request": {"phase": "administration", "use_case": "compliance", "group": "compliance"},
+    "conference_request": {
+        "phase": "administration",
+        "use_case": "compliance",
+        "group": "compliance",
+    },
 }
 
 # Pattern-based category inference for unregistered S3 files
 FILENAME_CATEGORY_PATTERNS: List[Tuple[str, Dict[str, str]]] = [
-    (r"j&a|justification|j_and_a|single.?source", {"phase": "planning", "use_case": "sole_source", "group": "justification"}),
-    (r"igce|ige|cost.?estimate", {"phase": "planning", "use_case": "competitive", "group": "cost"}),
-    (r"sow|statement.?of.?work", {"phase": "planning", "use_case": "competitive", "group": "requirements"}),
-    (r"son|statement.?of.?need", {"phase": "intake", "use_case": "competitive", "group": "requirements"}),
-    (r"market.?research|mr_|mrr", {"phase": "planning", "use_case": "competitive", "group": "research"}),
-    (r"acquisition.?plan|ap_|s-ap", {"phase": "planning", "use_case": "competitive", "group": "planning"}),
-    (r"cor|contracting.?officer", {"phase": "award", "use_case": "compliance", "group": "compliance"}),
-    (r"subk|subcontract", {"phase": "award", "use_case": "competitive", "group": "compliance"}),
-    (r"buy.?american", {"phase": "solicitation", "use_case": "compliance", "group": "compliance"}),
-    (r"conference|event.?request", {"phase": "administration", "use_case": "compliance", "group": "compliance"}),
-    (r"quotation|quote", {"phase": "solicitation", "use_case": "competitive", "group": "solicitation"}),
-    (r"receiving.?report", {"phase": "administration", "use_case": "compliance", "group": "compliance"}),
-    (r"srb|source.?review", {"phase": "evaluation", "use_case": "competitive", "group": "evaluation"}),
-    (r"bpa|blanket.?purchase", {"phase": "solicitation", "use_case": "competitive", "group": "solicitation"}),
+    (
+        r"j&a|justification|j_and_a|single.?source",
+        {"phase": "planning", "use_case": "sole_source", "group": "justification"},
+    ),
+    (
+        r"igce|ige|cost.?estimate",
+        {"phase": "planning", "use_case": "competitive", "group": "cost"},
+    ),
+    (
+        r"sow|statement.?of.?work",
+        {"phase": "planning", "use_case": "competitive", "group": "requirements"},
+    ),
+    (
+        r"son|statement.?of.?need",
+        {"phase": "intake", "use_case": "competitive", "group": "requirements"},
+    ),
+    (
+        r"market.?research|mr_|mrr",
+        {"phase": "planning", "use_case": "competitive", "group": "research"},
+    ),
+    (
+        r"acquisition.?plan|ap_|s-ap",
+        {"phase": "planning", "use_case": "competitive", "group": "planning"},
+    ),
+    (
+        r"cor|contracting.?officer",
+        {"phase": "award", "use_case": "compliance", "group": "compliance"},
+    ),
+    (
+        r"subk|subcontract",
+        {"phase": "award", "use_case": "competitive", "group": "compliance"},
+    ),
+    (
+        r"buy.?american",
+        {"phase": "solicitation", "use_case": "compliance", "group": "compliance"},
+    ),
+    (
+        r"conference|event.?request",
+        {"phase": "administration", "use_case": "compliance", "group": "compliance"},
+    ),
+    (
+        r"quotation|quote",
+        {"phase": "solicitation", "use_case": "competitive", "group": "solicitation"},
+    ),
+    (
+        r"receiving.?report",
+        {"phase": "administration", "use_case": "compliance", "group": "compliance"},
+    ),
+    (
+        r"srb|source.?review",
+        {"phase": "evaluation", "use_case": "competitive", "group": "evaluation"},
+    ),
+    (
+        r"bpa|blanket.?purchase",
+        {"phase": "solicitation", "use_case": "competitive", "group": "solicitation"},
+    ),
 ]
 
 # ── S3 Template Cache ─────────────────────────────────────────────────
@@ -334,12 +411,14 @@ def normalize_field_names(data: Dict[str, Any], doc_type: str) -> Dict[str, Any]
 
 
 # Document types that use markdown-only (no S3 template)
-MARKDOWN_ONLY_DOC_TYPES = frozenset({
-    "eval_criteria",
-    "security_checklist",
-    "section_508",
-    "contract_type_justification",
-})
+MARKDOWN_ONLY_DOC_TYPES = frozenset(
+    {
+        "eval_criteria",
+        "security_checklist",
+        "section_508",
+        "contract_type_justification",
+    }
+)
 
 # Form-only templates — official forms that don't need AI content generation
 FORM_TEMPLATES: Dict[str, str] = {
@@ -362,10 +441,12 @@ REFERENCE_GUIDES: Dict[str, str] = {
 
 # ── Schema Integration ────────────────────────────────────────────────
 
+
 def _attach_schemas() -> None:
     """Attach template schemas to their registry mappings at module load."""
     try:
         from app.template_schema import load_template_schemas
+
         schemas = load_template_schemas()
         for doc_type, schema in schemas.items():
             mapping = TEMPLATE_REGISTRY.get(doc_type)
@@ -443,6 +524,7 @@ def get_placeholder_map(doc_type: str) -> Dict[str, str]:
 
 # ── Schema Accessors ──
 
+
 def get_section_schema(doc_type: str):
     """Get the TemplateSchema for a doc_type, if available."""
     mapping = get_template_mapping(doc_type)
@@ -451,6 +533,7 @@ def get_section_schema(doc_type: str):
     # Fallback: check the schema module directly
     try:
         from app.template_schema import TEMPLATE_SCHEMAS, _ensure_schemas_loaded
+
         _ensure_schemas_loaded()
         return TEMPLATE_SCHEMAS.get(doc_type)
     except ImportError:
@@ -461,6 +544,7 @@ def get_section_guidance(doc_type: str) -> str:
     """Get AI prompt section guidance for a doc_type."""
     try:
         from app.template_schema import build_section_guidance
+
         return build_section_guidance(doc_type)
     except ImportError:
         return ""
@@ -470,12 +554,14 @@ def validate_document_completeness(doc_type: str, content: str):
     """Validate document content completeness against schema."""
     try:
         from app.template_schema import validate_completeness
+
         return validate_completeness(doc_type, content)
     except ImportError:
         return None
 
 
 # ── S3 Template Listing ───────────────────────────────────────────────
+
 
 def _infer_doc_type_from_filename(filename: str) -> Optional[str]:
     """Infer doc_type from filename by matching against registered templates.
@@ -501,6 +587,7 @@ def _infer_doc_type_from_filename(filename: str) -> Optional[str]:
     # Fallback: fuzzy classification via document_classification_service
     try:
         from .document_classification_service import classify_document
+
         result = classify_document(filename, None)
         if result.confidence >= 0.7:
             return result.doc_type
@@ -564,11 +651,24 @@ ALTERNATE_DISPLAY_NAMES: Dict[str, str] = {
 
 # Acronyms that .title() mangles — maps wrong form to correct form
 _ACRONYM_FIXES: Dict[str, str] = {
-    "Hhs": "HHS", "Nih": "NIH", "Nci": "NCI", "Igce": "IGCE",
-    "Ige": "IGE", "Cor": "COR", "Son": "SON", "Sat": "SAT",
-    "Sow": "SOW", "Oa": "OA", "Subk": "SubK", "Df": "DF",
-    "Fy26": "FY26", "Fy25": "FY25", "Fy24": "FY24",
-    "J&a": "J&A", "S-Ap": "S-AP", "Bpa": "BPA",
+    "Hhs": "HHS",
+    "Nih": "NIH",
+    "Nci": "NCI",
+    "Igce": "IGCE",
+    "Ige": "IGE",
+    "Cor": "COR",
+    "Son": "SON",
+    "Sat": "SAT",
+    "Sow": "SOW",
+    "Oa": "OA",
+    "Subk": "SubK",
+    "Df": "DF",
+    "Fy26": "FY26",
+    "Fy25": "FY25",
+    "Fy24": "FY24",
+    "J&a": "J&A",
+    "S-Ap": "S-AP",
+    "Bpa": "BPA",
 }
 
 
@@ -588,6 +688,7 @@ def _build_display_name(filename: str) -> str:
 
     # 3. Auto-clean with improved logic
     from .document_classification_service import _clean_filename_for_title
+
     name = _clean_filename_for_title(filename)
 
     # Strip numbering prefixes (e.g., "01.D ", "1.A. ", "3.a. ")
@@ -607,7 +708,9 @@ def _build_display_name(filename: str) -> str:
     return name or "Untitled Template"
 
 
-def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_s3_templates(
+    refresh: bool = False, phase_filter: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """List all templates from S3 bucket with metadata.
 
     Args:
@@ -632,7 +735,9 @@ def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None)
             s3 = get_s3()
             paginator = s3.get_paginator("list_objects_v2")
 
-            for page in paginator.paginate(Bucket=TEMPLATE_BUCKET, Prefix=TEMPLATE_PREFIX):
+            for page in paginator.paginate(
+                Bucket=TEMPLATE_BUCKET, Prefix=TEMPLATE_PREFIX
+            ):
                 for obj in page.get("Contents", []):
                     key = obj["Key"]
                     # Skip directory markers
@@ -655,17 +760,21 @@ def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None)
                     else:
                         category = _infer_category_from_filename(filename)
 
-                    templates.append({
-                        "s3_key": key,
-                        "filename": filename,
-                        "file_type": file_type,
-                        "size_bytes": obj.get("Size", 0),
-                        "last_modified": obj.get("LastModified").isoformat() if obj.get("LastModified") else None,
-                        "doc_type": doc_type,
-                        "category": category,
-                        "display_name": _build_display_name(filename),
-                        "registered": doc_type is not None,
-                    })
+                    templates.append(
+                        {
+                            "s3_key": key,
+                            "filename": filename,
+                            "file_type": file_type,
+                            "size_bytes": obj.get("Size", 0),
+                            "last_modified": obj.get("LastModified").isoformat()
+                            if obj.get("LastModified")
+                            else None,
+                            "doc_type": doc_type,
+                            "category": category,
+                            "display_name": _build_display_name(filename),
+                            "registered": doc_type is not None,
+                        }
+                    )
 
             # Sort by display name
             templates.sort(key=lambda t: t["display_name"])
@@ -674,7 +783,12 @@ def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None)
             _s3_template_cache[cache_key] = templates
             _s3_cache_expiry = now + S3_CACHE_TTL_SECONDS
 
-            logger.info("Listed %d S3 templates from %s/%s", len(templates), TEMPLATE_BUCKET, TEMPLATE_PREFIX)
+            logger.info(
+                "Listed %d S3 templates from %s/%s",
+                len(templates),
+                TEMPLATE_BUCKET,
+                TEMPLATE_PREFIX,
+            )
 
         except ClientError as e:
             logger.error("Failed to list S3 templates: %s", e)
@@ -682,7 +796,9 @@ def list_s3_templates(refresh: bool = False, phase_filter: Optional[str] = None)
 
     # Apply phase filter
     if phase_filter:
-        templates = [t for t in templates if t.get("category", {}).get("phase") == phase_filter]
+        templates = [
+            t for t in templates if t.get("category", {}).get("phase") == phase_filter
+        ]
 
     return templates
 

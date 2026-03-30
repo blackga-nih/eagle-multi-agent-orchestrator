@@ -39,12 +39,23 @@ interface DocumentBrowserProps {
 }
 
 // Document type display configuration
-const DOCUMENT_TYPE_CONFIG: Record<string, { icon: typeof FileText; label: string; color: string }> = {
+const DOCUMENT_TYPE_CONFIG: Record<
+  string,
+  { icon: typeof FileText; label: string; color: string }
+> = {
   sow: { icon: FileText, label: 'Statement of Work', color: 'text-blue-600 bg-blue-50' },
   igce: { icon: FileText, label: 'IGCE', color: 'text-green-600 bg-green-50' },
   justification: { icon: FileText, label: 'Justification', color: 'text-purple-600 bg-purple-50' },
-  market_research: { icon: FileText, label: 'Market Research', color: 'text-orange-600 bg-orange-50' },
-  acquisition_plan: { icon: FileText, label: 'Acquisition Plan', color: 'text-indigo-600 bg-indigo-50' },
+  market_research: {
+    icon: FileText,
+    label: 'Market Research',
+    color: 'text-orange-600 bg-orange-50',
+  },
+  acquisition_plan: {
+    icon: FileText,
+    label: 'Acquisition Plan',
+    color: 'text-indigo-600 bg-indigo-50',
+  },
 };
 
 // Status badge colors
@@ -111,7 +122,7 @@ export default function DocumentBrowser({
       });
 
       if (response.ok) {
-        setDocuments(docs => docs.filter(d => d.document_id !== docId));
+        setDocuments((docs) => docs.filter((d) => d.document_id !== docId));
         if (selectedDocId === docId) {
           setSelectedDocId(null);
         }
@@ -129,7 +140,9 @@ export default function DocumentBrowser({
     e.stopPropagation();
 
     try {
-      const response = await fetch(`/api/documents/${doc.document_id}?user_id=${userId}&content=true`);
+      const response = await fetch(
+        `/api/documents/${doc.document_id}?user_id=${userId}&content=true`,
+      );
       if (!response.ok) throw new Error('Download failed');
 
       const data = await response.json();
@@ -152,28 +165,33 @@ export default function DocumentBrowser({
   };
 
   // Filter documents by search query
-  const filteredDocuments = documents.filter(doc => {
+  const filteredDocuments = documents.filter((doc) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
       doc.title.toLowerCase().includes(query) ||
       doc.document_type.toLowerCase().includes(query) ||
-      (doc.description?.toLowerCase().includes(query)) ||
-      doc.tags.some(tag => tag.toLowerCase().includes(query))
+      doc.description?.toLowerCase().includes(query) ||
+      doc.tags.some((tag) => tag.toLowerCase().includes(query))
     );
   });
 
   // Group documents by type
-  const groupedByType = filteredDocuments.reduce((acc, doc) => {
-    const type = doc.document_type;
-    if (!acc[type]) acc[type] = [];
-    acc[type].push(doc);
-    return acc;
-  }, {} as Record<string, DocumentMetadata[]>);
+  const groupedByType = filteredDocuments.reduce(
+    (acc, doc) => {
+      const type = doc.document_type;
+      if (!acc[type]) acc[type] = [];
+      acc[type].push(doc);
+      return acc;
+    },
+    {} as Record<string, DocumentMetadata[]>,
+  );
 
   // Get document type config
   const getTypeConfig = (type: string) => {
-    return DOCUMENT_TYPE_CONFIG[type] || { icon: File, label: type, color: 'text-gray-600 bg-gray-50' };
+    return (
+      DOCUMENT_TYPE_CONFIG[type] || { icon: File, label: type, color: 'text-gray-600 bg-gray-50' }
+    );
   };
 
   // Clear filters
@@ -186,7 +204,9 @@ export default function DocumentBrowser({
   const hasActiveFilters = filterType || filterStatus || searchQuery;
 
   return (
-    <div className={`h-full flex flex-col bg-white rounded-2xl shadow-lg overflow-hidden ${className}`}>
+    <div
+      className={`h-full flex flex-col bg-white rounded-2xl shadow-lg overflow-hidden ${className}`}
+    >
       {/* Header */}
       <div className="p-4 border-b border-gray-100">
         <div className="flex items-center justify-between mb-4">
@@ -214,7 +234,9 @@ export default function DocumentBrowser({
               <Filter className="w-4 h-4" />
             </button>
             <button
-              onClick={() => {/* TODO: Upload modal */}}
+              onClick={() => {
+                /* TODO: Upload modal */
+              }}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               title="Upload"
             >
@@ -255,7 +277,9 @@ export default function DocumentBrowser({
           <div className="mt-3 p-3 bg-gray-50 rounded-xl space-y-3">
             {/* Type filter */}
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1.5 block">Document Type</label>
+              <label className="text-xs font-medium text-gray-500 mb-1.5 block">
+                Document Type
+              </label>
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setFilterType(null)}
@@ -402,12 +426,12 @@ export default function DocumentBrowser({
                             {/* Content */}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <h4 className="font-medium text-gray-900 truncate">
-                                  {doc.title}
-                                </h4>
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium capitalize ${
-                                  STATUS_COLORS[doc.status] || 'bg-gray-100 text-gray-600'
-                                }`}>
+                                <h4 className="font-medium text-gray-900 truncate">{doc.title}</h4>
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium capitalize ${
+                                    STATUS_COLORS[doc.status] || 'bg-gray-100 text-gray-600'
+                                  }`}
+                                >
                                   {doc.status.replace('_', ' ')}
                                 </span>
                               </div>
@@ -424,8 +448,11 @@ export default function DocumentBrowser({
                                 <span>v{doc.current_version}</span>
                                 {doc.tags.length > 0 && (
                                   <span className="flex items-center gap-1">
-                                    {doc.tags.slice(0, 2).map(tag => (
-                                      <span key={tag} className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px]">
+                                    {doc.tags.slice(0, 2).map((tag) => (
+                                      <span
+                                        key={tag}
+                                        className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px]"
+                                      >
                                         {tag}
                                       </span>
                                     ))}

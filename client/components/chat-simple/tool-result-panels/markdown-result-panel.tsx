@@ -15,12 +15,14 @@ export default function MarkdownResultPanel({ text }: { text: string }) {
     <div className="border-t border-[#E5E9F0] bg-white">
       <div className="relative">
         <div className="overflow-y-auto max-h-72 px-4 py-3">
-          <div className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
+          <div
+            className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
                           [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1
                           [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1
                           [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5
                           [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0
-                          [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded">
+                          [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded"
+          >
             <ReactMarkdown>{clean}</ReactMarkdown>
           </div>
         </div>

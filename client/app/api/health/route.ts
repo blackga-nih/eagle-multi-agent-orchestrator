@@ -13,9 +13,6 @@ export async function GET() {
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error('Health check error:', error);
-    return NextResponse.json(
-      { error: 'Backend unreachable' },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: 'Backend unreachable' }, { status: 502 });
   }
 }

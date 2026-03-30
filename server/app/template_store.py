@@ -1,4 +1,4 @@
-'''Template Store — DynamoDB-backed TEMPLATE# entity CRUD with 60-second in-process cache.
+"""Template Store — DynamoDB-backed TEMPLATE# entity CRUD with 60-second in-process cache.
 
 TEMPLATE# items hold tenant- and user-specific document template overrides.
 When no tenant/user override exists the resolution chain falls back to
@@ -14,7 +14,8 @@ user_id:         specific user ID  or  "shared" for tenant-wide defaults
 GSI (for reverse lookups by tenant + doc_type + recency):
     GSI1PK = f"TENANT#{tenant_id}"
     GSI1SK = f"TEMPLATE#{doc_type}#{updated_at}"
-'''
+"""
+
 from __future__ import annotations
 
 import logging
@@ -50,14 +51,16 @@ def _cache_key(tenant_id: str, doc_type: str, user_id: str) -> str:
 
 
 def _cache_get(tenant_id: str, doc_type: str, user_id: str) -> object:
-    '''Return cached item (possibly None) if still fresh; _MISS sentinel if stale/absent.'''
+    """Return cached item (possibly None) if still fresh; _MISS sentinel if stale/absent."""
     entry = _template_cache.get(_cache_key(tenant_id, doc_type, user_id))
     if entry is not None and time.time() < entry["ts"] + CACHE_TTL_SECONDS:
         return entry["item"]  # may itself be None (cached miss)
     return _MISS
 
 
-def _cache_set(tenant_id: str, doc_type: str, user_id: str, item: Optional[dict]) -> None:
+def _cache_set(
+    tenant_id: str, doc_type: str, user_id: str, item: Optional[dict]
+) -> None:
     _template_cache[_cache_key(tenant_id, doc_type, user_id)] = {
         "ts": time.time(),
         "item": item,
@@ -70,6 +73,7 @@ def _cache_invalidate(tenant_id: str, doc_type: str, user_id: str) -> None:
 
 # ── Key Helpers ──────────────────────────────────────────────────────────
 
+
 def _pk(tenant_id: str) -> str:
     return f"TEMPLATE#{tenant_id}"
 
@@ -79,15 +83,16 @@ def _sk(doc_type: str, user_id: str) -> str:
 
 
 def _extract_variables(template_body: str) -> List[str]:
-    '''Return unique {{VARIABLE}} placeholder names found in template_body, in order.'''
+    """Return unique {{VARIABLE}} placeholder names found in template_body, in order."""
     seen: List[str] = []
-    for name in re.findall(r'\{\{(\w+)\}\}', template_body):
+    for name in re.findall(r"\{\{(\w+)\}\}", template_body):
         if name not in seen:
             seen.append(name)
     return seen
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────
+
 
 def put_template(
     tenant_id: str,
@@ -98,7 +103,7 @@ def put_template(
     is_default: bool = False,
     ttl: Optional[int] = None,
 ) -> dict:
-    '''Upsert a TEMPLATE# item.
+    """Upsert a TEMPLATE# item.
 
     Extracts {{VARIABLE}} placeholders from template_body and stores them in the
     ``variables`` attribute.  Version is auto-incremented on each update.
@@ -114,7 +119,7 @@ def put_template(
 
     Returns:
         The written item as a plain dict.
-    '''
+    """
     now = datetime.utcnow().isoformat()
 
     existing = get_template(tenant_id, doc_type, user_id)
@@ -172,11 +177,11 @@ def put_template(
 
 
 def get_template(tenant_id: str, doc_type: str, user_id: str) -> Optional[dict]:
-    '''Fetch a single TEMPLATE# item by (tenant_id, doc_type, user_id).
+    """Fetch a single TEMPLATE# item by (tenant_id, doc_type, user_id).
 
     Returns the item dict or None if not found.  Results are served from the
     60-second in-process cache when fresh.
-    '''
+    """
     cached = _cache_get(tenant_id, doc_type, user_id)
     if cached is not _MISS:
         return cached  # type: ignore[return-value]
@@ -201,7 +206,7 @@ def get_template(tenant_id: str, doc_type: str, user_id: str) -> Optional[dict]:
 
 
 def delete_template(tenant_id: str, doc_type: str, user_id: str) -> bool:
-    '''Delete a TEMPLATE# item.  Returns True on success, False on error.'''
+    """Delete a TEMPLATE# item.  Returns True on success, False on error."""
     try:
         get_table().delete_item(
             Key={"PK": _pk(tenant_id), "SK": _sk(doc_type, user_id)}
@@ -229,7 +234,7 @@ def list_tenant_templates(
     tenant_id: str,
     doc_type: Optional[str] = None,
 ) -> List[dict]:
-    '''List all TEMPLATE# items for a tenant, optionally filtered by doc_type.
+    """List all TEMPLATE# items for a tenant, optionally filtered by doc_type.
 
     Queries by PK = TEMPLATE#{tenant_id}.  When doc_type is supplied the SK
     begins_with filter restricts results to that doc_type only.
@@ -240,7 +245,7 @@ def list_tenant_templates(
 
     Returns:
         List of item dicts, possibly empty.
-    '''
+    """
     pk_val = _pk(tenant_id)
 
     try:
@@ -273,8 +278,11 @@ def list_tenant_templates(
 
 # ── Resolution ────────────────────────────────────────────────────────
 
-def _build_provenance_metadata(item: Optional[dict], source: str, doc_type: str) -> dict:
-    '''Build structured provenance metadata from a resolved template item.'''
+
+def _build_provenance_metadata(
+    item: Optional[dict], source: str, doc_type: str
+) -> dict:
+    """Build structured provenance metadata from a resolved template item."""
     if item is None:
         return {
             "version": 0,
@@ -285,7 +293,9 @@ def _build_provenance_metadata(item: Optional[dict], source: str, doc_type: str)
         }
     return {
         "version": item.get("version", 1),
-        "display_name": item.get("display_name") or item.get("name") or f"{doc_type} template",
+        "display_name": item.get("display_name")
+        or item.get("name")
+        or f"{doc_type} template",
         "doc_type": doc_type,
         "tenant_id": item.get("tenant_id", ""),
         "user_id": item.get("owner_user_id", item.get("user_id", "")),
@@ -297,7 +307,7 @@ def resolve_template(
     user_id: str,
     doc_type: str,
 ) -> Tuple[str, str, dict]:
-    '''Resolve the best available template body for a given (tenant, user, doc_type).
+    """Resolve the best available template body for a given (tenant, user, doc_type).
 
     Fallback chain — first non-empty match wins:
         1. TEMPLATE#{tenant_id}  /  {doc_type}#{user_id}   — user personal override
@@ -318,21 +328,33 @@ def resolve_template(
             "plugin"  — canonical PLUGIN#templates entry
             "missing" — no template found anywhere
         metadata is a dict with keys: version, display_name, doc_type, tenant_id, user_id
-    '''
+    """
     # 1. User personal override
     user_item = get_template(tenant_id, doc_type, user_id)
     if user_item and user_item.get("template_body"):
-        return user_item["template_body"], "user", _build_provenance_metadata(user_item, "user", doc_type)
+        return (
+            user_item["template_body"],
+            "user",
+            _build_provenance_metadata(user_item, "user", doc_type),
+        )
 
     # 2. Tenant shared default
     shared_item = get_template(tenant_id, doc_type, "shared")
     if shared_item and shared_item.get("template_body"):
-        return shared_item["template_body"], "tenant", _build_provenance_metadata(shared_item, "tenant", doc_type)
+        return (
+            shared_item["template_body"],
+            "tenant",
+            _build_provenance_metadata(shared_item, "tenant", doc_type),
+        )
 
     # 3. Global system default
     global_item = get_template("global", doc_type, "shared")
     if global_item and global_item.get("template_body"):
-        return global_item["template_body"], "global", _build_provenance_metadata(global_item, "global", doc_type)
+        return (
+            global_item["template_body"],
+            "global",
+            _build_provenance_metadata(global_item, "global", doc_type),
+        )
 
     # 4. PLUGIN#templates canonical fallback
     try:
@@ -340,7 +362,11 @@ def resolve_template(
 
         plugin_item = get_plugin_item("templates", doc_type)
         if plugin_item and plugin_item.get("content"):
-            return plugin_item["content"], "plugin", _build_provenance_metadata(plugin_item, "plugin", doc_type)
+            return (
+                plugin_item["content"],
+                "plugin",
+                _build_provenance_metadata(plugin_item, "plugin", doc_type),
+            )
     except ImportError:
         logger.warning(
             "template_store.resolve_template: plugin_store not importable; "

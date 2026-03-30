@@ -20,10 +20,7 @@ export async function GET(request: NextRequest) {
   const userId = searchParams.get('user_id');
 
   if (!userId) {
-    return NextResponse.json(
-      { error: 'Missing required parameter: user_id' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Missing required parameter: user_id' }, { status: 400 });
   }
 
   // Only try backend if AGENTCORE_URL is explicitly configured
@@ -79,10 +76,7 @@ export async function PUT(request: NextRequest) {
     const { userId, sessions, sharedContext } = body;
 
     if (!userId) {
-      return NextResponse.json(
-        { error: 'Missing required field: userId' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing required field: userId' }, { status: 400 });
     }
 
     // Only try backend if AGENTCORE_URL is explicitly configured
@@ -121,13 +115,8 @@ export async function PUT(request: NextRequest) {
       success: true,
       lastUpdated: now,
     });
-
   } catch (error) {
     console.error('Conversations PUT error:', error);
-    return NextResponse.json(
-      { error: 'Failed to update conversations' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to update conversations' }, { status: 500 });
   }
 }
-

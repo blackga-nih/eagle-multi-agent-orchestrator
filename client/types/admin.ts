@@ -207,10 +207,10 @@ export interface CopyTemplateResponse {
 
 export interface S3TemplatePreviewResponse {
   type: 'pdf' | 'markdown' | 'xlsx';
-  url?: string;       // when type === 'pdf'
-  content?: string;   // when type === 'markdown' or 'xlsx'
-  preview_mode?: string;  // when type === 'xlsx'
-  preview_sheets?: XlsxPreviewSheet[];  // when type === 'xlsx'
+  url?: string; // when type === 'pdf'
+  content?: string; // when type === 'markdown' or 'xlsx'
+  preview_mode?: string; // when type === 'xlsx'
+  preview_sheets?: XlsxPreviewSheet[]; // when type === 'xlsx'
   filename: string;
 }
 

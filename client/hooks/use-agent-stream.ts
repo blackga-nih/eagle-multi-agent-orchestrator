@@ -4,11 +4,7 @@ import { useState, useCallback, useRef } from 'react';
 import { StreamEvent, AuditLogEntry, parseStreamEvent, streamEventToMessage } from '@/types/stream';
 import { Message, DocumentInfo } from '@/types/chat';
 import { generateUUID } from '@/lib/uuid';
-import {
-  CLIENT_SIDE_TOOLS,
-  executeClientTool,
-  ClientToolResult,
-} from '@/lib/client-tools';
+import { CLIENT_SIDE_TOOLS, executeClientTool, ClientToolResult } from '@/lib/client-tools';
 
 const API_URL = '/api/invoke';
 
@@ -66,7 +62,12 @@ export interface UseAgentStreamOptions {
 }
 
 export interface UseAgentStreamReturn {
-  sendQuery: (query: string, sessionId?: string, packageId?: string, streamingMsgId?: string) => Promise<void>;
+  sendQuery: (
+    query: string,
+    sessionId?: string,
+    packageId?: string,
+    streamingMsgId?: string,
+  ) => Promise<void>;
   isStreaming: boolean;
   logs: AuditLogEntry[];
   lastMessage: Message | null;
@@ -130,7 +131,10 @@ const DOC_TYPE_MAP: Record<string, { type: string; label: string }> = {
   security_checklist: { type: 'security_checklist', label: 'Security Checklist' },
   section_508: { type: 'section_508', label: 'Section 508 Compliance' },
   cor_certification: { type: 'cor_certification', label: 'COR Certification' },
-  contract_type_justification: { type: 'contract_type_justification', label: 'Contract Type Justification' },
+  contract_type_justification: {
+    type: 'contract_type_justification',
+    label: 'Contract Type Justification',
+  },
 };
 
 /**
@@ -167,12 +171,42 @@ function parseDocumentsFromText(text: string): DocumentInfo[] {
 }
 
 /** Map of keyword patterns to document types for text-based detection. */
-const DOC_KEYWORD_PATTERNS: Array<{ pattern: RegExp; type: string; label: string; template: string }> = [
-  { pattern: /statement\s+of\s+work|(\b)sow(\b)/i, type: 'sow', label: 'Statement of Work', template: 'sow-template.md' },
-  { pattern: /\b(igce|ige)\b|cost\s+estimate|independent\s+government/i, type: 'igce', label: 'Cost Estimate (IGCE)', template: 'igce-template.md' },
-  { pattern: /market\s+research/i, type: 'market_research', label: 'Market Research Report', template: 'market-research-template.md' },
-  { pattern: /acquisition\s+plan/i, type: 'acquisition_plan', label: 'Acquisition Plan', template: 'acquisition-plan-template.md' },
-  { pattern: /justification\s*((&|and)\s*approval)?|(\b)j\s*(&|and)\s*a(\b)|sole\s*source/i, type: 'justification', label: 'Justification & Approval', template: 'justification-template.md' },
+const DOC_KEYWORD_PATTERNS: Array<{
+  pattern: RegExp;
+  type: string;
+  label: string;
+  template: string;
+}> = [
+  {
+    pattern: /statement\s+of\s+work|(\b)sow(\b)/i,
+    type: 'sow',
+    label: 'Statement of Work',
+    template: 'sow-template.md',
+  },
+  {
+    pattern: /\b(igce|ige)\b|cost\s+estimate|independent\s+government/i,
+    type: 'igce',
+    label: 'Cost Estimate (IGCE)',
+    template: 'igce-template.md',
+  },
+  {
+    pattern: /market\s+research/i,
+    type: 'market_research',
+    label: 'Market Research Report',
+    template: 'market-research-template.md',
+  },
+  {
+    pattern: /acquisition\s+plan/i,
+    type: 'acquisition_plan',
+    label: 'Acquisition Plan',
+    template: 'acquisition-plan-template.md',
+  },
+  {
+    pattern: /justification\s*((&|and)\s*approval)?|(\b)j\s*(&|and)\s*a(\b)|sole\s*source/i,
+    type: 'justification',
+    label: 'Justification & Approval',
+    template: 'justification-template.md',
+  },
 ];
 
 /**
@@ -231,381 +265,388 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
     eventCountRef.current = 0;
   }, []);
 
-  const sendQuery = useCallback(async (query: string, sessionId?: string, packageId?: string, overrideMsgId?: string) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+  const sendQuery = useCallback(
+    async (query: string, sessionId?: string, packageId?: string, overrideMsgId?: string) => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
 
-    abortControllerRef.current = new AbortController();
-    setIsStreaming(true);
-    setError(null);
+      abortControllerRef.current = new AbortController();
+      setIsStreaming(true);
+      setError(null);
 
-    const finalSessionId = sessionId || generateUUID();
-    const activePackageId = packageId || options.packageId;
-    const queryStartTime = new Date();
-    let accumulatedText = '';
-    /** True after a tool_use/tool_result event — next text chunk needs a separator. */
-    let toolBoundarySeen = false;
-    // Stable ID used for the single streaming assistant message.
-    // All text chunks for one response share this ID so the UI upserts
-    // rather than appending a new bubble per chunk.
-    const streamingMsgId = overrideMsgId || `stream-${Date.now()}`;
-    let shouldFetchDocs = false;
-    const emittedDocKeys = new Set<string>();
-    // Accumulate server-side tool results during streaming — merged at onComplete
-    const serverToolResults: ServerToolResult[] = [];
-    // Capture complete event metadata for timing info
-    let completeMetadata: Record<string, unknown> | undefined;
+      const finalSessionId = sessionId || generateUUID();
+      const activePackageId = packageId || options.packageId;
+      const queryStartTime = new Date();
+      let accumulatedText = '';
+      /** True after a tool_use/tool_result event — next text chunk needs a separator. */
+      let toolBoundarySeen = false;
+      // Stable ID used for the single streaming assistant message.
+      // All text chunks for one response share this ID so the UI upserts
+      // rather than appending a new bubble per chunk.
+      const streamingMsgId = overrideMsgId || `stream-${Date.now()}`;
+      let shouldFetchDocs = false;
+      const emittedDocKeys = new Set<string>();
+      // Accumulate server-side tool results during streaming — merged at onComplete
+      const serverToolResults: ServerToolResult[] = [];
+      // Capture complete event metadata for timing info
+      let completeMetadata: Record<string, unknown> | undefined;
 
-    // The session to use for client tool localStorage namespacing.
-    // Prefer the sessionId passed to sendQuery; fall back to options.sessionId.
-    const activeSessionId = finalSessionId || options.sessionId;
+      // The session to use for client tool localStorage namespacing.
+      // Prefer the sessionId passed to sendQuery; fall back to options.sessionId.
+      const activeSessionId = finalSessionId || options.sessionId;
 
-    try {
-      // Build headers with JWT if available
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
+      try {
+        // Build headers with JWT if available
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
 
-      if (options.getToken) {
-        const token = await options.getToken();
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
+        if (options.getToken) {
+          const token = await options.getToken();
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
         }
-      }
 
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          query,
-          session_id: finalSessionId,
-          package_id: activePackageId,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            query,
+            session_id: finalSessionId,
+            package_id: activePackageId,
+          }),
+          signal: abortControllerRef.current.signal,
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Backend error: ${response.status} - ${errorText}`);
-      }
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Backend error: ${response.status} - ${errorText}`);
+        }
 
-      const contentType = response.headers.get('content-type');
+        const contentType = response.headers.get('content-type');
 
-      if (contentType?.includes('text/event-stream')) {
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No response body');
+        if (contentType?.includes('text/event-stream')) {
+          const reader = response.body?.getReader();
+          if (!reader) throw new Error('No response body');
 
-        const decoder = new TextDecoder();
-        let buffer = '';
+          const decoder = new TextDecoder();
+          let buffer = '';
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6).trim();
-              if (data) {
-                await processEventData(data, activeSessionId);
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6).trim();
+                if (data) {
+                  await processEventData(data, activeSessionId);
+                }
               }
             }
           }
-        }
-      } else {
-        const text = await response.text();
-        const lines = text.split('\n');
+        } else {
+          const text = await response.text();
+          const lines = text.split('\n');
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('data: ')) {
-            const data = trimmed.slice(6);
-            if (data) {
-              await processEventData(data, activeSessionId);
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ')) {
+              const data = trimmed.slice(6);
+              if (data) {
+                await processEventData(data, activeSessionId);
+              }
+            } else if (trimmed.startsWith('{')) {
+              await processEventData(trimmed, activeSessionId);
             }
-          } else if (trimmed.startsWith('{')) {
-            await processEventData(trimmed, activeSessionId);
           }
         }
-      }
 
-      // After event processing: fetch documents from S3 via API if
-      // create_document was called but tool_result events were not received
-      // (REST fallback path where tool results are lost).
-      if (shouldFetchDocs && options.onDocumentGenerated) {
-        await fetchCreatedDocuments(headers, queryStartTime, emittedDocKeys);
-      }
-
-      options.onComplete?.({
-        toolResults: serverToolResults.length > 0 ? serverToolResults : undefined,
-        durationMs: completeMetadata?.duration_ms as number | undefined,
-        toolTimings: completeMetadata?.tool_timings as Array<{ tool_name: string; duration_ms: number }> | undefined,
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return;
-      }
-
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(errorMessage);
-      options.onError?.(errorMessage);
-    } finally {
-      setIsStreaming(false);
-    }
-
-    async function processEventData(data: string, sid: string | undefined) {
-      const event = parseStreamEvent(data);
-      if (!event) return;
-
-      const logEntry: AuditLogEntry = {
-        ...event,
-        id: `log-${eventCountRef.current++}`,
-      };
-
-      setLogs(prev => [...prev, logEntry]);
-      options.onEvent?.(event);
-
-      // Handle text messages — accumulate into a single streaming bubble.
-      // The backend sends one event per text chunk (and an empty one as a
-      // connection handshake). We use a stable streamingMsgId so the UI can
-      // upsert the same message rather than appending a new one each chunk.
-      if (event.type === 'text') {
-        const chunk = event.content || '';
-        if (!chunk && !accumulatedText) return; // skip empty handshake event
-        // Insert paragraph break when text resumes after a tool boundary
-        if (chunk && toolBoundarySeen && accumulatedText && !/\s$/.test(accumulatedText)) {
-          accumulatedText += '\n\n';
+        // After event processing: fetch documents from S3 via API if
+        // create_document was called but tool_result events were not received
+        // (REST fallback path where tool results are lost).
+        if (shouldFetchDocs && options.onDocumentGenerated) {
+          await fetchCreatedDocuments(headers, queryStartTime, emittedDocKeys);
         }
-        toolBoundarySeen = false;
-        accumulatedText += chunk;
-        if (!accumulatedText) return;
-        const message: Message = {
-          id: streamingMsgId,
-          role: 'assistant',
-          content: accumulatedText,
-          timestamp: new Date(event.timestamp),
-          reasoning: event.reasoning,
-          agent_id: event.agent_id,
-          agent_name: event.agent_name,
-        };
-        setLastMessage(message);
-        options.onMessage?.(message);
+
+        options.onComplete?.({
+          toolResults: serverToolResults.length > 0 ? serverToolResults : undefined,
+          durationMs: completeMetadata?.duration_ms as number | undefined,
+          toolTimings: completeMetadata?.tool_timings as
+            | Array<{ tool_name: string; duration_ms: number }>
+            | undefined,
+        });
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
+
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        setError(errorMessage);
+        options.onError?.(errorMessage);
+      } finally {
+        setIsStreaming(false);
       }
 
-      // Handle tool_use events — dispatch client-side tools or emit server notification.
-      if (event.type === 'tool_use' && event.tool_use) {
-        toolBoundarySeen = true;
-        const toolName = event.tool_use.name;
-        const toolInput = (event.tool_use.input ?? {}) as Record<string, unknown>;
-        const toolUseId = event.tool_use.tool_use_id ?? `tool-${Date.now()}`;
-        const isClientSide = CLIENT_SIDE_TOOLS.has(toolName);
+      async function processEventData(data: string, sid: string | undefined) {
+        const event = parseStreamEvent(data);
+        if (!event) return;
 
-        // Notify UI that the tool is starting
-        options.onToolUse?.({
-          toolName,
-          input: toolInput,
-          toolUseId,
-          isClientSide,
-          executionTarget: isClientSide ? 'client' : 'server',
-          result: undefined,
-        });
+        const logEntry: AuditLogEntry = {
+          ...event,
+          id: `log-${eventCountRef.current++}`,
+        };
 
-        if (isClientSide) {
-          // Execute the tool in the browser and then notify UI with the result
-          const result = await executeClientTool(toolName, toolInput, sid);
+        setLogs((prev) => [...prev, logEntry]);
+        options.onEvent?.(event);
+
+        // Handle text messages — accumulate into a single streaming bubble.
+        // The backend sends one event per text chunk (and an empty one as a
+        // connection handshake). We use a stable streamingMsgId so the UI can
+        // upsert the same message rather than appending a new one each chunk.
+        if (event.type === 'text') {
+          const chunk = event.content || '';
+          if (!chunk && !accumulatedText) return; // skip empty handshake event
+          // Insert paragraph break when text resumes after a tool boundary
+          if (chunk && toolBoundarySeen && accumulatedText && !/\s$/.test(accumulatedText)) {
+            accumulatedText += '\n\n';
+          }
+          toolBoundarySeen = false;
+          accumulatedText += chunk;
+          if (!accumulatedText) return;
+          const message: Message = {
+            id: streamingMsgId,
+            role: 'assistant',
+            content: accumulatedText,
+            timestamp: new Date(event.timestamp),
+            reasoning: event.reasoning,
+            agent_id: event.agent_id,
+            agent_name: event.agent_name,
+          };
+          setLastMessage(message);
+          options.onMessage?.(message);
+        }
+
+        // Handle tool_use events — dispatch client-side tools or emit server notification.
+        if (event.type === 'tool_use' && event.tool_use) {
+          toolBoundarySeen = true;
+          const toolName = event.tool_use.name;
+          const toolInput = (event.tool_use.input ?? {}) as Record<string, unknown>;
+          const toolUseId = event.tool_use.tool_use_id ?? `tool-${Date.now()}`;
+          const isClientSide = CLIENT_SIDE_TOOLS.has(toolName);
+
+          // Notify UI that the tool is starting
           options.onToolUse?.({
             toolName,
             input: toolInput,
             toolUseId,
-            isClientSide: true,
-            executionTarget: 'client',
-            result,
+            isClientSide,
+            executionTarget: isClientSide ? 'client' : 'server',
+            result: undefined,
           });
-        }
-      }
 
-      // Handle tool_result events — accumulate for merge at onComplete
-      // AND immediately notify UI so tool cards update to 'done' during streaming
-      if (event.type === 'tool_result' && event.tool_result) {
-        const tr = event.tool_result;
-
-        // Accumulate for batch merge when stream completes
-        serverToolResults.push({
-          toolName: tr.name,
-          result: { success: true, result: tr.result },
-        });
-
-        // Immediately update tool card to 'done' during streaming
-        options.onToolResult?.(tr.name, { success: true, result: tr.result });
-
-        // Extract document info for create_document
-        const docInfo = parseDocumentToolResult(event);
-        if (docInfo) {
-          if (docInfo.s3_key) emittedDocKeys.add(docInfo.s3_key);
-          if (docInfo.document_id) emittedDocKeys.add(docInfo.document_id);
-          setLastDocument(docInfo);
-          options.onDocumentGenerated?.(docInfo);
-        }
-
-        // Auto-open HTML playground in new tab when presigned_url is returned
-        if (tr.name === 'generate_html_playground') {
-          try {
-            const data = typeof tr.result === 'string' ? JSON.parse(tr.result) : tr.result;
-            if (data?.presigned_url && data?.open_in_tab) {
-              window.open(data.presigned_url, '_blank');
-            }
-          } catch { /* ignore parse errors */ }
-        }
-      }
-
-      // Handle agent_status events — real-time progress indicators
-      if (event.type === 'agent_status') {
-        const status = event.metadata?.status ?? '';
-        const detail = event.metadata?.detail ?? '';
-        options.onAgentStatus?.(status, detail);
-      }
-
-      // Handle reasoning events — show status indicator in main chat
-      if (event.type === 'reasoning') {
-        options.onAgentStatus?.('Reasoning...', '');
-      }
-
-      // Handle handoff events — show agent transfer in main chat
-      if (event.type === 'handoff' && event.metadata) {
-        const target = String(event.metadata.target_agent ?? 'specialist');
-        options.onAgentStatus?.(`Handing off to ${target}`, String(event.metadata.reason ?? ''));
-      }
-
-      // Handle elicitation events — show question status in main chat
-      if (event.type === 'elicitation' && event.elicitation) {
-        options.onAgentStatus?.('Requesting input', String(event.elicitation.question ?? ''));
-      }
-
-      // Handle metadata events with state_type — package state updates
-      if (event.type === 'metadata' && event.metadata?.state_type) {
-        options.onStateUpdate?.(event.metadata as Record<string, unknown>);
-      }
-
-      // Handle complete event — REST/fallback path
-      // When tool_result events were already received (streaming path), skip
-      // text-based parsing to avoid duplicate document cards.
-      if (event.type === 'complete') {
-        completeMetadata = event.metadata;
-        const toolsCalled = event.metadata?.tools_called;
-        if (Array.isArray(toolsCalled) && toolsCalled.includes('create_document')) {
-          const expectedCount = toolsCalled.filter((t: string) => t === 'create_document').length;
-
-          // Skip text parsing if tool_result events already provided the docs
-          if (emittedDocKeys.size < expectedCount) {
-            const docs = parseDocumentsFromText(accumulatedText);
-            for (const doc of docs) {
-              // Skip if this filename matches an already-emitted key
-              const name = doc.s3_key || '';
-              const alreadyEmitted = [...emittedDocKeys].some(k => k.endsWith(name));
-              if (alreadyEmitted) continue;
-
-              if (doc.s3_key) emittedDocKeys.add(doc.s3_key);
-              setLastDocument(doc);
-              options.onDocumentGenerated?.(doc);
-            }
-
-            // If still fewer docs than expected, flag for API fallback
-            if (emittedDocKeys.size < expectedCount) {
-              shouldFetchDocs = true;
-            }
+          if (isClientSide) {
+            // Execute the tool in the browser and then notify UI with the result
+            const result = await executeClientTool(toolName, toolInput, sid);
+            options.onToolUse?.({
+              toolName,
+              input: toolInput,
+              toolUseId,
+              isClientSide: true,
+              executionTarget: 'client',
+              result,
+            });
           }
         }
-      }
 
-      if (event.type === 'error') {
-        setError(event.content || 'Unknown error');
-        options.onError?.(event.content || 'Unknown error');
-      }
-    }
+        // Handle tool_result events — accumulate for merge at onComplete
+        // AND immediately notify UI so tool cards update to 'done' during streaming
+        if (event.type === 'tool_result' && event.tool_result) {
+          const tr = event.tool_result;
 
-    async function fetchCreatedDocuments(
-      headers: Record<string, string>,
-      startTime: Date,
-      alreadyEmitted: Set<string>,
-    ) {
-      let foundFromApi = false;
+          // Accumulate for batch merge when stream completes
+          serverToolResults.push({
+            toolName: tr.name,
+            result: { success: true, result: tr.result },
+          });
 
-      // Phase 1: Try fetching real documents from the backend (S3)
-      try {
-        const res = await fetch('/api/documents', {
-          method: 'GET',
-          headers,
-          signal: AbortSignal.timeout(10000),
-        });
+          // Immediately update tool card to 'done' during streaming
+          options.onToolResult?.(tr.name, { success: true, result: tr.result });
 
-        if (res.ok) {
-          const data = await res.json();
-          const docs: Array<{
-            key?: string;
-            name?: string;
-            size_bytes?: number;
-            last_modified?: string;
-            type?: string;
-          }> = data.documents || [];
-
-          for (const doc of docs) {
-            const key = doc.key || '';
-            const name = doc.name || '';
-
-            // Skip already emitted via streaming or text parsing
-            if (alreadyEmitted.has(name) || alreadyEmitted.has(key)) continue;
-
-            // Only include documents modified after the query started
-            if (doc.last_modified) {
-              const modified = new Date(doc.last_modified);
-              if (modified < startTime) continue;
-            }
-
-            // Infer type from filename prefix
-            const prefixMatch = name.match(/^(\w+?)_\d/);
-            const prefix = prefixMatch?.[1]?.toLowerCase() || '';
-            const typeInfo = DOC_TYPE_MAP[prefix];
-
-            // Skip documents without a recognizable type — avoids "unknown / Untitled" cards
-            const docType = typeInfo?.type || doc.type;
-            if (!docType) continue;
-
-            const docInfo: DocumentInfo = {
-              document_id: name || key,
-              document_type: docType,
-              title: typeInfo?.label || name || 'Document',
-              s3_key: key,
-              status: 'saved',
-              generated_at: doc.last_modified,
-            };
-
-            alreadyEmitted.add(name || key);
+          // Extract document info for create_document
+          const docInfo = parseDocumentToolResult(event);
+          if (docInfo) {
+            if (docInfo.s3_key) emittedDocKeys.add(docInfo.s3_key);
+            if (docInfo.document_id) emittedDocKeys.add(docInfo.document_id);
             setLastDocument(docInfo);
             options.onDocumentGenerated?.(docInfo);
-            foundFromApi = true;
+          }
+
+          // Auto-open HTML playground in new tab when presigned_url is returned
+          if (tr.name === 'generate_html_playground') {
+            try {
+              const data = typeof tr.result === 'string' ? JSON.parse(tr.result) : tr.result;
+              if (data?.presigned_url && data?.open_in_tab) {
+                window.open(data.presigned_url, '_blank');
+              }
+            } catch {
+              /* ignore parse errors */
+            }
           }
         }
-      } catch {
-        // S3/backend unavailable — fall through to template fallback
-      }
 
-      // Phase 2: Template fallback — detect document types from text
-      // when S3 is unavailable or returned no new documents.
-      if (!foundFromApi && accumulatedText) {
-        const templateDocs = detectDocumentTypesFromText(accumulatedText);
-        for (const doc of templateDocs) {
-          if (doc.document_id && alreadyEmitted.has(doc.document_id)) continue;
-          if (doc.document_id) alreadyEmitted.add(doc.document_id);
-          setLastDocument(doc);
-          options.onDocumentGenerated?.(doc);
+        // Handle agent_status events — real-time progress indicators
+        if (event.type === 'agent_status') {
+          const status = event.metadata?.status ?? '';
+          const detail = event.metadata?.detail ?? '';
+          options.onAgentStatus?.(status, detail);
+        }
+
+        // Handle reasoning events — show status indicator in main chat
+        if (event.type === 'reasoning') {
+          options.onAgentStatus?.('Reasoning...', '');
+        }
+
+        // Handle handoff events — show agent transfer in main chat
+        if (event.type === 'handoff' && event.metadata) {
+          const target = String(event.metadata.target_agent ?? 'specialist');
+          options.onAgentStatus?.(`Handing off to ${target}`, String(event.metadata.reason ?? ''));
+        }
+
+        // Handle elicitation events — show question status in main chat
+        if (event.type === 'elicitation' && event.elicitation) {
+          options.onAgentStatus?.('Requesting input', String(event.elicitation.question ?? ''));
+        }
+
+        // Handle metadata events with state_type — package state updates
+        if (event.type === 'metadata' && event.metadata?.state_type) {
+          options.onStateUpdate?.(event.metadata as Record<string, unknown>);
+        }
+
+        // Handle complete event — REST/fallback path
+        // When tool_result events were already received (streaming path), skip
+        // text-based parsing to avoid duplicate document cards.
+        if (event.type === 'complete') {
+          completeMetadata = event.metadata;
+          const toolsCalled = event.metadata?.tools_called;
+          if (Array.isArray(toolsCalled) && toolsCalled.includes('create_document')) {
+            const expectedCount = toolsCalled.filter((t: string) => t === 'create_document').length;
+
+            // Skip text parsing if tool_result events already provided the docs
+            if (emittedDocKeys.size < expectedCount) {
+              const docs = parseDocumentsFromText(accumulatedText);
+              for (const doc of docs) {
+                // Skip if this filename matches an already-emitted key
+                const name = doc.s3_key || '';
+                const alreadyEmitted = [...emittedDocKeys].some((k) => k.endsWith(name));
+                if (alreadyEmitted) continue;
+
+                if (doc.s3_key) emittedDocKeys.add(doc.s3_key);
+                setLastDocument(doc);
+                options.onDocumentGenerated?.(doc);
+              }
+
+              // If still fewer docs than expected, flag for API fallback
+              if (emittedDocKeys.size < expectedCount) {
+                shouldFetchDocs = true;
+              }
+            }
+          }
+        }
+
+        if (event.type === 'error') {
+          setError(event.content || 'Unknown error');
+          options.onError?.(event.content || 'Unknown error');
         }
       }
-    }
-  }, [options]);
+
+      async function fetchCreatedDocuments(
+        headers: Record<string, string>,
+        startTime: Date,
+        alreadyEmitted: Set<string>,
+      ) {
+        let foundFromApi = false;
+
+        // Phase 1: Try fetching real documents from the backend (S3)
+        try {
+          const res = await fetch('/api/documents', {
+            method: 'GET',
+            headers,
+            signal: AbortSignal.timeout(10000),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const docs: Array<{
+              key?: string;
+              name?: string;
+              size_bytes?: number;
+              last_modified?: string;
+              type?: string;
+            }> = data.documents || [];
+
+            for (const doc of docs) {
+              const key = doc.key || '';
+              const name = doc.name || '';
+
+              // Skip already emitted via streaming or text parsing
+              if (alreadyEmitted.has(name) || alreadyEmitted.has(key)) continue;
+
+              // Only include documents modified after the query started
+              if (doc.last_modified) {
+                const modified = new Date(doc.last_modified);
+                if (modified < startTime) continue;
+              }
+
+              // Infer type from filename prefix
+              const prefixMatch = name.match(/^(\w+?)_\d/);
+              const prefix = prefixMatch?.[1]?.toLowerCase() || '';
+              const typeInfo = DOC_TYPE_MAP[prefix];
+
+              // Skip documents without a recognizable type — avoids "unknown / Untitled" cards
+              const docType = typeInfo?.type || doc.type;
+              if (!docType) continue;
+
+              const docInfo: DocumentInfo = {
+                document_id: name || key,
+                document_type: docType,
+                title: typeInfo?.label || name || 'Document',
+                s3_key: key,
+                status: 'saved',
+                generated_at: doc.last_modified,
+              };
+
+              alreadyEmitted.add(name || key);
+              setLastDocument(docInfo);
+              options.onDocumentGenerated?.(docInfo);
+              foundFromApi = true;
+            }
+          }
+        } catch {
+          // S3/backend unavailable — fall through to template fallback
+        }
+
+        // Phase 2: Template fallback — detect document types from text
+        // when S3 is unavailable or returned no new documents.
+        if (!foundFromApi && accumulatedText) {
+          const templateDocs = detectDocumentTypesFromText(accumulatedText);
+          for (const doc of templateDocs) {
+            if (doc.document_id && alreadyEmitted.has(doc.document_id)) continue;
+            if (doc.document_id) alreadyEmitted.add(doc.document_id);
+            setLastDocument(doc);
+            options.onDocumentGenerated?.(doc);
+          }
+        }
+      }
+    },
+    [options],
+  );
 
   const addUserInputLog = useCallback((content: string) => {
     const entry: AuditLogEntry = {
@@ -616,21 +657,24 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
       content,
       timestamp: new Date().toISOString(),
     };
-    setLogs(prev => [...prev, entry]);
+    setLogs((prev) => [...prev, entry]);
   }, []);
 
-  const addFormSubmitLog = useCallback((formType: string, data: Record<string, unknown>, summary?: string) => {
-    const entry: AuditLogEntry = {
-      id: `log-${eventCountRef.current++}`,
-      type: 'metadata',
-      agent_id: 'user',
-      agent_name: 'User',
-      content: summary || `Form submitted: ${formType}`,
-      metadata: { formType, ...data },
-      timestamp: new Date().toISOString(),
-    };
-    setLogs(prev => [...prev, entry]);
-  }, []);
+  const addFormSubmitLog = useCallback(
+    (formType: string, data: Record<string, unknown>, summary?: string) => {
+      const entry: AuditLogEntry = {
+        id: `log-${eventCountRef.current++}`,
+        type: 'metadata',
+        agent_id: 'user',
+        agent_name: 'User',
+        content: summary || `Form submitted: ${formType}`,
+        metadata: { formType, ...data },
+        timestamp: new Date().toISOString(),
+      };
+      setLogs((prev) => [...prev, entry]);
+    },
+    [],
+  );
 
   return {
     sendQuery,

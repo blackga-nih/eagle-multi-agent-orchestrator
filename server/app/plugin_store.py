@@ -10,6 +10,7 @@ Entity format:
 
 entity_type values: "agents" | "skills" | "templates" | "refdata" | "tools" | "manifest"
 """
+
 import time
 import json
 import logging
@@ -50,6 +51,7 @@ def _cache_invalidate(entity_type: str) -> None:
 
 # ── Low-Level CRUD ────────────────────────────────────────────────────
 
+
 def get_plugin_item(entity_type: str, name: str) -> Optional[Dict[str, Any]]:
     """Fetch a single PLUGIN# item by entity_type and name.
 
@@ -66,7 +68,9 @@ def get_plugin_item(entity_type: str, name: str) -> Optional[Dict[str, Any]]:
         item = response.get("Item")
         return dict(item) if item else None
     except (ClientError, BotoCoreError) as e:
-        logger.error("plugin_store.get_plugin_item failed [%s/%s]: %s", entity_type, name, e)
+        logger.error(
+            "plugin_store.get_plugin_item failed [%s/%s]: %s", entity_type, name, e
+        )
         return None
 
 
@@ -107,9 +111,13 @@ def put_plugin_item(
         table = get_table()
         table.put_item(Item=item)
         _cache_invalidate(entity_type)
-        logger.debug("plugin_store.put_plugin_item: [%s/%s] v%s", entity_type, name, version)
+        logger.debug(
+            "plugin_store.put_plugin_item: [%s/%s] v%s", entity_type, name, version
+        )
     except (ClientError, BotoCoreError) as e:
-        logger.error("plugin_store.put_plugin_item failed [%s/%s]: %s", entity_type, name, e)
+        logger.error(
+            "plugin_store.put_plugin_item failed [%s/%s]: %s", entity_type, name, e
+        )
 
     return item
 
@@ -136,11 +144,14 @@ def list_plugin_entities(entity_type: str) -> List[Dict[str, Any]]:
         _cache_set(entity_type, items)
         return items
     except (ClientError, BotoCoreError) as e:
-        logger.error("plugin_store.list_plugin_entities failed [%s]: %s", entity_type, e)
+        logger.error(
+            "plugin_store.list_plugin_entities failed [%s]: %s", entity_type, e
+        )
         return []
 
 
 # ── Resolution Helpers ────────────────────────────────────────────────
+
 
 def get_agent_content(name: str) -> Optional[str]:
     """Return the body/content string for an agent by directory name.
@@ -190,6 +201,7 @@ def get_plugin_manifest() -> Dict[str, Any]:
 
 # ── Bootstrap Seeder ─────────────────────────────────────────────────
 
+
 def ensure_plugin_seeded() -> None:
     """Seed the eagle DynamoDB table from bundled plugin files if not already seeded.
 
@@ -206,12 +218,18 @@ def ensure_plugin_seeded() -> None:
         try:
             content = json.loads(existing_manifest.get("content", "{}"))
             if content.get("version") == BUNDLED_PLUGIN_VERSION:
-                logger.debug("plugin_store: DynamoDB already seeded at version %s — skipping", BUNDLED_PLUGIN_VERSION)
+                logger.debug(
+                    "plugin_store: DynamoDB already seeded at version %s — skipping",
+                    BUNDLED_PLUGIN_VERSION,
+                )
                 return
         except (json.JSONDecodeError, TypeError):
             pass  # Corrupt manifest — re-seed
 
-    logger.info("plugin_store: seeding DynamoDB from bundled eagle-plugin/ files (version %s)", BUNDLED_PLUGIN_VERSION)
+    logger.info(
+        "plugin_store: seeding DynamoDB from bundled eagle-plugin/ files (version %s)",
+        BUNDLED_PLUGIN_VERSION,
+    )
 
     # Import here to avoid circular imports — eagle_skill_constants imports plugin_store
     # at its tail end, so by the time ensure_plugin_seeded() runs, AGENTS/SKILLS are loaded.
@@ -231,7 +249,9 @@ def ensure_plugin_seeded() -> None:
             )
             seeded_agents += 1
         except Exception as exc:  # noqa: BLE001
-            logger.warning("plugin_store: failed to seed agent [%s]: %s", agent_name, exc)
+            logger.warning(
+                "plugin_store: failed to seed agent [%s]: %s", agent_name, exc
+            )
 
     for skill_name, entry in SKILLS.items():
         try:
@@ -244,15 +264,19 @@ def ensure_plugin_seeded() -> None:
             )
             seeded_skills += 1
         except Exception as exc:  # noqa: BLE001
-            logger.warning("plugin_store: failed to seed skill [%s]: %s", skill_name, exc)
+            logger.warning(
+                "plugin_store: failed to seed skill [%s]: %s", skill_name, exc
+            )
 
     # Write manifest last — marks seeding as complete
-    manifest_content = json.dumps({
-        "version": BUNDLED_PLUGIN_VERSION,
-        "seeded_at": datetime.utcnow().isoformat(),
-        "agent_count": seeded_agents,
-        "skill_count": seeded_skills,
-    })
+    manifest_content = json.dumps(
+        {
+            "version": BUNDLED_PLUGIN_VERSION,
+            "seeded_at": datetime.utcnow().isoformat(),
+            "agent_count": seeded_agents,
+            "skill_count": seeded_skills,
+        }
+    )
     put_plugin_item(
         entity_type="manifest",
         name="manifest",

@@ -100,7 +100,10 @@ export default function CodeSandboxRenderer({
               </div>
               <div className="px-3 py-2 max-h-48 overflow-y-auto font-mono text-[11px] space-y-0.5">
                 {logs.map((line, i) => (
-                  <div key={i} className="text-[#a6e3a1] whitespace-pre-wrap break-all leading-snug">
+                  <div
+                    key={i}
+                    className="text-[#a6e3a1] whitespace-pre-wrap break-all leading-snug"
+                  >
                     <span className="text-[#6c7086] select-none mr-2">{i + 1}</span>
                     {line}
                   </div>

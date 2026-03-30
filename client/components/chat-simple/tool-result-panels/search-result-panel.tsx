@@ -35,9 +35,10 @@ export default function SearchResultPanel({ text }: { text: string }) {
 
     if (items && items.length > 0) {
       // Header with result count
-      const count = (data && typeof data === 'object' && (data as Record<string, unknown>).results_count)
-        ? Number((data as Record<string, unknown>).results_count)
-        : items.length;
+      const count =
+        data && typeof data === 'object' && (data as Record<string, unknown>).results_count
+          ? Number((data as Record<string, unknown>).results_count)
+          : items.length;
 
       return (
         <div className="border-t border-[#E5E9F0] bg-white">
@@ -62,9 +63,7 @@ export default function SearchResultPanel({ text }: { text: string }) {
                 >
                   <span className="text-xs shrink-0 mt-0.5">{'📖'}</span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-gray-800">
-                      {title}
-                    </p>
+                    <p className="text-xs font-medium text-gray-800">{title}</p>
                     {desc && (
                       <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">{desc}</p>
                     )}

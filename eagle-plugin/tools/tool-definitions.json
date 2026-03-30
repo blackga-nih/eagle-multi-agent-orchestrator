@@ -143,14 +143,14 @@
     },
     {
       "name": "s3_document_ops",
-      "description": "Read, write, or list documents stored in S3. All documents are scoped per-tenant. Use this to manage acquisition documents, templates, and generated files.",
+      "description": "Read, write, list, delete, copy, rename, move, check existence, or generate presigned URLs for documents stored in S3. All documents are scoped per-tenant.",
       "input_schema": {
         "type": "object",
         "properties": {
           "operation": {
             "type": "string",
-            "enum": ["list", "read", "write"],
-            "description": "Operation to perform: list files, read a file, or write a file"
+            "enum": ["list", "read", "write", "delete", "copy", "rename", "move", "exists", "presign"],
+            "description": "Operation to perform on S3 objects"
           },
           "bucket": {
             "type": "string",
@@ -158,11 +158,19 @@
           },
           "key": {
             "type": "string",
-            "description": "S3 key/path for read or write operations"
+            "description": "S3 key/path (source key for copy/rename/move)"
           },
           "content": {
             "type": "string",
             "description": "Content to write (for write operation)"
+          },
+          "destination_key": {
+            "type": "string",
+            "description": "Target key for copy/rename/move operations"
+          },
+          "expiry_seconds": {
+            "type": "integer",
+            "description": "Presigned URL expiry in seconds (default 3600)"
           }
         },
         "required": ["operation"]
@@ -170,14 +178,14 @@
     },
     {
       "name": "dynamodb_intake",
-      "description": "Create, read, update, list, or query intake records in DynamoDB. All records are scoped per-tenant using PK/SK patterns. Use this to track acquisition intake packages.",
+      "description": "Create, read, update, delete, list, query, count, batch_get, or batch_write intake records in DynamoDB. All records are scoped per-tenant using PK/SK patterns.",
       "input_schema": {
         "type": "object",
         "properties": {
           "operation": {
             "type": "string",
-            "enum": ["create", "read", "update", "list", "query"],
-            "description": "CRUD operation to perform"
+            "enum": ["create", "read", "update", "delete", "list", "query", "count", "batch_get", "batch_write"],
+            "description": "Operation to perform"
           },
           "table": {
             "type": "string",
@@ -185,7 +193,7 @@
           },
           "item_id": {
             "type": "string",
-            "description": "Unique item identifier for read/update"
+            "description": "Unique item identifier for read/update/delete"
           },
           "data": {
             "type": "object",
@@ -213,6 +221,15 @@
               }
             }
           },
+          "item_ids": {
+            "type": "string",
+            "description": "Comma-separated item IDs for batch_get (e.g. 'id1,id2,id3')"
+          },
+          "items": {
+            "type": "array",
+            "items": { "type": "object" },
+            "description": "Array of item objects for batch_write (max 25)"
+          },
           "filter_expression": {
             "type": "string",
             "description": "Optional filter expression for queries"
@@ -236,14 +253,14 @@
     },
     {
       "name": "cloudwatch_logs",
-      "description": "Read CloudWatch logs filtered by user/session. Use this to inspect application logs, debug issues, or audit user activity.",
+      "description": "Read CloudWatch logs, run Logs Insights queries, or list log groups. Use this to inspect application logs, debug issues, or audit user activity.",
       "input_schema": {
         "type": "object",
         "properties": {
           "operation": {
             "type": "string",
-            "enum": ["search", "recent", "get_stream"],
-            "description": "Log operation: search with filter, get recent events, or get a specific stream"
+            "enum": ["search", "recent", "get_stream", "insights", "list_groups"],
+            "description": "Log operation: search, recent events, get stream, run Insights query, or list log groups"
           },
           "log_group": {
             "type": "string",
@@ -264,6 +281,14 @@
           "limit": {
             "type": "integer",
             "description": "Maximum number of log events to return (default: 50)"
+          },
+          "query": {
+            "type": "string",
+            "description": "CloudWatch Logs Insights query string (for 'insights' operation)"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Log group name prefix filter (for 'list_groups' operation)"
           }
         },
         "required": ["operation"]

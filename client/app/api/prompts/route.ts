@@ -6,7 +6,7 @@ import { join } from 'path';
 async function discoverEntries(
   baseDir: string,
   filename: string,
-  typeLabel: string
+  typeLabel: string,
 ): Promise<Record<string, { title: string; path: string }>> {
   const entries: Record<string, { title: string; path: string }> = {};
   try {

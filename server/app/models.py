@@ -4,10 +4,12 @@ from datetime import datetime
 from enum import Enum
 from decimal import Decimal
 
+
 class SubscriptionTier(str, Enum):
     BASIC = "basic"
     ADVANCED = "advanced"
     PREMIUM = "premium"
+
 
 class TierLimits(BaseModel):
     daily_messages: int
@@ -16,11 +18,13 @@ class TierLimits(BaseModel):
     concurrent_sessions: int
     mcp_server_access: bool
 
+
 class TenantContext(BaseModel):
     tenant_id: str
     user_id: str
     session_id: str
     subscription_tier: SubscriptionTier = SubscriptionTier.BASIC
+
 
 class ChatMessage(BaseModel):
     message: str
@@ -28,11 +32,13 @@ class ChatMessage(BaseModel):
     package_id: Optional[str] = None
     tenant_context: Optional[TenantContext] = None
 
+
 class ChatResponse(BaseModel):
     response: str
     session_id: str
     tenant_id: str
     usage_metrics: Dict[str, Any]
+
 
 class UsageMetric(BaseModel):
     tenant_id: str
@@ -41,6 +47,7 @@ class UsageMetric(BaseModel):
     value: Decimal
     session_id: str
     agent_id: Optional[str] = None
+
 
 class TenantSession(BaseModel):
     tenant_id: str
@@ -51,6 +58,7 @@ class TenantSession(BaseModel):
     last_activity: datetime
     message_count: int = 0
     tier_usage_count: int = 0
+
 
 class SubscriptionUsage(BaseModel):
     tenant_id: str

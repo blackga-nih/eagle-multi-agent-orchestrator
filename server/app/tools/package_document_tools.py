@@ -106,7 +106,9 @@ def exec_finalize_package(params: dict, tenant_id: str) -> dict:
             result["status"] = "review"
         else:
             result["submitted"] = False
-            result["submit_error"] = "Package could not be submitted (may not be in drafting status)"
+            result["submit_error"] = (
+                "Package could not be submitted (may not be in drafting status)"
+            )
 
     return result
 
@@ -137,7 +139,7 @@ def _backfill_completed_docs(
         found: dict[str, str] = {}  # doc_type → s3_key (latest)
         for obj in contents:
             key = obj["Key"]
-            filename = key[len(prefix):]  # e.g. "sow_20260325_203000.md"
+            filename = key[len(prefix) :]  # e.g. "sow_20260325_203000.md"
             parts = filename.split("_", 1)
             if parts:
                 dt = parts[0].lower()
@@ -164,7 +166,7 @@ def _backfill_completed_docs(
                     package_id=pkg_id,
                     doc_type=doc_type,
                     content=content,
-                    title=f"{doc_type.replace('_', ' ').title()} (linked)",
+                    title=f"{doc_type.replace('_', ' ').title()}",
                     file_type=s3_key.rsplit(".", 1)[-1] if "." in s3_key else "md",
                     created_by_user_id=owner,
                     session_id=session_id,
@@ -174,10 +176,14 @@ def _backfill_completed_docs(
                     completed.append(doc_type)
                     logger.info(
                         "Backfilled %s from %s into package %s",
-                        doc_type, s3_key, pkg_id,
+                        doc_type,
+                        s3_key,
+                        pkg_id,
                     )
             except Exception:
-                logger.debug("Backfill failed for %s: %s", doc_type, s3_key, exc_info=True)
+                logger.debug(
+                    "Backfill failed for %s: %s", doc_type, s3_key, exc_info=True
+                )
 
         if completed != list(package.get("completed_documents", [])):
             update_package(tenant_id, pkg_id, {"completed_documents": completed})
@@ -185,10 +191,14 @@ def _backfill_completed_docs(
         logger.debug("_backfill_completed_docs failed (non-critical)", exc_info=True)
 
 
-def exec_manage_package(params: dict, tenant_id: str, session_id: str | None = None) -> dict:
+def exec_manage_package(
+    params: dict, tenant_id: str, session_id: str | None = None
+) -> dict:
     """Create, read, update, list, or get checklist for acquisition packages."""
     from app.package_store import (
+        clone_package,
         create_package,
+        delete_package,
         get_package,
         get_package_checklist,
         list_packages,
@@ -265,7 +275,49 @@ def exec_manage_package(params: dict, tenant_id: str, session_id: str | None = N
         checklist["package_id"] = package_id
         return checklist
 
-    return {"error": f"Unknown operation: {operation}. Use create, get, update, list, or checklist."}
+    if operation == "delete":
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for delete operation"}
+        result = delete_package(tenant_id, package_id)
+        if result is None:
+            return {
+                "error": (
+                    f"Package {package_id} not found or cannot"
+                    " be deleted (only intake/drafting)"
+                ),
+            }
+        return {"deleted": True, "package_id": package_id, "title": result.get("title")}
+
+    if operation == "clone":
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for clone operation"}
+        new_title = params.get("title") or None
+        owner = _extract_owner_user_id(session_id)
+        result = clone_package(
+            tenant_id, package_id, new_title,
+            owner_user_id=owner or None,
+        )
+        if result is None:
+            return {"error": f"Source package {package_id} not found"}
+        return result
+
+    if operation == "exports":
+        from app.export_store import list_exports
+
+        package_id = params.get("package_id")
+        if not package_id:
+            return {"error": "package_id is required for exports operation"}
+        exports = list_exports(tenant_id, package_id=package_id)
+        return {"exports": exports, "count": len(exports)}
+
+    return {
+        "error": (
+            f"Unknown operation: {operation}. Use create, get,"
+            " update, delete, list, checklist, clone, or exports."
+        )
+    }
 
 
 def _extract_owner_user_id(session_id: str | None) -> str:

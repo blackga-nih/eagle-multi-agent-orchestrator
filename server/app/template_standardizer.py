@@ -36,10 +36,12 @@ TEMPLATES_DIR = _PLUGIN_ROOT / "data" / "templates"
 METADATA_DIR = _PLUGIN_ROOT / "data" / "template-metadata"
 
 # XLSX MIME types — skipped by standardizer
-_XLSX_MIMES = frozenset({
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
-})
+_XLSX_MIMES = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    }
+)
 
 # ── Data Models ──────────────────────────────────────────────────────
 
@@ -215,7 +217,10 @@ def standardize_template(
     # Step 3: AI standardization via Bedrock
     try:
         standardized = _ai_standardize(
-            raw_markdown, doc_type, reference_template, metadata_hints,
+            raw_markdown,
+            doc_type,
+            reference_template,
+            metadata_hints,
         )
     except Exception as e:
         logger.error("AI standardization failed for %s: %s", filename, e)
@@ -276,7 +281,10 @@ def _ai_standardize(
     if metadata_hints:
         sections = metadata_hints.get("sections", [])
         if sections:
-            hints = [f"- Section {s.get('number', '?')}: {s.get('title', '?')}" for s in sections]
+            hints = [
+                f"- Section {s.get('number', '?')}: {s.get('title', '?')}"
+                for s in sections
+            ]
             section_hints = "\n## Expected Sections\n" + "\n".join(hints)
 
     user_prompt = f"""Convert this document to properly structured markdown.
@@ -297,15 +305,19 @@ def _ai_standardize(
 
 Convert the raw document content above into the gold-standard markdown format shown in the reference template. Preserve all original content while restructuring it."""
 
-    body = json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 8192,
-        "temperature": 0.1,
-        "system": _SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": user_prompt}],
-    })
+    body = json.dumps(
+        {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 8192,
+            "temperature": 0.1,
+            "system": _SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": user_prompt}],
+        }
+    )
 
-    logger.info("Invoking Bedrock %s for %s standardization", BEDROCK_MODEL_ID, doc_type)
+    logger.info(
+        "Invoking Bedrock %s for %s standardization", BEDROCK_MODEL_ID, doc_type
+    )
 
     bedrock = _get_bedrock()
     response = bedrock.invoke_model(modelId=BEDROCK_MODEL_ID, body=body)
@@ -399,7 +411,9 @@ def assess_quality(markdown: str, doc_type: str = "") -> QualityReport:
         issues.append("Missing --- section separators")
 
     # Check EAGLE footer
-    has_footer = "EAGLE" in markdown[-200:] and "NCI Acquisition Assistant" in markdown[-200:]
+    has_footer = (
+        "EAGLE" in markdown[-200:] and "NCI Acquisition Assistant" in markdown[-200:]
+    )
     if has_footer:
         score += 5
     else:
@@ -458,7 +472,9 @@ def _get_metadata_hints(filename: str) -> dict:
         for candidate in METADATA_DIR.glob("*.json"):
             if candidate.name.startswith("_"):
                 continue
-            if candidate.stem.lower().replace("_", "") == stem.lower().replace(" ", "").replace("-", "").replace("_", ""):
+            if candidate.stem.lower().replace("_", "") == stem.lower().replace(
+                " ", ""
+            ).replace("-", "").replace("_", ""):
                 path = candidate
                 break
 
@@ -472,6 +488,7 @@ def _get_metadata_hints(filename: str) -> dict:
 def _extract_raw_text(body: bytes, content_type: str, filename: str) -> Optional[str]:
     """Extract raw text from document bytes using existing converter."""
     from .document_markdown_service import convert_to_markdown
+
     return convert_to_markdown(body, content_type, filename)
 
 
@@ -552,7 +569,8 @@ def update_batch_job(job_id: str, result: BatchJobResult) -> None:
             "failed": len(results) - len(successes),
             "avg_quality": (
                 sum(r["quality_score"] for r in successes) / len(successes)
-                if successes else 0.0
+                if successes
+                else 0.0
             ),
         }
 

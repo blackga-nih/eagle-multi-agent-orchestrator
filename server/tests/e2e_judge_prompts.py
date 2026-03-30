@@ -97,8 +97,30 @@ Return ONLY valid JSON:
 Expected elements:
 - Document list or grid view
 - Document cards with titles, types, dates
-- Filter or search controls
+- Status tabs (All Documents, Not Started, In Progress, Draft, Approved)
+- Search bar and filter controls
 - Document actions (view, download, edit)
+- "Templates" and "+ New Document" buttons in the header
+
+CRITICAL CHECKS — any of these MUST result in verdict "fail":
+
+1. SIDECAR FILE LEAK: Look for document entries whose filename ends with ".content.md"
+   (e.g., "foo.docx.content.md", "bar.xlsx.content.md"). These are internal sidecar
+   metadata files and should NOT appear in the user-facing document list. If you see ANY
+   entries with ".content.md" in the filename, FAIL and list each one in issues as
+   "Sidecar file visible: <filename>".
+
+2. TEMPLATE JARGON: If any visible document content, title, or preview shows raw template
+   placeholders such as {{{{VARIABLE_NAME}}}}, {{{{placeholder}}}}, <<FIELD>>,
+   or bracketed markers like "[Something - To Be Filled]", FAIL and report
+   "Template jargon visible: <pattern found>".
+
+3. DUPLICATE ENTRIES: If the same base document appears twice — once as the real file
+   (e.g., "report.docx") and once as its sidecar (e.g., "report.docx.content.md") —
+   FAIL with "Duplicate document entries: <base filename>".
+
+4. 404 OR ERROR PAGES: If the screenshot shows a 404 error, "page could not be found",
+   blank white screen, or error overlay, FAIL immediately.
 
 {page_description}
 Step: {step_description}

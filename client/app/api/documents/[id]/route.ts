@@ -23,7 +23,11 @@ const DOC_TYPE_BY_PREFIX: Array<{ prefix: string; type: string; title: string }>
   { prefix: 'acquisition_plan', type: 'acquisition_plan', title: 'Acquisition Plan' },
   { prefix: 'market_research', type: 'market_research', title: 'Market Research' },
   { prefix: 'security_checklist', type: 'security_checklist', title: 'Security Checklist' },
-  { prefix: 'contract_type_justification', type: 'contract_type_justification', title: 'Contract Type Justification' },
+  {
+    prefix: 'contract_type_justification',
+    type: 'contract_type_justification',
+    title: 'Contract Type Justification',
+  },
   { prefix: 'cor_certification', type: 'cor_certification', title: 'COR Certification' },
   { prefix: 'eval_criteria', type: 'eval_criteria', title: 'Evaluation Criteria' },
   { prefix: 'section_508', type: 'section_508', title: 'Section 508 Compliance' },
@@ -36,7 +40,11 @@ const DOC_TYPE_BY_PREFIX: Array<{ prefix: string; type: string; title: string }>
 function inferDocTypeAndTitle(fileName: string): { document_type: string; title: string } {
   const base = fileName.toLowerCase();
   for (const entry of DOC_TYPE_BY_PREFIX) {
-    if (base.startsWith(`${entry.prefix}_`) || base === entry.prefix || base.includes(`${entry.prefix}.`)) {
+    if (
+      base.startsWith(`${entry.prefix}_`) ||
+      base === entry.prefix ||
+      base.includes(`${entry.prefix}.`)
+    ) {
       return { document_type: entry.type, title: entry.title };
     }
   }
@@ -114,10 +122,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
   try {
     const query = includeContent ? '?content=true' : '';
-    const response = await fetch(`${FASTAPI_URL}/api/documents/${encodeURIComponent(docKey)}${query}`, {
-      method: 'GET',
-      headers,
-    });
+    const response = await fetch(
+      `${FASTAPI_URL}/api/documents/${encodeURIComponent(docKey)}${query}`,
+      {
+        method: 'GET',
+        headers,
+      },
+    );
 
     if (!response.ok) {
       const errorText = await response.text();

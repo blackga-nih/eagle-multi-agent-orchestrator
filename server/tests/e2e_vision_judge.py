@@ -66,6 +66,7 @@ class VisionJudge:
         journey: str,
         page_description: str,
         step_description: str,
+        page_context: str = "",
     ) -> JudgmentResult:
         """Judge a single screenshot. Checks cache first.
 
@@ -74,6 +75,9 @@ class VisionJudge:
             journey: Journey name (e.g., "chat", "admin", "login").
             page_description: What the page should look like.
             step_description: What this specific step captures.
+            page_context: Frontend events captured since the last screenshot
+                (console errors, network failures, SSE events). Appended to
+                the judge prompt so the model can reason about frontend state.
 
         Returns:
             JudgmentResult with verdict, score, reasoning, and cache status.
@@ -91,6 +95,17 @@ class VisionJudge:
         # Cache miss — call Bedrock
         logger.info(f"Judging {step_description} ({sha256[:12]}...) via {self.model_id}")
         prompt = get_prompt(journey, page_description, step_description)
+
+        # Append frontend event context if present
+        if page_context:
+            prompt += (
+                "\n\n--- Frontend Event Context (captured by Playwright) ---\n"
+                "The following events were recorded in the browser between the "
+                "previous screenshot and this one. Use them to understand errors, "
+                "network failures, or SSE streaming state that may explain what "
+                "you see in the screenshot.\n\n"
+                f"{page_context}"
+            )
 
         try:
             response = self._client.converse(

@@ -29,25 +29,28 @@ export default function KBPreviewModal({ document: doc, onClose }: KBPreviewModa
   const [loading, setLoading] = useState(false);
   const [truncated, setTruncated] = useState(false);
 
-  const fetchContent = useCallback(async (s3Key: string) => {
-    setLoading(true);
-    setContent(null);
-    try {
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+  const fetchContent = useCallback(
+    async (s3Key: string) => {
+      setLoading(true);
+      setContent(null);
+      try {
+        const token = await getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(`/api/knowledge-base/document/${encodeURI(s3Key)}`, { headers });
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data = await res.json();
-      setContent(data.content || '');
-      setTruncated(data.truncated || false);
-    } catch {
-      setContent('Failed to load document content.');
-    } finally {
-      setLoading(false);
-    }
-  }, [getToken]);
+        const res = await fetch(`/api/knowledge-base/document/${encodeURI(s3Key)}`, { headers });
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        setContent(data.content || '');
+        setTruncated(data.truncated || false);
+      } catch {
+        setContent('Failed to load document content.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [getToken],
+  );
 
   useEffect(() => {
     if (doc?.s3_key) {
@@ -66,7 +69,9 @@ export default function KBPreviewModal({ document: doc, onClose }: KBPreviewModa
         <div>
           <span className="text-gray-500">Type</span>
           <div className="mt-1">
-            <Badge variant={typeVariants[doc.document_type] || 'default'}>{doc.document_type}</Badge>
+            <Badge variant={typeVariants[doc.document_type] || 'default'}>
+              {doc.document_type}
+            </Badge>
           </div>
         </div>
         <div>
@@ -110,7 +115,9 @@ export default function KBPreviewModal({ document: doc, onClose }: KBPreviewModa
           <span className="text-sm text-gray-500">Keywords</span>
           <div className="flex flex-wrap gap-1.5 mt-1.5">
             {doc.keywords.map((kw) => (
-              <Badge key={kw} variant="default">{kw}</Badge>
+              <Badge key={kw} variant="default">
+                {kw}
+              </Badge>
             ))}
           </div>
         </div>

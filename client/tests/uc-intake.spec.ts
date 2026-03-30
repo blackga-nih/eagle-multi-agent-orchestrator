@@ -25,7 +25,7 @@ test.describe('UC: OA Intake Workflow', () => {
 
     // Response should include acquisition pathway content
     await expect(page.locator('main')).toContainText(
-      /simplified|acquisition type|required documents|SOW|IGCE|threshold|pathway|procurement/i
+      /simplified|acquisition type|required documents|SOW|IGCE|threshold|pathway|procurement/i,
     );
   });
 });

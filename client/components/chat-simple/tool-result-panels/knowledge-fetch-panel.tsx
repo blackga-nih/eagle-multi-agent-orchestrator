@@ -28,7 +28,9 @@ export default function KnowledgeFetchPanel({ text }: { text: string }) {
   if (!content) {
     return (
       <div className="border-t border-[#E5E9F0] px-3 py-2 bg-white max-h-64 overflow-y-auto">
-        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">{text}</pre>
+        <pre className="text-gray-700 font-mono text-[11px] whitespace-pre-wrap break-all">
+          {text}
+        </pre>
       </div>
     );
   }
@@ -42,16 +44,20 @@ export default function KnowledgeFetchPanel({ text }: { text: string }) {
       {/* Header with filename */}
       <div className="px-3 py-1.5 border-b border-gray-100 flex items-center gap-2">
         <span className="text-[10px] font-mono text-gray-600 truncate">{filename}</span>
-        <span className="text-[10px] text-gray-400 ml-auto">{content.length.toLocaleString()} chars</span>
+        <span className="text-[10px] text-gray-400 ml-auto">
+          {content.length.toLocaleString()} chars
+        </span>
       </div>
       <div className="relative">
         <div className="overflow-y-auto max-h-64 px-3 py-2">
-          <div className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
+          <div
+            className="prose prose-xs prose-gray max-w-none text-[11px] leading-relaxed
                           [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1
                           [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1
                           [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5
                           [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0
-                          [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded">
+                          [&_code]:text-[10px] [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded"
+          >
             <ReactMarkdown>{stripMetadata(content.slice(0, 5000))}</ReactMarkdown>
           </div>
         </div>

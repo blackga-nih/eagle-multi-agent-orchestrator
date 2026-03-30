@@ -1,7 +1,19 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, Trash2, Bot, User, Download, FileText, History, Cloud, CloudOff, RefreshCw } from 'lucide-react';
+import {
+  Send,
+  Loader2,
+  Trash2,
+  Bot,
+  User,
+  Download,
+  FileText,
+  History,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AgentConfig, AgentMessage, ToolResult } from '@/types/mcp';
@@ -134,7 +146,9 @@ export default function AgentChat({ config }: AgentChatProps) {
               className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               {message.role === 'assistant' && (
-                <div className={`w-8 h-8 rounded-lg ${config.bgColor} ${config.color} flex items-center justify-center flex-shrink-0`}>
+                <div
+                  className={`w-8 h-8 rounded-lg ${config.bgColor} ${config.color} flex items-center justify-center flex-shrink-0`}
+                >
                   <Bot className="w-4 h-4" />
                 </div>
               )}
@@ -150,9 +164,7 @@ export default function AgentChat({ config }: AgentChatProps) {
                   <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                 ) : (
                   <div className="prose prose-sm max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {message.content}
-                    </ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                   </div>
                 )}
 
@@ -181,7 +193,9 @@ export default function AgentChat({ config }: AgentChatProps) {
           {/* Loading indicator */}
           {isLoading && (
             <div className="flex gap-3">
-              <div className={`w-8 h-8 rounded-lg ${config.bgColor} ${config.color} flex items-center justify-center flex-shrink-0`}>
+              <div
+                className={`w-8 h-8 rounded-lg ${config.bgColor} ${config.color} flex items-center justify-center flex-shrink-0`}
+              >
                 <Bot className="w-4 h-4" />
               </div>
               <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
@@ -217,8 +231,18 @@ export default function AgentChat({ config }: AgentChatProps) {
                   ) : (
                     <CloudOff className="w-3 h-3 text-gray-300" />
                   )}
-                  <span className={isSynced ? 'text-green-600' : hasPendingChanges ? 'text-amber-600' : ''}>
-                    {isSyncing ? 'Syncing...' : isSynced ? 'Synced' : hasPendingChanges ? 'Pending' : 'Offline'}
+                  <span
+                    className={
+                      isSynced ? 'text-green-600' : hasPendingChanges ? 'text-amber-600' : ''
+                    }
+                  >
+                    {isSyncing
+                      ? 'Syncing...'
+                      : isSynced
+                        ? 'Synced'
+                        : hasPendingChanges
+                          ? 'Pending'
+                          : 'Offline'}
                   </span>
                   {(hasPendingChanges || !isSynced) && !isSyncing && (
                     <button
@@ -325,11 +349,7 @@ function getSuggestedQuestions(agentId: string): string[] {
       'What EC2 instances are running?',
       'Show Lambda function status',
     ],
-    analyst: [
-      'How many users are active?',
-      'Generate a workflow report',
-      'Analyze data trends',
-    ],
+    analyst: ['How many users are active?', 'Generate a workflow report', 'Analyze data trends'],
   };
 
   return suggestions[agentId] || ['How can you help me?'];

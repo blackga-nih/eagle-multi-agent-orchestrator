@@ -18,7 +18,11 @@ from .admin_tools import (
     exec_manage_templates,
     exec_query_compliance_matrix,
 )
-from .aws_ops_tools import exec_cloudwatch_logs, exec_dynamodb_intake, exec_s3_document_ops
+from .aws_ops_tools import (
+    exec_cloudwatch_logs,
+    exec_dynamodb_intake,
+    exec_s3_document_ops,
+)
 from .docx_edit_tool import exec_edit_docx_document
 from .far_search import exec_search_far
 from .intake_tools import exec_get_intake_status, exec_intake_workflow
@@ -42,7 +46,9 @@ TOOLS_NEEDING_SESSION = {
 }
 
 
-def exec_create_document(params: dict, tenant_id: str, session_id: str | None = None) -> dict:
+def exec_create_document(
+    params: dict, tenant_id: str, session_id: str | None = None
+) -> dict:
     from .document_generation import exec_create_document as _exec_create_document
 
     return _exec_create_document(params, tenant_id, session_id)
@@ -71,7 +77,9 @@ def get_tool_dispatch() -> dict[str, ToolHandler]:
     }
 
 
-def execute_tool(tool_name: str, tool_input: dict, session_id: str | None = None) -> str:
+def execute_tool(
+    tool_name: str, tool_input: dict, session_id: str | None = None
+) -> str:
     tenant_id = extract_tenant_id(session_id)
     handler = get_tool_dispatch().get(tool_name)
     if handler is None:

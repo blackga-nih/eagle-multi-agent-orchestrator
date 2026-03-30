@@ -29,7 +29,9 @@ def check_knowledge_base_health() -> dict[str, Any]:
         kb_status["metadata_table"]["error"] = str(exc)
 
     if not document_bucket:
-        kb_status["document_bucket"]["error"] = "DOCUMENT_BUCKET or S3_BUCKET is not configured"
+        kb_status["document_bucket"]["error"] = (
+            "DOCUMENT_BUCKET or S3_BUCKET is not configured"
+        )
         return kb_status
 
     try:

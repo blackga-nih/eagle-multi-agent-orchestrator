@@ -35,9 +35,7 @@ from botocore.exceptions import ClientError, ReadTimeoutError
 logger = logging.getLogger("eagle.web_search")
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-WEB_SEARCH_MODEL_ID = os.environ.get(
-    "WEB_SEARCH_MODEL", "us.amazon.nova-2-lite-v1:0"
-)
+WEB_SEARCH_MODEL_ID = os.environ.get("WEB_SEARCH_MODEL", "us.amazon.nova-2-lite-v1:0")
 
 # Lazy-loaded client
 _bedrock_runtime = None
@@ -77,11 +75,13 @@ def _extract_citations(block: dict, last_text: str) -> list[dict]:
         web = location.get("web", {})
         url = web.get("url", "")
         if url:
-            results.append({
-                "url": url,
-                "domain": web.get("domain", ""),
-                "snippet": last_text[:200] if last_text else "",
-            })
+            results.append(
+                {
+                    "url": url,
+                    "domain": web.get("domain", ""),
+                    "snippet": last_text[:200] if last_text else "",
+                }
+            )
     return results
 
 
@@ -150,7 +150,9 @@ def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
         # Parse the response content blocks.
         # Nova returns interleaved text + citationsContent blocks.
         # text and citationsContent may be in the SAME block or SEPARATE blocks.
-        content_blocks = response.get("output", {}).get("message", {}).get("content", [])
+        content_blocks = (
+            response.get("output", {}).get("message", {}).get("content", [])
+        )
 
         answer_parts: list[str] = []
         sources: list[dict[str, str]] = []
@@ -175,9 +177,7 @@ def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
 
         # Auto-fetch top source pages so the agent gets full content
         # without needing separate web_fetch calls.
-        auto_fetch_count = int(
-            os.environ.get("WEB_SEARCH_AUTO_FETCH", "3")
-        )
+        auto_fetch_count = int(os.environ.get("WEB_SEARCH_AUTO_FETCH", "3"))
         fetch_urls = [s["url"] for s in sources[:auto_fetch_count]]
         fetched_pages = _auto_fetch_pages(fetch_urls)
 
@@ -188,9 +188,7 @@ def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
                 src["page_content"] = page
 
         # Build list of remaining URLs not yet fetched
-        unfetched = [
-            s["url"] for s in sources[auto_fetch_count:]
-        ]
+        unfetched = [s["url"] for s in sources[auto_fetch_count:]]
 
         result: dict[str, Any] = {
             "query": query,

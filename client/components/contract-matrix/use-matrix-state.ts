@@ -1,7 +1,13 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-import type { MatrixState, Requirements, FactorAnswer, RankedRecommendation, MatrixTab } from './matrix-types';
+import type {
+  MatrixState,
+  Requirements,
+  FactorAnswer,
+  RankedRecommendation,
+  MatrixTab,
+} from './matrix-types';
 import {
   DEFAULT_STATE,
   PRESETS,
@@ -17,11 +23,16 @@ export function useMatrixState(initialMethod?: string, initialType?: string) {
   const [state, setState] = useState<MatrixState>(() => {
     const s = { ...DEFAULT_STATE };
     if (initialMethod) {
-      const m = METHODS.find(x => x.id === initialMethod || x.label.toLowerCase().includes(initialMethod.toLowerCase()));
+      const m = METHODS.find(
+        (x) =>
+          x.id === initialMethod || x.label.toLowerCase().includes(initialMethod.toLowerCase()),
+      );
       if (m) s.method = m.id;
     }
     if (initialType) {
-      const t = TYPES.find(x => x.id === initialType || x.label.toLowerCase().includes(initialType.toLowerCase()));
+      const t = TYPES.find(
+        (x) => x.id === initialType || x.label.toLowerCase().includes(initialType.toLowerCase()),
+      );
       if (t && !isTypeDisabled(s.method, t.id)) s.type = t.id;
     }
     return s;
@@ -31,7 +42,7 @@ export function useMatrixState(initialMethod?: string, initialType?: string) {
   const [factorAnswers, setFactorAnswers] = useState<FactorAnswer[]>([]);
 
   const setMethod = useCallback((id: string) => {
-    setState(prev => {
+    setState((prev) => {
       const next = { ...prev, method: id };
       // If current type is disabled for new method, reset to ffp
       if (isTypeDisabled(id, prev.type)) {
@@ -42,19 +53,22 @@ export function useMatrixState(initialMethod?: string, initialType?: string) {
   }, []);
 
   const setType = useCallback((id: string) => {
-    setState(prev => {
+    setState((prev) => {
       if (isTypeDisabled(prev.method, id)) return prev;
       return { ...prev, type: id };
     });
   }, []);
 
   const setDollarValue = useCallback((v: number) => {
-    setState(prev => ({ ...prev, dollarValue: v }));
+    setState((prev) => ({ ...prev, dollarValue: v }));
   }, []);
 
-  const toggleFlag = useCallback((key: keyof Pick<MatrixState, 'isIT' | 'isSB' | 'isRD' | 'isHS' | 'isServices'>) => {
-    setState(prev => ({ ...prev, [key]: !prev[key] }));
-  }, []);
+  const toggleFlag = useCallback(
+    (key: keyof Pick<MatrixState, 'isIT' | 'isSB' | 'isRD' | 'isHS' | 'isServices'>) => {
+      setState((prev) => ({ ...prev, [key]: !prev[key] }));
+    },
+    [],
+  );
 
   const applyPreset = useCallback((name: string) => {
     const p = PRESETS[name];
@@ -69,8 +83,8 @@ export function useMatrixState(initialMethod?: string, initialType?: string) {
   );
 
   const setFactorAnswer = useCallback((factorId: string, optionId: string) => {
-    setFactorAnswers(prev => {
-      const filtered = prev.filter(a => a.factorId !== factorId);
+    setFactorAnswers((prev) => {
+      const filtered = prev.filter((a) => a.factorId !== factorId);
       return [...filtered, { factorId, optionId }];
     });
   }, []);

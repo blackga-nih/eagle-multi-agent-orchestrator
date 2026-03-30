@@ -4,10 +4,7 @@ export const dynamic = 'force-dynamic';
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const authHeader = request.headers.get('authorization');

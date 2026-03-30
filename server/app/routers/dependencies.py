@@ -15,7 +15,9 @@ from ..config import auth as auth_config
 REQUIRE_AUTH = auth_config.require_auth
 
 
-async def get_user_from_header(authorization: Optional[str] = Header(None)) -> UserContext:
+async def get_user_from_header(
+    authorization: Optional[str] = Header(None),
+) -> UserContext:
     """Extract user from Authorization header (EAGLE Cognito auth)."""
     user, error = extract_user_context(authorization)
     if REQUIRE_AUTH and user.user_id == "anonymous":

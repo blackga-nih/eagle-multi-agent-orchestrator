@@ -18,6 +18,7 @@ Key difference from agentic_service.py:
   - agentic_service.py: skills = prompt text injected into one system prompt (shared context)
   - sdk_agentic_service.py: skills = AgentDefinitions with separate context windows per skill
 """
+
 from __future__ import annotations
 
 import json
@@ -94,14 +95,20 @@ MAX_SKILL_PROMPT_CHARS = 4000
 
 # Read plugin.json to determine which agents/skills are wired as subagents
 _PLUGIN_JSON_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "eagle-plugin", "plugin.json"
+    os.path.dirname(os.path.abspath(__file__)),
+    "..",
+    "..",
+    "eagle-plugin",
+    "plugin.json",
 )
+
 
 def _load_plugin_config() -> dict:
     """Load plugin manifest — prefers DynamoDB PLUGIN#manifest, falls back to bundled file."""
     # Try DynamoDB first (hot-reloadable authoritative source)
     try:
         from .plugin_store import get_plugin_manifest
+
         manifest = get_plugin_manifest()
         if manifest:
             return manifest
@@ -114,6 +121,7 @@ def _load_plugin_config() -> dict:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+
 
 def _build_registry() -> dict:
     """Build SKILL_AGENT_REGISTRY dynamically from AGENTS + SKILLS metadata.
@@ -152,6 +160,7 @@ def _build_registry() -> dict:
         }
 
     return registry
+
 
 SKILL_AGENT_REGISTRY = _build_registry()
 
@@ -203,9 +212,16 @@ def build_skill_agents(
         if workspace_id:
             try:
                 from .workspace_override_store import resolve_skill
-                prompt_body, _source = resolve_skill(tenant_id, user_id, workspace_id, name)
+
+                prompt_body, _source = resolve_skill(
+                    tenant_id, user_id, workspace_id, name
+                )
             except Exception as exc:
-                logger.warning("workspace_override_store.resolve_skill failed for %s: %s — using bundled", name, exc)
+                logger.warning(
+                    "workspace_override_store.resolve_skill failed for %s: %s — using bundled",
+                    name,
+                    exc,
+                )
                 prompt_body = ""
         else:
             prompt_body = ""
@@ -214,7 +230,9 @@ def build_skill_agents(
         if not prompt_body:
             entry = PLUGIN_CONTENTS.get(meta["skill_key"])
             if not entry:
-                logger.warning("Plugin content not found for %s (key=%s)", name, meta["skill_key"])
+                logger.warning(
+                    "Plugin content not found for %s (key=%s)", name, meta["skill_key"]
+                )
                 continue
             prompt_body = entry["body"]
 
@@ -228,6 +246,7 @@ def build_skill_agents(
     # Merge active user-created SKILL# items (tenant-defined skills override bundled when same name)
     try:
         from .skill_store import list_active_skills
+
         user_skills = list_active_skills(tenant_id)
         for skill in user_skills:
             name = skill.get("name", "")
@@ -245,12 +264,17 @@ def build_skill_agents(
                 model=skill.get("model") or agent_model,
             )
     except Exception as exc:
-        logger.warning("skill_store.list_active_skills failed for %s: %s — skipping user skills", tenant_id, exc)
+        logger.warning(
+            "skill_store.list_active_skills failed for %s: %s — skipping user skills",
+            tenant_id,
+            exc,
+        )
 
     return agents
 
 
 # ── Supervisor Prompt ────────────────────────────────────────────────
+
 
 def build_supervisor_prompt(
     tenant_id: str = "demo-tenant",
@@ -276,14 +300,24 @@ def build_supervisor_prompt(
     if workspace_id:
         try:
             from .workspace_override_store import resolve_agent
-            base_prompt, _source = resolve_agent(tenant_id, user_id, workspace_id, "supervisor")
+
+            base_prompt, _source = resolve_agent(
+                tenant_id, user_id, workspace_id, "supervisor"
+            )
         except Exception as exc:
-            logger.warning("workspace_override_store.resolve_agent failed for supervisor: %s — using bundled", exc)
+            logger.warning(
+                "workspace_override_store.resolve_agent failed for supervisor: %s — using bundled",
+                exc,
+            )
 
     # Fall back to bundled AGENTS content
     if not base_prompt:
         supervisor_entry = AGENTS.get("supervisor")
-        base_prompt = supervisor_entry["body"].strip() if supervisor_entry else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
+        base_prompt = (
+            supervisor_entry["body"].strip()
+            if supervisor_entry
+            else "You are the EAGLE Supervisor Agent for NCI Office of Acquisitions."
+        )
 
     return (
         f"Tenant: {tenant_id} | User: {user_id} | Tier: {tier}\n\n"
@@ -297,6 +331,7 @@ def build_supervisor_prompt(
 
 
 # ── SDK Query Wrappers ──────────────────────────────────────────────
+
 
 async def sdk_query(
     prompt: str,
@@ -333,10 +368,14 @@ async def sdk_query(
     if not resolved_workspace_id:
         try:
             from .workspace_store import get_or_create_default
+
             ws = get_or_create_default(tenant_id, user_id)
             resolved_workspace_id = ws.get("workspace_id")
         except Exception as exc:
-            logger.warning("workspace_store.get_or_create_default failed: %s — using bundled prompts", exc)
+            logger.warning(
+                "workspace_store.get_or_create_default failed: %s — using bundled prompts",
+                exc,
+            )
 
     agent_model = model or MODEL
     agents = build_skill_agents(

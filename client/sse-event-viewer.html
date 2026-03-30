@@ -1,992 +1,1740 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EAGLE SSE Event Stream Viewer</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EAGLE SSE Event Stream Viewer</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-  :root {
-    --navy: #003366;
-    --navy-light: #004488;
-    --navy-dark: #002244;
-    --sidebar-bg: #0d1117;
-    --sidebar-border: #21262d;
-    --card-bg: #161b22;
-    --text-primary: #e6edf3;
-    --text-secondary: #8b949e;
-    --text-muted: #484f58;
-    --accent-blue: #58a6ff;
-    --accent-green: #3fb950;
-    --accent-purple: #bc8cff;
-    --accent-amber: #d29922;
-    --accent-orange: #f0883e;
-    --accent-red: #f85149;
-    --accent-gray: #8b949e;
-    --main-bg: #f6f8fa;
-  }
+      :root {
+        --navy: #003366;
+        --navy-light: #004488;
+        --navy-dark: #002244;
+        --sidebar-bg: #0d1117;
+        --sidebar-border: #21262d;
+        --card-bg: #161b22;
+        --text-primary: #e6edf3;
+        --text-secondary: #8b949e;
+        --text-muted: #484f58;
+        --accent-blue: #58a6ff;
+        --accent-green: #3fb950;
+        --accent-purple: #bc8cff;
+        --accent-amber: #d29922;
+        --accent-orange: #f0883e;
+        --accent-red: #f85149;
+        --accent-gray: #8b949e;
+        --main-bg: #f6f8fa;
+      }
 
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    background: var(--main-bg);
-    color: #1f2328;
-    height: 100vh;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+        background: var(--main-bg);
+        color: #1f2328;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
 
-  /* ── Top bar ── */
-  .top-bar {
-    background: var(--navy);
-    color: white;
-    padding: 10px 20px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-    z-index: 10;
-  }
-  .top-bar h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; }
-  .top-bar .logo { font-size: 18px; }
+      /* ── Top bar ── */
+      .top-bar {
+        background: var(--navy);
+        color: white;
+        padding: 10px 20px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-shrink: 0;
+        z-index: 10;
+      }
+      .top-bar h1 {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+      .top-bar .logo {
+        font-size: 18px;
+      }
 
-  /* Stats bar */
-  .stats {
-    display: flex;
-    gap: 20px;
-    margin-left: auto;
-    font-size: 11px;
-  }
-  .stat {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    opacity: 0.85;
-  }
-  .stat-value { font-weight: 700; font-size: 13px; }
-  .stat-label { opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; font-size: 9px; }
+      /* Stats bar */
+      .stats {
+        display: flex;
+        gap: 20px;
+        margin-left: auto;
+        font-size: 11px;
+      }
+      .stat {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        opacity: 0.85;
+      }
+      .stat-value {
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .stat-label {
+        opacity: 0.7;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-size: 9px;
+      }
 
-  /* Controls row */
-  .controls-row {
-    background: var(--navy-dark);
-    padding: 8px 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 0;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-  }
-  .controls-row label {
-    color: rgba(255,255,255,0.6);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .controls-row select {
-    background: rgba(255,255,255,0.1);
-    color: white;
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .controls-row select:hover { border-color: rgba(255,255,255,0.4); }
-  .controls-row select option { background: var(--navy-dark); color: white; }
+      /* Controls row */
+      .controls-row {
+        background: var(--navy-dark);
+        padding: 8px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-shrink: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .controls-row label {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .controls-row select {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .controls-row select:hover {
+        border-color: rgba(255, 255, 255, 0.4);
+      }
+      .controls-row select option {
+        background: var(--navy-dark);
+        color: white;
+      }
 
-  .btn {
-    padding: 5px 14px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    transition: all 0.15s;
-  }
-  .btn-play {
-    background: var(--accent-green);
-    color: #0d1117;
-  }
-  .btn-play:hover { background: #46d15a; }
-  .btn-play:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-reset {
-    background: rgba(255,255,255,0.1);
-    color: white;
-  }
-  .btn-reset:hover { background: rgba(255,255,255,0.2); }
-  .btn-load {
-    background: var(--accent-blue);
-    color: #0d1117;
-  }
-  .btn-load:hover { background: #6fb8ff; }
+      .btn {
+        padding: 5px 14px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        transition: all 0.15s;
+      }
+      .btn-play {
+        background: var(--accent-green);
+        color: #0d1117;
+      }
+      .btn-play:hover {
+        background: #46d15a;
+      }
+      .btn-play:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-reset {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+      }
+      .btn-reset:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      .btn-load {
+        background: var(--accent-blue);
+        color: #0d1117;
+      }
+      .btn-load:hover {
+        background: #6fb8ff;
+      }
 
-  .speed-control {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-left: 8px;
-  }
-  .speed-control input[type="range"] {
-    width: 60px;
-    accent-color: var(--accent-blue);
-  }
-  .speed-label {
-    color: rgba(255,255,255,0.5);
-    font-size: 10px;
-    min-width: 28px;
-  }
+      .speed-control {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 8px;
+      }
+      .speed-control input[type='range'] {
+        width: 60px;
+        accent-color: var(--accent-blue);
+      }
+      .speed-label {
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 10px;
+        min-width: 28px;
+      }
 
-  /* ── Main layout ── */
-  .main-layout {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-  }
+      /* ── Main layout ── */
+      .main-layout {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
 
-  /* ── Timeline sidebar ── */
-  .timeline-panel {
-    width: 380px;
-    min-width: 380px;
-    background: var(--sidebar-bg);
-    border-right: 1px solid var(--sidebar-border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .timeline-header {
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--sidebar-border);
-    font-size: 11px;
-    color: var(--text-secondary);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .timeline-header .event-count {
-    background: var(--card-bg);
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 10px;
-    color: var(--text-muted);
-  }
-  .timeline-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px 0;
-  }
-  .timeline-list::-webkit-scrollbar { width: 6px; }
-  .timeline-list::-webkit-scrollbar-track { background: transparent; }
-  .timeline-list::-webkit-scrollbar-thumb { background: var(--sidebar-border); border-radius: 3px; }
+      /* ── Timeline sidebar ── */
+      .timeline-panel {
+        width: 380px;
+        min-width: 380px;
+        background: var(--sidebar-bg);
+        border-right: 1px solid var(--sidebar-border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .timeline-header {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--sidebar-border);
+        font-size: 11px;
+        color: var(--text-secondary);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .timeline-header .event-count {
+        background: var(--card-bg);
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+      .timeline-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 0;
+      }
+      .timeline-list::-webkit-scrollbar {
+        width: 6px;
+      }
+      .timeline-list::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .timeline-list::-webkit-scrollbar-thumb {
+        background: var(--sidebar-border);
+        border-radius: 3px;
+      }
 
-  .timeline-event {
-    padding: 8px 14px;
-    cursor: pointer;
-    border-left: 3px solid transparent;
-    transition: all 0.1s;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-  }
-  .timeline-event:hover { background: rgba(255,255,255,0.03); }
-  .timeline-event.selected {
-    background: rgba(88, 166, 255, 0.08);
-    border-left-color: var(--accent-blue);
-  }
-  .timeline-event.entering {
-    animation: slideIn 0.3s ease-out;
-  }
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateX(-10px); }
-    to { opacity: 1; transform: translateX(0); }
-  }
+      .timeline-event {
+        padding: 8px 14px;
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        transition: all 0.1s;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .timeline-event:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .timeline-event.selected {
+        background: rgba(88, 166, 255, 0.08);
+        border-left-color: var(--accent-blue);
+      }
+      .timeline-event.entering {
+        animation: slideIn 0.3s ease-out;
+      }
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateX(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
 
-  .event-type-badge {
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    white-space: nowrap;
-    min-width: 64px;
-    text-align: center;
-    flex-shrink: 0;
-    margin-top: 1px;
-  }
-  .badge-text { background: rgba(63,185,80,0.15); color: var(--accent-green); }
-  .badge-tool_use { background: rgba(88,166,255,0.15); color: var(--accent-blue); }
-  .badge-tool_result { background: rgba(188,140,255,0.15); color: var(--accent-purple); }
-  .badge-agent_status { background: rgba(210,153,34,0.15); color: var(--accent-amber); }
-  .badge-reasoning { background: rgba(139,148,158,0.15); color: var(--accent-gray); }
-  .badge-handoff { background: rgba(240,136,62,0.15); color: var(--accent-orange); }
-  .badge-complete { background: rgba(255,255,255,0.08); color: var(--text-secondary); }
-  .badge-error { background: rgba(248,81,73,0.15); color: var(--accent-red); }
-  .badge-metadata { background: rgba(139,148,158,0.1); color: var(--text-muted); }
-  .badge-nested { background: rgba(240,136,62,0.15); color: var(--accent-orange); font-size: 8px; }
+      .event-type-badge {
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        white-space: nowrap;
+        min-width: 64px;
+        text-align: center;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .badge-text {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--accent-green);
+      }
+      .badge-tool_use {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--accent-blue);
+      }
+      .badge-tool_result {
+        background: rgba(188, 140, 255, 0.15);
+        color: var(--accent-purple);
+      }
+      .badge-agent_status {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--accent-amber);
+      }
+      .badge-reasoning {
+        background: rgba(139, 148, 158, 0.15);
+        color: var(--accent-gray);
+      }
+      .badge-handoff {
+        background: rgba(240, 136, 62, 0.15);
+        color: var(--accent-orange);
+      }
+      .badge-complete {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-secondary);
+      }
+      .badge-error {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--accent-red);
+      }
+      .badge-metadata {
+        background: rgba(139, 148, 158, 0.1);
+        color: var(--text-muted);
+      }
+      .badge-nested {
+        background: rgba(240, 136, 62, 0.15);
+        color: var(--accent-orange);
+        font-size: 8px;
+      }
 
-  .event-content {
-    flex: 1;
-    min-width: 0;
-  }
-  .event-summary {
-    font-size: 12px;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .event-time {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-family: 'SFMono-Regular', Consolas, monospace;
-    margin-top: 2px;
-  }
+      .event-content {
+        flex: 1;
+        min-width: 0;
+      }
+      .event-summary {
+        font-size: 12px;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .event-time {
+        font-size: 10px;
+        color: var(--text-muted);
+        font-family: 'SFMono-Regular', Consolas, monospace;
+        margin-top: 2px;
+      }
 
-  /* ── Right panel ── */
-  .right-panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
+      /* ── Right panel ── */
+      .right-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
 
-  /* Card preview */
-  .card-preview-section {
-    padding: 20px 24px;
-    border-bottom: 1px solid #d8dee4;
-    flex-shrink: 0;
-  }
-  .card-preview-section h3 {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #656d76;
-    margin-bottom: 12px;
-  }
-  .card-preview-empty {
-    color: #8b949e;
-    font-size: 13px;
-    text-align: center;
-    padding: 30px 20px;
-  }
-  .card-preview-empty .hint {
-    font-size: 11px;
-    margin-top: 6px;
-    opacity: 0.6;
-  }
+      /* Card preview */
+      .card-preview-section {
+        padding: 20px 24px;
+        border-bottom: 1px solid #d8dee4;
+        flex-shrink: 0;
+      }
+      .card-preview-section h3 {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #656d76;
+        margin-bottom: 12px;
+      }
+      .card-preview-empty {
+        color: #8b949e;
+        font-size: 13px;
+        text-align: center;
+        padding: 30px 20px;
+      }
+      .card-preview-empty .hint {
+        font-size: 11px;
+        margin-top: 6px;
+        opacity: 0.6;
+      }
 
-  /* Tool card mock */
-  .tool-card {
-    border: 1px solid #d0d7de;
-    border-radius: 8px;
-    background: #f6f8fa;
-    overflow: hidden;
-    font-size: 12px;
-    max-width: 500px;
-  }
-  .tool-card-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    cursor: pointer;
-  }
-  .tool-card-header:hover { background: rgba(0,0,0,0.02); }
-  .tool-card-icon { font-size: 14px; flex-shrink: 0; }
-  .tool-card-label { font-weight: 600; color: #1f2328; flex-shrink: 0; }
-  .tool-card-summary { color: #656d76; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tool-card-status {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  .status-pending { background: #58a6ff; animation: pulse 1.5s infinite; }
-  .status-done { background: #3fb950; }
-  .status-error { background: #f85149; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .tool-card-chevron { color: #656d76; font-size: 10px; transition: transform 0.2s; flex-shrink: 0; }
-  .tool-card-chevron.open { transform: rotate(180deg); }
+      /* Tool card mock */
+      .tool-card {
+        border: 1px solid #d0d7de;
+        border-radius: 8px;
+        background: #f6f8fa;
+        overflow: hidden;
+        font-size: 12px;
+        max-width: 500px;
+      }
+      .tool-card-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .tool-card-header:hover {
+        background: rgba(0, 0, 0, 0.02);
+      }
+      .tool-card-icon {
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+      .tool-card-label {
+        font-weight: 600;
+        color: #1f2328;
+        flex-shrink: 0;
+      }
+      .tool-card-summary {
+        color: #656d76;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tool-card-status {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .status-pending {
+        background: #58a6ff;
+        animation: pulse 1.5s infinite;
+      }
+      .status-done {
+        background: #3fb950;
+      }
+      .status-error {
+        background: #f85149;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .tool-card-chevron {
+        color: #656d76;
+        font-size: 10px;
+        transition: transform 0.2s;
+        flex-shrink: 0;
+      }
+      .tool-card-chevron.open {
+        transform: rotate(180deg);
+      }
 
-  /* Tool card result panels */
-  .tool-card-result {
-    border-top: 1px solid #d0d7de;
-    background: white;
-  }
-  .result-panel-header {
-    padding: 6px 12px;
-    border-bottom: 1px solid #eaeef2;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .result-panel-header .result-type {
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: var(--navy);
-    letter-spacing: 0.5px;
-  }
-  .result-panel-header .result-count {
-    font-size: 9px;
-    color: #656d76;
-    background: #eaeef2;
-    padding: 1px 6px;
-    border-radius: 10px;
-  }
-  .result-panel-items { max-height: 200px; overflow-y: auto; }
-  .result-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 6px 12px;
-    border-bottom: 1px solid #f6f8fa;
-  }
-  .result-item:hover { background: #f0f6ff; }
-  .result-item-icon { font-size: 11px; flex-shrink: 0; margin-top: 1px; }
-  .result-item-content { flex: 1; min-width: 0; }
-  .result-item-title { font-size: 11px; font-weight: 500; color: #1f2328; }
-  .result-item-desc { font-size: 10px; color: #656d76; margin-top: 1px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .result-item-badge { font-size: 9px; color: var(--navy); background: #dbeafe; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; margin-top: 1px; white-space: nowrap; }
+      /* Tool card result panels */
+      .tool-card-result {
+        border-top: 1px solid #d0d7de;
+        background: white;
+      }
+      .result-panel-header {
+        padding: 6px 12px;
+        border-bottom: 1px solid #eaeef2;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .result-panel-header .result-type {
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: var(--navy);
+        letter-spacing: 0.5px;
+      }
+      .result-panel-header .result-count {
+        font-size: 9px;
+        color: #656d76;
+        background: #eaeef2;
+        padding: 1px 6px;
+        border-radius: 10px;
+      }
+      .result-panel-items {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .result-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 6px 12px;
+        border-bottom: 1px solid #f6f8fa;
+      }
+      .result-item:hover {
+        background: #f0f6ff;
+      }
+      .result-item-icon {
+        font-size: 11px;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .result-item-content {
+        flex: 1;
+        min-width: 0;
+      }
+      .result-item-title {
+        font-size: 11px;
+        font-weight: 500;
+        color: #1f2328;
+      }
+      .result-item-desc {
+        font-size: 10px;
+        color: #656d76;
+        margin-top: 1px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .result-item-badge {
+        font-size: 9px;
+        color: var(--navy);
+        background: #dbeafe;
+        padding: 2px 6px;
+        border-radius: 3px;
+        flex-shrink: 0;
+        margin-top: 1px;
+        white-space: nowrap;
+      }
 
-  /* Web search panel (compact, collapsed style) */
-  .ws-answer { padding: 6px 12px; border-bottom: 1px solid #eaeef2; font-size: 11px; color: #444; line-height: 1.5; }
-  .ws-source-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border-bottom: 1px solid #f6f8fa;
-  }
-  .ws-source-item:hover { background: #f0f6ff; }
-  .ws-source-num { font-size: 10px; color: #656d76; width: 16px; text-align: right; flex-shrink: 0; }
-  .ws-source-link { font-size: 11px; color: var(--navy); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ws-source-link:hover { text-decoration: underline; }
+      /* Web search panel (compact, collapsed style) */
+      .ws-answer {
+        padding: 6px 12px;
+        border-bottom: 1px solid #eaeef2;
+        font-size: 11px;
+        color: #444;
+        line-height: 1.5;
+      }
+      .ws-source-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-bottom: 1px solid #f6f8fa;
+      }
+      .ws-source-item:hover {
+        background: #f0f6ff;
+      }
+      .ws-source-num {
+        font-size: 10px;
+        color: #656d76;
+        width: 16px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+      .ws-source-link {
+        font-size: 11px;
+        color: var(--navy);
+        text-decoration: none;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ws-source-link:hover {
+        text-decoration: underline;
+      }
 
-  /* Document card */
-  .doc-card {
-    border-top: 1px solid #d0d7de;
-    padding: 10px 12px;
-    background: white;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .doc-card-info { flex: 1; }
-  .doc-card-type { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--navy); letter-spacing: 0.5px; }
-  .doc-card-title { font-size: 12px; font-weight: 500; color: #1f2328; }
-  .doc-card-meta { font-size: 10px; color: #656d76; }
-  .doc-card-btn {
-    background: var(--navy);
-    color: white;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 5px 10px;
-    border-radius: 4px;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
-  }
+      /* Document card */
+      .doc-card {
+        border-top: 1px solid #d0d7de;
+        padding: 10px 12px;
+        background: white;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .doc-card-info {
+        flex: 1;
+      }
+      .doc-card-type {
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: var(--navy);
+        letter-spacing: 0.5px;
+      }
+      .doc-card-title {
+        font-size: 12px;
+        font-weight: 500;
+        color: #1f2328;
+      }
+      .doc-card-meta {
+        font-size: 10px;
+        color: #656d76;
+      }
+      .doc-card-btn {
+        background: var(--navy);
+        color: white;
+        font-size: 10px;
+        font-weight: 600;
+        padding: 5px 10px;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        white-space: nowrap;
+      }
 
-  /* Text event preview */
-  .text-preview {
-    padding: 16px;
-    background: white;
-    border: 1px solid #d0d7de;
-    border-radius: 8px;
-    max-width: 500px;
-  }
-  .text-preview p {
-    font-size: 13px;
-    color: #1f2328;
-    line-height: 1.6;
-  }
-  .text-preview .agent-badge {
-    font-size: 9px;
-    font-weight: 600;
-    text-transform: uppercase;
-    color: var(--navy);
-    letter-spacing: 0.5px;
-    margin-bottom: 6px;
-  }
+      /* Text event preview */
+      .text-preview {
+        padding: 16px;
+        background: white;
+        border: 1px solid #d0d7de;
+        border-radius: 8px;
+        max-width: 500px;
+      }
+      .text-preview p {
+        font-size: 13px;
+        color: #1f2328;
+        line-height: 1.6;
+      }
+      .text-preview .agent-badge {
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--navy);
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+      }
 
-  /* Status/handoff preview */
-  .status-preview {
-    padding: 12px 16px;
-    background: #fffbeb;
-    border: 1px solid #fde68a;
-    border-radius: 8px;
-    max-width: 500px;
-    font-size: 12px;
-    color: #92400e;
-  }
-  .handoff-preview {
-    padding: 12px 16px;
-    background: #fff7ed;
-    border: 1px solid #fed7aa;
-    border-radius: 8px;
-    max-width: 500px;
-    font-size: 12px;
-    color: #9a3412;
-  }
-  .complete-preview {
-    padding: 12px 16px;
-    background: #f6f8fa;
-    border: 1px solid #d0d7de;
-    border-radius: 8px;
-    max-width: 500px;
-    font-size: 12px;
-  }
-  .complete-preview .timing-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 3px 0;
-    border-bottom: 1px solid #eaeef2;
-  }
-  .complete-preview .timing-row:last-child { border: none; }
-  .complete-preview .timing-bar {
-    height: 4px;
-    background: var(--navy);
-    border-radius: 2px;
-    margin-top: 3px;
-    transition: width 0.3s;
-  }
+      /* Status/handoff preview */
+      .status-preview {
+        padding: 12px 16px;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 8px;
+        max-width: 500px;
+        font-size: 12px;
+        color: #92400e;
+      }
+      .handoff-preview {
+        padding: 12px 16px;
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        border-radius: 8px;
+        max-width: 500px;
+        font-size: 12px;
+        color: #9a3412;
+      }
+      .complete-preview {
+        padding: 12px 16px;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        border-radius: 8px;
+        max-width: 500px;
+        font-size: 12px;
+      }
+      .complete-preview .timing-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 3px 0;
+        border-bottom: 1px solid #eaeef2;
+      }
+      .complete-preview .timing-row:last-child {
+        border: none;
+      }
+      .complete-preview .timing-bar {
+        height: 4px;
+        background: var(--navy);
+        border-radius: 2px;
+        margin-top: 3px;
+        transition: width 0.3s;
+      }
 
-  /* ── JSON inspector ── */
-  .json-section {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    border-top: 1px solid #d8dee4;
-  }
-  .json-header {
-    padding: 10px 24px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #656d76;
-    border-bottom: 1px solid #d8dee4;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-  }
-  .btn-copy {
-    background: #eaeef2;
-    color: #1f2328;
-    border: 1px solid #d0d7de;
-    padding: 3px 10px;
-    border-radius: 4px;
-    font-size: 10px;
-    cursor: pointer;
-    font-weight: 500;
-  }
-  .btn-copy:hover { background: #d8dee4; }
-  .btn-copy.copied { background: var(--accent-green); color: white; border-color: var(--accent-green); }
-  .json-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px 24px;
-    background: #fafbfc;
-  }
-  .json-body pre {
-    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-    font-size: 11px;
-    line-height: 1.6;
-    color: #1f2328;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .json-body .json-key { color: #0550ae; }
-  .json-body .json-string { color: #0a3069; }
-  .json-body .json-number { color: #0550ae; }
-  .json-body .json-bool { color: #cf222e; }
-  .json-body .json-null { color: #656d76; }
+      /* ── JSON inspector ── */
+      .json-section {
+        flex: 1;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid #d8dee4;
+      }
+      .json-header {
+        padding: 10px 24px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #656d76;
+        border-bottom: 1px solid #d8dee4;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-shrink: 0;
+      }
+      .btn-copy {
+        background: #eaeef2;
+        color: #1f2328;
+        border: 1px solid #d0d7de;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 10px;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      .btn-copy:hover {
+        background: #d8dee4;
+      }
+      .btn-copy.copied {
+        background: var(--accent-green);
+        color: white;
+        border-color: var(--accent-green);
+      }
+      .json-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 24px;
+        background: #fafbfc;
+      }
+      .json-body pre {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        font-size: 11px;
+        line-height: 1.6;
+        color: #1f2328;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .json-body .json-key {
+        color: #0550ae;
+      }
+      .json-body .json-string {
+        color: #0a3069;
+      }
+      .json-body .json-number {
+        color: #0550ae;
+      }
+      .json-body .json-bool {
+        color: #cf222e;
+      }
+      .json-body .json-null {
+        color: #656d76;
+      }
 
-  /* ── Empty state ── */
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: var(--text-muted);
-    gap: 8px;
-  }
-  .empty-state .icon { font-size: 32px; opacity: 0.5; }
-  .empty-state .msg { font-size: 13px; }
-  .empty-state .hint { font-size: 11px; opacity: 0.6; }
+      /* ── Empty state ── */
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-muted);
+        gap: 8px;
+      }
+      .empty-state .icon {
+        font-size: 32px;
+        opacity: 0.5;
+      }
+      .empty-state .msg {
+        font-size: 13px;
+      }
+      .empty-state .hint {
+        font-size: 11px;
+        opacity: 0.6;
+      }
 
-  /* ── Prompt output (bottom) ── */
-  .prompt-bar {
-    background: var(--sidebar-bg);
-    border-top: 1px solid var(--sidebar-border);
-    padding: 10px 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 0;
-  }
-  .prompt-text {
-    flex: 1;
-    font-family: 'SFMono-Regular', Consolas, monospace;
-    font-size: 11px;
-    color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .btn-copy-prompt {
-    background: var(--accent-blue);
-    color: #0d1117;
-    border: none;
-    padding: 5px 14px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .btn-copy-prompt:hover { background: #6fb8ff; }
-  .btn-copy-prompt.copied { background: var(--accent-green); }
-</style>
-</head>
-<body>
-
-<!-- Top bar -->
-<div class="top-bar">
-  <span class="logo">&#x1F985;</span>
-  <h1>EAGLE SSE Event Stream Viewer</h1>
-  <div class="stats">
-    <div class="stat">
-      <span class="stat-value" id="stat-events">0</span>
-      <span class="stat-label">Events</span>
-    </div>
-    <div class="stat">
-      <span class="stat-value" id="stat-duration">--</span>
-      <span class="stat-label">Duration</span>
-    </div>
-    <div class="stat">
-      <span class="stat-value" id="stat-tools">0</span>
-      <span class="stat-label">Tools</span>
-    </div>
-  </div>
-</div>
-
-<!-- Controls -->
-<div class="controls-row">
-  <label>Scenario</label>
-  <select id="scenario-select">
-    <option value="far-search">A: FAR Policy Search</option>
-    <option value="web-knowledge">B: Web + Knowledge Search</option>
-    <option value="doc-gen">C: Document Generation</option>
-    <option value="subagent-flow">D: Subagent Flow (Legal + Policy)</option>
-  </select>
-  <button class="btn btn-load" id="btn-load" onclick="loadScenario()">Load</button>
-  <button class="btn btn-play" id="btn-play" onclick="playScenario()">&#9654; Play</button>
-  <button class="btn btn-reset" onclick="resetTimeline()">Reset</button>
-  <div class="speed-control">
-    <label style="font-size:10px;color:rgba(255,255,255,0.5)">Speed</label>
-    <input type="range" id="speed-slider" min="1" max="10" value="5">
-    <span class="speed-label" id="speed-label">1x</span>
-  </div>
-</div>
-
-<!-- Main layout -->
-<div class="main-layout">
-  <!-- Timeline sidebar -->
-  <div class="timeline-panel">
-    <div class="timeline-header">
-      Event Timeline
-      <span class="event-count" id="timeline-count">0 events</span>
-    </div>
-    <div class="timeline-list" id="timeline-list">
-      <div class="empty-state">
-        <div class="icon">&#x1F4E1;</div>
-        <div class="msg">No events yet</div>
-        <div class="hint">Select a scenario and click Play</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Right panel -->
-  <div class="right-panel">
-    <!-- Card preview -->
-    <div class="card-preview-section">
-      <h3>Card Preview</h3>
-      <div id="card-preview">
-        <div class="card-preview-empty">
-          Click an event in the timeline to preview its rendering
-          <div class="hint">tool_use and tool_result events show the actual card UI</div>
+      /* ── Prompt output (bottom) ── */
+      .prompt-bar {
+        background: var(--sidebar-bg);
+        border-top: 1px solid var(--sidebar-border);
+        padding: 10px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .prompt-text {
+        flex: 1;
+        font-family: 'SFMono-Regular', Consolas, monospace;
+        font-size: 11px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .btn-copy-prompt {
+        background: var(--accent-blue);
+        color: #0d1117;
+        border: none;
+        padding: 5px 14px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-copy-prompt:hover {
+        background: #6fb8ff;
+      }
+      .btn-copy-prompt.copied {
+        background: var(--accent-green);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Top bar -->
+    <div class="top-bar">
+      <span class="logo">&#x1F985;</span>
+      <h1>EAGLE SSE Event Stream Viewer</h1>
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-value" id="stat-events">0</span>
+          <span class="stat-label">Events</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-duration">--</span>
+          <span class="stat-label">Duration</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-tools">0</span>
+          <span class="stat-label">Tools</span>
         </div>
       </div>
     </div>
 
-    <!-- JSON inspector -->
-    <div class="json-section">
-      <div class="json-header">
-        Raw Event JSON
-        <button class="btn-copy" id="btn-copy-json" onclick="copyJson()">Copy</button>
-      </div>
-      <div class="json-body" id="json-body">
-        <pre id="json-content" style="color:#656d76;text-align:center;padding-top:40px;">Select an event to inspect</pre>
+    <!-- Controls -->
+    <div class="controls-row">
+      <label>Scenario</label>
+      <select id="scenario-select">
+        <option value="far-search">A: FAR Policy Search</option>
+        <option value="web-knowledge">B: Web + Knowledge Search</option>
+        <option value="doc-gen">C: Document Generation</option>
+        <option value="subagent-flow">D: Subagent Flow (Legal + Policy)</option>
+      </select>
+      <button class="btn btn-load" id="btn-load" onclick="loadScenario()">Load</button>
+      <button class="btn btn-play" id="btn-play" onclick="playScenario()">&#9654; Play</button>
+      <button class="btn btn-reset" onclick="resetTimeline()">Reset</button>
+      <div class="speed-control">
+        <label style="font-size: 10px; color: rgba(255, 255, 255, 0.5)">Speed</label>
+        <input type="range" id="speed-slider" min="1" max="10" value="5" />
+        <span class="speed-label" id="speed-label">1x</span>
       </div>
     </div>
-  </div>
-</div>
 
-<!-- Prompt bar -->
-<div class="prompt-bar">
-  <span class="prompt-text" id="prompt-text">Load a scenario to see event analysis</span>
-  <button class="btn-copy-prompt" id="btn-copy-prompt" onclick="copyPrompt()">Copy Prompt</button>
-</div>
+    <!-- Main layout -->
+    <div class="main-layout">
+      <!-- Timeline sidebar -->
+      <div class="timeline-panel">
+        <div class="timeline-header">
+          Event Timeline
+          <span class="event-count" id="timeline-count">0 events</span>
+        </div>
+        <div class="timeline-list" id="timeline-list">
+          <div class="empty-state">
+            <div class="icon">&#x1F4E1;</div>
+            <div class="msg">No events yet</div>
+            <div class="hint">Select a scenario and click Play</div>
+          </div>
+        </div>
+      </div>
 
-<script>
-// ── Tool metadata (mirrors tool-use-display.tsx TOOL_META) ──
-const TOOL_META = {
-  oa_intake:            { icon: '\u{1F4CB}', label: 'Intake Assessment' },
-  legal_counsel:        { icon: '\u2696\uFE0F', label: 'Legal Analysis' },
-  market_intelligence:  { icon: '\u{1F4CA}', label: 'Market Research' },
-  tech_translator:      { icon: '\u{1F527}', label: 'Technical Review' },
-  tech_review:          { icon: '\u{1F527}', label: 'Technical Review' },
-  public_interest:      { icon: '\u{1F3DB}\uFE0F', label: 'Public Interest Review' },
-  document_generator:   { icon: '\u{1F4C4}', label: 'Generating Document' },
-  compliance:           { icon: '\u2705', label: 'Compliance Check' },
-  policy_analyst:       { icon: '\u{1F4DC}', label: 'Policy Analysis' },
-  policy_librarian:     { icon: '\u{1F4DA}', label: 'Policy Lookup' },
-  s3_document_ops:      { icon: '\u{1F4C1}', label: 'Document Storage' },
-  create_document:      { icon: '\u{1F4DD}', label: 'Creating Document' },
-  search_far:           { icon: '\u{1F4D6}', label: 'Searching FAR/DFARS' },
-  web_search:           { icon: '\u{1F310}', label: 'Web Search' },
-  web_fetch:            { icon: '\u{1F4C4}', label: 'Reading Page' },
-  knowledge_search:     { icon: '\u{1F50D}', label: 'Knowledge Search' },
-  knowledge_fetch:      { icon: '\u{1F4C4}', label: 'Reading Document' },
-  think:                { icon: '\u{1F4AD}', label: 'Reasoning' },
-  code:                 { icon: '\u{1F4BB}', label: 'Running Code' },
-  intake_workflow:      { icon: '\u{1F504}', label: 'Intake Workflow' },
-  manage_package:       { icon: '\u{1F4E6}', label: 'Package Status' },
-  query_compliance_matrix: { icon: '\u2705', label: 'Compliance Matrix' },
-};
+      <!-- Right panel -->
+      <div class="right-panel">
+        <!-- Card preview -->
+        <div class="card-preview-section">
+          <h3>Card Preview</h3>
+          <div id="card-preview">
+            <div class="card-preview-empty">
+              Click an event in the timeline to preview its rendering
+              <div class="hint">tool_use and tool_result events show the actual card UI</div>
+            </div>
+          </div>
+        </div>
 
-function getToolMeta(name) {
-  return TOOL_META[name] || { icon: '\u2699\uFE0F', label: name.replace(/_/g, ' ') };
-}
+        <!-- JSON inspector -->
+        <div class="json-section">
+          <div class="json-header">
+            Raw Event JSON
+            <button class="btn-copy" id="btn-copy-json" onclick="copyJson()">Copy</button>
+          </div>
+          <div class="json-body" id="json-body">
+            <pre id="json-content" style="color: #656d76; text-align: center; padding-top: 40px">
+Select an event to inspect</pre
+            >
+          </div>
+        </div>
+      </div>
+    </div>
 
-// ── Scenarios ──
-const SCENARIOS = {
-  'far-search': [
-    {"type":"text","agent_id":"supervisor","agent_name":"Supervisor","content":"Let me search FAR for that...","timestamp":"2026-03-23T10:00:01Z"},
-    {"type":"tool_use","agent_id":"supervisor","agent_name":"Supervisor","tool_use":{"name":"search_far","input":{"query":"sole source justification requirements"},"tool_use_id":"tu_001"},"timestamp":"2026-03-23T10:00:02Z"},
-    {"type":"tool_result","agent_id":"supervisor","agent_name":"Supervisor","tool_result":{"name":"search_far","result":{"clauses":[{"title":"FAR 6.302-1","section":"6.302-1","description":"Only one responsible source and no other supplies or services will satisfy agency requirements","summary":"Authorizes sole source when only one source can meet requirements"},{"title":"FAR 6.303","section":"6.303","description":"Justifications for other than full and open competition","summary":"J&A documentation requirements for sole source actions"},{"title":"FAR 6.304","section":"6.304","description":"Approval of justifications","summary":"Approval thresholds for sole source justifications by dollar value"}],"results_count":3}},"timestamp":"2026-03-23T10:00:05Z"},
-    {"type":"text","agent_id":"supervisor","agent_name":"Supervisor","content":"Based on FAR 6.302-1, sole source justification requires demonstrating that only one responsible source can meet the agency's requirements. You'll need to prepare a Justification & Approval (J&A) document per FAR 6.303.","timestamp":"2026-03-23T10:00:06Z"},
-    {"type":"complete","agent_id":"supervisor","agent_name":"Supervisor","metadata":{"tools_called":["search_far"],"duration_ms":5200,"tool_timings":[{"tool_name":"search_far","duration_ms":3100}]},"timestamp":"2026-03-23T10:00:07Z"}
-  ],
-  'web-knowledge': [
-    {"type":"text","agent_id":"supervisor","agent_name":"Supervisor","content":"I'll search for that information...","timestamp":"2026-03-23T10:01:00Z"},
-    {"type":"tool_use","agent_id":"supervisor","agent_name":"Supervisor","tool_use":{"name":"web_search","input":{"query":"GSA IT Schedule 70 current rates 2026"},"tool_use_id":"tu_010"},"timestamp":"2026-03-23T10:01:01Z"},
-    {"type":"tool_result","agent_id":"supervisor","agent_name":"Supervisor","tool_result":{"name":"web_search","result":{"query":"GSA IT Schedule 70 current rates 2026","answer":"The GSA IT Schedule (now known as the Multiple Award Schedule) provides pre-negotiated pricing for IT products and services. Current labor rates vary by SIN and contractor but typically range from $85-$350/hour for various IT categories.","sources":[{"url":"https://www.gsa.gov/technology/technology-purchasing-programs","domain":"gsa.gov","snippet":"GSA IT Schedule overview"},{"url":"https://www.gsaadvantage.gov","domain":"gsaadvantage.gov","snippet":"GSA Advantage purchasing portal"},{"url":"https://www.acquisition.gov/far","domain":"acquisition.gov","snippet":"FAR reference"}],"source_count":3}},"timestamp":"2026-03-23T10:01:08Z"},
-    {"type":"tool_use","agent_id":"supervisor","agent_name":"Supervisor","tool_use":{"name":"knowledge_search","input":{"query":"GSA schedule pricing guidance"},"tool_use_id":"tu_011"},"timestamp":"2026-03-23T10:01:09Z"},
-    {"type":"tool_result","agent_id":"supervisor","agent_name":"Supervisor","tool_result":{"name":"knowledge_search","result":{"results":[{"title":"GSA Schedule Ordering Procedures","summary":"Guidance on ordering from GSA schedules including price analysis requirements","primary_topic":"procurement","confidence_score":0.92},{"title":"IT Schedule Best Practices","summary":"NCI best practices for IT schedule orders including fair opportunity requirements","primary_topic":"IT procurement","confidence_score":0.85}]}},"timestamp":"2026-03-23T10:01:12Z"},
-    {"type":"text","agent_id":"supervisor","agent_name":"Supervisor","content":"Based on my research, here's what I found about GSA IT Schedule rates. The current MAS (Multiple Award Schedule) provides pre-negotiated pricing ranging from $85-$350/hour depending on the SIN category.","timestamp":"2026-03-23T10:01:13Z"},
-    {"type":"complete","agent_id":"supervisor","agent_name":"Supervisor","metadata":{"tools_called":["web_search","knowledge_search"],"duration_ms":13500,"tool_timings":[{"tool_name":"web_search","duration_ms":7200},{"tool_name":"knowledge_search","duration_ms":3100}]},"timestamp":"2026-03-23T10:01:14Z"}
-  ],
-  'doc-gen': [
-    {"type":"agent_status","agent_id":"supervisor","agent_name":"Supervisor","metadata":{"status":"Analyzing your request...","detail":""},"timestamp":"2026-03-23T10:02:00Z"},
-    {"type":"tool_use","agent_id":"supervisor","agent_name":"Supervisor","tool_use":{"name":"think","input":{"thought":"User wants a Statement of Work. I need to gather requirements first via the document generator specialist."},"tool_use_id":"tu_020"},"timestamp":"2026-03-23T10:02:01Z"},
-    {"type":"handoff","agent_id":"supervisor","agent_name":"Supervisor","metadata":{"target_agent":"document_generator","reason":"Generate SOW document"},"timestamp":"2026-03-23T10:02:02Z"},
-    {"type":"tool_use","agent_id":"supervisor","agent_name":"Supervisor","tool_use":{"name":"document_generator","input":{"query":"Generate a Statement of Work for cloud migration services"},"tool_use_id":"tu_021"},"timestamp":"2026-03-23T10:02:03Z"},
-    {"type":"tool_result","agent_id":"supervisor","agent_name":"Supervisor","tool_result":{"name":"document_generator","result":"## Document Generation Report\n\nI've drafted a Statement of Work for cloud migration services.\n\n### Key Sections:\n1. **Scope** - Cloud migration from on-premises to AWS GovCloud\n2. **Period of Performance** - 12 months base + 2 option years\n3. **Deliverables** - Migration plan, architecture docs, training\n4. **Quality Standards** - FedRAMP High, FISMA compliance"},"timestamp":"2026-03-23T10:02:15Z"},
-    {"type":"tool_use","agent_id":"supervisor","agent_name":"Supervisor","tool_use":{"name":"create_document","input":{"doc_type":"sow","title":"Cloud Migration Services SOW"},"tool_use_id":"tu_022"},"timestamp":"2026-03-23T10:02:16Z"},
-    {"type":"tool_result","agent_id":"supervisor","agent_name":"Supervisor","tool_result":{"name":"create_document","result":{"document_type":"sow","title":"Cloud Migration Services SOW","s3_key":"sow_20260323_100216.md","status":"saved","version":1,"word_count":2847,"content":"# Statement of Work..."}},"timestamp":"2026-03-23T10:02:20Z"},
-    {"type":"text","agent_id":"supervisor","agent_name":"Supervisor","content":"I've generated your Statement of Work for cloud migration services. The document has been saved and is ready for review.","timestamp":"2026-03-23T10:02:21Z"},
-    {"type":"complete","agent_id":"supervisor","agent_name":"Supervisor","metadata":{"tools_called":["think","document_generator","create_document"],"duration_ms":21000,"tool_timings":[{"tool_name":"think","duration_ms":500},{"tool_name":"document_generator","duration_ms":12000},{"tool_name":"create_document","duration_ms":4200}]},"timestamp":"2026-03-23T10:02:22Z"}
-  ],
-  'subagent-flow': [
-    {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"I'll review the legal and policy aspects of this sole-source justification.","timestamp":"2026-03-23T10:03:00Z"},
-    {"type":"tool_use","agent_id":"eagle","agent_name":"EAGLE","tool_use":{"name":"think","input":{"thought":"This requires legal analysis for sole-source authority under FAR 6.302, plus a policy check. I'll delegate to legal_counsel and policy_analyst subagents."},"tool_use_id":"tu_030"},"timestamp":"2026-03-23T10:03:01Z"},
-    {"type":"handoff","agent_id":"eagle","agent_name":"EAGLE","metadata":{"target_agent":"legal_counsel","reason":"Analyze sole-source legal authority"},"timestamp":"2026-03-23T10:03:02Z"},
-    {"type":"tool_use","agent_id":"eagle","agent_name":"EAGLE","tool_use":{"name":"legal_counsel","input":{"query":"Analyze legal authority for sole-source procurement of specialized cancer research imaging equipment from Siemens Healthineers, estimated value $2.3M"},"tool_use_id":"tu_031"},"timestamp":"2026-03-23T10:03:03Z"},
-    {"type":"tool_result","agent_id":"eagle","agent_name":"EAGLE","tool_result":{"name":"search_far","result":{"clauses":[{"title":"FAR 6.302-1","section":"6.302-1","description":"Only one responsible source and no other supplies or services will satisfy agency requirements","summary":"Only-one-source authority — strongest basis for specialized medical imaging"},{"title":"FAR 6.302-1(b)(2)","section":"6.302-1(b)(2)","description":"Patent rights, data rights, or proprietary processes that limit availability","summary":"Applicable when Siemens holds proprietary technology patents"},{"title":"FAR 6.303-2","section":"6.303-2","description":"Content of justification — minimum requirements for J&A documentation","summary":"Required elements: market research, efforts to obtain competition, actions to remove barriers"}],"results_count":3}},"timestamp":"2026-03-23T10:03:08Z"},
-    {"type":"tool_result","agent_id":"eagle","agent_name":"EAGLE","tool_result":{"name":"knowledge_search","result":{"results":[{"title":"NCI Sole Source Thresholds","summary":"For actions >$750K, J&A requires Head of Contracting Activity (HCA) approval. Actions >$100M require SPE approval.","primary_topic":"approval thresholds","confidence_score":0.95},{"title":"NCI Medical Equipment Precedents","summary":"Prior sole-source awards for specialized imaging: 2024 PET/CT scanner (Siemens, $1.8M, approved under 6.302-1).","primary_topic":"precedent","confidence_score":0.88}]}},"timestamp":"2026-03-23T10:03:11Z"},
-    {"type":"tool_result","agent_id":"eagle","agent_name":"EAGLE","tool_result":{"name":"legal_counsel","result":"## Legal Analysis: Sole-Source Justification\n\n### Authority\nFAR 6.302-1 (Only One Responsible Source) is the appropriate authority. Siemens Healthineers holds proprietary patents on the MagnetomVida MRI technology.\n\n### Approval Level\nAt $2.3M, this requires **Head of Contracting Activity (HCA)** approval per FAR 6.304(a)(3).\n\n### Risk Assessment\n**LOW RISK** — Strong legal basis. NCI has precedent (2024 PET/CT, $1.8M). Patent documentation available.\n\n### Required Documentation\n1. Market research demonstrating no equivalent alternatives\n2. Patent/proprietary data documentation from Siemens\n3. Fair & reasonable price determination\n4. J&A signed by requirements office + contracting officer"},"timestamp":"2026-03-23T10:03:15Z"},
-    {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"The legal analysis is complete. Now let me check policy compliance.","timestamp":"2026-03-23T10:03:16Z"},
-    {"type":"handoff","agent_id":"eagle","agent_name":"EAGLE","metadata":{"target_agent":"policy_analyst","reason":"Verify FAR/DFARS compliance for sole-source"},"timestamp":"2026-03-23T10:03:17Z"},
-    {"type":"tool_use","agent_id":"eagle","agent_name":"EAGLE","tool_use":{"name":"policy_analyst","input":{"query":"Review FAR/DFARS compliance requirements for a $2.3M sole-source medical equipment procurement under FAR 6.302-1"},"tool_use_id":"tu_032"},"timestamp":"2026-03-23T10:03:18Z"},
-    {"type":"tool_result","agent_id":"eagle","agent_name":"EAGLE","tool_result":{"name":"web_search","result":{"query":"FAR 6.302-1 sole source justification 2026 thresholds","answer":"Current sole-source J&A approval thresholds under FAR 6.304: up to $750K requires Contracting Officer; $750K-$15M requires Head of Contracting Activity (HCA); $15M-$100M requires Senior Procurement Executive.","sources":[{"url":"https://www.acquisition.gov/far/6.304","domain":"acquisition.gov","snippet":"Approval thresholds"},{"url":"https://www.gsa.gov/policy-regulations/policy","domain":"gsa.gov","snippet":"Procurement policy updates"}],"source_count":2}},"timestamp":"2026-03-23T10:03:23Z"},
-    {"type":"tool_result","agent_id":"eagle","agent_name":"EAGLE","tool_result":{"name":"search_far","result":{"clauses":[{"title":"FAR 5.202(a)(7)","section":"5.202(a)(7)","description":"Sole-source synopsizing requirements — 15-day notice for actions >$25K unless urgency exception applies","summary":"Must publish FedBizOpps notice even for sole-source over $25K"}],"results_count":1}},"timestamp":"2026-03-23T10:03:25Z"},
-    {"type":"tool_result","agent_id":"eagle","agent_name":"EAGLE","tool_result":{"name":"policy_analyst","result":"## Policy Compliance Review\n\n### Compliance Status: PASS (with conditions)\n\n| Requirement | Status | Notes |\n|---|---|---|\n| FAR 6.302-1 authority | ✅ | Only-one-source — proprietary patents |\n| FAR 6.303 J&A content | ⚠️ | Ensure market research is current (<12 months) |\n| FAR 6.304 approval | ✅ | HCA approval required ($2.3M) |\n| FAR 5.202 synopsis | ⚠️ | 15-day FedBizOpps notice required |\n| DFARS 206.302-1 | ✅ | No additional DoD restrictions for NIH |\n\n### Action Items\n1. Verify market research report is dated within 12 months\n2. Post FedBizOpps synopsis (15-day minimum)\n3. Obtain HCA signature on J&A before award"},"timestamp":"2026-03-23T10:03:30Z"},
-    {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"Here's the complete analysis of your sole-source justification for the Siemens imaging equipment:\n\n**Legal Authority:** FAR 6.302-1 (Only One Responsible Source) — strong basis due to proprietary patents. Risk is LOW.\n\n**Approval Level:** HCA approval required at $2.3M.\n\n**Compliance:** PASS with two conditions — ensure market research is current and post the required FedBizOpps synopsis.\n\nWould you like me to draft the J&A document?","timestamp":"2026-03-23T10:03:32Z"},
-    {"type":"complete","agent_id":"eagle","agent_name":"EAGLE","metadata":{"tools_called":["think","legal_counsel","search_far","knowledge_search","policy_analyst","web_search","search_far"],"duration_ms":32000,"tool_timings":[{"tool_name":"think","duration_ms":400},{"tool_name":"legal_counsel","duration_ms":12200},{"tool_name":"search_far","duration_ms":2800},{"tool_name":"knowledge_search","duration_ms":2500},{"tool_name":"policy_analyst","duration_ms":12400},{"tool_name":"web_search","duration_ms":5200}]},"timestamp":"2026-03-23T10:03:33Z"}
-  ]
-};
+    <!-- Prompt bar -->
+    <div class="prompt-bar">
+      <span class="prompt-text" id="prompt-text">Load a scenario to see event analysis</span>
+      <button class="btn-copy-prompt" id="btn-copy-prompt" onclick="copyPrompt()">
+        Copy Prompt
+      </button>
+    </div>
 
-// ── State ──
-const state = {
-  scenario: 'far-search',
-  events: [],
-  visibleEvents: [],
-  selectedIndex: -1,
-  playing: false,
-  playTimer: null,
-  speed: 1,
-  cardExpanded: false,
-};
+    <script>
+      // ── Tool metadata (mirrors tool-use-display.tsx TOOL_META) ──
+      const TOOL_META = {
+        oa_intake: { icon: '\u{1F4CB}', label: 'Intake Assessment' },
+        legal_counsel: { icon: '\u2696\uFE0F', label: 'Legal Analysis' },
+        market_intelligence: { icon: '\u{1F4CA}', label: 'Market Research' },
+        tech_translator: { icon: '\u{1F527}', label: 'Technical Review' },
+        tech_review: { icon: '\u{1F527}', label: 'Technical Review' },
+        public_interest: { icon: '\u{1F3DB}\uFE0F', label: 'Public Interest Review' },
+        document_generator: { icon: '\u{1F4C4}', label: 'Generating Document' },
+        compliance: { icon: '\u2705', label: 'Compliance Check' },
+        policy_analyst: { icon: '\u{1F4DC}', label: 'Policy Analysis' },
+        policy_librarian: { icon: '\u{1F4DA}', label: 'Policy Lookup' },
+        s3_document_ops: { icon: '\u{1F4C1}', label: 'Document Storage' },
+        create_document: { icon: '\u{1F4DD}', label: 'Creating Document' },
+        search_far: { icon: '\u{1F4D6}', label: 'Searching FAR/DFARS' },
+        web_search: { icon: '\u{1F310}', label: 'Web Search' },
+        web_fetch: { icon: '\u{1F4C4}', label: 'Reading Page' },
+        knowledge_search: { icon: '\u{1F50D}', label: 'Knowledge Search' },
+        knowledge_fetch: { icon: '\u{1F4C4}', label: 'Reading Document' },
+        think: { icon: '\u{1F4AD}', label: 'Reasoning' },
+        code: { icon: '\u{1F4BB}', label: 'Running Code' },
+        intake_workflow: { icon: '\u{1F504}', label: 'Intake Workflow' },
+        manage_package: { icon: '\u{1F4E6}', label: 'Package Status' },
+        query_compliance_matrix: { icon: '\u2705', label: 'Compliance Matrix' },
+      };
 
-// ── Speed slider ──
-const speedSlider = document.getElementById('speed-slider');
-const speedLabel = document.getElementById('speed-label');
-speedSlider.addEventListener('input', () => {
-  const v = parseInt(speedSlider.value);
-  const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 10];
-  state.speed = speeds[v - 1] || 1;
-  speedLabel.textContent = state.speed + 'x';
-});
-
-// ── Load scenario ──
-function loadScenario() {
-  state.scenario = document.getElementById('scenario-select').value;
-  state.events = SCENARIOS[state.scenario] || [];
-  state.visibleEvents = [...state.events];
-  state.selectedIndex = -1;
-  state.cardExpanded = false;
-  stopPlay();
-  renderTimeline();
-  updateStats();
-  clearPreview();
-  updatePrompt();
-}
-
-// ── Play scenario ──
-function playScenario() {
-  if (state.playing) { stopPlay(); return; }
-  state.scenario = document.getElementById('scenario-select').value;
-  state.events = SCENARIOS[state.scenario] || [];
-  state.visibleEvents = [];
-  state.selectedIndex = -1;
-  state.cardExpanded = false;
-  state.playing = true;
-  document.getElementById('btn-play').innerHTML = '\u23F8 Pause';
-  document.getElementById('btn-play').classList.add('playing');
-  renderTimeline();
-  clearPreview();
-  playNext(0);
-}
-
-function playNext(idx) {
-  if (!state.playing || idx >= state.events.length) {
-    stopPlay();
-    updateStats();
-    updatePrompt();
-    return;
-  }
-
-  const evt = state.events[idx];
-  state.visibleEvents.push(evt);
-  renderTimeline();
-  selectEvent(state.visibleEvents.length - 1);
-  updateStats();
-
-  // Calculate delay based on timestamps
-  let delay = 600;
-  if (idx + 1 < state.events.length) {
-    const t1 = new Date(evt.timestamp).getTime();
-    const t2 = new Date(state.events[idx + 1].timestamp).getTime();
-    delay = Math.max(150, Math.min(2000, (t2 - t1) / state.speed));
-    // Scale for playback speed
-    delay = delay / state.speed;
-  }
-
-  state.playTimer = setTimeout(() => playNext(idx + 1), delay);
-}
-
-function stopPlay() {
-  state.playing = false;
-  if (state.playTimer) { clearTimeout(state.playTimer); state.playTimer = null; }
-  document.getElementById('btn-play').innerHTML = '\u25B6 Play';
-  document.getElementById('btn-play').classList.remove('playing');
-}
-
-function resetTimeline() {
-  stopPlay();
-  state.visibleEvents = [];
-  state.selectedIndex = -1;
-  state.cardExpanded = false;
-  renderTimeline();
-  updateStats();
-  clearPreview();
-  document.getElementById('json-content').innerHTML = '<span style="color:#656d76;display:block;text-align:center;padding-top:40px;">Select an event to inspect</span>';
-  document.getElementById('prompt-text').textContent = 'Load a scenario to see event analysis';
-}
-
-// ── Render timeline ──
-function renderTimeline() {
-  const list = document.getElementById('timeline-list');
-  if (state.visibleEvents.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4E1;</div><div class="msg">No events yet</div><div class="hint">Select a scenario and click Play</div></div>';
-    document.getElementById('timeline-count').textContent = '0 events';
-    return;
-  }
-
-  document.getElementById('timeline-count').textContent = state.visibleEvents.length + ' event' + (state.visibleEvents.length !== 1 ? 's' : '');
-
-  // Track open tool calls to detect nested/subagent results
-  const openTools = new Set();
-  const nestedFlags = state.visibleEvents.map((evt, i) => {
-    if (evt.type === 'tool_use') {
-      openTools.add(evt.tool_use.name);
-      return false;
-    }
-    if (evt.type === 'tool_result') {
-      const name = evt.tool_result.name;
-      if (openTools.has(name)) {
-        openTools.delete(name);
-        return false; // Direct result for an open tool
+      function getToolMeta(name) {
+        return TOOL_META[name] || { icon: '\u2699\uFE0F', label: name.replace(/_/g, ' ') };
       }
-      return openTools.size > 0; // Nested: result for a tool we didn't see tool_use for
-    }
-    return false;
-  });
 
-  list.innerHTML = state.visibleEvents.map((evt, i) => {
-    const isNew = state.playing && i === state.visibleEvents.length - 1;
-    const sel = i === state.selectedIndex ? ' selected' : '';
-    const entering = isNew ? ' entering' : '';
-    const nested = nestedFlags[i];
-    const indent = nested ? 'padding-left:32px;' : '';
+      // ── Scenarios ──
+      const SCENARIOS = {
+        'far-search': [
+          {
+            type: 'text',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            content: 'Let me search FAR for that...',
+            timestamp: '2026-03-23T10:00:01Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_use: {
+              name: 'search_far',
+              input: { query: 'sole source justification requirements' },
+              tool_use_id: 'tu_001',
+            },
+            timestamp: '2026-03-23T10:00:02Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_result: {
+              name: 'search_far',
+              result: {
+                clauses: [
+                  {
+                    title: 'FAR 6.302-1',
+                    section: '6.302-1',
+                    description:
+                      'Only one responsible source and no other supplies or services will satisfy agency requirements',
+                    summary: 'Authorizes sole source when only one source can meet requirements',
+                  },
+                  {
+                    title: 'FAR 6.303',
+                    section: '6.303',
+                    description: 'Justifications for other than full and open competition',
+                    summary: 'J&A documentation requirements for sole source actions',
+                  },
+                  {
+                    title: 'FAR 6.304',
+                    section: '6.304',
+                    description: 'Approval of justifications',
+                    summary: 'Approval thresholds for sole source justifications by dollar value',
+                  },
+                ],
+                results_count: 3,
+              },
+            },
+            timestamp: '2026-03-23T10:00:05Z',
+          },
+          {
+            type: 'text',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            content:
+              "Based on FAR 6.302-1, sole source justification requires demonstrating that only one responsible source can meet the agency's requirements. You'll need to prepare a Justification & Approval (J&A) document per FAR 6.303.",
+            timestamp: '2026-03-23T10:00:06Z',
+          },
+          {
+            type: 'complete',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            metadata: {
+              tools_called: ['search_far'],
+              duration_ms: 5200,
+              tool_timings: [{ tool_name: 'search_far', duration_ms: 3100 }],
+            },
+            timestamp: '2026-03-23T10:00:07Z',
+          },
+        ],
+        'web-knowledge': [
+          {
+            type: 'text',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            content: "I'll search for that information...",
+            timestamp: '2026-03-23T10:01:00Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_use: {
+              name: 'web_search',
+              input: { query: 'GSA IT Schedule 70 current rates 2026' },
+              tool_use_id: 'tu_010',
+            },
+            timestamp: '2026-03-23T10:01:01Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_result: {
+              name: 'web_search',
+              result: {
+                query: 'GSA IT Schedule 70 current rates 2026',
+                answer:
+                  'The GSA IT Schedule (now known as the Multiple Award Schedule) provides pre-negotiated pricing for IT products and services. Current labor rates vary by SIN and contractor but typically range from $85-$350/hour for various IT categories.',
+                sources: [
+                  {
+                    url: 'https://www.gsa.gov/technology/technology-purchasing-programs',
+                    domain: 'gsa.gov',
+                    snippet: 'GSA IT Schedule overview',
+                  },
+                  {
+                    url: 'https://www.gsaadvantage.gov',
+                    domain: 'gsaadvantage.gov',
+                    snippet: 'GSA Advantage purchasing portal',
+                  },
+                  {
+                    url: 'https://www.acquisition.gov/far',
+                    domain: 'acquisition.gov',
+                    snippet: 'FAR reference',
+                  },
+                ],
+                source_count: 3,
+              },
+            },
+            timestamp: '2026-03-23T10:01:08Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_use: {
+              name: 'knowledge_search',
+              input: { query: 'GSA schedule pricing guidance' },
+              tool_use_id: 'tu_011',
+            },
+            timestamp: '2026-03-23T10:01:09Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_result: {
+              name: 'knowledge_search',
+              result: {
+                results: [
+                  {
+                    title: 'GSA Schedule Ordering Procedures',
+                    summary:
+                      'Guidance on ordering from GSA schedules including price analysis requirements',
+                    primary_topic: 'procurement',
+                    confidence_score: 0.92,
+                  },
+                  {
+                    title: 'IT Schedule Best Practices',
+                    summary:
+                      'NCI best practices for IT schedule orders including fair opportunity requirements',
+                    primary_topic: 'IT procurement',
+                    confidence_score: 0.85,
+                  },
+                ],
+              },
+            },
+            timestamp: '2026-03-23T10:01:12Z',
+          },
+          {
+            type: 'text',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            content:
+              "Based on my research, here's what I found about GSA IT Schedule rates. The current MAS (Multiple Award Schedule) provides pre-negotiated pricing ranging from $85-$350/hour depending on the SIN category.",
+            timestamp: '2026-03-23T10:01:13Z',
+          },
+          {
+            type: 'complete',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            metadata: {
+              tools_called: ['web_search', 'knowledge_search'],
+              duration_ms: 13500,
+              tool_timings: [
+                { tool_name: 'web_search', duration_ms: 7200 },
+                { tool_name: 'knowledge_search', duration_ms: 3100 },
+              ],
+            },
+            timestamp: '2026-03-23T10:01:14Z',
+          },
+        ],
+        'doc-gen': [
+          {
+            type: 'agent_status',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            metadata: { status: 'Analyzing your request...', detail: '' },
+            timestamp: '2026-03-23T10:02:00Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_use: {
+              name: 'think',
+              input: {
+                thought:
+                  'User wants a Statement of Work. I need to gather requirements first via the document generator specialist.',
+              },
+              tool_use_id: 'tu_020',
+            },
+            timestamp: '2026-03-23T10:02:01Z',
+          },
+          {
+            type: 'handoff',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            metadata: { target_agent: 'document_generator', reason: 'Generate SOW document' },
+            timestamp: '2026-03-23T10:02:02Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_use: {
+              name: 'document_generator',
+              input: { query: 'Generate a Statement of Work for cloud migration services' },
+              tool_use_id: 'tu_021',
+            },
+            timestamp: '2026-03-23T10:02:03Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_result: {
+              name: 'document_generator',
+              result:
+                "## Document Generation Report\n\nI've drafted a Statement of Work for cloud migration services.\n\n### Key Sections:\n1. **Scope** - Cloud migration from on-premises to AWS GovCloud\n2. **Period of Performance** - 12 months base + 2 option years\n3. **Deliverables** - Migration plan, architecture docs, training\n4. **Quality Standards** - FedRAMP High, FISMA compliance",
+            },
+            timestamp: '2026-03-23T10:02:15Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_use: {
+              name: 'create_document',
+              input: { doc_type: 'sow', title: 'Cloud Migration Services SOW' },
+              tool_use_id: 'tu_022',
+            },
+            timestamp: '2026-03-23T10:02:16Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            tool_result: {
+              name: 'create_document',
+              result: {
+                document_type: 'sow',
+                title: 'Cloud Migration Services SOW',
+                s3_key: 'sow_20260323_100216.md',
+                status: 'saved',
+                version: 1,
+                word_count: 2847,
+                content: '# Statement of Work...',
+              },
+            },
+            timestamp: '2026-03-23T10:02:20Z',
+          },
+          {
+            type: 'text',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            content:
+              "I've generated your Statement of Work for cloud migration services. The document has been saved and is ready for review.",
+            timestamp: '2026-03-23T10:02:21Z',
+          },
+          {
+            type: 'complete',
+            agent_id: 'supervisor',
+            agent_name: 'Supervisor',
+            metadata: {
+              tools_called: ['think', 'document_generator', 'create_document'],
+              duration_ms: 21000,
+              tool_timings: [
+                { tool_name: 'think', duration_ms: 500 },
+                { tool_name: 'document_generator', duration_ms: 12000 },
+                { tool_name: 'create_document', duration_ms: 4200 },
+              ],
+            },
+            timestamp: '2026-03-23T10:02:22Z',
+          },
+        ],
+        'subagent-flow': [
+          {
+            type: 'text',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            content: "I'll review the legal and policy aspects of this sole-source justification.",
+            timestamp: '2026-03-23T10:03:00Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_use: {
+              name: 'think',
+              input: {
+                thought:
+                  "This requires legal analysis for sole-source authority under FAR 6.302, plus a policy check. I'll delegate to legal_counsel and policy_analyst subagents.",
+              },
+              tool_use_id: 'tu_030',
+            },
+            timestamp: '2026-03-23T10:03:01Z',
+          },
+          {
+            type: 'handoff',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            metadata: {
+              target_agent: 'legal_counsel',
+              reason: 'Analyze sole-source legal authority',
+            },
+            timestamp: '2026-03-23T10:03:02Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_use: {
+              name: 'legal_counsel',
+              input: {
+                query:
+                  'Analyze legal authority for sole-source procurement of specialized cancer research imaging equipment from Siemens Healthineers, estimated value $2.3M',
+              },
+              tool_use_id: 'tu_031',
+            },
+            timestamp: '2026-03-23T10:03:03Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_result: {
+              name: 'search_far',
+              result: {
+                clauses: [
+                  {
+                    title: 'FAR 6.302-1',
+                    section: '6.302-1',
+                    description:
+                      'Only one responsible source and no other supplies or services will satisfy agency requirements',
+                    summary:
+                      'Only-one-source authority — strongest basis for specialized medical imaging',
+                  },
+                  {
+                    title: 'FAR 6.302-1(b)(2)',
+                    section: '6.302-1(b)(2)',
+                    description:
+                      'Patent rights, data rights, or proprietary processes that limit availability',
+                    summary: 'Applicable when Siemens holds proprietary technology patents',
+                  },
+                  {
+                    title: 'FAR 6.303-2',
+                    section: '6.303-2',
+                    description:
+                      'Content of justification — minimum requirements for J&A documentation',
+                    summary:
+                      'Required elements: market research, efforts to obtain competition, actions to remove barriers',
+                  },
+                ],
+                results_count: 3,
+              },
+            },
+            timestamp: '2026-03-23T10:03:08Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_result: {
+              name: 'knowledge_search',
+              result: {
+                results: [
+                  {
+                    title: 'NCI Sole Source Thresholds',
+                    summary:
+                      'For actions >$750K, J&A requires Head of Contracting Activity (HCA) approval. Actions >$100M require SPE approval.',
+                    primary_topic: 'approval thresholds',
+                    confidence_score: 0.95,
+                  },
+                  {
+                    title: 'NCI Medical Equipment Precedents',
+                    summary:
+                      'Prior sole-source awards for specialized imaging: 2024 PET/CT scanner (Siemens, $1.8M, approved under 6.302-1).',
+                    primary_topic: 'precedent',
+                    confidence_score: 0.88,
+                  },
+                ],
+              },
+            },
+            timestamp: '2026-03-23T10:03:11Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_result: {
+              name: 'legal_counsel',
+              result:
+                '## Legal Analysis: Sole-Source Justification\n\n### Authority\nFAR 6.302-1 (Only One Responsible Source) is the appropriate authority. Siemens Healthineers holds proprietary patents on the MagnetomVida MRI technology.\n\n### Approval Level\nAt $2.3M, this requires **Head of Contracting Activity (HCA)** approval per FAR 6.304(a)(3).\n\n### Risk Assessment\n**LOW RISK** — Strong legal basis. NCI has precedent (2024 PET/CT, $1.8M). Patent documentation available.\n\n### Required Documentation\n1. Market research demonstrating no equivalent alternatives\n2. Patent/proprietary data documentation from Siemens\n3. Fair & reasonable price determination\n4. J&A signed by requirements office + contracting officer',
+            },
+            timestamp: '2026-03-23T10:03:15Z',
+          },
+          {
+            type: 'text',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            content: 'The legal analysis is complete. Now let me check policy compliance.',
+            timestamp: '2026-03-23T10:03:16Z',
+          },
+          {
+            type: 'handoff',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            metadata: {
+              target_agent: 'policy_analyst',
+              reason: 'Verify FAR/DFARS compliance for sole-source',
+            },
+            timestamp: '2026-03-23T10:03:17Z',
+          },
+          {
+            type: 'tool_use',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_use: {
+              name: 'policy_analyst',
+              input: {
+                query:
+                  'Review FAR/DFARS compliance requirements for a $2.3M sole-source medical equipment procurement under FAR 6.302-1',
+              },
+              tool_use_id: 'tu_032',
+            },
+            timestamp: '2026-03-23T10:03:18Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_result: {
+              name: 'web_search',
+              result: {
+                query: 'FAR 6.302-1 sole source justification 2026 thresholds',
+                answer:
+                  'Current sole-source J&A approval thresholds under FAR 6.304: up to $750K requires Contracting Officer; $750K-$15M requires Head of Contracting Activity (HCA); $15M-$100M requires Senior Procurement Executive.',
+                sources: [
+                  {
+                    url: 'https://www.acquisition.gov/far/6.304',
+                    domain: 'acquisition.gov',
+                    snippet: 'Approval thresholds',
+                  },
+                  {
+                    url: 'https://www.gsa.gov/policy-regulations/policy',
+                    domain: 'gsa.gov',
+                    snippet: 'Procurement policy updates',
+                  },
+                ],
+                source_count: 2,
+              },
+            },
+            timestamp: '2026-03-23T10:03:23Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_result: {
+              name: 'search_far',
+              result: {
+                clauses: [
+                  {
+                    title: 'FAR 5.202(a)(7)',
+                    section: '5.202(a)(7)',
+                    description:
+                      'Sole-source synopsizing requirements — 15-day notice for actions >$25K unless urgency exception applies',
+                    summary: 'Must publish FedBizOpps notice even for sole-source over $25K',
+                  },
+                ],
+                results_count: 1,
+              },
+            },
+            timestamp: '2026-03-23T10:03:25Z',
+          },
+          {
+            type: 'tool_result',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            tool_result: {
+              name: 'policy_analyst',
+              result:
+                '## Policy Compliance Review\n\n### Compliance Status: PASS (with conditions)\n\n| Requirement | Status | Notes |\n|---|---|---|\n| FAR 6.302-1 authority | ✅ | Only-one-source — proprietary patents |\n| FAR 6.303 J&A content | ⚠️ | Ensure market research is current (<12 months) |\n| FAR 6.304 approval | ✅ | HCA approval required ($2.3M) |\n| FAR 5.202 synopsis | ⚠️ | 15-day FedBizOpps notice required |\n| DFARS 206.302-1 | ✅ | No additional DoD restrictions for NIH |\n\n### Action Items\n1. Verify market research report is dated within 12 months\n2. Post FedBizOpps synopsis (15-day minimum)\n3. Obtain HCA signature on J&A before award',
+            },
+            timestamp: '2026-03-23T10:03:30Z',
+          },
+          {
+            type: 'text',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            content:
+              "Here's the complete analysis of your sole-source justification for the Siemens imaging equipment:\n\n**Legal Authority:** FAR 6.302-1 (Only One Responsible Source) — strong basis due to proprietary patents. Risk is LOW.\n\n**Approval Level:** HCA approval required at $2.3M.\n\n**Compliance:** PASS with two conditions — ensure market research is current and post the required FedBizOpps synopsis.\n\nWould you like me to draft the J&A document?",
+            timestamp: '2026-03-23T10:03:32Z',
+          },
+          {
+            type: 'complete',
+            agent_id: 'eagle',
+            agent_name: 'EAGLE',
+            metadata: {
+              tools_called: [
+                'think',
+                'legal_counsel',
+                'search_far',
+                'knowledge_search',
+                'policy_analyst',
+                'web_search',
+                'search_far',
+              ],
+              duration_ms: 32000,
+              tool_timings: [
+                { tool_name: 'think', duration_ms: 400 },
+                { tool_name: 'legal_counsel', duration_ms: 12200 },
+                { tool_name: 'search_far', duration_ms: 2800 },
+                { tool_name: 'knowledge_search', duration_ms: 2500 },
+                { tool_name: 'policy_analyst', duration_ms: 12400 },
+                { tool_name: 'web_search', duration_ms: 5200 },
+              ],
+            },
+            timestamp: '2026-03-23T10:03:33Z',
+          },
+        ],
+      };
 
-    let summary = '';
-    switch (evt.type) {
-      case 'text':
-        summary = (evt.content || '').slice(0, 60) + ((evt.content || '').length > 60 ? '...' : '');
-        break;
-      case 'tool_use': {
-        const tm = getToolMeta(evt.tool_use.name);
-        const tuInput = summarizeToolInput(evt.tool_use.name, evt.tool_use.input || {});
-        summary = tm.icon + ' ' + tm.label + (tuInput ? ' \u2014 "' + tuInput.slice(0, 40) + (tuInput.length > 40 ? '...' : '') + '"' : '');
-        break;
+      // ── State ──
+      const state = {
+        scenario: 'far-search',
+        events: [],
+        visibleEvents: [],
+        selectedIndex: -1,
+        playing: false,
+        playTimer: null,
+        speed: 1,
+        cardExpanded: false,
+      };
+
+      // ── Speed slider ──
+      const speedSlider = document.getElementById('speed-slider');
+      const speedLabel = document.getElementById('speed-label');
+      speedSlider.addEventListener('input', () => {
+        const v = parseInt(speedSlider.value);
+        const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 10];
+        state.speed = speeds[v - 1] || 1;
+        speedLabel.textContent = state.speed + 'x';
+      });
+
+      // ── Load scenario ──
+      function loadScenario() {
+        state.scenario = document.getElementById('scenario-select').value;
+        state.events = SCENARIOS[state.scenario] || [];
+        state.visibleEvents = [...state.events];
+        state.selectedIndex = -1;
+        state.cardExpanded = false;
+        stopPlay();
+        renderTimeline();
+        updateStats();
+        clearPreview();
+        updatePrompt();
       }
-      case 'tool_result': {
-        const trm = getToolMeta(evt.tool_result.name);
-        const res = evt.tool_result.result;
-        // Find the matching tool_use to show its input as the primary label
-        const matchingUse = state.visibleEvents.slice(0, i).reverse().find(
-          e => e.type === 'tool_use' && e.tool_use.name === evt.tool_result.name
-        );
-        const trInput = matchingUse ? summarizeToolInput(matchingUse.tool_use.name, matchingUse.tool_use.input || {}) : '';
-        let detail = '';
-        if (typeof res === 'object' && res) {
-          if (res.clauses) detail = res.results_count + ' results';
-          else if (res.sources) detail = res.source_count + ' sources';
-          else if (res.results) detail = res.results.length + ' results';
-          else if (res.document_type) detail = res.document_type;
-        } else if (typeof res === 'string') {
-          detail = 'report';
+
+      // ── Play scenario ──
+      function playScenario() {
+        if (state.playing) {
+          stopPlay();
+          return;
         }
-        const trLabel = trInput ? '"' + trInput.slice(0, 30) + (trInput.length > 30 ? '...' : '') + '"' : '';
-        summary = (nested ? '\u2514 ' : '') + trm.icon + ' ' + trm.label + (trLabel ? ' \u2014 ' + trLabel : '') + (detail ? ' (' + detail + ')' : '');
-        break;
+        state.scenario = document.getElementById('scenario-select').value;
+        state.events = SCENARIOS[state.scenario] || [];
+        state.visibleEvents = [];
+        state.selectedIndex = -1;
+        state.cardExpanded = false;
+        state.playing = true;
+        document.getElementById('btn-play').innerHTML = '\u23F8 Pause';
+        document.getElementById('btn-play').classList.add('playing');
+        renderTimeline();
+        clearPreview();
+        playNext(0);
       }
-      case 'agent_status':
-        summary = evt.metadata?.status || '';
-        break;
-      case 'handoff':
-        summary = '\u2192 ' + (evt.metadata?.target_agent || 'specialist');
-        break;
-      case 'complete':
-        summary = (evt.metadata?.duration_ms || 0) + 'ms total';
-        break;
-      case 'reasoning':
-        summary = 'Thinking...';
-        break;
-      case 'error':
-        summary = evt.content || 'Error';
-        break;
-      default:
-        summary = evt.type;
-    }
 
-    const time = new Date(evt.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      function playNext(idx) {
+        if (!state.playing || idx >= state.events.length) {
+          stopPlay();
+          updateStats();
+          updatePrompt();
+          return;
+        }
 
-    return `<div class="timeline-event${sel}${entering}" style="${indent}" onclick="selectEvent(${i})">
+        const evt = state.events[idx];
+        state.visibleEvents.push(evt);
+        renderTimeline();
+        selectEvent(state.visibleEvents.length - 1);
+        updateStats();
+
+        // Calculate delay based on timestamps
+        let delay = 600;
+        if (idx + 1 < state.events.length) {
+          const t1 = new Date(evt.timestamp).getTime();
+          const t2 = new Date(state.events[idx + 1].timestamp).getTime();
+          delay = Math.max(150, Math.min(2000, (t2 - t1) / state.speed));
+          // Scale for playback speed
+          delay = delay / state.speed;
+        }
+
+        state.playTimer = setTimeout(() => playNext(idx + 1), delay);
+      }
+
+      function stopPlay() {
+        state.playing = false;
+        if (state.playTimer) {
+          clearTimeout(state.playTimer);
+          state.playTimer = null;
+        }
+        document.getElementById('btn-play').innerHTML = '\u25B6 Play';
+        document.getElementById('btn-play').classList.remove('playing');
+      }
+
+      function resetTimeline() {
+        stopPlay();
+        state.visibleEvents = [];
+        state.selectedIndex = -1;
+        state.cardExpanded = false;
+        renderTimeline();
+        updateStats();
+        clearPreview();
+        document.getElementById('json-content').innerHTML =
+          '<span style="color:#656d76;display:block;text-align:center;padding-top:40px;">Select an event to inspect</span>';
+        document.getElementById('prompt-text').textContent =
+          'Load a scenario to see event analysis';
+      }
+
+      // ── Render timeline ──
+      function renderTimeline() {
+        const list = document.getElementById('timeline-list');
+        if (state.visibleEvents.length === 0) {
+          list.innerHTML =
+            '<div class="empty-state"><div class="icon">&#x1F4E1;</div><div class="msg">No events yet</div><div class="hint">Select a scenario and click Play</div></div>';
+          document.getElementById('timeline-count').textContent = '0 events';
+          return;
+        }
+
+        document.getElementById('timeline-count').textContent =
+          state.visibleEvents.length + ' event' + (state.visibleEvents.length !== 1 ? 's' : '');
+
+        // Track open tool calls to detect nested/subagent results
+        const openTools = new Set();
+        const nestedFlags = state.visibleEvents.map((evt, i) => {
+          if (evt.type === 'tool_use') {
+            openTools.add(evt.tool_use.name);
+            return false;
+          }
+          if (evt.type === 'tool_result') {
+            const name = evt.tool_result.name;
+            if (openTools.has(name)) {
+              openTools.delete(name);
+              return false; // Direct result for an open tool
+            }
+            return openTools.size > 0; // Nested: result for a tool we didn't see tool_use for
+          }
+          return false;
+        });
+
+        list.innerHTML = state.visibleEvents
+          .map((evt, i) => {
+            const isNew = state.playing && i === state.visibleEvents.length - 1;
+            const sel = i === state.selectedIndex ? ' selected' : '';
+            const entering = isNew ? ' entering' : '';
+            const nested = nestedFlags[i];
+            const indent = nested ? 'padding-left:32px;' : '';
+
+            let summary = '';
+            switch (evt.type) {
+              case 'text':
+                summary =
+                  (evt.content || '').slice(0, 60) + ((evt.content || '').length > 60 ? '...' : '');
+                break;
+              case 'tool_use': {
+                const tm = getToolMeta(evt.tool_use.name);
+                const tuInput = summarizeToolInput(evt.tool_use.name, evt.tool_use.input || {});
+                summary =
+                  tm.icon +
+                  ' ' +
+                  tm.label +
+                  (tuInput
+                    ? ' \u2014 "' + tuInput.slice(0, 40) + (tuInput.length > 40 ? '...' : '') + '"'
+                    : '');
+                break;
+              }
+              case 'tool_result': {
+                const trm = getToolMeta(evt.tool_result.name);
+                const res = evt.tool_result.result;
+                // Find the matching tool_use to show its input as the primary label
+                const matchingUse = state.visibleEvents
+                  .slice(0, i)
+                  .reverse()
+                  .find((e) => e.type === 'tool_use' && e.tool_use.name === evt.tool_result.name);
+                const trInput = matchingUse
+                  ? summarizeToolInput(matchingUse.tool_use.name, matchingUse.tool_use.input || {})
+                  : '';
+                let detail = '';
+                if (typeof res === 'object' && res) {
+                  if (res.clauses) detail = res.results_count + ' results';
+                  else if (res.sources) detail = res.source_count + ' sources';
+                  else if (res.results) detail = res.results.length + ' results';
+                  else if (res.document_type) detail = res.document_type;
+                } else if (typeof res === 'string') {
+                  detail = 'report';
+                }
+                const trLabel = trInput
+                  ? '"' + trInput.slice(0, 30) + (trInput.length > 30 ? '...' : '') + '"'
+                  : '';
+                summary =
+                  (nested ? '\u2514 ' : '') +
+                  trm.icon +
+                  ' ' +
+                  trm.label +
+                  (trLabel ? ' \u2014 ' + trLabel : '') +
+                  (detail ? ' (' + detail + ')' : '');
+                break;
+              }
+              case 'agent_status':
+                summary = evt.metadata?.status || '';
+                break;
+              case 'handoff':
+                summary = '\u2192 ' + (evt.metadata?.target_agent || 'specialist');
+                break;
+              case 'complete':
+                summary = (evt.metadata?.duration_ms || 0) + 'ms total';
+                break;
+              case 'reasoning':
+                summary = 'Thinking...';
+                break;
+              case 'error':
+                summary = evt.content || 'Error';
+                break;
+              default:
+                summary = evt.type;
+            }
+
+            const time = new Date(evt.timestamp).toLocaleTimeString('en-US', {
+              hour12: false,
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            });
+
+            return `<div class="timeline-event${sel}${entering}" style="${indent}" onclick="selectEvent(${i})">
       <span class="event-type-badge badge-${evt.type}">${nested ? 'nested' : evt.type.replace('_', ' ')}</span>
       <div class="event-content">
         <div class="event-summary">${escHtml(summary)}</div>
         <div class="event-time">${time}${nested ? ' <span style="color:var(--accent-orange);font-size:9px;"> via subagent</span>' : ''}</div>
       </div>
     </div>`;
-  }).join('');
+          })
+          .join('');
 
-  // Auto-scroll to bottom
-  list.scrollTop = list.scrollHeight;
-}
+        // Auto-scroll to bottom
+        list.scrollTop = list.scrollHeight;
+      }
 
-// ── Select event ──
-function selectEvent(idx) {
-  state.selectedIndex = idx;
-  state.cardExpanded = false;
-  renderTimeline();
-  renderPreview();
-  renderJson();
-}
+      // ── Select event ──
+      function selectEvent(idx) {
+        state.selectedIndex = idx;
+        state.cardExpanded = false;
+        renderTimeline();
+        renderPreview();
+        renderJson();
+      }
 
-function toggleCardExpand() {
-  state.cardExpanded = !state.cardExpanded;
-  renderPreview();
-}
+      function toggleCardExpand() {
+        state.cardExpanded = !state.cardExpanded;
+        renderPreview();
+      }
 
-// ── Render card preview ──
-function renderPreview() {
-  const container = document.getElementById('card-preview');
-  if (state.selectedIndex < 0 || state.selectedIndex >= state.visibleEvents.length) {
-    container.innerHTML = '<div class="card-preview-empty">Click an event in the timeline to preview its rendering<div class="hint">tool_use and tool_result events show the actual card UI</div></div>';
-    return;
-  }
+      // ── Render card preview ──
+      function renderPreview() {
+        const container = document.getElementById('card-preview');
+        if (state.selectedIndex < 0 || state.selectedIndex >= state.visibleEvents.length) {
+          container.innerHTML =
+            '<div class="card-preview-empty">Click an event in the timeline to preview its rendering<div class="hint">tool_use and tool_result events show the actual card UI</div></div>';
+          return;
+        }
 
-  const evt = state.visibleEvents[state.selectedIndex];
+        const evt = state.visibleEvents[state.selectedIndex];
 
-  switch (evt.type) {
-    case 'tool_use':
-      container.innerHTML = renderToolUseCard(evt);
-      break;
-    case 'tool_result':
-      container.innerHTML = renderToolResultCard(evt);
-      break;
-    case 'text':
-      container.innerHTML = renderTextPreview(evt);
-      break;
-    case 'agent_status':
-      container.innerHTML = `<div class="status-preview"><strong>\u{1F4AC} ${escHtml(evt.metadata?.status || '')}</strong>${evt.metadata?.detail ? '<br><span style="opacity:0.7">' + escHtml(evt.metadata.detail) + '</span>' : ''}</div>`;
-      break;
-    case 'handoff':
-      container.innerHTML = `<div class="handoff-preview"><strong>\u{1F91D} Handing off to ${escHtml(evt.metadata?.target_agent || '')}</strong><br><span style="opacity:0.7">${escHtml(evt.metadata?.reason || '')}</span></div>`;
-      break;
-    case 'complete':
-      container.innerHTML = renderCompletePreview(evt);
-      break;
-    case 'error':
-      container.innerHTML = `<div style="padding:12px 16px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;max-width:500px;color:#991b1b;font-size:12px;"><strong>\u274C Error</strong><br>${escHtml(evt.content || 'Unknown error')}</div>`;
-      break;
-    default:
-      container.innerHTML = `<div class="card-preview-empty">No card preview for "${evt.type}" events</div>`;
-  }
-}
+        switch (evt.type) {
+          case 'tool_use':
+            container.innerHTML = renderToolUseCard(evt);
+            break;
+          case 'tool_result':
+            container.innerHTML = renderToolResultCard(evt);
+            break;
+          case 'text':
+            container.innerHTML = renderTextPreview(evt);
+            break;
+          case 'agent_status':
+            container.innerHTML = `<div class="status-preview"><strong>\u{1F4AC} ${escHtml(evt.metadata?.status || '')}</strong>${evt.metadata?.detail ? '<br><span style="opacity:0.7">' + escHtml(evt.metadata.detail) + '</span>' : ''}</div>`;
+            break;
+          case 'handoff':
+            container.innerHTML = `<div class="handoff-preview"><strong>\u{1F91D} Handing off to ${escHtml(evt.metadata?.target_agent || '')}</strong><br><span style="opacity:0.7">${escHtml(evt.metadata?.reason || '')}</span></div>`;
+            break;
+          case 'complete':
+            container.innerHTML = renderCompletePreview(evt);
+            break;
+          case 'error':
+            container.innerHTML = `<div style="padding:12px 16px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;max-width:500px;color:#991b1b;font-size:12px;"><strong>\u274C Error</strong><br>${escHtml(evt.content || 'Unknown error')}</div>`;
+            break;
+          default:
+            container.innerHTML = `<div class="card-preview-empty">No card preview for "${evt.type}" events</div>`;
+        }
+      }
 
-function renderToolUseCard(evt) {
-  const tu = evt.tool_use;
-  const meta = getToolMeta(tu.name);
-  const summary = summarizeToolInput(tu.name, tu.input || {});
+      function renderToolUseCard(evt) {
+        const tu = evt.tool_use;
+        const meta = getToolMeta(tu.name);
+        const summary = summarizeToolInput(tu.name, tu.input || {});
 
-  return `<div class="tool-card" style="border-color:#93c5fd;background:#eff6ff;">
+        return `<div class="tool-card" style="border-color:#93c5fd;background:#eff6ff;">
     <div class="tool-card-header">
       <span class="tool-card-icon">${meta.icon}</span>
       <span class="tool-card-label">${escHtml(meta.label)}</span>
@@ -997,30 +1745,37 @@ function renderToolUseCard(evt) {
   <div style="margin-top:8px;font-size:10px;color:#656d76;">
     <em>Card shown during streaming \u2014 status: pending/running (pulsing blue dot)</em>
   </div>`;
-}
+      }
 
-function renderToolResultCard(evt) {
-  const tr = evt.tool_result;
-  const meta = getToolMeta(tr.name);
-  // Find the matching tool_use to show its input query
-  const matchIdx = state.visibleEvents.indexOf(evt);
-  const matchingUse = state.visibleEvents.slice(0, matchIdx).reverse().find(
-    e => e.type === 'tool_use' && e.tool_use.name === tr.name
-  );
-  const inputSummary = matchingUse ? summarizeToolInput(matchingUse.tool_use.name, matchingUse.tool_use.input || {}) : '';
-  const resultSummary = summarizeToolResult(tr.name, tr.result);
-  const summary = inputSummary || resultSummary;
-  const chevClass = state.cardExpanded ? ' open' : '';
+      function renderToolResultCard(evt) {
+        const tr = evt.tool_result;
+        const meta = getToolMeta(tr.name);
+        // Find the matching tool_use to show its input query
+        const matchIdx = state.visibleEvents.indexOf(evt);
+        const matchingUse = state.visibleEvents
+          .slice(0, matchIdx)
+          .reverse()
+          .find((e) => e.type === 'tool_use' && e.tool_use.name === tr.name);
+        const inputSummary = matchingUse
+          ? summarizeToolInput(matchingUse.tool_use.name, matchingUse.tool_use.input || {})
+          : '';
+        const resultSummary = summarizeToolResult(tr.name, tr.result);
+        const summary = inputSummary || resultSummary;
+        const chevClass = state.cardExpanded ? ' open' : '';
 
-  let resultHtml = '';
-  if (state.cardExpanded) {
-    resultHtml = renderResultPanel(tr.name, tr.result);
-  }
+        let resultHtml = '';
+        if (state.cardExpanded) {
+          resultHtml = renderResultPanel(tr.name, tr.result);
+        }
 
-  // Special case: create_document shows inline doc card (never expandable)
-  if (tr.name === 'create_document' && typeof tr.result === 'object' && tr.result.document_type) {
-    const d = tr.result;
-    return `<div class="tool-card">
+        // Special case: create_document shows inline doc card (never expandable)
+        if (
+          tr.name === 'create_document' &&
+          typeof tr.result === 'object' &&
+          tr.result.document_type
+        ) {
+          const d = tr.result;
+          return `<div class="tool-card">
       <div class="tool-card-header">
         <span class="tool-card-icon">${meta.icon}</span>
         <span class="tool-card-label">Document Created</span>
@@ -1039,9 +1794,9 @@ function renderToolResultCard(evt) {
     <div style="margin-top:8px;font-size:10px;color:#656d76;">
       <em>Document card \u2014 shown inline, not expandable (user clicks "Open Document" to view)</em>
     </div>`;
-  }
+        }
 
-  return `<div class="tool-card">
+        return `<div class="tool-card">
     <div class="tool-card-header" onclick="toggleCardExpand()">
       <span class="tool-card-icon">${meta.icon}</span>
       <span class="tool-card-label">${escHtml(meta.label)}</span>
@@ -1054,71 +1809,85 @@ function renderToolResultCard(evt) {
   <div style="margin-top:8px;font-size:10px;color:#656d76;">
     <em>Card after completion \u2014 ${state.cardExpanded ? 'expanded (click header to collapse)' : 'collapsed by default (click header to expand)'}</em>
   </div>`;
-}
+      }
 
-function renderResultPanel(toolName, result) {
-  if (toolName === 'search_far') return renderFarPanel(result);
-  if (toolName === 'web_search') return renderWebSearchPanel(result);
-  if (toolName === 'knowledge_search') return renderKnowledgePanel(result);
-  if (typeof result === 'string') return renderMarkdownPanel(result);
-  return `<div class="tool-card-result" style="padding:8px 12px;"><pre style="font-size:10px;font-family:monospace;white-space:pre-wrap;color:#444;max-height:160px;overflow:auto;">${escHtml(JSON.stringify(result, null, 2))}</pre></div>`;
-}
+      function renderResultPanel(toolName, result) {
+        if (toolName === 'search_far') return renderFarPanel(result);
+        if (toolName === 'web_search') return renderWebSearchPanel(result);
+        if (toolName === 'knowledge_search') return renderKnowledgePanel(result);
+        if (typeof result === 'string') return renderMarkdownPanel(result);
+        return `<div class="tool-card-result" style="padding:8px 12px;"><pre style="font-size:10px;font-family:monospace;white-space:pre-wrap;color:#444;max-height:160px;overflow:auto;">${escHtml(JSON.stringify(result, null, 2))}</pre></div>`;
+      }
 
-function renderFarPanel(result) {
-  const clauses = result?.clauses || [];
-  return `<div class="tool-card-result">
+      function renderFarPanel(result) {
+        const clauses = result?.clauses || [];
+        return `<div class="tool-card-result">
     <div class="result-panel-header">
       <span class="result-type">Policy Lookup</span>
       <span class="result-count">${clauses.length} result${clauses.length !== 1 ? 's' : ''}</span>
     </div>
     <div class="result-panel-items">
-      ${clauses.map(c => `<div class="result-item">
+      ${clauses
+        .map(
+          (c) => `<div class="result-item">
         <span class="result-item-icon">\u{1F4D6}</span>
         <div class="result-item-content">
           <div class="result-item-title">${escHtml(c.title || '')}</div>
           <div class="result-item-desc">${escHtml(c.summary || c.description || '')}</div>
         </div>
         ${c.section ? `<span class="result-item-badge">${escHtml(c.section)}</span>` : ''}
-      </div>`).join('')}
+      </div>`,
+        )
+        .join('')}
     </div>
   </div>`;
-}
+      }
 
-function renderWebSearchPanel(result) {
-  const answer = result?.answer || '';
-  const sources = result?.sources || [];
-  const sourceCount = result?.source_count || sources.length;
-  const truncated = answer.length > 200 ? answer.slice(0, 200) + '...' : answer;
+      function renderWebSearchPanel(result) {
+        const answer = result?.answer || '';
+        const sources = result?.sources || [];
+        const sourceCount = result?.source_count || sources.length;
+        const truncated = answer.length > 200 ? answer.slice(0, 200) + '...' : answer;
 
-  return `<div class="tool-card-result">
+        return `<div class="tool-card-result">
     ${truncated ? `<div class="ws-answer">${escHtml(truncated)}</div>` : ''}
-    ${sources.length > 0 ? `
+    ${
+      sources.length > 0
+        ? `
       <div class="result-panel-header">
         <span class="result-type">Sources</span>
         <span class="result-count">${sourceCount}</span>
       </div>
       <div style="max-height:120px;overflow-y:auto;">
-        ${sources.slice(0, 5).map((s, i) => `<div class="ws-source-item">
+        ${sources
+          .slice(0, 5)
+          .map(
+            (s, i) => `<div class="ws-source-item">
           <span class="ws-source-num">${i + 1}.</span>
           <a class="ws-source-link" href="${escHtml(s.url)}" target="_blank">${escHtml(s.domain || s.url)}</a>
-        </div>`).join('')}
+        </div>`,
+          )
+          .join('')}
       </div>
       ${sourceCount > 5 ? `<div style="padding:4px 12px;font-size:10px;color:#656d76;">+${sourceCount - 5} more</div>` : ''}
-    ` : ''}
+    `
+        : ''
+    }
   </div>`;
-}
+      }
 
-function renderKnowledgePanel(result) {
-  const items = result?.results || result?.documents || result?.matches || [];
-  return `<div class="tool-card-result">
+      function renderKnowledgePanel(result) {
+        const items = result?.results || result?.documents || result?.matches || [];
+        return `<div class="tool-card-result">
     <div class="result-panel-header">
       <span class="result-type">Knowledge Search</span>
       <span class="result-count">${items.length} result${items.length !== 1 ? 's' : ''}</span>
     </div>
     <div class="result-panel-items">
-      ${items.map(it => {
-        const conf = it.confidence_score ?? it.confidence ?? it.score;
-        return `<div class="result-item">
+      ${items
+        .map((it) => {
+          const conf = it.confidence_score ?? it.confidence ?? it.score;
+          return `<div class="result-item">
           <div class="result-item-content">
             <div class="result-item-title">${escHtml(it.title || 'Result')}</div>
             <div class="result-item-desc">${escHtml(it.summary || '')}</div>
@@ -1126,176 +1895,222 @@ function renderKnowledgePanel(result) {
           ${it.primary_topic ? `<span class="result-item-badge" style="background:#eef2ff;color:#4338ca;">${escHtml(it.primary_topic)}</span>` : ''}
           ${conf != null ? `<span style="font-size:9px;color:#656d76;flex-shrink:0;">${Math.round(conf * 100)}%</span>` : ''}
         </div>`;
-      }).join('')}
+        })
+        .join('')}
     </div>
   </div>`;
-}
+      }
 
-function renderMarkdownPanel(text) {
-  // Simple markdown-ish render
-  const html = escHtml(text)
-    .replace(/^## (.+)$/gm, '<strong style="font-size:12px;">$1</strong>')
-    .replace(/^### (.+)$/gm, '<strong style="font-size:11px;">$1</strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
-  return `<div class="tool-card-result" style="padding:10px 12px;font-size:11px;color:#1f2328;line-height:1.6;max-height:200px;overflow-y:auto;">${html}</div>`;
-}
+      function renderMarkdownPanel(text) {
+        // Simple markdown-ish render
+        const html = escHtml(text)
+          .replace(/^## (.+)$/gm, '<strong style="font-size:12px;">$1</strong>')
+          .replace(/^### (.+)$/gm, '<strong style="font-size:11px;">$1</strong>')
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\n/g, '<br>');
+        return `<div class="tool-card-result" style="padding:10px 12px;font-size:11px;color:#1f2328;line-height:1.6;max-height:200px;overflow-y:auto;">${html}</div>`;
+      }
 
-function renderTextPreview(evt) {
-  return `<div class="text-preview">
+      function renderTextPreview(evt) {
+        return `<div class="text-preview">
     <div class="agent-badge">${escHtml(evt.agent_name || 'Assistant')}</div>
     <p>${escHtml(evt.content || '')}</p>
   </div>`;
-}
+      }
 
-function renderCompletePreview(evt) {
-  const m = evt.metadata || {};
-  const dur = m.duration_ms || 0;
-  const timings = m.tool_timings || [];
-  const maxDur = timings.reduce((mx, t) => Math.max(mx, t.duration_ms), 0) || 1;
+      function renderCompletePreview(evt) {
+        const m = evt.metadata || {};
+        const dur = m.duration_ms || 0;
+        const timings = m.tool_timings || [];
+        const maxDur = timings.reduce((mx, t) => Math.max(mx, t.duration_ms), 0) || 1;
 
-  return `<div class="complete-preview">
+        return `<div class="complete-preview">
     <div style="font-weight:600;margin-bottom:8px;">\u2705 Stream Complete \u2014 ${(dur / 1000).toFixed(1)}s total</div>
-    ${timings.length > 0 ? `
+    ${
+      timings.length > 0
+        ? `
       <div style="font-size:10px;color:#656d76;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Tool Timings</div>
-      ${timings.map(t => {
-        const pct = Math.round((t.duration_ms / maxDur) * 100);
-        const tm = getToolMeta(t.tool_name);
-        return `<div class="timing-row">
+      ${timings
+        .map((t) => {
+          const pct = Math.round((t.duration_ms / maxDur) * 100);
+          const tm = getToolMeta(t.tool_name);
+          return `<div class="timing-row">
           <span>${tm.icon} ${escHtml(tm.label)}</span>
           <span style="color:#656d76;">${(t.duration_ms / 1000).toFixed(1)}s</span>
         </div>
         <div class="timing-bar" style="width:${pct}%;"></div>`;
-      }).join('')}
-    ` : ''}
+        })
+        .join('')}
+    `
+        : ''
+    }
     ${m.tools_called ? `<div style="margin-top:8px;font-size:10px;color:#656d76;">Tools: ${m.tools_called.join(', ')}</div>` : ''}
   </div>`;
-}
+      }
 
-// ── Input summarizer (mirrors tool-use-display.tsx) ──
-function summarizeToolInput(name, input) {
-  switch (name) {
-    case 'think': { const t = input.thought || ''; return t.slice(0, 60) + (t.length > 60 ? '...' : ''); }
-    case 'search_far': return input.query || '';
-    case 'web_search': return input.query || '';
-    case 'web_fetch': {
-      const u = input.url || '';
-      try { return new URL(u).hostname + new URL(u).pathname.slice(0, 30); } catch { return u.slice(0, 60); }
-    }
-    case 'knowledge_search': return input.query || input.topic || '';
-    case 'knowledge_fetch': { const k = input.s3_key || ''; return k.split('/').pop() || k; }
-    case 'create_document': { const dt = (input.doc_type || '').replace(/_/g, ' '); return input.title ? dt + ': ' + input.title : dt; }
-    case 'edit_docx_document': { const k = input.document_key || ''; return k.split('/').pop() || k; }
-    case 'load_skill': return input.name || '';
-    default: { const q = input.query || input.prompt || input.message || ''; return q.slice(0, 60) + (q.length > 60 ? '...' : ''); }
-  }
-}
+      // ── Input summarizer (mirrors tool-use-display.tsx) ──
+      function summarizeToolInput(name, input) {
+        switch (name) {
+          case 'think': {
+            const t = input.thought || '';
+            return t.slice(0, 60) + (t.length > 60 ? '...' : '');
+          }
+          case 'search_far':
+            return input.query || '';
+          case 'web_search':
+            return input.query || '';
+          case 'web_fetch': {
+            const u = input.url || '';
+            try {
+              return new URL(u).hostname + new URL(u).pathname.slice(0, 30);
+            } catch {
+              return u.slice(0, 60);
+            }
+          }
+          case 'knowledge_search':
+            return input.query || input.topic || '';
+          case 'knowledge_fetch': {
+            const k = input.s3_key || '';
+            return k.split('/').pop() || k;
+          }
+          case 'create_document': {
+            const dt = (input.doc_type || '').replace(/_/g, ' ');
+            return input.title ? dt + ': ' + input.title : dt;
+          }
+          case 'edit_docx_document': {
+            const k = input.document_key || '';
+            return k.split('/').pop() || k;
+          }
+          case 'load_skill':
+            return input.name || '';
+          default: {
+            const q = input.query || input.prompt || input.message || '';
+            return q.slice(0, 60) + (q.length > 60 ? '...' : '');
+          }
+        }
+      }
 
-function summarizeToolResult(name, result) {
-  if (typeof result === 'string') return result.slice(0, 50);
-  if (!result || typeof result !== 'object') return '';
-  if (result.clauses) return result.results_count + ' results';
-  if (result.sources) return result.source_count + ' sources';
-  if (result.results) return result.results.length + ' results';
-  if (result.document_type) return (result.document_type || '').replace(/_/g, ' ');
-  return '';
-}
+      function summarizeToolResult(name, result) {
+        if (typeof result === 'string') return result.slice(0, 50);
+        if (!result || typeof result !== 'object') return '';
+        if (result.clauses) return result.results_count + ' results';
+        if (result.sources) return result.source_count + ' sources';
+        if (result.results) return result.results.length + ' results';
+        if (result.document_type) return (result.document_type || '').replace(/_/g, ' ');
+        return '';
+      }
 
-// ── Render JSON ──
-function renderJson() {
-  const container = document.getElementById('json-content');
-  if (state.selectedIndex < 0) {
-    container.innerHTML = '<span style="color:#656d76;display:block;text-align:center;padding-top:40px;">Select an event to inspect</span>';
-    return;
-  }
-  const evt = state.visibleEvents[state.selectedIndex];
-  container.innerHTML = syntaxHighlight(JSON.stringify(evt, null, 2));
-}
+      // ── Render JSON ──
+      function renderJson() {
+        const container = document.getElementById('json-content');
+        if (state.selectedIndex < 0) {
+          container.innerHTML =
+            '<span style="color:#656d76;display:block;text-align:center;padding-top:40px;">Select an event to inspect</span>';
+          return;
+        }
+        const evt = state.visibleEvents[state.selectedIndex];
+        container.innerHTML = syntaxHighlight(JSON.stringify(evt, null, 2));
+      }
 
-function syntaxHighlight(json) {
-  return json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?/g, (match) => {
-      let cls = 'json-string';
-      if (/:$/.test(match)) cls = 'json-key';
-      return '<span class="' + cls + '">' + match + '</span>';
-    })
-    .replace(/\b(true|false)\b/g, '<span class="json-bool">$&</span>')
-    .replace(/\bnull\b/g, '<span class="json-null">$&</span>')
-    .replace(/\b-?\d+\.?\d*([eE][+-]?\d+)?\b/g, '<span class="json-number">$&</span>');
-}
+      function syntaxHighlight(json) {
+        return json
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?/g, (match) => {
+            let cls = 'json-string';
+            if (/:$/.test(match)) cls = 'json-key';
+            return '<span class="' + cls + '">' + match + '</span>';
+          })
+          .replace(/\b(true|false)\b/g, '<span class="json-bool">$&</span>')
+          .replace(/\bnull\b/g, '<span class="json-null">$&</span>')
+          .replace(/\b-?\d+\.?\d*([eE][+-]?\d+)?\b/g, '<span class="json-number">$&</span>');
+      }
 
-// ── Stats ──
-function updateStats() {
-  const evts = state.visibleEvents;
-  document.getElementById('stat-events').textContent = evts.length;
+      // ── Stats ──
+      function updateStats() {
+        const evts = state.visibleEvents;
+        document.getElementById('stat-events').textContent = evts.length;
 
-  const complete = evts.find(e => e.type === 'complete');
-  if (complete && complete.metadata?.duration_ms) {
-    document.getElementById('stat-duration').textContent = (complete.metadata.duration_ms / 1000).toFixed(1) + 's';
-  } else if (evts.length >= 2) {
-    const d = new Date(evts[evts.length - 1].timestamp) - new Date(evts[0].timestamp);
-    document.getElementById('stat-duration').textContent = (d / 1000).toFixed(1) + 's';
-  } else {
-    document.getElementById('stat-duration').textContent = '--';
-  }
+        const complete = evts.find((e) => e.type === 'complete');
+        if (complete && complete.metadata?.duration_ms) {
+          document.getElementById('stat-duration').textContent =
+            (complete.metadata.duration_ms / 1000).toFixed(1) + 's';
+        } else if (evts.length >= 2) {
+          const d = new Date(evts[evts.length - 1].timestamp) - new Date(evts[0].timestamp);
+          document.getElementById('stat-duration').textContent = (d / 1000).toFixed(1) + 's';
+        } else {
+          document.getElementById('stat-duration').textContent = '--';
+        }
 
-  const tools = evts.filter(e => e.type === 'tool_use').length;
-  document.getElementById('stat-tools').textContent = tools;
-}
+        const tools = evts.filter((e) => e.type === 'tool_use').length;
+        document.getElementById('stat-tools').textContent = tools;
+      }
 
-// ── Prompt ──
-function updatePrompt() {
-  const evts = state.visibleEvents;
-  if (evts.length === 0) {
-    document.getElementById('prompt-text').textContent = 'Load a scenario to see event analysis';
-    return;
-  }
+      // ── Prompt ──
+      function updatePrompt() {
+        const evts = state.visibleEvents;
+        if (evts.length === 0) {
+          document.getElementById('prompt-text').textContent =
+            'Load a scenario to see event analysis';
+          return;
+        }
 
-  const tools = evts.filter(e => e.type === 'tool_use').map(e => e.tool_use.name);
-  const results = evts.filter(e => e.type === 'tool_result');
-  const complete = evts.find(e => e.type === 'complete');
-  const dur = complete?.metadata?.duration_ms;
+        const tools = evts.filter((e) => e.type === 'tool_use').map((e) => e.tool_use.name);
+        const results = evts.filter((e) => e.type === 'tool_result');
+        const complete = evts.find((e) => e.type === 'complete');
+        const dur = complete?.metadata?.duration_ms;
 
-  let parts = [`This SSE stream used ${tools.length} tool${tools.length !== 1 ? 's' : ''}: ${[...new Set(tools)].join(', ')}.`];
-  if (dur) parts.push(`Total duration: ${(dur/1000).toFixed(1)}s.`);
-  if (results.length > 0) parts.push(`${results.length} tool result${results.length !== 1 ? 's' : ''} received.`);
+        let parts = [
+          `This SSE stream used ${tools.length} tool${tools.length !== 1 ? 's' : ''}: ${[...new Set(tools)].join(', ')}.`,
+        ];
+        if (dur) parts.push(`Total duration: ${(dur / 1000).toFixed(1)}s.`);
+        if (results.length > 0)
+          parts.push(`${results.length} tool result${results.length !== 1 ? 's' : ''} received.`);
 
-  document.getElementById('prompt-text').textContent = parts.join(' ');
-}
+        document.getElementById('prompt-text').textContent = parts.join(' ');
+      }
 
-function clearPreview() {
-  document.getElementById('card-preview').innerHTML = '<div class="card-preview-empty">Click an event in the timeline to preview its rendering<div class="hint">tool_use and tool_result events show the actual card UI</div></div>';
-}
+      function clearPreview() {
+        document.getElementById('card-preview').innerHTML =
+          '<div class="card-preview-empty">Click an event in the timeline to preview its rendering<div class="hint">tool_use and tool_result events show the actual card UI</div></div>';
+      }
 
-// ── Copy ──
-function copyJson() {
-  if (state.selectedIndex < 0) return;
-  const evt = state.visibleEvents[state.selectedIndex];
-  navigator.clipboard.writeText(JSON.stringify(evt, null, 2));
-  const btn = document.getElementById('btn-copy-json');
-  btn.textContent = 'Copied!';
-  btn.classList.add('copied');
-  setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
-}
+      // ── Copy ──
+      function copyJson() {
+        if (state.selectedIndex < 0) return;
+        const evt = state.visibleEvents[state.selectedIndex];
+        navigator.clipboard.writeText(JSON.stringify(evt, null, 2));
+        const btn = document.getElementById('btn-copy-json');
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 1500);
+      }
 
-function copyPrompt() {
-  const text = document.getElementById('prompt-text').textContent;
-  navigator.clipboard.writeText(text);
-  const btn = document.getElementById('btn-copy-prompt');
-  btn.textContent = 'Copied!';
-  btn.classList.add('copied');
-  setTimeout(() => { btn.textContent = 'Copy Prompt'; btn.classList.remove('copied'); }, 1500);
-}
+      function copyPrompt() {
+        const text = document.getElementById('prompt-text').textContent;
+        navigator.clipboard.writeText(text);
+        const btn = document.getElementById('btn-copy-prompt');
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'Copy Prompt';
+          btn.classList.remove('copied');
+        }, 1500);
+      }
 
-// ── Util ──
-function escHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
+      // ── Util ──
+      function escHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+      }
 
-// ── Init: auto-load first scenario ──
-loadScenario();
-</script>
-</body>
+      // ── Init: auto-load first scenario ──
+      loadScenario();
+    </script>
+  </body>
 </html>

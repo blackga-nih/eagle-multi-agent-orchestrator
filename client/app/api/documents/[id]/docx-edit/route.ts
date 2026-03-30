@@ -58,15 +58,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const response = await fetch(`${FASTAPI_URL}/api/documents/docx-edit/${encodeURIComponent(docKey)}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        preview_blocks: body.preview_blocks,
-        preview_mode: body.preview_mode,
-        change_source: body.change_source || 'user_edit',
-      }),
-    });
+    const response = await fetch(
+      `${FASTAPI_URL}/api/documents/docx-edit/${encodeURIComponent(docKey)}`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          preview_blocks: body.preview_blocks,
+          preview_mode: body.preview_mode,
+          change_source: body.change_source || 'user_edit',
+        }),
+      },
+    );
 
     if (!response.ok) {
       const errorText = await response.text();

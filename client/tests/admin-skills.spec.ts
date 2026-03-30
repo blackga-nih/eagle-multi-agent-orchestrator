@@ -7,7 +7,9 @@ test.describe('Admin Skills & Prompts Page', () => {
 
   test('displays page header', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Agent Skills & Prompts' })).toBeVisible();
-    await expect(page.getByText('Configure AI agent capabilities and system prompts')).toBeVisible();
+    await expect(
+      page.getByText('Configure AI agent capabilities and system prompts'),
+    ).toBeVisible();
   });
 
   test('displays breadcrumb navigation', async ({ page }) => {
@@ -73,7 +75,8 @@ test.describe('Admin Skills & Prompts Page', () => {
     await page.waitForSelector('text=Loading data...', { state: 'hidden' }).catch(() => {});
 
     // Custom skills have status badges: Draft, In Review, Active, or Disabled
-    const statusBadges = page.getByText('Draft')
+    const statusBadges = page
+      .getByText('Draft')
       .or(page.getByText('In Review'))
       .or(page.getByText('Active'))
       .or(page.getByText('Disabled'));

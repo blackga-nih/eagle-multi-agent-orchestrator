@@ -5,22 +5,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    output: 'standalone',
-    eslint: { ignoreDuringBuilds: true },
-    trailingSlash: false,
-    images: {
-        unoptimized: true,
-    },
-    outputFileTracingRoot: __dirname,
-    async rewrites() {
-        const backendUrl = process.env.FASTAPI_URL || 'http://localhost:8000';
-        return [
-            {
-                source: '/ws/:path*',
-                destination: `${backendUrl}/ws/:path*`,
-            },
-        ];
-    },
+  output: 'standalone',
+  eslint: { ignoreDuringBuilds: true },
+  trailingSlash: false,
+  images: {
+    unoptimized: true,
+  },
+  outputFileTracingRoot: __dirname,
+  async rewrites() {
+    const backendUrl = process.env.FASTAPI_URL || 'http://localhost:8000';
+    return [
+      {
+        source: '/ws/:path*',
+        destination: `${backendUrl}/ws/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

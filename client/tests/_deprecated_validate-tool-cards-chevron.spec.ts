@@ -4,7 +4,9 @@ import fs from 'fs';
 
 const OUT_DIR = 'C:/Users/blackga/Desktop/eagle/sm_eagle/server/screenshots-tool-cards';
 
-test('Tool card chevron validation: all tool cards should have chevron (tool_result)', async ({ page }) => {
+test('Tool card chevron validation: all tool cards should have chevron (tool_result)', async ({
+  page,
+}) => {
   test.setTimeout(180_000); // 3 min
 
   // Ensure output dir exists
@@ -41,9 +43,13 @@ test('Tool card chevron validation: all tool cards should have chevron (tool_res
           if (evt.type === 'tool_result') {
             toolResultEvents.push(data);
           }
-        } catch { /* not JSON */ }
+        } catch {
+          /* not JSON */
+        }
       }
-    } catch { /* response body unavailable */ }
+    } catch {
+      /* response body unavailable */
+    }
   });
 
   // Also capture raw request/response for debugging
@@ -53,7 +59,9 @@ test('Tool card chevron validation: all tool cards should have chevron (tool_res
       allRequests.push(`${req.method()} ${req.url()}`);
       try {
         allRequests.push(`  Body: ${req.postData()?.slice(0, 500)}`);
-      } catch { /* */ }
+      } catch {
+        /* */
+      }
     }
   });
 
@@ -116,21 +124,30 @@ test('Tool card chevron validation: all tool cards should have chevron (tool_res
 
     // Check if streaming has ended (no more typing indicator / pulsing dots)
     const typingIndicator = page.locator('.animate-pulse, .typing-dot');
-    const stillTyping = await typingIndicator.count() > 0;
+    const stillTyping = (await typingIndicator.count()) > 0;
 
     // Check for assistant response
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const hasResponse = bodyText.toLowerCase().includes('threshold') ||
-                        bodyText.toLowerCase().includes('simplified acquisition') ||
-                        bodyText.toLowerCase().includes('far') ||
-                        bodyText.toLowerCase().includes('micro-purchase');
+    const bodyText = await page
+      .locator('body')
+      .innerText()
+      .catch(() => '');
+    const hasResponse =
+      bodyText.toLowerCase().includes('threshold') ||
+      bodyText.toLowerCase().includes('simplified acquisition') ||
+      bodyText.toLowerCase().includes('far') ||
+      bodyText.toLowerCase().includes('micro-purchase');
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    console.log(`  ${elapsed}s elapsed — typing: ${stillTyping}, hasResponse: ${hasResponse}, toolUseSSE: ${toolUseEvents.length}, toolResultSSE: ${toolResultEvents.length}`);
+    console.log(
+      `  ${elapsed}s elapsed — typing: ${stillTyping}, hasResponse: ${hasResponse}, toolUseSSE: ${toolUseEvents.length}, toolResultSSE: ${toolResultEvents.length}`,
+    );
 
     // Take periodic screenshots
     if (elapsed % 30 === 0 || (hasResponse && !stillTyping)) {
-      await page.screenshot({ path: path.join(OUT_DIR, `step4-progress-${elapsed}s.png`), fullPage: true });
+      await page.screenshot({
+        path: path.join(OUT_DIR, `step4-progress-${elapsed}s.png`),
+        fullPage: true,
+      });
     }
 
     if (hasResponse && !stillTyping) {
@@ -172,7 +189,8 @@ test('Tool card chevron validation: all tool cards should have chevron (tool_res
     const greenDot = await card.locator('.bg-green-500').count();
     const blueDot = await card.locator('.bg-blue-400').count();
     const redDot = await card.locator('.bg-red-400').count();
-    const statusColor = greenDot > 0 ? 'green' : blueDot > 0 ? 'blue' : redDot > 0 ? 'red' : 'unknown';
+    const statusColor =
+      greenDot > 0 ? 'green' : blueDot > 0 ? 'blue' : redDot > 0 ? 'red' : 'unknown';
 
     const label = cardText.split('\n')[0]?.trim() || `Card ${i}`;
     cardResults.push({ label, hasChevron, statusColor });
@@ -189,7 +207,10 @@ test('Tool card chevron validation: all tool cards should have chevron (tool_res
     // Scroll to first tool card and screenshot
     await toolCards.first().scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
-    await page.screenshot({ path: path.join(OUT_DIR, 'step7-tool-cards-zoomed.png'), fullPage: false });
+    await page.screenshot({
+      path: path.join(OUT_DIR, 'step7-tool-cards-zoomed.png'),
+      fullPage: false,
+    });
 
     // Try to get a bounding box shot of just the tool cards area
     try {
@@ -202,7 +223,7 @@ test('Tool card chevron validation: all tool cards should have chevron (tool_res
           x: Math.max(0, firstBox.x - 20),
           y: Math.max(0, firstBox.y - 20),
           width: Math.max(firstBox.width, lastBox.width) + 40,
-          height: (lastBox.y + lastBox.height) - firstBox.y + 40,
+          height: lastBox.y + lastBox.height - firstBox.y + 40,
         };
         await page.screenshot({
           path: path.join(OUT_DIR, 'step7-tool-cards-clipped.png'),
@@ -256,17 +277,24 @@ test('Tool card chevron validation: all tool cards should have chevron (tool_res
   for (const cr of cardResults) {
     const check = cr.hasChevron ? 'YES' : 'NO';
     if (!cr.hasChevron) allHaveChevron = false;
-    console.log(`    ${cr.hasChevron ? '[OK]' : '[!!]'} ${cr.label} — chevron: ${check}, status: ${cr.statusColor}`);
+    console.log(
+      `    ${cr.hasChevron ? '[OK]' : '[!!]'} ${cr.label} — chevron: ${check}, status: ${cr.statusColor}`,
+    );
   }
   console.log('');
   console.log(`  ALL tool cards have chevron: ${allHaveChevron ? 'YES' : 'NO'}`);
-  console.log(`  tool_use == tool_result:     ${toolUseEvents.length === toolResultEvents.length ? 'YES' : 'NO'} (${toolUseEvents.length} vs ${toolResultEvents.length})`);
+  console.log(
+    `  tool_use == tool_result:     ${toolUseEvents.length === toolResultEvents.length ? 'YES' : 'NO'} (${toolUseEvents.length} vs ${toolResultEvents.length})`,
+  );
   console.log('================================================================');
 
   // Assertion: every tool card should have a chevron
   if (toolCardCount > 0) {
     for (const cr of cardResults) {
-      expect(cr.hasChevron, `Tool card "${cr.label}" should have a chevron (▾) indicating tool_result was received`).toBe(true);
+      expect(
+        cr.hasChevron,
+        `Tool card "${cr.label}" should have a chevron (▾) indicating tool_result was received`,
+      ).toBe(true);
     }
     expect(toolUseEvents.length).toBeGreaterThan(0);
     expect(toolResultEvents.length).toBe(toolUseEvents.length);

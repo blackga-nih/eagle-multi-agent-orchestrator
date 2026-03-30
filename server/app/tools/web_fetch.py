@@ -30,8 +30,17 @@ MAX_RESPONSE_BYTES = 5_000_000  # 5MB — skip huge pages
 
 # Tags that are boilerplate / not main content
 STRIP_TAGS = [
-    "script", "style", "nav", "footer", "header", "aside",
-    "form", "iframe", "noscript", "svg", "button",
+    "script",
+    "style",
+    "nav",
+    "footer",
+    "header",
+    "aside",
+    "form",
+    "iframe",
+    "noscript",
+    "svg",
+    "button",
 ]
 
 # Browser-realistic headers to avoid bot detection.
@@ -60,9 +69,7 @@ _HEADERS = {
 }
 
 
-def _try_cached_fallback(
-    client: httpx.Client, url: str
-) -> httpx.Response | None:
+def _try_cached_fallback(client: httpx.Client, url: str) -> httpx.Response | None:
     """Try Wayback Machine, then Google cache for a 403-blocked URL.
 
     Returns a successful Response or None if all caches miss.
@@ -88,9 +95,9 @@ def _try_cached_fallback(
     # 2. Google webcache
     try:
         from urllib.parse import quote_plus
+
         cache_url = (
-            "https://webcache.googleusercontent.com"
-            f"/search?q=cache:{quote_plus(url)}"
+            f"https://webcache.googleusercontent.com/search?q=cache:{quote_plus(url)}"
         )
         cache_resp = client.get(cache_url)
         if cache_resp.status_code == 200:
@@ -133,7 +140,10 @@ def exec_web_fetch(url: str) -> dict[str, Any]:
     # Validate URL
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        return {"error": f"Invalid URL scheme: {parsed.scheme}. Use http or https.", "url": url}
+        return {
+            "error": f"Invalid URL scheme: {parsed.scheme}. Use http or https.",
+            "url": url,
+        }
     if not parsed.netloc:
         return {"error": "Invalid URL: no domain found.", "url": url}
 
@@ -169,7 +179,10 @@ def exec_web_fetch(url: str) -> dict[str, Any]:
 
             # Check content type — only process HTML
             content_type = response.headers.get("content-type", "")
-            if "text/html" not in content_type and "application/xhtml" not in content_type:
+            if (
+                "text/html" not in content_type
+                and "application/xhtml" not in content_type
+            ):
                 return {
                     "error": f"Not an HTML page (content-type: {content_type})",
                     "url": url,

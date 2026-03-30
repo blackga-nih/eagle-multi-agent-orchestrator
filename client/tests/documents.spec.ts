@@ -24,8 +24,11 @@ test.describe('Documents Page', () => {
     // Wait for loading to complete
     await page.waitForTimeout(2000);
 
-    const hasDocuments = await page.getByRole('heading', { level: 3 }).count() > 0;
-    const hasEmptyState = await page.getByText(/No documents/i).isVisible().catch(() => false);
+    const hasDocuments = (await page.getByRole('heading', { level: 3 }).count()) > 0;
+    const hasEmptyState = await page
+      .getByText(/No documents/i)
+      .isVisible()
+      .catch(() => false);
 
     // Must show documents or empty state
     expect(hasDocuments || hasEmptyState).toBe(true);

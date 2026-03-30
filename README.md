@@ -1,6 +1,27 @@
 # EAGLE — Multi-Tenant AI Acquisition Assistant
 
+![CI](https://github.com/CBIIT/sm_eagle/actions/workflows/deploy.yml/badge.svg)
+![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
+![Next.js 15](https://img.shields.io/badge/Next.js-15-black.svg)
+![Strands Agents SDK](https://img.shields.io/badge/Strands_Agents-SDK-orange.svg)
+![License: NCI Internal](https://img.shields.io/badge/license-NCI_Internal-lightgrey.svg)
+
 A multi-tenant AI platform built for the **NCI Office of Acquisitions**, using the **Strands Agents SDK** (with **Amazon Bedrock** inference via boto3-native `BedrockModel`), **Cognito JWT authentication**, **DynamoDB session storage**, and **granular cost attribution**. This application serves as a reference implementation for multi-tenant AI applications on AWS.
+
+## Table of Contents
+
+- [Core Concept](#core-concept)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Setup Guides](#setup-guides)
+- [Common Commands](#common-commands)
+- [Validation Ladder](#validation-ladder)
+- [CI/CD Pipeline](#cicd-pipeline)
+- [API Reference](#api-reference)
+- [Authentication & Multi-Tenancy](#authentication--multi-tenancy)
+- [Data Model](#data-model)
+- [Contributing](#contributing)
 
 ## Core Concept
 
@@ -17,7 +38,8 @@ User Login -> JWT with tenant_id -> Session Attributes -> Strands Agents SDK (vi
                                     Tenant-specific response + cost tracking
 ```
 
-## Important Disclaimers
+<details>
+<summary><strong>Important Disclaimers</strong></summary>
 
 **This is a code sample for demonstration purposes only.** Do not use in production environments without:
 - Comprehensive security review and penetration testing
@@ -31,6 +53,7 @@ User Login -> JWT with tenant_id -> Session Attributes -> Strands Agents SDK (vi
 **Responsible AI**: This system includes automated AWS operations capabilities. Users are responsible for ensuring appropriate safeguards, monitoring, and human oversight when deploying AI-driven infrastructure management tools. Learn more about [AWS Responsible AI practices](https://docs.aws.amazon.com/wellarchitected/latest/generative-ai-lens/responsible-ai.html).
 
 **Guardrails for Foundation Models**: When deploying this application in production, implement [Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) for content filtering, denied topics, word filters, PII redaction, contextual grounding, and safety thresholds.
+</details>
 
 ---
 
@@ -285,329 +308,18 @@ All stacks in `infrastructure/cdk-eagle/`:
 
 ## Setup Guides
 
-Three checklists:
-- **Checklist A** — Local development (Docker Compose, fast iteration)
-- **Checklist B** — EC2 Runner deployment *(standard — recommended for all NCI deploys)*
-- **Checklist C** — First-time cloud setup (CDK infrastructure bootstrap)
+| Guide | When to Use | Link |
+|-------|------------|------|
+| **Local Development** | Iterating on UI/backend, running tests locally | [docs/setup/local-development.md](docs/setup/local-development.md) |
+| **EC2 Runner** (standard) | All NCI AWS deployments | [docs/setup/ec2-runner-deployment.md](docs/setup/ec2-runner-deployment.md) |
+| **CDK Bootstrap** | First-time AWS account setup | [docs/setup/cdk-bootstrap.md](docs/setup/cdk-bootstrap.md) |
 
----
-
-## Checklist A: Local Development
-
-Run the full stack on your laptop using Docker Compose. No cloud account required for the app itself — you only need AWS credentials for DynamoDB session storage and optionally Bedrock.
-
-### A0 — Prerequisites
-
-- [ ] **Docker Desktop** installed and running
-- [ ] **Python 3.11+** and **Node.js 20+**
-- [ ] **`just`** task runner: `cargo install just` or `brew install just` or `winget install just`
-- [ ] **Playwright Chromium**: `cd client && npx playwright install chromium`
-
-### A1 — Configure Environment
-
+**Quick start (local):**
 ```bash
-cp .env.example .env
+cp .env.example .env     # configure credentials
+just dev                 # start full stack via Docker Compose
+# → http://localhost:3000
 ```
-
-Minimum settings for local dev (edit `.env`):
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-...       # Direct Anthropic API (no Bedrock needed)
-USE_BEDROCK=false
-DEV_MODE=true                       # Skips Cognito auth — use for local only
-REQUIRE_AUTH=false
-EAGLE_SESSIONS_TABLE=eagle          # Still needs AWS credentials for DynamoDB
-AWS_DEFAULT_REGION=us-east-1
-```
-
-> **DynamoDB note**: Session storage still uses the real `eagle` DynamoDB table.
-> Set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in `.env`, or configure `aws configure`.
-
-#### Using AWS SSO for Bedrock
-
-If you're using AWS SSO (Single Sign-On) for credentials, you can mount your AWS credentials directory into the Docker container:
-
-1. **Login to AWS SSO:**
-   ```bash
-   aws sso login --profile <your-profile>
-   ```
-
-2. **Verify credentials work:**
-   ```bash
-   just check-sso
-   ```
-
-3. **Start the stack with SSO:**
-   ```bash
-   # Uses default AWS profile
-   just dev-sso
-   
-   # Or specify a profile
-   just dev-sso <profile-name>
-   ```
-
-   For detached mode:
-   ```bash
-   just dev-up-sso [profile-name]
-   ```
-
-The Docker container will mount your `~/.aws` directory (or `%USERPROFILE%\.aws` on Windows) so it can use your SSO credentials to access Bedrock and other AWS services.
-
-> **Windows Note**: If `${HOME}/.aws` doesn't resolve correctly, set `AWS_CONFIG_DIR` environment variable:
-> ```bash
-> export AWS_CONFIG_DIR=C:/Users/YourUsername/.aws
-> just dev-sso
-> ```
-
-### A2 — Start the Stack
-
-```bash
-just dev-up
-```
-
-This builds both containers, starts them detached, then polls `localhost:8000/health` until the backend is ready (up to 60s). You should see:
-
-```
-Backend ready (HTTP 200)
-```
-
-### A3 — Open in Browser
-
-Open **http://localhost:3000** — you should see the EAGLE landing page with a green **"Connected"** indicator in the top-right header. That indicator only appears when the frontend successfully called the backend on startup.
-
-### A4 — Run Tests
-
-Start with smoke, then use case workflows:
-
-```bash
-# Full local validation gate (recommended before committing)
-just validate       # L1-L5: lint → unit → CDK synth → docker stack → smoke mid (auto teardown)
-
-# Or run individually:
-
-# Smoke — pages load and backend is reachable (headless, fast)
-just smoke          # nav + home page (~14s)
-just smoke mid      # all pages including admin, documents, workflows (~22s)
-just smoke full     # all pages + basic agent response check (~27s)
-
-# E2E Use Cases — complete acquisition workflows (headed, visible browser)
-just e2e intake     # describe acquisition → agent returns pathway + document list
-just e2e doc        # request SOW → agent generates document structure
-just e2e far        # ask FAR question → agent returns regulation reference
-just e2e full       # all three workflows in sequence
-```
-
-`just e2e full` opens a Chromium window and walks through three real acquisition scenarios end-to-end — proof the AI pipeline, agent routing, and domain knowledge are all working.
-
-### A5 — Tear Down
-
-```bash
-just dev-down
-```
-
----
-
-## Checklist B: EC2 Runner Deployment (Standard)
-
-> **This is the recommended deploy path for NCI.** No local Docker required — all builds happen on the EC2 runner inside the VPC using its instance-role credentials.
-
-### B0 — Prerequisites
-
-- [ ] **AWS CLI** with SSO profile `eagle` configured
-- [ ] SSM Session Manager plugin installed: `aws ssm install-plugin`
-- [ ] EC2 runner `i-0390c06d166d18926` in account `695681773636`
-
-### B1 — Open SSM Session
-
-```bash
-aws sso login --profile eagle
-AWS_PROFILE=eagle aws ssm start-session \
-  --target i-0390c06d166d18926 \
-  --region us-east-1
-```
-
-No SSH keys, no bastion host — SSM handles authentication via IAM.
-
-### B2 — Switch to Eagle User and Pull Latest Code
-
-```bash
-su -s /bin/bash eagle
-cd /home/eagle/eagle
-
-# Pull latest from your branch
-git pull origin dev/greg   # or main for production
-```
-
-> **Updating from Windows**: If git pull fails (no direct GitHub access from EC2), use the bundle method:
-> ```bash
-> # On Windows: create and upload bundle
-> git bundle create /tmp/bundle.bundle dev/greg
-> aws s3 cp /tmp/bundle.bundle s3://eagle-eval-artifacts-695681773636-dev/deploy/
->
-> # On EC2: download and apply
-> aws s3 cp s3://eagle-eval-artifacts-695681773636-dev/deploy/bundle.bundle /tmp/
-> git -C /home/eagle/eagle pull /tmp/bundle.bundle dev/greg
-> ```
-
-### B3 — Deploy
-
-```bash
-# Full deploy: ECR login → build backend → build frontend → push → ECS rolling update
-just deploy
-
-# Or separately:
-just deploy-backend
-just deploy-frontend
-```
-
-`just deploy` automatically:
-1. Logs into ECR using instance role credentials
-2. Reads Cognito config from CloudFormation outputs (no manual env vars)
-3. Builds both Docker images (Linux, matching container OS)
-4. Pushes to ECR with `latest` and `$COMMIT_SHA` tags
-5. Triggers ECS rolling updates and waits for `services-stable`
-
-### B4 — Verify
-
-```bash
-just check-aws   # 7/7 OK: Identity, S3, DDB×2, Lambda, ECS×2
-just status      # ECS running counts
-just urls        # frontend + backend ALB URLs
-```
-
-### B5 — Access the App
-
-The ALBs are **VPC-internal** — not reachable from the public internet. Access requires being on the NCI network (VPN or SSM port-forward).
-
-**Get the frontend URL:**
-```bash
-AWS_PROFILE=eagle aws cloudformation describe-stacks --stack-name EagleComputeStack \
-  --query "Stacks[0].Outputs[?contains(OutputKey,'FrontendUrl')].OutputValue" \
-  --output text --region us-east-1
-```
-
-**Login credentials** (created by `just create-users`):
-
-| Role | Email | Password |
-|------|-------|----------|
-| Standard user | testuser@example.com | EagleTest2024! |
-| Admin | admin@example.com | EagleAdmin2024! |
-
-> **First login note**: Cognito may prompt for a password change. Enter `EagleTest2024!` as both old and new password to clear the prompt.
-
-### B6 — Run Smoke Tests from EC2
-
-The EC2 runner also supports running the full smoke + eval suite:
-
-```bash
-# Eval suite (28 tests against Bedrock/haiku)
-just eval
-
-# Smoke tests (Playwright against local Docker stack)
-just smoke mid
-```
-
-> Playwright and Chromium are pre-installed on the runner. Browsers are in `/home/eagle/.cache/ms-playwright`.
-
----
-
-## Checklist C: First-Time Cloud Setup (CDK Bootstrap)
-
-Only needed when deploying to a **new AWS account** for the first time.
-
-### C0 — Prerequisites
-
-- [ ] **AWS CLI** with admin credentials (or PowerUser + boundary for NCI accounts)
-- [ ] **Node.js 20+**, **`just`**
-
-### C1 — Configure Account-Specific Names
-
-S3 bucket names are globally unique. Update `infrastructure/cdk-eagle/config/environments.ts`:
-
-```typescript
-documentBucketName: 'eagle-documents-{account-id}-dev',  // must be globally unique
-githubOwner: 'your-github-org',
-githubRepo:  'your-repo-name',
-```
-
-### C2 — Enable Bedrock Model Access *(manual, one-time)*
-
-1. Open **AWS Console → Amazon Bedrock → Model access**
-2. Enable **Anthropic Claude Sonnet 4.6** and **Claude Haiku 4.5**
-3. Wait for **"Access granted"**
-
-### C3 — Bootstrap CDK and Deploy All Stacks
-
-```bash
-just cdk-install   # npm ci in infrastructure/cdk-eagle/
-
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-npx cdk bootstrap aws://$ACCOUNT_ID/us-east-1
-
-just cdk-deploy    # deploys all 5 stacks
-```
-
-> **NCI accounts** use a patched bootstrap (PowerUser boundary). See `.claude/context/` for the NCI-specific bootstrap procedure.
-
-### C4 — Create Cognito Users
-
-```bash
-just create-users
-```
-
-| User | Email | Password | Tenant | Tier |
-|------|-------|----------|--------|------|
-| Test | testuser@example.com | EagleTest2024! | nci | basic |
-| Admin | admin@example.com | EagleAdmin2024! | nci | premium |
-
-<details>
-<summary>Manual user creation</summary>
-
-```bash
-USER_POOL_ID=$(aws cloudformation describe-stacks --stack-name EagleCoreStack \
-  --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text)
-
-aws cognito-idp admin-create-user \
-  --user-pool-id $USER_POOL_ID \
-  --username testuser@example.com \
-  --user-attributes \
-    Name=email,Value=testuser@example.com \
-    Name=email_verified,Value=true \
-    Name=given_name,Value=Test \
-    Name=family_name,Value=User \
-    Name=custom:tenant_id,Value=nci \
-    Name=custom:subscription_tier,Value=basic \
-  --temporary-password 'TempPass123!' \
-  --message-action SUPPRESS
-
-aws cognito-idp admin-set-user-password \
-  --user-pool-id $USER_POOL_ID \
-  --username testuser@example.com \
-  --password 'EagleTest2024!' \
-  --permanent
-```
-
-</details>
-
-### C5 — Set GitHub Secret for CI/CD
-
-```bash
-# Get the deploy role ARN from CiCdStack
-aws cloudformation describe-stacks --stack-name EagleCiCdStack \
-  --query "Stacks[0].Outputs[?OutputKey=='DeployRoleArn'].OutputValue" --output text
-
-# Set the secret (or use gh CLI):
-gh secret set DEPLOY_ROLE_ARN --body "arn:aws:iam::ACCOUNT_ID:role/eagle-github-actions-dev"
-```
-
-### C6 — Upload Knowledge Base Documents *(optional)*
-
-```bash
-aws s3 sync path/to/knowledge-base/ s3://eagle-documents-{account-id}-dev/eagle/knowledge-base/ \
-  --region us-east-1
-```
-
-S3 event notifications auto-trigger the metadata extraction Lambda on upload.
 
 ---
 
@@ -683,6 +395,11 @@ just ship   # lint + CDK synth gate + deploy + L5 smoke-prod verify (full ship)
 
 ## Authentication & Multi-Tenancy
 
+Cognito JWT tokens carry `tenant_id`, `user_id`, and `subscription_tier`. Session IDs encode tenant context: `{tenant_id}-{tier}-{user_id}-{session_id}`. All DynamoDB data is partitioned by tenant.
+
+<details>
+<summary>JWT structure and tenant isolation details</summary>
+
 ### JWT Token Structure
 
 ```json
@@ -697,16 +414,22 @@ just ship   # lint + CDK synth gate + deploy + L5 smoke-prod verify (full ship)
 
 ### Tenant Isolation
 
-- **Session IDs**: `{tenant_id}-{subscription_tier}-{user_id}-{session_id}`
 - **DynamoDB Partitioning**: All data partitioned by `tenant_id` via PK/SK patterns
-- **Runtime Context**: Tenant information passed as session attributes to the Anthropic SDK
+- **Runtime Context**: Tenant information passed as session attributes to the Strands SDK
 - **Admin Access**: Cognito Groups for tenant-specific admin privileges
+
+</details>
 
 ---
 
 ## Data Model
 
-### DynamoDB Single-Table Design (`eagle`)
+DynamoDB single-table design (`eagle`) with 5 entity types. Subscription tiers (`basic` / `advanced` / `premium`) gate message limits, concurrent sessions, and session duration.
+
+<details>
+<summary>DynamoDB key patterns and tier limits</summary>
+
+### DynamoDB Single-Table Design
 
 | Entity | PK Pattern | SK Pattern |
 |--------|-----------|------------|
@@ -724,6 +447,8 @@ just ship   # lint + CDK synth gate + deploy + L5 smoke-prod verify (full ship)
 | Monthly Messages | 1,000 | 5,000 | 25,000 |
 | Concurrent Sessions | 1 | 3 | 10 |
 | Session Duration | 30 min | 60 min | 240 min |
+
+</details>
 
 ---
 
@@ -762,7 +487,11 @@ just ship   # lint + CDK synth gate + deploy + L5 smoke-prod verify (full ship)
 
 ## Demo
 
-![Demo](data/media/Demo.gif)
+![Demo](docs/media/Demo.gif)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, branch naming, validation requirements, and code style guidelines.
 
 ## Cleanup
 

@@ -20,17 +20,23 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(
       `${FASTAPI_URL}/api/admin/kb-reviews?status=${encodeURIComponent(status)}`,
-      { method: 'GET', headers }
+      { method: 'GET', headers },
     );
 
     if (!response.ok) {
       const errorText = await response.text();
-      return NextResponse.json({ error: `Backend error: ${response.status}`, detail: errorText }, { status: response.status });
+      return NextResponse.json(
+        { error: `Backend error: ${response.status}`, detail: errorText },
+        { status: response.status },
+      );
     }
 
     return NextResponse.json(await response.json());
   } catch (error) {
     console.error('KB reviews GET error:', error);
-    return NextResponse.json({ error: 'Internal server error', details: String(error) }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Internal server error', details: String(error) },
+      { status: 500 },
+    );
   }
 }

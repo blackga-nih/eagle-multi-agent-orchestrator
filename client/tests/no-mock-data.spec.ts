@@ -39,8 +39,10 @@ test.describe('No Mock Data Guard', () => {
     const offenders: string[] = [];
     for (const file of sourceFiles) {
       const content = fs.readFileSync(file, 'utf-8');
-      if (/from\s+['"]@\/lib\/mock-data['"]/.test(content) ||
-          /from\s+['"]\.\.?\/.*mock-data['"]/.test(content)) {
+      if (
+        /from\s+['"]@\/lib\/mock-data['"]/.test(content) ||
+        /from\s+['"]\.\.?\/.*mock-data['"]/.test(content)
+      ) {
         offenders.push(path.relative(CLIENT_DIR, file));
       }
     }
@@ -48,7 +50,8 @@ test.describe('No Mock Data Guard', () => {
   });
 
   test('no source file references MOCK_ constants', () => {
-    const pattern = /\bMOCK_(USERS|DOCUMENTS|DOCUMENT_TEMPLATES|AGENT_SKILLS|AUDIT_LOGS|USER_GROUPS|REQUIREMENTS|SUBMISSIONS|CONVERSATION_TURNS|SYSTEM_PROMPTS)\b/;
+    const pattern =
+      /\bMOCK_(USERS|DOCUMENTS|DOCUMENT_TEMPLATES|AGENT_SKILLS|AUDIT_LOGS|USER_GROUPS|REQUIREMENTS|SUBMISSIONS|CONVERSATION_TURNS|SYSTEM_PROMPTS)\b/;
     const offenders: string[] = [];
     for (const file of sourceFiles) {
       const content = fs.readFileSync(file, 'utf-8');
@@ -93,12 +96,27 @@ test.describe('No Mock Data Guard', () => {
         }
       }
     }
-    expect(offenders, `Files referencing mock workflow constants: ${offenders.join(', ')}`).toHaveLength(0);
+    expect(
+      offenders,
+      `Files referencing mock workflow constants: ${offenders.join(', ')}`,
+    ).toHaveLength(0);
   });
 
   test('no hardcoded mock IDs in source files', () => {
     // These are the fake IDs from the deleted mock data
-    const mockIds = ['wf-001', 'wf-002', 'wf-003', 'wf-004', 'doc-001', 'doc-002', 'doc-003', 'user-001', 'user-002', 'tpl-001', 'cl-001'];
+    const mockIds = [
+      'wf-001',
+      'wf-002',
+      'wf-003',
+      'wf-004',
+      'doc-001',
+      'doc-002',
+      'doc-003',
+      'user-001',
+      'user-002',
+      'tpl-001',
+      'cl-001',
+    ];
     const offenders: { file: string; id: string }[] = [];
 
     for (const file of sourceFiles) {
@@ -110,7 +128,7 @@ test.describe('No Mock Data Guard', () => {
         }
       }
     }
-    const summary = offenders.map(o => `${o.file} (${o.id})`).join(', ');
+    const summary = offenders.map((o) => `${o.file} (${o.id})`).join(', ');
     expect(offenders, `Hardcoded mock IDs found: ${summary}`).toHaveLength(0);
   });
 
@@ -147,6 +165,9 @@ test.describe('No Mock Data Guard', () => {
 
     const checklistBlock = match![0];
     const itemCount = (checklistBlock.match(/document_type:/g) || []).length;
-    expect(itemCount, `DEFAULT_CHECKLIST has ${itemCount} items, expected >= 10`).toBeGreaterThanOrEqual(10);
+    expect(
+      itemCount,
+      `DEFAULT_CHECKLIST has ${itemCount} items, expected >= 10`,
+    ).toBeGreaterThanOrEqual(10);
   });
 });

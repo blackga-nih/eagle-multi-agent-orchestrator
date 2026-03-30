@@ -1,14 +1,15 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Keyboard Shortcuts', () => {
-
   // ─── Command Palette (Ctrl+K) ────────────────────────────────────────
 
   test.describe('Command Palette — Ctrl+K', () => {
     test('Ctrl+K opens the command palette', async ({ page }) => {
       await page.goto('/chat/');
       // Palette should not be visible initially
-      await expect(page.locator('.fixed.inset-0').locator('input[placeholder="Search commands..."]')).not.toBeVisible();
+      await expect(
+        page.locator('.fixed.inset-0').locator('input[placeholder="Search commands..."]'),
+      ).not.toBeVisible();
 
       await page.keyboard.press('Control+k');
 

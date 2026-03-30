@@ -22,18 +22,14 @@ export async function GET(request: Request) {
     if (listMode) {
       // List all run-*.json files with metadata
       const files = await readdir(EVAL_RESULTS_DIR);
-      const traceFiles = files.filter(
-        (f) => f.startsWith('run-') && f.endsWith('.json')
-      );
+      const traceFiles = files.filter((f) => f.startsWith('run-') && f.endsWith('.json'));
 
       const runs = await Promise.all(
         traceFiles.map(async (filename) => {
           const filePath = join(EVAL_RESULTS_DIR, filename);
           const fileStat = await stat(filePath);
           try {
-            const content = JSON.parse(
-              await readFile(filePath, 'utf-8')
-            );
+            const content = JSON.parse(await readFile(filePath, 'utf-8'));
             return {
               filename,
               timestamp: content.timestamp || fileStat.mtime.toISOString(),
@@ -57,14 +53,11 @@ export async function GET(request: Request) {
               parse_error: true,
             };
           }
-        })
+        }),
       );
 
       // Sort newest first
-      runs.sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
+      runs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
       return NextResponse.json({ runs });
     }
@@ -86,7 +79,7 @@ export async function GET(request: Request) {
         error:
           'No eval results found. Run python test_eagle_sdk_eval.py to generate results in data/eval/results/.',
       },
-      { status: 404 }
+      { status: 404 },
     );
   }
 }

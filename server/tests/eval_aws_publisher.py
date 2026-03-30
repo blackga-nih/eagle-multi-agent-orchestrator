@@ -165,6 +165,16 @@ _TEST_NAMES = {
     126: "126_skill_tech_quantified_criteria",
     127: "127_skill_docgen_research_first",
     128: "128_skill_supervisor_delegates",
+    # Category 15: Demo Script Multi-Turn UC Tests
+    129: "129_uc02_gsa_schedule_multi_turn",
+    130: "130_uc02_1_micro_purchase_multi_turn",
+    131: "131_uc03_sole_source_multi_turn",
+    132: "132_uc04_competitive_range_multi_turn",
+    133: "133_uc10_igce_multi_turn",
+    134: "134_uc13_small_business_multi_turn",
+    135: "135_uc16_tech_to_contract_multi_turn",
+    136: "136_uc29_e2e_acquisition_multi_turn",
+    137: "137_uc29_finalize_package",
 }
 
 

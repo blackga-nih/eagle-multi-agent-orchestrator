@@ -58,7 +58,7 @@ test.describe('Chat Page', () => {
     await expect(page.locator('text=🦅 EAGLE')).toBeVisible();
 
     // Phase 5: main content has substantive text from the agent response
-    const mainText = await page.locator('main').textContent() ?? '';
+    const mainText = (await page.locator('main').textContent()) ?? '';
     expect(mainText.length).toBeGreaterThan(100);
   });
 
@@ -73,7 +73,9 @@ test.describe('Chat Page', () => {
     await expect(textarea).toBeEnabled();
 
     // Send a long-running prompt to ensure streaming lasts long enough to click stop
-    await textarea.fill('Write a detailed 2000-word acquisition plan for a $5M IT services contract');
+    await textarea.fill(
+      'Write a detailed 2000-word acquisition plan for a $5M IT services contract',
+    );
     await page.getByRole('button', { name: '➤' }).click();
 
     // Wait for streaming to start — stop button appears (textarea disables, send button hides).

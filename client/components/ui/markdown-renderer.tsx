@@ -33,7 +33,12 @@ function sanitizeTables(md: string): string {
 
         if (isSeparator && cleaned.length > 0) {
           // Keep separator rows (---|---) only once after a header
-          const prevIsSep = cleaned.length > 0 && cleaned[cleaned.length - 1].split('|').slice(1, -1).every((c) => /^[\s-:]*$/.test(c));
+          const prevIsSep =
+            cleaned.length > 0 &&
+            cleaned[cleaned.length - 1]
+              .split('|')
+              .slice(1, -1)
+              .every((c) => /^[\s-:]*$/.test(c));
           if (!prevIsSep) cleaned.push(line);
         } else if (hasContent) {
           cleaned.push(line);
@@ -41,7 +46,7 @@ function sanitizeTables(md: string): string {
         // Skip lines that are entirely empty cells
       }
       return cleaned.length > 0 ? cleaned.join('\n') + '\n' : '';
-    }
+    },
   );
 }
 
@@ -54,43 +59,29 @@ export const markdownComponents = {
     </h1>
   ),
   h2: ({ children }: { children?: React.ReactNode }) => (
-    <h2 className="text-xl font-semibold text-gray-900 mt-5 mb-3">
-      {children}
-    </h2>
+    <h2 className="text-xl font-semibold text-gray-900 mt-5 mb-3">{children}</h2>
   ),
   h3: ({ children }: { children?: React.ReactNode }) => (
-    <h3 className="text-lg font-semibold text-gray-800 mt-4 mb-2">
-      {children}
-    </h3>
+    <h3 className="text-lg font-semibold text-gray-800 mt-4 mb-2">{children}</h3>
   ),
   h4: ({ children }: { children?: React.ReactNode }) => (
-    <h4 className="text-base font-semibold text-gray-800 mt-3 mb-2">
-      {children}
-    </h4>
+    <h4 className="text-base font-semibold text-gray-800 mt-3 mb-2">{children}</h4>
   ),
 
   // Paragraphs
   p: ({ children }: { children?: React.ReactNode }) => (
-    <p className="text-gray-700 leading-relaxed my-3">
-      {children}
-    </p>
+    <p className="text-gray-700 leading-relaxed my-3">{children}</p>
   ),
 
   // Lists
   ul: ({ children }: { children?: React.ReactNode }) => (
-    <ul className="list-disc list-inside my-3 space-y-1 text-gray-700">
-      {children}
-    </ul>
+    <ul className="list-disc list-inside my-3 space-y-1 text-gray-700">{children}</ul>
   ),
   ol: ({ children }: { children?: React.ReactNode }) => (
-    <ol className="list-decimal list-inside my-3 space-y-1 text-gray-700">
-      {children}
-    </ol>
+    <ol className="list-decimal list-inside my-3 space-y-1 text-gray-700">{children}</ol>
   ),
   li: ({ children }: { children?: React.ReactNode }) => (
-    <li className="text-gray-700 pl-1">
-      {children}
-    </li>
+    <li className="text-gray-700 pl-1">{children}</li>
   ),
 
   // Code
@@ -125,25 +116,17 @@ export const markdownComponents = {
   // Tables — wrapped in a scrollable container for wide IGCE/cost tables
   table: ({ children }: { children?: React.ReactNode }) => (
     <div className="overflow-x-auto my-4 border border-gray-200 rounded-lg">
-      <table className="min-w-full divide-y divide-gray-200">
-        {children}
-      </table>
+      <table className="min-w-full divide-y divide-gray-200">{children}</table>
     </div>
   ),
   thead: ({ children }: { children?: React.ReactNode }) => (
-    <thead className="bg-gray-50">
-      {children}
-    </thead>
+    <thead className="bg-gray-50">{children}</thead>
   ),
   tbody: ({ children }: { children?: React.ReactNode }) => (
-    <tbody className="divide-y divide-gray-200 bg-white">
-      {children}
-    </tbody>
+    <tbody className="divide-y divide-gray-200 bg-white">{children}</tbody>
   ),
   tr: ({ children }: { children?: React.ReactNode }) => (
-    <tr className="hover:bg-gray-50">
-      {children}
-    </tr>
+    <tr className="hover:bg-gray-50">{children}</tr>
   ),
   th: ({ children }: { children?: React.ReactNode }) => (
     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
@@ -151,9 +134,7 @@ export const markdownComponents = {
     </th>
   ),
   td: ({ children }: { children?: React.ReactNode }) => (
-    <td className="px-4 py-3 text-sm text-gray-700">
-      {children}
-    </td>
+    <td className="px-4 py-3 text-sm text-gray-700">{children}</td>
   ),
 
   // Links
@@ -169,22 +150,16 @@ export const markdownComponents = {
   ),
 
   // Horizontal rule
-  hr: () => (
-    <hr className="my-6 border-gray-200" />
-  ),
+  hr: () => <hr className="my-6 border-gray-200" />,
 
   // Strong/Bold
   strong: ({ children }: { children?: React.ReactNode }) => (
-    <strong className="font-semibold text-gray-900">
-      {children}
-    </strong>
+    <strong className="font-semibold text-gray-900">{children}</strong>
   ),
 
   // Emphasis/Italic
   em: ({ children }: { children?: React.ReactNode }) => (
-    <em className="italic text-gray-700">
-      {children}
-    </em>
+    <em className="italic text-gray-700">{children}</em>
   ),
 
   // Images
@@ -199,21 +174,14 @@ export const markdownComponents = {
 
 export default function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   if (!content) {
-    return (
-      <div className="text-gray-400 italic text-sm">
-        No content available
-      </div>
-    );
+    return <div className="text-gray-400 italic text-sm">No content available</div>;
   }
 
   const cleanContent = sanitizeTables(content);
 
   return (
     <div className={`prose prose-sm max-w-none ${className}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={markdownComponents}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {cleanContent}
       </ReactMarkdown>
     </div>

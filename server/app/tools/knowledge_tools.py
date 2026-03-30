@@ -17,7 +17,7 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from functools import lru_cache
+import threading
 
 from ..db_client import get_dynamodb, get_s3, AWS_REGION
 
@@ -44,7 +44,15 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "acquisition_packages",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["SOW", "statement of work", "template", "requirements", "deliverables", "tasks", "performance"],
+        "keywords": [
+            "SOW",
+            "statement of work",
+            "template",
+            "requirements",
+            "deliverables",
+            "tasks",
+            "performance",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/statement-of-work-template-eagle-v2.docx",
         "confidence_score": 0.95,
     },
@@ -56,7 +64,16 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "funding",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["IGCE", "IGE", "cost estimate", "template", "pricing", "labor rates", "budget", "spreadsheet"],
+        "keywords": [
+            "IGCE",
+            "IGE",
+            "cost estimate",
+            "template",
+            "pricing",
+            "labor rates",
+            "budget",
+            "spreadsheet",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/01.D_IGCE_for_Commercial_Organizations.xlsx",
         "confidence_score": 0.95,
     },
@@ -68,7 +85,16 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "market_research",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["market research", "MRR", "template", "vendors", "pricing", "small business", "set-aside", "competition"],
+        "keywords": [
+            "market research",
+            "MRR",
+            "template",
+            "vendors",
+            "pricing",
+            "small business",
+            "set-aside",
+            "competition",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/HHS_Streamlined_Market_Research_Template_FY26.docx",
         "confidence_score": 0.95,
     },
@@ -80,7 +106,16 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "compliance",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["J&A", "justification", "approval", "sole source", "template", "FAR 6.302", "competition", "JOFOC"],
+        "keywords": [
+            "J&A",
+            "justification",
+            "approval",
+            "sole source",
+            "template",
+            "FAR 6.302",
+            "competition",
+            "JOFOC",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/Justification_and_Approval_Over_350K_Template.docx",
         "confidence_score": 0.95,
     },
@@ -92,7 +127,16 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "acquisition_packages",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["acquisition plan", "AP", "template", "FAR 7.105", "strategy", "contract type", "competition", "planning"],
+        "keywords": [
+            "acquisition plan",
+            "AP",
+            "template",
+            "FAR 7.105",
+            "strategy",
+            "contract type",
+            "competition",
+            "planning",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/HHS Streamlined Acquisition Plan Template.docx",
         "confidence_score": 0.95,
     },
@@ -104,7 +148,14 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "compliance",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["COR", "appointment", "certification", "memorandum", "template", "contracting officer representative"],
+        "keywords": [
+            "COR",
+            "appointment",
+            "certification",
+            "memorandum",
+            "template",
+            "contracting officer representative",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/NIH COR Appointment Memorandum.docx",
         "confidence_score": 0.90,
     },
@@ -116,7 +167,16 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "acquisition_packages",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["SON", "statement of need", "products", "equipment", "supplies", "template", "intake", "requirements"],
+        "keywords": [
+            "SON",
+            "statement of need",
+            "products",
+            "equipment",
+            "supplies",
+            "template",
+            "intake",
+            "requirements",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/3.a. SON - Products (including Equipment and Supplies).docx",
         "confidence_score": 0.90,
     },
@@ -128,7 +188,15 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "acquisition_packages",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["SON", "statement of need", "services", "catalog", "pricing", "template", "intake"],
+        "keywords": [
+            "SON",
+            "statement of need",
+            "services",
+            "catalog",
+            "pricing",
+            "template",
+            "intake",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/3.b. SON - Services based on Catalog Pricing.docx",
         "confidence_score": 0.90,
     },
@@ -140,7 +208,15 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "compliance",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["Buy American", "BAA", "determination", "template", "non-availability", "foreign", "compliance"],
+        "keywords": [
+            "Buy American",
+            "BAA",
+            "determination",
+            "template",
+            "non-availability",
+            "foreign",
+            "compliance",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/DF_Buy_American_Non_Availability_Template.docx",
         "confidence_score": 0.85,
     },
@@ -152,7 +228,15 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "socioeconomic",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["subcontracting", "subK", "plan", "template", "small business", "goals", "FAR 19.702"],
+        "keywords": [
+            "subcontracting",
+            "subK",
+            "plan",
+            "template",
+            "small business",
+            "goals",
+            "FAR 19.702",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/HHS SubK Plan Template - updated March 2022.doc",
         "confidence_score": 0.85,
     },
@@ -164,7 +248,15 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "compliance",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["J&A", "justification", "sole source", "template", "simplified", "under SAT", "under $350K"],
+        "keywords": [
+            "J&A",
+            "justification",
+            "sole source",
+            "template",
+            "simplified",
+            "under SAT",
+            "under $350K",
+        ],
         "s3_key": f"{_TEMPLATE_PREFIX}/Justification_and_Approval_Under_350K_Template.docx",
         "confidence_score": 0.90,
     },
@@ -176,7 +268,14 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
         "primary_topic": "acquisition_packages",
         "primary_agent": "supervisor-core",
         "authority_level": "guidance",
-        "keywords": ["checklist", "acquisition package", "required documents", "completeness", "review", "compliance"],
+        "keywords": [
+            "checklist",
+            "acquisition package",
+            "required documents",
+            "completeness",
+            "review",
+            "compliance",
+        ],
         "s3_key": "",
         "confidence_score": 0.80,
     },
@@ -187,10 +286,21 @@ SEARCH_MODEL_ID = os.environ.get(
 )
 
 
-@lru_cache(maxsize=1)
+_bedrock_local = threading.local()
+
+
 def _get_bedrock_runtime():
-    """Get Bedrock runtime client for knowledge search."""
-    return boto3.client("bedrock-runtime", region_name=AWS_REGION)
+    """Get Bedrock runtime client for knowledge search (thread-local).
+
+    Uses threading.local() instead of @lru_cache to avoid sharing a boto3
+    client with internal _thread.lock objects across threads.  When Strands
+    SDK runs @tool functions via asyncio.to_thread() and OTEL threading
+    instrumentation propagates context, copy.deepcopy on shared locks causes
+    TypeError/RecursionError.
+    """
+    if not hasattr(_bedrock_local, "client"):
+        _bedrock_local.client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+    return _bedrock_local.client
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -218,7 +328,15 @@ KNOWLEDGE_SEARCH_TOOL = {
             },
             "document_type": {
                 "type": "string",
-                "enum": ["regulation", "guidance", "policy", "template", "memo", "checklist", "reference"],
+                "enum": [
+                    "regulation",
+                    "guidance",
+                    "policy",
+                    "template",
+                    "memo",
+                    "checklist",
+                    "reference",
+                ],
                 "description": "Type of document to search for",
             },
             "agent": {
@@ -285,6 +403,7 @@ KNOWLEDGE_FETCH_TOOL = {
 # AI-Powered Semantic Search
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _ai_rank_documents(
     query: str,
     keywords: list[str],
@@ -303,24 +422,68 @@ def _ai_rank_documents(
     if not items:
         return []
 
-    # Build compact catalog: index | doc_id | title | keywords | summary snippet
+    # Build compact catalog: index | doc_id | title | keywords | related | summary
     catalog_lines = []
     for i, item in enumerate(items):
         doc_id = item.get("document_id", "")
         title = item.get("title", "")
-        kws = ", ".join(item.get("keywords", [])[:5])
-        summary = (item.get("summary", "") or "")[:150]
-        catalog_lines.append(f"{i}|{doc_id}|{title}|{kws}|{summary}")
+        kws = ", ".join(item.get("keywords", []))
+        related = ", ".join(item.get("related_topics", []))
+        summary = (item.get("summary", "") or "")[:200]
+        line = f"{i}|{doc_id}|{title}|{kws}|{summary}"
+        if related:
+            line += f"|RELATED:{related}"
+        catalog_lines.append(line)
 
     catalog = "\n".join(catalog_lines)
 
     keywords_ctx = f"\nAdditional keywords: {', '.join(keywords)}" if keywords else ""
 
+    # Boost checklists when query involves document generation or compliance
+    _doc_gen_signals = {
+        "acquisition plan",
+        "igce",
+        "sow",
+        "market research",
+        "generate",
+        "create document",
+        "compliance",
+        "checklist",
+        "pre-award",
+        "package",
+    }
+    _query_lower = query.lower()
+    checklist_boost = ""
+    if any(sig in _query_lower for sig in _doc_gen_signals):
+        checklist_boost = (
+            "\nIMPORTANT: When the query involves document generation, compliance, "
+            "or acquisition packages, always include relevant checklists (document_type "
+            "= 'checklist') in the top results. Checklists ensure completeness and "
+            "regulatory compliance."
+        )
+
     prompt = (
         "You are a document relevance matcher for a federal acquisition knowledge base.\n"
         "Given the search query and document catalog, return the indices of the most "
         f"relevant documents, ranked by relevance. Return up to {limit} results.\n\n"
-        f"Search query: {query}{keywords_ctx}\n\n"
+        "MATCHING RULES:\n"
+        "1. CONCEPT ASSOCIATIONS — related concepts must match each other:\n"
+        "   - 'fiscal year' + 'appropriation' <-> 'bona fide needs'\n"
+        "   - 'severable' / 'non-severable' <-> 'bona fide needs' + 'fiscal year'\n"
+        "   - 'IDIQ' + 'minimum' <-> 'funding' + 'obligation'\n"
+        "   - 'protest' + 'debriefing' <-> 'stay' + 'timeliness'\n"
+        "   - 'fair opportunity' <-> 'exceptions' + 'IDIQ' + '16.505'\n"
+        "2. CASE NUMBERS — if the query contains a case number (e.g., B-302358, B-421835),\n"
+        "   prioritize documents whose document_id, title, or keywords contain that number.\n"
+        "3. SYNONYMS — treat these as equivalent:\n"
+        "   - 'requirement' = 'obligation' = 'mandate'\n"
+        "   - 'funding' = 'appropriation' = 'money'\n"
+        "   - 'IDIQ' = 'indefinite-delivery indefinite-quantity'\n"
+        "4. RELATED TOPICS — if a document's RELATED field contains a query concept,\n"
+        "   boost its relevance score.\n"
+        "5. PREFER knowledge-base documents (s3_key contains 'eagle-knowledge-base/approved')\n"
+        "   over user-generated package documents for regulatory/policy queries.\n\n"
+        f"Search query: {query}{keywords_ctx}{checklist_boost}\n\n"
         "Document catalog (index|document_id|title|keywords|summary):\n"
         f"{catalog}\n\n"
         f"Return ONLY a JSON array of index numbers for the top {limit} most relevant "
@@ -346,17 +509,30 @@ def _ai_rank_documents(
 
         indices = json.loads(result_text)
         if not isinstance(indices, list):
-            logger.warning("knowledge_search AI: unexpected response type: %s", type(indices))
+            logger.warning(
+                "knowledge_search AI: unexpected response type: %s", type(indices)
+            )
             return []
 
-        ranked = [items[i] for i in indices if isinstance(i, int) and 0 <= i < len(items)]
+        ranked = [
+            items[i] for i in indices if isinstance(i, int) and 0 <= i < len(items)
+        ]
         logger.info(
             "knowledge_search AI: query='%s' matched %d/%d docs",
-            query, len(ranked), len(items),
+            query,
+            len(ranked),
+            len(items),
         )
         return ranked
 
-    except (ClientError, BotoCoreError, json.JSONDecodeError, KeyError, IndexError, Exception) as e:
+    except (
+        ClientError,
+        BotoCoreError,
+        json.JSONDecodeError,
+        KeyError,
+        IndexError,
+        Exception,
+    ) as e:
         logger.warning("knowledge_search AI ranking failed, falling back: %s", e)
         return []
 
@@ -405,6 +581,7 @@ def _deterministic_match(
 # Tool Implementations
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def exec_knowledge_search(
     params: dict[str, Any],
     tenant_id: str,
@@ -430,7 +607,12 @@ def exec_knowledge_search(
 
     logger.info(
         "knowledge_search: tenant=%s query=%s topic=%s doc_type=%s agent=%s limit=%d",
-        tenant_id, query, topic, document_type, agent, limit,
+        tenant_id,
+        query,
+        topic,
+        document_type,
+        agent,
+        limit,
     )
 
     # Build DynamoDB filter for exact-match attributes
@@ -487,11 +669,16 @@ def exec_knowledge_search(
                 items.append(entry)
 
         db_count = len(items) - sum(
-            1 for e in BUILTIN_KB_ENTRIES
+            1
+            for e in BUILTIN_KB_ENTRIES
             if any(it.get("document_id") == e["document_id"] for it in items)
         )
-        logger.info("knowledge_search: %d total items (%d DB + %d built-in templates)",
-                     len(items), db_count, len(items) - db_count)
+        logger.info(
+            "knowledge_search: %d total items (%d DB + %d built-in templates)",
+            len(items),
+            db_count,
+            len(items) - db_count,
+        )
     except ClientError as e:
         logger.error("knowledge_search DynamoDB error: %s", e)
         return {"error": str(e), "results": [], "count": 0}
@@ -513,20 +700,22 @@ def exec_knowledge_search(
     # Format results
     results = []
     for item in items[:limit]:
-        results.append({
-            "document_id": item.get("document_id", ""),
-            "title": item.get("title", ""),
-            "summary": item.get("summary", ""),
-            "document_type": item.get("document_type", ""),
-            "primary_topic": item.get("primary_topic", ""),
-            "primary_agent": item.get("primary_agent", ""),
-            "authority_level": item.get("authority_level", ""),
-            "complexity_level": item.get("complexity_level", ""),
-            "key_requirements": item.get("key_requirements", []),
-            "keywords": item.get("keywords", [])[:10],
-            "s3_key": item.get("s3_key", ""),
-            "confidence_score": float(item.get("confidence_score", 0)),
-        })
+        results.append(
+            {
+                "document_id": item.get("document_id", ""),
+                "title": item.get("title", ""),
+                "summary": item.get("summary", ""),
+                "document_type": item.get("document_type", ""),
+                "primary_topic": item.get("primary_topic", ""),
+                "primary_agent": item.get("primary_agent", ""),
+                "authority_level": item.get("authority_level", ""),
+                "complexity_level": item.get("complexity_level", ""),
+                "key_requirements": item.get("key_requirements", []),
+                "keywords": item.get("keywords", [])[:10],
+                "s3_key": item.get("s3_key", ""),
+                "confidence_score": float(item.get("confidence_score", 0)),
+            }
+        )
 
     logger.info("knowledge_search: returning %d results", len(results))
     return {"results": results, "count": len(results)}
@@ -551,7 +740,9 @@ def exec_knowledge_fetch(
         if query:
             logger.info("knowledge_fetch: no s3_key, auto-searching for '%s'", query)
             search_result = exec_knowledge_search(
-                {"query": query, "limit": 1}, tenant_id, session_id,
+                {"query": query, "limit": 1},
+                tenant_id,
+                session_id,
             )
             results = search_result.get("results", [])
             if results:

@@ -138,6 +138,7 @@ async def run_pipeline(
             journey=ss["journey"],
             page_description=ss["description"],
             step_description=ss["step_name"],
+            page_context=ss.get("page_context", ""),
         )
         all_judgments.append(judgment)
 

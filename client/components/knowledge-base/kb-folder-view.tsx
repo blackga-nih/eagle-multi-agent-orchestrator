@@ -35,14 +35,11 @@ export default function KBFolderView({ documents, groupBy, stats, onSelect }: KB
     });
   };
 
-  const formatLabel = (key: string) => key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const formatLabel = (key: string) =>
+    key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
   if (sortedGroups.length === 0) {
-    return (
-      <div className="text-center py-16 text-gray-400">
-        No documents to display
-      </div>
-    );
+    return <div className="text-center py-16 text-gray-400">No documents to display</div>;
   }
 
   return (

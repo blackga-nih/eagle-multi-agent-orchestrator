@@ -24,8 +24,16 @@ interface UseExpertiseReturn {
   error: string | null;
   logs: ExpertiseLogEntry[];
   // Actions
-  trackCompleteIntake: (intakeId: string, acquisitionType: string, costCategory: string) => Promise<void>;
-  trackSaveDraft: (intakeId: string, acquisitionType: string, costCategory: string) => Promise<void>;
+  trackCompleteIntake: (
+    intakeId: string,
+    acquisitionType: string,
+    costCategory: string,
+  ) => Promise<void>;
+  trackSaveDraft: (
+    intakeId: string,
+    acquisitionType: string,
+    costCategory: string,
+  ) => Promise<void>;
   trackViewWorkflow: (workflowId: string, workflowType: string, status: string) => Promise<void>;
   trackDocumentAction: (documentId: string, documentType: string, action: string) => Promise<void>;
   // Management
@@ -44,16 +52,19 @@ export function useExpertise(options: UseExpertiseOptions = {}): UseExpertiseRet
   const [logs, setLogs] = useState<ExpertiseLogEntry[]>([]);
 
   // Add log entry
-  const addLog = useCallback((phase: 'ACT' | 'LEARN' | 'REUSE', action: string, details: string) => {
-    const entry: ExpertiseLogEntry = {
-      timestamp: new Date().toISOString(),
-      phase,
-      action,
-      details,
-    };
-    setLogs(prev => [entry, ...prev].slice(0, 50)); // Keep last 50 logs
-    console.log(`[Expertise ${phase}] ${action}: ${details}`);
-  }, []);
+  const addLog = useCallback(
+    (phase: 'ACT' | 'LEARN' | 'REUSE', action: string, details: string) => {
+      const entry: ExpertiseLogEntry = {
+        timestamp: new Date().toISOString(),
+        phase,
+        action,
+        details,
+      };
+      setLogs((prev) => [entry, ...prev].slice(0, 50)); // Keep last 50 logs
+      console.log(`[Expertise ${phase}] ${action}: ${details}`);
+    },
+    [],
+  );
 
   // Fetch expertise
   const fetchExpertise = useCallback(async () => {
@@ -95,140 +106,136 @@ export function useExpertise(options: UseExpertiseOptions = {}): UseExpertiseRet
   }, [autoFetch, fetchExpertise]);
 
   // Track completed intake
-  const trackCompleteIntake = useCallback(async (
-    intakeId: string,
-    acquisitionType: string,
-    costCategory: string
-  ) => {
-    addLog('ACT', 'complete_intake', `Intake ${intakeId} (${acquisitionType}, ${costCategory})`);
+  const trackCompleteIntake = useCallback(
+    async (intakeId: string, acquisitionType: string, costCategory: string) => {
+      addLog('ACT', 'complete_intake', `Intake ${intakeId} (${acquisitionType}, ${costCategory})`);
 
-    try {
-      const response = await fetch(`${API_BASE}/api/expertise/${userId}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action_type: 'complete_intake',
-          intake_id: intakeId,
-          acquisition_type: acquisitionType,
-          cost_category: costCategory,
-        }),
-      });
+      try {
+        const response = await fetch(`${API_BASE}/api/expertise/${userId}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: 'complete_intake',
+            intake_id: intakeId,
+            acquisition_type: acquisitionType,
+            cost_category: costCategory,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to track action: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to track action: ${response.statusText}`);
+        }
+
+        const updated = await response.json();
+        setExpertise(updated);
+        addLog('LEARN', 'expertise_updated', `Total improvements: ${updated.total_improvements}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setError(message);
+        addLog('LEARN', 'error', message);
       }
-
-      const updated = await response.json();
-      setExpertise(updated);
-      addLog('LEARN', 'expertise_updated', `Total improvements: ${updated.total_improvements}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setError(message);
-      addLog('LEARN', 'error', message);
-    }
-  }, [userId, addLog]);
+    },
+    [userId, addLog],
+  );
 
   // Track save draft
-  const trackSaveDraft = useCallback(async (
-    intakeId: string,
-    acquisitionType: string,
-    costCategory: string
-  ) => {
-    addLog('ACT', 'save_draft', `Draft ${intakeId} (${acquisitionType}, ${costCategory})`);
+  const trackSaveDraft = useCallback(
+    async (intakeId: string, acquisitionType: string, costCategory: string) => {
+      addLog('ACT', 'save_draft', `Draft ${intakeId} (${acquisitionType}, ${costCategory})`);
 
-    try {
-      const response = await fetch(`${API_BASE}/api/expertise/${userId}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action_type: 'save_draft',
-          intake_id: intakeId,
-          acquisition_type: acquisitionType,
-          cost_category: costCategory,
-        }),
-      });
+      try {
+        const response = await fetch(`${API_BASE}/api/expertise/${userId}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: 'save_draft',
+            intake_id: intakeId,
+            acquisition_type: acquisitionType,
+            cost_category: costCategory,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to track action: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to track action: ${response.statusText}`);
+        }
+
+        const updated = await response.json();
+        setExpertise(updated);
+        addLog('LEARN', 'expertise_updated', `Total improvements: ${updated.total_improvements}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setError(message);
+        addLog('LEARN', 'error', message);
       }
-
-      const updated = await response.json();
-      setExpertise(updated);
-      addLog('LEARN', 'expertise_updated', `Total improvements: ${updated.total_improvements}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setError(message);
-      addLog('LEARN', 'error', message);
-    }
-  }, [userId, addLog]);
+    },
+    [userId, addLog],
+  );
 
   // Track view workflow
-  const trackViewWorkflow = useCallback(async (
-    workflowId: string,
-    workflowType: string,
-    status: string
-  ) => {
-    addLog('ACT', 'view_workflow', `Workflow ${workflowId} (${workflowType}, ${status})`);
+  const trackViewWorkflow = useCallback(
+    async (workflowId: string, workflowType: string, status: string) => {
+      addLog('ACT', 'view_workflow', `Workflow ${workflowId} (${workflowType}, ${status})`);
 
-    try {
-      const response = await fetch(`${API_BASE}/api/expertise/${userId}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action_type: 'view_workflow',
-          workflow_id: workflowId,
-          workflow_type: workflowType,
-          status,
-        }),
-      });
+      try {
+        const response = await fetch(`${API_BASE}/api/expertise/${userId}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: 'view_workflow',
+            workflow_id: workflowId,
+            workflow_type: workflowType,
+            status,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to track action: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to track action: ${response.statusText}`);
+        }
+
+        const updated = await response.json();
+        setExpertise(updated);
+        addLog('LEARN', 'expertise_updated', `Total improvements: ${updated.total_improvements}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setError(message);
+        addLog('LEARN', 'error', message);
       }
-
-      const updated = await response.json();
-      setExpertise(updated);
-      addLog('LEARN', 'expertise_updated', `Total improvements: ${updated.total_improvements}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setError(message);
-      addLog('LEARN', 'error', message);
-    }
-  }, [userId, addLog]);
+    },
+    [userId, addLog],
+  );
 
   // Track document action
-  const trackDocumentAction = useCallback(async (
-    documentId: string,
-    documentType: string,
-    action: string
-  ) => {
-    addLog('ACT', 'document_action', `Document ${documentId} (${documentType}) - ${action}`);
+  const trackDocumentAction = useCallback(
+    async (documentId: string, documentType: string, action: string) => {
+      addLog('ACT', 'document_action', `Document ${documentId} (${documentType}) - ${action}`);
 
-    try {
-      const response = await fetch(`${API_BASE}/api/expertise/${userId}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action_type: 'document_action',
-          document_id: documentId,
-          document_type: documentType,
-          document_action: action,
-        }),
-      });
+      try {
+        const response = await fetch(`${API_BASE}/api/expertise/${userId}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: 'document_action',
+            document_id: documentId,
+            document_type: documentType,
+            document_action: action,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to track action: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to track action: ${response.statusText}`);
+        }
+
+        const updated = await response.json();
+        setExpertise(updated);
+        addLog('LEARN', 'expertise_updated', `Total improvements: ${updated.total_improvements}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setError(message);
+        addLog('LEARN', 'error', message);
       }
-
-      const updated = await response.json();
-      setExpertise(updated);
-      addLog('LEARN', 'expertise_updated', `Total improvements: ${updated.total_improvements}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setError(message);
-      addLog('LEARN', 'error', message);
-    }
-  }, [userId, addLog]);
+    },
+    [userId, addLog],
+  );
 
   // Clear all expertise
   const clearAll = useCallback(async () => {
@@ -254,51 +261,57 @@ export function useExpertise(options: UseExpertiseOptions = {}): UseExpertiseRet
   }, [userId, addLog]);
 
   // Clear specific section
-  const clearSection = useCallback(async (section: ExpertiseSection) => {
-    addLog('ACT', 'clear_section', `Clearing section: ${section}`);
+  const clearSection = useCallback(
+    async (section: ExpertiseSection) => {
+      addLog('ACT', 'clear_section', `Clearing section: ${section}`);
 
-    try {
-      const response = await fetch(`${API_BASE}/api/expertise/${userId}/section/${section}`, {
-        method: 'DELETE',
-      });
+      try {
+        const response = await fetch(`${API_BASE}/api/expertise/${userId}/section/${section}`, {
+          method: 'DELETE',
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to clear section: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to clear section: ${response.statusText}`);
+        }
+
+        const updated = await response.json();
+        setExpertise(updated);
+        addLog('LEARN', 'section_cleared', `Section ${section} cleared`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setError(message);
+        addLog('LEARN', 'error', message);
       }
-
-      const updated = await response.json();
-      setExpertise(updated);
-      addLog('LEARN', 'section_cleared', `Section ${section} cleared`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setError(message);
-      addLog('LEARN', 'error', message);
-    }
-  }, [userId, addLog]);
+    },
+    [userId, addLog],
+  );
 
   // Remove specific entry
-  const removeEntry = useCallback(async (section: ExpertiseSection, entryId: string) => {
-    addLog('ACT', 'remove_entry', `Removing ${entryId} from ${section}`);
+  const removeEntry = useCallback(
+    async (section: ExpertiseSection, entryId: string) => {
+      addLog('ACT', 'remove_entry', `Removing ${entryId} from ${section}`);
 
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/expertise/${userId}/section/${section}/entry/${entryId}`,
-        { method: 'DELETE' }
-      );
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/expertise/${userId}/section/${section}/entry/${entryId}`,
+          { method: 'DELETE' },
+        );
 
-      if (!response.ok) {
-        throw new Error(`Failed to remove entry: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to remove entry: ${response.statusText}`);
+        }
+
+        const updated = await response.json();
+        setExpertise(updated);
+        addLog('LEARN', 'entry_removed', `Removed ${entryId} from ${section}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setError(message);
+        addLog('LEARN', 'error', message);
       }
-
-      const updated = await response.json();
-      setExpertise(updated);
-      addLog('LEARN', 'entry_removed', `Removed ${entryId} from ${section}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setError(message);
-      addLog('LEARN', 'error', message);
-    }
-  }, [userId, addLog]);
+    },
+    [userId, addLog],
+  );
 
   return {
     expertise,

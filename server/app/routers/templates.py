@@ -13,7 +13,12 @@ from pydantic import BaseModel
 
 from ..cognito_auth import UserContext
 from ..db_client import get_s3
-from ..template_store import delete_template, list_tenant_templates, put_template, resolve_template
+from ..template_store import (
+    delete_template,
+    list_tenant_templates,
+    put_template,
+    resolve_template,
+)
 from .dependencies import get_user_from_header
 
 logger = logging.getLogger(__name__)
@@ -89,13 +94,19 @@ async def preview_s3_template(
 ):
     """Preview an S3 template."""
     from ..spreadsheet_edit_service import extract_xlsx_preview_payload
-    from ..template_registry import TEMPLATE_BUCKET, TEMPLATE_PREFIX, get_s3_template_by_key
+    from ..template_registry import (
+        TEMPLATE_BUCKET,
+        TEMPLATE_PREFIX,
+        get_s3_template_by_key,
+    )
     from ..template_service import DOCXPopulator
 
     if not s3_key:
         raise HTTPException(status_code=400, detail="s3_key is required")
     if not s3_key.startswith(TEMPLATE_PREFIX):
-        raise HTTPException(status_code=403, detail="Access denied — invalid template key")
+        raise HTTPException(
+            status_code=403, detail="Access denied — invalid template key"
+        )
 
     filename = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
     file_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -143,7 +154,9 @@ async def get_s3_template_download_url(
     if not s3_key:
         raise HTTPException(status_code=400, detail="s3_key is required")
     if not s3_key.startswith(TEMPLATE_PREFIX):
-        raise HTTPException(status_code=403, detail="Access denied — invalid template key")
+        raise HTTPException(
+            status_code=403, detail="Access denied — invalid template key"
+        )
 
     filename = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
     s3 = get_s3()
@@ -173,14 +186,19 @@ async def copy_s3_template_to_package(
     Returns:
         Created document entry with document_id
     """
-    from ..template_registry import get_s3_template_by_key, _infer_doc_type_from_filename
+    from ..template_registry import (
+        get_s3_template_by_key,
+        _infer_doc_type_from_filename,
+    )
     from ..document_store import create_document_from_s3
 
     s3_key = body.get("s3_key")
     package_id = body.get("package_id")
 
     if not s3_key or not package_id:
-        raise HTTPException(status_code=400, detail="s3_key and package_id are required")
+        raise HTTPException(
+            status_code=400, detail="s3_key and package_id are required"
+        )
 
     # Fetch template content from S3
     content = get_s3_template_by_key(s3_key)
@@ -222,16 +240,37 @@ async def batch_standardize_templates(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Batch standardize S3 templates to gold-standard markdown."""
-    from ..template_registry import TEMPLATE_BUCKET, get_s3_template_by_key, list_s3_templates
-    from ..template_standardizer import BatchJobResult, create_batch_job, standardize_template as run_standardize, update_batch_job
+    from ..template_registry import (
+        TEMPLATE_BUCKET,
+        get_s3_template_by_key,
+        list_s3_templates,
+    )
+    from ..template_standardizer import (
+        BatchJobResult,
+        create_batch_job,
+        standardize_template as run_standardize,
+        update_batch_job,
+    )
 
     templates = list_s3_templates(refresh=True)
-    templates = [template for template in templates if template.get("file_type") not in ("xlsx", "xls")]
+    templates = [
+        template
+        for template in templates
+        if template.get("file_type") not in ("xlsx", "xls")
+    ]
     if body.doc_types:
-        templates = [template for template in templates if template.get("doc_type") in body.doc_types]
+        templates = [
+            template
+            for template in templates
+            if template.get("doc_type") in body.doc_types
+        ]
 
     if not templates:
-        return {"job_id": None, "status": "complete", "message": "No templates to process"}
+        return {
+            "job_id": None,
+            "status": "complete",
+            "message": "No templates to process",
+        }
 
     job_id = create_batch_job(len(templates))
 
@@ -247,7 +286,16 @@ async def batch_standardize_templates(
                 doc_type = template.get("doc_type") or "unknown"
                 template_bytes = get_s3_template_by_key(s3_key)
                 if template_bytes is None:
-                    update_batch_job(job_id, BatchJobResult(filename=filename, doc_type=doc_type, quality_score=0, success=False, issues=["Template not found in S3"]))
+                    update_batch_job(
+                        job_id,
+                        BatchJobResult(
+                            filename=filename,
+                            doc_type=doc_type,
+                            quality_score=0,
+                            success=False,
+                            issues=["Template not found in S3"],
+                        ),
+                    )
                     continue
 
                 content_type_map = {
@@ -257,8 +305,12 @@ async def batch_standardize_templates(
                     "txt": "text/plain",
                     "md": "text/markdown",
                 }
-                content_type = content_type_map.get(file_type, "application/octet-stream")
-                result = await asyncio.to_thread(run_standardize, template_bytes, filename, content_type, doc_type)
+                content_type = content_type_map.get(
+                    file_type, "application/octet-stream"
+                )
+                result = await asyncio.to_thread(
+                    run_standardize, template_bytes, filename, content_type, doc_type
+                )
 
                 if result.success and not body.dry_run:
                     md_key = s3_key.rsplit(".", 1)[0] + ".standardized.md"
@@ -285,7 +337,11 @@ async def batch_standardize_templates(
                     ),
                 )
             except Exception as exc:
-                logger.error("Batch standardization error for %s: %s", template.get("filename"), exc)
+                logger.error(
+                    "Batch standardization error for %s: %s",
+                    template.get("filename"),
+                    exc,
+                )
                 update_batch_job(
                     job_id,
                     BatchJobResult(
@@ -329,7 +385,10 @@ async def standardize_single_template(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Standardize a single S3 template."""
-    from ..template_registry import _infer_doc_type_from_filename, get_s3_template_by_key
+    from ..template_registry import (
+        _infer_doc_type_from_filename,
+        get_s3_template_by_key,
+    )
     from ..template_standardizer import standardize_template as run_standardize
 
     s3_key = body.s3_key
@@ -349,7 +408,10 @@ async def standardize_single_template(
     }
     content_type = content_type_map.get(file_type, "application/octet-stream")
     result = run_standardize(template_bytes, filename, content_type, doc_type)
-    return {"result": result.to_dict(), "preview": result.markdown[:1000] if result.markdown else ""}
+    return {
+        "result": result.to_dict(),
+        "preview": result.markdown[:1000] if result.markdown else "",
+    }
 
 
 @router.get("/quality-report")
@@ -362,7 +424,11 @@ async def get_templates_quality_report(
     from ..template_standardizer import assess_quality
 
     templates = list_s3_templates(refresh=True)
-    templates = [template for template in templates if template.get("file_type") not in ("xlsx", "xls")]
+    templates = [
+        template
+        for template in templates
+        if template.get("file_type") not in ("xlsx", "xls")
+    ]
 
     results = []
     for template in templates:
@@ -372,7 +438,13 @@ async def get_templates_quality_report(
         try:
             template_bytes = get_s3_template_by_key(template["s3_key"])
             if template_bytes is None:
-                results.append({"filename": filename, "doc_type": doc_type, "quality": {"score": 0, "issues": ["Template not found"]}})
+                results.append(
+                    {
+                        "filename": filename,
+                        "doc_type": doc_type,
+                        "quality": {"score": 0, "issues": ["Template not found"]},
+                    }
+                )
                 continue
 
             content_type_map = {
@@ -395,12 +467,26 @@ async def get_templates_quality_report(
                 }
             )
         except Exception as exc:
-            results.append({"filename": filename, "doc_type": doc_type, "quality": {"score": 0, "issues": [str(exc)]}})
+            results.append(
+                {
+                    "filename": filename,
+                    "doc_type": doc_type,
+                    "quality": {"score": 0, "issues": [str(exc)]},
+                }
+            )
 
     results.sort(key=lambda item: item.get("quality", {}).get("score", 0))
     total = len(results)
-    avg_score = sum(item.get("quality", {}).get("score", 0) for item in results) / total if total else 0
-    return {"total": total, "avg_quality_score": round(avg_score, 1), "templates": results}
+    avg_score = (
+        sum(item.get("quality", {}).get("score", 0) for item in results) / total
+        if total
+        else 0
+    )
+    return {
+        "total": total,
+        "avg_quality_score": round(avg_score, 1),
+        "templates": results,
+    }
 
 
 # ── Template CRUD (Dynamic Routes) ─────────────────────────────────
@@ -418,7 +504,12 @@ async def get_active_template(
     else:
         body, source = resolved
         metadata = None
-    return {"doc_type": doc_type, "template_body": body, "source": source, "metadata": metadata}
+    return {
+        "doc_type": doc_type,
+        "template_body": body,
+        "source": source,
+        "metadata": metadata,
+    }
 
 
 @router.post("/{doc_type}")
@@ -469,7 +560,12 @@ async def get_template_clauses(
                 clause_number = clause.get("clause_number", "")
                 if clause_number and clause_number not in all_clauses:
                     all_clauses[clause_number] = clause
-        return {"doc_type": doc_type, "clauses": list(all_clauses.values()), "total": len(all_clauses), "variants": len(refs)}
+        return {
+            "doc_type": doc_type,
+            "clauses": list(all_clauses.values()),
+            "total": len(all_clauses),
+            "variants": len(refs),
+        }
     except Exception as exc:
         return {"doc_type": doc_type, "clauses": [], "total": 0, "error": str(exc)}
 
@@ -515,14 +611,23 @@ async def search_templates_by_clause(
             for sec_num, sec_data in ref_data.get("section_clause_map", {}).items():
                 for ref_clause in sec_data.get("clauses", []):
                     if clause_lower in ref_clause.get("clause_number", "").lower():
-                        found_in.append({"section": sec_num, "section_title": sec_data.get("section_title", "")})
+                        found_in.append(
+                            {
+                                "section": sec_num,
+                                "section_title": sec_data.get("section_title", ""),
+                            }
+                        )
             for ref_clause in ref_data.get("template_level_clauses", []):
                 if clause_lower in ref_clause.get("clause_number", "").lower():
-                    found_in.append({"section": "template_level", "section_title": "Template-level"})
+                    found_in.append(
+                        {"section": "template_level", "section_title": "Template-level"}
+                    )
             if found_in:
                 matches.append(
                     {
-                        "template_filename": ref_data.get("template_filename", filename),
+                        "template_filename": ref_data.get(
+                            "template_filename", filename
+                        ),
                         "category": ref_data.get("category", ""),
                         "sections": found_in,
                     }
@@ -553,4 +658,10 @@ async def compliance_gap_analysis(
         }
         return analyze_compliance_gaps(value, method, type, flags)
     except Exception as exc:
-        return {"error": str(exc), "covered": [], "gaps": [], "partial": [], "coverage_pct": 0}
+        return {
+            "error": str(exc),
+            "covered": [],
+            "gaps": [],
+            "partial": [],
+            "coverage_pct": 0,
+        }

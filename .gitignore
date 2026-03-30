@@ -147,6 +147,14 @@ client/client/
 # One-off reports at repo root
 20260320-refactor-0319-ah-report.md
 
+# Demo script scratch / backups
+EAGLE-DEMO-SCRIPT.md
+EAGLE-DEMO-SCRIPT-UPDATED.md
+EAGLE-DEMO-SCRIPT*.bak
+
+# One-off scratch docs at root
+micro-purchase-RO.md
+
 # Separate plugin projects (own repos)
 tac-experts-plugin/
 

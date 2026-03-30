@@ -9,6 +9,7 @@ Context resolution order:
 2. active_package_id in session metadata
 3. No package context (workspace mode)
 """
+
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -63,7 +64,8 @@ def resolve_context(
         else:
             logger.warning(
                 "Explicit package_id %s not found for tenant %s",
-                explicit_package_id, tenant_id
+                explicit_package_id,
+                tenant_id,
             )
             # Fall through to session metadata
 
@@ -78,13 +80,13 @@ def resolve_context(
             if pkg:
                 logger.debug(
                     "Package context resolved from session metadata: %s",
-                    session_package_id
+                    session_package_id,
                 )
                 return _build_package_context(pkg)
             else:
                 logger.warning(
                     "Session active_package_id %s not found, clearing from session",
-                    session_package_id
+                    session_package_id,
                 )
                 # Clear stale package reference
                 clear_active_package(tenant_id, user_id, session_id)
@@ -116,16 +118,15 @@ def set_active_package(
     if not pkg:
         logger.warning(
             "Cannot set active package: %s not found for tenant %s",
-            package_id, tenant_id
+            package_id,
+            tenant_id,
         )
         return None
 
     # Get current session metadata
     session = get_session(session_id, tenant_id, user_id)
     if not session:
-        logger.warning(
-            "Cannot set active package: session %s not found", session_id
-        )
+        logger.warning("Cannot set active package: session %s not found", session_id)
         return None
 
     # Update session metadata
@@ -136,12 +137,10 @@ def set_active_package(
         session_id=session_id,
         tenant_id=tenant_id,
         user_id=user_id,
-        updates={"metadata": metadata}
+        updates={"metadata": metadata},
     )
 
-    logger.info(
-        "Set active package %s for session %s", package_id, session_id
-    )
+    logger.info("Set active package %s for session %s", package_id, session_id)
     return _build_package_context(pkg)
 
 
@@ -162,9 +161,7 @@ def clear_active_package(
     """
     session = get_session(session_id, tenant_id, user_id)
     if not session:
-        logger.warning(
-            "Cannot clear active package: session %s not found", session_id
-        )
+        logger.warning("Cannot clear active package: session %s not found", session_id)
         return False
 
     metadata = session.get("metadata", {})
@@ -174,7 +171,7 @@ def clear_active_package(
             session_id=session_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            updates={"metadata": metadata}
+            updates={"metadata": metadata},
         )
         logger.info("Cleared active package for session %s", session_id)
 
@@ -221,7 +218,9 @@ def detect_package_from_session(
 
     messages = get_messages(session_id, tenant_id, user_id, limit=200)
     if not messages:
-        logger.debug("detect_package_from_session: no messages in session %s", session_id)
+        logger.debug(
+            "detect_package_from_session: no messages in session %s", session_id
+        )
         return None
 
     # Walk messages in reverse (newest first) looking for package_id references
@@ -265,7 +264,9 @@ def detect_package_from_session(
                     if pkg:
                         return _set_and_return(tenant_id, user_id, session_id, pkg_id)
 
-    logger.debug("detect_package_from_session: no package_id found in session %s", session_id)
+    logger.debug(
+        "detect_package_from_session: no package_id found in session %s", session_id
+    )
     return None
 
 
@@ -304,7 +305,8 @@ def _set_and_return(
     if ctx:
         logger.info(
             "detect_package_from_session: detected and set package %s for session %s",
-            package_id, session_id,
+            package_id,
+            session_id,
         )
     return ctx
 

@@ -107,9 +107,7 @@ export default function KBDocumentList({ documents, onSelect, loading }: KBDocum
                   {doc.primary_topic && (
                     <Badge variant="info">{doc.primary_topic.replace(/_/g, ' ')}</Badge>
                   )}
-                  {doc.authority_level && (
-                    <Badge variant="purple">{doc.authority_level}</Badge>
-                  )}
+                  {doc.authority_level && <Badge variant="purple">{doc.authority_level}</Badge>}
                 </div>
               </div>
             </div>

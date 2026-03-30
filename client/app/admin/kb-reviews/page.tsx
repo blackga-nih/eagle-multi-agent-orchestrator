@@ -1,7 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, FileText, Clock, AlertCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Clock,
+  AlertCircle,
+} from 'lucide-react';
 import AuthGuard from '@/components/auth/auth-guard';
 import TopNav from '@/components/layout/top-nav';
 import PageHeader from '@/components/layout/page-header';
@@ -28,7 +36,11 @@ interface KBReview {
   reviewed_at?: string;
 }
 
-function ReviewCard({ review, onApprove, onReject }: {
+function ReviewCard({
+  review,
+  onApprove,
+  onReject,
+}: {
   review: KBReview;
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string) => Promise<void>;
@@ -107,19 +119,31 @@ function ReviewCard({ review, onApprove, onReject }: {
       {expanded && (
         <div className="border-t border-gray-100 bg-gray-50 p-4">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            Proposed Diff ({review.proposed_diff.length} operation{review.proposed_diff.length !== 1 ? 's' : ''})
+            Proposed Diff ({review.proposed_diff.length} operation
+            {review.proposed_diff.length !== 1 ? 's' : ''})
           </p>
           {review.proposed_diff.length === 0 ? (
-            <p className="text-sm text-gray-500 italic">No matrix changes proposed — informational update only.</p>
+            <p className="text-sm text-gray-500 italic">
+              No matrix changes proposed — informational update only.
+            </p>
           ) : (
             <div className="space-y-1.5">
               {review.proposed_diff.map((op, i) => (
-                <div key={i} className="flex items-start gap-2 text-sm font-mono bg-white border border-gray-200 rounded px-3 py-2">
-                  <span className={`shrink-0 font-semibold ${
-                    op.op === 'add' ? 'text-green-600' :
-                    op.op === 'remove' ? 'text-red-600' :
-                    'text-yellow-600'
-                  }`}>{op.op}</span>
+                <div
+                  key={i}
+                  className="flex items-start gap-2 text-sm font-mono bg-white border border-gray-200 rounded px-3 py-2"
+                >
+                  <span
+                    className={`shrink-0 font-semibold ${
+                      op.op === 'add'
+                        ? 'text-green-600'
+                        : op.op === 'remove'
+                          ? 'text-red-600'
+                          : 'text-yellow-600'
+                    }`}
+                  >
+                    {op.op}
+                  </span>
                   <span className="text-gray-600 flex-1 break-all">{op.path}</span>
                   {op.value !== undefined && (
                     <span className="text-blue-700 max-w-xs break-all">
@@ -136,17 +160,31 @@ function ReviewCard({ review, onApprove, onReject }: {
   );
 }
 
-function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
+function Toast({
+  message,
+  type,
+  onClose,
+}: {
+  message: string;
+  type: 'success' | 'error';
+  onClose: () => void;
+}) {
   useEffect(() => {
     const t = setTimeout(onClose, 4000);
     return () => clearTimeout(t);
   }, [onClose]);
 
   return (
-    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium transition-all ${
-      type === 'success' ? 'bg-green-600' : 'bg-red-600'
-    }`}>
-      {type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+    <div
+      className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium transition-all ${
+        type === 'success' ? 'bg-green-600' : 'bg-red-600'
+      }`}
+    >
+      {type === 'success' ? (
+        <CheckCircle2 className="w-4 h-4" />
+      ) : (
+        <AlertCircle className="w-4 h-4" />
+      )}
       {message}
     </div>
   );
@@ -199,7 +237,7 @@ export default function KBReviewsPage() {
         const body = await resp.json().catch(() => ({}));
         throw new Error(body.detail || `HTTP ${resp.status}`);
       }
-      setReviews(prev => prev.filter(r => r.review_id !== reviewId));
+      setReviews((prev) => prev.filter((r) => r.review_id !== reviewId));
       showToast('Review approved — matrix.json updated.', 'success');
     } catch (e) {
       showToast(`Approve failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
@@ -216,7 +254,7 @@ export default function KBReviewsPage() {
         const body = await resp.json().catch(() => ({}));
         throw new Error(body.detail || `HTTP ${resp.status}`);
       }
-      setReviews(prev => prev.filter(r => r.review_id !== reviewId));
+      setReviews((prev) => prev.filter((r) => r.review_id !== reviewId));
       showToast('Review rejected.', 'success');
     } catch (e) {
       showToast(`Reject failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
@@ -245,7 +283,10 @@ export default function KBReviewsPage() {
               <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-700 text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 {error}
-                <button onClick={fetchReviews} className="ml-auto text-red-600 underline hover:no-underline text-xs">
+                <button
+                  onClick={fetchReviews}
+                  className="ml-auto text-red-600 underline hover:no-underline text-xs"
+                >
                   Retry
                 </button>
               </div>
@@ -256,7 +297,9 @@ export default function KBReviewsPage() {
                 <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-green-400" />
                 <p className="font-medium">No pending reviews</p>
                 <p className="text-sm mt-1">
-                  Upload a document to <code className="bg-gray-100 px-1 rounded">eagle-knowledge-base/pending/</code> in S3 to create a review.
+                  Upload a document to{' '}
+                  <code className="bg-gray-100 px-1 rounded">eagle-knowledge-base/pending/</code> in
+                  S3 to create a review.
                 </p>
               </div>
             )}
@@ -266,7 +309,7 @@ export default function KBReviewsPage() {
                 <p className="text-sm text-gray-600">
                   {reviews.length} pending review{reviews.length !== 1 ? 's' : ''}
                 </p>
-                {reviews.map(review => (
+                {reviews.map((review) => (
                   <ReviewCard
                     key={review.review_id}
                     review={review}
@@ -280,13 +323,7 @@ export default function KBReviewsPage() {
         </main>
       </div>
 
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </AuthGuard>
   );
 }

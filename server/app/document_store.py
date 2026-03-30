@@ -11,6 +11,7 @@ GSI (GSI1):
     GSI1PK:  TENANT#{tenant_id}
     GSI1SK:  DOCUMENT#{package_id}#{doc_type}#{version:04d}
 """
+
 import uuid
 import logging
 from datetime import datetime
@@ -21,21 +22,22 @@ from boto3.dynamodb.conditions import Attr, Key
 
 from .db_client import get_table, item_to_dict
 
-logger = logging.getLogger('eagle.document_store')
+logger = logging.getLogger("eagle.document_store")
 
 
 # -- Helpers ---------------------------------------------------------------
 
 
 def _sk(package_id: str, doc_type: str, version: int) -> str:
-    return f'DOCUMENT#{package_id}#{doc_type}#{version}'
+    return f"DOCUMENT#{package_id}#{doc_type}#{version}"
 
 
 def _gsi1_sk(package_id: str, doc_type: str, version: int) -> str:
-    return f'DOCUMENT#{package_id}#{doc_type}#{version:04d}'
+    return f"DOCUMENT#{package_id}#{doc_type}#{version:04d}"
 
 
 # -- Core CRUD -------------------------------------------------------------
+
 
 def create_document(
     tenant_id: str,
@@ -71,65 +73,69 @@ def create_document(
     now = datetime.utcnow().isoformat()
 
     existing = get_document_history(tenant_id, package_id, doc_type)
-    next_version = (max(d['version'] for d in existing) + 1) if existing else 1
+    next_version = (max(d["version"] for d in existing) + 1) if existing else 1
 
     document_id = str(uuid.uuid4())
 
     item: dict = {
-        'PK': f'DOCUMENT#{tenant_id}',
-        'SK': _sk(package_id, doc_type, next_version),
-        'GSI1PK': f'TENANT#{tenant_id}',
-        'GSI1SK': _gsi1_sk(package_id, doc_type, next_version),
-        'document_id': document_id,
-        'package_id': package_id,
-        'doc_type': doc_type,
-        'content': content,
-        'version': next_version,
-        'status': 'draft',
-        'generated_by': generated_by,
-        'created_at': now,
+        "PK": f"DOCUMENT#{tenant_id}",
+        "SK": _sk(package_id, doc_type, next_version),
+        "GSI1PK": f"TENANT#{tenant_id}",
+        "GSI1SK": _gsi1_sk(package_id, doc_type, next_version),
+        "document_id": document_id,
+        "package_id": package_id,
+        "doc_type": doc_type,
+        "content": content,
+        "version": next_version,
+        "status": "draft",
+        "generated_by": generated_by,
+        "created_at": now,
     }
     if session_id is not None:
-        item['session_id'] = session_id
+        item["session_id"] = session_id
     if template_id is not None:
-        item['template_id'] = template_id
+        item["template_id"] = template_id
     if template_provenance is not None:
-        item['template_provenance'] = template_provenance
+        item["template_provenance"] = template_provenance
     if system_tags:
-        item['system_tags'] = system_tags
+        item["system_tags"] = system_tags
     if user_tags:
-        item['user_tags'] = user_tags
+        item["user_tags"] = user_tags
     if far_tags:
-        item['far_tags'] = far_tags
+        item["far_tags"] = far_tags
     if completeness_pct is not None:
-        item['completeness_pct'] = completeness_pct
+        item["completeness_pct"] = completeness_pct
 
     try:
         table.put_item(Item=item)
         logger.debug(
-            'document_store.create_document: [%s/%s/%s] v%s created',
-            tenant_id, package_id, doc_type, next_version,
+            "document_store.create_document: [%s/%s/%s] v%s created",
+            tenant_id,
+            package_id,
+            doc_type,
+            next_version,
         )
     except (ClientError, BotoCoreError) as e:
-        logger.error('document_store.create_document failed: %s', e)
+        logger.error("document_store.create_document failed: %s", e)
         raise
 
     for prior in existing:
-        if prior['status'] != 'superseded':
+        if prior["status"] != "superseded":
             try:
                 table.update_item(
                     Key={
-                        'PK': f'DOCUMENT#{tenant_id}',
-                        'SK': _sk(package_id, doc_type, prior['version']),
+                        "PK": f"DOCUMENT#{tenant_id}",
+                        "SK": _sk(package_id, doc_type, prior["version"]),
                     },
-                    UpdateExpression='SET #s = :superseded',
-                    ExpressionAttributeNames={'#s': 'status'},
-                    ExpressionAttributeValues={':superseded': 'superseded'},
+                    UpdateExpression="SET #s = :superseded",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={":superseded": "superseded"},
                 )
             except (ClientError, BotoCoreError) as e:
                 logger.warning(
-                    'document_store.create_document: failed to supersede v%s: %s',
-                    prior['version'], e,
+                    "document_store.create_document: failed to supersede v%s: %s",
+                    prior["version"],
+                    e,
                 )
 
     return item
@@ -151,20 +157,20 @@ def get_document(
             table = get_table()
             response = table.get_item(
                 Key={
-                    'PK': f'DOCUMENT#{tenant_id}',
-                    'SK': _sk(package_id, doc_type, version),
+                    "PK": f"DOCUMENT#{tenant_id}",
+                    "SK": _sk(package_id, doc_type, version),
                 }
             )
-            raw = response.get('Item')
+            raw = response.get("Item")
             return item_to_dict(raw) if raw else None
         except (ClientError, BotoCoreError) as e:
-            logger.error('document_store.get_document failed: %s', e)
+            logger.error("document_store.get_document failed: %s", e)
             return None
 
     history = get_document_history(tenant_id, package_id, doc_type)
     if not history:
         return None
-    return max(history, key=lambda d: d['version'])
+    return max(history, key=lambda d: d["version"])
 
 
 def finalize_document(
@@ -178,31 +184,34 @@ def finalize_document(
     Returns the updated document dict, or None if the document was not found.
     """
     table = get_table()
-    pk = f'DOCUMENT#{tenant_id}'
+    pk = f"DOCUMENT#{tenant_id}"
     sk = _sk(package_id, doc_type, version)
 
     try:
         response = table.update_item(
-            Key={'PK': pk, 'SK': sk},
-            UpdateExpression='SET #s = :final',
-            ConditionExpression='attribute_exists(PK)',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':final': 'final'},
-            ReturnValues='ALL_NEW',
+            Key={"PK": pk, "SK": sk},
+            UpdateExpression="SET #s = :final",
+            ConditionExpression="attribute_exists(PK)",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":final": "final"},
+            ReturnValues="ALL_NEW",
         )
-        attrs = response.get('Attributes', {})
+        attrs = response.get("Attributes", {})
         return item_to_dict(attrs) if attrs else None
     except ClientError as e:
-        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             logger.warning(
-                'document_store.finalize_document: item not found [%s/%s/%s v%s]',
-                tenant_id, package_id, doc_type, version,
+                "document_store.finalize_document: item not found [%s/%s/%s v%s]",
+                tenant_id,
+                package_id,
+                doc_type,
+                version,
             )
             return None
-        logger.error('document_store.finalize_document failed: %s', e)
+        logger.error("document_store.finalize_document failed: %s", e)
         return None
     except BotoCoreError as e:
-        logger.error('document_store.finalize_document failed: %s', e)
+        logger.error("document_store.finalize_document failed: %s", e)
         return None
 
 
@@ -213,27 +222,26 @@ def list_package_documents(tenant_id: str, package_id: str) -> list[dict]:
     then selects the highest version per doc_type.
     """
     table = get_table()
-    sk_prefix = f'DOCUMENT#{package_id}#'
+    sk_prefix = f"DOCUMENT#{package_id}#"
 
     try:
         response = table.query(
             KeyConditionExpression=(
-                Key('PK').eq(f'DOCUMENT#{tenant_id}')
-                & Key('SK').begins_with(sk_prefix)
+                Key("PK").eq(f"DOCUMENT#{tenant_id}") & Key("SK").begins_with(sk_prefix)
             ),
         )
-        items = [item_to_dict(i) for i in response.get('Items', [])]
+        items = [item_to_dict(i) for i in response.get("Items", [])]
     except (ClientError, BotoCoreError) as e:
-        logger.error('document_store.list_package_documents failed: %s', e)
+        logger.error("document_store.list_package_documents failed: %s", e)
         return []
 
     latest: dict[str, dict] = {}
     for item in items:
-        dt = item.get('doc_type', '')
-        if dt not in latest or item['version'] > latest[dt]['version']:
+        dt = item.get("doc_type", "")
+        if dt not in latest or item["version"] > latest[dt]["version"]:
             latest[dt] = item
 
-    return sorted(latest.values(), key=lambda d: d.get('doc_type', ''))
+    return sorted(latest.values(), key=lambda d: d.get("doc_type", ""))
 
 
 def get_document_history(
@@ -243,19 +251,18 @@ def get_document_history(
 ) -> list[dict]:
     """Return all versions of a given doc_type within a package, sorted ascending."""
     table = get_table()
-    sk_prefix = f'DOCUMENT#{package_id}#{doc_type}#'
+    sk_prefix = f"DOCUMENT#{package_id}#{doc_type}#"
 
     try:
         response = table.query(
             KeyConditionExpression=(
-                Key('PK').eq(f'DOCUMENT#{tenant_id}')
-                & Key('SK').begins_with(sk_prefix)
+                Key("PK").eq(f"DOCUMENT#{tenant_id}") & Key("SK").begins_with(sk_prefix)
             ),
         )
-        items = [item_to_dict(i) for i in response.get('Items', [])]
-        return sorted(items, key=lambda d: d.get('version', 0))
+        items = [item_to_dict(i) for i in response.get("Items", [])]
+        return sorted(items, key=lambda d: d.get("version", 0))
     except (ClientError, BotoCoreError) as e:
-        logger.error('document_store.get_document_history failed: %s', e)
+        logger.error("document_store.get_document_history failed: %s", e)
         return []
 
 
@@ -319,69 +326,74 @@ def create_document_from_s3(
     now = datetime.utcnow().isoformat()
 
     existing = get_document_history(tenant_id, package_id, doc_type)
-    next_version = (max(d['version'] for d in existing) + 1) if existing else 1
+    next_version = (max(d["version"] for d in existing) + 1) if existing else 1
 
     document_id = str(uuid.uuid4())
 
     # Store binary content as base64 for DynamoDB (MVP approach)
     # Production would upload to S3 and store a reference
-    content_b64 = base64.b64encode(content).decode('utf-8') if content else None
+    content_b64 = base64.b64encode(content).decode("utf-8") if content else None
 
     # Size guard: DynamoDB has a 400KB item limit. If content is too large,
     # keep it in S3 and store just the reference.
     if content_b64 and len(content_b64) > 350_000:
         logger.info(
-            'document_store.create_document_from_s3: content too large for DynamoDB (%d bytes), storing S3 reference only',
+            "document_store.create_document_from_s3: content too large for DynamoDB (%d bytes), storing S3 reference only",
             len(content_b64),
         )
         content_b64 = None  # Will use source_s3_key as reference
 
     item: dict = {
-        'PK': f'DOCUMENT#{tenant_id}',
-        'SK': _sk(package_id, doc_type, next_version),
-        'GSI1PK': f'TENANT#{tenant_id}',
-        'GSI1SK': _gsi1_sk(package_id, doc_type, next_version),
-        'document_id': document_id,
-        'package_id': package_id,
-        'doc_type': doc_type,
-        'filename': filename,
-        'file_type': file_type,
-        'content_b64': content_b64,
-        'source_s3_key': source_s3_key,
-        'version': next_version,
-        'status': 'draft',
-        'generated_by': created_by,
-        'created_at': now,
-        'source_type': 's3_template',
+        "PK": f"DOCUMENT#{tenant_id}",
+        "SK": _sk(package_id, doc_type, next_version),
+        "GSI1PK": f"TENANT#{tenant_id}",
+        "GSI1SK": _gsi1_sk(package_id, doc_type, next_version),
+        "document_id": document_id,
+        "package_id": package_id,
+        "doc_type": doc_type,
+        "filename": filename,
+        "file_type": file_type,
+        "content_b64": content_b64,
+        "source_s3_key": source_s3_key,
+        "version": next_version,
+        "status": "draft",
+        "generated_by": created_by,
+        "created_at": now,
+        "source_type": "s3_template",
     }
 
     try:
         table.put_item(Item=item)
         logger.info(
-            'document_store.create_document_from_s3: [%s/%s/%s] v%s created from %s',
-            tenant_id, package_id, doc_type, next_version, source_s3_key,
+            "document_store.create_document_from_s3: [%s/%s/%s] v%s created from %s",
+            tenant_id,
+            package_id,
+            doc_type,
+            next_version,
+            source_s3_key,
         )
     except (ClientError, BotoCoreError) as e:
-        logger.error('document_store.create_document_from_s3 failed: %s', e)
+        logger.error("document_store.create_document_from_s3 failed: %s", e)
         raise
 
     # Supersede prior versions
     for prior in existing:
-        if prior['status'] != 'superseded':
+        if prior["status"] != "superseded":
             try:
                 table.update_item(
                     Key={
-                        'PK': f'DOCUMENT#{tenant_id}',
-                        'SK': _sk(package_id, doc_type, prior['version']),
+                        "PK": f"DOCUMENT#{tenant_id}",
+                        "SK": _sk(package_id, doc_type, prior["version"]),
                     },
-                    UpdateExpression='SET #s = :superseded',
-                    ExpressionAttributeNames={'#s': 'status'},
-                    ExpressionAttributeValues={':superseded': 'superseded'},
+                    UpdateExpression="SET #s = :superseded",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={":superseded": "superseded"},
                 )
             except (ClientError, BotoCoreError) as e:
                 logger.warning(
-                    'document_store.create_document_from_s3: failed to supersede v%s: %s',
-                    prior['version'], e,
+                    "document_store.create_document_from_s3: failed to supersede v%s: %s",
+                    prior["version"],
+                    e,
                 )
 
     return item

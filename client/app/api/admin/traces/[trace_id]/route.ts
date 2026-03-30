@@ -6,7 +6,7 @@ const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ trace_id: string }> }
+  { params }: { params: Promise<{ trace_id: string }> },
 ) {
   try {
     const { trace_id } = await params;
@@ -33,7 +33,7 @@ export async function GET(
       console.error(`Admin trace detail error: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Backend error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -48,13 +48,13 @@ export async function GET(
           error: 'Cannot connect to backend',
           details: `Ensure FastAPI is running at ${FASTAPI_URL}`,
         },
-        { status: 503 }
+        { status: 503 },
       );
     }
 
     return NextResponse.json(
       { error: 'Internal server error', details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

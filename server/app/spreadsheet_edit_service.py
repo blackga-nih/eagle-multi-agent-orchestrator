@@ -156,12 +156,18 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
     }
 
 
-def apply_xlsx_cell_edits(xlsx_bytes: bytes, cell_edits: list[SpreadsheetCellEdit]) -> tuple[bytes, int, list[str]]:
+def apply_xlsx_cell_edits(
+    xlsx_bytes: bytes, cell_edits: list[SpreadsheetCellEdit]
+) -> tuple[bytes, int, list[str]]:
     """Apply structured cell edits back to a workbook."""
     from openpyxl import load_workbook
 
     wb = load_workbook(io.BytesIO(xlsx_bytes))
-    sheet_map = {f"{idx}:{_sheet_identity(ws)}": ws for idx, ws in enumerate(wb.worksheets) if ws.sheet_state == "visible"}
+    sheet_map = {
+        f"{idx}:{_sheet_identity(ws)}": ws
+        for idx, ws in enumerate(wb.worksheets)
+        if ws.sheet_state == "visible"
+    }
     applied = 0
     missing: list[str] = []
 
@@ -220,13 +226,18 @@ def save_xlsx_preview_edits(
     try:
         response = s3.get_object(Bucket=S3_BUCKET, Key=doc_key)
         original_bytes = response["Body"].read()
-        content_type = response.get("ContentType") or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        content_type = (
+            response.get("ContentType")
+            or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     except (ClientError, BotoCoreError) as exc:
         logger.error("Failed to load XLSX preview artifact: %s", exc, exc_info=True)
         return {"error": "Failed to load document."}
 
     try:
-        updated_bytes, applied_count, missing = apply_xlsx_cell_edits(original_bytes, edits)
+        updated_bytes, applied_count, missing = apply_xlsx_cell_edits(
+            original_bytes, edits
+        )
     except Exception as exc:
         logger.error("Failed to apply structured XLSX edits: %s", exc, exc_info=True)
         return {"error": "Failed to apply spreadsheet edits."}
@@ -297,7 +308,9 @@ def save_xlsx_preview_edits(
             actor_user_id=user_id or "user",
         )
     except Exception as exc:
-        logger.error("Failed to save workspace XLSX preview edits: %s", exc, exc_info=True)
+        logger.error(
+            "Failed to save workspace XLSX preview edits: %s", exc, exc_info=True
+        )
         return {"error": "Failed to save spreadsheet."}
 
     return {

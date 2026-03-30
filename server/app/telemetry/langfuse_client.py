@@ -10,6 +10,7 @@ Tag: error:sso-expired).
 
 Requires LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY env vars.
 """
+
 import asyncio
 import base64
 import logging
@@ -52,10 +53,18 @@ async def list_traces(
     """
     auth = _auth_header()
     if not auth:
-        return {"data": [], "meta": {"page": 1, "limit": limit, "totalItems": 0, "totalPages": 0},
-                "error": "Langfuse credentials not configured"}
+        return {
+            "data": [],
+            "meta": {"page": 1, "limit": limit, "totalItems": 0, "totalPages": 0},
+            "error": "Langfuse credentials not configured",
+        }
 
-    params: Dict[str, Any] = {"limit": limit, "page": page, "orderBy": order_by, "order": order}
+    params: Dict[str, Any] = {
+        "limit": limit,
+        "page": page,
+        "orderBy": order_by,
+        "order": order,
+    }
     if user_id:
         params["userId"] = user_id
     if session_id:
@@ -80,8 +89,11 @@ async def list_traces(
             return resp.json()
     except Exception as exc:
         logger.error("Langfuse list_traces failed: %s", exc)
-        return {"data": [], "meta": {"page": 1, "limit": limit, "totalItems": 0, "totalPages": 0},
-                "error": str(exc)}
+        return {
+            "data": [],
+            "meta": {"page": 1, "limit": limit, "totalItems": 0, "totalPages": 0},
+            "error": str(exc),
+        }
 
 
 async def get_trace(trace_id: str) -> Optional[Dict[str, Any]]:
@@ -116,7 +128,10 @@ async def list_observations(
     """
     auth = _auth_header()
     if not auth:
-        return {"data": [], "meta": {"page": 1, "limit": limit, "totalItems": 0, "totalPages": 0}}
+        return {
+            "data": [],
+            "meta": {"page": 1, "limit": limit, "totalItems": 0, "totalPages": 0},
+        }
 
     params: Dict[str, Any] = {"limit": limit, "page": page}
     if trace_id:
@@ -135,8 +150,11 @@ async def list_observations(
             return resp.json()
     except Exception as exc:
         logger.error("Langfuse list_observations failed: %s", exc)
-        return {"data": [], "meta": {"page": 1, "limit": limit, "totalItems": 0, "totalPages": 0},
-                "error": str(exc)}
+        return {
+            "data": [],
+            "meta": {"page": 1, "limit": limit, "totalItems": 0, "totalPages": 0},
+            "error": str(exc),
+        }
 
 
 def langfuse_trace_url(trace_id: str) -> str:
@@ -153,15 +171,50 @@ def langfuse_trace_url(trace_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 _ERROR_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
-    (re.compile(r"token has expired|refresh failed|ExpiredToken", re.I), "sso-expired", "infra"),
-    (re.compile(r"UnrecognizedClientException|InvalidIdentityToken", re.I), "credentials-invalid", "infra"),
-    (re.compile(r"ThrottlingException|rate limit|too many requests", re.I), "throttled", "infra"),
-    (re.compile(r"ModelNotReadyException|cold start", re.I), "model-cold-start", "infra"),
-    (re.compile(r"AccessDeniedException|not authorized|forbidden", re.I), "access-denied", "infra"),
+    (
+        re.compile(r"token has expired|refresh failed|ExpiredToken", re.I),
+        "sso-expired",
+        "infra",
+    ),
+    (
+        re.compile(r"UnrecognizedClientException|InvalidIdentityToken", re.I),
+        "credentials-invalid",
+        "infra",
+    ),
+    (
+        re.compile(r"ThrottlingException|rate limit|too many requests", re.I),
+        "throttled",
+        "infra",
+    ),
+    (
+        re.compile(r"ModelNotReadyException|cold start", re.I),
+        "model-cold-start",
+        "infra",
+    ),
+    (
+        re.compile(r"AccessDeniedException|not authorized|forbidden", re.I),
+        "access-denied",
+        "infra",
+    ),
     # model-not-found must precede network-error (ResourceNotFoundException contains "eNotFound")
-    (re.compile(r"ResourceNotFoundException|model.*not found", re.I), "model-not-found", "config"),
-    (re.compile(r"ECONNREFUSED|ECONNRESET|ETIMEDOUT|\bENOTFOUND\b|EPIPE|ConnectionReset", re.I), "network-error", "infra"),
-    (re.compile(r"socket hang up|fetch failed|abort|ConnectionError", re.I), "network-error", "infra"),
+    (
+        re.compile(r"ResourceNotFoundException|model.*not found", re.I),
+        "model-not-found",
+        "config",
+    ),
+    (
+        re.compile(
+            r"ECONNREFUSED|ECONNRESET|ETIMEDOUT|\bENOTFOUND\b|EPIPE|ConnectionReset",
+            re.I,
+        ),
+        "network-error",
+        "infra",
+    ),
+    (
+        re.compile(r"socket hang up|fetch failed|abort|ConnectionError", re.I),
+        "network-error",
+        "infra",
+    ),
     (re.compile(r"CERT_|certificate|TLS|SSL", re.I), "tls-error", "infra"),
     (re.compile(r"ValidationException", re.I), "validation-error", "app"),
 ]
@@ -194,8 +247,12 @@ async def _find_latest_trace_id(session_id: str) -> Optional[str]:
     return None
 
 
-async def update_trace(trace_id: str, *, tags: Optional[List[str]] = None,
-                       metadata: Optional[Dict[str, Any]] = None) -> bool:
+async def update_trace(
+    trace_id: str,
+    *,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
     """Update a Langfuse trace with tags and/or metadata via REST API."""
     auth = _auth_header()
     if not auth:
@@ -258,7 +315,9 @@ async def tag_trace_error(
         await update_trace(tid, tags=tags, metadata=metadata)
         logger.info(
             "Tagged trace %s with error:%s severity:%s",
-            tid, info["category"], info["severity"],
+            tid,
+            info["category"],
+            info["severity"],
         )
     except Exception as exc:
         logger.warning("tag_trace_error failed: %s", exc)
@@ -273,8 +332,12 @@ def notify_trace_error(
     """Fire-and-forget wrapper for tag_trace_error (called from sync context)."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(tag_trace_error(
-            session_id, error_message, trace_id=trace_id,
-        ))
+        loop.create_task(
+            tag_trace_error(
+                session_id,
+                error_message,
+                trace_id=trace_id,
+            )
+        )
     except RuntimeError:
         pass

@@ -1,13 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  MCPTool,
-  ToolResult,
-  MCPClientReturn,
-  AgentType,
-  AgentMessage,
-} from '@/types/mcp';
+import { MCPTool, ToolResult, MCPClientReturn, AgentType, AgentMessage } from '@/types/mcp';
 import {
   AGENT_CONFIGS,
   USE_MOCK_MCP,
@@ -55,7 +49,14 @@ interface UseMCPClientReturn extends MCPClientReturn {
  * - Export conversations as Markdown/JSON
  */
 export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
-  const { agentId, enablePersistence = true, enableSync = true, onMessage, onToolResult, onError } = options;
+  const {
+    agentId,
+    enablePersistence = true,
+    enableSync = true,
+    onMessage,
+    onToolResult,
+    onError,
+  } = options;
   const config = AGENT_CONFIGS[agentId];
   const { user } = useAuth();
 
@@ -128,7 +129,7 @@ export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
                 params: {
                   protocolVersion: '2024-11-05',
                   capabilities: {},
-                  clientInfo: { name: 'eagle-intake-client', version: '1.0.0' }
+                  clientInfo: { name: 'eagle-intake-client', version: '1.0.0' },
                 },
                 id: 1,
               }),
@@ -149,12 +150,14 @@ export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
             if (response.ok) {
               const data = await response.json();
               if (data.result?.tools) {
-                const serverTools = data.result.tools.map((t: { name: string; description: string; inputSchema?: object }) => ({
-                  name: t.name,
-                  description: t.description,
-                  inputSchema: t.inputSchema || { type: 'object', properties: {} },
-                  server: server.name,
-                }));
+                const serverTools = data.result.tools.map(
+                  (t: { name: string; description: string; inputSchema?: object }) => ({
+                    name: t.name,
+                    description: t.description,
+                    inputSchema: t.inputSchema || { type: 'object', properties: {} },
+                    server: server.name,
+                  }),
+                );
                 allTools.push(...serverTools);
               }
             }
@@ -230,7 +233,9 @@ export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
 
           // Extract result from MCP response
           const content = data.result?.content || [];
-          const textContent = content.find((c: { type: string; text?: string }) => c.type === 'text');
+          const textContent = content.find(
+            (c: { type: string; text?: string }) => c.type === 'text',
+          );
           const resultData = textContent?.text || JSON.stringify(data.result);
 
           const result: ToolResult = {
@@ -250,7 +255,7 @@ export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
 
       throw new Error(`Tool '${name}' not found on any configured MCP server`);
     },
-    [config.mcpServers, onToolResult]
+    [config.mcpServers, onToolResult],
   );
 
   const disconnect = useCallback(() => {
@@ -302,7 +307,7 @@ export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
           const { content: responseContent, toolCalls } = generateMockResponse(
             agentId,
             content,
-            includeToolCall
+            includeToolCall,
           );
 
           const assistantMessage: AgentMessage = {
@@ -416,12 +421,15 @@ export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
             role: 'assistant',
             content: responseContent || 'No response received.',
             timestamp: new Date(),
-            toolCalls: toolCalls.length > 0 ? toolCalls.map((tc) => ({
-              name: tc.name,
-              args: tc.args,
-              result: tc.result,
-              timestamp: new Date(),
-            })) : undefined,
+            toolCalls:
+              toolCalls.length > 0
+                ? toolCalls.map((tc) => ({
+                    name: tc.name,
+                    args: tc.args,
+                    result: tc.result,
+                    timestamp: new Date(),
+                  }))
+                : undefined,
           };
 
           setMessages((prev) => [...prev, assistantMessage]);
@@ -466,7 +474,17 @@ export function useMCPClient(options: UseMCPClientOptions): UseMCPClientReturn {
         setIsLoading(false);
       }
     },
-    [agentId, config, session.id, enablePersistence, persistMessage, persistToolResult, onMessage, onToolResult, onError]
+    [
+      agentId,
+      config,
+      session.id,
+      enablePersistence,
+      persistMessage,
+      persistToolResult,
+      onMessage,
+      onToolResult,
+      onError,
+    ],
   );
 
   return {

@@ -30,17 +30,14 @@ import type { ExcalidrawCanvasRef, DiagramElement } from '@/components/diagrams/
 import { ChevronLeft, Trash2, Download, Send, Loader2, PenTool } from 'lucide-react';
 
 // Excalidraw is browser-only — disable SSR
-const ExcalidrawCanvas = dynamic(
-  () => import('@/components/diagrams/ExcalidrawCanvas'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm bg-gray-50">
-        Loading canvas…
-      </div>
-    ),
-  },
-);
+const ExcalidrawCanvas = dynamic(() => import('@/components/diagrams/ExcalidrawCanvas'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full text-gray-400 text-sm bg-gray-50">
+      Loading canvas…
+    </div>
+  ),
+});
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -86,9 +83,13 @@ function deriveDiagramTitle(text: string, userPrompt: string): string {
 function ChatBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user';
   // Strip JSON code blocks from display text (they're shown in the canvas instead)
-  const displayContent = msg.role === 'assistant'
-    ? msg.content.replace(/```(?:json)?[\s\S]*?```/g, '*(Excalidraw diagram rendered in canvas ↗)*')
-    : msg.content;
+  const displayContent =
+    msg.role === 'assistant'
+      ? msg.content.replace(
+          /```(?:json)?[\s\S]*?```/g,
+          '*(Excalidraw diagram rendered in canvas ↗)*',
+        )
+      : msg.content;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
@@ -153,14 +154,11 @@ export default function DiagramsPage() {
 
   // ── load elements into canvas ─────────────────────────────────────────────
 
-  const loadDiagram = useCallback(
-    (elements: DiagramElement[], title: string) => {
-      setCanvasTitle(title);
-      canvasRef.current?.loadElements(elements);
-      showStatus(`✅ Loaded "${title}" — ${elements.length} elements`);
-    },
-    [],
-  );
+  const loadDiagram = useCallback((elements: DiagramElement[], title: string) => {
+    setCanvasTitle(title);
+    canvasRef.current?.loadElements(elements);
+    showStatus(`✅ Loaded "${title}" — ${elements.length} elements`);
+  }, []);
 
   // ── send ───────────────────────────────────────────────────────────────────
 
@@ -249,9 +247,7 @@ export default function DiagramsPage() {
           if (type === 'complete') {
             // Mark streaming done
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === streamingIdRef.current ? { ...m, isStreaming: false } : m,
-              ),
+              prev.map((m) => (m.id === streamingIdRef.current ? { ...m, isStreaming: false } : m)),
             );
             streamingIdRef.current = null;
             setIsStreaming(false);
@@ -318,10 +314,7 @@ export default function DiagramsPage() {
         {/* Page header */}
         <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-[#E8ECF1] flex-shrink-0">
           <div className="flex items-center gap-3">
-            <Link
-              href="/admin"
-              className="text-gray-400 hover:text-[#003366] transition-colors"
-            >
+            <Link href="/admin" className="text-gray-400 hover:text-[#003366] transition-colors">
               <ChevronLeft className="w-5 h-5" />
             </Link>
             <div>
@@ -347,7 +340,11 @@ export default function DiagramsPage() {
               </span>
             )}
             <button
-              onClick={() => { canvasRef.current?.clearCanvas(); setCanvasTitle(undefined); setElementCount(0); }}
+              onClick={() => {
+                canvasRef.current?.clearCanvas();
+                setCanvasTitle(undefined);
+                setElementCount(0);
+              }}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" /> Clear
@@ -363,7 +360,6 @@ export default function DiagramsPage() {
 
         {/* Main split layout */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
-
           {/* ── Left: AI Chat panel ────────────────────────────────── */}
           <div className="w-[360px] flex-shrink-0 flex flex-col border-r border-[#E8ECF1] bg-white">
             <div className="px-4 py-2.5 border-b border-[#E8ECF1] bg-[#F8FAFC] flex-shrink-0">
@@ -379,9 +375,7 @@ export default function DiagramsPage() {
             <div className="flex-1 overflow-y-auto px-4 py-4">
               {messages.length === 0 ? (
                 <div className="space-y-2">
-                  <p className="text-[11px] text-gray-400 text-center mb-3">
-                    Try one of these…
-                  </p>
+                  <p className="text-[11px] text-gray-400 text-center mb-3">Try one of these…</p>
                   {SUGGESTIONS.map((s) => (
                     <button
                       key={s}
@@ -420,10 +414,11 @@ export default function DiagramsPage() {
                   disabled={isStreaming || !input.trim()}
                   className="p-2.5 rounded-lg bg-[#003366] text-white hover:bg-[#002244] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  {isStreaming
-                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                    : <Send className="w-4 h-4" />
-                  }
+                  {isStreaming ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
                 </button>
               </div>
             </div>

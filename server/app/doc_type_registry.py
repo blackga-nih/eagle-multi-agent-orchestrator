@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
+
 logger = logging.getLogger("eagle.doc_type_registry")
 
 # ── Load categories from template metadata index ──────────────────────
@@ -43,23 +44,48 @@ def _load_categories_from_index() -> frozenset[str]:
 
 
 # Fallback if _index.json is unavailable (e.g., during testing)
-_FALLBACK_DOC_TYPES = frozenset({
-    "sow", "igce", "acquisition_plan", "justification", "market_research",
-    "son_products", "son_services", "conference_request", "conference_waiver",
-    "promotional_item", "exemption_determination", "mandatory_use_waiver",
-    "buy_american", "gfp_form", "subk_plan", "reference_guide",
-    "bpa_call_order", "cor_certification", "technical_questionnaire",
-    "quotation_abstract", "receiving_report", "srb_request", "subk_review",
-    # Markdown-only doc types (used by agentic service, not in S3 templates)
-    "eval_criteria", "security_checklist", "section_508",
-    "contract_type_justification",
-})
+_FALLBACK_DOC_TYPES = frozenset(
+    {
+        "sow",
+        "igce",
+        "acquisition_plan",
+        "justification",
+        "market_research",
+        "son_products",
+        "son_services",
+        "conference_request",
+        "conference_waiver",
+        "promotional_item",
+        "exemption_determination",
+        "mandatory_use_waiver",
+        "buy_american",
+        "gfp_form",
+        "subk_plan",
+        "reference_guide",
+        "bpa_call_order",
+        "cor_certification",
+        "technical_questionnaire",
+        "quotation_abstract",
+        "receiving_report",
+        "srb_request",
+        "subk_review",
+        # Markdown-only doc types (used by agentic service, not in S3 templates)
+        "eval_criteria",
+        "security_checklist",
+        "section_508",
+        "contract_type_justification",
+    }
+)
 
 # All recognized doc types (loaded from index + markdown-only extras)
-_MARKDOWN_ONLY_TYPES = frozenset({
-    "eval_criteria", "security_checklist", "section_508",
-    "contract_type_justification",
-})
+_MARKDOWN_ONLY_TYPES = frozenset(
+    {
+        "eval_criteria",
+        "security_checklist",
+        "section_508",
+        "contract_type_justification",
+    }
+)
 
 ALL_DOC_TYPES: frozenset[str] = _load_categories_from_index() | _MARKDOWN_ONLY_TYPES
 
@@ -128,6 +154,7 @@ _DOC_TYPE_ALIASES: dict[str, str] = {
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
 
 def normalize_doc_type(raw: str) -> str:
     """Normalize a doc_type string to its canonical underscore form.

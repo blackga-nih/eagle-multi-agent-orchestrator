@@ -22,16 +22,8 @@ interface ExpertiseManagerProps {
 }
 
 export default function ExpertiseManager({ userId }: ExpertiseManagerProps) {
-  const {
-    expertise,
-    loading,
-    error,
-    logs,
-    clearAll,
-    clearSection,
-    removeEntry,
-    refresh,
-  } = useExpertise({ userId });
+  const { expertise, loading, error, logs, clearAll, clearSection, removeEntry, refresh } =
+    useExpertise({ userId });
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     completed_intakes: true,
@@ -44,7 +36,7 @@ export default function ExpertiseManager({ userId }: ExpertiseManagerProps) {
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
 
   const toggleSection = (section: string) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+    setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
   const handleClearSection = async (section: ExpertiseSection) => {
@@ -162,17 +154,23 @@ export default function ExpertiseManager({ userId }: ExpertiseManagerProps) {
       <div className="bg-gradient-to-r from-amber-50 via-emerald-50 to-indigo-50 rounded-lg border border-gray-200 p-4">
         <div className="flex items-center justify-center gap-6">
           <div className="text-center">
-            <div className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">ACT</div>
+            <div className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">
+              ACT
+            </div>
             <div className="text-[10px] text-gray-500 mt-1">You take action</div>
           </div>
           <ChevronRight className="w-4 h-4 text-gray-400" />
           <div className="text-center">
-            <div className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full">LEARN</div>
+            <div className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full">
+              LEARN
+            </div>
             <div className="text-[10px] text-gray-500 mt-1">System learns</div>
           </div>
           <ChevronRight className="w-4 h-4 text-gray-400" />
           <div className="text-center">
-            <div className="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded-full">REUSE</div>
+            <div className="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded-full">
+              REUSE
+            </div>
             <div className="text-[10px] text-gray-500 mt-1">Better answers</div>
           </div>
         </div>
@@ -185,11 +183,15 @@ export default function ExpertiseManager({ userId }: ExpertiseManagerProps) {
           <div className="space-y-2 max-h-48 overflow-y-auto">
             {logs.map((log, i) => (
               <div key={i} className="flex items-start gap-2 text-xs">
-                <span className={`px-1.5 py-0.5 rounded font-medium ${
-                  log.phase === 'ACT' ? 'bg-amber-100 text-amber-700' :
-                  log.phase === 'LEARN' ? 'bg-emerald-100 text-emerald-700' :
-                  'bg-indigo-100 text-indigo-700'
-                }`}>
+                <span
+                  className={`px-1.5 py-0.5 rounded font-medium ${
+                    log.phase === 'ACT'
+                      ? 'bg-amber-100 text-amber-700'
+                      : log.phase === 'LEARN'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-indigo-100 text-indigo-700'
+                  }`}
+                >
                   {log.phase}
                 </span>
                 <span className="text-gray-500">{log.action}:</span>
@@ -387,11 +389,7 @@ function Section({
         </div>
       </button>
 
-      {expanded && (
-        <div className="border-t border-gray-100 p-4 space-y-2">
-          {children}
-        </div>
-      )}
+      {expanded && <div className="border-t border-gray-100 p-4 space-y-2">{children}</div>}
     </div>
   );
 }
@@ -421,9 +419,7 @@ function EntryCard({ id, title, subtitle, timestamp, count, onRemove }: EntryCar
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-xs text-gray-500 capitalize">{subtitle}</span>
           <span className="text-gray-300">•</span>
-          <span className="text-xs text-gray-400">
-            {new Date(timestamp).toLocaleDateString()}
-          </span>
+          <span className="text-xs text-gray-400">{new Date(timestamp).toLocaleDateString()}</span>
         </div>
       </div>
       <button

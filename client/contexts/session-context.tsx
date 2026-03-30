@@ -10,57 +10,60 @@ import type { ToolCallsByMessageId } from '@/components/chat-simple/simple-chat-
 import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 
 interface SessionContextValue {
-    sessions: ChatSession[];
-    currentSessionId: string;
-    isLoading: boolean;
-    saveSession: (sessionId: string, messages: Message[], acquisitionData: AcquisitionData, documents?: Record<string, DocumentInfo[]>, toolCallsByMsg?: ToolCallsByMessageId, stateChangesByMsg?: Record<string, StateChangeEntry[]>) => void;
-    loadSession: (sessionId: string) => {
-        id: string;
-        title: string;
-        summary?: string;
-        messages: Message[];
-        acquisitionData: AcquisitionData;
-        documents?: Record<string, DocumentInfo[]>;
-        toolCallsByMsg?: ToolCallsByMessageId;
-        stateChangesByMsg?: Record<string, StateChangeEntry[]>;
-        createdAt: string;
-        updatedAt: string;
-        status: 'in_progress' | 'completed' | 'draft';
-    } | null;
-    createNewSession: () => string;
-    deleteSession: (sessionId: string) => void;
-    setCurrentSession: (sessionId: string) => void;
-    markSessionComplete: (sessionId: string) => void;
-    renameSession: (sessionId: string, newTitle: string) => void;
-    /** Optimistic write: persists message to IndexedDB immediately, fire-and-forget. */
-    writeMessageOptimistic: (sessionId: string, message: ChatMessage) => void;
-    /** Fetch from backend and populate IDB if empty or stale (>5 min). */
-    hydrateFromBackend: (sessionId: string) => Promise<void>;
+  sessions: ChatSession[];
+  currentSessionId: string;
+  isLoading: boolean;
+  saveSession: (
+    sessionId: string,
+    messages: Message[],
+    acquisitionData: AcquisitionData,
+    documents?: Record<string, DocumentInfo[]>,
+    toolCallsByMsg?: ToolCallsByMessageId,
+    stateChangesByMsg?: Record<string, StateChangeEntry[]>,
+  ) => void;
+  loadSession: (sessionId: string) => {
+    id: string;
+    title: string;
+    summary?: string;
+    messages: Message[];
+    acquisitionData: AcquisitionData;
+    documents?: Record<string, DocumentInfo[]>;
+    toolCallsByMsg?: ToolCallsByMessageId;
+    stateChangesByMsg?: Record<string, StateChangeEntry[]>;
+    createdAt: string;
+    updatedAt: string;
+    status: 'in_progress' | 'completed' | 'draft';
+  } | null;
+  createNewSession: () => string;
+  deleteSession: (sessionId: string) => void;
+  setCurrentSession: (sessionId: string) => void;
+  markSessionComplete: (sessionId: string) => void;
+  renameSession: (sessionId: string, newTitle: string) => void;
+  /** Optimistic write: persists message to IndexedDB immediately, fire-and-forget. */
+  writeMessageOptimistic: (sessionId: string, message: ChatMessage) => void;
+  /** Fetch from backend and populate IDB if empty or stale (>5 min). */
+  hydrateFromBackend: (sessionId: string) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-    const { user } = useAuth();
+  const { user } = useAuth();
 
-    // Use stable fallback identifiers while auth is loading so the hook
-    // initialises immediately (no-op DB writes until real IDs arrive).
-    const userId = user?.userId ?? 'anon';
-    const tenantId = user?.tenantId ?? 'default';
+  // Use stable fallback identifiers while auth is loading so the hook
+  // initialises immediately (no-op DB writes until real IDs arrive).
+  const userId = user?.userId ?? 'anon';
+  const tenantId = user?.tenantId ?? 'default';
 
-    const cache = useLocalCache(userId, tenantId);
+  const cache = useLocalCache(userId, tenantId);
 
-    return (
-        <SessionContext.Provider value={cache}>
-            {children}
-        </SessionContext.Provider>
-    );
+  return <SessionContext.Provider value={cache}>{children}</SessionContext.Provider>;
 }
 
 export function useSession() {
-    const context = useContext(SessionContext);
-    if (!context) {
-        throw new Error('useSession must be used within a SessionProvider');
-    }
-    return context;
+  const context = useContext(SessionContext);
+  if (!context) {
+    throw new Error('useSession must be used within a SessionProvider');
+  }
+  return context;
 }

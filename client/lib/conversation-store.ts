@@ -24,11 +24,14 @@ import {
  * In-memory store for server-side API routes (development only).
  * This is used when localStorage isn't available (server-side rendering).
  */
-export const memoryStore: Map<string, {
-  sessions: Record<AgentType, AgentSession | null>;
-  sharedContext: SharedContext;
-  lastUpdated: string;
-}> = new Map();
+export const memoryStore: Map<
+  string,
+  {
+    sessions: Record<AgentType, AgentSession | null>;
+    sharedContext: SharedContext;
+    lastUpdated: string;
+  }
+> = new Map();
 
 /**
  * Check if localStorage is available.
@@ -115,10 +118,7 @@ export function saveConversationStore(store: UserConversationStore): StorageResu
 /**
  * Get or create a session for a specific agent.
  */
-export function getOrCreateSession(
-  store: UserConversationStore,
-  agentId: AgentType
-): AgentSession {
+export function getOrCreateSession(store: UserConversationStore, agentId: AgentType): AgentSession {
   if (store.sessions[agentId]) {
     return store.sessions[agentId]!;
   }
@@ -134,16 +134,14 @@ export function getOrCreateSession(
 export function addMessageToSession(
   session: AgentSession,
   message: AgentMessage,
-  options: ConversationOptions = DEFAULT_CONVERSATION_OPTIONS
+  options: ConversationOptions = DEFAULT_CONVERSATION_OPTIONS,
 ): AgentSession {
   const updatedMessages = [...session.messages, message];
 
   // Trim to max messages if needed
   const maxMessages = options.maxMessages ?? 100;
   const trimmedMessages =
-    updatedMessages.length > maxMessages
-      ? updatedMessages.slice(-maxMessages)
-      : updatedMessages;
+    updatedMessages.length > maxMessages ? updatedMessages.slice(-maxMessages) : updatedMessages;
 
   return {
     ...session,
@@ -159,16 +157,14 @@ export function addMessageToSession(
 export function addToolResultToSession(
   session: AgentSession,
   toolResult: ToolResult,
-  options: ConversationOptions = DEFAULT_CONVERSATION_OPTIONS
+  options: ConversationOptions = DEFAULT_CONVERSATION_OPTIONS,
 ): AgentSession {
   const updatedResults = [...session.toolResults, toolResult];
 
   // Trim to max tool results if needed
   const maxToolResults = options.maxToolResults ?? 50;
   const trimmedResults =
-    updatedResults.length > maxToolResults
-      ? updatedResults.slice(-maxToolResults)
-      : updatedResults;
+    updatedResults.length > maxToolResults ? updatedResults.slice(-maxToolResults) : updatedResults;
 
   return {
     ...session,
@@ -182,7 +178,7 @@ export function addToolResultToSession(
  */
 export function clearSession(
   store: UserConversationStore,
-  agentId: AgentType
+  agentId: AgentType,
 ): UserConversationStore {
   return {
     ...store,
@@ -216,7 +212,7 @@ export function clearAllSessions(store: UserConversationStore): UserConversation
  */
 export function updateSharedContext(
   store: UserConversationStore,
-  context: Partial<SharedContext>
+  context: Partial<SharedContext>,
 ): UserConversationStore {
   return {
     ...store,
@@ -234,7 +230,7 @@ export function updateSharedContext(
 export function addInsight(
   store: UserConversationStore,
   insight: AgentInsight,
-  maxInsights: number = 10
+  maxInsights: number = 10,
 ): UserConversationStore {
   const currentInsights = store.sharedContext.recentInsights ?? [];
   const updatedInsights = [insight, ...currentInsights].slice(0, maxInsights);
@@ -249,13 +245,13 @@ export function addInsight(
  */
 export function getInsightsForAgent(
   store: UserConversationStore,
-  agentId: AgentType
+  agentId: AgentType,
 ): AgentInsight[] {
   const insights = store.sharedContext.recentInsights ?? [];
   return insights.filter(
     (insight) =>
       insight.agentId !== agentId && // Not from the same agent
-      (!insight.relevantTo || insight.relevantTo.includes(agentId))
+      (!insight.relevantTo || insight.relevantTo.includes(agentId)),
   );
 }
 
@@ -354,7 +350,7 @@ export function getStorageStats(userId: string): {
  */
 export function buildContextPrompt(
   store: UserConversationStore,
-  agentId: AgentType
+  agentId: AgentType,
 ): string | undefined {
   const parts: string[] = [];
 
@@ -362,7 +358,7 @@ export function buildContextPrompt(
   if (store.sharedContext.currentWorkflow) {
     const wf = store.sharedContext.currentWorkflow;
     parts.push(
-      `Current Workflow: "${wf.title}" (Status: ${wf.status}${wf.acquisitionType ? `, Type: ${wf.acquisitionType}` : ''})`
+      `Current Workflow: "${wf.title}" (Status: ${wf.status}${wf.acquisitionType ? `, Type: ${wf.acquisitionType}` : ''})`,
     );
   }
 

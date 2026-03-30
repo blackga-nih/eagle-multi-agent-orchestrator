@@ -174,7 +174,7 @@ export default function TracesPage() {
         setLoading(false);
       }
     },
-    [getToken, envFilter, searchQuery]
+    [getToken, envFilter, searchQuery],
   );
 
   useEffect(() => {
@@ -218,14 +218,12 @@ export default function TracesPage() {
 
   const totalTokens = traces.reduce(
     (sum, t) => sum + t.total_input_tokens + t.total_output_tokens,
-    0
+    0,
   );
   const totalCost = traces.reduce((sum, t) => sum + (t.total_cost_usd || 0), 0);
   const avgDuration =
-    traces.length > 0
-      ? traces.reduce((sum, t) => sum + t.duration_ms, 0) / traces.length
-      : 0;
-  const errorCount = traces.filter(t => t.status === 'error').length;
+    traces.length > 0 ? traces.reduce((sum, t) => sum + t.duration_ms, 0) / traces.length : 0;
+  const errorCount = traces.filter((t) => t.status === 'error').length;
   const errorRate = traces.length > 0 ? (errorCount / traces.length) * 100 : 0;
 
   // -----------------------------------------------------------------------
@@ -242,19 +240,14 @@ export default function TracesPage() {
             <PageHeader
               title="Langfuse Traces"
               description="API invocations and agent traces from Langfuse"
-              breadcrumbs={[
-                { label: 'Admin', href: '/admin' },
-                { label: 'Traces' },
-              ]}
+              breadcrumbs={[{ label: 'Admin', href: '/admin' }, { label: 'Traces' }]}
               actions={
                 <button
                   onClick={() => fetchTraces(page)}
                   disabled={loading}
                   className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
                 >
-                  <RefreshCw
-                    className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
-                  />
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                   Refresh
                 </button>
               }
@@ -294,20 +287,11 @@ export default function TracesPage() {
                   color: errorRate > 10 ? 'bg-red-500' : 'bg-amber-500',
                 },
               ].map((card, i) => (
-                <div
-                  key={i}
-                  className="bg-white rounded-2xl border border-gray-200 p-5"
-                >
+                <div key={i} className="bg-white rounded-2xl border border-gray-200 p-5">
                   <div className="flex items-start justify-between mb-4">
-                    <div
-                      className={`p-3 rounded-xl ${card.color} text-white`}
-                    >
-                      {card.icon}
-                    </div>
+                    <div className={`p-3 rounded-xl ${card.color} text-white`}>{card.icon}</div>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {card.value}
-                  </p>
+                  <p className="text-2xl font-bold text-gray-900">{card.value}</p>
                   <p className="text-sm text-gray-500">{card.label}</p>
                 </div>
               ))}
@@ -401,16 +385,12 @@ export default function TracesPage() {
                   {loading ? (
                     <div className="p-12 text-center">
                       <Loader2 className="w-6 h-6 text-[#003149] animate-spin mx-auto mb-3" />
-                      <p className="text-sm text-gray-500">
-                        Loading traces from Langfuse...
-                      </p>
+                      <p className="text-sm text-gray-500">Loading traces from Langfuse...</p>
                     </div>
                   ) : traces.length === 0 ? (
                     <div className="p-12 text-center">
                       <Activity className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                      <p className="text-sm font-medium text-gray-500">
-                        No traces found
-                      </p>
+                      <p className="text-sm font-medium text-gray-500">No traces found</p>
                     </div>
                   ) : (
                     <div className="divide-y divide-gray-50 max-h-[65vh] overflow-y-auto">
@@ -435,13 +415,7 @@ export default function TracesPage() {
                                 {trace.environment}
                               </span>
                             </div>
-                            <Badge
-                              variant={
-                                trace.status === 'success'
-                                  ? 'success'
-                                  : 'danger'
-                              }
-                            >
+                            <Badge variant={trace.status === 'success' ? 'success' : 'danger'}>
                               {trace.status}
                             </Badge>
                           </div>
@@ -449,20 +423,13 @@ export default function TracesPage() {
                           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
                             <span>{formatDuration(trace.duration_ms)}</span>
                             <span>
-                              {formatTokens(
-                                trace.total_input_tokens +
-                                  trace.total_output_tokens
-                              )}{' '}
+                              {formatTokens(trace.total_input_tokens + trace.total_output_tokens)}{' '}
                               tokens
                             </span>
                             {trace.total_cost_usd > 0 && (
-                              <span>
-                                ${trace.total_cost_usd.toFixed(4)}
-                              </span>
+                              <span>${trace.total_cost_usd.toFixed(4)}</span>
                             )}
-                            <span>
-                              {trace.observation_count} observations
-                            </span>
+                            <span>{trace.observation_count} observations</span>
                           </div>
 
                           {trace.user_id && (
@@ -471,9 +438,7 @@ export default function TracesPage() {
                             </div>
                           )}
                           <div className="text-[10px] text-gray-400 mt-0.5">
-                            {trace.created_at
-                              ? new Date(trace.created_at).toLocaleString()
-                              : ''}
+                            {trace.created_at ? new Date(trace.created_at).toLocaleString() : ''}
                           </div>
                         </div>
                       ))}
@@ -490,13 +455,9 @@ export default function TracesPage() {
                       >
                         Previous
                       </button>
-                      <span className="text-xs text-gray-500">
-                        {meta.totalItems} total traces
-                      </span>
+                      <span className="text-xs text-gray-500">{meta.totalItems} total traces</span>
                       <button
-                        onClick={() =>
-                          setPage((p) => Math.min(meta.totalPages, p + 1))
-                        }
+                        onClick={() => setPage((p) => Math.min(meta.totalPages, p + 1))}
                         disabled={page >= meta.totalPages}
                         className="px-3 py-1.5 text-sm bg-gray-100 rounded-lg disabled:opacity-40 hover:bg-gray-200 transition-colors"
                       >
@@ -565,15 +526,11 @@ export default function TracesPage() {
                           },
                           {
                             label: 'Input Tokens',
-                            value: formatTokens(
-                              selectedTrace.total_input_tokens
-                            ),
+                            value: formatTokens(selectedTrace.total_input_tokens),
                           },
                           {
                             label: 'Output Tokens',
-                            value: formatTokens(
-                              selectedTrace.total_output_tokens
-                            ),
+                            value: formatTokens(selectedTrace.total_output_tokens),
                           },
                           {
                             label: 'Cost',
@@ -582,9 +539,7 @@ export default function TracesPage() {
                           {
                             label: 'Created',
                             value: selectedTrace.created_at
-                              ? new Date(
-                                  selectedTrace.created_at
-                                ).toLocaleString()
+                              ? new Date(selectedTrace.created_at).toLocaleString()
                               : '-',
                           },
                           {
@@ -592,10 +547,7 @@ export default function TracesPage() {
                             value: selectedTrace.status,
                           },
                         ].map((item, i) => (
-                          <div
-                            key={i}
-                            className="bg-gray-50 rounded-xl p-3"
-                          >
+                          <div key={i} className="bg-gray-50 rounded-xl p-3">
                             <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold mb-1">
                               {item.label}
                             </p>
@@ -660,22 +612,14 @@ export default function TracesPage() {
                                         {obs.model}
                                       </span>
                                     )}
-                                    <span>
-                                      {formatDuration(obs.duration_ms)}
-                                    </span>
-                                    {obs.input_tokens + obs.output_tokens >
-                                      0 && (
+                                    <span>{formatDuration(obs.duration_ms)}</span>
+                                    {obs.input_tokens + obs.output_tokens > 0 && (
                                       <span>
-                                        {formatTokens(
-                                          obs.input_tokens + obs.output_tokens
-                                        )}{' '}
-                                        tok
+                                        {formatTokens(obs.input_tokens + obs.output_tokens)} tok
                                       </span>
                                     )}
                                     {obs.total_cost > 0 && (
-                                      <span>
-                                        ${obs.total_cost.toFixed(4)}
-                                      </span>
+                                      <span>${obs.total_cost.toFixed(4)}</span>
                                     )}
                                   </div>
                                 </div>
@@ -684,39 +628,27 @@ export default function TracesPage() {
                                   <div className="border-t border-gray-100 p-3 bg-gray-50/50">
                                     <div className="grid grid-cols-2 gap-3 mb-3 text-xs">
                                       <div>
-                                        <span className="text-gray-400">
-                                          Input Tokens:
-                                        </span>{' '}
+                                        <span className="text-gray-400">Input Tokens:</span>{' '}
                                         <span className="font-medium">
                                           {formatTokens(obs.input_tokens)}
                                         </span>
                                       </div>
                                       <div>
-                                        <span className="text-gray-400">
-                                          Output Tokens:
-                                        </span>{' '}
+                                        <span className="text-gray-400">Output Tokens:</span>{' '}
                                         <span className="font-medium">
                                           {formatTokens(obs.output_tokens)}
                                         </span>
                                       </div>
                                       <div>
-                                        <span className="text-gray-400">
-                                          Start:
-                                        </span>{' '}
+                                        <span className="text-gray-400">Start:</span>{' '}
                                         {obs.start_time
-                                          ? new Date(
-                                              obs.start_time
-                                            ).toLocaleTimeString()
+                                          ? new Date(obs.start_time).toLocaleTimeString()
                                           : '-'}
                                       </div>
                                       <div>
-                                        <span className="text-gray-400">
-                                          End:
-                                        </span>{' '}
+                                        <span className="text-gray-400">End:</span>{' '}
                                         {obs.end_time
-                                          ? new Date(
-                                              obs.end_time
-                                            ).toLocaleTimeString()
+                                          ? new Date(obs.end_time).toLocaleTimeString()
                                           : '-'}
                                       </div>
                                     </div>
@@ -729,11 +661,7 @@ export default function TracesPage() {
                                         <pre className="text-xs bg-gray-900 text-green-400 rounded-lg p-3 overflow-x-auto max-h-40">
                                           {typeof obs.input === 'string'
                                             ? obs.input
-                                            : JSON.stringify(
-                                                obs.input,
-                                                null,
-                                                2
-                                              )}
+                                            : JSON.stringify(obs.input, null, 2)}
                                         </pre>
                                       </div>
                                     )}
@@ -746,11 +674,7 @@ export default function TracesPage() {
                                         <pre className="text-xs bg-gray-900 text-blue-400 rounded-lg p-3 overflow-x-auto max-h-40">
                                           {typeof obs.output === 'string'
                                             ? obs.output
-                                            : JSON.stringify(
-                                                obs.output,
-                                                null,
-                                                2
-                                              )}
+                                            : JSON.stringify(obs.output, null, 2)}
                                         </pre>
                                       </div>
                                     )}
@@ -774,9 +698,7 @@ export default function TracesPage() {
                       <p className="text-sm font-medium text-gray-500">
                         Select a trace to view details
                       </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Traces are sourced from Langfuse
-                      </p>
+                      <p className="text-xs text-gray-400 mt-1">Traces are sourced from Langfuse</p>
                     </div>
                   )}
                 </div>

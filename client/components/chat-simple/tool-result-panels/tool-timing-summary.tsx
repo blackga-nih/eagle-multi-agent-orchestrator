@@ -16,16 +16,16 @@ interface TimingMetadata {
 export default function ToolTimingSummary({ metadata }: { metadata: TimingMetadata }) {
   const timings = metadata.tool_timings || [];
   const totalMs = metadata.total_duration_ms || timings.reduce((s, t) => s + t.duration_ms, 0);
-  const maxMs = Math.max(...timings.map(t => t.duration_ms), 1);
+  const maxMs = Math.max(...timings.map((t) => t.duration_ms), 1);
 
   return (
     <div className="space-y-2">
       {/* Total duration */}
       <div className="flex items-center gap-2">
-        <span className="text-[9px] font-bold uppercase text-gray-400 tracking-wider">Duration</span>
-        <span className="text-sm font-bold text-gray-700">
-          {(totalMs / 1000).toFixed(1)}s
+        <span className="text-[9px] font-bold uppercase text-gray-400 tracking-wider">
+          Duration
         </span>
+        <span className="text-sm font-bold text-gray-700">{(totalMs / 1000).toFixed(1)}s</span>
       </div>
 
       {/* Per-tool bars */}
@@ -33,7 +33,9 @@ export default function ToolTimingSummary({ metadata }: { metadata: TimingMetada
         <div className="space-y-1">
           {timings.map((t, i) => (
             <div key={i} className="flex items-center gap-2 text-[10px]">
-              <span className={`w-24 truncate shrink-0 ${t.error ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
+              <span
+                className={`w-24 truncate shrink-0 ${t.error ? 'text-red-600 font-medium' : 'text-gray-600'}`}
+              >
                 {t.name}
               </span>
               <div className="flex-1 h-2 bg-gray-100 rounded overflow-hidden">

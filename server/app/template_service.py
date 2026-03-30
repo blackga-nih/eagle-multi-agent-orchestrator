@@ -4,6 +4,7 @@ Fetches official NCI/HHS templates from S3, populates {{PLACEHOLDER}} tokens,
 and returns the populated document. Falls back to markdown generation when
 templates are unavailable.
 """
+
 from __future__ import annotations
 
 import io
@@ -122,7 +123,9 @@ class DOCXPopulator:
                         lines = []
                         for item in value:
                             if isinstance(item, dict):
-                                lines.append(", ".join(f"{k}: {v}" for k, v in item.items()))
+                                lines.append(
+                                    ", ".join(f"{k}: {v}" for k, v in item.items())
+                                )
                             else:
                                 lines.append(str(item))
                         value = "\n".join(lines)
@@ -141,11 +144,19 @@ class DOCXPopulator:
 
         # Replace in headers/footers
         for section in doc.sections:
-            for header in [section.header, section.first_page_header, section.even_page_header]:
+            for header in [
+                section.header,
+                section.first_page_header,
+                section.even_page_header,
+            ]:
                 if header:
                     for para in header.paragraphs:
                         DOCXPopulator._replace_in_paragraph(para, replacements)
-            for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+            for footer in [
+                section.footer,
+                section.first_page_footer,
+                section.even_page_footer,
+            ]:
                 if footer:
                     for para in footer.paragraphs:
                         DOCXPopulator._replace_in_paragraph(para, replacements)
@@ -290,7 +301,13 @@ class XLSXPopulator:
             sheet.cell(row=row, column=3, value=item.get("quantity", 1))
             sheet.cell(row=row, column=4, value=item.get("unit", "EA"))
             sheet.cell(row=row, column=5, value=item.get("unit_price", 0))
-            sheet.cell(row=row, column=6, value=item.get("total", item.get("unit_price", 0) * item.get("quantity", 1)))
+            sheet.cell(
+                row=row,
+                column=6,
+                value=item.get(
+                    "total", item.get("unit_price", 0) * item.get("quantity", 1)
+                ),
+            )
 
     @staticmethod
     def extract_text(xlsx_bytes: bytes) -> str:
@@ -308,7 +325,9 @@ class XLSXPopulator:
             lines.append("")
 
             for row in sheet.iter_rows(max_row=50):  # Limit preview
-                cells = [str(cell.value) if cell.value is not None else "" for cell in row]
+                cells = [
+                    str(cell.value) if cell.value is not None else "" for cell in row
+                ]
                 if any(cells):
                     lines.append("| " + " | ".join(cells) + " |")
 
@@ -366,7 +385,9 @@ class TemplateService:
 
         # Check if we have a template for this doc_type
         if not has_template(doc_type):
-            logger.info("No template registered for %s, using markdown fallback", doc_type)
+            logger.info(
+                "No template registered for %s, using markdown fallback", doc_type
+            )
             return self._generate_markdown_fallback(doc_type, title, data)
 
         # Try to fetch and populate the template
@@ -404,16 +425,21 @@ class TemplateService:
 
         # Normalize field names and add title
         from app.template_registry import normalize_field_names
+
         data_with_title = normalize_field_names({"title": title, **data}, doc_type)
 
         # Populate based on file type
         placeholder_map = get_placeholder_map(doc_type)
         if mapping.file_type == "docx":
-            populated = DOCXPopulator.populate(template_bytes, data_with_title, placeholder_map)
+            populated = DOCXPopulator.populate(
+                template_bytes, data_with_title, placeholder_map
+            )
             preview = DOCXPopulator.extract_text(populated)
             file_type = "docx"
         elif mapping.file_type == "xlsx":
-            populated = XLSXPopulator.populate(template_bytes, data_with_title, placeholder_map)
+            populated = XLSXPopulator.populate(
+                template_bytes, data_with_title, placeholder_map
+            )
             preview = XLSXPopulator.extract_text(populated)
             file_type = "xlsx"
         else:
@@ -519,11 +545,11 @@ class TemplateService:
                 error=str(e),
             )
 
-
     def _check_completeness(self, doc_type: str, preview: str) -> Optional[Any]:
         """Run completeness validation against template schema."""
         try:
             from app.template_registry import validate_document_completeness
+
             return validate_document_completeness(doc_type, preview)
         except Exception as e:
             logger.debug("Completeness check skipped for %s: %s", doc_type, e)

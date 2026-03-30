@@ -10,20 +10,20 @@ import { SettingsProvider } from '@/contexts/settings-context';
 import FeedbackModal from '@/components/feedback/feedback-modal';
 
 export function Providers({ children }: { children: ReactNode }) {
-    return (
-        <AuthProvider>
-            <SettingsProvider>
-            <SessionProvider>
-                <ChatRuntimeProvider>
-                <BackendStatusProvider>
-                    <FeedbackProvider>
-                        {children}
-                        <FeedbackModal />
-                    </FeedbackProvider>
-                </BackendStatusProvider>
-                </ChatRuntimeProvider>
-            </SessionProvider>
-            </SettingsProvider>
-        </AuthProvider>
-    );
+  return (
+    <AuthProvider>
+      <SettingsProvider>
+        <SessionProvider>
+          <ChatRuntimeProvider>
+            <BackendStatusProvider>
+              <FeedbackProvider>
+                {children}
+                <FeedbackModal />
+              </FeedbackProvider>
+            </BackendStatusProvider>
+          </ChatRuntimeProvider>
+        </SessionProvider>
+      </SettingsProvider>
+    </AuthProvider>
+  );
 }

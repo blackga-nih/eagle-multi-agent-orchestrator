@@ -9,7 +9,13 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Request
 
 from ..cognito_auth import UserContext
-from ..tag_store import add_tags, find_entities_by_tag, get_entity_tags, remove_tags, update_entity_tags
+from ..tag_store import (
+    add_tags,
+    find_entities_by_tag,
+    get_entity_tags,
+    remove_tags,
+    update_entity_tags,
+)
 from .dependencies import get_user_from_header
 
 router = APIRouter(tags=["tags"])
@@ -46,7 +52,9 @@ async def add_document_tags(
     tags = _normalize_tag_payload(body.get("tags", []))
     written = add_tags(user.tenant_id, "document", doc_id, tags)
     current = get_entity_tags(user.tenant_id, "document", doc_id)
-    update_entity_tags(user.tenant_id, "document", doc_id, user_tags=_merge_user_tags(current, tags))
+    update_entity_tags(
+        user.tenant_id, "document", doc_id, user_tags=_merge_user_tags(current, tags)
+    )
     return {"added": written}
 
 
@@ -86,7 +94,9 @@ async def add_package_tags(
     tags = _normalize_tag_payload(body.get("tags", []))
     written = add_tags(user.tenant_id, "package", package_id, tags)
     current = get_entity_tags(user.tenant_id, "package", package_id)
-    update_entity_tags(user.tenant_id, "package", package_id, user_tags=_merge_user_tags(current, tags))
+    update_entity_tags(
+        user.tenant_id, "package", package_id, user_tags=_merge_user_tags(current, tags)
+    )
     return {"added": written}
 
 

@@ -12,6 +12,7 @@ Tag types:
     - user:   Free-form user labels (e.g., "priority", "needs-review")
     - far:    FAR clause references (e.g., "FAR 52.219-8", "FAR 6.302")
 """
+
 from __future__ import annotations
 
 import logging
@@ -183,8 +184,7 @@ def find_entities_by_tag(
         if entity_type:
             response = table.query(
                 KeyConditionExpression=(
-                    Key("PK").eq(pk)
-                    & Key("SK").begins_with(f"TAG#{entity_type}#")
+                    Key("PK").eq(pk) & Key("SK").begins_with(f"TAG#{entity_type}#")
                 ),
             )
         else:
@@ -242,7 +242,8 @@ def find_entities_by_tags(
 
     if match_all:
         return [
-            entity for key, entity in all_results.items()
+            entity
+            for key, entity in all_results.items()
             if tag_counts[key] >= len(tag_values)
         ]
     else:

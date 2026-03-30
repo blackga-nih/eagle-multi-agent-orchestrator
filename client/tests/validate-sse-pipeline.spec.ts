@@ -46,9 +46,13 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
         try {
           const evt: SSEEvent = JSON.parse(raw);
           allEvents.push(evt);
-        } catch { /* skip non-JSON */ }
+        } catch {
+          /* skip non-JSON */
+        }
       }
-    } catch { /* body unavailable */ }
+    } catch {
+      /* body unavailable */
+    }
   });
 
   const consoleErrors: string[] = [];
@@ -62,7 +66,8 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
   await page.screenshot({ path: path.join(OUT_DIR, '01-initial.png'), fullPage: true });
 
   // ── Step 2: Send query that triggers multiple tools ────────────────
-  const query = 'What are the NCI thresholds for simplified acquisitions and what FAR clauses apply?';
+  const query =
+    'What are the NCI thresholds for simplified acquisitions and what FAR clauses apply?';
 
   const chatInput = page.locator('textarea').first();
   await expect(chatInput).toBeVisible({ timeout: 5_000 });
@@ -118,7 +123,8 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
       schemaErrors.push(`tool_use[${i}]: missing "tool_use" object`);
     } else {
       if (!evt.tool_use.name) schemaErrors.push(`tool_use[${i}]: missing tool_use.name`);
-      if (evt.tool_use.input === undefined) schemaErrors.push(`tool_use[${i}]: missing tool_use.input`);
+      if (evt.tool_use.input === undefined)
+        schemaErrors.push(`tool_use[${i}]: missing tool_use.input`);
     }
   }
 
@@ -129,7 +135,8 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
       schemaErrors.push(`tool_result[${i}]: missing "tool_result" object`);
     } else {
       if (!evt.tool_result.name) schemaErrors.push(`tool_result[${i}]: missing tool_result.name`);
-      if (evt.tool_result.result === undefined) schemaErrors.push(`tool_result[${i}]: missing tool_result.result`);
+      if (evt.tool_result.result === undefined)
+        schemaErrors.push(`tool_result[${i}]: missing tool_result.result`);
     }
   }
 
@@ -145,7 +152,7 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
   const pairingErrors: string[] = [];
   if (toolUseNames.length !== toolResultNames.length) {
     pairingErrors.push(
-      `tool_use count (${toolUseNames.length}) != tool_result count (${toolResultNames.length})`
+      `tool_use count (${toolUseNames.length}) != tool_result count (${toolResultNames.length})`,
     );
   }
 
@@ -166,7 +173,9 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
   // Check no empty-name tool_result leaked through
   const emptyNameResults = toolResultEvents.filter((e) => !e.tool_result?.name);
   if (emptyNameResults.length > 0) {
-    pairingErrors.push(`${emptyNameResults.length} tool_result event(s) with empty name leaked through`);
+    pairingErrors.push(
+      `${emptyNameResults.length} tool_result event(s) with empty name leaked through`,
+    );
   }
 
   // ── Step 6: Tool card rendering validation ─────────────────────────
@@ -174,7 +183,12 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
   const cardCount = await toolCards.count();
 
   const renderingErrors: string[] = [];
-  const cardDetails: Array<{ label: string; hasChevron: boolean; expandable: boolean; contentFormatted: boolean }> = [];
+  const cardDetails: Array<{
+    label: string;
+    hasChevron: boolean;
+    expandable: boolean;
+    contentFormatted: boolean;
+  }> = [];
 
   for (let i = 0; i < cardCount; i++) {
     const card = toolCards.nth(i);
@@ -203,7 +217,10 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
       expandable = panelCount > 0;
 
       if (expandable) {
-        const panelText = await expandedPanel.first().innerText().catch(() => '');
+        const panelText = await expandedPanel
+          .first()
+          .innerText()
+          .catch(() => '');
 
         // Content should NOT be raw SSE event JSON (no "agent_id" or "timestamp" leak)
         if (panelText.includes('"agent_id"') && panelText.includes('"timestamp"')) {
@@ -266,7 +283,7 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
     `  Total cards: ${cardCount}`,
     ...cardDetails.map(
       (c) =>
-        `  ${c.hasChevron ? '[OK]' : '[!!]'} ${c.label} — chevron: ${c.hasChevron}, expandable: ${c.expandable}, formatted: ${c.contentFormatted}`
+        `  ${c.hasChevron ? '[OK]' : '[!!]'} ${c.label} — chevron: ${c.hasChevron}, expandable: ${c.expandable}, formatted: ${c.contentFormatted}`,
     ),
     '',
     '## Tool Names',
@@ -277,21 +294,21 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
   fs.writeFileSync(path.join(OUT_DIR, 'report.md'), report, 'utf-8');
 
   // Save raw events
-  fs.writeFileSync(
-    path.join(OUT_DIR, 'events.json'),
-    JSON.stringify(allEvents, null, 2),
-    'utf-8'
-  );
+  fs.writeFileSync(path.join(OUT_DIR, 'events.json'), JSON.stringify(allEvents, null, 2), 'utf-8');
 
   // ── Console report ─────────────────────────────────────────────────
   console.log('\n' + '='.repeat(60));
   console.log('  SSE PIPELINE VALIDATION REPORT');
   console.log('='.repeat(60));
-  console.log(`  Events: ${allEvents.length} total (${textEvents.length} text, ${toolUseEvents.length} tool_use, ${toolResultEvents.length} tool_result)`);
+  console.log(
+    `  Events: ${allEvents.length} total (${textEvents.length} text, ${toolUseEvents.length} tool_use, ${toolResultEvents.length} tool_result)`,
+  );
   console.log(`  Schema errors:    ${schemaErrors.length}`);
   console.log(`  Pairing errors:   ${pairingErrors.length}`);
   console.log(`  Rendering errors: ${renderingErrors.length}`);
-  console.log(`  Tool cards:       ${cardCount} (${cardDetails.filter((c) => c.hasChevron).length} with chevron)`);
+  console.log(
+    `  Tool cards:       ${cardCount} (${cardDetails.filter((c) => c.hasChevron).length} with chevron)`,
+  );
   console.log(`  Response complete: ${complete}`);
   console.log('='.repeat(60));
 
@@ -343,7 +360,10 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
   await page.waitForTimeout(5_000);
   await page.screenshot({ path: path.join(OUT_DIR, '04-after-reload.png'), fullPage: true });
 
-  const afterReloadBody = await page.locator('body').innerText().catch(() => '');
+  const afterReloadBody = await page
+    .locator('body')
+    .innerText()
+    .catch(() => '');
 
   // User message should persist
   const userMsgSurvived =
@@ -364,7 +384,9 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
 
   // Tool cards should re-render from persisted state
   const reloadCardCount = await toolCards.count();
-  console.log(`  Session persistence — user msg: ${userMsgSurvived}, assistant: ${assistantSurvived}, cards after reload: ${reloadCardCount}`);
+  console.log(
+    `  Session persistence — user msg: ${userMsgSurvived}, assistant: ${assistantSurvived}, cards after reload: ${reloadCardCount}`,
+  );
   if (sessionErrors.length > 0) {
     sessionErrors.forEach((e) => console.log(`    - ${e}`));
   }
@@ -398,19 +420,22 @@ test('SSE pipeline: schema match, tool pairing, and card rendering', async ({ pa
   expect(assistantSurvived, 'Assistant response should survive page reload').toBe(true);
 });
 
-test('SSE pipeline: reasoning, handoff, elicitation events reach activity panel', async ({ page }) => {
+test('SSE pipeline: reasoning, handoff, elicitation events reach activity panel', async ({
+  page,
+}) => {
   test.setTimeout(60_000);
 
   // Intercept the SSE endpoint and return synthetic events
   await page.route('**/api/invoke', async (route) => {
-    const syntheticSSE = [
-      'data: {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"","timestamp":"2026-01-01T00:00:00Z"}',
-      'data: {"type":"agent_status","agent_id":"eagle","agent_name":"EAGLE","metadata":{"status":"Analyzing...","detail":""},"timestamp":"2026-01-01T00:00:01Z"}',
-      'data: {"type":"handoff","agent_id":"eagle","agent_name":"EAGLE","metadata":{"target_agent":"legal_counsel","reason":"Legal review needed"},"timestamp":"2026-01-01T00:00:02Z"}',
-      'data: {"type":"elicitation","agent_id":"eagle","agent_name":"EAGLE","elicitation":{"question":"What is your budget range?","fields":[]},"timestamp":"2026-01-01T00:00:03Z"}',
-      'data: {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"Here is my response.","timestamp":"2026-01-01T00:00:04Z"}',
-      'data: {"type":"complete","agent_id":"eagle","agent_name":"EAGLE","metadata":{},"timestamp":"2026-01-01T00:00:05Z"}',
-    ].join('\n\n') + '\n\n';
+    const syntheticSSE =
+      [
+        'data: {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"","timestamp":"2026-01-01T00:00:00Z"}',
+        'data: {"type":"agent_status","agent_id":"eagle","agent_name":"EAGLE","metadata":{"status":"Analyzing...","detail":""},"timestamp":"2026-01-01T00:00:01Z"}',
+        'data: {"type":"handoff","agent_id":"eagle","agent_name":"EAGLE","metadata":{"target_agent":"legal_counsel","reason":"Legal review needed"},"timestamp":"2026-01-01T00:00:02Z"}',
+        'data: {"type":"elicitation","agent_id":"eagle","agent_name":"EAGLE","elicitation":{"question":"What is your budget range?","fields":[]},"timestamp":"2026-01-01T00:00:03Z"}',
+        'data: {"type":"text","agent_id":"eagle","agent_name":"EAGLE","content":"Here is my response.","timestamp":"2026-01-01T00:00:04Z"}',
+        'data: {"type":"complete","agent_id":"eagle","agent_name":"EAGLE","metadata":{},"timestamp":"2026-01-01T00:00:05Z"}',
+      ].join('\n\n') + '\n\n';
 
     await route.fulfill({
       status: 200,
@@ -419,7 +444,10 @@ test('SSE pipeline: reasoning, handoff, elicitation events reach activity panel'
     });
   });
 
-  await page.goto('http://localhost:3000/chat/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+  await page.goto('http://localhost:3000/chat/', {
+    waitUntil: 'domcontentloaded',
+    timeout: 15_000,
+  });
 
   // Send a message to trigger the mocked SSE
   const textarea = page.locator('textarea').first();
@@ -438,6 +466,10 @@ test('SSE pipeline: reasoning, handoff, elicitation events reach activity panel'
 
   // Verify no console errors from unhandled event types
   const consoleErrors: string[] = [];
-  page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
-  expect(consoleErrors.filter(e => e.includes('handoff') || e.includes('elicitation'))).toHaveLength(0);
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  });
+  expect(
+    consoleErrors.filter((e) => e.includes('handoff') || e.includes('elicitation')),
+  ).toHaveLength(0);
 });

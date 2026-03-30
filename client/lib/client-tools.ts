@@ -138,10 +138,18 @@ export function runEditor(input: EditorInput): ClientToolResult {
           pos += normalizedOld.length;
         }
         if (count === 0) {
-          return { success: false, result: null, error: 'The specified text was not found in the file.' };
+          return {
+            success: false,
+            result: null,
+            error: 'The specified text was not found in the file.',
+          };
         }
         if (count > 1) {
-          return { success: false, result: null, error: `Found ${count} occurrences — replacement must match exactly one location.` };
+          return {
+            success: false,
+            result: null,
+            error: `Found ${count} occurrences — replacement must match exactly one location.`,
+          };
         }
         localStorage.setItem(histKey, content);
         const newContent = normalized.replace(normalizedOld, normalizeNewlines(new_str));
@@ -155,7 +163,9 @@ export function runEditor(input: EditorInput): ClientToolResult {
         localStorage.setItem(fileKey, fileContent);
         return {
           success: true,
-          result: overwritten ? `Overwrote existing file: ${path}` : `Successfully created file: ${path}`,
+          result: overwritten
+            ? `Overwrote existing file: ${path}`
+            : `Successfully created file: ${path}`,
         };
       }
 
@@ -183,7 +193,11 @@ export function runEditor(input: EditorInput): ClientToolResult {
       case 'undo_edit': {
         const previous = localStorage.getItem(histKey);
         if (previous === null) {
-          return { success: false, result: null, error: `No previous edit found for file: ${path}` };
+          return {
+            success: false,
+            result: null,
+            error: `No previous edit found for file: ${path}`,
+          };
         }
         localStorage.setItem(fileKey, previous);
         localStorage.removeItem(histKey);
@@ -250,11 +264,9 @@ async function runJavaScript(source: string, timeoutMs: number): Promise<CodeRes
   return new Promise((resolve) => {
     const logs: string[] = [];
 
-    const workerCode = [
-      CONSOLE_BRIDGE,
-      source,
-      'self.postMessage({ type: "done" });',
-    ].join('\n;\n');
+    const workerCode = [CONSOLE_BRIDGE, source, 'self.postMessage({ type: "done" });'].join(
+      '\n;\n',
+    );
 
     let worker: Worker;
     try {
@@ -333,7 +345,8 @@ async function runHtml(source: string, timeoutMs: number): Promise<CodeResult> {
     // Create a sandboxed off-screen iframe
     const frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts');
-    frame.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:800px;height:600px;border:0;';
+    frame.style.cssText =
+      'position:fixed;left:-9999px;top:-9999px;width:800px;height:600px;border:0;';
 
     const cleanup = () => {
       clearTimeout(killTimer);

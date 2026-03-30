@@ -44,7 +44,9 @@ export default function ToolsPage() {
     }
   }, [getToken]);
 
-  useEffect(() => { fetchTools(); }, [fetchTools]);
+  useEffect(() => {
+    fetchTools();
+  }, [fetchTools]);
 
   return (
     <AuthGuard>
@@ -55,10 +57,7 @@ export default function ToolsPage() {
             <PageHeader
               title="Tool Health"
               description="Per-tool call counts, success rates, and latency"
-              breadcrumbs={[
-                { label: 'Admin', href: '/admin' },
-                { label: 'Tools' },
-              ]}
+              breadcrumbs={[{ label: 'Admin', href: '/admin' }, { label: 'Tools' }]}
               actions={
                 <button
                   onClick={fetchTools}
@@ -80,18 +79,33 @@ export default function ToolsPage() {
               <div className="mb-6 flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
                 <AlertTriangle className="w-5 h-5 flex-shrink-0" />
                 <p className="flex-1">{error}</p>
-                <button onClick={fetchTools} className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200">Retry</button>
+                <button
+                  onClick={fetchTools}
+                  className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200"
+                >
+                  Retry
+                </button>
               </div>
             ) : (
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Tool</th>
-                      <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Calls</th>
-                      <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Success Rate</th>
-                      <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Avg Latency</th>
-                      <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Errors</th>
+                      <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase">
+                        Tool
+                      </th>
+                      <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase">
+                        Calls
+                      </th>
+                      <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase">
+                        Success Rate
+                      </th>
+                      <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase">
+                        Avg Latency
+                      </th>
+                      <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase">
+                        Errors
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -111,20 +125,33 @@ export default function ToolsPage() {
                               <span className="font-medium text-gray-900">{tool.name}</span>
                             </div>
                           </td>
-                          <td className="px-6 py-4 text-right text-sm text-gray-700">{tool.call_count}</td>
+                          <td className="px-6 py-4 text-right text-sm text-gray-700">
+                            {tool.call_count}
+                          </td>
                           <td className="px-6 py-4 text-right">
-                            <span className={`inline-flex items-center gap-1 text-sm font-medium ${
-                              tool.success_rate >= 95 ? 'text-green-600' :
-                              tool.success_rate >= 80 ? 'text-amber-600' : 'text-red-600'
-                            }`}>
-                              {tool.success_rate >= 95 ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                            <span
+                              className={`inline-flex items-center gap-1 text-sm font-medium ${
+                                tool.success_rate >= 95
+                                  ? 'text-green-600'
+                                  : tool.success_rate >= 80
+                                    ? 'text-amber-600'
+                                    : 'text-red-600'
+                              }`}
+                            >
+                              {tool.success_rate >= 95 ? (
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              ) : (
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              )}
                               {tool.success_rate.toFixed(1)}%
                             </span>
                           </td>
                           <td className="px-6 py-4 text-right text-sm text-gray-700">
                             <span className="inline-flex items-center gap-1">
                               <Clock className="w-3.5 h-3.5 text-gray-400" />
-                              {tool.avg_duration_ms >= 1000 ? `${(tool.avg_duration_ms / 1000).toFixed(1)}s` : `${tool.avg_duration_ms}ms`}
+                              {tool.avg_duration_ms >= 1000
+                                ? `${(tool.avg_duration_ms / 1000).toFixed(1)}s`
+                                : `${tool.avg_duration_ms}ms`}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-right">

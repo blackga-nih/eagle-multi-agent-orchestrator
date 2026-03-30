@@ -4,6 +4,7 @@ Computes system_tags, far_tags, threshold_tier, and approval_level
 from document/package attributes using the compliance matrix and
 template registry data.
 """
+
 from __future__ import annotations
 
 import logging
@@ -122,6 +123,7 @@ def compute_approval_level(
     """
     try:
         from app.compliance_matrix import get_requirements
+
         result = get_requirements(estimated_value, acquisition_method, contract_type)
         approvals = result.get("approvals_required", [])
         if approvals:
@@ -146,6 +148,7 @@ def compute_far_tags_from_template(doc_type: str) -> list[str]:
     """
     try:
         from app.template_schema import load_clause_references_by_category
+
         refs = load_clause_references_by_category(doc_type)
         clause_numbers = set()
         for ref_data in refs:
@@ -171,6 +174,7 @@ def compute_completeness_pct(doc_type: str, content: str) -> float:
     """
     try:
         from app.template_schema import validate_completeness
+
         report = validate_completeness(doc_type, content)
         if report:
             return report.completeness_pct
@@ -196,7 +200,9 @@ def compute_compliance_readiness(
     doc_by_type = {}
     for doc in documents:
         dt = doc.get("doc_type", "")
-        if dt not in doc_by_type or doc.get("version", 0) > doc_by_type[dt].get("version", 0):
+        if dt not in doc_by_type or doc.get("version", 0) > doc_by_type[dt].get(
+            "version", 0
+        ):
             doc_by_type[dt] = doc
 
     missing = []

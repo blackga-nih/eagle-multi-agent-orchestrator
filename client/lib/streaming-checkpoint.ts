@@ -19,14 +19,14 @@ import type { DocumentInfo } from '@/types/chat';
 // ---------------------------------------------------------------------------
 
 export interface StreamingCheckpoint {
-    sessionId: string;
-    requestId: string;
-    streamingMsgId: string;
-    text: string;
-    toolCalls: TrackedToolCall[];
-    stateChanges: StateChangeEntry[];
-    documents: DocumentInfo[];
-    updatedAt: number; // Date.now()
+  sessionId: string;
+  requestId: string;
+  streamingMsgId: string;
+  text: string;
+  toolCalls: TrackedToolCall[];
+  stateChanges: StateChangeEntry[];
+  documents: DocumentInfo[];
+  updatedAt: number; // Date.now()
 }
 
 // ---------------------------------------------------------------------------
@@ -46,14 +46,14 @@ const MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
  * Safe to call frequently — the caller should throttle (e.g., every 2 s).
  */
 export function saveCheckpoint(cp: StreamingCheckpoint): void {
-    if (typeof window === 'undefined') return;
-    // Skip saving empty checkpoints
-    if (!cp.text && cp.toolCalls.length === 0 && cp.stateChanges.length === 0) return;
-    try {
-        localStorage.setItem(KEY_PREFIX + cp.sessionId, JSON.stringify(cp));
-    } catch {
-        // localStorage full or unavailable — silently drop
-    }
+  if (typeof window === 'undefined') return;
+  // Skip saving empty checkpoints
+  if (!cp.text && cp.toolCalls.length === 0 && cp.stateChanges.length === 0) return;
+  try {
+    localStorage.setItem(KEY_PREFIX + cp.sessionId, JSON.stringify(cp));
+  } catch {
+    // localStorage full or unavailable — silently drop
+  }
 }
 
 /**
@@ -62,44 +62,44 @@ export function saveCheckpoint(cp: StreamingCheckpoint): void {
  * Automatically removes stale checkpoints from localStorage.
  */
 export function loadCheckpoint(sessionId: string): StreamingCheckpoint | null {
-    if (typeof window === 'undefined') return null;
-    try {
-        const raw = localStorage.getItem(KEY_PREFIX + sessionId);
-        if (!raw) return null;
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(KEY_PREFIX + sessionId);
+    if (!raw) return null;
 
-        const parsed: StreamingCheckpoint = JSON.parse(raw);
+    const parsed: StreamingCheckpoint = JSON.parse(raw);
 
-        // Validate shape
-        if (!parsed.sessionId || !parsed.streamingMsgId || typeof parsed.text !== 'string') {
-            clearCheckpoint(sessionId);
-            return null;
-        }
-
-        // Garbage-collect stale checkpoints
-        if (Date.now() - (parsed.updatedAt ?? 0) > MAX_AGE_MS) {
-            clearCheckpoint(sessionId);
-            return null;
-        }
-
-        // Ensure arrays exist (defensive — old data may lack new fields)
-        parsed.toolCalls = parsed.toolCalls ?? [];
-        parsed.stateChanges = parsed.stateChanges ?? [];
-        parsed.documents = parsed.documents ?? [];
-
-        return parsed;
-    } catch {
-        // Corrupt JSON — remove it
-        clearCheckpoint(sessionId);
-        return null;
+    // Validate shape
+    if (!parsed.sessionId || !parsed.streamingMsgId || typeof parsed.text !== 'string') {
+      clearCheckpoint(sessionId);
+      return null;
     }
+
+    // Garbage-collect stale checkpoints
+    if (Date.now() - (parsed.updatedAt ?? 0) > MAX_AGE_MS) {
+      clearCheckpoint(sessionId);
+      return null;
+    }
+
+    // Ensure arrays exist (defensive — old data may lack new fields)
+    parsed.toolCalls = parsed.toolCalls ?? [];
+    parsed.stateChanges = parsed.stateChanges ?? [];
+    parsed.documents = parsed.documents ?? [];
+
+    return parsed;
+  } catch {
+    // Corrupt JSON — remove it
+    clearCheckpoint(sessionId);
+    return null;
+  }
 }
 
 /** Remove a checkpoint for the given session. */
 export function clearCheckpoint(sessionId: string): void {
-    if (typeof window === 'undefined') return;
-    try {
-        localStorage.removeItem(KEY_PREFIX + sessionId);
-    } catch {
-        // ignore
-    }
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(KEY_PREFIX + sessionId);
+  } catch {
+    // ignore
+  }
 }

@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(
       `${FASTAPI_URL}/api/feedback/messages${queryString ? `?${queryString}` : ''}`,
-      { headers }
+      { headers },
     );
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });

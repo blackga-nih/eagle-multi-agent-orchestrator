@@ -8,6 +8,7 @@ Preferences persist indefinitely (no TTL).
 In-process cache with 60-second TTL to avoid repeated DynamoDB reads
 within the same session (e.g. preload + agent tool access).
 """
+
 import logging
 import time as _time
 from datetime import datetime
@@ -60,6 +61,7 @@ def _cache_invalidate(tenant_id: str, user_id: str) -> None:
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
+
 def _merge_with_defaults(item: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Return DEFAULT_PREFS merged with any values present in *item*.
 
@@ -80,6 +82,7 @@ def _merge_with_defaults(item: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
 
 def get_prefs(tenant_id: str, user_id: str) -> Dict[str, Any]:
     """Fetch preferences for *user_id* within *tenant_id*.
@@ -127,7 +130,9 @@ def update_prefs(
     # Strip unknown keys
     filtered = {k: v for k, v in updates.items() if k in _ALLOWED_KEYS}
     if not filtered:
-        logger.debug("pref_store.update_prefs: no valid keys supplied — returning current prefs")
+        logger.debug(
+            "pref_store.update_prefs: no valid keys supplied — returning current prefs"
+        )
         return get_prefs(tenant_id, user_id)
 
     now = datetime.utcnow().isoformat()

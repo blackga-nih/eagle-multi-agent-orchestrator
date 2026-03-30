@@ -28,16 +28,50 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _seven_year_ttl() -> int:
     """Return Unix epoch seconds 7 years from now."""
     return ttl_timestamp(days=365 * 7)
 
 
 _TYPE_KEYWORDS: dict[str, list[str]] = {
-    "bug":            ["bug", "error", "broken", "doesn't work", "not working", "crash", "fail", "issue"],
-    "suggestion":     ["suggest", "feature", "improve", "wish", "could", "should", "would be better"],
-    "praise":         ["great", "love", "excellent", "perfect", "helpful", "amazing", "good", "thank"],
-    "incorrect_info": ["incorrect", "false", "inaccurate", "wrong", "misinformation", "misleading"],
+    "bug": [
+        "bug",
+        "error",
+        "broken",
+        "doesn't work",
+        "not working",
+        "crash",
+        "fail",
+        "issue",
+    ],
+    "suggestion": [
+        "suggest",
+        "feature",
+        "improve",
+        "wish",
+        "could",
+        "should",
+        "would be better",
+    ],
+    "praise": [
+        "great",
+        "love",
+        "excellent",
+        "perfect",
+        "helpful",
+        "amazing",
+        "good",
+        "thank",
+    ],
+    "incorrect_info": [
+        "incorrect",
+        "false",
+        "inaccurate",
+        "wrong",
+        "misinformation",
+        "misleading",
+    ],
 }
 
 
@@ -52,6 +86,7 @@ def _detect_feedback_type(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def write_feedback(
     tenant_id: str,
@@ -112,7 +147,8 @@ def list_feedback(tenant_id: str, limit: int = 50) -> list[dict]:
     pk = f"FEEDBACK#{tenant_id}"
     try:
         response = get_table().query(
-            KeyConditionExpression=Key("PK").eq(pk) & Key("SK").begins_with("FEEDBACK#"),
+            KeyConditionExpression=Key("PK").eq(pk)
+            & Key("SK").begins_with("FEEDBACK#"),
             ScanIndexForward=False,
             Limit=limit,
         )
@@ -156,7 +192,10 @@ def write_message_feedback(
         get_table().put_item(Item=item)
         logger.info(
             "feedback_store: wrote message feedback %s (type=%s tenant=%s msg=%s)",
-            feedback_id, feedback_type, tenant_id, message_id,
+            feedback_id,
+            feedback_type,
+            tenant_id,
+            message_id,
         )
     except (ClientError, BotoCoreError) as exc:
         logger.error("feedback_store: failed to write message feedback: %s", exc)
@@ -170,7 +209,8 @@ def list_message_feedback(tenant_id: str, limit: int = 100) -> list[dict]:
     pk = f"FEEDBACK#{tenant_id}"
     try:
         response = get_table().query(
-            KeyConditionExpression=Key("PK").eq(pk) & Key("SK").begins_with("MSG_FEEDBACK#"),
+            KeyConditionExpression=Key("PK").eq(pk)
+            & Key("SK").begins_with("MSG_FEEDBACK#"),
             ScanIndexForward=False,
             Limit=limit,
         )

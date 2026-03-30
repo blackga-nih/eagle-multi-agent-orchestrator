@@ -36,7 +36,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const blob = await response.blob();
-    const disposition = response.headers.get('content-disposition') || `attachment; filename="${packageId}.zip"`;
+    const disposition =
+      response.headers.get('content-disposition') || `attachment; filename="${packageId}.zip"`;
 
     return new NextResponse(blob, {
       status: 200,

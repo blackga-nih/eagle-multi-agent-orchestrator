@@ -50,7 +50,9 @@ export default function AgentSidebar({
                 <p className="text-[10px] text-gray-400 truncate">{server.url}</p>
               </div>
               {isConnected ? (
-                <div className={`flex items-center gap-1 ${isMockMode ? 'text-amber-600' : 'text-green-600'}`}>
+                <div
+                  className={`flex items-center gap-1 ${isMockMode ? 'text-amber-600' : 'text-green-600'}`}
+                >
                   <CheckCircle2 className="w-4 h-4" />
                   <span className="text-[10px] font-medium">{isMockMode ? 'Mock' : 'Live'}</span>
                 </div>
@@ -96,20 +98,23 @@ export default function AgentSidebar({
             Recent Tool Calls
           </h4>
           <div className="space-y-2 max-h-40 overflow-y-auto">
-            {recentToolResults.slice(-5).reverse().map((result, idx) => (
-              <div
-                key={`${result.name}-${idx}`}
-                className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg"
-              >
-                <Terminal className="w-3 h-3 text-gray-400" />
-                <span className="text-xs font-mono text-gray-600">{result.name}</span>
-                {result.error ? (
-                  <XCircle className="w-3 h-3 text-red-400 ml-auto" />
-                ) : (
-                  <CheckCircle2 className="w-3 h-3 text-green-400 ml-auto" />
-                )}
-              </div>
-            ))}
+            {recentToolResults
+              .slice(-5)
+              .reverse()
+              .map((result, idx) => (
+                <div
+                  key={`${result.name}-${idx}`}
+                  className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg"
+                >
+                  <Terminal className="w-3 h-3 text-gray-400" />
+                  <span className="text-xs font-mono text-gray-600">{result.name}</span>
+                  {result.error ? (
+                    <XCircle className="w-3 h-3 text-red-400 ml-auto" />
+                  ) : (
+                    <CheckCircle2 className="w-3 h-3 text-green-400 ml-auto" />
+                  )}
+                </div>
+              ))}
           </div>
         </div>
       )}

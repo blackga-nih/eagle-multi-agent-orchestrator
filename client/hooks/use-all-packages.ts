@@ -22,9 +22,7 @@ export interface UseAllPackagesResult {
  * caches document lists per package, and exposes a refetch() for refresh
  * after streaming completes.
  */
-export function useAllPackages(
-  getToken: () => Promise<string | null>,
-): UseAllPackagesResult {
+export function useAllPackages(getToken: () => Promise<string | null>): UseAllPackagesResult {
   const [packages, setPackages] = useState<PackageInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

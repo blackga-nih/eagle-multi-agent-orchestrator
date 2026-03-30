@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Package State & Checklist Panel', () => {
-
   // ─── Package Tab in Activity Panel ──────────────────────────────────
 
   test.describe('Package Tab', () => {
@@ -9,7 +8,9 @@ test.describe('Package State & Checklist Panel', () => {
       await page.goto('/chat/');
 
       // The "Package" tab should be visible and be the first/default tab
-      await expect(page.getByText('Package', { exact: true }).first()).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('Package', { exact: true }).first()).toBeVisible({
+        timeout: 5000,
+      });
     });
 
     test('package tab shows empty state when no package active', async ({ page }) => {
@@ -24,7 +25,9 @@ test.describe('Package State & Checklist Panel', () => {
       await expect(page.getByText('Start an acquisition intake')).toBeVisible();
     });
 
-    test('all four tabs present: Package, Documents, Notifications, Agent Logs', async ({ page }) => {
+    test('all four tabs present: Package, Documents, Notifications, Agent Logs', async ({
+      page,
+    }) => {
       await page.goto('/chat/');
 
       await expect(page.getByText('Package', { exact: true }).first()).toBeVisible();
@@ -63,7 +66,9 @@ test.describe('Package State & Checklist Panel', () => {
       await expect(textarea).toBeEnabled();
 
       // Send an intake query that should trigger manage_package
-      await textarea.fill('I need to buy lab equipment for $85,000, genomics sequencer, need it by June');
+      await textarea.fill(
+        'I need to buy lab equipment for $85,000, genomics sequencer, need it by June',
+      );
       await page.getByRole('button', { name: '\u27A4' }).click();
 
       // Wait for streaming to start
@@ -76,9 +81,9 @@ test.describe('Package State & Checklist Panel', () => {
 
       // Look for the Package Update tool chip (manage_package in TOOL_META)
       try {
-        await expect(
-          page.locator('text=/Package Update|Intake/i').first()
-        ).toBeVisible({ timeout: 60_000 });
+        await expect(page.locator('text=/Package Update|Intake/i').first()).toBeVisible({
+          timeout: 60_000,
+        });
       } catch {
         // Not all intake queries trigger manage_package immediately
       }
@@ -102,7 +107,9 @@ test.describe('Package State & Checklist Panel', () => {
       await expect(textarea).toBeEnabled();
 
       // Send a message that should trigger package creation + state update
-      await textarea.fill('I need to purchase IT consulting services for approximately $200,000. Need it by September 2026.');
+      await textarea.fill(
+        'I need to purchase IT consulting services for approximately $200,000. Need it by September 2026.',
+      );
       await page.getByRole('button', { name: '\u27A4' }).click();
 
       try {
@@ -118,16 +125,20 @@ test.describe('Package State & Checklist Panel', () => {
       // Look for a state change card — these have a data-testid="state-change-card"
       // or render with recognizable text patterns
       const stateCard = page.locator('[data-testid="state-change-card"]');
-      const packageUpdateText = page.locator('text=/Package Updated|Package Created|docs complete/i');
+      const packageUpdateText = page.locator(
+        'text=/Package Updated|Package Created|docs complete/i',
+      );
 
       // At least one of these should be visible if state updates are wired correctly
-      const hasStateCard = await stateCard.count() > 0;
-      const hasPackageText = await packageUpdateText.count() > 0;
+      const hasStateCard = (await stateCard.count()) > 0;
+      const hasPackageText = (await packageUpdateText.count()) > 0;
 
       // This is a soft assertion — the supervisor may not always create a package
       // on the first message. Log result for diagnostics.
       if (!hasStateCard && !hasPackageText) {
-        console.log('No state change card found — supervisor may not have created package on first turn');
+        console.log(
+          'No state change card found — supervisor may not have created package on first turn',
+        );
       }
     });
 
@@ -158,7 +169,9 @@ test.describe('Package State & Checklist Panel', () => {
         await stateCard.click();
 
         // Detail modal should appear with package information
-        await expect(page.locator('[data-testid="state-change-detail"]')).toBeVisible({ timeout: 3000 });
+        await expect(page.locator('[data-testid="state-change-detail"]')).toBeVisible({
+          timeout: 3000,
+        });
       }
     });
   });

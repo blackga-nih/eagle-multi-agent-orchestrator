@@ -5,9 +5,15 @@ from __future__ import annotations
 from ..session_scope import extract_user_id
 
 
-def exec_edit_docx_document(params: dict, tenant_id: str, session_id: str | None = None) -> dict:
+def exec_edit_docx_document(
+    params: dict, tenant_id: str, session_id: str | None = None
+) -> dict:
     """Apply targeted edits to an existing DOCX document."""
-    from app.document_ai_edit_service import DocxCheckboxEdit, DocxEdit, edit_docx_document
+    from app.document_ai_edit_service import (
+        DocxCheckboxEdit,
+        DocxEdit,
+        edit_docx_document,
+    )
 
     doc_key = params.get("document_key", "")
     edits_input = params.get("edits") or []
@@ -27,7 +33,9 @@ def exec_edit_docx_document(params: dict, tenant_id: str, session_id: str | None
         replacement_text = str(edit.get("replacement_text", "") or "")
         if not search_text:
             return {"error": f"edit #{idx} is missing search_text"}
-        edits.append(DocxEdit(search_text=search_text, replacement_text=replacement_text))
+        edits.append(
+            DocxEdit(search_text=search_text, replacement_text=replacement_text)
+        )
 
     checkbox_edits: list[DocxCheckboxEdit] = []
     for idx, edit in enumerate(checkbox_edits_input, start=1):

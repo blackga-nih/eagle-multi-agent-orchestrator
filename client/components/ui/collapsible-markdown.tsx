@@ -51,7 +51,10 @@ interface CollapsibleMarkdownProps {
   defaultExpanded?: boolean;
 }
 
-export default function CollapsibleMarkdown({ content, defaultExpanded = false }: CollapsibleMarkdownProps) {
+export default function CollapsibleMarkdown({
+  content,
+  defaultExpanded = false,
+}: CollapsibleMarkdownProps) {
   const { preamble, sections } = useMemo(() => parseSections(content), [content]);
   const [expanded, setExpanded] = useState<Record<number, boolean>>(() => {
     if (defaultExpanded) {
@@ -61,7 +64,7 @@ export default function CollapsibleMarkdown({ content, defaultExpanded = false }
   });
 
   function toggle(index: number) {
-    setExpanded(prev => ({ ...prev, [index]: !prev[index] }));
+    setExpanded((prev) => ({ ...prev, [index]: !prev[index] }));
   }
 
   function expandAll() {

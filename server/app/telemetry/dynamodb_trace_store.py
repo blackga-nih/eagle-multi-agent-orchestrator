@@ -4,6 +4,7 @@ DynamoDB persistence for trace summaries.
 Uses the existing 'eagle' table with TRACE# partition key prefix.
 No new tables required.
 """
+
 import json
 import logging
 import os
@@ -161,7 +162,9 @@ def get_traces_by_session(session_id: str, limit: int = 20) -> List[Dict]:
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code == "ValidationException":
                 # GSI1 doesn't exist — fall back to scan
-                logger.info("GSI1 not found, falling back to scan for session %s", session_id)
+                logger.info(
+                    "GSI1 not found, falling back to scan for session %s", session_id
+                )
                 response = table.scan(
                     FilterExpression="session_id = :sid AND begins_with(PK, :prefix)",
                     ExpressionAttributeValues={

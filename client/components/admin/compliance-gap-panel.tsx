@@ -120,18 +120,8 @@ function Column({
 
 function CoverageBar({ percentage }: { percentage: number }) {
   const pct = Math.min(100, Math.max(0, Math.round(percentage)));
-  const color =
-    pct >= 80
-      ? 'bg-green-500'
-      : pct >= 50
-      ? 'bg-amber-500'
-      : 'bg-red-500';
-  const textColor =
-    pct >= 80
-      ? 'text-green-700'
-      : pct >= 50
-      ? 'text-amber-700'
-      : 'text-red-700';
+  const color = pct >= 80 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500';
+  const textColor = pct >= 80 ? 'text-green-700' : pct >= 50 ? 'text-amber-700' : 'text-red-700';
 
   return (
     <div className="flex items-center gap-3">

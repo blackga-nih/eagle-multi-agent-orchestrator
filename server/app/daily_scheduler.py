@@ -19,7 +19,9 @@ from datetime import datetime, timedelta, timezone
 logger = logging.getLogger("eagle.daily_scheduler")
 
 SUMMARY_HOUR: int = int(os.getenv("TEAMS_DAILY_SUMMARY_HOUR", "13"))
-SUMMARY_ENABLED: bool = os.getenv("TEAMS_DAILY_SUMMARY_ENABLED", "true").lower() == "true"
+SUMMARY_ENABLED: bool = (
+    os.getenv("TEAMS_DAILY_SUMMARY_ENABLED", "true").lower() == "true"
+)
 
 _task: asyncio.Task | None = None
 
@@ -39,7 +41,11 @@ async def _daily_loop() -> None:
 
     while True:
         wait = _seconds_until_next(SUMMARY_HOUR)
-        logger.info("Daily scheduler: next summary in %.0f seconds (hour=%d UTC)", wait, SUMMARY_HOUR)
+        logger.info(
+            "Daily scheduler: next summary in %.0f seconds (hour=%d UTC)",
+            wait,
+            SUMMARY_HOUR,
+        )
         await asyncio.sleep(wait)
 
         try:

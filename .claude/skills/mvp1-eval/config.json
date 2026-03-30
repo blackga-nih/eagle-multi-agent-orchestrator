@@ -22,6 +22,26 @@
       "tests/test_strands_service_integration.py"
     ],
     "tier3_test": "tests/test_strands_eval.py",
+    "client_dir": "client",
+    "tier4a_tests": [
+      "navigation.spec.ts",
+      "chat.spec.ts",
+      "chat-features.spec.ts",
+      "admin-dashboard.spec.ts",
+      "documents.spec.ts",
+      "workflows.spec.ts",
+      "keyboard-shortcuts.spec.ts",
+      "validate-feedback.spec.ts",
+      "knowledge-base.spec.ts",
+      "admin-skills.spec.ts",
+      "admin-templates.spec.ts",
+      "admin-workspaces.spec.ts",
+      "modal-width.spec.ts",
+      "no-mock-data.spec.ts",
+      "document-pipeline.spec.ts"
+    ],
+    "tier4a_project": "chromium",
+    "tier4b_journeys": ["login", "home", "chat", "admin", "documents", "workflows"],
     "notes": "NCI EAGLE CBIIT instance — account 695681773636, eagle SSO profile, NONPROD environment"
   },
 
@@ -45,6 +65,26 @@
       "tests/test_strands_service_integration.py"
     ],
     "tier3_test": "tests/test_strands_eval.py",
+    "client_dir": "client",
+    "tier4a_tests": [
+      "navigation.spec.ts",
+      "chat.spec.ts",
+      "chat-features.spec.ts",
+      "admin-dashboard.spec.ts",
+      "documents.spec.ts",
+      "workflows.spec.ts",
+      "keyboard-shortcuts.spec.ts",
+      "validate-feedback.spec.ts",
+      "knowledge-base.spec.ts",
+      "admin-skills.spec.ts",
+      "admin-templates.spec.ts",
+      "admin-workspaces.spec.ts",
+      "modal-width.spec.ts",
+      "no-mock-data.spec.ts",
+      "document-pipeline.spec.ts"
+    ],
+    "tier4a_project": "chromium",
+    "tier4b_journeys": ["login", "home", "chat", "admin", "documents", "workflows"],
     "notes": "NCI EAGLE instance — account 274487662938, power-user-* IAM prefix, eagle SSO profile"
   },
 
@@ -68,6 +108,26 @@
       "tests/test_strands_service_integration.py"
     ],
     "tier3_test": "tests/test_strands_eval.py",
+    "client_dir": "client",
+    "tier4a_tests": [
+      "navigation.spec.ts",
+      "chat.spec.ts",
+      "chat-features.spec.ts",
+      "admin-dashboard.spec.ts",
+      "documents.spec.ts",
+      "workflows.spec.ts",
+      "keyboard-shortcuts.spec.ts",
+      "validate-feedback.spec.ts",
+      "knowledge-base.spec.ts",
+      "admin-skills.spec.ts",
+      "admin-templates.spec.ts",
+      "admin-workspaces.spec.ts",
+      "modal-width.spec.ts",
+      "no-mock-data.spec.ts",
+      "document-pipeline.spec.ts"
+    ],
+    "tier4a_project": "chromium",
+    "tier4b_journeys": ["login", "home", "chat", "admin", "documents", "workflows"],
     "notes": "Upstream gblack686/blackga-nih instance — account 695681773636"
   },
 
@@ -92,6 +152,26 @@
       "tests/test_strands_service_integration.py"
     ],
     "tier3_test": "tests/test_strands_eval.py",
+    "client_dir": "client",
+    "tier4a_tests": [
+      "navigation.spec.ts",
+      "chat.spec.ts",
+      "chat-features.spec.ts",
+      "admin-dashboard.spec.ts",
+      "documents.spec.ts",
+      "workflows.spec.ts",
+      "keyboard-shortcuts.spec.ts",
+      "validate-feedback.spec.ts",
+      "knowledge-base.spec.ts",
+      "admin-skills.spec.ts",
+      "admin-templates.spec.ts",
+      "admin-workspaces.spec.ts",
+      "modal-width.spec.ts",
+      "no-mock-data.spec.ts",
+      "document-pipeline.spec.ts"
+    ],
+    "tier4a_project": "chromium",
+    "tier4b_journeys": ["login", "home", "chat", "admin", "documents", "workflows"],
     "notes": "Describe this repo/environment here"
   }
 }

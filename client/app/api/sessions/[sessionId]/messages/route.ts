@@ -41,9 +41,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error('Session messages GET error:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch session messages' },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch session messages' }, { status: 502 });
   }
 }

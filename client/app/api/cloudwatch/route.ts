@@ -41,17 +41,13 @@ export async function GET(request: Request) {
           orderBy: 'LastEventTime',
           descending: true,
           limit: Math.min(limit, 50),
-        })
+        }),
       );
 
       const streams = (response.logStreams || []).map((s) => ({
         name: s.logStreamName,
-        created: s.creationTime
-          ? new Date(s.creationTime).toISOString()
-          : null,
-        lastEvent: s.lastEventTimestamp
-          ? new Date(s.lastEventTimestamp).toISOString()
-          : null,
+        created: s.creationTime ? new Date(s.creationTime).toISOString() : null,
+        lastEvent: s.lastEventTimestamp ? new Date(s.lastEventTimestamp).toISOString() : null,
         storedBytes: s.storedBytes,
       }));
 
@@ -66,7 +62,7 @@ export async function GET(request: Request) {
           logStreamName: stream,
           startFromHead: true,
           limit: Math.min(limit, 500),
-        })
+        }),
       );
 
       const events = (response.events || []).map((e) => {
@@ -77,9 +73,7 @@ export async function GET(request: Request) {
           // not JSON, keep raw
         }
         return {
-          timestamp: e.timestamp
-            ? new Date(e.timestamp).toISOString()
-            : null,
+          timestamp: e.timestamp ? new Date(e.timestamp).toISOString() : null,
           message: parsed || e.message,
         };
       });
@@ -94,7 +88,7 @@ export async function GET(request: Request) {
         orderBy: 'LastEventTime',
         descending: true,
         limit: 1,
-      })
+      }),
     );
 
     const latestStream = streamsResp.logStreams?.[0];
@@ -113,7 +107,7 @@ export async function GET(request: Request) {
         logStreamName: latestStream.logStreamName,
         startFromHead: true,
         limit: Math.min(limit, 500),
-      })
+      }),
     );
 
     const events = (eventsResp.events || []).map((e) => {
@@ -124,9 +118,7 @@ export async function GET(request: Request) {
         // not JSON
       }
       return {
-        timestamp: e.timestamp
-          ? new Date(e.timestamp).toISOString()
-          : null,
+        timestamp: e.timestamp ? new Date(e.timestamp).toISOString() : null,
         message: parsed || e.message,
       };
     });
@@ -137,11 +129,9 @@ export async function GET(request: Request) {
       events,
     });
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : 'Unknown error';
+    const message = error instanceof Error ? error.message : 'Unknown error';
     const isNotFound =
-      message.includes('ResourceNotFoundException') ||
-      message.includes('does not exist');
+      message.includes('ResourceNotFoundException') || message.includes('does not exist');
 
     if (isNotFound) {
       return NextResponse.json(
@@ -150,7 +140,7 @@ export async function GET(request: Request) {
           error: `Log group ${logGroup} not found. Run test_eagle_sdk_eval.py to create it.`,
           available: false,
         },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -159,7 +149,7 @@ export async function GET(request: Request) {
         error: `CloudWatch error: ${message}`,
         available: false,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
