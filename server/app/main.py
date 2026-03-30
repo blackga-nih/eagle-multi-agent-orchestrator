@@ -88,7 +88,6 @@ from .routers.documents import GENERIC_EDIT_ERROR
 from .routers.feedback import router as feedback_router
 from .routers.health import router as health_router
 from .routers.commands import router as commands_router
-from .routers.mcp import router as mcp_router
 from .routers.packages import router as packages_router
 from .routers.packages import compat_router as packages_compat_router
 from .routers.sessions import (
@@ -2883,47 +2882,6 @@ async def get_tenant_analytics(
     return analytics
 
 
-# ── Weather MCP endpoints (compatibility) ────────────────────────────
-
-
-@app.get("/api/mcp/weather/tools")
-async def get_available_weather_tools(current_user: dict = Depends(get_current_user)):
-    """Get available weather MCP tools for current subscription tier"""
-    try:
-        from .weather_mcp_service import WeatherMCPClient
-
-        weather_client = WeatherMCPClient()
-        tier = current_user["subscription_tier"]
-        weather_tools = await weather_client.get_available_weather_tools(tier)
-        return {"subscription_tier": tier.value, "weather_tools": weather_tools}
-    except ImportError:
-        return {
-            "subscription_tier": "unknown",
-            "weather_tools": [],
-            "note": "Weather MCP not available",
-        }
-
-
-@app.post("/api/mcp/weather/{tool_name}")
-async def execute_weather_mcp_tool(
-    tool_name: str, arguments: dict, current_user: dict = Depends(get_current_user)
-):
-    """Execute weather MCP tool if subscription tier allows it"""
-    try:
-        from .weather_mcp_service import WeatherMCPClient
-
-        weather_client = WeatherMCPClient()
-        tier = current_user["subscription_tier"]
-        result = await weather_client.execute_weather_tool(tool_name, arguments, tier)
-        return {
-            "tool_name": tool_name,
-            "subscription_tier": tier.value,
-            "result": result,
-        }
-    except ImportError:
-        raise HTTPException(status_code=503, detail="Weather MCP service not available")
-
-
 # ── Admin Langfuse trace endpoints ────────────────────────────────────
 
 
@@ -3346,7 +3304,6 @@ app.include_router(commands_router)
 app.include_router(documents_router)
 app.include_router(feedback_router)
 app.include_router(health_router)
-app.include_router(mcp_router)
 app.include_router(packages_router)
 app.include_router(packages_compat_router)
 app.include_router(sessions_router)
