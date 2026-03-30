@@ -359,9 +359,9 @@ _model = BedrockModel(
     cache_config=CacheConfig(strategy="auto"),
 )
 
-# Fallback model — used when primary model returns ServiceUnavailableException.
-# Nova Pro has high availability and supports the same Converse API.
-FALLBACK_MODEL_ID = os.getenv("EAGLE_BEDROCK_FALLBACK_MODEL_ID", _NOVA_PRO)
+# Fallback model — used when primary model returns ServiceUnavailableException
+# or TTFT timeout. Haiku is fast, cheap, and already permitted by the app role.
+FALLBACK_MODEL_ID = os.getenv("EAGLE_BEDROCK_FALLBACK_MODEL_ID", _HAIKU)
 _fallback_model = BedrockModel(
     model_id=FALLBACK_MODEL_ID,
     region_name=os.getenv("AWS_REGION", "us-east-1"),
@@ -4814,6 +4814,11 @@ async def sdk_query_streaming(
     _current_tool_id: str | None = None
     error_holder: list[Exception] = []
     agent_result = None
+    # TTFT (Time To First Token) timeout: if no meaningful content arrives
+    # within this window, abort and retry with the fallback model.
+    # Bedrock cross-region inference can stall for 60-120s on cold paths.
+    _TTFT_TIMEOUT = float(os.getenv("EAGLE_TTFT_TIMEOUT", "45"))
+    _first_content_received = False
 
     def _drain_tool_results() -> list[dict]:
         """Drain events pushed by factory tools / subagent callbacks via result_queue."""
@@ -4890,6 +4895,26 @@ async def sdk_query_streaming(
                 _last_visible_yield = _time.perf_counter()
 
             if not done:
+                # TTFT timeout: if no text/tool content has arrived yet and
+                # we've exceeded the TTFT budget, abort and fall through to
+                # the fallback model (same path as ServiceUnavailableException).
+                if (
+                    not _first_content_received
+                    and _TTFT_TIMEOUT > 0
+                    and (_time.perf_counter() - _agent_start) > _TTFT_TIMEOUT
+                ):
+                    logger.warning(
+                        "TTFT timeout (%.0fs) exceeded for session=%s — "
+                        "cancelling primary model, switching to fallback",
+                        _TTFT_TIMEOUT,
+                        session_id,
+                    )
+                    if _pending_next and not _pending_next.done():
+                        _pending_next.cancel()
+                    raise TimeoutError(
+                        f"TTFT timeout: no content from {MODEL} after {_TTFT_TIMEOUT:.0f}s"
+                    )
+
                 # Emit periodic status while waiting for model output
                 if (
                     _time.perf_counter() - _last_visible_yield
@@ -4897,7 +4922,7 @@ async def sdk_query_streaming(
                     _stale_detail = (
                         "Preparing documents..."
                         if any("create_document" in str(tc) for tc in tools_called)
-                        else "Reconnecting..."
+                        else "Still working..."
                     )
                     yield {
                         "type": "agent_status",
@@ -4920,6 +4945,7 @@ async def sdk_query_streaming(
                 delta = raw_event.get("contentBlockDelta", {}).get("delta", {})
                 reasoning_text = delta.get("reasoningContent", {}).get("text", "")
                 if reasoning_text:
+                    _first_content_received = True
                     yield {"type": "reasoning", "data": reasoning_text}
                     continue
                 # Tool input delta — model composing tool parameters
@@ -4940,6 +4966,7 @@ async def sdk_query_streaming(
             # --- Text streaming ---
             data = event.get("data")
             if data and isinstance(data, str):
+                _first_content_received = True
                 full_text_parts.append(data)
                 yield {"type": "text", "data": data}
                 _last_visible_yield = _time.perf_counter()
@@ -4950,6 +4977,7 @@ async def sdk_query_streaming(
             # before switching to the new one.
             current_tool = event.get("current_tool_use")
             if current_tool and isinstance(current_tool, dict):
+                _first_content_received = True
                 tool_id = current_tool.get("toolUseId", "")
                 if tool_id and tool_id != _current_tool_id:
                     if _tool_input_buf and _current_tool_id:
@@ -5094,20 +5122,22 @@ async def sdk_query_streaming(
         from botocore.exceptions import ClientError
         from strands.types.exceptions import ContextWindowOverflowException
 
-        # --- Fallback to alternate model on ServiceUnavailableException ---
+        # --- Fallback to alternate model on ServiceUnavailable or TTFT timeout ---
         _is_service_unavailable = (
             isinstance(exc, ClientError)
             and exc.response.get("Error", {}).get("Code") == "ServiceUnavailableException"
         ) or "ServiceUnavailableException" in str(exc)
+        _is_ttft_timeout = isinstance(exc, TimeoutError) and "TTFT timeout" in str(exc)
 
-        if _is_service_unavailable and FALLBACK_MODEL_ID:
+        if (_is_service_unavailable or _is_ttft_timeout) and FALLBACK_MODEL_ID:
+            _fallback_reason = "TTFT timeout" if _is_ttft_timeout else "service unavailable"
             logger.warning(
-                "Primary model %s unavailable, falling back to %s: session=%s error=%s",
-                MODEL, FALLBACK_MODEL_ID, session_id, exc,
+                "Primary model %s %s, falling back to %s: session=%s error=%s",
+                MODEL, _fallback_reason, FALLBACK_MODEL_ID, session_id, exc,
             )
             yield {
                 "type": "agent_status",
-                "status": "Switching to backup model...",
+                "status": "Switching to faster model...",
                 "detail": "model_fallback",
             }
             try:
