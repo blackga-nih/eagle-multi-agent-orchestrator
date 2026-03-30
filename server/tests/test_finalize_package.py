@@ -133,7 +133,7 @@ class TestExecFinalizePackage:
     @patch("app.package_store.submit_package")
     def test_auto_submit_submits_when_ready(self, mock_submit, mock_validate):
         """auto_submit=True should call submit_package when ready."""
-        from app.agentic_service import _exec_finalize_package
+        from app.tools.package_document_tools import exec_finalize_package as _exec_finalize_package
 
         mock_validate.return_value = {
             "ready": True,
@@ -159,7 +159,7 @@ class TestExecFinalizePackage:
     @patch("app.package_store.submit_package")
     def test_auto_submit_skips_when_not_ready(self, mock_submit, mock_validate):
         """auto_submit=True should NOT submit when package is not ready."""
-        from app.agentic_service import _exec_finalize_package
+        from app.tools.package_document_tools import exec_finalize_package as _exec_finalize_package
 
         mock_validate.return_value = {
             "ready": False,
@@ -181,7 +181,7 @@ class TestExecFinalizePackage:
 
     def test_missing_package_id_returns_error(self):
         """Missing package_id param should return error."""
-        from app.agentic_service import _exec_finalize_package
+        from app.tools.package_document_tools import exec_finalize_package as _exec_finalize_package
 
         result = _exec_finalize_package({}, "tenant")
         assert "error" in result

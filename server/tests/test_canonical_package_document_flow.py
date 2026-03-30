@@ -11,7 +11,7 @@ from app.document_service import DocumentResult
 
 def test_exec_create_document_routes_package_mode_to_canonical(monkeypatch):
     """When package_id is present, create_document should use canonical service."""
-    from app.agentic_service import _exec_create_document
+    from app.tools.document_generation import exec_create_document as _exec_create_document
 
     class FakeTemplateResult:
         success = False
@@ -44,7 +44,7 @@ def test_exec_create_document_routes_package_mode_to_canonical(monkeypatch):
     )
 
     mock_s3 = mock.MagicMock()
-    monkeypatch.setattr("app.agentic_service._get_s3", lambda: mock_s3)
+    monkeypatch.setattr("app.tools.document_generation.get_s3", lambda: mock_s3)
 
     result = _exec_create_document(
         {
@@ -157,7 +157,7 @@ def test_force_document_creation_for_direct_request_without_tool(monkeypatch):
             "word_count": 1200,
         }
 
-    monkeypatch.setattr("app.agentic_service._exec_create_document", fake_exec_create_document)
+    monkeypatch.setattr("app.tools.document_generation.exec_create_document", fake_exec_create_document)
 
     forced = asyncio.run(
         _ensure_create_document_for_direct_request(
@@ -182,7 +182,7 @@ def test_force_document_creation_skips_when_tool_already_called(monkeypatch):
         called["count"] += 1
         return {"status": "saved"}
 
-    monkeypatch.setattr("app.agentic_service._exec_create_document", fake_exec_create_document)
+    monkeypatch.setattr("app.tools.document_generation.exec_create_document", fake_exec_create_document)
 
     forced = asyncio.run(
         _ensure_create_document_for_direct_request(
@@ -260,7 +260,7 @@ def test_sdk_query_streaming_fast_path_emits_document_events(monkeypatch):
             "word_count": 1200,
         }
 
-    monkeypatch.setattr("app.agentic_service._exec_create_document", fake_exec_create_document)
+    monkeypatch.setattr("app.tools.document_generation.exec_create_document", fake_exec_create_document)
 
     async def _collect():
         chunks = []

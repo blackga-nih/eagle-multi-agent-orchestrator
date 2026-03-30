@@ -43,18 +43,6 @@ class TestBackfillTitleNoLinked:
             "package_document_tools.py still contains '(linked)' in backfill title"
         )
 
-    def test_agentic_service_backfill_title(self):
-        """agentic_service.py backfill should not append (linked)."""
-        import importlib
-        import app.agentic_service as asvc
-
-        src = importlib.util.find_spec("app.agentic_service")
-        assert src and src.origin
-        source_text = open(src.origin, encoding="utf-8").read()
-        assert "(linked)" not in source_text, (
-            "agentic_service.py still contains '(linked)' in backfill title"
-        )
-
     def test_backfill_title_format(self):
         """Title format should be clean: 'Acquisition Plan' not 'Acquisition Plan (linked)'."""
         doc_type = "acquisition_plan"

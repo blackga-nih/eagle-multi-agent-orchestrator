@@ -1,8 +1,7 @@
 """Active document generation boundary for ``create_document``.
 
 This module owns the active create-document execution path. Shared document
-generation helpers now live in ``create_document_support.py`` so active callers
-do not import behavior from the deprecated ``agentic_service`` monolith.
+generation helpers live in ``create_document_support.py``.
 """
 
 from __future__ import annotations

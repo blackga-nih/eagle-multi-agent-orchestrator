@@ -1,7 +1,7 @@
 """
 EAGLE Business Tools MCP Server
 
-Exposes the execute_tool() dispatcher from agentic_service.py as a local
+Exposes the execute_tool() dispatcher from tools/legacy_dispatch.py as a local
 MCP server so that SDK skill subagents can call S3, DynamoDB, CloudWatch,
 and document generation tools.
 
@@ -32,8 +32,7 @@ from typing import Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-# Import through a compatibility boundary so active code no longer depends on
-# the deprecated agentic_service module path directly.
+# Import the tool dispatcher from the refactored tools package.
 try:
     from .tools.legacy_dispatch import execute_tool as _execute_tool
 except ImportError:
@@ -133,7 +132,7 @@ def create_eagle_mcp_server(
 ):
     """Create a local MCP server that exposes EAGLE business tools.
 
-    Each tool delegates to execute_tool() from agentic_service.py.
+    Each tool delegates to execute_tool() from tools/legacy_dispatch.py.
     The tenant_id and session_id are injected into every tool call for
     per-tenant scoping and audit trail consistency.
 

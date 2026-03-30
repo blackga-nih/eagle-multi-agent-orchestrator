@@ -13,43 +13,43 @@ class TestDocTypeAliases:
     """Verify _normalize_create_document_doc_type resolves aliases."""
 
     def test_section_l_alias_resolves(self):
-        from app.agentic_service import _normalize_create_document_doc_type
+        from app.tools.create_document_support import _normalize_create_document_doc_type
 
         assert _normalize_create_document_doc_type("section_l", "") == "eval_criteria"
 
     def test_section_m_alias_resolves(self):
-        from app.agentic_service import _normalize_create_document_doc_type
+        from app.tools.create_document_support import _normalize_create_document_doc_type
 
         assert _normalize_create_document_doc_type("section_m", "") == "eval_criteria"
 
     def test_instructions_to_offerors_alias_resolves(self):
-        from app.agentic_service import _normalize_create_document_doc_type
+        from app.tools.create_document_support import _normalize_create_document_doc_type
 
         assert _normalize_create_document_doc_type("instructions_to_offerors", "") == "eval_criteria"
 
     def test_evaluation_factors_alias_resolves(self):
-        from app.agentic_service import _normalize_create_document_doc_type
+        from app.tools.create_document_support import _normalize_create_document_doc_type
 
         assert _normalize_create_document_doc_type("evaluation_factors", "") == "eval_criteria"
 
     def test_evaluation_criteria_alias_resolves(self):
-        from app.agentic_service import _normalize_create_document_doc_type
+        from app.tools.create_document_support import _normalize_create_document_doc_type
 
         assert _normalize_create_document_doc_type("evaluation_criteria", "") == "eval_criteria"
 
     def test_source_selection_plan_alias_resolves(self):
-        from app.agentic_service import _normalize_create_document_doc_type
+        from app.tools.create_document_support import _normalize_create_document_doc_type
 
         assert _normalize_create_document_doc_type("source_selection_plan", "") == "acquisition_plan"
 
     def test_ssp_alias_resolves(self):
-        from app.agentic_service import _normalize_create_document_doc_type
+        from app.tools.create_document_support import _normalize_create_document_doc_type
 
         assert _normalize_create_document_doc_type("ssp", "") == "acquisition_plan"
 
     def test_existing_types_unchanged(self):
         """All 10 valid doc types should normalize to themselves."""
-        from app.agentic_service import _normalize_create_document_doc_type
+        from app.tools.create_document_support import _normalize_create_document_doc_type
 
         valid_types = [
             "sow", "igce", "market_research", "justification",
@@ -65,28 +65,28 @@ class TestTitleDocTypePatterns:
     """Verify _infer_doc_type_from_title handles RFP section names."""
 
     def test_title_instructions_to_offerors(self):
-        from app.agentic_service import _infer_doc_type_from_title
+        from app.tools.create_document_support import _infer_doc_type_from_title
 
         assert _infer_doc_type_from_title("RFP Section L - Instructions to Offerors") == "eval_criteria"
 
     def test_title_section_l(self):
-        from app.agentic_service import _infer_doc_type_from_title
+        from app.tools.create_document_support import _infer_doc_type_from_title
 
         assert _infer_doc_type_from_title("Section L Evaluation Instructions") == "eval_criteria"
 
     def test_title_section_m(self):
-        from app.agentic_service import _infer_doc_type_from_title
+        from app.tools.create_document_support import _infer_doc_type_from_title
 
         assert _infer_doc_type_from_title("Section M Evaluation Criteria") == "eval_criteria"
 
     def test_title_source_selection_plan(self):
-        from app.agentic_service import _infer_doc_type_from_title
+        from app.tools.create_document_support import _infer_doc_type_from_title
 
         assert _infer_doc_type_from_title("Source Selection Plan for Cloud Services") == "acquisition_plan"
 
     def test_existing_title_patterns_still_work(self):
         """Existing title patterns should not be broken."""
-        from app.agentic_service import _infer_doc_type_from_title
+        from app.tools.create_document_support import _infer_doc_type_from_title
 
         assert _infer_doc_type_from_title("Statement of Work") == "sow"
         assert _infer_doc_type_from_title("IGCE for IT Services") == "igce"

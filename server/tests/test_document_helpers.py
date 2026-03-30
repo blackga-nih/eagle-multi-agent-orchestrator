@@ -28,7 +28,7 @@ class TestExtractFirstMoneyValue:
     @pytest.fixture(autouse=True)
     def _import(self):
         with patch.dict(os.environ, ENV_PATCH, clear=False):
-            from app.agentic_service import _extract_first_money_value
+            from app.tools.create_document_support import _extract_first_money_value
             self.fn = _extract_first_money_value
 
     def test_standard_currency(self):
@@ -66,7 +66,7 @@ class TestExtractPeriod:
     @pytest.fixture(autouse=True)
     def _import(self):
         with patch.dict(os.environ, ENV_PATCH, clear=False):
-            from app.agentic_service import _extract_period
+            from app.tools.create_document_support import _extract_period
             self.fn = _extract_period
 
     def test_months(self):
@@ -106,7 +106,7 @@ class TestExtractSectionBullets:
     @pytest.fixture(autouse=True)
     def _import(self):
         with patch.dict(os.environ, ENV_PATCH, clear=False):
-            from app.agentic_service import _extract_section_bullets
+            from app.tools.create_document_support import _extract_section_bullets
             self.fn = _extract_section_bullets
 
     def test_basic_heading_and_bullets(self):
@@ -154,7 +154,7 @@ class TestNormalizeDocType:
     @pytest.fixture(autouse=True)
     def _import(self):
         with patch.dict(os.environ, ENV_PATCH, clear=False):
-            from app.agentic_service import _normalize_create_document_doc_type
+            from app.tools.create_document_support import _normalize_create_document_doc_type
             self.fn = _normalize_create_document_doc_type
 
     def test_standard_type(self):
@@ -194,7 +194,7 @@ class TestInferDocTypeFromTitle:
     @pytest.fixture(autouse=True)
     def _import(self):
         with patch.dict(os.environ, ENV_PATCH, clear=False):
-            from app.agentic_service import _infer_doc_type_from_title
+            from app.tools.create_document_support import _infer_doc_type_from_title
             self.fn = _infer_doc_type_from_title
 
     def test_sow_title(self):
@@ -228,7 +228,7 @@ class TestLooksLikeUnfilledTemplatePreview:
     @pytest.fixture(autouse=True)
     def _import(self):
         with patch.dict(os.environ, ENV_PATCH, clear=False):
-            from app.agentic_service import _looks_like_unfilled_template_preview
+            from app.tools.create_document_support import _looks_like_unfilled_template_preview
             self.fn = _looks_like_unfilled_template_preview
 
     def test_empty_preview_returns_false(self):

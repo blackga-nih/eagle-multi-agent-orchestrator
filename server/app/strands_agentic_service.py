@@ -51,7 +51,13 @@ if __package__ is None or __package__ == "":
     __package__ = "app"
 
 from eagle_skill_constants import AGENTS, COMMANDS, SKILLS, PLUGIN_CONTENTS
-from .config import DEFAULT_BEDROCK_HAIKU_MODEL, DEFAULT_BEDROCK_SONNET_MODEL
+from .config import (
+    DEFAULT_BEDROCK_HAIKU_MODEL,
+    DEFAULT_BEDROCK_SONNET_46_MODEL,
+    DEFAULT_BEDROCK_SONNET_45_MODEL,
+    DEFAULT_BEDROCK_SONNET_40_MODEL,
+    DEFAULT_BEDROCK_SONNET_MODEL,
+)
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
 from .tools.web_fetch import exec_web_fetch
 from .tools.web_search import exec_web_search
@@ -299,33 +305,143 @@ class ResultMessage:
     usage: dict = field(default_factory=dict)
 
 
-# -- Model Selection -------------------------------------------------
-# If EAGLE_BEDROCK_MODEL_ID is explicitly set, use it.
-# Default to Haiku — Sonnet 4.6 cross-region inference is consistently
-# timing out (100% TTFT failures as of 2026-03-30). Switch back to
-# Sonnet once Bedrock stabilises by setting EAGLE_BEDROCK_MODEL_ID.
+# -- Model Circuit Breaker -------------------------------------------
+# Ordered fallback chain: Sonnet 4.6 → 4.5 → 4.0 → Haiku.
+# Circuit breaker tracks per-model failures and routes to the next
+# healthy model automatically. Recovers when failed models come back.
+
+import threading
+import time as _time_mod
 
 _NCI_ACCOUNT = "695681773636"
-_SONNET = DEFAULT_BEDROCK_SONNET_MODEL
+_SONNET_46 = DEFAULT_BEDROCK_SONNET_46_MODEL
+_SONNET_45 = DEFAULT_BEDROCK_SONNET_45_MODEL
+_SONNET_40 = DEFAULT_BEDROCK_SONNET_40_MODEL
 _HAIKU = DEFAULT_BEDROCK_HAIKU_MODEL
 _NOVA_PRO = "us.amazon.nova-pro-v1:0"
+# Backward-compat alias
+_SONNET = _SONNET_46
 
 
-def _default_model() -> str:
-    env_model = os.getenv("EAGLE_BEDROCK_MODEL_ID")
-    if env_model:
-        return env_model
-    return _HAIKU
+class ModelCircuitBreaker:
+    """Per-model circuit breaker with ordered fallback chain.
+
+    States per model:
+      CLOSED    — healthy, accepting traffic
+      OPEN      — failed, routing to next model in chain
+      HALF_OPEN — recovery timeout elapsed, next request probes this model
+
+    Thread-safe via threading.Lock (Strands SDK bridges sync/async via threads).
+    """
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+    def __init__(
+        self,
+        model_ids: list[str],
+        failure_threshold: int = 2,
+        recovery_timeout: float = 120.0,
+    ):
+        self._lock = threading.Lock()
+        self._model_ids = list(model_ids)
+        self._failure_threshold = failure_threshold
+        self._recovery_timeout = recovery_timeout
+        self._states: dict[str, str] = {m: self.CLOSED for m in model_ids}
+        self._failure_counts: dict[str, int] = {m: 0 for m in model_ids}
+        self._last_failure_time: dict[str, float] = {m: 0.0 for m in model_ids}
+
+    @property
+    def model_ids(self) -> list[str]:
+        return list(self._model_ids)
+
+    def get_active_model_id(self) -> str:
+        """Return the first model in the chain that is CLOSED or HALF_OPEN."""
+        with self._lock:
+            now = _time_mod.monotonic()
+            for mid in self._model_ids:
+                state = self._states[mid]
+                if state == self.CLOSED:
+                    return mid
+                if state == self.OPEN:
+                    if (now - self._last_failure_time[mid]) >= self._recovery_timeout:
+                        self._states[mid] = self.HALF_OPEN
+                        logger.info(
+                            "circuit_breaker: %s -> HALF_OPEN (probe eligible)", mid
+                        )
+                        return mid
+                    continue
+                if state == self.HALF_OPEN:
+                    return mid
+            # All open — last resort: always return the last model (Haiku)
+            return self._model_ids[-1]
+
+    def record_success(self, model_id: str) -> None:
+        """Reset failure count and close the circuit for this model."""
+        with self._lock:
+            if model_id not in self._states:
+                return
+            prev = self._states[model_id]
+            self._failure_counts[model_id] = 0
+            self._states[model_id] = self.CLOSED
+            if prev != self.CLOSED:
+                logger.info("circuit_breaker: %s -> CLOSED (recovered)", model_id)
+
+    def record_failure(self, model_id: str) -> None:
+        """Increment failure count; open circuit if threshold reached."""
+        with self._lock:
+            if model_id not in self._states:
+                return
+            self._failure_counts[model_id] += 1
+            self._last_failure_time[model_id] = _time_mod.monotonic()
+            if self._failure_counts[model_id] >= self._failure_threshold:
+                self._states[model_id] = self.OPEN
+                logger.warning(
+                    "circuit_breaker: %s -> OPEN (failures=%d, threshold=%d)",
+                    model_id,
+                    self._failure_counts[model_id],
+                    self._failure_threshold,
+                )
+
+    def get_status(self) -> dict:
+        """Return snapshot of all model states for /api/health and logging."""
+        with self._lock:
+            return {
+                mid: {
+                    "state": self._states[mid],
+                    "failures": self._failure_counts[mid],
+                }
+                for mid in self._model_ids
+            }
 
 
-MODEL = _default_model()
-logger.info("EAGLE model: %s", MODEL)
+# -- Model Chain Setup -----------------------------------------------
+# Build the ordered chain. EAGLE_BEDROCK_MODEL_ID (if set) is promoted
+# to position 0; duplicates are removed.
 
+_DEFAULT_MODEL_CHAIN = [_SONNET_46, _SONNET_45, _SONNET_40, _HAIKU]
+_ENV_MODEL_OVERRIDE = os.getenv("EAGLE_BEDROCK_MODEL_ID")
 
-# -- Shared Model (module-level) -------------------------------------
-# Created once at import time. Reused across all requests.
-# boto3 handles SSO/IAM natively — no credential bridging needed.
+_MODEL_CHAIN_IDS: list[str] = list(_DEFAULT_MODEL_CHAIN)
+if _ENV_MODEL_OVERRIDE:
+    if _ENV_MODEL_OVERRIDE in _MODEL_CHAIN_IDS:
+        _MODEL_CHAIN_IDS.remove(_ENV_MODEL_OVERRIDE)
+    _MODEL_CHAIN_IDS.insert(0, _ENV_MODEL_OVERRIDE)
 
+_CB_FAILURE_THRESHOLD = int(os.getenv("EAGLE_CB_FAILURE_THRESHOLD", "2"))
+_CB_RECOVERY_TIMEOUT = float(os.getenv("EAGLE_CB_RECOVERY_TIMEOUT", "120"))
+
+_circuit_breaker = ModelCircuitBreaker(
+    model_ids=_MODEL_CHAIN_IDS,
+    failure_threshold=_CB_FAILURE_THRESHOLD,
+    recovery_timeout=_CB_RECOVERY_TIMEOUT,
+)
+
+# Backward-compat: MODULE is the preferred (first) model in the chain.
+MODEL = _MODEL_CHAIN_IDS[0]
+
+# -- Shared BedrockModel instances (one per unique model in chain) ---
 _bedrock_client_config = Config(
     connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "60")),
     read_timeout=int(os.getenv("EAGLE_BEDROCK_READ_TIMEOUT", "300")),
@@ -336,27 +452,79 @@ _bedrock_client_config = Config(
     tcp_keepalive=True,
 )
 
-_model = BedrockModel(
-    model_id=MODEL,
-    region_name=os.getenv("AWS_REGION", "us-east-1"),
-    boto_client_config=_bedrock_client_config,
-    # Bedrock prompt caching — requires boto3>=1.37.24 (native cachePoint support).
-    # cache_tools: appends cachePoint to toolConfig, caching 34 tool schemas (~17K tokens).
-    # cache_config: auto-injects cachePoint at last user message for prefix caching.
-    # 5-min TTL, refreshes on hit. ~2-4s TTFT reduction, ~90% input token cost savings.
-    cache_tools="default",
-    cache_config=CacheConfig(strategy="auto"),
+_bedrock_models: dict[str, BedrockModel] = {}
+for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
+    _kwargs: dict[str, Any] = dict(
+        model_id=_mid,
+        region_name=os.getenv("AWS_REGION", "us-east-1"),
+        boto_client_config=_bedrock_client_config,
+    )
+    # Enable prompt caching on Sonnet-class models
+    if "sonnet" in _mid:
+        _kwargs["cache_tools"] = "default"
+        _kwargs["cache_config"] = CacheConfig(strategy="auto")
+    _bedrock_models[_mid] = BedrockModel(**_kwargs)
+
+# Backward-compat alias
+_model = _bedrock_models[MODEL]
+
+logger.info("EAGLE model chain: %s", _MODEL_CHAIN_IDS)
+logger.info(
+    "EAGLE circuit breaker: threshold=%d, recovery=%ds",
+    _CB_FAILURE_THRESHOLD,
+    _CB_RECOVERY_TIMEOUT,
 )
 
-# Fallback model — used when primary model returns ServiceUnavailableException
-# or TTFT timeout. Haiku is fast, cheap, and already permitted by the app role.
-FALLBACK_MODEL_ID = os.getenv("EAGLE_BEDROCK_FALLBACK_MODEL_ID", _HAIKU)
-_fallback_model = BedrockModel(
-    model_id=FALLBACK_MODEL_ID,
-    region_name=os.getenv("AWS_REGION", "us-east-1"),
-    boto_client_config=_bedrock_client_config,
+
+def _get_active_model() -> tuple[str, BedrockModel]:
+    """Return (model_id, BedrockModel) for the currently active model."""
+    mid = _circuit_breaker.get_active_model_id()
+    return mid, _bedrock_models[mid]
+
+
+# -- Startup Probe (background) -------------------------------------
+# Fire a minimal converse() to each model at import time.
+# Dead models get their circuit opened immediately, avoiding first-request latency.
+
+_ENABLE_STARTUP_PROBE = os.getenv("EAGLE_CB_STARTUP_PROBE", "true").lower() in (
+    "true",
+    "1",
 )
-logger.info("EAGLE fallback model: %s", FALLBACK_MODEL_ID)
+
+
+def _run_startup_probe():
+    """Probe each model in the chain with a trivial request."""
+    import boto3
+
+    probe_client = boto3.client(
+        "bedrock-runtime",
+        region_name=os.getenv("AWS_REGION", "us-east-1"),
+        config=Config(
+            connect_timeout=5, read_timeout=15, retries={"max_attempts": 1}
+        ),
+    )
+    for mid in _MODEL_CHAIN_IDS:
+        try:
+            probe_client.converse(
+                modelId=mid,
+                messages=[{"role": "user", "content": [{"text": "hi"}]}],
+                inferenceConfig={"maxTokens": 1},
+            )
+            logger.info("startup_probe: %s OK", mid)
+        except Exception as exc:
+            # Hit threshold immediately so circuit opens
+            for _ in range(_CB_FAILURE_THRESHOLD):
+                _circuit_breaker.record_failure(mid)
+            logger.warning("startup_probe: %s FAILED: %s", mid, exc)
+
+
+if _ENABLE_STARTUP_PROBE:
+    threading.Thread(
+        target=_run_startup_probe, name="cb-startup-probe", daemon=True
+    ).start()
+
+# Backward-compat alias used by older code paths
+FALLBACK_MODEL_ID = _MODEL_CHAIN_IDS[-1]
 
 # Tier-gated tool access.
 # Strands subagents don't use CLI tools like Read/Glob/Grep — tool access
@@ -503,7 +671,7 @@ async def _maybe_fast_path_greeting(prompt: str) -> dict | None:
 
     t0 = _t.perf_counter()
     client = _get_greeting_bedrock_client()
-    model_id = os.getenv("EAGLE_BEDROCK_MODEL_ID", MODEL)
+    model_id = _circuit_breaker.get_active_model_id()
 
     try:
         resp = await asyncio.get_event_loop().run_in_executor(
@@ -514,14 +682,16 @@ async def _maybe_fast_path_greeting(prompt: str) -> dict | None:
                 system=[{"text": _GREETING_SYSTEM_PROMPT}],
             ),
         )
+        _circuit_breaker.record_success(model_id)
     except Exception as exc:
-        logger.warning("Greeting fast-path failed, falling through: %s", exc)
+        _circuit_breaker.record_failure(model_id)
+        logger.warning("Greeting fast-path failed (%s), falling through: %s", model_id, exc)
         return None
 
     output_text = resp["output"]["message"]["content"][0]["text"]
     usage = resp.get("usage", {})
     elapsed_ms = int((_t.perf_counter() - t0) * 1000)
-    logger.info("Greeting fast-path responded in %dms", elapsed_ms)
+    logger.info("Greeting fast-path responded in %dms (model=%s)", elapsed_ms, model_id)
     return {
         "text": output_text,
         "usage": usage,
@@ -2209,8 +2379,9 @@ def _make_subagent_tool(
         kb_tools = _build_subagent_kb_tools(tenant_id, session_id, result_queue, loop)
         all_tools = kb_tools + (extra_tools or [])
 
+        _, _active_bedrock_model = _get_active_model()
         agent = Agent(
-            model=_model,
+            model=_active_bedrock_model,
             system_prompt=subagent_context + prompt_body,
             tools=all_tools,
             callback_handler=(
@@ -4547,8 +4718,9 @@ async def sdk_query(
             )
 
     _ensure_langfuse_exporter()
+    _current_model_id, _current_bedrock_model = _get_active_model()
     supervisor = Agent(
-        model=_model,
+        model=_current_bedrock_model,
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,
@@ -4883,8 +5055,9 @@ async def sdk_query_streaming(
     except Exception:
         logger.debug("Failed to emit trace.started", exc_info=True)
 
+    _current_model_id, _current_bedrock_model = _get_active_model()
     supervisor = Agent(
-        model=_model,
+        model=_current_bedrock_model,
         system_prompt=system_prompt,
         tools=skill_tools + service_tools,
         callback_handler=None,  # stream_async yields events directly
@@ -5166,6 +5339,8 @@ async def sdk_query_streaming(
             if "result" in event and hasattr(event.get("result"), "metrics"):
                 agent_result = event["result"]
 
+        _circuit_breaker.record_success(_current_model_id)
+
     except GeneratorExit:
         _elapsed = int((_time.perf_counter() - _agent_start) * 1000)
         logger.warning(
@@ -5212,86 +5387,130 @@ async def sdk_query_streaming(
                     "Failed to persist partial work on disconnect: session=%s",
                     session_id,
                 )
+        # Close Langfuse parent span on client disconnect
+        if _root_span is not None:
+            try:
+                partial = "".join(full_text_parts)[:500] if full_text_parts else "[interrupted]"
+                _root_span.update(output=partial)
+            except Exception:
+                pass
+        if _lf_ctx is not None:
+            try:
+                _lf_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
         return  # Stream was abandoned — skip cleanup yields
     except Exception as exc:
         from botocore.exceptions import ClientError
         from strands.types.exceptions import ContextWindowOverflowException
 
-        # --- Fallback to alternate model on ServiceUnavailable or TTFT timeout ---
+        # --- Circuit-breaker cascade on ServiceUnavailable or TTFT timeout ---
         _is_service_unavailable = (
             isinstance(exc, ClientError)
             and exc.response.get("Error", {}).get("Code") == "ServiceUnavailableException"
         ) or "ServiceUnavailableException" in str(exc)
         _is_ttft_timeout = isinstance(exc, TimeoutError) and "TTFT timeout" in str(exc)
 
-        if (_is_service_unavailable or _is_ttft_timeout) and FALLBACK_MODEL_ID:
+        if _is_service_unavailable or _is_ttft_timeout:
             _fallback_reason = "TTFT timeout" if _is_ttft_timeout else "service unavailable"
+            _circuit_breaker.record_failure(_current_model_id)
             logger.warning(
-                "Primary model %s %s, falling back to %s: session=%s error=%s",
-                MODEL, _fallback_reason, FALLBACK_MODEL_ID, session_id, exc,
+                "circuit_breaker: %s failed (%s), session=%s. Status: %s",
+                _current_model_id, _fallback_reason, session_id,
+                _circuit_breaker.get_status(),
             )
-            yield {
-                "type": "agent_status",
-                "status": "Switching to faster model...",
-                "detail": "model_fallback",
-            }
-            try:
-                fallback_supervisor = Agent(
-                    model=_fallback_model,
-                    system_prompt=system_prompt,
-                    tools=skill_tools + service_tools,
-                    callback_handler=None,
-                    messages=strands_history or None,
-                    conversation_manager=conv_manager,
-                    trace_attributes=_build_trace_attrs(
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        tier=tier,
-                        session_id=session_id or "",
-                        username=username or "",
-                        eval_tags=tags,
-                    ),
+
+            # Cascade through remaining models in the chain
+            _cascade_succeeded = False
+            _failed_model_id = _current_model_id
+            for _cascade_attempt in range(len(_MODEL_CHAIN_IDS) - 1):
+                _next_model_id, _next_bedrock_model = _get_active_model()
+                if _next_model_id == _failed_model_id:
+                    break  # Circuit breaker has no more options
+
+                logger.info(
+                    "circuit_breaker: cascading to %s (attempt %d), session=%s",
+                    _next_model_id, _cascade_attempt + 1, session_id,
                 )
-                _fallback_iter = fallback_supervisor.stream_async(prompt).__aiter__()
-                _fb_pending: asyncio.Task | None = None
-                _fb_done = False
-                while not _fb_done:
-                    if _fb_pending is None:
-                        _fb_pending = asyncio.ensure_future(_fallback_iter.__anext__())
-                    fb_ready, _ = await asyncio.wait({_fb_pending}, timeout=0.5)
-                    for tool_result_chunk in _drain_tool_results():
-                        yield tool_result_chunk
-                    if not fb_ready:
-                        continue
-                    try:
-                        fb_event = _fb_pending.result()
-                    except StopAsyncIteration:
-                        _fb_done = True
-                        break
-                    _fb_pending = None
-                    fb_data = fb_event.get("data")
-                    if fb_data and isinstance(fb_data, str):
-                        full_text_parts.append(fb_data)
-                        yield {"type": "text", "data": fb_data}
-                        continue
-                    fb_raw = fb_event.get("event", {})
-                    if isinstance(fb_raw, dict):
-                        fb_reasoning = fb_raw.get("contentBlockDelta", {}).get("delta", {}).get("reasoningContent", {}).get("text", "")
-                        if fb_reasoning:
-                            yield {"type": "reasoning", "data": fb_reasoning}
+                yield {
+                    "type": "agent_status",
+                    "status": "Switching to faster model...",
+                    "detail": "model_fallback",
+                }
+                try:
+                    fallback_supervisor = Agent(
+                        model=_next_bedrock_model,
+                        system_prompt=system_prompt,
+                        tools=skill_tools + service_tools,
+                        callback_handler=None,
+                        messages=strands_history or None,
+                        conversation_manager=conv_manager,
+                        trace_attributes=_build_trace_attrs(
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            tier=tier,
+                            session_id=session_id or "",
+                            username=username or "",
+                            eval_tags=tags,
+                        ),
+                    )
+                    _fallback_iter = fallback_supervisor.stream_async(prompt).__aiter__()
+                    _fb_pending: asyncio.Task | None = None
+                    _fb_done = False
+                    while not _fb_done:
+                        if _fb_pending is None:
+                            _fb_pending = asyncio.ensure_future(_fallback_iter.__anext__())
+                        fb_ready, _ = await asyncio.wait({_fb_pending}, timeout=0.5)
+                        for tool_result_chunk in _drain_tool_results():
+                            yield tool_result_chunk
+                        if not fb_ready:
                             continue
-                    fb_tool = fb_event.get("current_tool_use")
-                    if fb_tool and isinstance(fb_tool, dict):
-                        fb_tool_name = fb_tool.get("name", "")
-                        tools_called.append(fb_tool_name)
-                        yield {"type": "tool_use", "name": fb_tool_name, "input": {}, "tool_use_id": fb_tool.get("toolUseId", "")}
-                        continue
-                    if "result" in fb_event and hasattr(fb_event.get("result"), "metrics"):
-                        agent_result = fb_event["result"]
-                logger.info("Fallback model %s succeeded for session=%s", FALLBACK_MODEL_ID, session_id)
-            except Exception as fallback_exc:
-                error_holder.append(fallback_exc)
-                logger.error("Fallback model %s also failed: session=%s error=%s", FALLBACK_MODEL_ID, session_id, fallback_exc)
+                        try:
+                            fb_event = _fb_pending.result()
+                        except StopAsyncIteration:
+                            _fb_done = True
+                            break
+                        _fb_pending = None
+                        fb_data = fb_event.get("data")
+                        if fb_data and isinstance(fb_data, str):
+                            full_text_parts.append(fb_data)
+                            yield {"type": "text", "data": fb_data}
+                            continue
+                        fb_raw = fb_event.get("event", {})
+                        if isinstance(fb_raw, dict):
+                            fb_reasoning = fb_raw.get("contentBlockDelta", {}).get("delta", {}).get("reasoningContent", {}).get("text", "")
+                            if fb_reasoning:
+                                yield {"type": "reasoning", "data": fb_reasoning}
+                                continue
+                        fb_tool = fb_event.get("current_tool_use")
+                        if fb_tool and isinstance(fb_tool, dict):
+                            fb_tool_name = fb_tool.get("name", "")
+                            tools_called.append(fb_tool_name)
+                            yield {"type": "tool_use", "name": fb_tool_name, "input": {}, "tool_use_id": fb_tool.get("toolUseId", "")}
+                            continue
+                        if "result" in fb_event and hasattr(fb_event.get("result"), "metrics"):
+                            agent_result = fb_event["result"]
+                    _circuit_breaker.record_success(_next_model_id)
+                    _cascade_succeeded = True
+                    logger.info(
+                        "circuit_breaker: %s succeeded for session=%s",
+                        _next_model_id, session_id,
+                    )
+                    break
+                except Exception as cascade_exc:
+                    _circuit_breaker.record_failure(_next_model_id)
+                    logger.warning(
+                        "circuit_breaker: %s also failed: session=%s error=%s",
+                        _next_model_id, session_id, cascade_exc,
+                    )
+                    _failed_model_id = _next_model_id
+                    continue
+
+            if not _cascade_succeeded:
+                error_holder.append(exc)
+                logger.error(
+                    "circuit_breaker: all models exhausted for session=%s", session_id,
+                )
         elif isinstance(exc, ContextWindowOverflowException):
             logger.error(
                 "Context window overflow unrecoverable for session=%s: %s",
@@ -5526,8 +5745,9 @@ async def sdk_query_single_skill(
     )
 
     _ensure_langfuse_exporter()
+    _, _active_bedrock_model = _get_active_model()
     agent = Agent(
-        model=_model,
+        model=_active_bedrock_model,
         system_prompt=tenant_context + skill_content,
         callback_handler=None,
         trace_attributes=_build_trace_attrs(

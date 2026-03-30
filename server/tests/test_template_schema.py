@@ -937,8 +937,8 @@ class TestDocGenSOW:
         """SOW with full AI content should include completeness report."""
         mock_s3 = _mock_s3()
         with patch.dict(os.environ, ENV_PATCH, clear=False), \
-             patch("app.agentic_service._get_s3", return_value=mock_s3):
-            from app.agentic_service import _exec_create_document
+             patch("app.tools.document_generation.get_s3", return_value=mock_s3):
+            from app.tools.document_generation import exec_create_document as _exec_create_document
             result = _exec_create_document(
                 {
                     "doc_type": "sow",
@@ -993,8 +993,8 @@ class TestDocGenIGCE:
         """IGCE with structured data returns valid output with cost details."""
         mock_s3 = _mock_s3()
         with patch.dict(os.environ, ENV_PATCH, clear=False), \
-             patch("app.agentic_service._get_s3", return_value=mock_s3):
-            from app.agentic_service import _exec_create_document
+             patch("app.tools.document_generation.get_s3", return_value=mock_s3):
+            from app.tools.document_generation import exec_create_document as _exec_create_document
             result = _exec_create_document(
                 {
                     "doc_type": "igce",
@@ -1080,8 +1080,8 @@ class TestDocGenMarketResearch:
         """Market Research with full AI content saves correctly."""
         mock_s3 = _mock_s3()
         with patch.dict(os.environ, ENV_PATCH, clear=False), \
-             patch("app.agentic_service._get_s3", return_value=mock_s3):
-            from app.agentic_service import _exec_create_document
+             patch("app.tools.document_generation.get_s3", return_value=mock_s3):
+            from app.tools.document_generation import exec_create_document as _exec_create_document
             result = _exec_create_document(
                 {
                     "doc_type": "market_research",
@@ -1112,8 +1112,8 @@ class TestDocGenJustification:
         """J&A with full AI content saves correctly."""
         mock_s3 = _mock_s3()
         with patch.dict(os.environ, ENV_PATCH, clear=False), \
-             patch("app.agentic_service._get_s3", return_value=mock_s3):
-            from app.agentic_service import _exec_create_document
+             patch("app.tools.document_generation.get_s3", return_value=mock_s3):
+            from app.tools.document_generation import exec_create_document as _exec_create_document
             result = _exec_create_document(
                 {
                     "doc_type": "justification",
@@ -1144,8 +1144,8 @@ class TestDocGenAcquisitionPlan:
         """Acquisition Plan with structured data returns valid output."""
         mock_s3 = _mock_s3()
         with patch.dict(os.environ, ENV_PATCH, clear=False), \
-             patch("app.agentic_service._get_s3", return_value=mock_s3):
-            from app.agentic_service import _exec_create_document
+             patch("app.tools.document_generation.get_s3", return_value=mock_s3):
+            from app.tools.document_generation import exec_create_document as _exec_create_document
             result = _exec_create_document(
                 {
                     "doc_type": "acquisition_plan",

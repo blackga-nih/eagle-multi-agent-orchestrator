@@ -1,8 +1,6 @@
-"""Active package/document tool handlers.
+"""Package/document tool handlers.
 
-This module owns the package/document management handlers that were previously
-hosted inside ``agentic_service``. Active runtimes should use these functions
-through the compatibility dispatch layer while the broader migration continues.
+Manages package validation, finalization, and document linkage operations.
 """
 
 from __future__ import annotations

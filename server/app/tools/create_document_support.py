@@ -623,6 +623,14 @@ _DOC_TYPE_ALIASES = {
     "independent_government_cost_estimate": "igce",
     "cost_estimate": "igce",
     "statement_of_work": "sow",
+    # RFP sections → closest existing types
+    "section_l": "eval_criteria",
+    "instructions_to_offerors": "eval_criteria",
+    "section_m": "eval_criteria",
+    "evaluation_factors": "eval_criteria",
+    "evaluation_criteria": "eval_criteria",
+    "source_selection_plan": "acquisition_plan",
+    "ssp": "acquisition_plan",
 }
 
 _TITLE_DOC_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -643,6 +651,10 @@ _TITLE_DOC_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "justification",
     ),
+    # RFP sections
+    (re.compile(r"\bsection\s+[lLmM]\b", re.IGNORECASE), "eval_criteria"),
+    (re.compile(r"\binstructions?\s+to\s+offerors?\b", re.IGNORECASE), "eval_criteria"),
+    (re.compile(r"\bsource\s+selection\s+plan\b", re.IGNORECASE), "acquisition_plan"),
 ]
 
 
