@@ -10,6 +10,8 @@ from app.compliance_matrix import (
     METHODS,
     THRESHOLD_TIERS,
     TYPES,
+    _normalize_method,
+    _normalize_type,
     execute_operation,
     get_requirements,
     search_far,
@@ -133,6 +135,174 @@ class TestGetRequirements:
         subk = [d for d in result["documents_required"] if "Subcontracting" in d["name"]]
         assert len(subk) == 1
         assert subk[0]["required"] is False
+
+
+# ---------------------------------------------------------------------------
+# 1b. Normalization / alias resolution
+# ---------------------------------------------------------------------------
+
+class TestNormalization:
+    """Verify alias resolution and normalization for method and type IDs."""
+
+    # --- Method aliases ---
+
+    def test_full_and_open_resolves_to_negotiated(self):
+        result = get_requirements(500_000, "full_and_open", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "negotiated"
+
+    def test_sealed_bidding_resolves_to_negotiated(self):
+        result = get_requirements(500_000, "sealed_bidding", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "negotiated"
+
+    def test_simplified_acquisition_resolves_to_sap(self):
+        result = get_requirements(200_000, "simplified_acquisition", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "sap"
+
+    def test_micro_purchase_resolves_to_micro(self):
+        result = get_requirements(10_000, "micro_purchase", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "micro"
+
+    def test_sole_source_resolves_to_sole(self):
+        result = get_requirements(500_000, "sole_source", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "sole"
+
+    def test_task_order_resolves_to_idiq_order(self):
+        result = get_requirements(200_000, "task_order", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "idiq-order"
+
+    def test_bpa_resolves_to_bpa_est(self):
+        result = get_requirements(200_000, "bpa", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "bpa-est"
+
+    def test_gsa_schedule_resolves_to_fss(self):
+        result = get_requirements(200_000, "gsa_schedule", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "fss"
+
+    # --- Type aliases ---
+
+    def test_firm_fixed_price_resolves_to_ffp(self):
+        result = get_requirements(200_000, "sap", "firm_fixed_price")
+        assert result["errors"] == []
+        assert result["contract_type"]["id"] == "ffp"
+
+    def test_cost_plus_fixed_fee_resolves_to_cpff(self):
+        result = get_requirements(1_000_000, "negotiated", "cost_plus_fixed_fee")
+        assert result["errors"] == []
+        assert result["contract_type"]["id"] == "cpff"
+
+    def test_time_and_materials_resolves_to_tm(self):
+        result = get_requirements(200_000, "sap", "time_and_materials")
+        assert result["errors"] == []
+        assert result["contract_type"]["id"] == "tm"
+
+    def test_labor_hour_resolves_to_lh(self):
+        result = get_requirements(200_000, "sap", "labor_hour")
+        assert result["errors"] == []
+        assert result["contract_type"]["id"] == "lh"
+
+    def test_t_and_m_alias_resolves_to_tm(self):
+        result = get_requirements(200_000, "sap", "t&m")
+        assert result["errors"] == []
+        assert result["contract_type"]["id"] == "tm"
+
+    # --- Case / whitespace / hyphen tolerance ---
+
+    def test_uppercase_method_resolves(self):
+        result = get_requirements(200_000, "SAP", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "sap"
+
+    def test_hyphen_underscore_equivalence_method(self):
+        result = get_requirements(200_000, "bpa_est", "ffp")
+        assert result["errors"] == []
+        assert result["method"]["id"] == "bpa-est"
+
+    def test_hyphen_underscore_equivalence_type(self):
+        result = get_requirements(200_000, "sap", "fp_epa")
+        assert result["errors"] == []
+        assert result["contract_type"]["id"] == "fp-epa"
+
+    def test_leading_trailing_whitespace(self):
+        result = get_requirements(200_000, "  sap  ", "  ffp  ")
+        assert result["errors"] == []
+
+    # --- Still errors for truly unknown inputs ---
+
+    def test_unknown_method_still_errors(self):
+        result = get_requirements(100_000, "bogus_method", "ffp")
+        assert len(result["errors"]) == 1
+        assert "Unknown acquisition method" in result["errors"][0]
+
+    def test_unknown_type_still_errors(self):
+        result = get_requirements(100_000, "sap", "bogus_type")
+        assert len(result["errors"]) == 1
+        assert "Unknown contract type" in result["errors"][0]
+
+    def test_empty_method_errors(self):
+        result = get_requirements(100_000, "", "ffp")
+        assert len(result["errors"]) == 1
+        assert "Unknown acquisition method" in result["errors"][0]
+
+    def test_empty_type_errors(self):
+        result = get_requirements(100_000, "sap", "")
+        assert len(result["errors"]) == 1
+        assert "Unknown contract type" in result["errors"][0]
+
+    # --- Error messages include valid IDs ---
+
+    def test_error_lists_valid_method_ids(self):
+        result = get_requirements(100_000, "xyz", "ffp")
+        error_msg = result["errors"][0]
+        assert "Valid IDs:" in error_msg
+        assert "negotiated" in error_msg
+
+    def test_error_lists_valid_type_ids(self):
+        result = get_requirements(100_000, "sap", "xyz")
+        error_msg = result["errors"][0]
+        assert "Valid IDs:" in error_msg
+        assert "ffp" in error_msg
+
+
+class TestNormalizeFunctions:
+    """Direct unit tests for normalization helpers."""
+
+    def test_normalize_method_exact_match(self):
+        assert _normalize_method("sap") == "sap"
+
+    def test_normalize_method_hyphenated_id(self):
+        assert _normalize_method("bpa-est") == "bpa-est"
+
+    def test_normalize_method_underscore_to_hyphen(self):
+        assert _normalize_method("bpa_call") == "bpa-call"
+
+    def test_normalize_method_alias(self):
+        assert _normalize_method("full_and_open") == "negotiated"
+
+    def test_normalize_method_none_for_unknown(self):
+        assert _normalize_method("nonexistent") is None
+
+    def test_normalize_method_none_for_empty(self):
+        assert _normalize_method("") is None
+
+    def test_normalize_type_exact_match(self):
+        assert _normalize_type("ffp") == "ffp"
+
+    def test_normalize_type_hyphenated_id(self):
+        assert _normalize_type("fp-epa") == "fp-epa"
+
+    def test_normalize_type_alias(self):
+        assert _normalize_type("firm_fixed_price") == "ffp"
+
+    def test_normalize_type_none_for_unknown(self):
+        assert _normalize_type("nonexistent") is None
 
 
 # ---------------------------------------------------------------------------

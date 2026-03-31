@@ -3641,8 +3641,8 @@ def _build_all_service_tools(
         Args:
             operation: Matrix operation — 'query', 'list_methods', 'list_types', 'list_thresholds', 'search_far', 'suggest_vehicle'
             contract_value: Contract dollar value
-            acquisition_method: Acquisition method code (e.g. 'sap', 'sealed_bidding')
-            contract_type: Contract type code (e.g. 'ffp', 'cpff')
+            acquisition_method: Acquisition method ID. Valid values: micro, sap, negotiated, fss, bpa-est, bpa-call, idiq, idiq-order, sole. Common aliases also accepted (e.g. 'full_and_open' resolves to 'negotiated', 'simplified_acquisition' to 'sap').
+            contract_type: Contract type ID. Valid values: ffp, fp-epa, fpi, cpff, cpif, cpaf, tm, lh. Common aliases also accepted (e.g. 'firm_fixed_price' resolves to 'ffp', 'time_and_materials' to 'tm').
             is_it: Whether this is an IT acquisition
             is_small_business: Whether small business set-aside applies
             is_rd: Whether this is R&D
