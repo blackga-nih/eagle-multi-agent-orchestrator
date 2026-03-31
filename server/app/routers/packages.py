@@ -293,6 +293,22 @@ async def export_package_zip_endpoint(
             file_type = doc.get("file_type", "md")
             if file_type in ("md", "txt", "json", "html"):
                 doc["content"] = raw_content.decode("utf-8")
+            elif file_type in ("docx", "xlsx"):
+                # For DOCX/XLSX, check if a markdown sibling exists (the
+                # markdown source is more useful for format conversion and
+                # avoids exporting unfilled templates).
+                md_key = s3_key.rsplit(".", 1)[0] + ".md"
+                try:
+                    md_obj = s3.get_object(Bucket=s3_bucket, Key=md_key)
+                    doc["content"] = md_obj["Body"].read().decode("utf-8")
+                    logger.debug("ZIP export: using markdown sibling for %s", s3_key)
+                except Exception:
+                    # No markdown sibling — include the binary DOCX directly
+                    doc["_binary"] = raw_content
+                    doc["filename"] = (
+                        f"{doc.get('doc_type', 'doc')}"
+                        f"_{doc.get('title', 'document')}.{file_type}"
+                    )
             else:
                 doc["_binary"] = raw_content
                 doc["filename"] = (

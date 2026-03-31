@@ -127,7 +127,7 @@ def exec_create_document(
             session_id=session_id,
         )
 
-    title = params.get("title", "Untitled Acquisition")
+    title = params.get("title") or ""
     doc_type = _normalize_create_document_doc_type(params.get("doc_type"), title)
     raw_data = params.get("data", {})
     if isinstance(raw_data, str):
@@ -151,6 +151,8 @@ def exec_create_document(
     # (commit b654a49), the LLM generated titles using the full conversation
     # context.  This restores that behaviour for the fast-path.
     title = _title_from_context(title, doc_type, data)
+    if not title:
+        title = _DOC_TYPE_LABELS.get(doc_type, "") or doc_type.replace("_", " ").title() or "Acquisition Document"
 
     inline_edited_content: str | None = None
     if doc_type == "sow":

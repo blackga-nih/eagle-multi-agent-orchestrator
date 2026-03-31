@@ -211,11 +211,11 @@ def test_get_active_model_returns_tuple():
 # ── Model chain integrity ────────────────────────────────────────────
 
 
-def test_model_chain_has_four_models():
-    """The default chain should have exactly 4 models with Haiku as last resort."""
+def test_model_chain_has_accessible_models():
+    """The default chain should only contain accessible models with Haiku as last resort."""
     from app.strands_agentic_service import _DEFAULT_MODEL_CHAIN, _MODEL_CHAIN_IDS
 
-    assert len(_MODEL_CHAIN_IDS) >= 4
+    assert len(_MODEL_CHAIN_IDS) >= 2
     # Default (un-overridden) chain always ends with Haiku
     assert _DEFAULT_MODEL_CHAIN[-1] == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     # Runtime chain always contains Haiku somewhere

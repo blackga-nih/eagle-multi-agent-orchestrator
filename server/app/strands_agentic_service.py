@@ -419,7 +419,10 @@ class ModelCircuitBreaker:
 # Build the ordered chain. EAGLE_BEDROCK_MODEL_ID (if set) is promoted
 # to position 0; duplicates are removed.
 
-_DEFAULT_MODEL_CHAIN = [_SONNET_46, _SONNET_45, _SONNET_40, _HAIKU]
+# Only include models verified accessible in the NCI account.
+# Sonnet 4.5 and Sonnet 4.0 consistently fail with AccessDeniedException
+# at startup probe — removed to avoid wasting fallback attempts.
+_DEFAULT_MODEL_CHAIN = [_SONNET_46, _HAIKU]
 _ENV_MODEL_OVERRIDE = os.getenv("EAGLE_BEDROCK_MODEL_ID")
 
 _MODEL_CHAIN_IDS: list[str] = list(_DEFAULT_MODEL_CHAIN)
@@ -499,7 +502,7 @@ def _run_startup_probe():
         "bedrock-runtime",
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         config=Config(
-            connect_timeout=3, read_timeout=8, retries={"max_attempts": 1}
+            connect_timeout=5, read_timeout=20, retries={"max_attempts": 1}
         ),
     )
 
@@ -3048,10 +3051,13 @@ def _build_all_service_tools(
 
             t = str(parsed.get("title", "")).strip()
             if not t:
+                # Normalize dt for label lookup (hyphens → underscores)
+                normalized_dt = dt.replace("-", "_") if dt else ""
                 inferred_title = (
                     prompt_doc_ctx.get("title")
-                    or _DOC_TYPE_LABELS.get(dt or "", "")
-                    or "Untitled Acquisition"
+                    or _DOC_TYPE_LABELS.get(normalized_dt, "")
+                    or (normalized_dt.replace("_", " ").title() if normalized_dt else "")
+                    or "Acquisition Document"
                 )
                 parsed["title"] = inferred_title
 

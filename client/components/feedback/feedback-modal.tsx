@@ -105,6 +105,7 @@ export default function FeedbackModal() {
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers,
+        signal: AbortSignal.timeout(10_000),
         body: JSON.stringify({
           feedback_text: feedbackText,
           feedback_type: feedbackType,
@@ -128,10 +129,14 @@ export default function FeedbackModal() {
         resetForm();
       }, 1500);
     } catch (err) {
-      const msg =
-        err instanceof Error && err.message === 'auth'
-          ? 'Session expired. Please sign in again.'
-          : 'Could not submit feedback. Please try again.';
+      let msg = 'Could not submit feedback. Please try again.';
+      if (err instanceof Error) {
+        if (err.message === 'auth') {
+          msg = 'Session expired. Please sign in again.';
+        } else if (err.name === 'TimeoutError') {
+          msg = 'Request timed out. Please try again.';
+        }
+      }
       setError(msg);
     } finally {
       setSubmitting(false);
