@@ -28,6 +28,8 @@ services:
     build:
       context: ../client
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_DEV_MODE=true
     ports:
       - "3000:3000"
     environment:
