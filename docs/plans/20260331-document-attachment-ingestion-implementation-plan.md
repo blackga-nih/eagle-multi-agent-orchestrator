@@ -6,13 +6,15 @@ Implement first-class document attachments that can be uploaded to a workspace o
 
 Primary user flow:
 
-1. User uploads a `.doc`, `.docx`, or `.txt` requirements document.
+1. User uploads a `.doc`, `.docx`, or `.txt` source document (requirements, market research, prior SOW, etc.).
 2. The original file is stored in S3.
 3. The system extracts text and a normalized markdown representation.
 4. The attachment becomes selectable and usable as context in chat and package workflows.
-5. The user asks for something like: "Create an SOW from this requirements document."
+5. The user asks for document generation referencing the attachment (e.g., "Create an SOW from my requirements doc" or "Draft an IGCE using the attached market research").
 6. The AI uses the attachment content plus package/session context to generate a draft through the existing document pipeline.
 7. If the user edits the attachment or the generated document, the updated artifact is saved back to S3 and tracked.
+
+**Note:** This feature is "any source → any output", not limited to specific document type pairings. See the Attachment Prompt Contract section for details.
 
 ## What Already Exists
 
@@ -47,7 +49,7 @@ Current limitations:
 - The AI document-generation path does not yet have an explicit attachment-ingestion layer that says "these uploaded docs are part of this request."
 - `.doc` support is only best-effort today and will be unreliable without a dedicated conversion fallback.
 - Workspace document edits mostly overwrite in place; package docs version properly.
-- There is no explicit attachment-to-prompt context builder for requests like "Create an SOW from this requirements doc."
+- There is no explicit attachment-to-prompt context builder for requests that reference uploaded source documents.
 
 ## Product Scope
 
@@ -503,9 +505,10 @@ Recommendation:
 
 ### Acceptance criteria
 
-- asking "create an SOW from this requirements doc" uses the uploaded document markdown in the prompt
-- the model can identify which attachment drove the output
+- asking to generate any document type from any attached source uses the uploaded markdown in the prompt
+- the model can identify which attachment(s) informed the output
 - the attachment list is deterministic and inspectable in logs
+- multiple attachments of different types can be selected simultaneously
 
 ## Phase 5: Integrate Attachment Context Into Document Generation
 
@@ -546,8 +549,102 @@ If attachments become large, move from full-document injection to chunk retrieva
 
 ### Acceptance criteria
 
-- SOW generation from a requirements attachment works without manually copying document text into chat
+- document generation from any attachment type works without manually copying text into chat
 - generated output still persists through the existing package document pipeline
+- prompts follow the Attachment Prompt Contract (see below)
+
+---
+
+## Attachment Prompt Contract
+
+This section defines the generic contract for how attachments are presented to the model. The feature is "any source → any output", not just "requirements → SOW".
+
+### Source Document Semantics
+
+- Attached documents are **source material**, not instructions to the model
+- Source document type (requirements, SOW, market research, prior art) is metadata for context, not behavioral constraint
+- Multiple sources may contain conflicting or overlapping information
+- Source document type does NOT constrain output document type
+
+### Model Behavior Requirements
+
+1. **Attribution**: Generated output should cite which attachment(s) informed each major section
+2. **Conflict handling**: When sources contain conflicting information, flag the conflict explicitly rather than silently choosing one
+3. **Completeness**: Missing information should be flagged as `[TBD - not found in attached sources]` per existing document rules
+4. **Type independence**: A requirements doc can inform an IGCE, SOW, AP, or any other output type
+5. **No blind quoting**: Synthesize and adapt content rather than copying verbatim
+
+### Prompt Structure
+
+When attachments are included in generation requests, use this structure:
+
+```text
+[Attached Source Documents]
+
+--- Source 1: {title} ---
+Type: {doc_type} (e.g., requirements, market_research, prior_sow)
+Scope: {workspace|package}
+Content:
+{normalized_markdown, truncated to max_chars_per_doc}
+--- End Source 1 ---
+
+--- Source 2: {title} ---
+...
+--- End Source 2 ---
+
+[Generation Instructions]
+Generate a {output_type} for package {package_id}.
+
+Use the attached source documents as reference material:
+- Cite sources when synthesizing (e.g., "per Source 1...")
+- Flag conflicts between sources explicitly
+- Mark information gaps as [TBD - not in sources]
+- Do not quote sources verbatim; synthesize and adapt
+
+{existing_document_generation_instructions}
+```
+
+### Token Budget Management
+
+| Constraint | Value | Rationale |
+|------------|-------|-----------|
+| Max chars per attachment | 50,000 | ~12.5k tokens, leaves room for instructions |
+| Max attachments per request | 5 | Practical limit for coherent synthesis |
+| Total attachment budget | 150,000 chars | ~37.5k tokens max for all sources |
+
+When attachments exceed budget:
+1. Prioritize user-selected attachments over auto-included
+2. Prioritize more recent versions over older
+3. Truncate from end of document, preserving headers/structure
+4. Log truncation in generation metadata
+
+### Conflict Detection Guidance
+
+Include in system prompt:
+
+```text
+If attached sources contain conflicting information:
+- Explicitly note the conflict: "Source 1 states X, but Source 2 states Y"
+- Do not silently choose one interpretation
+- If resolution is clear from context, state your reasoning
+- If resolution is unclear, flag for user review: [CONFLICT: ...]
+```
+
+### Example: Multi-Source Generation
+
+User request: "Create an IGCE based on the attached requirements and market research"
+
+Attachments:
+- Source 1: "Genomic Analysis Requirements" (type: requirements)
+- Source 2: "Similar Services Market Survey" (type: market_research)
+
+Expected behavior:
+- IGCE cost estimates should reference market research pricing
+- Scope should align with requirements document
+- Conflicts between requirements scope and market survey scope should be flagged
+- Output should cite both sources where relevant
+
+---
 
 ## Phase 6: UI and UX Changes
 
@@ -913,23 +1010,23 @@ If you want the smallest vertical slice that delivers user value quickly, build 
 2. Persist original file + markdown sidecar + metadata.
 3. Let the user select one uploaded document in chat.
 4. Inject that document's markdown into `create_document` prompt context.
-5. Generate an SOW into the existing package document pipeline.
+5. Generate any document type into the existing package document pipeline.
 
 That slice gets you from:
 
-- "I uploaded a requirements doc"
+- "I uploaded a source document"
 
 to:
 
-- "Create an SOW from this requirements doc"
+- "Generate a [SOW/IGCE/AP/etc.] using my attached document"
 
 without waiting for the full attachment/version/history UI to be complete.
 
 ---
 
-## Phase 0: Security & File Validation (Pre-requisite)
+## Security & File Validation (Originally Phase 0, Now Phase 2)
 
-This phase must be completed before Phase 2 (upload refactor) to ensure all uploads are validated.
+This phase should be completed after value validation but before the upload refactor goes to production.
 
 ### Files
 
@@ -1224,18 +1321,29 @@ history = get_document_history(tenant_id, package_id, doc_type)
 next_version = max(d["version"] for d in history) + 1
 ```
 
-### Solution: Atomic Version Counter
+### Scope Clarification
 
-Add a version counter item per document:
+There are TWO separate versioning contexts with different keys:
+
+| Context | Race Key | Counter Key | Notes |
+|---------|----------|-------------|-------|
+| Package documents | `(tenant_id, package_id, doc_type)` | `DOCVER#{tenant_id}#{package_id}#{doc_type}` | Existing race in `create_package_document_version()` |
+| Workspace attachments | `(tenant_id, document_id)` | `DOCVER#{tenant_id}#{document_id}` | New versioning for this feature |
+
+**Decision:** This plan fixes workspace attachment versioning only. Package document versioning is a separate issue that should be addressed in a dedicated fix to `document_service.py`.
+
+### Solution: Atomic Version Counter (Workspace Attachments)
+
+Add a version counter item per workspace document:
 
 ```python
-def get_next_version_atomic(tenant_id: str, document_id: str) -> int:
-    """Atomically increment and return next version number."""
+def get_next_workspace_version_atomic(tenant_id: str, document_id: str) -> int:
+    """Atomically increment and return next version for a workspace document."""
     table = get_table()
     response = table.update_item(
         Key={
             "PK": f"DOCVER#{tenant_id}",
-            "SK": f"COUNTER#{document_id}",
+            "SK": f"WSDOC#{document_id}",  # WSDOC prefix distinguishes from package docs
         },
         UpdateExpression="SET version_counter = if_not_exists(version_counter, :zero) + :one",
         ExpressionAttributeValues={
@@ -1246,6 +1354,25 @@ def get_next_version_atomic(tenant_id: str, document_id: str) -> int:
     )
     return response["Attributes"]["version_counter"]
 ```
+
+### Future: Package Document Version Fix (Out of Scope)
+
+For completeness, the package document race would be fixed with:
+
+```python
+def get_next_package_doc_version_atomic(tenant_id: str, package_id: str, doc_type: str) -> int:
+    """Atomically increment version for package document type."""
+    # Key matches the race: (tenant_id, package_id, doc_type)
+    response = table.update_item(
+        Key={
+            "PK": f"DOCVER#{tenant_id}#{package_id}",
+            "SK": f"DOCTYPE#{doc_type}",
+        },
+        ...
+    )
+```
+
+This should be a separate PR to `document_service.py`.
 
 ### Solution: Optimistic Locking for Updates
 
@@ -1296,71 +1423,9 @@ async def update_document(
 
 ---
 
-## Quotas & Limits
+## Future: Quotas & Usage Tracking
 
-### Configuration Structure
-
-Add quota configuration to tenant/user settings:
-
-```python
-@dataclass
-class DocumentQuotas:
-    max_file_size_bytes: int = 25 * 1024 * 1024  # 25 MB
-    max_uploads_per_day: int = 100
-    max_storage_bytes: int = 500 * 1024 * 1024  # 500 MB total
-    max_attachments_per_session: int = 10
-    max_attachments_per_package: int = 25
-    allowed_mime_types: set[str] = field(default_factory=lambda: ALLOWED_UPLOAD_MIME_TYPES)
-```
-
-### Quota Enforcement
-
-Add quota check before upload:
-
-```python
-def check_upload_quota(tenant_id: str, user_id: str, file_size: int) -> None:
-    """Raise HTTPException if quota exceeded."""
-    quotas = get_tenant_quotas(tenant_id)
-    usage = get_user_storage_usage(tenant_id, user_id)
-
-    if usage.total_bytes + file_size > quotas.max_storage_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail={
-                "error": "Storage quota exceeded",
-                "current_usage": usage.total_bytes,
-                "limit": quotas.max_storage_bytes,
-            },
-        )
-
-    if usage.uploads_today >= quotas.max_uploads_per_day:
-        raise HTTPException(
-            status_code=429,
-            detail="Daily upload limit reached",
-        )
-```
-
-### Usage Tracking
-
-Track storage usage in DynamoDB:
-
-```python
-# Update on upload
-table.update_item(
-    Key={"PK": f"USAGE#{tenant_id}", "SK": f"USER#{user_id}"},
-    UpdateExpression="""
-        SET total_bytes = if_not_exists(total_bytes, :zero) + :size,
-            upload_count = if_not_exists(upload_count, :zero) + :one,
-            last_upload = :now
-    """,
-    ExpressionAttributeValues={
-        ":zero": 0,
-        ":one": 1,
-        ":size": file_size,
-        ":now": datetime.now(timezone.utc).isoformat(),
-    },
-)
-```
+**Not needed for POC/MVP.** For production multi-tenant deployment, add per-user storage quotas with physical accounting (total S3 footprint including all versions and sidecars). Monitor S3 bucket size manually during POC.
 
 ---
 
@@ -1381,24 +1446,28 @@ async def delete_workspace_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Delete all S3 versions
+    # Delete all S3 versions and sidecars
     versions = list_workspace_document_versions(user.tenant_id, document_id)
     s3 = get_s3()
+    deleted_count = 0
     for version in versions:
         try:
             s3.delete_object(Bucket=version["s3_bucket"], Key=version["s3_key"])
+            deleted_count += 1
             if version.get("markdown_s3_key"):
                 s3.delete_object(Bucket=version["s3_bucket"], Key=version["markdown_s3_key"])
+                deleted_count += 1
         except ClientError as e:
             logger.warning("Failed to delete S3 object: %s", e)
 
-    # Delete DynamoDB records
+    # Delete DynamoDB records (document + all version records)
     delete_workspace_document_records(user.tenant_id, user.user_id, document_id)
 
-    # Update usage tracking
-    update_storage_usage(user.tenant_id, user.user_id, -doc["size_bytes"])
-
-    return {"deleted": document_id, "versions_deleted": len(versions)}
+    return {
+        "deleted": document_id, 
+        "versions_deleted": len(versions),
+        "s3_objects_deleted": deleted_count,
+    }
 ```
 
 ### Cascade Behavior
@@ -1412,13 +1481,46 @@ Define cascade rules:
 | Session | Session attachment links removed, source documents remain |
 | User | All user documents soft-deleted, S3 retained for compliance |
 
-### S3 Lifecycle Policy (CDK)
+### S3 Lifecycle Policy Clarification
 
-Already exists in `storage-stack.ts`:
-- Non-current versions → Infrequent Access after 90 days
-- Non-current versions → Deleted after 365 days
+**Important:** The plan uses **key-per-version** storage (`/v{version}/file.docx`), NOT S3 object versioning.
 
-No changes needed unless retention requirements change.
+The existing lifecycle rules in `storage-stack.ts` apply to S3's internal versioning (when the same key is overwritten), which does NOT apply to our key-per-version design.
+
+**Decision:** Historical workspace attachment versions are retained until explicit user deletion.
+
+**Rationale:**
+- Users may need to revert to previous versions
+- Automatic expiration could delete user data unexpectedly
+- For POC, manual S3 monitoring is sufficient
+
+**Alternative (if auto-cleanup is needed later):**
+
+Add a prefix-based lifecycle rule for old versions:
+
+```typescript
+// storage-stack.ts - ADD if auto-cleanup desired
+lifecycleRules: [
+  {
+    id: "expire-old-workspace-attachment-versions",
+    prefix: "eagle/",
+    // Only expire objects with this tag (set on superseded versions)
+    tagFilters: [{ key: "superseded", value: "true" }],
+    expiration: Duration.days(365),
+  },
+]
+```
+
+Then tag old versions when new version is created:
+
+```python
+# When creating new version, tag the old one
+s3.put_object_tagging(
+    Bucket=bucket,
+    Key=old_version_key,
+    Tagging={"TagSet": [{"Key": "superseded", "Value": "true"}]},
+)
+```
 
 ---
 
@@ -1484,19 +1586,68 @@ documentBucket.addToResourcePolicy(new iam.PolicyStatement({
 
 ## Updated Implementation Order
 
-With security as a prerequisite:
+**Critical insight:** The plan front-loads infrastructure before validating that attachment injection improves generation quality. For a POC/MVP, validate the value proposition first.
 
-1. **Phase 0:** Create `file_validation_service.py` with magic bytes, macro scanning, sanitization
-2. **Phase 1:** Create `workspace_document_store.py` with atomic versioning
-3. **Phase 2:** Refactor upload to use validation + durable storage
-4. **Phase 3:** Add workspace versioning with optimistic locking
-5. **Phase 4:** Add package/session attachment linking
-6. **Phase 5:** Build `attachment_context_service.py`
-7. **Phase 6:** Inject attachment context into generation
-8. **Phase 7:** Update UI for attachment selection
-9. **Phase 8:** Add quotas and usage tracking
-10. **Phase 9:** Add cleanup/deletion endpoints
-11. **Phase 10:** Add tests and observability
+### Recommended Order (Value-First)
+
+| Phase | Name | Purpose | Validates |
+|-------|------|---------|-----------|
+| **0** | Value Validation | Manual test of attachment injection | Does the feature actually help? |
+| **1** | Minimal Attachment Injection | Simplest path from upload to generation | Core user flow |
+| **2** | Security Hardening | File validation, macro scanning | Safe to accept uploads |
+| **3** | Durable Storage | Workspace document store | Persistence beyond TTL |
+| **4** | Versioning | Atomic counters, optimistic locking | Multi-edit support |
+| **5** | Full UI | Attachment selection, history | Polish |
+| **6** | Cleanup & Deletion | Delete endpoints, cascade | Maintenance |
+
+### Phase 0: Value Validation (1 day)
+
+Before building any infrastructure, manually test the core hypothesis:
+
+1. Upload a real requirements document via existing endpoint
+2. Manually read the `.parsed.md` sidecar from S3
+3. Copy the markdown content into a chat message like:
+   ```
+   Using this requirements document as context:
+   ---
+   {paste markdown here}
+   ---
+   Create an SOW for this procurement.
+   ```
+4. Evaluate: Does the generated SOW quality improve vs. no attachment?
+5. Test with poor-quality markdown extraction: Does the model still produce useful output?
+
+**Exit criteria:**
+- [ ] Attachment injection demonstrably improves generation quality
+- [ ] Markdown extraction quality is sufficient for model consumption
+- [ ] Token limits are manageable with typical document sizes
+
+If validation fails, stop and fix markdown extraction or prompt design before proceeding.
+
+### Phase 1: Minimal Attachment Injection (3-5 days)
+
+Build the thinnest vertical slice:
+
+1. Add `attachment_ids: list[str]` parameter to generation request
+2. Resolve attachments from existing upload metadata (TTL records are fine for now)
+3. Inject markdown into prompt using the Attachment Prompt Contract
+4. Return generation result with `attachments_used` in metadata
+
+No new stores, no versioning, no UI changes yet.
+
+### Phase 2: Security Hardening (2-3 days)
+
+Now that the feature works, make it safe:
+
+1. Create `file_validation_service.py`
+2. Add magic byte validation
+3. Add DOCX macro scanning
+4. Add markdown sanitization
+5. Integrate into upload endpoint
+
+### Phase 3-7: Infrastructure & Polish
+
+Proceed with remaining phases as originally planned, but now with confidence that the core feature delivers value.
 
 ---
 
@@ -1514,10 +1665,14 @@ With security as a prerequisite:
 
 **Decision:** Return HTTP 409 Conflict with current version number. Client should re-fetch and retry.
 
-### 4. How are quotas enforced?
+### 4. What happens to orphaned S3 objects?
 
-**Decision:** Check before upload. Return HTTP 413 for storage quota, HTTP 429 for rate limit.
+**Decision:** Historical workspace attachment versions are retained until explicit user deletion. For POC, monitor S3 bucket size manually.
 
-### 5. What happens to orphaned S3 objects?
+### 5. Does the concurrency fix apply to package documents?
 
-**Decision:** S3 lifecycle policy handles cleanup of non-current versions after 365 days. Explicit deletion removes immediately.
+**Decision:** No. This plan fixes workspace attachment versioning only. Package document versioning is a separate issue requiring changes to `document_service.py` with a counter keyed by `(tenant_id, package_id, doc_type)`.
+
+### 6. How should the model handle conflicting sources?
+
+**Decision:** Flag conflicts explicitly rather than silently choosing. See Attachment Prompt Contract for details.

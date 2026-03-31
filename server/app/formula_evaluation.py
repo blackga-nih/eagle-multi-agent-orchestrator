@@ -49,8 +49,11 @@ def evaluate_workbook_formulas(xlsx_bytes: bytes) -> Tuple[bytes, bool]:
         os.close(fd)
 
         # Load workbook into formulas engine and calculate
+        logger.info("Loading workbook into formulas engine: %s", tmp_path)
         xl_model = formulas.ExcelModel().loads(tmp_path).finish()
+        logger.info("Calculating formulas...")
         solution = xl_model.calculate()
+        logger.info("Formula calculation complete, %d results", len(solution))
 
         # Build a lookup from UPPER sheet name -> actual openpyxl sheet name
         wb = load_workbook(tmp_path)
@@ -99,7 +102,9 @@ def evaluate_workbook_formulas(xlsx_bytes: bytes) -> Tuple[bytes, bool]:
         return result_bytes, True
 
     except Exception as exc:
-        logger.warning("Formula evaluation failed: %s", exc, exc_info=True)
+        logger.warning("Formula evaluation failed: %s", exc, exc_info=False)
+        # Log more details for debugging
+        logger.debug("Formula evaluation exception details:", exc_info=True)
         return xlsx_bytes, False
     finally:
         if tmp_path and os.path.exists(tmp_path):

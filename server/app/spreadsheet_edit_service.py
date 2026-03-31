@@ -112,11 +112,17 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
                 raw_value = cell.value
                 is_formula = isinstance(raw_value, str) and raw_value.startswith("=")
                 # Determine display value: prefer cached calculation, avoid showing raw formulas
-                if value_cell.value is not None:
-                    display_value = value_cell.value
-                elif is_formula:
-                    # Formula with no cached value - show empty rather than "=A1+B1"
-                    display_value = ""
+                cached_value = value_cell.value
+                if is_formula:
+                    # For formula cells: use cached value if it's NOT the formula string
+                    # (data_only=True should give calculated value, but double-check)
+                    if cached_value is not None and not (isinstance(cached_value, str) and cached_value.startswith("=")):
+                        display_value = cached_value
+                    else:
+                        # No valid cached value - show empty rather than formula text
+                        display_value = ""
+                elif cached_value is not None:
+                    display_value = cached_value
                 else:
                     display_value = raw_value
                 is_hidden = cell.coordinate in hidden_cells
@@ -243,7 +249,18 @@ def save_xlsx_preview_edits(
         return {"error": "Failed to apply spreadsheet edits."}
 
     if applied_count == 0:
-        return {"error": "No spreadsheet edits were applied.", "missing": missing}
+        # No actual changes needed - return success with current state (not an error)
+        # This happens when user saves the same value that's already in the cell
+        preview_payload = extract_xlsx_preview_payload(original_bytes)
+        return {
+            "success": True,
+            "mode": "no_changes",
+            "message": "No changes were needed.",
+            "content": preview_payload.get("content"),
+            "preview_mode": preview_payload.get("preview_mode"),
+            "preview_sheets": preview_payload.get("preview_sheets", []),
+            "missing": missing,
+        }
 
     # Re-evaluate formulas after edits so totals update
     updated_bytes = evaluate_workbook_formulas_safe(updated_bytes)

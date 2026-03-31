@@ -25,7 +25,7 @@ import TopNav from '@/components/layout/top-nav';
 import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import TemplateProvenanceBadge from '@/components/ui/template-provenance-badge';
 import TagEditor from '@/components/ui/tag-editor';
-import SpreadsheetPreview, { SpreadsheetPreviewHandle } from '@/components/spreadsheet-preview';
+import SpreadsheetPreview, { SpreadsheetPreviewHandle, PendingCellEdit } from '@/components/spreadsheet-preview';
 import { useAgentStream } from '@/hooks/use-agent-stream';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
@@ -182,24 +182,27 @@ function normalizeXlsxPreviewSheets(sheets: unknown): XlsxPreviewSheet[] {
       const cells = rawRow.cells.flatMap((cell) => {
         if (!cell || typeof cell !== 'object') return [];
         const rawCell = cell as Record<string, unknown>;
+        // Required fields (but be lenient with types - coerce where reasonable)
         if (
           typeof rawCell.cell_ref !== 'string' ||
           typeof rawCell.row !== 'number' ||
-          typeof rawCell.col !== 'number' ||
-          typeof rawCell.display_value !== 'string' ||
-          typeof rawCell.value !== 'string' ||
-          typeof rawCell.editable !== 'boolean'
+          typeof rawCell.col !== 'number'
         ) {
           return [];
         }
+        // Coerce value and display_value to strings (backend may send numbers)
+        const cellValue = rawCell.value != null ? String(rawCell.value) : '';
+        const displayValue = rawCell.display_value != null ? String(rawCell.display_value) : cellValue;
+        // Coerce editable to boolean (backend may send 1/0, true/false, or "true"/"false")
+        const isEditable = rawCell.editable === true || rawCell.editable === 1 || rawCell.editable === 'true';
         return [
           {
             cell_ref: rawCell.cell_ref,
             row: rawCell.row,
             col: rawCell.col,
-            value: rawCell.value,
-            display_value: rawCell.display_value,
-            editable: rawCell.editable,
+            value: cellValue,
+            display_value: displayValue,
+            editable: isEditable,
             is_formula: typeof rawCell.is_formula === 'boolean' ? rawCell.is_formula : false,
           },
         ];
@@ -310,6 +313,18 @@ function autoResizeTextarea(element: HTMLTextAreaElement | null) {
   if (!element) return;
   element.style.height = '0px';
   element.style.height = `${element.scrollHeight}px`;
+}
+
+function shouldRenderCachedDocument(doc: DocumentInfo): boolean {
+  const cachedFileType = (doc.file_type || '').toLowerCase();
+  const cachedSheets = normalizeXlsxPreviewSheets(doc.preview_sheets);
+
+  // XLSX documents should not flash their text fallback before grid data arrives.
+  if (Boolean(doc.is_binary) && cachedFileType === 'xlsx' && cachedSheets.length === 0) {
+    return false;
+  }
+
+  return Boolean(doc.content);
 }
 
 // ---------------------------------------------------------------------------
@@ -762,9 +777,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
         setXlsxPreviewSheets(nextPreviewSheets);
         setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
         setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
-        if (doc.content) {
-          setDocumentContent(doc.content);
-          setEditContent(doc.content);
+        if (shouldRenderCachedDocument(doc)) {
+          setDocumentContent(doc.content ?? '');
+          setEditContent(doc.content ?? '');
           setIsLoading(false);
           loadedFromCache = true;
           // Don't return — still fetch fresh content from S3 in background
@@ -777,7 +792,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
     // Try localStorage (handles navigation from Documents page)
     if (!loadedFromCache) {
       const stored2 = getGeneratedDocument(id);
-      if (stored2?.content) {
+      if (stored2) {
         setDocumentTitle(stored2.title);
         setDocumentType(stored2.document_type);
         setPackageId(stored2.package_id);
@@ -796,11 +811,13 @@ export default function DocumentViewerPage({ params }: PageProps) {
         setXlsxPreviewSheets(nextPreviewSheets);
         setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
         setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
-        setDocumentContent(stored2.content);
-        setEditContent(stored2.content);
-        setIsLoading(false);
-        loadedFromCache = true;
-        // Don't return — still fetch fresh content from S3 in background
+        if (shouldRenderCachedDocument(stored2)) {
+          setDocumentContent(stored2.content || '');
+          setEditContent(stored2.content || '');
+          setIsLoading(false);
+          loadedFromCache = true;
+          // Don't return — still fetch fresh content from S3 in background
+        }
       }
     }
 
@@ -1341,8 +1358,11 @@ ${docSnippet}`;
   // Save handler - persists to S3
   const handleSave = async () => {
     // Commit any pending cell edit before saving (for XLSX)
+    // IMPORTANT: commitPendingEdit returns the edit immediately because React setState is async
+    // and the state won't be updated by the time we call collectXlsxCellEdits
+    let pendingEdit: PendingCellEdit | null = null;
     if (isBinaryDocument && isXlsxDocument) {
-      spreadsheetRef.current?.commitPendingEdit();
+      pendingEdit = spreadsheetRef.current?.commitPendingEdit() ?? null;
     }
     if (!s3Key) {
       setSaveError('No document key available - cannot save');
@@ -1362,6 +1382,24 @@ ${docSnippet}`;
         docxPreviewMode === 'text_fallback'
           ? editDocxPreviewBlocks
           : collectChangedDocxPreviewBlocks(docxPreviewBlocks, editDocxPreviewBlocks);
+
+      // For XLSX: collect edits and merge in any pending edit that hasn't propagated to state yet
+      let xlsxCellEdits: Array<{ sheet_id: string; cell_ref: string; value: string }> = [];
+      if (isBinaryDocument && isXlsxDocument) {
+        xlsxCellEdits = collectXlsxCellEdits(xlsxPreviewSheets, editXlsxPreviewSheets);
+        if (pendingEdit) {
+          // Remove any existing edit for this cell, then add the pending one
+          xlsxCellEdits = xlsxCellEdits.filter(
+            (e) => !(e.sheet_id === pendingEdit!.sheetId && e.cell_ref === pendingEdit!.cellRef)
+          );
+          xlsxCellEdits.push({
+            sheet_id: pendingEdit.sheetId,
+            cell_ref: pendingEdit.cellRef,
+            value: pendingEdit.value,
+          });
+        }
+      }
+
       const requestBody =
         isBinaryDocument && isDocxDocument
           ? {
@@ -1371,7 +1409,7 @@ ${docSnippet}`;
             }
           : isBinaryDocument && isXlsxDocument
             ? {
-                cell_edits: collectXlsxCellEdits(xlsxPreviewSheets, editXlsxPreviewSheets),
+                cell_edits: xlsxCellEdits,
                 change_source: 'user_edit',
               }
             : {

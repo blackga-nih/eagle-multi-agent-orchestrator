@@ -4,9 +4,15 @@ import React, { useState, useCallback, useMemo, useRef, useEffect, useImperative
 import { Calculator, ChevronLeft, ChevronRight } from 'lucide-react';
 import { XlsxPreviewSheet, XlsxPreviewCell } from '@/types/chat';
 
+export interface PendingCellEdit {
+  sheetId: string;
+  cellRef: string;
+  value: string;
+}
+
 export interface SpreadsheetPreviewHandle {
-  /** Commits any currently editing cell. Call before save. */
-  commitPendingEdit: () => void;
+  /** Commits any currently editing cell. Returns the edit info for immediate use (avoids async state race). */
+  commitPendingEdit: () => PendingCellEdit | null;
 }
 
 interface SpreadsheetPreviewProps {
@@ -138,7 +144,8 @@ export const SpreadsheetPreview = forwardRef<SpreadsheetPreviewHandle, Spreadshe
   const handleCellClick = useCallback(
     (cell: XlsxPreviewCell | null, sheetId: string, cellRef: string) => {
       if (!isEditing || !cell || !cell.editable || cell.is_formula) return;
-      setEditingCell(`${sheetId}:${cellRef}`);
+      // Use | as separator since sheet_id contains colons (e.g., "0:igce")
+      setEditingCell(`${sheetId}|${cellRef}`);
       setEditValue(cell.value);
       setTimeout(() => inputRef.current?.focus(), 0);
     },
@@ -147,7 +154,11 @@ export const SpreadsheetPreview = forwardRef<SpreadsheetPreviewHandle, Spreadshe
 
   const handleCellBlur = useCallback(() => {
     if (!editingCell || !onCellChangeRef.current) return;
-    const [sheetId, cellRef] = editingCell.split(':');
+    // Split on | to correctly separate sheet_id (may contain :) from cell_ref
+    const sepIndex = editingCell.lastIndexOf('|');
+    if (sepIndex === -1) return;
+    const sheetId = editingCell.slice(0, sepIndex);
+    const cellRef = editingCell.slice(sepIndex + 1);
     onCellChangeRef.current(sheetId, cellRef, editValue);
     setEditingCell(null);
     setEditValue('');
@@ -168,13 +179,21 @@ export const SpreadsheetPreview = forwardRef<SpreadsheetPreviewHandle, Spreadshe
 
   // Expose commitPendingEdit so parent can commit before save
   useImperativeHandle(ref, () => ({
-    commitPendingEdit: () => {
+    commitPendingEdit: (): PendingCellEdit | null => {
       if (editingCell && onCellChangeRef.current) {
-        const [sheetId, cellRef] = editingCell.split(':');
-        onCellChangeRef.current(sheetId, cellRef, editValue);
+        // Split on | to correctly separate sheet_id from cell_ref
+        const sepIndex = editingCell.lastIndexOf('|');
+        if (sepIndex === -1) return null;
+        const sheetId = editingCell.slice(0, sepIndex);
+        const cellRef = editingCell.slice(sepIndex + 1);
+        const value = editValue;
+        onCellChangeRef.current(sheetId, cellRef, value);
         setEditingCell(null);
         setEditValue('');
+        // Return the edit for immediate use (avoids async state race condition)
+        return { sheetId, cellRef, value };
       }
+      return null;
     },
   }), [editingCell, editValue]);
 
@@ -254,7 +273,7 @@ export const SpreadsheetPreview = forwardRef<SpreadsheetPreviewHandle, Spreadshe
                     </td>
                     {rowCells.map((cell, colIndex) => {
                       const cellRef = `${getColumnLabel(colIndex)}${rowNum}`;
-                      const cellKey = activeSheet ? `${activeSheet.sheet_id}:${cellRef}` : '';
+                      const cellKey = activeSheet ? `${activeSheet.sheet_id}|${cellRef}` : '';
                       const isEditingThis = editingCell === cellKey;
                       const isFormula = cell?.is_formula;
                       const isEditable = isEditing && cell?.editable && !isFormula;

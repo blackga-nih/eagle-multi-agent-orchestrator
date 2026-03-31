@@ -121,40 +121,51 @@ dev-smoke: dev-up smoke
 # One-command local smoke with visible browser window
 dev-smoke-ui: dev-up smoke-ui
 
-# Start backend + frontend locally (no docker) — kills stale processes first
+# Start backend + frontend locally with hot reload (no docker) — kills stale processes first
 dev-local:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "=== Clearing ports 8000 + 3000 ==="
-    # Kill by port — netstat + powershell fallback for reliable PID capture
-    for port in 8000 3000 3001; do
-        for pid in $(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $NF}' | sort -u | grep -v '^0$'); do
-            echo "  Killing PID $pid (port $port)"
-            taskkill /F /T /PID "$pid" 2>/dev/null || true
-        done
-        # Powershell fallback — catches IPv6 listeners netstat misses
-        for pid in $(powershell.exe -NoProfile -Command \
-          "(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess" 2>/dev/null | tr -d '\r' | sort -u); do
-            [ -n "$pid" ] && [ "$pid" != "0" ] && {
-                echo "  Killing PID $pid (port $port, ps fallback)"
+    if command -v taskkill >/dev/null 2>&1; then
+        # Windows path
+        for port in 8000 3000 3001; do
+            for pid in $(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $NF}' | sort -u | grep -v '^0$'); do
+                echo "  Killing PID $pid (port $port)"
                 taskkill /F /T /PID "$pid" 2>/dev/null || true
-            }
+            done
+            # Powershell fallback — catches IPv6 listeners netstat misses
+            for pid in $(powershell.exe -NoProfile -Command \
+              "(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess" 2>/dev/null | tr -d '\r' | sort -u); do
+                [ -n "$pid" ] && [ "$pid" != "0" ] && {
+                    echo "  Killing PID $pid (port $port, ps fallback)"
+                    taskkill /F /T /PID "$pid" 2>/dev/null || true
+                }
+            done
         done
-    done
-    # Kill any lingering node processes holding .next/trace
-    taskkill /F /IM node.exe 2>/dev/null || true
-    # Wait for ports to actually free (taskkill is async on Windows)
+        # Kill any lingering node processes holding .next/trace
+        taskkill /F /IM node.exe 2>/dev/null || true
+    else
+        # macOS/Linux path
+        for port in 8000 3000 3001; do
+            for pid in $(lsof -ti tcp:${port} 2>/dev/null | sort -u); do
+                echo "  Killing PID $pid (port $port)"
+                kill "$pid" 2>/dev/null || true
+            done
+        done
+    fi
+    # Wait for ports to actually free
     for port in 3000 8000; do
         for i in 1 2 3 4 5 6 7 8 9 10; do
-            if ! netstat -ano 2>/dev/null | grep ":${port} " | grep -q LISTENING; then
-                break
+            if command -v taskkill >/dev/null 2>&1; then
+                netstat -ano 2>/dev/null | grep ":${port} " | grep -q LISTENING || break
+            else
+                lsof -ti tcp:${port} >/dev/null 2>&1 || break
             fi
             echo "  Waiting for port $port to free... ($i)"
             sleep 1
         done
     done
-    # Clear Next.js cache — retry loop because Windows holds file locks
-    # briefly after taskkill (NTFS handles are released asynchronously)
+    # Clear Next.js cache — retry loop because file locks can linger briefly
     for attempt in 1 2 3 4 5; do
         rm -rf client/.next 2>/dev/null || true
         if [ ! -d client/.next ]; then
@@ -166,7 +177,7 @@ dev-local:
     done
     if [ -d client/.next ]; then
         echo "  WARNING: could not fully delete .next — may see stale cache errors"
-        echo "  Try closing all terminals/editors accessing client/ and re-run"
+        echo "  Try closing terminals/editors accessing client/ and re-run"
     fi
     unset FASTAPI_URL
     export FASTAPI_URL=http://127.0.0.1:8000
@@ -184,27 +195,54 @@ dev-local:
     trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT
     wait
 
-# Start FastAPI backend only (local) — kills stale processes on port 8000 first
+# Start backend + frontend locally with hot reload and AWS SSO credentials
+# Usage: just dev-local-sso [PROFILE_NAME]
+dev-local-sso PROFILE="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{PROFILE}}" ]; then
+        export AWS_PROFILE="{{PROFILE}}"
+    fi
+    if ! aws sts get-caller-identity &>/dev/null; then
+        echo "AWS SSO credentials not found. Run: aws sso login"
+        echo "Or pass a profile: just dev-local-sso <profile-name>"
+        exit 1
+    fi
+    just dev-local
+
+# Start FastAPI backend only with hot reload (local) — kills stale processes on port 8000 first
 dev-backend:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Clearing port 8000..."
-    for pid in $(netstat -ano 2>/dev/null | grep ':8000 ' | grep LISTENING | awk '{print $5}' | sort -u); do
-        taskkill /F /T /PID "$pid" 2>/dev/null || true
-    done
+    if command -v taskkill >/dev/null 2>&1; then
+        for pid in $(netstat -ano 2>/dev/null | grep ':8000 ' | grep LISTENING | awk '{print $5}' | sort -u); do
+            taskkill /F /T /PID "$pid" 2>/dev/null || true
+        done
+    else
+        for pid in $(lsof -ti tcp:8000 2>/dev/null | sort -u); do
+            kill "$pid" 2>/dev/null || true
+        done
+    fi
     sleep 1
     cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
-# Start Next.js frontend only (local) — kills stale processes on port 3000 first
+# Start Next.js frontend only with hot reload (local) — kills stale processes on port 3000 first
 dev-frontend:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Clearing port 3000..."
-    for pid in $(netstat -ano 2>/dev/null | grep ':3000 ' | grep LISTENING | awk '{print $5}' | sort -u); do
-        taskkill /F /T /PID "$pid" 2>/dev/null || true
-    done
+    if command -v taskkill >/dev/null 2>&1; then
+        for pid in $(netstat -ano 2>/dev/null | grep ':3000 ' | grep LISTENING | awk '{print $5}' | sort -u); do
+            taskkill /F /T /PID "$pid" 2>/dev/null || true
+        done
+    else
+        for pid in $(lsof -ti tcp:3000 2>/dev/null | sort -u); do
+            kill "$pid" 2>/dev/null || true
+        done
+    fi
     sleep 1
-    # Clear stale .next cache (retry — Windows file lock delay)
+    # Clear stale .next cache
     for attempt in 1 2 3; do
         rm -rf client/.next 2>/dev/null || true
         [ ! -d client/.next ] && break
