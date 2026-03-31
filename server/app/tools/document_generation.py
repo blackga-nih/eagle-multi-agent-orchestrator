@@ -64,8 +64,9 @@ def _title_from_context(title: str, doc_type: str, data: dict) -> str:
     that to produce a title like
     ``"Statement of Work - Cloud Hosting Services for NCI Research Portal"``.
 
-    Only replaces titles that look like they came from the fast-path (start with
-    the generic doc-type label).  LLM-generated titles are left untouched.
+    Only replaces titles that are bare doc-type labels or have very short
+    suffixes.  Agent-generated titles with meaningful suffixes (>10 chars after
+    the label) are left untouched.
     """
     base_label = _DOC_TYPE_LABELS.get(doc_type, "")
     if not base_label:
@@ -76,6 +77,19 @@ def _title_from_context(title: str, doc_type: str, data: dict) -> str:
     # "Statement of Work - ...").  LLM-generated titles like "SOW - Cloud
     # Hosting Services" won't match and are kept as-is.
     if not title.startswith(base_label):
+        return title
+
+    # If the title already has a meaningful descriptive suffix (e.g.
+    # "Acquisition Plan - Cloud Hosting Services for NIH Research Data Platform"),
+    # keep it as-is.  Only enrich bare labels like "Acquisition Plan" or
+    # titles with trivially short suffixes.
+    after_label = title[len(base_label):].strip()
+    if after_label.startswith("- "):
+        existing_suffix = after_label[2:].strip()
+        if len(existing_suffix) > 10:
+            return title
+    elif after_label:
+        # Has a non-standard suffix (no " - " separator) — leave it alone
         return title
 
     # Pull the best available context string from enriched session data
@@ -332,6 +346,10 @@ def exec_create_document(
     if package_id:
         from app.document_service import create_package_document_version
 
+        # Pass the markdown content as sidecar when storing binary files
+        # so the viewer and ZIP export can render human-readable previews.
+        _md_content = content if ext in ("docx", "xlsx") and isinstance(content, str) else None
+
         canonical = create_package_document_version(
             tenant_id=tenant_id,
             package_id=package_id,
@@ -344,6 +362,7 @@ def exec_create_document(
             change_source="agent_tool",
             template_id=effective_template_id,
             template_provenance=template_provenance,
+            markdown_content=_md_content,
         )
         if not canonical.success:
             return {"error": canonical.error or "Failed to create package document"}
