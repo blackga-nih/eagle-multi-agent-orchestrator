@@ -40,8 +40,30 @@
       "no-mock-data.spec.ts",
       "document-pipeline.spec.ts"
     ],
+    "tier4_live_tests": [
+      "validate-sse-pipeline.spec.ts",
+      "validate-chat-v2.spec.ts",
+      "validate-chat-v2-long-wait.spec.ts",
+      "tool-result-panels.spec.ts",
+      "tool-meta-coverage.spec.ts",
+      "streaming-render-quality.spec.ts",
+      "streaming-persistence.spec.ts",
+      "activity-panel-event-counts.spec.ts",
+      "session-memory.spec.ts",
+      "chat-thread-isolation.spec.ts"
+    ],
     "tier4a_project": "chromium",
     "tier4b_journeys": ["login", "home", "chat", "admin", "documents", "workflows"],
+    "e2e_judge_orchestrator": "tests/e2e_judge_orchestrator.py",
+    "demo_script_paths": [
+      "EAGLE-DEMO-SCRIPT-UPDATED.md",
+      "EAGLE-DEMO-SCRIPT.md"
+    ],
+    "report_generator_scripts": [
+      "server/tests/generate_eval_report.py",
+      "server/tests/generate_mt_report.py",
+      "generate_dashboard.py"
+    ],
     "notes": "NCI EAGLE CBIIT instance — account 695681773636, eagle SSO profile, NONPROD environment"
   },
 
@@ -53,6 +75,7 @@
     "server_dir": "server",
     "env_file": "server/.env",
     "langfuse_host": "https://us.cloud.langfuse.com",
+    "langfuse_project_id": "cmmsqvi2406aead071t0zhl7f",
     "tier1_tests": [
       "tests/test_compliance_matrix.py",
       "tests/test_chat_kb_flow.py",
@@ -83,8 +106,30 @@
       "no-mock-data.spec.ts",
       "document-pipeline.spec.ts"
     ],
+    "tier4_live_tests": [
+      "validate-sse-pipeline.spec.ts",
+      "validate-chat-v2.spec.ts",
+      "validate-chat-v2-long-wait.spec.ts",
+      "tool-result-panels.spec.ts",
+      "tool-meta-coverage.spec.ts",
+      "streaming-render-quality.spec.ts",
+      "streaming-persistence.spec.ts",
+      "activity-panel-event-counts.spec.ts",
+      "session-memory.spec.ts",
+      "chat-thread-isolation.spec.ts"
+    ],
     "tier4a_project": "chromium",
     "tier4b_journeys": ["login", "home", "chat", "admin", "documents", "workflows"],
+    "e2e_judge_orchestrator": "tests/e2e_judge_orchestrator.py",
+    "demo_script_paths": [
+      "EAGLE-DEMO-SCRIPT-UPDATED.md",
+      "EAGLE-DEMO-SCRIPT.md"
+    ],
+    "report_generator_scripts": [
+      "server/tests/generate_eval_report.py",
+      "server/tests/generate_mt_report.py",
+      "generate_dashboard.py"
+    ],
     "notes": "NCI EAGLE instance — account 274487662938, power-user-* IAM prefix, eagle SSO profile"
   },
 
@@ -96,6 +141,7 @@
     "server_dir": "server",
     "env_file": "server/.env",
     "langfuse_host": "https://us.cloud.langfuse.com",
+    "langfuse_project_id": "cmmsqvi2406aead071t0zhl7f",
     "tier1_tests": [
       "tests/test_compliance_matrix.py",
       "tests/test_chat_kb_flow.py",
@@ -126,8 +172,30 @@
       "no-mock-data.spec.ts",
       "document-pipeline.spec.ts"
     ],
+    "tier4_live_tests": [
+      "validate-sse-pipeline.spec.ts",
+      "validate-chat-v2.spec.ts",
+      "validate-chat-v2-long-wait.spec.ts",
+      "tool-result-panels.spec.ts",
+      "tool-meta-coverage.spec.ts",
+      "streaming-render-quality.spec.ts",
+      "streaming-persistence.spec.ts",
+      "activity-panel-event-counts.spec.ts",
+      "session-memory.spec.ts",
+      "chat-thread-isolation.spec.ts"
+    ],
     "tier4a_project": "chromium",
     "tier4b_journeys": ["login", "home", "chat", "admin", "documents", "workflows"],
+    "e2e_judge_orchestrator": "tests/e2e_judge_orchestrator.py",
+    "demo_script_paths": [
+      "EAGLE-DEMO-SCRIPT-UPDATED.md",
+      "EAGLE-DEMO-SCRIPT.md"
+    ],
+    "report_generator_scripts": [
+      "server/tests/generate_eval_report.py",
+      "server/tests/generate_mt_report.py",
+      "generate_dashboard.py"
+    ],
     "notes": "Upstream gblack686/blackga-nih instance — account 695681773636"
   },
 
@@ -140,6 +208,7 @@
     "server_dir": "server",
     "env_file": "server/.env",
     "langfuse_host": "https://us.cloud.langfuse.com",
+    "langfuse_project_id": "YOUR_LANGFUSE_PROJECT_ID",
     "tier1_tests": [
       "tests/test_compliance_matrix.py",
       "tests/test_chat_kb_flow.py",
@@ -170,8 +239,30 @@
       "no-mock-data.spec.ts",
       "document-pipeline.spec.ts"
     ],
+    "tier4_live_tests": [
+      "validate-sse-pipeline.spec.ts",
+      "validate-chat-v2.spec.ts",
+      "validate-chat-v2-long-wait.spec.ts",
+      "tool-result-panels.spec.ts",
+      "tool-meta-coverage.spec.ts",
+      "streaming-render-quality.spec.ts",
+      "streaming-persistence.spec.ts",
+      "activity-panel-event-counts.spec.ts",
+      "session-memory.spec.ts",
+      "chat-thread-isolation.spec.ts"
+    ],
     "tier4a_project": "chromium",
     "tier4b_journeys": ["login", "home", "chat", "admin", "documents", "workflows"],
+    "e2e_judge_orchestrator": "tests/e2e_judge_orchestrator.py",
+    "demo_script_paths": [
+      "EAGLE-DEMO-SCRIPT-UPDATED.md",
+      "EAGLE-DEMO-SCRIPT.md"
+    ],
+    "report_generator_scripts": [
+      "server/tests/generate_eval_report.py",
+      "server/tests/generate_mt_report.py",
+      "generate_dashboard.py"
+    ],
     "notes": "Describe this repo/environment here"
   }
 }

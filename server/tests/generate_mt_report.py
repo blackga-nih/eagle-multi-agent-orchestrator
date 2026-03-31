@@ -10,12 +10,27 @@ Usage:
     python tests/generate_mt_report.py --open                # generate and open
 """
 import json
-import os
+import math
 import re
 import sys
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
+
+_SERVER_ROOT = Path(__file__).resolve().parent.parent
+if str(_SERVER_ROOT.resolve()) not in sys.path:
+    sys.path.insert(0, str(_SERVER_ROOT.resolve()))
+
+from app.telemetry.conversation_scorer import (  # noqa: E402
+    clamp_score_0_100,
+    confidence_from_evidence,
+    extract_tool_calls_from_strands_trace,
+    rollup_eval_backend_only,
+    score_band_description,
+    score_band_label,
+    score_conversation,
+    score_tool_calls,
+)
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _RESULTS_DIR = _ROOT / "data" / "eval" / "results"
@@ -47,6 +62,103 @@ def _parse_indicators(logs: list[str]) -> dict:
                 detail = {}
             return {"hit": hit, "total": total, "detail": detail}
     return {"hit": 0, "total": 0, "detail": {}}
+
+
+def _last_result_text_from_trace(trace: list | None) -> str:
+    if not trace:
+        return ""
+    for msg in reversed(trace):
+        if isinstance(msg, dict) and msg.get("type") == "ResultMessage":
+            r = msg.get("result")
+            return r if isinstance(r, str) else ""
+    return ""
+
+
+def _explicit_quality_score(entry: dict) -> int | None:
+    for key in ("quality_score", "eval_quality_score", "conversation_score", "score"):
+        v = entry.get(key)
+        if isinstance(v, (int, float)):
+            return clamp_score_0_100(v)
+        if isinstance(v, dict) and "score" in v:
+            inner = v.get("score")
+            if isinstance(inner, (int, float)):
+                return clamp_score_0_100(inner)
+    return None
+
+
+def derive_mt_test_scores(
+    entry: dict,
+    indicators: dict,
+    tokens: dict,
+) -> dict:
+    """Resilient per-test scores for MT / Strands JSON (explicit fields or heuristics)."""
+    trace = entry.get("trace") or []
+    logs = entry.get("logs", [])
+    log_text = "\n".join(logs)
+    status_ok = entry.get("status") == "pass"
+    calls = extract_tool_calls_from_strands_trace(trace if isinstance(trace, list) else [])
+
+    if not status_ok:
+        for c in calls:
+            c["success"] = False
+
+    tool_scoring = score_tool_calls(calls, log_text=log_text, status_pass=status_ok)
+
+    resp = _last_result_text_from_trace(trace if isinstance(trace, list) else None)
+    if not resp:
+        resp = log_text[-12000:] if log_text else ""
+
+    ind = indicators.get("total") or 0
+    ind_ratio = (indicators.get("hit") or 0) / ind if ind else None
+
+    lf = entry.get("langfuse") or {}
+    lf_ratio = None
+    ct = lf.get("checks_total") or 0
+    if ct:
+        lf_ratio = (lf.get("checks_passed") or 0) / ct
+
+    confidence = confidence_from_evidence(
+        response_chars=len(resp),
+        num_tool_calls=len(calls),
+        trace_steps=len(trace) if isinstance(trace, list) else 0,
+        indicator_hit_ratio=ind_ratio,
+        lf_pass_ratio=lf_ratio,
+    )
+
+    explicit = _explicit_quality_score(entry)
+    if explicit is not None:
+        quality = explicit
+    else:
+        conv = score_conversation(
+            completed=status_ok,
+            error_count=0 if status_ok else 1,
+            tool_timings=[{"tool_name": c.get("name", ""), "duration_ms": 100} for c in calls],
+            tool_failures=[{"tool_name": c["name"]} for c in calls if c.get("success") is False],
+            response_text=resp,
+            tools_called=[c.get("name", "") for c in calls],
+            user_message="",
+            duration_ms=5000,
+        )
+        quality = conv["score"]
+        if ind:
+            ind_quality = clamp_score_0_100(100.0 * (indicators.get("hit") or 0) / ind)
+            quality = clamp_score_0_100(0.55 * quality + 0.45 * ind_quality)
+        if not calls and tokens.get("total_output", 0) > 0:
+            tok_boost = clamp_score_0_100(
+                min(100.0, 15.0 + math.log10(max(1, tokens["total_output"])) * 12.0)
+            )
+            quality = clamp_score_0_100(0.85 * quality + 0.15 * tok_boost)
+
+    return {
+        "quality": quality,
+        "quality_band": score_band_label(quality),
+        "confidence": confidence["score"],
+        "confidence_band": confidence["band"],
+        "confidence_breakdown": confidence["breakdown"],
+        "tool_score": tool_scoring["score"],
+        "tool_breakdown": tool_scoring["breakdown"],
+        "tool_band": tool_scoring["band"],
+    }
 
 
 def _parse_tokens(logs: list[str]) -> dict:
@@ -92,15 +204,32 @@ def generate_html(data: dict, test_filter: set[int] | None = None) -> str:
         total_ind_hit += indicators["hit"]
         total_ind += indicators["total"]
 
+        scores = derive_mt_test_scores(entry, indicators, tokens)
         test_rows.append({
             "id": tid, "meta": meta, "status": status,
             "indicators": indicators, "tokens": tokens,
             "logs": logs, "langfuse": lf,
+            "scores": scores,
         })
 
     has_langfuse = any(r["langfuse"] for r in test_rows)
     grand_in = sum(r["tokens"]["total_input"] for r in test_rows)
     grand_out = sum(r["tokens"]["total_output"] for r in test_rows)
+
+    pass_rate = (passed / total) if total else 0.0
+    qualities = [r["scores"]["quality"] for r in test_rows]
+    rollup = rollup_eval_backend_only(
+        tier_scores_0_100=[float(x) for x in qualities],
+        overall_pass_rate=pass_rate,
+    )
+    mean_conf = sum(r["scores"]["confidence"] for r in test_rows) / len(test_rows) if test_rows else 0.0
+    mean_tool = sum(r["scores"]["tool_score"] for r in test_rows) / len(test_rows) if test_rows else 0.0
+    declared_quality = None
+    for key in ("eval_quality_score", "overall_quality", "quality_score"):
+        v = data.get(key)
+        if isinstance(v, (int, float)):
+            declared_quality = clamp_score_0_100(v)
+            break
 
     # ── Build HTML ───────────────────────────────────────────
     parts = []
@@ -125,6 +254,10 @@ table{{width:100%;border-collapse:separate;border-spacing:0;background:#fff;bord
 .tr2{{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--g200);font-size:.8rem}}.tr2:last-child{{border-bottom:none}}.tr2 .tl{{color:var(--g600)}}.tr2 .tv{{font-weight:700}}
 .lfb{{margin-top:10px;padding:8px;background:var(--purple-bg);border-radius:6px;font-size:.75rem}}.lfb strong{{color:var(--purple)}}.lfb a{{color:var(--purple)}}
 .ft{{text-align:center;padding:20px;font-size:.78rem;color:var(--g600)}}
+.scb{{font-size:.7rem;font-weight:700;color:var(--g600);white-space:nowrap}}
+.scn{{font-weight:800;font-size:1rem}}
+.bandlg{{font-size:.78rem;color:var(--g600);line-height:1.45;margin-top:8px}}
+.bandlg code{{background:var(--g100);padding:1px 6px;border-radius:4px;font-size:.72rem}}
 </style>
 </head>
 <body>
@@ -141,14 +274,34 @@ table{{width:100%;border-collapse:separate;border-spacing:0;background:#fff;bord
 </div>
 
 <div class="sum">
+  <div class="cd i"><div class="v">{rollup["score"]}</div><div class="l">Eval quality (rollup)</div><div class="bandlg">{score_band_label(rollup["score"])} — {score_band_description(rollup["score"])}</div></div>
+  <div class="cd i"><div class="v">{round(mean_conf)}</div><div class="l">Avg confidence</div><div class="bandlg">Evidence depth across tests (trace, text, indicators, Langfuse).</div></div>
+  <div class="cd i"><div class="v">{round(mean_tool)}</div><div class="l">Avg tool-call score</div><div class="bandlg">Selection, parameters, execution, sequence (heuristic).</div></div>
   <div class="cd {'p' if failed==0 else 'f'}"><div class="v">{passed}/{total}</div><div class="l">Tests Passed</div></div>
-  <div class="cd {'p' if failed==0 else 'f'}"><div class="v">{round(passed/total*100) if total else 0}%</div><div class="l">Pass Rate</div></div>
+  <div class="cd {'p' if failed==0 else 'f'}"><div class="v">{round(pass_rate*100) if total else 0}%</div><div class="l">Pass Rate</div></div>
   <div class="cd i"><div class="v">{total_turns}</div><div class="l">Total Turns</div></div>
   <div class="cd i"><div class="v">{total_ind_hit}/{total_ind}</div><div class="l">Indicators Hit</div></div>
   <div class="cd u"><div class="v">{grand_in:,}</div><div class="l">Input Tokens</div></div>
   <div class="cd u"><div class="v">{grand_out:,}</div><div class="l">Output Tokens</div></div>
 </div>
 """)
+    if declared_quality is not None:
+        parts.append(
+            f'<div class="obs" style="background:var(--g100);border:1px solid var(--g200)">'
+            f'<div><h3 style="color:var(--g800)">Declared vs derived quality</h3>'
+            f'<p>JSON field reports <strong>{declared_quality}</strong> '
+            f'({score_band_label(declared_quality)}); rollup from this slice is <strong>{rollup["score"]}</strong>.</p></div></div>\n'
+        )
+
+    parts.append(
+        '<div class="obs" style="background:#fff;border:1px solid var(--g200)">'
+        '<div><h3 style="color:var(--g800)">How to read scores (0–100)</h3>'
+        '<p class="bandlg"><code>90+</code> Excellent &nbsp; <code>75–89</code> Strong &nbsp; '
+        '<code>60–74</code> Adequate &nbsp; <code>40–59</code> Weak &nbsp; <code>&lt;40</code> Critical</p>'
+        '<p class="bandlg"><strong>Rollup quality</strong> blends mean per-test quality (~55%) with pass rate (~45%). '
+        '<strong>Confidence</strong> rewards substantive outputs, tool/trace depth, indicator coverage, and Langfuse checks when present. '
+        '<strong>Tool score</strong> is independent of pass/fail except for execution hints.</p></div></div>\n'
+    )
 
     # Langfuse observability banner
     if has_langfuse:
@@ -167,7 +320,11 @@ table{{width:100%;border-collapse:separate;border-spacing:0;background:#fff;bord
     parts.append('<div class="obs" style="background:var(--blue-l);border:1px solid var(--blue-b)">\n  <div>\n    <h3 style="color:var(--blue)">CloudWatch Telemetry</h3>\n    <p>With <code>--emit-cloudwatch</code>, each test emits to <code>/eagle/eval/test-results</code>. Query via <code>/check-cloudwatch-logs</code>.</p>\n  </div>\n</div>\n')
 
     # Table
-    parts.append('<table>\n<thead><tr><th>#</th><th>Test</th><th>UC</th><th>Turns</th><th>Skill</th><th>Tokens</th><th>Status</th><th>Indicators</th></tr></thead>\n<tbody>\n')
+    parts.append(
+        '<table>\n<thead><tr><th>#</th><th>Test</th><th>UC</th><th>Turns</th><th>Skill</th>'
+        '<th>Tokens</th><th>Quality</th><th>Conf.</th><th>Tools</th><th>Status</th><th>Indicators</th>'
+        '</tr></thead>\n<tbody>\n'
+    )
 
     for r in test_rows:
         tid = r["id"]
@@ -175,6 +332,7 @@ table{{width:100%;border-collapse:separate;border-spacing:0;background:#fff;bord
         s = r["status"]
         ind = r["indicators"]
         tok = r["tokens"]
+        sc = r["scores"]
 
         dots = ""
         for i in range(1, m["turns"] + 1):
@@ -190,16 +348,41 @@ table{{width:100%;border-collapse:separate;border-spacing:0;background:#fff;bord
         if r["langfuse"] and r["langfuse"].get("trace_url"):
             lf_tag = f' <a href="{r["langfuse"]["trace_url"]}" target="_blank" style="font-size:.7rem;color:var(--purple)">[LF]</a>'
 
-        parts.append(f'<tr class="ck" onclick="toggle(\'d{tid}\')"><td>{tid}</td><td><strong>{m["title"]}</strong><br><small>{m["sub"]}</small></td><td>{m["uc"]}</td><td><div class="trn">{dots}</div></td><td>{m["skill"]}</td><td><small>{tok["total_input"]:,} in<br>{tok["total_output"]:,} out</small></td><td><span class="bd {s}">{s.upper()}</span>{lf_tag}</td><td><div class="ind">{pills}</div><small style="color:var(--g600)">{ind["hit"]}/{ind["total"]}</small></td></tr>\n')
+        parts.append(
+            f'<tr class="ck" onclick="toggle(\'d{tid}\')"><td>{tid}</td>'
+            f'<td><strong>{m["title"]}</strong><br><small>{m["sub"]}</small></td>'
+            f'<td>{m["uc"]}</td><td><div class="trn">{dots}</div></td><td>{m["skill"]}</td>'
+            f'<td><small>{tok["total_input"]:,} in<br>{tok["total_output"]:,} out</small></td>'
+            f'<td><span class="scn">{sc["quality"]}</span><br><span class="scb">{sc["quality_band"]}</span></td>'
+            f'<td><span class="scn">{sc["confidence"]}</span><br><span class="scb">{sc["confidence_band"]}</span></td>'
+            f'<td><span class="scn">{sc["tool_score"]}</span><br><span class="scb">{sc["tool_band"]}</span></td>'
+            f'<td><span class="bd {s}">{s.upper()}</span>{lf_tag}</td>'
+            f'<td><div class="ind">{pills}</div><small style="color:var(--g600)">{ind["hit"]}/{ind["total"]}</small></td></tr>\n'
+        )
 
         # Detail row
-        parts.append(f'<tr class="dc" id="d{tid}"><td colspan="8"><div class="di"><div class="dg">\n')
+        parts.append(f'<tr class="dc" id="d{tid}"><td colspan="11"><div class="di"><div class="dg">\n')
 
-        # Left: tokens
+        # Left: tokens + scoring drilldown
         parts.append('<div class="ds"><h4>Token Breakdown</h4>\n')
         for t in tok["turns"]:
             parts.append(f'<div class="tr2"><span class="tl">Turn {t["turn"]}</span><span class="tv">{t["input"]:,} in / {t["output"]:,} out ({t["chars"]} chars)</span></div>\n')
         parts.append(f'<div class="tr2" style="border-top:2px solid var(--g300)"><span class="tl"><strong>Total</strong></span><span class="tv"><strong>{tok["total_input"]:,} in / {tok["total_output"]:,} out</strong></span></div>\n')
+
+        tb = sc["tool_breakdown"]
+        cb = sc["confidence_breakdown"]
+        parts.append(
+            '<h4 style="margin-top:12px">Score drill-down</h4>\n'
+            f'<div class="tr2"><span class="tl">Quality</span><span class="tv">{sc["quality"]} ({sc["quality_band"]})</span></div>\n'
+            f'<div class="tr2"><span class="tl">Confidence</span><span class="tv">{sc["confidence"]} ({sc["confidence_band"]})</span></div>\n'
+        )
+        for k, v in cb.items():
+            parts.append(f'<div class="tr2"><span class="tl">&nbsp;&nbsp;{k}</span><span class="tv">{v}</span></div>\n')
+        parts.append(
+            f'<div class="tr2"><span class="tl">Tool-call total</span><span class="tv">{sc["tool_score"]} ({sc["tool_band"]})</span></div>\n'
+        )
+        for k, v in tb.items():
+            parts.append(f'<div class="tr2"><span class="tl">&nbsp;&nbsp;{k}</span><span class="tv">{v}</span></div>\n')
 
         if r["langfuse"]:
             lf = r["langfuse"]
