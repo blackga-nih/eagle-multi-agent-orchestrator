@@ -338,18 +338,31 @@ KNOWLEDGE_SEARCH_TOOL = {
         "Search the acquisition knowledge base for relevant documents, templates, and guidance. "
         "Returns summaries and metadata to help decide which documents to retrieve in full. "
         "Uses AI-powered semantic matching — describe what you need in natural language via 'query'. "
-        "Use topic/document_type/agent filters to narrow the search scope."
+        "Use topic/document_type/specialist filters to narrow the search scope."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "topic": {
                 "type": "string",
-                "description": (
-                    "Primary topic to filter by: funding, acquisition_packages, contract_types, "
-                    "compliance, legal, market_research, socioeconomic, labor, intellectual_property, "
-                    "termination, modifications, closeout, performance, subcontracting, general"
-                ),
+                "enum": [
+                    "funding",
+                    "acquisition_packages",
+                    "contract_types",
+                    "compliance",
+                    "legal",
+                    "market_research",
+                    "socioeconomic",
+                    "labor",
+                    "intellectual_property",
+                    "termination",
+                    "modifications",
+                    "closeout",
+                    "performance",
+                    "subcontracting",
+                    "general",
+                ],
+                "description": "Primary topic to filter by",
             },
             "document_type": {
                 "type": "string",
@@ -364,12 +377,18 @@ KNOWLEDGE_SEARCH_TOOL = {
                 ],
                 "description": "Type of document to search for",
             },
-            "agent": {
+            "specialist": {
                 "type": "string",
-                "description": (
-                    "Filter by primary agent: supervisor-core, financial-advisor, legal-counselor, "
-                    "compliance-strategist, market-intelligence, technical-translator, public-interest-guardian"
-                ),
+                "enum": [
+                    "supervisor-core",
+                    "financial-advisor",
+                    "legal-counselor",
+                    "compliance-strategist",
+                    "market-intelligence",
+                    "technical-translator",
+                    "public-interest-guardian",
+                ],
+                "description": "Filter by primary agent/specialist",
             },
             "authority_level": {
                 "type": "string",

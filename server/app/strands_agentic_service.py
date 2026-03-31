@@ -23,7 +23,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Literal
 
 from botocore.config import Config
 from strands import Agent, tool
@@ -1984,6 +1984,26 @@ def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> st
 
 # -- @tool Factory ---------------------------------------------------
 
+# Literal types for strict schema enforcement — Strands @tool generates
+# JSON Schema enum constraints from these, preventing the model from
+# sending free-text values that silently filter out all DynamoDB results.
+KBTopic = Literal[
+    "funding", "acquisition_packages", "contract_types", "compliance",
+    "legal", "market_research", "socioeconomic", "labor",
+    "intellectual_property", "termination", "modifications", "closeout",
+    "performance", "subcontracting", "general", "",
+]
+KBDocType = Literal[
+    "regulation", "guidance", "policy", "template", "memo",
+    "checklist", "reference", "",
+]
+KBAgent = Literal[
+    "supervisor-core", "financial-advisor", "legal-counselor",
+    "compliance-strategist", "market-intelligence", "technical-translator",
+    "public-interest-guardian", "",
+]
+KBAuthLevel = Literal["statute", "regulation", "policy", "guidance", "internal", ""]
+
 
 def _build_subagent_kb_tools(
     tenant_id: str,
@@ -2018,22 +2038,22 @@ def _build_subagent_kb_tools(
     @tool(name="knowledge_search")
     def kb_search(
         query: str = "",
-        topic: str = "",
-        document_type: str = "",
-        agent: str = "",
-        authority_level: str = "",
+        topic: KBTopic = "",
+        document_type: KBDocType = "",
+        specialist: KBAgent = "",
+        authority_level: KBAuthLevel = "",
         keywords: list[str] | None = None,
         limit: int = 10,
     ) -> str:
         """Search the acquisition knowledge base for relevant documents, templates, and guidance. Use 'query' for specific identifiers like case numbers or citations. Use 'topic' for broad subject searches.
 
         Args:
-            query: Search query — case numbers, citations, identifiers, or keywords
-            topic: Broad topic filter (e.g. "competition", "small business")
+            query: Natural language search query — case numbers, citations, identifiers, or keywords
+            topic: Primary topic filter for narrowing results
             document_type: Filter by document type
-            agent: Filter by agent/specialist
+            specialist: Filter by primary agent/specialist
             authority_level: Filter by authority level
-            keywords: List of keyword filters
+            keywords: List of keyword filters for semantic search
             limit: Maximum results to return (default 10)
         """
         params = {
@@ -2042,7 +2062,7 @@ def _build_subagent_kb_tools(
                 "query": query,
                 "topic": topic,
                 "document_type": document_type,
-                "agent": agent,
+                "agent": specialist,
                 "authority_level": authority_level,
                 "keywords": keywords,
                 "limit": limit,
@@ -3979,22 +3999,22 @@ def _build_kb_service_tools(
     @tool(name="knowledge_search")
     def knowledge_search(
         query: str = "",
-        topic: str = "",
-        document_type: str = "",
-        agent: str = "",
-        authority_level: str = "",
+        topic: KBTopic = "",
+        document_type: KBDocType = "",
+        specialist: KBAgent = "",
+        authority_level: KBAuthLevel = "",
         keywords: list[str] | None = None,
         limit: int = 10,
     ) -> str:
         """Search the acquisition knowledge base metadata in DynamoDB. Use 'query' for specific identifiers like case numbers, citations, or keywords. Use 'topic' for broad subject searches.
 
         Args:
-            query: Search query — case numbers, citations, identifiers, or keywords
-            topic: Broad topic filter (e.g. "competition", "small business")
+            query: Natural language search query — case numbers, citations, identifiers, or keywords
+            topic: Primary topic filter for narrowing results
             document_type: Filter by document type
-            agent: Filter by agent/specialist
+            specialist: Filter by primary agent/specialist
             authority_level: Filter by authority level
-            keywords: List of keyword filters
+            keywords: List of keyword filters for semantic search
             limit: Maximum results to return (default 10)
         """
         params = {
@@ -4003,7 +4023,7 @@ def _build_kb_service_tools(
                 "query": query,
                 "topic": topic,
                 "document_type": document_type,
-                "agent": agent,
+                "agent": specialist,
                 "authority_level": authority_level,
                 "keywords": keywords,
                 "limit": limit,
