@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -301,6 +302,30 @@ def _get_bedrock_runtime():
     if not hasattr(_bedrock_local, "client"):
         _bedrock_local.client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
     return _bedrock_local.client
+
+
+def _sanitize_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert a DynamoDB item to a plain Python dict.
+
+    Creates fresh dict/list containers and converts Decimal to int/float.
+    Breaks OTEL wrapper reference chains that cause RecursionError in json.dumps
+    when strands-agents[otel] threading instrumentation wraps boto3 responses.
+    """
+
+    def _convert(obj: Any, depth: int = 0) -> Any:
+        if depth > 20:
+            return str(obj)
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        if isinstance(obj, dict):
+            return {str(k): _convert(v, depth + 1) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_convert(v, depth + 1) for v in obj]
+        if isinstance(obj, (str, int, float, bool, type(None))):
+            return obj
+        return str(obj)
+
+    return _convert(item)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -647,11 +672,11 @@ def exec_knowledge_search(
     try:
         items: list[dict[str, Any]] = []
         response = table.scan(**scan_kwargs)
-        items.extend(response.get("Items", []))
+        items.extend(_sanitize_item(it) for it in response.get("Items", []))
         while "LastEvaluatedKey" in response:
             scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
             response = table.scan(**scan_kwargs)
-            items.extend(response.get("Items", []))
+            items.extend(_sanitize_item(it) for it in response.get("Items", []))
 
         # Inject built-in template/checklist entries so they participate in search.
         # Filter them the same way DynamoDB results are filtered.
