@@ -56,12 +56,16 @@ const COGNITO_CLIENT_ID = process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID ?? '';
 const COGNITO_REGION = process.env.NEXT_PUBLIC_COGNITO_REGION ?? 'us-east-1';
 
 /**
- * When the pool ID is empty or explicitly set to a placeholder value we
- * treat the application as running in "dev mode" -- no real Cognito calls
- * are made and a synthetic mock user is provided instead.
+ * Dev mode is only enabled when explicitly opted-in via NEXT_PUBLIC_DEV_MODE=true.
+ * Previously this was inferred from a missing Cognito pool ID, which caused
+ * deployed environments to silently fall into dev mode when build-args were
+ * omitted.  Now a missing pool ID without the explicit flag will surface as
+ * an auth error instead of quietly serving a mock user.
  */
+const EXPLICIT_DEV_MODE = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+
 function isDevMode(): boolean {
-  return !COGNITO_USER_POOL_ID || COGNITO_USER_POOL_ID.trim() === '';
+  return EXPLICIT_DEV_MODE;
 }
 
 // ---------------------------------------------------------------------------
