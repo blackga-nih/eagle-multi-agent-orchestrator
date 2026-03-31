@@ -15,7 +15,7 @@ import { useChatRuntimeContext } from '@/contexts/chat-runtime-context';
 import { useChatRuntime } from '@/hooks/use-chat-runtime';
 import { getChatStreamManager } from '@/lib/chat-stream-manager';
 import { SlashCommand } from '@/lib/slash-commands';
-import { ChatMessage, DocumentInfo } from '@/types/chat';
+import { ChatMessage, DocumentInfo, Message } from '@/types/chat';
 import { AuditLogEntry } from '@/types/stream';
 import { saveGeneratedDocument } from '@/lib/document-store';
 import { ClientToolResult } from '@/lib/client-tools';
@@ -52,6 +52,24 @@ export interface TrackedToolCall {
 
 /** Tool calls keyed by the parent message ID they belong to. */
 export type ToolCallsByMessageId = Record<string, TrackedToolCall[]>;
+
+function buildSessionPersistenceSignature(
+  messages: Message[],
+  documents: Record<string, DocumentInfo[]>,
+  toolCallsByMsg: ToolCallsByMessageId,
+  stateChangesByMsg: Record<string, StateChangeEntry[]>,
+): string {
+  return JSON.stringify({
+    messages: messages.map((message) => ({
+      ...message,
+      timestamp:
+        message.timestamp instanceof Date ? message.timestamp.toISOString() : message.timestamp,
+    })),
+    documents,
+    toolCallsByMsg,
+    stateChangesByMsg,
+  });
+}
 
 function documentIdentity(doc: DocumentInfo): string {
   if (doc.s3_key) return `s3:${doc.s3_key}`;
@@ -102,6 +120,7 @@ export default function SimpleChatInterface() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastAssistantIdRef = useRef<string | null>(null);
+  const lastPersistedSignatureRef = useRef('');
   /** Track whether AI title has been generated for this session. */
   const titleGeneratedRef = useRef<Set<string>>(new Set());
   /** Store the first user message for title generation. */
@@ -160,6 +179,12 @@ export default function SimpleChatInterface() {
     if (sessionData) {
       setMessages(sessionData.messages);
       setDocuments(sessionData.documents || {});
+      lastPersistedSignatureRef.current = buildSessionPersistenceSignature(
+        sessionData.messages,
+        sessionData.documents || {},
+        sessionData.toolCallsByMsg || {},
+        sessionData.stateChangesByMsg || {},
+      );
       // Mark existing sessions as already titled (don't re-generate)
       if (sessionData.messages.length > 0) {
         titleGeneratedRef.current.add(currentSessionId);
@@ -167,6 +192,7 @@ export default function SimpleChatInterface() {
     } else {
       setMessages([]);
       setDocuments({});
+      lastPersistedSignatureRef.current = '';
     }
     resetPackageState();
     firstUserMsgRef.current = null;
@@ -247,12 +273,22 @@ export default function SimpleChatInterface() {
         // Non-blocking — swallow errors
       }
     })();
-  }, [currentSessionId, loadSession, resetPackageState, getToken, handlePackageMetadata]);
+  }, [currentSessionId, loadSession, resetPackageState, getToken, handlePackageMetadata, dispatch]);
 
   // Auto-save session (includes tool calls and state changes for persistence across refresh)
   const saveSessionDebounced = useCallback(() => {
     if (messages.length > 0 && currentSessionId) {
+      const nextSignature = buildSessionPersistenceSignature(
+        messages,
+        documents,
+        toolCallsByMsg,
+        stateChangesByMsg,
+      );
+      if (nextSignature === lastPersistedSignatureRef.current) {
+        return;
+      }
       saveSession(currentSessionId, messages, {}, documents, toolCallsByMsg, stateChangesByMsg);
+      lastPersistedSignatureRef.current = nextSignature;
     }
   }, [currentSessionId, messages, documents, toolCallsByMsg, stateChangesByMsg, saveSession]);
 

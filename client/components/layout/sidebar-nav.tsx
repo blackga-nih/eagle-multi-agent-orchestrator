@@ -234,7 +234,7 @@ export default function SidebarNav() {
                     }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors cursor-pointer group ${
                       session.id === currentSessionId
-                        ? 'bg-blue-50 text-blue-700'
+                        ? 'bg-blue-100 text-blue-800'
                         : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >

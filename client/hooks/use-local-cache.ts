@@ -113,6 +113,32 @@ interface RawMessage {
   agent_name?: string;
 }
 
+function buildSessionContentSignature(session: {
+  title?: string;
+  summary?: string;
+  messages: Message[];
+  acquisitionData: AcquisitionData;
+  documents?: Record<string, DocumentInfo[]>;
+  toolCallsByMsg?: ToolCallsByMessageId;
+  stateChangesByMsg?: Record<string, StateChangeEntry[]>;
+  status: 'in_progress' | 'completed' | 'draft';
+}): string {
+  return JSON.stringify({
+    title: session.title ?? '',
+    summary: session.summary ?? '',
+    messages: session.messages.map((message) => ({
+      ...message,
+      timestamp:
+        message.timestamp instanceof Date ? message.timestamp.toISOString() : message.timestamp,
+    })),
+    acquisitionData: session.acquisitionData,
+    documents: session.documents ?? {},
+    toolCallsByMsg: session.toolCallsByMsg ?? {},
+    stateChangesByMsg: session.stateChangesByMsg ?? {},
+    status: session.status,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -284,10 +310,7 @@ export function useLocalCache(userId: string, tenantId: string): UseLocalCacheRe
         if (documents && Object.keys(documents).length > 0) {
           strippedDocs = {};
           for (const [msgId, docs] of Object.entries(documents)) {
-            strippedDocs[msgId] = docs.map(
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              ({ content, ...meta }) => meta,
-            );
+            strippedDocs[msgId] = docs.map(({ content, ...meta }) => meta);
           }
         }
 
@@ -328,6 +351,23 @@ export function useLocalCache(userId: string, tenantId: string): UseLocalCacheRe
           updatedAt: now,
           status: existing?.status ?? 'in_progress',
         };
+
+        const existingSignature = existing
+          ? buildSessionContentSignature({
+              title: existing.title,
+              summary: existing.summary,
+              messages: existing.messages,
+              acquisitionData: existing.acquisitionData,
+              documents: existing.documents,
+              toolCallsByMsg: existing.toolCallsByMsg,
+              stateChangesByMsg: existing.stateChangesByMsg,
+              status: existing.status,
+            })
+          : null;
+        const nextSignature = buildSessionContentSignature(sessionData);
+        if (existing && existingSignature === nextSignature) {
+          return;
+        }
 
         allSessions[sessionId] = sessionData;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(allSessions));

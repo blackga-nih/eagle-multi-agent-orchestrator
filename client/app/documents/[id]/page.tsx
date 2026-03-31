@@ -13,6 +13,7 @@ import {
   Sparkles,
   Download,
   ChevronDown,
+  ChevronUp,
   Eye,
   Edit3,
   RefreshCw,
@@ -24,6 +25,7 @@ import TopNav from '@/components/layout/top-nav';
 import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import TemplateProvenanceBadge from '@/components/ui/template-provenance-badge';
 import TagEditor from '@/components/ui/tag-editor';
+import SpreadsheetPreview, { SpreadsheetPreviewHandle } from '@/components/spreadsheet-preview';
 import { useAgentStream } from '@/hooks/use-agent-stream';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
@@ -254,13 +256,15 @@ function xlsxPreviewSheetsEqual(left: XlsxPreviewSheet[], right: XlsxPreviewShee
       }
       return row.cells.every((cell, cellIndex) => {
         const otherCell = otherRow.cells[cellIndex];
-        return Boolean(
-          otherCell &&
-          cell.cell_ref === otherCell.cell_ref &&
-          cell.value === otherCell.value &&
-          cell.display_value === otherCell.display_value &&
-          cell.editable === otherCell.editable,
-        );
+        if (!otherCell || cell.cell_ref !== otherCell.cell_ref || cell.editable !== otherCell.editable) {
+          return false;
+        }
+        // Normalize to strings for comparison (backend may send numbers)
+        const valA = String(cell.value ?? '');
+        const valB = String(otherCell.value ?? '');
+        const dispA = String(cell.display_value ?? '');
+        const dispB = String(otherCell.display_value ?? '');
+        return valA === valB && dispA === dispB;
       });
     });
   });
@@ -286,7 +290,10 @@ function collectXlsxCellEdits(
         if (!cell.editable) continue;
         const original = originalMap.get(`${sheet.sheet_id}:${cell.cell_ref}`);
         if (!original) continue;
-        if (original.value !== cell.value) {
+        // Normalize to strings for comparison (backend may have sent numbers)
+        const originalStr = String(original.value ?? '');
+        const currentStr = String(cell.value ?? '');
+        if (originalStr !== currentStr) {
           edits.push({
             sheet_id: sheet.sheet_id,
             cell_ref: cell.cell_ref,
@@ -530,6 +537,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
 
   // Assistant panel tab state
   const [assistantTab, setAssistantTab] = useState<'chat' | 'changelog'>('chat');
+  // Bottom drawer state (for XLSX documents)
+  const [isBottomDrawerOpen, setIsBottomDrawerOpen] = useState(false);
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -548,6 +557,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const docxBlockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const spreadsheetRef = useRef<SpreadsheetPreviewHandle>(null);
 
   // Download state
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
@@ -1330,6 +1340,10 @@ ${docSnippet}`;
 
   // Save handler - persists to S3
   const handleSave = async () => {
+    // Commit any pending cell edit before saving (for XLSX)
+    if (isBinaryDocument && isXlsxDocument) {
+      spreadsheetRef.current?.commitPendingEdit();
+    }
     if (!s3Key) {
       setSaveError('No document key available - cannot save');
       return;
@@ -1388,6 +1402,16 @@ ${docSnippet}`;
         setDocxPreviewMode(result.preview_mode ?? docxPreviewMode ?? null);
         setDocxPreviewBlocks(savedPreviewBlocks);
         setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(savedPreviewBlocks));
+        setCurrentDocumentId(result.document_id || currentDocumentId);
+        setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
+        setDownloadUrl(null);
+        setS3Key(result.s3_key || result.key || s3Key);
+        setIsEditing(false);
+      } else if (isBinaryDocument && isXlsxDocument) {
+        const savedPreviewSheets = normalizeXlsxPreviewSheets(result.preview_sheets);
+        setDocumentContent(result.content ?? documentContent);
+        setXlsxPreviewSheets(savedPreviewSheets);
+        setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(savedPreviewSheets));
         setCurrentDocumentId(result.document_id || currentDocumentId);
         setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
         setDownloadUrl(null);
@@ -1656,13 +1680,15 @@ ${docSnippet}`;
               {/* Edit / Preview toggle */}
               <button
                 onClick={handleToggleEdit}
-                disabled={isBinaryDocument && !canEditDocxPreview}
+                disabled={isBinaryDocument && !canEditDocxPreview && !canEditXlsxPreview}
                 title={
-                  isBinaryDocument && !canEditDocxPreview
+                  isBinaryDocument && !canEditDocxPreview && !canEditXlsxPreview
                     ? 'Direct editing is unavailable for this binary document type.'
                     : isBinaryDocument && isDocxDocument
                       ? 'Edit this structured DOCX preview. Changes will be applied back to the source document with python-docx.'
-                      : undefined
+                      : isBinaryDocument && isXlsxDocument
+                        ? 'Edit spreadsheet cells. Formula cells are read-only.'
+                        : undefined
                 }
                 className="flex items-center gap-2 px-4 py-2 bg-[#003366] text-white rounded-xl text-sm font-medium hover:bg-[#004488] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
@@ -1688,7 +1714,9 @@ ${docSnippet}`;
                     !s3Key ||
                     (isBinaryDocument && isDocxDocument
                       ? !hasDocxPreviewChanges
-                      : editContent === documentContent)
+                      : isBinaryDocument && isXlsxDocument
+                        ? !hasXlsxPreviewChanges
+                        : editContent === documentContent)
                   }
                   className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   title={
@@ -1760,20 +1788,186 @@ ${docSnippet}`;
           </div>
         )}
 
-        {/* Main Content Area — 65/35 split */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Panel — Document */}
-          <div
-            className={`flex-1 flex flex-col border-r bg-white overflow-y-auto transition-colors duration-500 ${
-              docUpdated ? 'border-r-green-300' : 'border-r-gray-200'
-            }`}
-            style={{ width: '65%' }}
-          >
-            <div className="flex-1 overflow-y-auto p-8">
-              <div
-                className={`${isBinaryDocument && isDocxDocument && isEditing ? 'max-w-6xl' : 'max-w-3xl'} mx-auto`}
+        {/* Main Content Area — conditional layout based on document type */}
+        {isBinaryDocument && isXlsxDocument ? (
+          /* XLSX Layout: Full-width spreadsheet + bottom drawer chat */
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Full-width Spreadsheet */}
+            <div
+              className={`flex-1 flex flex-col bg-white overflow-hidden transition-colors duration-500 ${
+                docUpdated ? 'ring-2 ring-green-300' : ''
+              }`}
+            >
+              <div className="flex-1 overflow-auto p-4">
+                {displayedXlsxSheets.length > 0 ? (
+                  <div className="h-full">
+                    <SpreadsheetPreview
+                      ref={spreadsheetRef}
+                      sheets={displayedXlsxSheets}
+                      activeSheetId={activeXlsxSheetId}
+                      onActiveSheetChange={setActiveXlsxSheetId}
+                      isEditing={isEditing}
+                      onCellChange={updateXlsxPreviewCell}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full">
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center max-w-md">
+                      <FileSpreadsheet className="h-12 w-12 text-emerald-600 mx-auto" />
+                      <h3 className="mt-4 text-lg font-semibold text-gray-900">
+                        {documentTitle || 'Excel Spreadsheet'}
+                      </h3>
+                      <p className="mt-4 text-sm text-gray-600">
+                        Preview unavailable. Download to view in Excel.
+                      </p>
+                      {downloadUrl && (
+                        <a
+                          href={downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-6 py-3 text-sm font-medium text-white hover:bg-[#004488]"
+                        >
+                          <Download className="h-4 w-4" />
+                          Download Excel
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom Drawer — Chat */}
+            <div
+              className={`border-t border-gray-200 bg-gray-50 transition-all duration-300 ${
+                isBottomDrawerOpen ? 'h-80' : 'h-12'
+              }`}
+            >
+              {/* Drawer Header / Toggle */}
+              <button
+                onClick={() => setIsBottomDrawerOpen(!isBottomDrawerOpen)}
+                className="w-full h-12 px-4 flex items-center justify-between bg-white border-b border-gray-200 hover:bg-gray-50 transition-colors"
               >
-                {isBinaryDocument && isDocxDocument ? (
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-[#003366]" />
+                  <span className="text-sm font-medium text-gray-700">
+                    Chat about this {documentType?.replace(/_/g, ' ').toUpperCase() || 'spreadsheet'}
+                  </span>
+                  {chatMessages.length > 1 && (
+                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                      {chatMessages.length - 1} messages
+                    </span>
+                  )}
+                </div>
+                {isBottomDrawerOpen ? (
+                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                ) : (
+                  <ChevronUp className="w-4 h-4 text-gray-500" />
+                )}
+              </button>
+
+              {/* Drawer Content */}
+              {isBottomDrawerOpen && (
+                <div className="flex flex-col h-[calc(100%-48px)]">
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {displayChatMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                      >
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            msg.role === 'assistant'
+                              ? 'bg-gradient-to-br from-[#003366] to-[#004488]'
+                              : 'bg-blue-500'
+                          }`}
+                        >
+                          {msg.role === 'assistant' ? (
+                            <Sparkles className="w-3 h-3 text-white" />
+                          ) : (
+                            <User className="w-3 h-3 text-white" />
+                          )}
+                        </div>
+                        <div
+                          className={`max-w-[80%] px-3 py-2 rounded-xl text-sm ${
+                            msg.role === 'assistant'
+                              ? 'bg-white border border-gray-200 text-gray-700'
+                              : 'bg-[#003366] text-white'
+                          }`}
+                        >
+                          <ReactMarkdown
+                            components={{
+                              p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    ))}
+                    {isStreaming && !streamingAssistantMsg && (
+                      <div className="flex gap-2">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
+                          <Sparkles className="w-3 h-3 text-white" />
+                        </div>
+                        <div className="bg-white border border-gray-200 rounded-xl px-3 py-2">
+                          <div className="flex items-center gap-1">
+                            <div className="typing-dot" />
+                            <div className="typing-dot" />
+                            <div className="typing-dot" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Chat Input */}
+                  <div className="p-3 bg-white border-t border-gray-200">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+                            e.preventDefault();
+                            handleSendMessage();
+                          }
+                        }}
+                        placeholder="Ask about this spreadsheet..."
+                        disabled={isStreaming}
+                        className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      />
+                      <button
+                        onClick={handleSendMessage}
+                        disabled={!chatInput.trim() || isStreaming}
+                        className="px-3 py-2 bg-[#003366] text-white rounded-lg hover:bg-[#004488] disabled:opacity-30 transition-colors"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Non-XLSX Layout: 65/35 split with side panel */
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left Panel — Document */}
+            <div
+              className={`flex-1 flex flex-col border-r bg-white overflow-y-auto transition-colors duration-500 ${
+                docUpdated ? 'border-r-green-300' : 'border-r-gray-200'
+              }`}
+              style={{ width: '65%' }}
+            >
+              <div className="flex-1 overflow-y-auto p-8">
+                <div
+                  className={`${isBinaryDocument && isDocxDocument && isEditing ? 'max-w-6xl' : 'max-w-3xl'} mx-auto`}
+                >
+                  {isBinaryDocument && isDocxDocument ? (
                   <div className="space-y-6">
                     <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-sm text-blue-950">
                       <div className="flex items-center gap-2 text-base font-semibold">
@@ -1938,37 +2132,6 @@ ${docSnippet}`;
                         Preview unavailable for this DOCX. You can still download the current file.
                       </div>
                     )}
-                  </div>
-                ) : isBinaryDocument && isXlsxDocument ? (
-                  <div className="flex flex-col items-center justify-center py-16">
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center max-w-md">
-                      <FileSpreadsheet className="h-12 w-12 text-emerald-600 mx-auto" />
-                      <h3 className="mt-4 text-lg font-semibold text-gray-900">
-                        {documentTitle || 'Excel Spreadsheet'}
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-500">
-                        {documentType
-                          ? documentType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-                          : 'Excel Document'}{' '}
-                        (.xlsx)
-                      </p>
-                      <p className="mt-4 text-sm text-gray-600 leading-relaxed">
-                        This spreadsheet is best viewed in Microsoft Excel or Google Sheets.
-                      </p>
-                      {downloadUrl ? (
-                        <a
-                          href={downloadUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-6 py-3 text-sm font-medium text-white hover:bg-[#004488] transition-colors"
-                        >
-                          <Download className="h-4 w-4" />
-                          Download Excel (.xlsx)
-                        </a>
-                      ) : (
-                        <p className="mt-6 text-sm text-gray-400">Download link loading...</p>
-                      )}
-                    </div>
                   </div>
                 ) : isBinaryDocument ? (
                   <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-sm text-blue-950">
@@ -2175,6 +2338,7 @@ ${docSnippet}`;
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Click-away for download menu */}

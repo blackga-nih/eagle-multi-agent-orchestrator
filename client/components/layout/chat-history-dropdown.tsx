@@ -166,7 +166,7 @@ export default function ChatHistoryDropdown({
                       }
                     }}
                     className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-gray-50 transition-colors cursor-pointer group ${
-                      session.id === currentSessionId ? 'bg-blue-50' : ''
+                      session.id === currentSessionId ? 'bg-blue-100' : ''
                     }`}
                   >
                     <MessageSquare
