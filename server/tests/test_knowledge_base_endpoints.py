@@ -96,7 +96,7 @@ class TestListKnowledgeBase:
         ]
         ddb = _mock_dynamo_resource(items)
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base")
 
         assert resp.status_code == 200
@@ -112,7 +112,7 @@ class TestListKnowledgeBase:
         ]
         ddb = _mock_dynamo_resource(items)
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base?topic=compliance")
 
         assert resp.status_code == 200
@@ -140,7 +140,7 @@ class TestListKnowledgeBase:
     def test_returns_empty_when_no_docs(self, client):
         ddb = _mock_dynamo_resource([])
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base")
 
         assert resp.status_code == 200
@@ -151,7 +151,7 @@ class TestListKnowledgeBase:
         items = [_ddb_item(doc_id=f"doc-{i}", title=f"Doc {i}") for i in range(10)]
         ddb = _mock_dynamo_resource(items)
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base?limit=3")
 
         assert resp.status_code == 200
@@ -167,7 +167,7 @@ class TestListKnowledgeBase:
         # DDB doesn't actually filter, but we verify endpoint doesn't crash
         ddb = _mock_dynamo_resource(items)
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base")
 
         assert resp.status_code == 200
@@ -183,7 +183,7 @@ class TestListKnowledgeBase:
         ddb = MagicMock()
         ddb.Table.return_value = table
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base")
 
         assert resp.status_code == 500
@@ -193,7 +193,7 @@ class TestListKnowledgeBase:
         items = [_ddb_item(doc_id="doc-1", title="Test Doc")]
         ddb = _mock_dynamo_resource(items)
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base")
 
         doc = resp.json()["documents"][0]
@@ -222,7 +222,7 @@ class TestKnowledgeBaseStats:
         ]
         ddb = _mock_dynamo_resource(items)
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base/stats")
 
         assert resp.status_code == 200
@@ -236,7 +236,7 @@ class TestKnowledgeBaseStats:
     def test_empty_table_returns_zero_counts(self, client):
         ddb = _mock_dynamo_resource([])
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base/stats")
 
         assert resp.status_code == 200
@@ -257,7 +257,7 @@ class TestKnowledgeBaseStats:
         ddb = MagicMock()
         ddb.Table.return_value = table
 
-        with patch("app.main._get_dynamo", return_value=ddb):
+        with patch("app.routers.knowledge._get_dynamo", return_value=ddb):
             resp = client.get("/api/knowledge-base/stats")
 
         assert resp.status_code == 500

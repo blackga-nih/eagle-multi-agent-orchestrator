@@ -704,6 +704,61 @@ _ecs-wait-frontend:
 #   gh workflow run deploy.yml --ref <branch> -f environment=qa
 # or trigger via GitHub Actions UI > "Deploy EAGLE Platform" > Run workflow > qa.
 
+# Trigger a deploy to dev via GitHub Actions (push-triggered pipeline)
+# Usage: just deploy-ci [branch]
+deploy-ci BRANCH="main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Triggering dev deploy via GitHub Actions ==="
+    echo "Branch: {{BRANCH}}"
+    # Cancel any in-progress deploy runs first
+    for run_id in $(gh run list --workflow=deploy.yml --json databaseId,status \
+      --jq '.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending") | .databaseId'); do
+        echo "Cancelling run $run_id..."
+        gh run cancel "$run_id" 2>/dev/null || true
+    done
+    gh workflow run deploy.yml --ref {{BRANCH}}
+    sleep 3
+    RUN_ID=$(gh run list --workflow=deploy.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+    echo ""
+    echo "Deploy triggered: https://github.com/CBIIT/sm_eagle/actions/runs/$RUN_ID"
+    echo ""
+    echo "Monitor with:"
+    echo "  just deploy-watch"
+    echo "  just deploy-status"
+
+# Watch the latest deploy run (live streaming output)
+deploy-watch:
+    #!/usr/bin/env bash
+    RUN_ID=$(gh run list --workflow=deploy.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+    echo "Watching run $RUN_ID..."
+    gh run watch "$RUN_ID"
+
+# Check status of the latest deploy run
+deploy-status:
+    #!/usr/bin/env bash
+    gh run list --workflow=deploy.yml --limit 1 --json databaseId,status,conclusion,headBranch,createdAt \
+      --jq '.[0] | "\(.status) \(.conclusion // "—") (branch: \(.headBranch), started: \(.createdAt))"'
+    echo ""
+    gh run view $(gh run list --workflow=deploy.yml --limit 1 --json databaseId --jq '.[0].databaseId') \
+      --json jobs --jq '.jobs[] | "\(if .conclusion == "success" then "✅" elif .conclusion == "failure" then "❌" elif .status == "in_progress" then "🔄" else "⏳" end) \(.name)"'
+
+# Cancel all active deploy runs
+deploy-cancel:
+    #!/usr/bin/env bash
+    CANCELLED=0
+    for run_id in $(gh run list --workflow=deploy.yml --json databaseId,status \
+      --jq '.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending") | .databaseId'); do
+        echo "Cancelling run $run_id..."
+        gh run cancel "$run_id" 2>/dev/null || true
+        CANCELLED=$((CANCELLED + 1))
+    done
+    if [ "$CANCELLED" -eq 0 ]; then
+        echo "No active runs to cancel."
+    else
+        echo "Cancelled $CANCELLED run(s)."
+    fi
+
 # Deploy to QA via GitHub Actions workflow_dispatch (recommended)
 # Usage: just deploy-qa-ci [branch]
 deploy-qa-ci BRANCH="main":
@@ -714,8 +769,7 @@ deploy-qa-ci BRANCH="main":
     gh workflow run deploy.yml --ref {{BRANCH}} -f environment=qa
     echo ""
     echo "Deploy triggered. Watch progress with:"
-    echo "  gh run watch"
-    echo "  gh run list --workflow deploy.yml --limit 5"
+    echo "  just deploy-watch"
 
 # Deploy to QA environment (local Docker build + ECR push)
 deploy-qa:
