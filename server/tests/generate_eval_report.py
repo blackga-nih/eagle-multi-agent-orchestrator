@@ -49,6 +49,25 @@ E2E_TESTS = [
 ENVIRONMENT = os.getenv("EAGLE_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev"))
 
 
+def _conversation_scorer():
+    """Lazy import so `app.telemetry` resolves when the script is run from repo root."""
+    p = str(SERVER_DIR.resolve())
+    if p not in sys.path:
+        sys.path.insert(0, p)
+    from app.telemetry import conversation_scorer as cs
+
+    return cs
+
+
+def _tier_pass_rate(result: dict | None) -> float | None:
+    if result is None:
+        return None
+    n = result["passed"] + result["failed"] + result.get("errors", 0)
+    if n <= 0:
+        return None
+    return result["passed"] / n
+
+
 def run_pytest(test_files: list[str], label: str, cwd: Path) -> dict:
     """Run pytest and return structured results."""
     start = time.time()
@@ -312,7 +331,24 @@ def generate_html_report(
         total_time += result["elapsed"]
 
     overall = "PASS" if total_failed == 0 else "FAIL"
-    overall_color = "#22c55e" if overall == "PASS" else "#ef4444"
+
+    cs = _conversation_scorer()
+    tier_scores: list[float] = []
+    for res in (tier1, tier2):
+        tr = _tier_pass_rate(res)
+        if tr is not None:
+            tier_scores.append(100.0 * tr)
+    overall_pass_rate = (total_passed / total_tests) if total_tests else 0.0
+    backend_rollup = cs.rollup_eval_backend_only(
+        tier_scores_0_100=tier_scores,
+        overall_pass_rate=overall_pass_rate,
+    )
+    e2e_rate = _tier_pass_rate(e2e)
+    rollup = cs.rollup_eval_full_stack(backend_rollup, e2e_pass_rate=e2e_rate)
+    run_conf = cs.eval_run_confidence_from_tiers(tier1=tier1, tier2=tier2, e2e=e2e)
+    quality_band = cs.score_band_label(rollup["score"])
+    quality_blurb = cs.score_band_description(rollup["score"])
+    conf_band = cs.score_band_label(run_conf["score"])
 
     # Build summary rows
     summary_rows = ""
@@ -358,6 +394,9 @@ def generate_html_report(
         output_tail = e2e["output"][-3000:] if len(e2e["output"]) > 3000 else e2e["output"]
         failure_html += f'<h3>E2E Failures</h3>\n<pre>{_html_escape(output_tail)}</pre>\n'
 
+    hero_band_class = " low" if rollup["score"] < 60 else (" mid" if rollup["score"] < 85 else "")
+    hero_e2e_line = f"E2E pass {e2e_rate:.0%}" if e2e_rate is not None else "Backend tiers only"
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -392,6 +431,19 @@ def generate_html_report(
   pre {{ background: var(--card); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; overflow-x: auto; font-size: 0.85rem; color: var(--muted); white-space: pre-wrap; word-break: break-all; }}
   details {{ margin: 1rem 0; }}
   summary {{ cursor: pointer; color: var(--blue); font-weight: 600; }}
+  .hero {{ background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.5rem 1.75rem; margin-bottom: 1.75rem; }}
+  .hero h2 {{ font-size: 1rem; color: var(--muted); font-weight: 600; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; border: none; padding: 0; }}
+  .hero-score {{ font-size: 2.75rem; font-weight: 800; color: #f8fafc; line-height: 1.1; }}
+  .hero-band {{ display: inline-block; margin-top: 0.5rem; padding: 0.2rem 0.65rem; border-radius: 9999px; font-size: 0.85rem; font-weight: 700; background: rgba(34, 197, 94, 0.2); color: var(--green); }}
+  .hero-band.mid {{ background: rgba(234, 179, 8, 0.2); color: #eab308; }}
+  .hero-band.low {{ background: rgba(239, 68, 68, 0.2); color: var(--red); }}
+  .hero p {{ color: var(--muted); font-size: 0.95rem; margin-top: 0.75rem; max-width: 52rem; line-height: 1.55; }}
+  .hero-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1.25rem; }}
+  .hero-mini {{ background: rgba(30, 41, 59, 0.8); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; }}
+  .hero-mini .mv {{ font-size: 1.5rem; font-weight: 700; color: #e2e8f0; }}
+  .hero-mini .ml {{ font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; text-transform: uppercase; letter-spacing: 0.04em; }}
+  .band-key {{ font-size: 0.82rem; color: var(--muted); margin: 1rem 0 0.5rem; line-height: 1.5; }}
+  .band-key code {{ background: var(--card); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.78rem; }}
 </style>
 </head>
 <body>
@@ -404,6 +456,20 @@ def generate_html_report(
   <span>Branch: main</span>
   <span>Commit: {commit}</span>
   <span class="badge {overall.lower()}">{overall}</span>
+</div>
+
+<div class="hero">
+  <h2>Derived eval quality (pytest / Playwright)</h2>
+  <div class="hero-score">{rollup["score"]}<span style="font-size:1.2rem;font-weight:600;color:var(--muted);margin-left:6px">/100</span></div>
+  <div class="hero-band{hero_band_class}">{quality_band}</div>
+  <p><strong>{quality_blurb}</strong> Rollup mixes per-tier pass rates with overall pass rate
+  ({overall_pass_rate:.0%}); when E2E ran, it is weighted into the same score. This is a coarse signal — unlike multi-turn JSON reports, individual test assertions are not rescored here.</p>
+  <div class="hero-grid">
+    <div class="hero-mini"><div class="mv">{run_conf["score"]}</div><div class="ml">Run confidence</div><div class="ml" style="margin-top:6px;text-transform:none;color:#94a3b8">{conf_band} — tiers run, volume, stability</div></div>
+    <div class="hero-mini"><div class="mv">{rollup.get("stack", "backend")}</div><div class="ml">Stack mode</div><div class="ml" style="margin-top:6px;text-transform:none;color:#94a3b8">{hero_e2e_line}</div></div>
+    <div class="hero-mini"><div class="mv">{overall_pass_rate:.0%}</div><div class="ml">Overall pass rate</div><div class="ml" style="margin-top:6px;text-transform:none;color:#94a3b8">{total_passed} / {total_tests} tests</div></div>
+  </div>
+  <p class="band-key">Bands: <code>90+</code> Excellent · <code>75–89</code> Strong · <code>60–74</code> Adequate · <code>40–59</code> Weak · <code>&lt;40</code> Critical</p>
 </div>
 
 <div class="stat-grid">

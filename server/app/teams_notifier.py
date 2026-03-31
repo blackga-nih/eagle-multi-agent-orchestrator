@@ -157,6 +157,8 @@ def notify_feedback(
     feedback_text: str,
     feedback_type: str = "general",
     page: str = "",
+    jira_key: str | None = None,
+    feedback_id: str = "",
 ) -> None:
     """Notify Teams when a user submits Ctrl+J feedback."""
     from .teams_cards import feedback_card
@@ -170,6 +172,8 @@ def notify_feedback(
         feedback_text=feedback_text,
         feedback_type=feedback_type,
         page=page,
+        jira_key=jira_key,
+        feedback_id=feedback_id,
     )
     _fire(payload, "feedback")
 

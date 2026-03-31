@@ -1,720 +1,245 @@
 ---
 name: mvp1-eval
-description: Run the EAGLE evaluation suite — unit tests, integration tests, frontend E2E (Playwright + visual QA), and live Bedrock eval tests covering supervisor routing, subagent orchestration, compliance matrix, document pipeline, and all UC use cases. Tests are tagged by MVP phase (MVP1 core, MVP2 intake optimization, MVP3 integrations).
+description: Run the EAGLE evaluation ladder — Python unit/integration tests, Strands/Bedrock eval suite (test_strands_eval.py), and Playwright frontend checks (structural, live SSE/tool UI, optional e2e-judge visual QA). Uses repo-keyed config; aligns traces with Langfuse when credentials exist.
 model: sonnet
 ---
 
-# EAGLE Eval Suite
+# EAGLE MVP1 Eval Skill
 
-Run the curated test suite validating the EAGLE acquisition package workflow end-to-end. Tests are organized by **MVP phase** so you can run only what's relevant to the current milestone.
+Curated ladder for the acquisition workflow stack: **Tier 1** fast unit tests, **Tier 2** live Strands/Bedrock integration, **Tier 3** full Strands eval driver, **Tier 4** frontend in three bands (structural, live streaming/tool UI, visual QA).
 
-## Source Documents & References
+## Validation loop (run every time)
 
-### Business Requirements
-| Source | Path | Description |
-|--------|------|-------------|
-| Use Case List (Excel) | `Use Case List.xlsx` | 30 use cases across MVP1/2/3 with roles, FAR parts, thresholds, scenarios. Sheet "use case list" has the master UC table, "MVP summary" has counts by role, "Baseline questions" has 6 QA test prompts with expected agent responses |
-| Sprint Update (DOCX) | `EAGLE-Sprint-Update-2026-03-16.docx` | Current sprint status — "What's Done" table, "Working for Demo" bullets, bottom line summary. Updated weekly |
-| Demo Script | `EAGLE-DEMO-SCRIPT.md` | 14-step demo script with UC-to-step mapping, pre-demo checklist, talking points, and fallback plan |
+1. **Load config** — `.claude/skills/mvp1-eval/config.json` for this repo basename; no hardcoded Langfuse project IDs in prose (use `langfuse_project_id` from config or `LANGFUSE_PROJECT_ID` from `env_file`).
+2. **Pre-flight (AWS)** — **Mandatory** before **Tier 2+**, **Tier 4-live**, and **Tier 4b** (any run that hits Bedrock, live backend/SSE, or e2e-judge). **Skip** AWS checks for **Tier 1 only** (or Tier 1 + **4a** structural) so local pytest can run without credentials. If the planned run includes Tier 2+, 4-live, or 4b and `aws sts get-caller-identity` fails, abort with a clear message (`aws sso login --profile ...`); do not start those tiers.
+3. **Execute tiers** in order; **after each tier** record pass/fail counts, duration, and failing test names.
+4. **Gate** — default: stop before Tier 3 unless `--full` or `--tier 3`; stop before Tier 4b visual unless `--full` or `--visual` (or `--tier 4b`).
+5. **Correlate** — for any tier that hit Bedrock, bracket timestamps and pull Langfuse traces (Phase 4).
+6. **Score** — apply [Scoring and report thresholds](#scoring-and-report-thresholds) below; flag regressions.
+7. **Notify** — only if `TEAMS_WEBHOOK_URL` or `ERROR_WEBHOOK_URL` is set in `env_file` (see [Notifications](#notifications)); never embed or default a webhook URL in code or copy-paste snippets.
 
-### Jira Sources
-| Source | Path | Description |
-|--------|------|-------------|
-| Jira Issues (full) | `docs/jira-issues.md` | 41 issues — 3 epics (EAGLE-3, EAGLE-20, EAGLE-22), 32 stories, 6 tasks. Team assignments, expert domains, status. Updated 2026-02-27 |
-| Jira New Items (Mar 10) | `docs/jira-new-items-20260310.md` | EAGLE-42 through EAGLE-64 — completed stories (SSE migration, observability, compliance) + new EAGLE-54 epic (intake optimization) with 10 stories. Source: March 10 QA session |
-| Jira Completed (early) | `jira-tickets.md` | EAGLE-001 through EAGLE-006 — early frontend bugs and stories (doc checklist, viewer, smart naming, home page) |
+## Canonical sources
 
-### Jira Epics
-| Epic | Summary | MVP |
-|------|---------|-----|
-| EAGLE-3 | UC-1 Create an acquisition package | MVP1 |
-| EAGLE-20 | Acquisition Package by Type | MVP1 |
-| EAGLE-22 | Technical Configuration | MVP1 |
-| EAGLE-54 | Intake Flow Optimization | MVP2 |
+| Kind | Path | Notes |
+|------|------|--------|
+| **Strands eval suite (source of truth for inventory)** | `server/tests/test_strands_eval.py` | Numbered scenarios, CLI (`--tests`, `--model`, …); docstring at top describes phases. **Do not assume a fixed test count** — the file grows; cross-check `server/tests/eval_aws_publisher.py` `_TEST_NAMES` for CloudWatch name mapping (keep in sync when adding tests). |
+| **Demo scripts** | `EAGLE-DEMO-SCRIPT-UPDATED.md` (primary), `EAGLE-DEMO-SCRIPT.md` (legacy) | Multi-turn UC content for demos and eval scenarios; paths also listed in config `demo_script_paths`. |
+| **e2e-judge** | `server/tests/e2e_judge_orchestrator.py`, `server/tests/e2e_judge_journeys.py` | Vision judge over Playwright screenshots; journey list in config `tier4b_journeys`. |
+| **Playwright eval config** | `client/tests/eval-playwright.config.ts` | Chromium, screenshots for eval runs. |
+| **Skill config** | `.claude/skills/mvp1-eval/config.json` | Per-repo paths, tiers, Langfuse host/project id, demo paths, optional report scripts. |
 
-### Test & Eval Files
-| Source | Path | Description |
-|--------|------|-------------|
-| Eval suite | `server/tests/test_strands_eval.py` | 42 async test functions (test_1 through test_42) — Strands Agent + compliance matrix + AWS tools + UC workflows |
-| CloudWatch publisher | `server/tests/eval_aws_publisher.py` | `_TEST_NAMES` dict (42 entries), `publish_eval_metrics()`, `archive_results_to_s3()` |
-| Tier 1 unit tests | `server/tests/test_compliance_matrix.py` | Compliance matrix logic — thresholds, documents, FAR lookups |
-| Tier 1 unit tests | `server/tests/test_chat_kb_flow.py` | Knowledge base query flow |
-| Tier 1 unit tests | `server/tests/test_canonical_package_document_flow.py` | Package-to-document routing |
-| Tier 1 unit tests | `server/tests/test_document_pipeline.py` | Document generation pipeline |
-| Tier 2 integration | `server/tests/test_strands_multi_agent.py` | Live Bedrock — supervisor routing to subagents |
-| Tier 2 integration | `server/tests/test_strands_poc.py` | Live Bedrock — UC-02 micro purchase E2E |
-| Tier 2 integration | `server/tests/test_strands_service_integration.py` | SDK query adapter tests |
-| Skill config | `.claude/skills/mvp1-eval/config.json` | Multi-repo config (sm_eagle, sample-multi-tenant, eagle-multi-agent) |
-| Tier 4a Playwright tests | `client/tests/*.spec.ts` | 15 curated spec files — navigation, chat, admin, documents, workflows, keyboard shortcuts, feedback, knowledge base |
-| Tier 4a Playwright config | `client/tests/eval-playwright.config.ts` | Eval-specific config — Chromium only, screenshots on every test |
-| Tier 4b e2e-judge orchestrator | `server/tests/e2e_judge_orchestrator.py` | Screenshot + vision judge pipeline — 8 journeys, Bedrock Sonnet |
-| Tier 4b e2e-judge journeys | `server/tests/e2e_judge_journeys.py` | Journey definitions — login, home, chat, admin, documents, workflows, responsive, acquisition_package |
+### Other useful references (short)
 
-### Backend Key Files
-| Source | Path | Description |
-|--------|------|-------------|
-| Strands orchestration | `server/app/strands_agentic_service.py` | Supervisor + 7 subagent @tools, `sdk_query_streaming()`, Langfuse OTEL exporter |
-| Document export | `server/app/document_export.py` | `markdown_to_docx()` + `markdown_to_pdf()` — NCI branding, DRAFT watermarks, branded tables |
-| Langfuse client | `server/app/telemetry/langfuse_client.py` | `list_traces()`, `get_trace()`, `list_observations()` — Langfuse REST API for admin dashboard |
-| Main routes | `server/app/main.py` | FastAPI endpoints — `/api/chat`, `/api/documents/export`, `/api/admin/traces`, etc. |
-| Compliance matrix | `server/app/compliance_matrix.py` | Deterministic FAR/DFARS threshold lookup — no LLM |
-| Environment | `server/.env` | AWS, Langfuse, Cognito, S3, model config |
+- **Tier 1** files: `test_compliance_matrix.py`, `test_chat_kb_flow.py`, `test_canonical_package_document_flow.py`, `test_document_pipeline.py`.
+- **Tier 2** files: `test_strands_multi_agent.py`, `test_strands_poc.py`, `test_strands_service_integration.py`.
+- **Backend orchestration**: `server/app/strands_agentic_service.py`; **compliance**: `server/app/compliance_matrix.py`.
 
-### Frontend Key Files
-| Source | Path | Description |
-|--------|------|-------------|
-| Workflows/Packages | `client/app/workflows/page.tsx` | Package cards with pathway badges, status, progress tracking |
-| Langfuse traces | `client/app/admin/traces/page.tsx` | Traces dashboard — summary cards, env filter, detail panel with observations |
-| Admin dashboard | `client/app/admin/page.tsx` | System health, stats, active sessions |
-| Chat UI | `client/components/chat-simple/simple-chat-interface.tsx` | Primary chat interface with activity panel |
+### Langfuse UI
 
-### External Systems
-| System | URL / Identifier | Purpose |
-|--------|-----------------|---------|
-| Jira | `tracker.nci.nih.gov` / Project: EAGLE | Issue tracking — epics, stories, bugs |
-| Langfuse | `https://us.cloud.langfuse.com/project/cmmtw4vjq026kad07iu2y1nuc` | OTEL trace viewer, cost dashboard, session analysis |
-| AWS Console (S3) | `eagle-documents-695681773636-dev` | Document storage bucket (us-east-1) |
-| GitHub | `CBIIT/sm_eagle` | Source repo, PRs, CI/CD |
-| CloudWatch | `/eagle/test-runs` log group | Eval metrics and test result archival |
+Build links as `{langfuse_host}/project/{langfuse_project_id}/traces/...` using values from **config** and/or `server/.env`. Do not use stale project slugs from old docs.
 
-## MVP Phase Definitions
+---
 
-| Phase | Scope | Jira Epic | Demo Target |
-|-------|-------|-----------|-------------|
-| **MVP1** | Core infrastructure — sessions, streaming, Strands SDK, supervisor routing, specialist agents, document gen, compliance, observability, cost tracking, basic UC flows | EAGLE-3 (UC-1), EAGLE-22 (Tech Config) | POC demo: simple + complex acquisition walkthrough |
-| **MVP2** | Intake optimization — baseline questions (EAGLE-59), verbosity reduction (EAGLE-58), deferred doc gen (EAGLE-62), vehicle recommendations (EAGLE-56), staged checklist (EAGLE-55), form cards (EAGLE-61), template routing (EAGLE-60), micro purchase fix (EAGLE-57) | EAGLE-54 (Intake Flow Optimization) | QA-validated intake flow matching legacy Eagle quality |
-| **MVP3** | Enterprise integrations — SharePoint (EAGLE-11), NVision vehicle detection, ServiceNow, CO feedback loop, historical analysis, crisis workflows, 800+ concurrent users | Future epics | Production-scale multi-tenant deployment |
-
-## Step 0: Load Repo Config
-
-Resolve all environment-specific values from the config file before running anything.
+## Step 0: Load repo config
 
 ```bash
-# Determine repo name (used as config key)
-REPO_NAME=$(basename $(git rev-parse --show-toplevel))
+REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
 echo "Repo: $REPO_NAME"
 ```
 
-Then read `.claude/skills/mvp1-eval/config.json` and look up the entry matching `$REPO_NAME`.
-Extract these values for use in all subsequent steps:
+Read `.claude/skills/mvp1-eval/config.json` → entry for `$REPO_NAME`, else `_template` fields as hints and fallbacks.
 
-| Variable | Config key | Fallback |
-|----------|-----------|---------|
-| `AWS_PROFILE` | `aws_profile` | `eagle` |
-| `S3_BUCKET` | `s3_bucket` | `eagle-documents-dev` |
-| `SERVER_DIR` | `server_dir` | `server` |
-| `ENV_FILE` | `env_file` | `server/.env` |
-| `LANGFUSE_HOST` | `langfuse_host` | `https://us.cloud.langfuse.com` |
-| `TIER1_TESTS` | `tier1_tests[]` | see defaults below |
-| `TIER2_TESTS` | `tier2_tests[]` | see defaults below |
+| Variable | Config key | Notes |
+|----------|------------|--------|
+| `AWS_PROFILE` | `aws_profile` | Default `eagle` |
+| `S3_BUCKET` | `s3_bucket` | From config |
+| `SERVER_DIR` | `server_dir` | Usually `server` |
+| `CLIENT_DIR` | `client_dir` | Usually `client` |
+| `ENV_FILE` | `env_file` | Usually `server/.env` |
+| `LANGFUSE_HOST` | `langfuse_host` | Plus `LANGFUSE_PROJECT_ID` in env for API URLs |
+| `LANGFUSE_PROJECT_ID` | `langfuse_project_id` | Prefer config; env overrides for local |
+| `TIER1_TESTS` | `tier1_tests[]` | pytest paths under `SERVER_DIR` |
+| `TIER2_TESTS` | `tier2_tests[]` | |
 | `TIER3_TEST` | `tier3_test` | `tests/test_strands_eval.py` |
-| `CLIENT_DIR` | `client_dir` | `client` |
-| `TIER4A_TESTS` | `tier4a_tests[]` | see defaults below |
-| `TIER4A_PROJECT` | `tier4a_project` | `chromium` |
-| `TIER4B_JOURNEYS` | `tier4b_journeys[]` | `["login","home","chat","admin","documents","workflows"]` |
+| `TIER4A_TESTS` | `tier4a_tests[]` | Structural Playwright specs (filenames) |
+| `TIER4_LIVE_TESTS` | `tier4_live_tests[]` | Live backend/SSE/tool specs |
+| `TIER4A_PROJECT` | `tier4a_project` | e.g. `chromium` |
+| `TIER4B_JOURNEYS` | `tier4b_journeys[]` | e2e-judge |
+| `E2E_JUDGE` | `e2e_judge_orchestrator` | Module path under server |
+| `DEMO_SCRIPTS` | `demo_script_paths[]` | Repo-relative markdown |
+| `REPORT_SCRIPTS` | `report_generator_scripts[]` | Optional helpers (e.g. `server/tests/generate_eval_report.py`, `server/tests/generate_mt_report.py`; repo may also list legacy paths) |
 
-If `$REPO_NAME` is not found in the config, print a warning and use fallback values. Do **not** abort — the skill should work in unknown repos with sensible defaults.
+If the repo key is missing, warn and use sensible defaults; do not abort.
 
-> **Adding a new repo**: Copy the `_template` block in `config.json`, rename the key to your repo basename, and fill in `aws_account` + `s3_bucket`. Everything else is usually identical.
+---
 
 ## Pre-flight
 
-1. Verify AWS credentials are active. **If this fails, STOP immediately — do not run any tests.**
-```bash
-aws sts get-caller-identity --profile $AWS_PROFILE 2>&1
-```
-If the command exits non-zero or prints an error, output:
-```
-❌ PREFLIGHT FAILED: AWS profile '$AWS_PROFILE' is not authenticated.
-Run: aws sso login --profile $AWS_PROFILE
-Aborting eval suite.
-```
-Then stop. Do not proceed to Tier 1 or any subsequent step.
-
-2. Set working directory (using `SERVER_DIR` from config):
-```bash
-cd $SERVER_DIR
-```
-
-## Test Tiers
-
-The suite is organized in 4 tiers, run sequentially. Stop and report if a tier has failures before proceeding to the next.
-
-### Tier 1: Unit Tests (fast, no AWS needed)
-
-These validate compliance matrix logic, document pipeline, KB flow, and canonical package routing.
+1. **AWS** — **not required** for **Tier 1** alone (or Tier 1 + **4a** structural Playwright). **Required** before **Tier 2+**, **Tier 4-live**, and **Tier 4b** (Bedrock, live SSE/backend, e2e-judge). When any of those tiers are in scope, run:
 
 ```bash
-python -m pytest tests/test_compliance_matrix.py tests/test_chat_kb_flow.py tests/test_canonical_package_document_flow.py tests/test_document_pipeline.py -v --tb=short 2>&1
+aws sts get-caller-identity --profile "$AWS_PROFILE" 2>&1
 ```
 
-**Expected**: ~60+ tests, all pass. Report count and any failures.
+On failure, print a clear abort message (`aws sso login --profile ...`) and **do not** start Tier 2+, Tier 3, Tier 4-live, or Tier 4b. **Tier 1** may still run first without AWS if you are gating that way.
 
-### Tier 2: Integration Tests (needs AWS/Bedrock)
+2. **Server tests**: `cd "$SERVER_DIR"`.
 
-These hit live Bedrock models via Strands SDK.
+---
+
+## Tier 1 — Unit tests (no Bedrock)
 
 ```bash
-AWS_PROFILE=eagle python -m pytest tests/test_strands_multi_agent.py tests/test_strands_poc.py tests/test_strands_service_integration.py -v --tb=short -x 2>&1
+python -m pytest "${TIER1_TESTS[@]}" -v --tb=short
 ```
 
-**Tests:**
-| Test | File | What it validates |
-|------|------|-------------------|
-| `test_supervisor_routes_to_intake` | test_strands_multi_agent.py | Supervisor -> OA Intake subagent routing |
-| `test_supervisor_routes_to_legal` | test_strands_multi_agent.py | Supervisor -> Legal Counsel subagent routing |
-| `test_supervisor_routes_to_market` | test_strands_multi_agent.py | Supervisor -> Market Intelligence subagent routing |
-| `test_strands_uc02_micro_purchase` | test_strands_poc.py | UC-02 micro purchase end-to-end |
-| `test_sdk_query_adapter_messages` | test_strands_service_integration.py | SDK query adapter message format |
-| `test_sdk_query_single_skill_adapter` | test_strands_service_integration.py | Single skill adapter routing |
+Expect a large fast suite (compliance, KB flow, package routing, document pipeline). Report pass/total and time.
 
-**Expected**: 6 tests, ~4 min total. All pass with valid Bedrock credentials.
+---
 
-### Tier 3: Full Eval Suite (needs AWS/Bedrock, ~30 min)
-
-The comprehensive 42-test eval suite. **Only run if user requests `--full` or Tier 1+2 pass.**
+## Tier 2 — Integration (Bedrock / Strands)
 
 ```bash
-AWS_PROFILE=eagle python -m pytest tests/test_strands_eval.py -v --tb=short -x 2>&1
+AWS_PROFILE="$AWS_PROFILE" python -m pytest "${TIER2_TESTS[@]}" -v --tb=short -x
 ```
 
-**Note**: `test_strands_eval.py` has a top-level `argparse.parse_args()` that crashes pytest collection. If collection fails, run with:
+Roughly six tests across the three files (supervisor routing, UC-02 POC, SDK adapter). ~minutes with valid credentials.
+
+---
+
+## Tier 3 — Full Strands eval (`test_strands_eval.py`)
+
+**Inventory is not fixed** — the authoritative list is the suite file itself (async tests + numbering), with `_TEST_NAMES` in `eval_aws_publisher.py` for telemetry naming.
+
 ```bash
-AWS_PROFILE=eagle python tests/test_strands_eval.py 2>&1
+AWS_PROFILE="$AWS_PROFILE" python -m pytest "$TIER3_TEST" -v --tb=short -x
 ```
 
-**Tests (137 implemented):**
+**Collection note:** `test_strands_eval.py` parses CLI args at import time. If pytest collection fails, run the module as a script per that file’s `if __name__ == "__main__"` / README-style invocation, or use the documented flags in the file header.
 
-| # | Test | Category | MVP | Jira | Excel UC |
-|---|------|----------|-----|------|----------|
-| 1 | session_creation | Session mgmt | MVP1 | EAGLE-44 | -- |
-| 2 | session_resume | Session mgmt | MVP1 | EAGLE-21 | -- |
-| 3 | trace_observation | Observability | MVP1 | EAGLE-44 | -- |
-| 4 | subagent_orchestration | Routing | MVP1 | EAGLE-51 | -- |
-| 5 | cost_tracking | Billing | MVP1 | EAGLE-37 | -- |
-| 6 | tier_gated_tools | Access control | MVP1 | EAGLE-22 | -- |
-| 7 | skill_loading | Plugin system | MVP1 | EAGLE-51 | -- |
-| 8 | subagent_tool_tracking | Observability | MVP1 | EAGLE-51 | -- |
-| 9 | oa_intake_workflow | Specialist | MVP1 | EAGLE-5 | -- |
-| 10 | legal_counsel_skill | Specialist | MVP1 | EAGLE-9 | -- |
-| 11 | market_intelligence_skill | Specialist | MVP1 | EAGLE-32 | -- |
-| 12 | tech_review_skill | Specialist | MVP1 | EAGLE-32 | -- |
-| 13 | public_interest_skill | Specialist | MVP1 | EAGLE-32 | -- |
-| 14 | document_generator_skill | Specialist | MVP1 | EAGLE-8 | -- |
-| 15 | supervisor_multi_skill_chain | Orchestration | MVP1 | EAGLE-51 | -- |
-| 16 | s3_document_ops | AWS tools | MVP1 | EAGLE-8 | -- |
-| 17 | dynamodb_intake_ops | AWS tools | MVP1 | EAGLE-5 | -- |
-| 18 | cloudwatch_logs_ops | AWS tools | MVP1 | EAGLE-44 | -- |
-| 19 | document_generation | Document pipeline | MVP1 | EAGLE-8 | -- |
-| 20 | cloudwatch_e2e_verification | AWS tools | MVP1 | EAGLE-44 | -- |
-| 21 | uc02_micro_purchase | Use case | MVP1 | EAGLE-15 | UC-2.1 |
-| 22 | uc03_option_exercise | Use case | **MVP2** | -- | -- |
-| 23 | uc04_contract_modification | Use case | **MVP2** | EAGLE-17 | -- |
-| 24 | uc05_co_package_review | Use case | **MVP2** | EAGLE-9 | -- |
-| 25 | uc07_contract_closeout | Use case | **MVP3** | -- | -- |
-| 26 | uc08_shutdown_notification | Use case | **MVP3** | -- | -- |
-| 27 | uc09_score_consolidation | Use case | **MVP3** | -- | -- |
-| 28 | strands_skill_tool_orchestration | Plugin system | MVP1 | EAGLE-51 | -- |
-| 29 | compliance_matrix_query_requirements | FAR/DFARS | MVP1 | EAGLE-9 | -- |
-| 30 | compliance_matrix_search_far | FAR/DFARS | MVP1 | EAGLE-9 | -- |
-| 31 | compliance_matrix_vehicle_suggestion | FAR/DFARS | MVP1 | EAGLE-9 | -- |
-| 32 | admin_manager_skill | Admin | MVP1 | EAGLE-22 | -- |
-| 33 | workspace_store | Workspace | MVP1 | EAGLE-22 | -- |
-| 34 | store_crud_functions | Data layer | MVP1 | EAGLE-22 | -- |
-| 35 | uc01_new_acquisition_package | Use case | MVP1 | EAGLE-16 | UC-1 |
-| 36 | uc02_gsa_schedule | Use case | MVP1 | EAGLE-18 | UC-2 |
-| 37 | uc03_sole_source | Use case | MVP1 | EAGLE-27 | UC-3 |
-| 38 | uc04_competitive_range | Use case | MVP1 | -- | UC-4 |
-| 39 | uc10_igce_development | Use case | MVP1 | EAGLE-29 | UC-10 |
-| 40 | uc13_small_business_setaside | Use case | MVP1 | -- | UC-13 |
-| 41 | uc16_tech_to_contract_language | Use case | MVP1 | -- | UC-16 |
-| 42 | uc29_e2e_acquisition | Use case | MVP1 | -- | UC-29 |
+**When to run:** `--full`, `--tier 3`, or after Tier 1+2 pass and the user explicitly wants the long run (often ~tens of minutes; cost on Bedrock).
 
-### Category 15: Demo Script Multi-Turn UC Tests (129-136)
+### Strands-native evaluation guidance (for new harnesses)
 
-These replay the exact multi-message conversations from `EAGLE-DEMO-SCRIPT.md`, validating context retention across turns. Run with `--tests 129,130,131,132,133,134,135,136`.
+When extending evals alongside the Strands Agents SDK, prefer SDK-aligned patterns over one-off asserts:
 
-| # | Test | UC | Turns | Skill | Demo Script Section |
-|---|------|----|-------|-------|---------------------|
-| 129 | uc02_gsa_schedule_multi_turn | UC-2 | 3 | oa-intake | GSA Schedule ($45K) |
-| 130 | uc02_1_micro_purchase_multi_turn | UC-2.1 | 2 | oa-intake | Micro Purchase ($14K) |
-| 131 | uc03_sole_source_multi_turn | UC-3 | 3 | oa-intake | Sole Source ($280K) |
-| 132 | uc04_competitive_range_multi_turn | UC-4 | 3 | legal-counsel | Competitive Range ($2.1M) |
-| 133 | uc10_igce_multi_turn | UC-10 | 3 | oa-intake | IGCE Development ($4.5M) |
-| 134 | uc13_small_business_multi_turn | UC-13 | 3 | market-intelligence | Small Business ($450K) |
-| 135 | uc16_tech_to_contract_multi_turn | UC-16 | 3 | tech-translator | Tech to Contract Language |
-| 136 | uc29_e2e_acquisition_multi_turn | UC-29 | 5 | supervisor | E2E Acquisition ($3.5M) |
-| 137 | uc29_finalize_package | UC-29 | 6 | supervisor | E2E + Package Validation ($3.5M) |
+- **ActorSimulator** — deterministic user turns and edge prompts (multi-turn, tool-forcing, abstention).
+- **TrajectoryEvaluator** — end-to-end session scoring over full agent traces (not only final text).
+- **Tool selection / parameter evaluators** — assert correct tool choice and structured args vs rubric (e.g. compliance matrix before routing, correct S3 keys).
+- **StrandsEvalsTelemetry** — emit structured run summaries so CloudWatch / Langfuse / dashboards stay consistent with `publish_eval_metrics` / trace validators in-repo.
 
-### Planned MVP2 Tests (not yet implemented)
+Reuse existing helpers where possible: `eval_helpers.py` (`LangfuseTraceValidator`, `ToolChainValidator`, etc.) and patterns in `test_strands_eval.py`.
 
-These tests will validate the EAGLE-54 intake optimization epic. Add them as the features land.
+---
 
-| # | Test (planned) | Category | MVP | Jira |
-|---|----------------|----------|-----|------|
-| 43 | baseline_intake_questions | Intake flow | MVP2 | EAGLE-59 |
-| 44 | response_verbosity_reduction | Output quality | MVP2 | EAGLE-58 |
-| 45 | deferred_document_generation | Doc pipeline | MVP2 | EAGLE-62 |
-| 46 | ranked_vehicle_recommendations | Routing | MVP2 | EAGLE-56 |
-| 47 | staged_checklist_progression | UI/backend | MVP2 | EAGLE-55 |
-| 48 | micro_purchase_correct_docs | Doc pipeline | MVP2 | EAGLE-57 |
-| 49 | template_routing_per_acq_type | Doc pipeline | MVP2 | EAGLE-60 |
-| 50 | quick_form_cards_intake | UI/backend | MVP2 | EAGLE-61 |
+## Tier 4 — Frontend
 
-### Planned MVP3 Tests (future)
+Resolve `BASE_URL` first: env override → probe `http://localhost:3000` → deployed default from `client/playwright.config.ts` if needed. Export as `RESOLVED_BASE_URL`.
 
-| # | Test (planned) | Category | MVP | Jira |
-|---|----------------|----------|-----|------|
-| 51 | sharepoint_package_store | Integration | MVP3 | EAGLE-11 |
-| 52 | co_session_handoff | Workflow | MVP3 | EAGLE-36 |
-| 53 | concurrent_users_load | Scale | MVP3 | -- |
+### 4a — Structural / mock-friendly Playwright
 
-### Tier 4: Frontend E2E (needs reachable frontend URL)
-
-Frontend end-to-end tests validating that the EAGLE UI renders correctly, navigation works, and key interactive features function. Split into two sub-tiers.
-
-#### Step 4.0: Resolve Frontend URL
-
-Determine the target URL for frontend tests. Check in this order:
-
-1. If `BASE_URL` env var is already set, use it.
-2. Else check if `http://localhost:3000` is reachable:
-```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ 2>/dev/null
-```
-If returns 200, use `http://localhost:3000`.
-3. Fall back to the deployed ALB URL from `client/playwright.config.ts` default (`http://EagleC-Front-XYyWWR29wzVZ-745394335.us-east-1.elb.amazonaws.com`).
-
-Store the resolved URL in `RESOLVED_BASE_URL`. Print it so the user knows which target is being tested.
-
-#### Tier 4a: Playwright Spec Tests (fast, free, ~2-3 min)
-
-Structural tests that verify page layout, navigation, component rendering, and interactive features. Most require no live backend — they test the frontend in isolation.
-
-**Prerequisites**: Playwright must be installed in `$CLIENT_DIR`. If `npx playwright --version` fails, run `npx playwright install chromium` first.
+Low dependency on a live agent: layout, navigation, admin shells, many chat **shell** checks. Uses `tier4a_tests` + `eval-playwright.config.ts`.
 
 ```bash
-cd $CLIENT_DIR && BASE_URL=$RESOLVED_BASE_URL npx playwright test \
-  ${TIER4A_TESTS[@]} \
-  --project=$TIER4A_PROJECT \
+cd "$CLIENT_DIR" && BASE_URL="$RESOLVED_BASE_URL" npx playwright test \
+  "${TIER4A_TESTS[@]}" \
+  --project="$TIER4A_PROJECT" \
   --config=tests/eval-playwright.config.ts \
-  --reporter=list 2>&1
+  --reporter=list
 ```
 
-**Curated MVP1 test files (15):**
+Treat connection failures to `localhost:8000` as **skipped / environment** when the intent is structural-only; do not count as product regressions without a running API.
 
-| File | What it validates | Backend? |
-|------|-------------------|----------|
-| `navigation.spec.ts` | Home page, EAGLE branding, feature cards | Health endpoint only |
-| `chat.spec.ts` | Chat page structure, new chat welcome, submit button | No |
-| `chat-features.spec.ts` | Activity panel tabs, collapse/open, default state | No |
-| `admin-dashboard.spec.ts` | Dashboard cards, system health, quick actions | No |
-| `documents.spec.ts` | Documents page header, filter tabs, search | No |
-| `workflows.spec.ts` | Acquisition packages page, filters, empty state | No |
-| `keyboard-shortcuts.spec.ts` | Ctrl+K command palette, search, categories | No |
-| `validate-feedback.spec.ts` | Ctrl+J feedback modal, submit flow | No |
-| `knowledge-base.spec.ts` | KB page, tabs, search, document cards | No |
-| `admin-skills.spec.ts` | Skills page header, breadcrumbs, tabs | No |
-| `admin-templates.spec.ts` | Templates page header, search, cards | No |
-| `admin-workspaces.spec.ts` | Workspaces page header, CRUD buttons | No |
-| `modal-width.spec.ts` | Modal responsiveness (80% viewport) | No |
-| `no-mock-data.spec.ts` | Guard: no mock imports in source | No (filesystem) |
-| `document-pipeline.spec.ts` | Document viewer, markdown rendering, export buttons | No |
+### 4-live — Live SSE, streaming, tool cards
 
-**Expected**: ~60+ tests (Chromium only), ~2-3 min. All pass with reachable frontend.
+Requires **reachable frontend + backend** (and typically Bedrock or full stack). Uses `tier4_live_tests` from config (SSE pipeline, `validate-chat-v2*`, tool panels, streaming persistence/render, activity counts, session/thread isolation, etc.).
 
-**Note**: If a test fails with a connection error to `localhost:8000` (backend health check), count it as "skipped (no backend)" rather than a failure. Tests using `test.slow()` that timeout without a live backend should also be counted as skipped.
+Same `playwright` invocation pattern as 4a, substituting the live spec list. Run when validating releases or after backend deploys; skip in CI that lacks the stack.
 
-#### Tier 4b: Visual QA — e2e-judge (optional, ~$0.16, ~20-30 min)
+### 4b — Visual QA (e2e-judge)
 
-Screenshot-based visual regression using Bedrock Sonnet as evaluator. **Only run if user requests `--full` or `--visual`.**
+Optional; Bedrock vision cost. **Only** with `--full`, `--visual`, or `--tier 4b`.
 
 ```bash
-cd $SERVER_DIR && python -m tests.e2e_judge_orchestrator \
-  --base-url $RESOLVED_BASE_URL \
-  --journeys $(echo ${TIER4B_JOURNEYS[@]} | tr ' ' ',') \
-  2>&1
+# If EAGLE_TEST_EMAIL / EAGLE_TEST_PASSWORD are in server/.env, add:
+#   --auth-email ... --auth-password ...
+cd "$SERVER_DIR" && python -m tests.e2e_judge_orchestrator \
+  --base-url "$RESOLVED_BASE_URL" \
+  --journeys "$(IFS=,; echo "${TIER4B_JOURNEYS[*]}")"
 ```
 
-If `EAGLE_TEST_EMAIL` and `EAGLE_TEST_PASSWORD` are set in `server/.env`, pass them:
-```bash
-cd $SERVER_DIR && python -m tests.e2e_judge_orchestrator \
-  --base-url $RESOLVED_BASE_URL \
-  --journeys $(echo ${TIER4B_JOURNEYS[@]} | tr ' ' ',') \
-  --auth-email $EAGLE_TEST_EMAIL \
-  --auth-password $EAGLE_TEST_PASSWORD \
-  2>&1
-```
-
-**Journeys (6 MVP1 curated):**
-
-| Journey | Screenshots | What it evaluates |
-|---------|-------------|-------------------|
-| `login` | 3 | Login page, auth flow, post-auth redirect |
-| `home` | 4 | Home page layout, sidebar, feature cards |
-| `chat` | 6+ | Chat lifecycle: empty state, message send, streaming, response, tool cards |
-| `admin` | 4+ | Admin dashboard, skills, templates sub-pages |
-| `documents` | 4+ | Document list, viewer, template jargon checks |
-| `workflows` | 4+ | Package grid, document checklist modal |
-
-**Expected**: ~25 screenshots, ~$0.10-0.16 cost, 20-30 min. SHA-256 cache means re-runs of unchanged UI are free.
-
-**Results**: The orchestrator writes:
-- `data/e2e-judge/results/{run_id}.json` — structured results
-- `data/e2e-judge/results/{run_id}-report.md` — markdown report
-- `data/e2e-judge/results/latest.json` — latest results symlink
-
-Read `latest.json` after the run to extract: `passed`, `failed`, `warnings`, `avg_quality_score`, `pass_rate`, `cache_stats`.
-
-## Arguments
-
-- `--full` — Run all 4 tiers including the full eval suite and visual QA
-- `--tier N` — Run only tier N (1, 2, 3, or 4)
-- `--tier 4a` — Run only Tier 4a (Playwright spec tests)
-- `--tier 4b` — Run only Tier 4b (e2e-judge visual QA)
-- `--visual` — Include Tier 4b (e2e-judge visual QA) in the run
-- `--base-url URL` — Override the frontend URL for Tier 4 tests
-- `--mvp N` — Run only tests tagged as MVP N (1, 2, or 3). Currently all implemented tests are MVP1; MVP2 tests will land as EAGLE-54 features ship
-- `--reauth` — Run `AWS_PROFILE=eagle aws sso login` before tests
-- (default) — Run Tier 1 + Tier 2 + Tier 4a
-
-## Reporting
-
-After each tier, report:
-- Pass/fail count
-- Failing test names with short error summary
-- Wall-clock time
-- Score (if eval tests report scoring)
-
-**Accumulate these variables across tiers for Phase 5:**
-
-| Variable | Source |
-|----------|--------|
-| `tier1_pass`, `tier1_total` | pytest output for Tier 1 |
-| `tier2_pass`, `tier2_total` | pytest output for Tier 2 |
-| `tier3_pass`, `tier3_total` | pytest output for Tier 3 (0/0 if skipped) |
-| `tier3_run` | `True` if `--full` or `--tier 3` was passed |
-| `tier4a_pass`, `tier4a_total` | Playwright test output for Tier 4a |
-| `tier4a_skipped` | Tests that failed due to missing backend (connection errors, slow timeouts) |
-| `tier4b_pass`, `tier4b_total` | e2e-judge orchestrator output for Tier 4b (0/0 if skipped) |
-| `tier4b_avg_score` | Average UI quality score (1-10) from e2e-judge |
-| `tier4b_cost` | Judge cost in USD from `cache_stats.cost_usd` |
-| `tier4b_run` | `True` if `--full` or `--visual` was passed |
-| `failed_tests` | List of all failing test names across all tiers |
-| `elapsed_seconds` | Total wall-clock time across all tiers that ran |
+Read `data/e2e-judge/results/latest.json` for pass/fail, `avg_quality_score`, `cache_stats`, cost.
 
 ---
 
-## Phase 4: Langfuse Trace Report
+## Scoring and report thresholds
 
-After Tier 2+ tests complete (any tier that hits live Bedrock), query Langfuse for traces generated during the run. The Langfuse env vars are in `server/.env`:
+Use these dimensions in written reports (adjust numbers with team agreement):
 
-```
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_HOST=https://us.cloud.langfuse.com  (default)
-LANGFUSE_PROJECT_ID=cmmsqvi2406aead071t0zhl7f   (required for clickable trace URLs)
-```
+| Dimension | What to measure | Suggested threshold / notes |
+|-----------|-------------------|-----------------------------|
+| **Conversation / session** | Turn coherence, handoffs, session resume, Langfuse session linkage | **Pass** = Tier 3 session/history tests green + no orphan traces for the run window |
+| **Tool-call** | Correct tool, argument shape, success vs error observations | **Pass** = ToolChainValidator / eval rubrics in Tier 3; flag **recovered** errors separately from hard fails |
+| **Frontend** | 4a structural pass rate; 4-live pass when stack available | **4a** target 100% with reachable app; **4-live** allow skips only for documented missing env |
+| **Confidence / quality** | e2e-judge `avg_quality_score` (1–10), content-quality tests in Tier 3 | **Warn** if avg < 7; **fail** if < 5 or any journey `failed` on release gates |
+| **Overall release bar** | Tiers run for the gate | **Ship candidate**: Tier 1 + 2 + 4a all pass; Tier 3 per release policy; 4-live pass on staging; 4b per policy |
 
-> **Local environment tag**: By default, local traces show `environment: "live"` because `DEV_MODE=false`.
-> To tag local traces as `"local"`, add `EAGLE_ENV=local` to `server/.env`. ECS containers
-> automatically get `EAGLE_ENV=dev` or `EAGLE_ENV=prod` from the CDK compute stack.
-
-### 4a. Collect Traces
-
-Load env vars from `server/.env`, then query using the UTC timestamps bracketing the eval run.
-**Important**: `date +"%Y-%m-%dT%H:%M:%SZ"` returns LOCAL time — run `date -u` or check the
-Langfuse trace timestamps to find the actual UTC window.
-
-```python
-import base64, json, httpx
-from datetime import datetime, timezone
-
-# Load from server/.env
-env = {}
-with open(ENV_FILE) as f:  # ENV_FILE from config (e.g. "server/.env")
-    for line in f:
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            env[k.strip()] = v.strip().strip('"').strip("'")
-
-pk = env["LANGFUSE_PUBLIC_KEY"]
-sk = env["LANGFUSE_SECRET_KEY"]
-host = env.get("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
-project_id = env.get("LANGFUSE_PROJECT_ID", "")
-auth = "Basic " + base64.b64encode(f"{pk}:{sk}".encode()).decode()
-
-def lf_get(path, params=None):
-    with httpx.Client(timeout=30) as client:
-        resp = client.get(f"{host}{path}", params=params or {}, headers={"Authorization": auth})
-        resp.raise_for_status()
-        return resp.json()
-
-def trace_url(tid):
-    """Build clickable Langfuse UI link for a trace."""
-    if project_id:
-        return f"{host}/project/{project_id}/traces/{tid}"
-    return f"{host}/traces/{tid}"
-
-# Use fromTimestamp/toTimestamp in UTC (milliseconds precision required)
-# Window: pad 5 min before tier1 start through 5 min after tier2 end
-traces = lf_get("/api/public/traces", params={
-    "limit": 50,
-    "fromTimestamp": "2026-03-20T16:00:00.000Z",  # replace with actual UTC window
-    "toTimestamp":   "2026-03-20T17:00:00.000Z",
-    "order": "ASC",
-})["data"]
-```
-
-To get token counts, fetch observations per trace (token data lives at the GENERATION level, not the trace level):
-
-```python
-for t in traces:
-    tid = t["id"]
-    obs = lf_get("/api/public/observations", params={"traceId": tid, "limit": 100})["data"]
-    gens = [o for o in obs if o.get("type") == "GENERATION"]
-    tin  = sum((o.get("usage") or {}).get("input", 0) or 0 for o in gens)
-    tout = sum((o.get("usage") or {}).get("output", 0) or 0 for o in gens)
-    # eagle.subagent is in metadata.attributes
-    subagent = ((t.get("metadata") or {}).get("attributes") or {}).get("eagle.subagent", "supervisor")
-    env_tag  = (t.get("metadata") or {}).get("environment", "—")
-    url = trace_url(tid)
-```
-
-### 4b. Per-Trace Analysis
-
-For each trace from the test run, fetch observations and extract:
-
-1. **Trace ID** and Langfuse URL — format: `{host}/project/{project_id}/traces/{trace_id}`
-2. **Subagent** — from `metadata.attributes["eagle.subagent"]` (e.g. `"legal-counsel"`, `"supervisor"`)
-3. **Environment** — from `metadata["environment"]` (`"local"`, `"dev"`, `"prod"`, or `"live"` legacy)
-4. **Token usage** — sum `input`/`output` from GENERATION observations (not from trace-level `usage`)
-5. **Session ID** — `metadata.attributes["eagle.session_id"]` — links to the test that created it
-6. **Documents created** — any TOOL observation output containing `s3_key`
-7. **S3 resource URLs** — if `s3_key` found, construct:
-   `https://s3.console.aws.amazon.com/s3/object/{bucket}?prefix={s3_key}`
-   where bucket = `$S3_BUCKET` (from config, e.g. `eagle-documents-695681773636-dev`)
-
-### 4c. Produce the Report
-
-Output the final report in this format:
-
-```
-## EAGLE Eval Report
-
-### Test Results
-
-| Tier | Tests | Passed | Failed | Skipped | Time |
-|------|-------|--------|--------|---------|------|
-| 1 - Unit | N | N | N | N | Ns |
-| 2 - Integration | 6 | N | N | N | Ns |
-| 3 - Full Eval | 42 | N | N | N | Ns |
-| 4a - Playwright | N | N | N | N | Ns |
-| 4b - Visual QA | N | N | N | N | Ns |
-| **Total** | **N** | **N** | **N** | **N** | **Ns** |
-
-### Coverage by MVP Phase
-
-| MVP | Tests | Passed | Failed | Coverage |
-|-----|-------|--------|--------|----------|
-| MVP1 | 36 | N | N | Core infra, specialists, 9 Excel UCs, observability |
-| MVP2 | 3+0/8 | N | N | 3 existing (uc03/04/05) + 8 planned (EAGLE-54) |
-| MVP3 | 3+0/3 | N | N | 3 existing (uc07/08/09) + 3 planned |
-
-### Agent Trace Summary
-
-| # | Agent | Env | Tokens (in/out) | Errors | Docs | Langfuse |
-|---|-------|-----|-----------------|--------|------|----------|
-| 1 | supervisor | local | 8,455/63 | 0 | 0 | [View]({host}/project/{project_id}/traces/{tid}) |
-| 2 | legal-counsel | local | 298/1,376 | 0 | 0 | [View]({url}) |
-
-**Total traces**: N | **Total tokens**: N in / N out | **Est. cost**: $N.NN
-
-### Tool Call Breakdown
-
-| Tool | Calls | Success | Errors | Avg Tokens |
-|------|-------|---------|--------|------------|
-| legal_counsel | N | N | N | N |
-| search_far | N | N | N | N |
-| web_search | N | N | N | N |
-| create_document | N | N | N | N |
-| dynamodb_intake | N | N | N | N |
-| s3_document_ops | N | N | N | N |
-| ... | ... | ... | ... | ... |
-
-### Documents Created
-
-| Doc Type | S3 Key | Trace | AWS Console |
-|----------|--------|-------|-------------|
-| sow | eagle/tenant/.../sow_20260316_... | [View]({langfuse_url}) | [S3]({s3_console_url}) |
-| (none if no documents created) |
-
-### Frontend E2E Summary
-
-#### Tier 4a — Playwright Spec Tests
-- **Target**: {RESOLVED_BASE_URL}
-- **Project**: Chromium
-- **Files**: 15 spec files, {tier4a_total} tests
-- **Result**: {tier4a_pass}/{tier4a_total} passed ({tier4a_skipped} skipped — no backend)
-
-#### Tier 4b — Visual QA (e2e-judge)
-<!-- If tier4b_run: -->
-- **Target**: {RESOLVED_BASE_URL}
-- **Journeys**: {tier4b_journeys}
-- **Screenshots**: {tier4b_total}
-- **Result**: {tier4b_pass} pass, {tier4b_failed} fail, {tier4b_warnings} warn
-- **Avg Quality Score**: {tier4b_avg_score}/10
-- **Judge Cost**: ${tier4b_cost:.4f}
-- **Cache Hit Rate**: {cache_hit_rate}%
-<!-- Else: -->
-SKIPPED — run with `--full` or `--visual` to include visual regression
-<!-- End if -->
-
-### Errors & Warnings
-
-- **{tool_name}** in trace {trace_id_short}: {error_message_preview}
-  [View in Langfuse]({langfuse_url})
-
-### Langfuse Dashboard
-
-- Traces: {host}/project/{project_id}/traces
-- Sessions: {host}/project/{project_id}/sessions
-- Cost dashboard: {host}/project/{project_id}/dashboard
-```
-
-### 4d. Report Rules
-
-- Always include Langfuse URLs as clickable links — format `{host}/project/{project_id}/traces/{trace_id}`
-- Token counts come from GENERATION observations, NOT from the trace-level `usage` field (which is often 0)
-- Subagent name is in `metadata.attributes["eagle.subagent"]` (missing = supervisor)
-- Environment flag is in `metadata["environment"]` — `local` / `dev` / `prod` (or `live` for legacy pre-EAGLE_ENV traces)
-- If a tool had an error but the agent recovered (used fallback tools), note it as **recovered** not **failed**
-- Group traces by test name when possible (match `eagle.session_id` to test output)
-- If no Langfuse credentials are configured, skip Phase 4 with: "Langfuse not configured — set LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_PROJECT_ID in server/.env for trace reporting"
-- S3 console URLs use region `us-east-1` and bucket from `S3_BUCKET` env var or default `eagle-documents-695681773636-dev`
+Always report wall-clock per tier and aggregate **failed test names** with one-line errors.
 
 ---
 
-## Phase 5: Teams Notification
+## Arguments (conventions)
 
-After Phases 3 and 4 complete (or after the highest tier that ran), send the eval summary to the Teams QA channel via the webhook. Use the variables accumulated during Reporting.
+| Flag | Behavior |
+|------|----------|
+| `--full` | All tiers including Tier 3 and 4b |
+| `--tier N` | `1`, `2`, `3`, `4a`, `4live`, `4b` |
+| `--visual` | Include 4b |
+| `--base-url URL` | Frontend target |
+| `--mvp N` | Filter when tests expose MVP markers (most Strands evals are mixed; prefer `--tests` in `test_strands_eval.py` for precision) |
+| `--reauth` | `aws sso login` before AWS tiers |
+| *(default)* | Tier 1 + 2 + 4a |
 
-```python
-import httpx, sys
-from datetime import datetime, timezone
+---
 
-# Reuse env dict loaded in Phase 4 (or reload from ENV_FILE)
-_DEFAULT_WEBHOOK = (
-    "https://prod-52.usgovtexas.logic.azure.us:443/workflows/"
-    "8705df58d766420d8847222b1b12d7a0/triggers/manual/paths/invoke"
-    "?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0"
-    "&sig=Xo4vpYNBYWWdyreboIYnBJtGlO3cNRLSEakEcNGWBoM"
-)
-webhook_url = env.get("TEAMS_WEBHOOK_URL") or env.get("ERROR_WEBHOOK_URL") or _DEFAULT_WEBHOOK
+## Reporting checklist
 
-environment = env.get("EAGLE_ENV", env.get("ENVIRONMENT", "dev"))
-date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+After each tier: passes, failures, skips, duration. Accumulate:
 
-# --- Fill from accumulated tier variables ---
-# tier1_pass, tier1_total, tier2_pass, tier2_total
-# tier3_pass, tier3_total, tier3_run (bool)
-# tier4a_pass, tier4a_total
-# tier4b_pass, tier4b_total, tier4b_avg_score, tier4b_cost, tier4b_run (bool)
-# failed_tests (list of str), elapsed_seconds (float)
+- `tier1_*`, `tier2_*`, `tier3_*`, `tier3_run`
+- `tier4a_*`, `tier4live_*`, `tier4live_run`
+- `tier4b_*`, `tier4b_run`, `tier4b_avg_score`, judge cost from cache stats
+- `failed_tests[]`, `elapsed_seconds`
 
-all_pass = (
-    tier1_pass == tier1_total
-    and tier2_pass == tier2_total
-    and tier4a_pass == tier4a_total
-    and (not tier3_run or tier3_pass == tier3_total)
-    and (not tier4b_run or tier4b_pass == tier4b_total)
-)
-style = "good" if all_pass else "attention"
-total_pass = tier1_pass + tier2_pass + tier4a_pass + (tier3_pass if tier3_run else 0) + (tier4b_pass if tier4b_run else 0)
-total = tier1_total + tier2_total + tier4a_total + (tier3_total if tier3_run else 0) + (tier4b_total if tier4b_run else 0)
-tier3_value = f"{tier3_pass}/{tier3_total}" if tier3_run else "SKIPPED"
-tier4b_value = f"{tier4b_pass}/{tier4b_total} (avg {tier4b_avg_score}/10)" if tier4b_run else "SKIPPED"
-status_label = "All Pass" if all_pass else f"{len(failed_tests)} Failed"
+### Langfuse (after Bedrock tiers)
 
-facts = [
-    {"title": "Date", "value": date},
-    {"title": "Environment", "value": environment},
-    {"title": "Tier 1 — Unit", "value": f"{tier1_pass}/{tier1_total}"},
-    {"title": "Tier 2 — Integration", "value": f"{tier2_pass}/{tier2_total}"},
-    {"title": "Tier 3 — Full Eval", "value": tier3_value},
-    {"title": "Tier 4a — Playwright", "value": f"{tier4a_pass}/{tier4a_total}"},
-    {"title": "Tier 4b — Visual QA", "value": tier4b_value},
-    {"title": "Total", "value": f"{total_pass}/{total} passed"},
-    {"title": "Duration", "value": f"{elapsed_seconds:.0f}s"},
-]
+Load `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`, `LANGFUSE_PROJECT_ID` from `ENV_FILE`. Query traces in **UTC** between run start/end. Token usage: sum **GENERATION** observations, not trace-level `usage`. Subagent: `metadata.attributes["eagle.subagent"]`. Trace link: `{LANGFUSE_HOST}/project/{LANGFUSE_PROJECT_ID}/traces/{id}`.
 
-if all_pass:
-    body_text = f"All {total} tests passed."
-else:
-    lines = [f"**{len(failed_tests)} failing:**"]
-    for t in failed_tests[:10]:
-        lines.append(f"- {t}")
-    if len(failed_tests) > 10:
-        lines.append(f"*...and {len(failed_tests) - 10} more*")
-    body_text = "\n\n".join(lines)
+If Langfuse is unset, state that explicitly and skip trace sections.
 
-langfuse_host = env.get("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
-langfuse_project_id = env.get("LANGFUSE_PROJECT_ID", "")
-langfuse_url = f"{langfuse_host}/project/{langfuse_project_id}/traces" if langfuse_project_id else ""
-cloudwatch_url = (
-    "https://console.aws.amazon.com/cloudwatch/home"
-    "?region=us-east-1#logsV2:log-groups/log-group/%2Feagle%2Ftest-runs"
-)
+### Report table template
 
-actions = []
-if langfuse_url:
-    actions.append({"type": "Action.OpenUrl", "title": "Langfuse Traces", "url": langfuse_url})
-actions.append({"type": "Action.OpenUrl", "title": "CloudWatch Logs", "url": cloudwatch_url})
+Use **dynamic** totals for Tier 3 and Tier 4 rows (never hardcode “42 tests”). Example:
 
-card = {
-    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-    "type": "AdaptiveCard",
-    "version": "1.4",
-    "msteams": {"width": "Full"},
-    "body": [
-        {
-            "type": "Container",
-            "style": style,
-            "bleed": True,
-            "items": [{
-                "type": "TextBlock",
-                "text": f"EAGLE {environment} | Eval Report — {status_label}",
-                "weight": "Bolder",
-                "size": "Medium",
-                "wrap": True,
-            }],
-        },
-        {"type": "FactSet", "facts": facts},
-        {"type": "TextBlock", "text": body_text, "wrap": True, "spacing": "Medium"},
-    ],
-    "actions": actions,
-}
-
-payload = {
-    "type": "message",
-    "attachments": [{
-        "contentType": "application/vnd.microsoft.card.adaptive",
-        "contentUrl": None,
-        "content": card,
-    }],
-}
-
-resp = httpx.post(webhook_url, json=payload, timeout=10)
-print(f"[Eval Report] Teams notification sent: status={resp.status_code}")
-if resp.status_code >= 300:
-    print(f"[Eval Report] Response: {resp.text[:200]}")
+```markdown
+| Tier | Passed | Failed | Skipped | Time |
+|------|--------|--------|---------|------|
+| 1 | … | … | … | … |
+| 2 | … | … | … | … |
+| 3 | … | … | … | … |
+| 4a | … | … | … | … |
+| 4-live | … | … | … | … |
+| 4b | … | … | … | … |
 ```
 
-### 5. Phase 5 Rules
+---
 
-- Always run Phase 5, even if tests failed — the card is the QA team's signal either way
-- If `TEAMS_WEBHOOK_URL` is absent from `server/.env`, skip silently with a printed message (do not error)
-- Green card (`style: good`) = all tiers fully passed; red card (`style: attention`) = any failures
-- Cap failing test names at 10 in the card body — full list is in the Phase 4 Langfuse report
-- The `elapsed_seconds` value should be the sum of all tier wall-clock times that actually ran
+## Notifications
+
+**Do not** use a baked-in or “default” webhook URL. Post Teams/Adaptive Cards **only** when `TEAMS_WEBHOOK_URL` or `ERROR_WEBHOOK_URL` is present in `ENV_FILE` (or the process environment). If neither is set, skip notification and mention that notifications were disabled. Never log full secrets.
+
+---
+
+## Adding a new repo
+
+Copy the `_template` object in `config.json`, rename the key to the repo basename, set `aws_account`, `s3_bucket`, and `langfuse_project_id`. Align `tier4_live_tests` and `demo_script_paths` with what exists in that clone.

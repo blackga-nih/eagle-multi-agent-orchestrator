@@ -26,6 +26,62 @@ from ..feedback_store import (
 from ..teams_notifier import notify_feedback
 from .dependencies import get_user_from_header
 
+# ── JIRA helpers ────────────────────────────────────────────────────
+
+
+def _create_jira_for_feedback(
+    feedback_id: str,
+    feedback_text: str,
+    feedback_type: str,
+    user_id: str,
+    tenant_id: str,
+    tier: str,
+    session_id: str,
+    page: str,
+    created_at: str,
+) -> Optional[str]:
+    """Create a JIRA issue for feedback. Returns ticket key or None."""
+    from ..config import jira as jira_config
+
+    if not jira_config.feedback_enabled:
+        return None
+
+    from ..jira_client import create_feedback_issue
+
+    summary_text = feedback_text[:80].replace("\n", " ")
+    summary = f"[Feedback][{feedback_type}] {summary_text}"
+
+    description = (
+        f"h3. User Feedback\n"
+        f"*User:* {user_id} ({tier})\n"
+        f"*Tenant:* {tenant_id}\n"
+        f"*Page:* {page or '(none)'}\n"
+        f"*Session:* {session_id[:36] if session_id else '(none)'}\n"
+        f"*Feedback Type:* {feedback_type}\n"
+        f"*Timestamp:* {created_at}\n"
+        f"*Feedback ID:* {feedback_id}\n\n"
+        f"----\n\n"
+        f"{feedback_text}\n\n"
+        f"----\n\n"
+        f"_Auto-created by EAGLE feedback pipeline_"
+    )
+
+    labels = ["feedback", "auto-created"]
+    if feedback_type and feedback_type != "general":
+        labels.append(feedback_type)
+
+    try:
+        return create_feedback_issue(
+            summary=summary,
+            description=description,
+            labels=labels,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to create JIRA issue for feedback %s", feedback_id, exc_info=True
+        )
+        return None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
@@ -90,7 +146,7 @@ async def api_submit_feedback(
 
     cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
 
-    feedback_store.write_feedback(
+    item = feedback_store.write_feedback(
         tenant_id=user.tenant_id,
         user_id=user.user_id,
         tier=user.tier,
@@ -101,6 +157,20 @@ async def api_submit_feedback(
         page=page,
         last_message_id=last_message_id,
     )
+
+    # Create JIRA issue (sync, graceful degradation — None on failure)
+    jira_key = _create_jira_for_feedback(
+        feedback_id=item.get("feedback_id", ""),
+        feedback_text=feedback_text,
+        feedback_type=item.get("feedback_type", "general"),
+        user_id=user.user_id,
+        tenant_id=user.tenant_id,
+        tier=user.tier,
+        session_id=session_id,
+        page=page,
+        created_at=item.get("created_at", ""),
+    )
+
     notify_feedback(
         tenant_id=user.tenant_id,
         user_id=user.user_id,
@@ -109,6 +179,8 @@ async def api_submit_feedback(
         feedback_text=feedback_text,
         feedback_type=body.get("feedback_type", "general"),
         page=page,
+        jira_key=jira_key,
+        feedback_id=item.get("feedback_id", ""),
     )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 
