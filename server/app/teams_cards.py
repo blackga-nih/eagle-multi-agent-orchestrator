@@ -18,6 +18,14 @@ Styles reference (Container.style):
 
 from __future__ import annotations
 
+import os
+
+# Power Automate HTTP trigger URLs for feedback action buttons
+_PA_APPROVE_URL = os.getenv("PA_FEEDBACK_APPROVE_URL", "")
+_PA_REJECT_URL = os.getenv("PA_FEEDBACK_REJECT_URL", "")
+_PA_RESEND_URL = os.getenv("PA_FEEDBACK_RESEND_URL", "")
+_JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "")
+
 
 def _wrap_card(card: dict) -> dict:
     """Wrap an Adaptive Card in the Power Automate webhook envelope."""
@@ -125,6 +133,47 @@ def error_card(
     )
 
 
+def _feedback_actions(
+    jira_key: str | None,
+    feedback_id: str,
+) -> list[dict] | None:
+    """Build Action.OpenUrl buttons for feedback triage.
+
+    Returns None if no actionable URLs are configured.
+    """
+    actions: list[dict] = []
+
+    if jira_key and _JIRA_BASE_URL:
+        actions.append({
+            "type": "Action.OpenUrl",
+            "title": "View in JIRA",
+            "url": f"{_JIRA_BASE_URL}/browse/{jira_key}",
+        })
+
+    params = f"ticket={jira_key or ''}&feedback_id={feedback_id}"
+
+    if _PA_APPROVE_URL:
+        actions.append({
+            "type": "Action.OpenUrl",
+            "title": "Approve",
+            "url": f"{_PA_APPROVE_URL}?action=approve&{params}",
+        })
+    if _PA_REJECT_URL:
+        actions.append({
+            "type": "Action.OpenUrl",
+            "title": "Reject",
+            "url": f"{_PA_REJECT_URL}?action=reject&{params}",
+        })
+    if _PA_RESEND_URL:
+        actions.append({
+            "type": "Action.OpenUrl",
+            "title": "Resend 24hr",
+            "url": f"{_PA_RESEND_URL}?action=resend_24hr&{params}",
+        })
+
+    return actions if actions else None
+
+
 def feedback_card(
     environment: str,
     tenant_id: str,
@@ -134,13 +183,17 @@ def feedback_card(
     feedback_text: str,
     feedback_type: str = "general",
     page: str = "",
+    jira_key: str | None = None,
+    feedback_id: str = "",
 ) -> dict:
-    """Build an Adaptive Card for user feedback."""
+    """Build an Adaptive Card for user feedback, optionally with JIRA link + action buttons."""
     facts = [
         {"title": "Type", "value": feedback_type or "general"},
         {"title": "User", "value": f"{user_id} ({tier})"},
         {"title": "Tenant", "value": tenant_id},
     ]
+    if jira_key:
+        facts.append({"title": "JIRA", "value": jira_key})
     if page:
         facts.append({"title": "Page", "value": page})
     if session_id:
@@ -148,11 +201,18 @@ def feedback_card(
 
     truncated = feedback_text[:500] + ("..." if len(feedback_text) > 500 else "")
 
+    actions = _feedback_actions(jira_key, feedback_id) if jira_key else None
+
+    title = f"EAGLE {environment} | Feedback"
+    if jira_key:
+        title += f" — {jira_key}"
+
     return _card(
-        title=f"EAGLE {environment} | Feedback",
+        title=title,
         facts=facts,
         body_text=truncated,
         style="accent",
+        actions=actions,
     )
 
 

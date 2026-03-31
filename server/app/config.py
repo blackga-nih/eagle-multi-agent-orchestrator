@@ -7,7 +7,7 @@ This provides type safety, validation, and a single source of truth for configur
 Created: 2026-03-19 (Phase 2 refactor)
 
 Usage:
-    from app.config import aws, auth, cost, telemetry, webhooks, session, bedrock
+    from app.config import aws, auth, cost, telemetry, webhooks, jira, session, bedrock
 
     # Access typed config values
     region = aws.region
@@ -163,6 +163,17 @@ class WebhookConfig:
 
 
 @dataclass(frozen=True)
+class JiraConfig:
+    """JIRA integration configuration (NCI self-hosted, PAT auth)."""
+
+    base_url: str = os.getenv("JIRA_BASE_URL", "")
+    api_token: str = os.getenv("JIRA_API_TOKEN", "")
+    project_key: str = os.getenv("JIRA_PROJECT", "EAGLE")
+    timeout: float = _float("JIRA_TIMEOUT", 5.0)
+    feedback_enabled: bool = _bool("JIRA_FEEDBACK_ENABLED", "false")
+
+
+@dataclass(frozen=True)
 class SessionConfig:
     """Session management configuration."""
 
@@ -199,6 +210,7 @@ bedrock = BedrockConfig()
 cost = CostConfig()
 telemetry = TelemetryConfig()
 webhooks = WebhookConfig()
+jira = JiraConfig()
 session = SessionConfig()
 model = ModelConfig()
 app = AppConfig()
@@ -227,6 +239,12 @@ def validate() -> list[str]:
     # Webhook validation
     if webhooks.teams_enabled and not webhooks.teams_url:
         warnings.append("TEAMS_WEBHOOK_ENABLED=true but TEAMS_WEBHOOK_URL not set")
+
+    # JIRA validation
+    if jira.feedback_enabled and not jira.base_url:
+        warnings.append("JIRA_FEEDBACK_ENABLED=true but JIRA_BASE_URL not set")
+    if jira.feedback_enabled and not jira.api_token:
+        warnings.append("JIRA_FEEDBACK_ENABLED=true but JIRA_API_TOKEN not set")
 
     return warnings
 

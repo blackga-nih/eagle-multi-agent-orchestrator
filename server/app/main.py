@@ -115,6 +115,9 @@ async def _lifespan(app):
     await close_webhook_client()
     stop_scheduler()
     await close_notifier_client()
+    from .jira_client import close_jira_client
+
+    close_jira_client()
 
 
 app = FastAPI(
