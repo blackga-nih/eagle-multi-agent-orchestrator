@@ -208,7 +208,7 @@ def ensure_plugin_seeded() -> None:
     Checks whether PLUGIN#manifest exists and whether its version matches
     BUNDLED_PLUGIN_VERSION. If the manifest is absent or stale, seeds all
     agents, skills, and templates from PLUGIN_CONTENTS (eagle_skill_constants.py)
-    then writes a fresh manifest record.
+    using batch_writer for efficiency, then writes a fresh manifest record.
 
     This function is intentionally idempotent — safe to call on every startup.
     """
@@ -235,44 +235,56 @@ def ensure_plugin_seeded() -> None:
     # at its tail end, so by the time ensure_plugin_seeded() runs, AGENTS/SKILLS are loaded.
     from eagle_skill_constants import AGENTS, SKILLS  # type: ignore[import]
 
+    now = datetime.utcnow().isoformat()
     seeded_agents = 0
     seeded_skills = 0
 
-    for agent_name, entry in AGENTS.items():
-        try:
-            put_plugin_item(
-                entity_type="agents",
-                name=agent_name,
-                content=entry.get("body", ""),
-                metadata=entry.get("meta", {}),
-                content_type="markdown",
-            )
-            seeded_agents += 1
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "plugin_store: failed to seed agent [%s]: %s", agent_name, exc
-            )
+    try:
+        table = get_table()
+        with table.batch_writer() as batch:
+            for agent_name, entry in AGENTS.items():
+                batch.put_item(Item={
+                    "PK": "PLUGIN#agents",
+                    "SK": f"PLUGIN#{agent_name}",
+                    "entity_type": "agents",
+                    "name": agent_name,
+                    "content": entry.get("body", ""),
+                    "content_type": "markdown",
+                    "metadata": entry.get("meta", {}),
+                    "version": 1,
+                    "is_active": True,
+                    "created_at": now,
+                    "updated_at": now,
+                })
+                seeded_agents += 1
 
-    for skill_name, entry in SKILLS.items():
-        try:
-            put_plugin_item(
-                entity_type="skills",
-                name=skill_name,
-                content=entry.get("body", ""),
-                metadata=entry.get("meta", {}),
-                content_type="markdown",
-            )
-            seeded_skills += 1
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "plugin_store: failed to seed skill [%s]: %s", skill_name, exc
-            )
+            for skill_name, entry in SKILLS.items():
+                batch.put_item(Item={
+                    "PK": "PLUGIN#skills",
+                    "SK": f"PLUGIN#{skill_name}",
+                    "entity_type": "skills",
+                    "name": skill_name,
+                    "content": entry.get("body", ""),
+                    "content_type": "markdown",
+                    "metadata": entry.get("meta", {}),
+                    "version": 1,
+                    "is_active": True,
+                    "created_at": now,
+                    "updated_at": now,
+                })
+                seeded_skills += 1
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("plugin_store: batch seeding failed: %s", exc)
+        return
+
+    _cache_invalidate("agents")
+    _cache_invalidate("skills")
 
     # Write manifest last — marks seeding as complete
     manifest_content = json.dumps(
         {
             "version": BUNDLED_PLUGIN_VERSION,
-            "seeded_at": datetime.utcnow().isoformat(),
+            "seeded_at": now,
             "agent_count": seeded_agents,
             "skill_count": seeded_skills,
         }

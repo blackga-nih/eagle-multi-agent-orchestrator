@@ -15,6 +15,7 @@ Exports:
 import json
 import os
 import re
+import threading as _threading
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _PLUGIN_DIR = os.path.join(_REPO_ROOT, "eagle-plugin")
@@ -185,9 +186,16 @@ MARKET_INTELLIGENCE_PROMPT = SKILL_CONSTANTS.get("market-intelligence", "")
 PUBLIC_INTEREST_PROMPT = SKILL_CONSTANTS.get("public-interest", "")
 
 # ── Seed DynamoDB from bundled plugin files if not already seeded ────
-# Wrapped in try/except so local dev without DynamoDB continues to work.
-try:
-    from app.plugin_store import ensure_plugin_seeded
-    ensure_plugin_seeded()
-except Exception:
-    pass  # DynamoDB unavailable — bundled files remain primary
+# Runs in a background thread so import is not blocked by DynamoDB I/O.
+# The supervisor uses in-memory SKILL_CONSTANTS, not the DynamoDB copy.
+
+def _seed_plugins_background():
+    try:
+        from app.plugin_store import ensure_plugin_seeded
+        ensure_plugin_seeded()
+    except Exception:
+        pass  # DynamoDB unavailable — bundled files remain primary
+
+_threading.Thread(
+    target=_seed_plugins_background, name="plugin-seed", daemon=True
+).start()

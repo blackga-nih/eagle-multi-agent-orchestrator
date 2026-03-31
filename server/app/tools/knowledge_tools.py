@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -303,6 +304,30 @@ def _get_bedrock_runtime():
     return _bedrock_local.client
 
 
+def _sanitize_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert a DynamoDB item to a plain Python dict.
+
+    Creates fresh dict/list containers and converts Decimal to int/float.
+    Breaks OTEL wrapper reference chains that cause RecursionError in json.dumps
+    when strands-agents[otel] threading instrumentation wraps boto3 responses.
+    """
+
+    def _convert(obj: Any, depth: int = 0) -> Any:
+        if depth > 20:
+            return str(obj)
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        if isinstance(obj, dict):
+            return {str(k): _convert(v, depth + 1) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_convert(v, depth + 1) for v in obj]
+        if isinstance(obj, (str, int, float, bool, type(None))):
+            return obj
+        return str(obj)
+
+    return _convert(item)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Tool Definitions (Anthropic tool_use format)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -313,18 +338,31 @@ KNOWLEDGE_SEARCH_TOOL = {
         "Search the acquisition knowledge base for relevant documents, templates, and guidance. "
         "Returns summaries and metadata to help decide which documents to retrieve in full. "
         "Uses AI-powered semantic matching — describe what you need in natural language via 'query'. "
-        "Use topic/document_type/agent filters to narrow the search scope."
+        "Use topic/document_type/specialist filters to narrow the search scope."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "topic": {
                 "type": "string",
-                "description": (
-                    "Primary topic to filter by: funding, acquisition_packages, contract_types, "
-                    "compliance, legal, market_research, socioeconomic, labor, intellectual_property, "
-                    "termination, modifications, closeout, performance, subcontracting, general"
-                ),
+                "enum": [
+                    "funding",
+                    "acquisition_packages",
+                    "contract_types",
+                    "compliance",
+                    "legal",
+                    "market_research",
+                    "socioeconomic",
+                    "labor",
+                    "intellectual_property",
+                    "termination",
+                    "modifications",
+                    "closeout",
+                    "performance",
+                    "subcontracting",
+                    "general",
+                ],
+                "description": "Primary topic to filter by",
             },
             "document_type": {
                 "type": "string",
@@ -339,12 +377,18 @@ KNOWLEDGE_SEARCH_TOOL = {
                 ],
                 "description": "Type of document to search for",
             },
-            "agent": {
+            "specialist": {
                 "type": "string",
-                "description": (
-                    "Filter by primary agent: supervisor-core, financial-advisor, legal-counselor, "
-                    "compliance-strategist, market-intelligence, technical-translator, public-interest-guardian"
-                ),
+                "enum": [
+                    "supervisor-core",
+                    "financial-advisor",
+                    "legal-counselor",
+                    "compliance-strategist",
+                    "market-intelligence",
+                    "technical-translator",
+                    "public-interest-guardian",
+                ],
+                "description": "Filter by primary agent/specialist",
             },
             "authority_level": {
                 "type": "string",
@@ -647,11 +691,11 @@ def exec_knowledge_search(
     try:
         items: list[dict[str, Any]] = []
         response = table.scan(**scan_kwargs)
-        items.extend(response.get("Items", []))
+        items.extend(_sanitize_item(it) for it in response.get("Items", []))
         while "LastEvaluatedKey" in response:
             scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
             response = table.scan(**scan_kwargs)
-            items.extend(response.get("Items", []))
+            items.extend(_sanitize_item(it) for it in response.get("Items", []))
 
         # Inject built-in template/checklist entries so they participate in search.
         # Filter them the same way DynamoDB results are filtered.

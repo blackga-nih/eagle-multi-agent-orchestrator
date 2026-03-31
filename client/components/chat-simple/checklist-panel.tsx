@@ -33,7 +33,7 @@ const PHASE_STYLES: Record<string, string> = {
   approved: 'bg-emerald-100 text-emerald-800',
 };
 
-function docLabel(docType: string): string {
+export function docLabel(docType: string): string {
   return (
     DOC_LABELS[docType] || docType.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
   );
@@ -41,6 +41,7 @@ function docLabel(docType: string): string {
 
 interface ChecklistPanelProps {
   state: PackageState;
+  onDocumentClick?: (docType: string) => void;
 }
 
 /**
@@ -48,7 +49,7 @@ interface ChecklistPanelProps {
  * Renders package header, progress, download, checklist items, and compliance alerts.
  * Shows an empty state when no package is active.
  */
-export function ChecklistTabContent({ state }: ChecklistPanelProps) {
+export function ChecklistTabContent({ state, onDocumentClick }: ChecklistPanelProps) {
   const { checklist, progressPct, phase, complianceAlerts, packageId } = state;
   const [downloading, setDownloading] = useState(false);
   const [showFormatMenu, setShowFormatMenu] = useState(false);
@@ -268,10 +269,31 @@ export function ChecklistTabContent({ state }: ChecklistPanelProps) {
           <ul className="space-y-1.5">
             {required.map((docType) => {
               const isDone = completed.has(docType);
+              const clickable = isDone && !!onDocumentClick;
               return (
-                <li key={docType} className="flex items-start gap-2">
+                <li
+                  key={docType}
+                  className={`flex items-center gap-2 rounded px-1 -mx-1 ${
+                    clickable
+                      ? 'cursor-pointer hover:bg-blue-50 transition-colors'
+                      : ''
+                  }`}
+                  onClick={clickable ? () => onDocumentClick(docType) : undefined}
+                  role={clickable ? 'button' : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  onKeyDown={
+                    clickable
+                      ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onDocumentClick(docType);
+                          }
+                        }
+                      : undefined
+                  }
+                >
                   <span
-                    className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center text-xs ${
+                    className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center text-xs ${
                       isDone ? 'bg-green-100 border-green-500 text-green-700' : 'border-gray-300'
                     }`}
                   >
@@ -286,12 +308,35 @@ export function ChecklistTabContent({ state }: ChecklistPanelProps) {
                     )}
                   </span>
                   <span
-                    className={`text-xs leading-tight ${
-                      isDone ? 'text-gray-400 line-through' : 'text-gray-800'
+                    className={`text-xs leading-tight flex-1 ${
+                      isDone
+                        ? 'text-[#003366] hover:underline'
+                        : 'text-gray-800'
                     }`}
                   >
                     {docLabel(docType)}
                   </span>
+                  {clickable && (
+                    <svg
+                      className="w-3 h-3 text-gray-400 shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                      />
+                    </svg>
+                  )}
                 </li>
               );
             })}

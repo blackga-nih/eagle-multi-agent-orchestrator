@@ -23,7 +23,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Literal
 
 from botocore.config import Config
 from strands import Agent, tool
@@ -419,7 +419,10 @@ class ModelCircuitBreaker:
 # Build the ordered chain. EAGLE_BEDROCK_MODEL_ID (if set) is promoted
 # to position 0; duplicates are removed.
 
-_DEFAULT_MODEL_CHAIN = [_SONNET_46, _SONNET_45, _SONNET_40, _HAIKU]
+# Only include models verified accessible in the NCI account.
+# Sonnet 4.5 and Sonnet 4.0 consistently fail with AccessDeniedException
+# at startup probe — removed to avoid wasting fallback attempts.
+_DEFAULT_MODEL_CHAIN = [_SONNET_46, _HAIKU]
 _ENV_MODEL_OVERRIDE = os.getenv("EAGLE_BEDROCK_MODEL_ID")
 
 _MODEL_CHAIN_IDS: list[str] = list(_DEFAULT_MODEL_CHAIN)
@@ -492,17 +495,18 @@ _ENABLE_STARTUP_PROBE = os.getenv("EAGLE_CB_STARTUP_PROBE", "true").lower() in (
 
 
 def _run_startup_probe():
-    """Probe each model in the chain with a trivial request."""
+    """Probe each model in the chain with a trivial request (parallel)."""
     import boto3
 
     probe_client = boto3.client(
         "bedrock-runtime",
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         config=Config(
-            connect_timeout=5, read_timeout=15, retries={"max_attempts": 1}
+            connect_timeout=5, read_timeout=20, retries={"max_attempts": 1}
         ),
     )
-    for mid in _MODEL_CHAIN_IDS:
+
+    def _probe_one(mid: str) -> None:
         try:
             probe_client.converse(
                 modelId=mid,
@@ -511,10 +515,14 @@ def _run_startup_probe():
             )
             logger.info("startup_probe: %s OK", mid)
         except Exception as exc:
-            # Hit threshold immediately so circuit opens
             for _ in range(_CB_FAILURE_THRESHOLD):
                 _circuit_breaker.record_failure(mid)
             logger.warning("startup_probe: %s FAILED: %s", mid, exc)
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=len(_MODEL_CHAIN_IDS), thread_name_prefix="cb-probe"
+    ) as pool:
+        list(pool.map(_probe_one, dict.fromkeys(_MODEL_CHAIN_IDS)))
 
 
 if _ENABLE_STARTUP_PROBE:
@@ -577,19 +585,26 @@ EAGLE_SUMMARIZATION_PROMPT = (
 )
 
 # Haiku model for low-cost summarization (used by SummarizingConversationManager).
-# Summarization is a straightforward text task — no need for Sonnet.
-_summarization_model = BedrockModel(
-    model_id=_HAIKU,
-    region_name=os.getenv("AWS_REGION", "us-east-1"),
-    boto_client_config=_bedrock_client_config,
-)
+# Lazy-initialized on first compaction to avoid import-time overhead.
+_summarization_agent: Agent | None = None
 
-_summarization_agent = Agent(
-    model=_summarization_model,
-    system_prompt=EAGLE_SUMMARIZATION_PROMPT,
-    tools=[],
-    callback_handler=None,
-)
+
+def _get_summarization_agent() -> Agent:
+    """Return the summarization agent, creating it on first use."""
+    global _summarization_agent
+    if _summarization_agent is None:
+        _summarization_model = BedrockModel(
+            model_id=_HAIKU,
+            region_name=os.getenv("AWS_REGION", "us-east-1"),
+            boto_client_config=_bedrock_client_config,
+        )
+        _summarization_agent = Agent(
+            model=_summarization_model,
+            system_prompt=EAGLE_SUMMARIZATION_PROMPT,
+            tools=[],
+            callback_handler=None,
+        )
+    return _summarization_agent
 
 # Per-tier compaction aggressiveness and DynamoDB message load limits.
 # Basic: aggressive (lower budget). Premium: gentle (full context).
@@ -612,7 +627,7 @@ def _build_conversation_manager(tier: str) -> SummarizingConversationManager:
     return SummarizingConversationManager(
         summary_ratio=cfg["summary_ratio"],
         preserve_recent_messages=cfg["preserve_recent"],
-        summarization_agent=_summarization_agent,
+        summarization_agent=_get_summarization_agent(),
     )
 
 
@@ -1969,6 +1984,26 @@ def _truncate_skill(content: str, max_chars: int = MAX_SKILL_PROMPT_CHARS) -> st
 
 # -- @tool Factory ---------------------------------------------------
 
+# Literal types for strict schema enforcement — Strands @tool generates
+# JSON Schema enum constraints from these, preventing the model from
+# sending free-text values that silently filter out all DynamoDB results.
+KBTopic = Literal[
+    "funding", "acquisition_packages", "contract_types", "compliance",
+    "legal", "market_research", "socioeconomic", "labor",
+    "intellectual_property", "termination", "modifications", "closeout",
+    "performance", "subcontracting", "general", "",
+]
+KBDocType = Literal[
+    "regulation", "guidance", "policy", "template", "memo",
+    "checklist", "reference", "",
+]
+KBAgent = Literal[
+    "supervisor-core", "financial-advisor", "legal-counselor",
+    "compliance-strategist", "market-intelligence", "technical-translator",
+    "public-interest-guardian", "",
+]
+KBAuthLevel = Literal["statute", "regulation", "policy", "guidance", "internal", ""]
+
 
 def _build_subagent_kb_tools(
     tenant_id: str,
@@ -2003,22 +2038,22 @@ def _build_subagent_kb_tools(
     @tool(name="knowledge_search")
     def kb_search(
         query: str = "",
-        topic: str = "",
-        document_type: str = "",
-        agent: str = "",
-        authority_level: str = "",
+        topic: KBTopic = "",
+        document_type: KBDocType = "",
+        specialist: KBAgent = "",
+        authority_level: KBAuthLevel = "",
         keywords: list[str] | None = None,
         limit: int = 10,
     ) -> str:
         """Search the acquisition knowledge base for relevant documents, templates, and guidance. Use 'query' for specific identifiers like case numbers or citations. Use 'topic' for broad subject searches.
 
         Args:
-            query: Search query — case numbers, citations, identifiers, or keywords
-            topic: Broad topic filter (e.g. "competition", "small business")
+            query: Natural language search query — case numbers, citations, identifiers, or keywords
+            topic: Primary topic filter for narrowing results
             document_type: Filter by document type
-            agent: Filter by agent/specialist
+            specialist: Filter by primary agent/specialist
             authority_level: Filter by authority level
-            keywords: List of keyword filters
+            keywords: List of keyword filters for semantic search
             limit: Maximum results to return (default 10)
         """
         params = {
@@ -2027,7 +2062,7 @@ def _build_subagent_kb_tools(
                 "query": query,
                 "topic": topic,
                 "document_type": document_type,
-                "agent": agent,
+                "agent": specialist,
                 "authority_level": authority_level,
                 "keywords": keywords,
                 "limit": limit,
@@ -3036,10 +3071,13 @@ def _build_all_service_tools(
 
             t = str(parsed.get("title", "")).strip()
             if not t:
+                # Normalize dt for label lookup (hyphens → underscores)
+                normalized_dt = dt.replace("-", "_") if dt else ""
                 inferred_title = (
                     prompt_doc_ctx.get("title")
-                    or _DOC_TYPE_LABELS.get(dt or "", "")
-                    or "Untitled Acquisition"
+                    or _DOC_TYPE_LABELS.get(normalized_dt, "")
+                    or (normalized_dt.replace("_", " ").title() if normalized_dt else "")
+                    or "Acquisition Document"
                 )
                 parsed["title"] = inferred_title
 
@@ -3623,8 +3661,8 @@ def _build_all_service_tools(
         Args:
             operation: Matrix operation — 'query', 'list_methods', 'list_types', 'list_thresholds', 'search_far', 'suggest_vehicle'
             contract_value: Contract dollar value
-            acquisition_method: Acquisition method code (e.g. 'sap', 'sealed_bidding')
-            contract_type: Contract type code (e.g. 'ffp', 'cpff')
+            acquisition_method: Acquisition method ID. Valid values: micro, sap, negotiated, fss, bpa-est, bpa-call, idiq, idiq-order, sole. Common aliases also accepted (e.g. 'full_and_open' resolves to 'negotiated', 'simplified_acquisition' to 'sap').
+            contract_type: Contract type ID. Valid values: ffp, fp-epa, fpi, cpff, cpif, cpaf, tm, lh. Common aliases also accepted (e.g. 'firm_fixed_price' resolves to 'ffp', 'time_and_materials' to 'tm').
             is_it: Whether this is an IT acquisition
             is_small_business: Whether small business set-aside applies
             is_rd: Whether this is R&D
@@ -3961,22 +3999,22 @@ def _build_kb_service_tools(
     @tool(name="knowledge_search")
     def knowledge_search(
         query: str = "",
-        topic: str = "",
-        document_type: str = "",
-        agent: str = "",
-        authority_level: str = "",
+        topic: KBTopic = "",
+        document_type: KBDocType = "",
+        specialist: KBAgent = "",
+        authority_level: KBAuthLevel = "",
         keywords: list[str] | None = None,
         limit: int = 10,
     ) -> str:
         """Search the acquisition knowledge base metadata in DynamoDB. Use 'query' for specific identifiers like case numbers, citations, or keywords. Use 'topic' for broad subject searches.
 
         Args:
-            query: Search query — case numbers, citations, identifiers, or keywords
-            topic: Broad topic filter (e.g. "competition", "small business")
+            query: Natural language search query — case numbers, citations, identifiers, or keywords
+            topic: Primary topic filter for narrowing results
             document_type: Filter by document type
-            agent: Filter by agent/specialist
+            specialist: Filter by primary agent/specialist
             authority_level: Filter by authority level
-            keywords: List of keyword filters
+            keywords: List of keyword filters for semantic search
             limit: Maximum results to return (default 10)
         """
         params = {
@@ -3985,7 +4023,7 @@ def _build_kb_service_tools(
                 "query": query,
                 "topic": topic,
                 "document_type": document_type,
-                "agent": agent,
+                "agent": specialist,
                 "authority_level": authority_level,
                 "keywords": keywords,
                 "limit": limit,
@@ -5671,9 +5709,15 @@ async def sdk_query_streaming(
     except Exception:
         logger.debug("Failed to emit trace.completed", exc_info=True)
 
-    # End-of-turn state refresh — always emit latest package state
-    for state_evt in _build_end_of_turn_state(package_context, tenant_id):
-        yield state_evt
+    # End-of-turn state refresh — only when a package tool ran this turn,
+    # otherwise stale package state leaks into unrelated conversations.
+    _PACKAGE_TOOLS = {
+        "create_document", "manage_package", "finalize_package",
+        "update_document", "policy_analyst", "legal_counsel",
+    }
+    if tools_called and _PACKAGE_TOOLS & set(tools_called):
+        for state_evt in _build_end_of_turn_state(package_context, tenant_id):
+            yield state_evt
 
     if error_holder:
         yield {"type": "error", "error": str(error_holder[0])}

@@ -24,7 +24,7 @@ def test_model_chain_exists():
     from app import strands_agentic_service as service
 
     assert hasattr(service, "_MODEL_CHAIN_IDS")
-    assert len(service._MODEL_CHAIN_IDS) >= 4
+    assert len(service._MODEL_CHAIN_IDS) >= 2
     # Default chain always ends with Haiku (env override may reorder runtime chain)
     assert "haiku" in service._DEFAULT_MODEL_CHAIN[-1]
     # Runtime chain always contains Haiku

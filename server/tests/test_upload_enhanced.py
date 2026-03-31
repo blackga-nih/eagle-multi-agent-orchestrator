@@ -79,9 +79,9 @@ class TestUploadMarkdownPersistence:
 
         with (
             patch("boto3.client") as mock_boto3,
-            patch("app.main.classify_document", return_value=_MOCK_CLASSIFICATION),
-            patch("app.main.extract_text_preview", return_value="preview"),
-            patch("app.main._put_upload") as mock_put,
+            patch("app.routers.documents.classify_document", return_value=_MOCK_CLASSIFICATION),
+            patch("app.routers.documents.extract_text_preview", return_value="preview"),
+            patch("app.routers.documents._put_upload") as mock_put,
         ):
             mock_s3 = MagicMock()
             mock_boto3.return_value = mock_s3
@@ -106,9 +106,9 @@ class TestUploadMarkdownPersistence:
         """Plain text uploads should also produce a markdown sibling (passthrough)."""
         with (
             patch("boto3.client") as mock_boto3,
-            patch("app.main.classify_document", return_value=_MOCK_CLASSIFICATION),
-            patch("app.main.extract_text_preview", return_value="plain text"),
-            patch("app.main._put_upload") as mock_put,
+            patch("app.routers.documents.classify_document", return_value=_MOCK_CLASSIFICATION),
+            patch("app.routers.documents.extract_text_preview", return_value="plain text"),
+            patch("app.routers.documents._put_upload") as mock_put,
         ):
             mock_s3 = MagicMock()
             mock_boto3.return_value = mock_s3
@@ -133,12 +133,11 @@ class TestUploadExtendedTTL:
 
     def test_ttl_is_24_hours(self):
         """_put_upload should set TTL to ~86400 seconds from now."""
-        import app.main as _main
+        from app.routers.documents import _put_upload
 
         mock_table = MagicMock()
-        with patch("boto3.resource") as mock_resource:
-            mock_resource.return_value.Table.return_value = mock_table
-            _main._put_upload("test-tenant", "upload-123", {"key": "value"})
+        with patch("app.routers.documents.get_table", return_value=mock_table):
+            _put_upload("test-tenant", "upload-123", {"key": "value"})
 
         assert mock_table.put_item.called
         item = mock_table.put_item.call_args[1]["Item"]
@@ -178,11 +177,11 @@ class TestAssignDocTypeNormalization:
         }
 
         with (
-            patch("app.main._get_upload", return_value=upload_meta),
-            patch("app.main.get_package", return_value={"package_id": "pkg-1"}),
+            patch("app.routers.documents._get_upload", return_value=upload_meta),
+            patch("app.routers.documents.get_package", return_value={"package_id": "pkg-1"}),
             patch("boto3.client") as mock_boto3,
-            patch("app.main.create_package_document_version", return_value=mock_result) as mock_create,
-            patch("app.main._delete_upload"),
+            patch("app.routers.documents.create_package_document_version", return_value=mock_result) as mock_create,
+            patch("app.routers.documents._delete_upload"),
             patch("app.tag_computation.compute_document_tags", return_value=["phase:planning"]),
             patch("app.tag_computation.compute_far_tags_from_template", return_value=["FAR 7.105"]),
             patch("app.tag_computation.compute_completeness_pct", return_value=0.0),
@@ -233,11 +232,11 @@ class TestAssignAutoTags:
         expected_far_tags = ["FAR 37.6"]
 
         with (
-            patch("app.main._get_upload", return_value=upload_meta),
-            patch("app.main.get_package", return_value={"package_id": "pkg-1"}),
+            patch("app.routers.documents._get_upload", return_value=upload_meta),
+            patch("app.routers.documents.get_package", return_value={"package_id": "pkg-1"}),
             patch("boto3.client") as mock_boto3,
-            patch("app.main.create_package_document_version", return_value=mock_result) as mock_create,
-            patch("app.main._delete_upload"),
+            patch("app.routers.documents.create_package_document_version", return_value=mock_result) as mock_create,
+            patch("app.routers.documents._delete_upload"),
             patch("app.tag_computation.compute_document_tags", return_value=expected_sys_tags),
             patch("app.tag_computation.compute_far_tags_from_template", return_value=expected_far_tags),
             patch("app.tag_computation.compute_completeness_pct", return_value=42.5),
