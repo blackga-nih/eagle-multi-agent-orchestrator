@@ -8,7 +8,7 @@ export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'xxl' | 'full';
   children: React.ReactNode;
   footer?: React.ReactNode;
 }
@@ -18,6 +18,7 @@ const sizeClasses = {
   md: 'w-[55vw]',
   lg: 'w-[60vw]',
   xl: 'w-[70vw]',
+  xxl: 'w-[80vw]',
   full: 'w-[90vw] max-h-[90vh]',
 };
 
