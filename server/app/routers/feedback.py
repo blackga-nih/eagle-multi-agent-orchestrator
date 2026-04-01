@@ -7,6 +7,7 @@ Handles user feedback submission and retrieval:
 - Feedback listing and summaries
 """
 
+import base64
 import json
 import logging
 import os
@@ -39,6 +40,7 @@ def _create_jira_for_feedback(
     session_id: str,
     page: str,
     created_at: str,
+    feedback_area: str = "",
 ) -> Optional[str]:
     """Create a JIRA issue for feedback. Returns ticket key or None."""
     from ..config import jira as jira_config
@@ -49,15 +51,17 @@ def _create_jira_for_feedback(
     from ..jira_client import create_feedback_issue
 
     summary_text = feedback_text[:80].replace("\n", " ")
-    summary = f"[Feedback][{feedback_type}] {summary_text}"
+    area_tag = f"[{feedback_area}]" if feedback_area else ""
+    summary = f"[Feedback][{feedback_type}]{area_tag} {summary_text}"
 
     description = (
         f"h3. User Feedback\n"
-        f"*User:* {user_id} ({tier})\n"
+        f"*User:* {user_id}\n"
         f"*Tenant:* {tenant_id}\n"
         f"*Page:* {page or '(none)'}\n"
         f"*Session:* {session_id[:36] if session_id else '(none)'}\n"
         f"*Feedback Type:* {feedback_type}\n"
+        f"*Feedback Area:* {feedback_area or '(none)'}\n"
         f"*Timestamp:* {created_at}\n"
         f"*Feedback ID:* {feedback_id}\n\n"
         f"----\n\n"
@@ -71,6 +75,8 @@ def _create_jira_for_feedback(
     labels = ["feedback", "auto-created", app_config.environment]
     if feedback_type and feedback_type != "general":
         labels.append(feedback_type)
+    if feedback_area:
+        labels.append(feedback_area)
 
     try:
         return create_feedback_issue(
@@ -100,6 +106,31 @@ class MessageFeedbackRequest(BaseModel):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _upload_screenshot_to_s3(feedback_id: str, data_url: str) -> Optional[str]:
+    """Decode a data-URL PNG and upload to S3. Returns S3 key or None."""
+    try:
+        # Strip "data:image/png;base64," prefix
+        header, encoded = data_url.split(",", 1)
+        image_bytes = base64.b64decode(encoded)
+        if len(image_bytes) > 5 * 1024 * 1024:  # 5 MB cap
+            logger.warning("feedback screenshot too large (%d bytes), skipping", len(image_bytes))
+            return None
+        from ..db_client import get_s3
+        from ..config import aws as aws_config
+
+        s3_key = f"feedback/screenshots/{feedback_id}.png"
+        get_s3().put_object(
+            Bucket=aws_config.s3_bucket,
+            Key=s3_key,
+            Body=image_bytes,
+            ContentType="image/png",
+        )
+        return s3_key
+    except Exception:
+        logger.warning("feedback: screenshot upload failed (non-fatal)", exc_info=True)
+        return None
 
 
 def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
@@ -144,12 +175,16 @@ async def api_submit_feedback(
     body = await request.json()
     session_id = body.get("session_id", "")
     feedback_text = body.get("feedback_text", "").strip()
+    feedback_area = body.get("feedback_area", "") or ""
     conversation_snapshot = body.get("conversation_snapshot", [])
     page = body.get("page", "")
     last_message_id = body.get("last_message_id", "")
 
     if not feedback_text:
         raise HTTPException(status_code=400, detail="feedback_text is required")
+
+    # Prefer human-readable name for display (Teams card, Jira)
+    display_name = user.email or user.username or user.user_id
 
     # Write feedback to DynamoDB FIRST (fast, critical path).
     # CloudWatch fetch is slow and non-critical — do it after.
@@ -163,6 +198,7 @@ async def api_submit_feedback(
         cloudwatch_logs="[]",
         page=page,
         last_message_id=last_message_id,
+        feedback_area=feedback_area,
     )
 
     # Best-effort: fetch CloudWatch logs and patch the record (non-blocking).
@@ -183,24 +219,56 @@ async def api_submit_feedback(
         feedback_id=item.get("feedback_id", ""),
         feedback_text=feedback_text,
         feedback_type=item.get("feedback_type", "general"),
-        user_id=user.user_id,
+        user_id=display_name,
         tenant_id=user.tenant_id,
         tier=user.tier,
         session_id=session_id,
         page=page,
         created_at=item.get("created_at", ""),
+        feedback_area=feedback_area,
     )
+
+    # Best-effort: upload screenshot to S3 + attach to Jira ticket
+    screenshot_url: Optional[str] = None
+    screenshot_data = body.get("screenshot")
+    if screenshot_data and isinstance(screenshot_data, str):
+        feedback_id = item.get("feedback_id", "")
+        s3_key = _upload_screenshot_to_s3(feedback_id, screenshot_data)
+        if s3_key:
+            # Generate presigned URL for Teams card (7-day expiry)
+            try:
+                from ..db_client import get_s3
+                from ..config import aws as aws_config
+
+                screenshot_url = get_s3().generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": aws_config.s3_bucket, "Key": s3_key},
+                    ExpiresIn=7 * 24 * 3600,
+                )
+            except Exception:
+                logger.debug("feedback: presigned URL failed (non-fatal)", exc_info=True)
+            # Attach to Jira ticket
+            if jira_key:
+                try:
+                    image_bytes = base64.b64decode(screenshot_data.split(",", 1)[1])
+                    from ..jira_client import add_attachment
+
+                    add_attachment(jira_key, f"feedback-{feedback_id[:8]}.png", image_bytes)
+                except Exception:
+                    logger.debug("feedback: jira attachment failed (non-fatal)", exc_info=True)
 
     notify_feedback(
         tenant_id=user.tenant_id,
-        user_id=user.user_id,
+        user_id=display_name,
         tier=user.tier,
         session_id=session_id,
         feedback_text=feedback_text,
         feedback_type=body.get("feedback_type", "general"),
+        feedback_area=feedback_area,
         page=page,
         jira_key=jira_key,
         feedback_id=item.get("feedback_id", ""),
+        screenshot_url=screenshot_url,
     )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 

@@ -191,16 +191,20 @@ def feedback_card(
     session_id: str,
     feedback_text: str,
     feedback_type: str = "general",
+    feedback_area: str = "",
     page: str = "",
     jira_key: str | None = None,
     feedback_id: str = "",
+    screenshot_url: str | None = None,
 ) -> dict:
     """Build an Adaptive Card for user feedback, optionally with JIRA link + action buttons."""
     facts = [
         {"title": "Type", "value": feedback_type or "general"},
-        {"title": "User", "value": f"{user_id} ({tier})"},
+        {"title": "User", "value": user_id},
         {"title": "Tenant", "value": tenant_id},
     ]
+    if feedback_area:
+        facts.insert(1, {"title": "Area", "value": feedback_area})
     if jira_key:
         facts.append({"title": "JIRA", "value": jira_key})
     if page:
@@ -216,13 +220,26 @@ def feedback_card(
     if jira_key:
         title += f" — {jira_key}"
 
-    return _card(
+    payload = _card(
         title=title,
         facts=facts,
         body_text=truncated,
         style="accent",
         actions=actions,
     )
+
+    # Inject screenshot image into the card body if available
+    if screenshot_url:
+        card = payload["attachments"][0]["content"]
+        card["body"].append({
+            "type": "Image",
+            "url": screenshot_url,
+            "size": "Large",
+            "spacing": "Medium",
+            "altText": "User screenshot",
+        })
+
+    return payload
 
 
 def daily_summary_card(
@@ -495,6 +512,150 @@ def eval_report_card(
         style=style,
         actions=actions or None,
     )
+
+
+def _triage_action_url(action: str, triage_id: str, jira_key: str) -> str:
+    """Build an HMAC-signed callback URL for a triage plan action."""
+    from .routers.triage_actions import compute_sig
+
+    sig = compute_sig(action, triage_id)
+    return (
+        f"{_BACKEND_URL}/api/triage/action"
+        f"?action={action}&triage_id={triage_id}"
+        f"&ticket={jira_key}&sig={sig}"
+    )
+
+
+def _triage_actions(
+    jira_key: str | None,
+    triage_id: str,
+) -> list[dict] | None:
+    """Build Action.OpenUrl buttons for triage plan approval.
+
+    Returns None if no actionable URLs are configured.
+    """
+    actions: list[dict] = []
+
+    if jira_key and _JIRA_BASE_URL:
+        actions.append({
+            "type": "Action.OpenUrl",
+            "title": "View in JIRA",
+            "url": f"{_JIRA_BASE_URL}/browse/{jira_key}",
+        })
+
+    if _BACKEND_URL and triage_id:
+        actions.append({
+            "type": "Action.OpenUrl",
+            "title": "Approve",
+            "url": _triage_action_url("approve", triage_id, jira_key or ""),
+        })
+        actions.append({
+            "type": "Action.OpenUrl",
+            "title": "Deny",
+            "url": _triage_action_url("deny", triage_id, jira_key or ""),
+        })
+        actions.append({
+            "type": "Action.OpenUrl",
+            "title": "Delay 24hr",
+            "url": _triage_action_url("delay", triage_id, jira_key or ""),
+        })
+
+    return actions if actions else None
+
+
+def triage_plan_card(
+    environment: str,
+    date: str,
+    plan_text: str,
+    p1_count: int = 0,
+    p2_count: int = 0,
+    p3_count: int = 0,
+    jira_key: str | None = None,
+    triage_id: str = "",
+    report_file: str = "",
+    plan_file: str = "",
+) -> dict:
+    """Build an Adaptive Card for a nightly triage fix plan.
+
+    The full plan is rendered in a collapsible section (Action.ToggleVisibility).
+    Approve / Deny / Delay 24hr buttons call the triage action endpoint.
+    """
+    total = p1_count + p2_count + p3_count
+    facts = [
+        {"title": "Environment", "value": environment},
+        {"title": "Date", "value": date},
+        {"title": "Issues", "value": f"{total} total ({p1_count} P1, {p2_count} P2, {p3_count} P3)"},
+    ]
+    if jira_key:
+        facts.append({"title": "JIRA", "value": jira_key})
+    if plan_file:
+        facts.append({"title": "Plan File", "value": plan_file.split("/")[-1]})
+
+    # Truncate plan for card size limits (~28KB max)
+    max_plan_chars = 2000
+    truncated_plan = plan_text[:max_plan_chars]
+    if len(plan_text) > max_plan_chars:
+        truncated_plan += "\n\n---\n*Plan truncated. Full plan attached to JIRA issue.*"
+
+    # Build card body with collapsible plan section
+    card_body: list[dict] = [
+        {
+            "type": "Container",
+            "style": "accent",
+            "bleed": True,
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": f"EAGLE {environment} | Nightly Triage Plan \u2014 {date}",
+                    "weight": "Bolder",
+                    "size": "Medium",
+                    "wrap": True,
+                }
+            ],
+        },
+        {
+            "type": "FactSet",
+            "facts": facts,
+        },
+        # Collapsible plan container (hidden by default)
+        {
+            "type": "Container",
+            "id": "planContent",
+            "isVisible": False,
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": truncated_plan,
+                    "wrap": True,
+                    "fontType": "Monospace",
+                    "size": "Small",
+                }
+            ],
+        },
+    ]
+
+    # Actions: toggle + triage buttons
+    actions: list[dict] = [
+        {
+            "type": "Action.ToggleVisibility",
+            "title": "Show / Hide Full Plan",
+            "targetElements": ["planContent"],
+        },
+    ]
+
+    triage_btns = _triage_actions(jira_key, triage_id)
+    if triage_btns:
+        actions.extend(triage_btns)
+
+    card: dict = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "msteams": {"width": "Full"},
+        "body": card_body,
+        "actions": actions,
+    }
+    return _wrap_card(card)
 
 
 def suspicious_card(
