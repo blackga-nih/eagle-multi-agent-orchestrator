@@ -153,7 +153,11 @@ export class EagleCoreStack extends cdk.Stack {
         'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6',
         // Sonnet 4.6 cross-region inference profile (us.* prefix used by SDK)
         `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-6`,
-        // Haiku 4.5 foundation model (title generation)
+        // Sonnet 4.5 foundation model (circuit breaker fallback)
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0',
+        // Sonnet 4.5 cross-region inference profile
+        `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0`,
+        // Haiku 4.5 foundation model (last-resort fallback + title generation)
         'arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0',
         // Haiku 4.5 cross-region inference profile
         `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0`,

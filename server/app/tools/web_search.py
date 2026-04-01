@@ -44,12 +44,13 @@ _bedrock_runtime = None
 def _get_client():
     global _bedrock_runtime
     if _bedrock_runtime is None:
-        # Extended timeout per AWS docs — web grounding performs multiple
-        # searches and can take 10-30s for complex queries.
+        # AWS Nova web grounding typically takes 10-30s.  Cap at 60s to
+        # prevent 5-minute stalls (observed 305-309s with previous 300s limit).
+        # No retry — the agent can reformulate and retry if needed.
         _bedrock_runtime = boto3.client(
             "bedrock-runtime",
             region_name=AWS_REGION,
-            config=Config(read_timeout=300, retries={"max_attempts": 2}),
+            config=Config(read_timeout=60, retries={"max_attempts": 1}),
         )
     return _bedrock_runtime
 

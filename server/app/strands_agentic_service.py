@@ -29,7 +29,8 @@ from botocore.config import Config
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models import BedrockModel
-from strands.models.model import CacheConfig
+# CacheConfig import removed — prompt caching disabled until Bedrock stabilises
+# from strands.models.model import CacheConfig
 
 # Add server/ to path for eagle_skill_constants
 _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -445,10 +446,9 @@ class ModelCircuitBreaker:
 # Build the ordered chain. EAGLE_BEDROCK_MODEL_ID (if set) is promoted
 # to position 0; duplicates are removed.
 
-# Only include models verified accessible in the NCI account.
-# Sonnet 4.5 and Sonnet 4.0 consistently fail with AccessDeniedException
-# at startup probe — removed to avoid wasting fallback attempts.
-_DEFAULT_MODEL_CHAIN = [_SONNET_46, _HAIKU]
+# Sonnet 4.0 removed — AccessDeniedException in NCI account (not in IAM policy).
+# Sonnet 4.5 restored after adding to core-stack.ts IAM policy.
+_DEFAULT_MODEL_CHAIN = [_SONNET_46, _SONNET_45, _HAIKU]
 _ENV_MODEL_OVERRIDE = os.getenv("EAGLE_BEDROCK_MODEL_ID")
 
 _MODEL_CHAIN_IDS: list[str] = list(_DEFAULT_MODEL_CHAIN)
@@ -474,8 +474,13 @@ _bedrock_client_config = Config(
     connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "60")),
     read_timeout=int(os.getenv("EAGLE_BEDROCK_READ_TIMEOUT", "300")),
     retries={
-        "max_attempts": int(os.getenv("EAGLE_BEDROCK_MAX_ATTEMPTS", "4")),
-        "mode": os.getenv("EAGLE_BEDROCK_RETRY_MODE", "adaptive"),
+        # Keep retries low (1 = no retry) — the circuit breaker handles
+        # model failover.  With max_attempts=4, botocore's adaptive backoff
+        # burns 30-40s on internal 503 retries *before* our TTFT timer can
+        # react, so the 45s budget is consumed by silent retries instead of
+        # cascading to the next model promptly.
+        "max_attempts": int(os.getenv("EAGLE_BEDROCK_MAX_ATTEMPTS", "1")),
+        "mode": os.getenv("EAGLE_BEDROCK_RETRY_MODE", "standard"),
     },
     tcp_keepalive=True,
 )
@@ -487,10 +492,13 @@ for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         boto_client_config=_bedrock_client_config,
     )
-    # Enable prompt caching on Sonnet-class models
-    if "sonnet" in _mid:
-        _kwargs["cache_tools"] = "default"
-        _kwargs["cache_config"] = CacheConfig(strategy="auto")
+    # Prompt caching disabled — Bedrock cross-region inference has been
+    # unstable since 2026-03-30 (100% TTFT failures, now intermittent).
+    # Cache-miss overhead adds to TTFT on the first request.  Re-enable
+    # after Bedrock cross-region stabilises.
+    # if "sonnet" in _mid:
+    #     _kwargs["cache_tools"] = "default"
+    #     _kwargs["cache_config"] = CacheConfig(strategy="auto")
     _bedrock_models[_mid] = BedrockModel(**_kwargs)
 
 # Backward-compat alias
@@ -5186,7 +5194,7 @@ async def sdk_query_streaming(
     # TTFT (Time To First Token) timeout: if no meaningful content arrives
     # within this window, abort and retry with the fallback model.
     # Bedrock cross-region inference can stall for 60-120s on cold paths.
-    _TTFT_TIMEOUT = float(os.getenv("EAGLE_TTFT_TIMEOUT", "45"))
+    _TTFT_TIMEOUT = float(os.getenv("EAGLE_TTFT_TIMEOUT", "15"))
     _first_content_received = False
 
     def _drain_tool_results() -> list[dict]:
