@@ -1416,6 +1416,17 @@ ${docSnippet}`;
                 content: editContent,
                 change_source: 'user_edit',
               };
+
+      // DEBUG: Log what we're sending
+      if (isBinaryDocument && isXlsxDocument) {
+        console.log('[XLSX Save Debug]', {
+          pendingEdit,
+          xlsxCellEdits,
+          originalSheetsCount: xlsxPreviewSheets.length,
+          editSheetsCount: editXlsxPreviewSheets.length,
+        });
+      }
+
       const res = await fetch(requestUrl, {
         method: isBinaryDocument ? 'POST' : 'PUT',
         headers: {
@@ -1433,6 +1444,9 @@ ${docSnippet}`;
         key?: string;
       };
 
+      // Track the new S3 key for cache clearing (may differ from old id/s3Key)
+      const savedS3Key = result.s3_key || result.key || s3Key;
+
       // Update local state with saved content
       if (isBinaryDocument && isDocxDocument) {
         const savedPreviewBlocks = normalizeDocxPreviewBlocks(result.preview_blocks);
@@ -1442,9 +1456,33 @@ ${docSnippet}`;
         setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(savedPreviewBlocks));
         setCurrentDocumentId(result.document_id || currentDocumentId);
         setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
-        setDownloadUrl(null);
-        setS3Key(result.s3_key || result.key || s3Key);
+        const newS3Key = result.s3_key || result.key || s3Key;
+        setS3Key(newS3Key);
         setIsEditing(false);
+        // Use download_url from response directly if available
+        if (result.download_url) {
+          setDownloadUrl(result.download_url);
+        } else if (newS3Key) {
+          // Fallback: fetch fresh download URL for saved document
+          try {
+            const presignRes = await fetch(
+              `/api/documents/${encodeURIComponent(newS3Key)}?content=false`,
+              { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+            );
+            if (presignRes.ok) {
+              const presignData = await presignRes.json();
+              setDownloadUrl(presignData.download_url || null);
+            }
+          } catch {
+            // Keep download unavailable on error
+          }
+        }
+        // Update browser URL to new version so refresh loads the saved document
+        if (newS3Key && newS3Key !== s3Key) {
+          const searchParams = new URLSearchParams(window.location.search);
+          const newUrl = `/documents/${encodeURIComponent(newS3Key)}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+          window.history.replaceState({}, '', newUrl);
+        }
       } else if (isBinaryDocument && isXlsxDocument) {
         const savedPreviewSheets = normalizeXlsxPreviewSheets(result.preview_sheets);
         setDocumentContent(result.content ?? documentContent);
@@ -1452,9 +1490,33 @@ ${docSnippet}`;
         setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(savedPreviewSheets));
         setCurrentDocumentId(result.document_id || currentDocumentId);
         setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
-        setDownloadUrl(null);
-        setS3Key(result.s3_key || result.key || s3Key);
+        const newS3Key = result.s3_key || result.key || s3Key;
+        setS3Key(newS3Key);
         setIsEditing(false);
+        // Use download_url from response directly if available
+        if (result.download_url) {
+          setDownloadUrl(result.download_url);
+        } else if (newS3Key) {
+          // Fallback: fetch fresh download URL for saved document
+          try {
+            const presignRes = await fetch(
+              `/api/documents/${encodeURIComponent(newS3Key)}?content=false`,
+              { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+            );
+            if (presignRes.ok) {
+              const presignData = await presignRes.json();
+              setDownloadUrl(presignData.download_url || null);
+            }
+          } catch {
+            // Keep download unavailable on error
+          }
+        }
+        // Update browser URL to new version so refresh loads the saved document
+        if (newS3Key && newS3Key !== s3Key) {
+          const searchParams = new URLSearchParams(window.location.search);
+          const newUrl = `/documents/${encodeURIComponent(newS3Key)}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+          window.history.replaceState({}, '', newUrl);
+        }
       } else {
         setDocumentContent(editContent);
       }
@@ -1462,8 +1524,12 @@ ${docSnippet}`;
       setTimeout(() => setDocUpdated(false), 2000);
 
       // Clear sessionStorage cache so reload fetches fresh content
+      // Clear both old key (id) and new key (savedS3Key) to handle version changes
       try {
         sessionStorage.removeItem(`doc-content-${id}`);
+        if (savedS3Key && savedS3Key !== id) {
+          sessionStorage.removeItem(`doc-content-${encodeURIComponent(savedS3Key)}`);
+        }
       } catch {
         // Ignore sessionStorage errors
       }

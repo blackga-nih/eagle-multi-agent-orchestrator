@@ -207,9 +207,11 @@ def save_xlsx_preview_edits(
     change_source: str = "user_edit",
 ) -> dict[str, Any]:
     """Persist browser-side XLSX cell edits."""
+    logger.info("[XLSX Save Debug] Received cell_edits=%s, doc_key=%s", cell_edits, doc_key)
     if not doc_key:
         return {"error": "document_key is required"}
     if not cell_edits:
+        logger.warning("[XLSX Save Debug] No cell_edits provided!")
         return {"error": "cell_edits are required"}
     if not is_allowed_document_key(doc_key, tenant_id, user_id):
         return {"error": "Access denied for document key"}
@@ -244,6 +246,7 @@ def save_xlsx_preview_edits(
         updated_bytes, applied_count, missing = apply_xlsx_cell_edits(
             original_bytes, edits
         )
+        logger.info("[XLSX Save Debug] Applied %d edits, missing=%s", applied_count, missing)
     except Exception as exc:
         logger.error("Failed to apply structured XLSX edits: %s", exc, exc_info=True)
         return {"error": "Failed to apply spreadsheet edits."}
@@ -262,10 +265,10 @@ def save_xlsx_preview_edits(
             "missing": missing,
         }
 
-    # Re-evaluate formulas after edits so totals update
-    updated_bytes, formulas_evaluated = evaluate_workbook_formulas(updated_bytes)
+    # Evaluate formulas for PREVIEW only - don't save evaluated bytes (preserves formulas)
+    preview_bytes, formulas_evaluated = evaluate_workbook_formulas(updated_bytes)
+    preview_payload = extract_xlsx_preview_payload(preview_bytes)
 
-    preview_payload = extract_xlsx_preview_payload(updated_bytes)
     package_ref = extract_package_document_ref(doc_key)
     if package_ref:
         if package_ref["tenant_id"] != tenant_id:
@@ -275,6 +278,7 @@ def save_xlsx_preview_edits(
         version = int(package_ref["version"])
         existing = get_document(tenant_id, package_id, doc_type, version)
         title = (existing or {}).get("title") or doc_type.replace("_", " ").title()
+        # Save original bytes WITH formulas intact (not the evaluated preview_bytes)
         result = create_package_document_version(
             tenant_id=tenant_id,
             package_id=package_id,
@@ -292,6 +296,16 @@ def save_xlsx_preview_edits(
         message = f"Saved spreadsheet version {result.version}."
         if not formulas_evaluated:
             message += " Note: Formulas will calculate when opened in Excel."
+        # Generate presigned download URL for the saved document
+        download_url = None
+        try:
+            download_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": S3_BUCKET, "Key": result.s3_key},
+                ExpiresIn=3600,
+            )
+        except Exception as exc:
+            logger.warning("Failed to generate presigned URL: %s", exc)
         return {
             "success": True,
             "mode": "package_xlsx_preview_edit",
@@ -305,6 +319,7 @@ def save_xlsx_preview_edits(
             "missing": missing,
             "formulas_calculated": formulas_evaluated,
             "message": message,
+            "download_url": download_url,
         }
 
     workspace_ref = extract_workspace_document_ref(doc_key)
@@ -337,6 +352,16 @@ def save_xlsx_preview_edits(
     ws_message = "Spreadsheet saved."
     if not formulas_evaluated:
         ws_message += " Note: Formulas will calculate when opened in Excel."
+    # Generate presigned download URL for the saved document
+    ws_download_url = None
+    try:
+        ws_download_url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": doc_key},
+            ExpiresIn=3600,
+        )
+    except Exception as exc:
+        logger.warning("Failed to generate presigned URL: %s", exc)
     return {
         "success": True,
         "mode": "workspace_xlsx_preview_edit",
@@ -350,4 +375,5 @@ def save_xlsx_preview_edits(
         "missing": missing,
         "formulas_calculated": formulas_evaluated,
         "message": ws_message,
+        "download_url": ws_download_url,
     }

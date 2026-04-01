@@ -20,6 +20,7 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional
 
 from boto3.dynamodb.conditions import Attr, Key
@@ -61,6 +62,21 @@ def _gsi2_sk(doc_type: str, version: int) -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _to_dynamodb_value(value: Any) -> Any:
+    """Recursively normalize Python values for DynamoDB writes.
+
+    boto3 rejects raw float values. Convert them to Decimal while preserving
+    nested structures such as classification metadata.
+    """
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, list):
+        return [_to_dynamodb_value(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _to_dynamodb_value(v) for k, v in value.items()}
+    return value
 
 
 # -- Core CRUD ----------------------------------------------------------------
@@ -160,7 +176,7 @@ def create_document(
         item["session_id"] = session_id
 
     try:
-        table.put_item(Item=item)
+        table.put_item(Item=_to_dynamodb_value(item))
         logger.info(
             "Created document %s for user %s (package=%s)",
             document_id,
@@ -240,7 +256,7 @@ def update_document(
             expr_names[attr_name] = key
 
         update_parts.append(f"{attr_name} = :{key}")
-        expr_values[f":{key}"] = value
+        expr_values[f":{key}"] = _to_dynamodb_value(value)
 
     # Update GSI2PK if package_id changed
     if "package_id" in updates:

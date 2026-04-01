@@ -653,6 +653,16 @@ def save_docx_preview_edits(
         )
         if not result.success:
             return {"error": result.error or "Failed to save document version"}
+        # Generate presigned download URL for the saved document
+        download_url = None
+        try:
+            download_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": S3_BUCKET, "Key": result.s3_key},
+                ExpiresIn=3600,
+            )
+        except Exception as exc:
+            logger.warning("Failed to generate presigned URL: %s", exc)
         return {
             "success": True,
             "mode": "package_docx_preview_edit",
@@ -664,6 +674,7 @@ def save_docx_preview_edits(
             "preview_blocks": preview_payload.get("preview_blocks", []),
             "preview_mode": preview_payload.get("preview_mode"),
             "message": f"Saved document version {result.version}.",
+            "download_url": download_url,
         }
 
     workspace_ref = extract_workspace_document_ref(doc_key)
@@ -693,6 +704,16 @@ def save_docx_preview_edits(
         )
         return {"error": "Failed to save document."}
 
+    # Generate presigned download URL for the saved document
+    ws_download_url = None
+    try:
+        ws_download_url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": doc_key},
+            ExpiresIn=3600,
+        )
+    except Exception as exc:
+        logger.warning("Failed to generate presigned URL: %s", exc)
     return {
         "success": True,
         "mode": "workspace_docx_preview_edit",
@@ -704,4 +725,5 @@ def save_docx_preview_edits(
         "preview_blocks": preview_payload.get("preview_blocks", []),
         "preview_mode": preview_payload.get("preview_mode"),
         "message": "Document saved.",
+        "download_url": ws_download_url,
     }
