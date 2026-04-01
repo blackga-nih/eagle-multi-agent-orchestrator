@@ -66,7 +66,7 @@ export class EagleComputeStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    backendTaskDef.addContainer('backend', {
+    const backendContainer = backendTaskDef.addContainer('backend', {
       containerName: 'eagle-backend',
       image: ecs.ContainerImage.fromEcrRepository(this.backendRepo),
       portMappings: [{ containerPort: 8000 }],
@@ -92,6 +92,9 @@ export class EagleComputeStack extends cdk.Stack {
         LANGFUSE_SECRET_KEY: config.langfuseSecretKey,
         LANGFUSE_HOST: config.langfuseHost,
         LANGFUSE_PROJECT_ID: config.langfuseProjectId,
+        JIRA_BASE_URL: config.jiraBaseUrl || '',
+        JIRA_FEEDBACK_ENABLED: config.jiraBaseUrl ? 'true' : 'false',
+        FEEDBACK_ACTION_SECRET: config.feedbackActionSecret || 'eagle-feedback-default-secret',
       },
       logging: ecs.LogDrivers.awsLogs({
         logGroup: backendLogGroup,
@@ -241,6 +244,13 @@ export class EagleComputeStack extends cdk.Stack {
       defaultTargetGroups: [frontendTargetGroup],
       open: false,
     });
+
+    // Inject frontend ALB URL into backend so Teams card action buttons
+    // can build callback URLs that route through the Next.js /api proxy.
+    backendContainer.addEnvironment(
+      'EAGLE_BACKEND_URL',
+      `http://${frontendAlb.loadBalancerDnsName}`,
+    );
 
     const frontendServiceSG = new ec2.SecurityGroup(this, 'FrontendServiceSG', {
       vpc,
