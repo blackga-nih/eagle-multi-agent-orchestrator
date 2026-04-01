@@ -441,10 +441,8 @@ class TestDocumentListEndpoint:
         assert len(data["documents"]) == 2
         # Verify document shape
         doc = data["documents"][0]
-        assert "key" in doc
-        assert "name" in doc
-        assert "size_bytes" in doc
-        assert "type" in doc
+        assert "document_id" in doc
+        assert "doc_type" in doc
 
 
 # ══════════════════════════════════════════════════════════════════════

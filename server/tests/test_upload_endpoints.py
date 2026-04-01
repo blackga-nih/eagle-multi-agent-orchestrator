@@ -72,14 +72,15 @@ class TestUploadEndpoint:
             "suggested_title": "Statement of Work",
         }
 
+        mock_doc = {"document_id": "doc-123", "doc_type": "sow"}
+
         with (
-            patch("boto3.client") as mock_boto3_client,
+            patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=mock_classification),
             patch("app.routers.documents.extract_text_preview", return_value="preview text"),
-            patch("app.routers.documents._put_upload"),
+            patch("app.unified_document_store.create_document", return_value=mock_doc),
+            patch("app.document_markdown_service.convert_to_markdown", return_value=None),
         ):
-            mock_boto3_client.return_value = MagicMock()
-
             response = client.post(
                 "/api/documents/upload",
                 files={"file": _PDF_FILE},
@@ -97,14 +98,15 @@ class TestUploadEndpoint:
         mock_classification.doc_type = "igce"
         mock_classification.to_dict.return_value = {"doc_type": "igce", "confidence": 0.8, "method": "filename"}
 
+        mock_doc = {"document_id": "doc-456", "doc_type": "igce"}
+
         with (
-            patch("boto3.client") as mock_boto3_client,
+            patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=mock_classification),
             patch("app.routers.documents.extract_text_preview", return_value=""),
-            patch("app.routers.documents._put_upload"),
+            patch("app.unified_document_store.create_document", return_value=mock_doc),
+            patch("app.document_markdown_service.convert_to_markdown", return_value=None),
         ):
-            mock_boto3_client.return_value = MagicMock()
-
             response = client.post(
                 "/api/documents/upload",
                 files={"file": _PDF_FILE},
@@ -134,7 +136,7 @@ class TestUploadEndpoint:
         assert "Unsupported file type" in response.json()["detail"]
 
     def test_upload_stores_metadata_in_dynamodb(self, client):
-        """_put_upload must be called with the correct tenant_id and upload_id."""
+        """create_document must be called with the correct tenant_id and user_id."""
         mock_classification = MagicMock()
         mock_classification.doc_type = "acquisition_plan"
         mock_classification.to_dict.return_value = {
@@ -143,41 +145,33 @@ class TestUploadEndpoint:
             "method": "filename",
         }
 
+        mock_doc = {"document_id": "doc-789", "tenant_id": "test-tenant", "owner_user_id": "test-user"}
+
         with (
-            patch("boto3.client") as mock_boto3_client,
+            patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=mock_classification),
             patch("app.routers.documents.extract_text_preview", return_value="preview"),
-            patch("app.routers.documents._put_upload") as mock_put,
+            patch("app.unified_document_store.create_document", return_value=mock_doc) as mock_create,
+            patch("app.document_markdown_service.convert_to_markdown", return_value=None),
         ):
-            mock_boto3_client.return_value = MagicMock()
-
             response = client.post(
                 "/api/documents/upload",
                 files={"file": _PDF_FILE},
             )
 
         assert response.status_code == 200
-        # _put_upload must have been called once
-        mock_put.assert_called_once()
-        call_args = mock_put.call_args
-        # Positional: (tenant_id, upload_id, metadata_dict)
-        assert call_args[0][0] == "test-tenant"
-        upload_id_stored = call_args[0][1]
-        assert upload_id_stored == response.json()["upload_id"]
-        metadata = call_args[0][2]
-        assert metadata["tenant_id"] == "test-tenant"
-        assert metadata["user_id"] == "test-user"
-        assert "classification" in metadata
+        mock_create.assert_called_once()
+        call_kwargs = mock_create.call_args
+        assert call_kwargs.kwargs["tenant_id"] == "test-tenant"
+        assert call_kwargs.kwargs["user_id"] == "test-user"
 
     def test_put_upload_converts_float_metadata_to_decimal(self):
         """Upload metadata written to DynamoDB must not contain raw floats."""
         from app.routers.documents import _put_upload
 
         mock_table = MagicMock()
-        mock_resource = MagicMock()
-        mock_resource.Table.return_value = mock_table
 
-        with patch("boto3.resource", return_value=mock_resource):
+        with patch("app.routers.documents.get_table", return_value=mock_table):
             _put_upload(
                 "test-tenant",
                 "upload-123",

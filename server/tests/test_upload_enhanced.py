@@ -74,53 +74,48 @@ class TestUploadMarkdownPersistence:
     """Verify upload stores markdown sibling in S3 and metadata."""
 
     def test_upload_stores_markdown_s3_key(self, client):
-        """Upload should store a .parsed.md sibling when conversion succeeds."""
+        """Upload should store a .content.md sibling when conversion succeeds."""
         docx_bytes = _make_docx_bytes()
 
+        mock_doc = {"document_id": "doc-md-1", "doc_type": "sow", "markdown_s3_key": "eagle/test/doc/v1/SOW-Test.docx.content.md"}
+
         with (
-            patch("boto3.client") as mock_boto3,
+            patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=_MOCK_CLASSIFICATION),
             patch("app.routers.documents.extract_text_preview", return_value="preview"),
-            patch("app.routers.documents._put_upload") as mock_put,
+            patch("app.unified_document_store.create_document", return_value=mock_doc) as mock_create,
         ):
-            mock_s3 = MagicMock()
-            mock_boto3.return_value = mock_s3
-
             response = client.post(
                 "/api/documents/upload",
                 files={"file": ("SOW-Test.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
             )
 
         assert response.status_code == 200
-
-        # Verify _put_upload was called with markdown_s3_key
-        assert mock_put.called
-        metadata = mock_put.call_args[0][2]  # third positional arg is metadata dict
-        assert "markdown_s3_key" in metadata
-        # The markdown key should end with .parsed.md
-        md_key = metadata["markdown_s3_key"]
-        if md_key is not None:
-            assert md_key.endswith(".parsed.md")
+        # Verify create_document was called with a markdown_s3_key
+        assert mock_create.called
+        call_kwargs = mock_create.call_args.kwargs
+        md_key = call_kwargs.get("markdown_s3_key")
+        assert md_key is not None
+        assert md_key.endswith(".content.md")
 
     def test_upload_plain_text_also_gets_markdown(self, client):
         """Plain text uploads should also produce a markdown sibling (passthrough)."""
+        mock_doc = {"document_id": "doc-md-2", "doc_type": "sow"}
+
         with (
-            patch("boto3.client") as mock_boto3,
+            patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=_MOCK_CLASSIFICATION),
             patch("app.routers.documents.extract_text_preview", return_value="plain text"),
-            patch("app.routers.documents._put_upload") as mock_put,
+            patch("app.unified_document_store.create_document", return_value=mock_doc) as mock_create,
         ):
-            mock_s3 = MagicMock()
-            mock_boto3.return_value = mock_s3
-
             response = client.post(
                 "/api/documents/upload",
                 files={"file": ("notes.txt", b"This is a test document.", "text/plain")},
             )
 
         assert response.status_code == 200
-        metadata = mock_put.call_args[0][2]
-        assert metadata.get("markdown_s3_key") is not None
+        call_kwargs = mock_create.call_args.kwargs
+        assert call_kwargs.get("markdown_s3_key") is not None
 
 
 # ---------------------------------------------------------------------------
