@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import os
 
-# Power Automate HTTP trigger URLs for feedback action buttons
-_PA_APPROVE_URL = os.getenv("PA_FEEDBACK_APPROVE_URL", "")
-_PA_REJECT_URL = os.getenv("PA_FEEDBACK_REJECT_URL", "")
-_PA_RESEND_URL = os.getenv("PA_FEEDBACK_RESEND_URL", "")
 _JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "")
+_BACKEND_URL = os.getenv(
+    "EAGLE_BACKEND_URL",
+    os.getenv("QA_BACKEND_URL", ""),
+)  # e.g. https://eagle-dev.example.com  (no trailing slash)
 
 
 def _wrap_card(card: dict) -> dict:
@@ -133,9 +133,22 @@ def error_card(
     )
 
 
+def _action_url(action: str, feedback_id: str, jira_key: str, tenant_id: str) -> str:
+    """Build an HMAC-signed callback URL for a triage action."""
+    from .routers.feedback_actions import compute_sig
+
+    sig = compute_sig(action, feedback_id)
+    return (
+        f"{_BACKEND_URL}/api/feedback/action"
+        f"?action={action}&feedback_id={feedback_id}"
+        f"&ticket={jira_key}&tenant={tenant_id}&sig={sig}"
+    )
+
+
 def _feedback_actions(
     jira_key: str | None,
     feedback_id: str,
+    tenant_id: str = "",
 ) -> list[dict] | None:
     """Build Action.OpenUrl buttons for feedback triage.
 
@@ -150,25 +163,21 @@ def _feedback_actions(
             "url": f"{_JIRA_BASE_URL}/browse/{jira_key}",
         })
 
-    params = f"ticket={jira_key or ''}&feedback_id={feedback_id}"
-
-    if _PA_APPROVE_URL:
+    if _BACKEND_URL and feedback_id:
         actions.append({
             "type": "Action.OpenUrl",
             "title": "Approve",
-            "url": f"{_PA_APPROVE_URL}?action=approve&{params}",
+            "url": _action_url("approve", feedback_id, jira_key or "", tenant_id),
         })
-    if _PA_REJECT_URL:
         actions.append({
             "type": "Action.OpenUrl",
             "title": "Reject",
-            "url": f"{_PA_REJECT_URL}?action=reject&{params}",
+            "url": _action_url("reject", feedback_id, jira_key or "", tenant_id),
         })
-    if _PA_RESEND_URL:
         actions.append({
             "type": "Action.OpenUrl",
-            "title": "Resend 24hr",
-            "url": f"{_PA_RESEND_URL}?action=resend_24hr&{params}",
+            "title": "Snooze 24hr",
+            "url": _action_url("snooze", feedback_id, jira_key or "", tenant_id),
         })
 
     return actions if actions else None
@@ -201,7 +210,7 @@ def feedback_card(
 
     truncated = feedback_text[:500] + ("..." if len(feedback_text) > 500 else "")
 
-    actions = _feedback_actions(jira_key, feedback_id) if jira_key else None
+    actions = _feedback_actions(jira_key, feedback_id, tenant_id) if (jira_key or feedback_id) else None
 
     title = f"EAGLE {environment} | Feedback"
     if jira_key:

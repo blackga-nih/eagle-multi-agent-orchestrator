@@ -101,6 +101,88 @@ def create_feedback_issue(
         return None
 
 
+def transition_issue(issue_key: str, target_status: str) -> bool:
+    """Transition a JIRA issue to a target status name.
+
+    Fetches available transitions and picks the first one whose 'to' name
+    matches *target_status* (case-insensitive).  Returns True on success.
+    Never raises — logs and returns False on any failure.
+    """
+    from .config import jira as jira_config
+
+    if not jira_config.base_url or not jira_config.api_token:
+        return False
+
+    try:
+        client = _get_client()
+        # Discover available transitions
+        url = f"{jira_config.base_url}/rest/api/2/issue/{issue_key}/transitions"
+        resp = client.get(url, headers=_headers())
+        if resp.status_code != 200:
+            logger.warning("jira_client: transitions GET failed status=%d", resp.status_code)
+            return False
+
+        transitions = resp.json().get("transitions", [])
+        target_lower = target_status.lower()
+        match = next(
+            (t for t in transitions if t["to"]["name"].lower() == target_lower),
+            None,
+        )
+        if not match:
+            logger.warning(
+                "jira_client: no transition to '%s' for %s (available: %s)",
+                target_status,
+                issue_key,
+                [t["to"]["name"] for t in transitions],
+            )
+            return False
+
+        resp = client.post(
+            url,
+            headers=_headers(),
+            json={"transition": {"id": match["id"]}},
+        )
+        ok = resp.status_code in (200, 204)
+        if ok:
+            logger.info("jira_client: transitioned %s → %s", issue_key, target_status)
+        else:
+            logger.warning(
+                "jira_client: transition POST failed status=%d body=%s",
+                resp.status_code,
+                resp.text[:200],
+            )
+        return ok
+    except Exception:
+        logger.warning("jira_client: transition failed for %s", issue_key, exc_info=True)
+        return False
+
+
+def add_comment(issue_key: str, body: str) -> bool:
+    """Add a comment to a JIRA issue.  Never raises."""
+    from .config import jira as jira_config
+
+    if not jira_config.base_url or not jira_config.api_token:
+        return False
+
+    try:
+        client = _get_client()
+        url = f"{jira_config.base_url}/rest/api/2/issue/{issue_key}/comment"
+        resp = client.post(url, headers=_headers(), json={"body": body})
+        ok = resp.status_code in (200, 201)
+        if ok:
+            logger.info("jira_client: added comment to %s", issue_key)
+        else:
+            logger.warning(
+                "jira_client: comment failed status=%d body=%s",
+                resp.status_code,
+                resp.text[:200],
+            )
+        return ok
+    except Exception:
+        logger.warning("jira_client: comment failed for %s", issue_key, exc_info=True)
+        return False
+
+
 def get_issue_url(issue_key: str) -> str:
     """Return the browse URL for an issue."""
     from .config import jira as jira_config

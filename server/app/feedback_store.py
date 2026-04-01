@@ -172,6 +172,59 @@ def patch_cloudwatch_logs(
         logger.debug("patch_cloudwatch_logs failed (non-fatal): %s", exc)
 
 
+def get_feedback_by_id(feedback_id: str, tenant_id: str) -> dict | None:
+    """Look up a single feedback record by its feedback_id."""
+    pk = f"FEEDBACK#{tenant_id}"
+    try:
+        response = get_table().query(
+            KeyConditionExpression=Key("PK").eq(pk)
+            & Key("SK").begins_with("FEEDBACK#"),
+            FilterExpression="feedback_id = :fid",
+            ExpressionAttributeValues={":fid": feedback_id},
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        return items[0] if items else None
+    except (ClientError, BotoCoreError) as exc:
+        logger.warning("feedback_store: get_feedback_by_id failed: %s", exc)
+        return None
+
+
+def update_feedback_status(
+    feedback_id: str, tenant_id: str, status: str, acted_by: str = ""
+) -> bool:
+    """Set triage_status on a feedback record (approved / rejected / snoozed)."""
+    pk = f"FEEDBACK#{tenant_id}"
+    try:
+        response = get_table().query(
+            KeyConditionExpression=Key("PK").eq(pk)
+            & Key("SK").begins_with("FEEDBACK#"),
+            FilterExpression="feedback_id = :fid",
+            ExpressionAttributeValues={":fid": feedback_id},
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        if not items:
+            return False
+        sk = items[0]["SK"]
+        get_table().update_item(
+            Key={"PK": pk, "SK": sk},
+            UpdateExpression="SET triage_status = :s, triage_acted_by = :a, triage_at = :t",
+            ExpressionAttributeValues={
+                ":s": status,
+                ":a": acted_by,
+                ":t": now_iso(),
+            },
+        )
+        logger.info(
+            "feedback_store: updated status=%s for feedback %s", status, feedback_id
+        )
+        return True
+    except (ClientError, BotoCoreError) as exc:
+        logger.warning("feedback_store: update_feedback_status failed: %s", exc)
+        return False
+
+
 def list_feedback(tenant_id: str, limit: int = 50) -> list[dict]:
     """Query feedback for a tenant, newest first."""
     pk = f"FEEDBACK#{tenant_id}"
