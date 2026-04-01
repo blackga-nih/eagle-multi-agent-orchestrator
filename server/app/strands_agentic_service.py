@@ -58,6 +58,11 @@ from .config import (
     DEFAULT_BEDROCK_SONNET_40_MODEL,
 )
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
+from .tools.user_document_tools import (
+    LIST_USER_DOCUMENTS_TOOL,
+    GET_DOCUMENT_CONTENT_TOOL,
+    make_user_document_tools,
+)
 from .tools.web_fetch import exec_web_fetch
 from .tools.web_search import exec_web_search
 
@@ -1877,6 +1882,9 @@ EAGLE_TOOLS = [
             "required": ["title", "html_content"],
         },
     },
+    # User document tools for conversational attachment injection
+    LIST_USER_DOCUMENTS_TOOL,
+    GET_DOCUMENT_CONTENT_TOOL,
 ]
 
 # Max prompt size per subagent to avoid context overflow
@@ -3879,6 +3887,9 @@ def _build_all_service_tools(
             except Exception:
                 pass
 
+    # User document tools for conversational attachment injection
+    user_doc_tools = make_user_document_tools(tenant_id, user_id)
+
     return [
         s3_document_ops_tool,
         dynamodb_intake_tool,
@@ -3897,6 +3908,7 @@ def _build_all_service_tools(
         query_compliance_matrix_tool,
         manage_package_tool,
         generate_html_playground_tool,
+        *user_doc_tools,
     ]
 
 

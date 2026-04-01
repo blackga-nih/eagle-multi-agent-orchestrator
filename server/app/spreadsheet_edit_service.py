@@ -20,7 +20,7 @@ from .document_key_utils import (
 )
 from .document_service import create_package_document_version
 from .document_store import get_document
-from .formula_evaluation import evaluate_workbook_formulas_safe
+from .formula_evaluation import evaluate_workbook_formulas, evaluate_workbook_formulas_safe
 from .template_service import XLSXPopulator
 
 logger = logging.getLogger("eagle.spreadsheet_edit")
@@ -263,7 +263,7 @@ def save_xlsx_preview_edits(
         }
 
     # Re-evaluate formulas after edits so totals update
-    updated_bytes = evaluate_workbook_formulas_safe(updated_bytes)
+    updated_bytes, formulas_evaluated = evaluate_workbook_formulas(updated_bytes)
 
     preview_payload = extract_xlsx_preview_payload(updated_bytes)
     package_ref = extract_package_document_ref(doc_key)
@@ -289,6 +289,9 @@ def save_xlsx_preview_edits(
         )
         if not result.success:
             return {"error": result.error or "Failed to save document version"}
+        message = f"Saved spreadsheet version {result.version}."
+        if not formulas_evaluated:
+            message += " Note: Formulas will calculate when opened in Excel."
         return {
             "success": True,
             "mode": "package_xlsx_preview_edit",
@@ -300,7 +303,8 @@ def save_xlsx_preview_edits(
             "preview_mode": preview_payload.get("preview_mode"),
             "preview_sheets": preview_payload.get("preview_sheets", []),
             "missing": missing,
-            "message": f"Saved spreadsheet version {result.version}.",
+            "formulas_calculated": formulas_evaluated,
+            "message": message,
         }
 
     workspace_ref = extract_workspace_document_ref(doc_key)
@@ -330,6 +334,9 @@ def save_xlsx_preview_edits(
         )
         return {"error": "Failed to save spreadsheet."}
 
+    ws_message = "Spreadsheet saved."
+    if not formulas_evaluated:
+        ws_message += " Note: Formulas will calculate when opened in Excel."
     return {
         "success": True,
         "mode": "workspace_xlsx_preview_edit",
@@ -341,5 +348,6 @@ def save_xlsx_preview_edits(
         "preview_mode": preview_payload.get("preview_mode"),
         "preview_sheets": preview_payload.get("preview_sheets", []),
         "missing": missing,
-        "message": "Spreadsheet saved.",
+        "formulas_calculated": formulas_evaluated,
+        "message": ws_message,
     }
