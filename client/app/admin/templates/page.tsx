@@ -30,6 +30,7 @@ import Badge from '@/components/ui/badge';
 import Modal from '@/components/ui/modal';
 import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import ComplianceGapPanel from '@/components/admin/compliance-gap-panel';
+import SpreadsheetPreview from '@/components/spreadsheet-preview';
 import { useAuth } from '@/contexts/auth-context';
 import { pluginApi, templateApi } from '@/lib/admin-api';
 import { listPackages, type PackageInfo } from '@/lib/document-api';
@@ -165,6 +166,7 @@ export default function TemplatesPage() {
   const [copyTarget, setCopyTarget] = useState<TemplateCard | null>(null);
   const [s3PreviewLoading, setS3PreviewLoading] = useState(false);
   const [s3PreviewData, setS3PreviewData] = useState<S3TemplatePreviewResponse | null>(null);
+  const [s3PreviewActiveSheet, setS3PreviewActiveSheet] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [selectedPackageId, setSelectedPackageId] = useState<string>('');
   const [newPackageTitle, setNewPackageTitle] = useState<string>('');
@@ -353,6 +355,7 @@ export default function TemplatesPage() {
     try {
       const data = await templateApi.previewS3(getToken, card.s3Key);
       setS3PreviewData(data);
+      setS3PreviewActiveSheet(data.preview_sheets?.[0]?.sheet_id || null);
     } catch (err) {
       setS3PreviewData({
         type: 'markdown',
@@ -952,6 +955,7 @@ export default function TemplatesPage() {
             setShowPreviewModal(false);
             setS3PreviewData(null);
             setS3PreviewLoading(false);
+            setS3PreviewActiveSheet(null);
           }}
           title={previewCard ? `Preview: ${previewCard.name}` : 'Template Preview'}
           size="xl"
@@ -1017,71 +1021,13 @@ export default function TemplatesPage() {
                       title={`PDF preview: ${s3PreviewData.filename}`}
                     />
                   ) : s3PreviewData?.type === 'xlsx' && s3PreviewData.preview_sheets?.length ? (
-                    <div className="space-y-4">
-                      {s3PreviewData.preview_sheets.map((sheet) => (
-                        <div key={sheet.sheet_id} className="space-y-2">
-                          <h5 className="text-sm font-medium text-gray-700">{sheet.title}</h5>
-                          {sheet.truncated && (
-                            <p className="text-xs text-amber-600">
-                              Preview limited to {sheet.max_row} rows x {sheet.max_col} columns
-                            </p>
-                          )}
-                          <div className="overflow-auto max-h-[50vh] rounded-lg border border-gray-200">
-                            <table className="min-w-full border-collapse text-sm">
-                              <thead className="bg-gray-100 sticky top-0 z-10">
-                                <tr>
-                                  <th className="border-b border-r border-gray-300 px-2 py-1.5 text-center text-xs font-semibold text-gray-500 w-10"></th>
-                                  {sheet.rows[0]?.cells.map((cell) => (
-                                    <th
-                                      key={cell.cell_ref}
-                                      className="border-b border-r border-gray-300 px-2 py-1.5 text-center text-xs font-semibold text-gray-600 min-w-[60px]"
-                                    >
-                                      {cell.cell_ref.replace(/\d+/g, '')}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {sheet.rows.map((row) => (
-                                  <tr key={row.row_index}>
-                                    <td className="border-b border-r border-gray-200 bg-gray-50 px-2 py-1 text-center text-xs font-medium text-gray-400 w-10">
-                                      {row.row_index}
-                                    </td>
-                                    {row.cells.map((cell) => (
-                                      <td
-                                        key={cell.cell_ref}
-                                        className={`border-b border-r border-gray-200 px-1.5 py-1 text-sm ${
-                                          cell.is_formula
-                                            ? 'bg-sky-50 text-sky-700 font-medium'
-                                            : 'bg-white text-gray-900'
-                                        }`}
-                                        title={
-                                          cell.is_formula ? `Formula: ${cell.value}` : undefined
-                                        }
-                                      >
-                                        <div className="truncate min-w-[60px]">
-                                          {cell.display_value || (cell.is_formula ? '\u2014' : '')}
-                                        </div>
-                                      </td>
-                                    ))}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ))}
-                      {/* Legend */}
-                      <div className="flex gap-4 text-xs text-gray-500 pt-2">
-                        <span className="flex items-center gap-1.5">
-                          <span className="inline-block w-3 h-3 bg-white border border-gray-300 rounded-sm" />
-                          Data
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="inline-block w-3 h-3 bg-sky-50 border border-gray-300 rounded-sm" />
-                          Formula
-                        </span>
-                      </div>
+                    <div className="h-[500px]">
+                      <SpreadsheetPreview
+                        sheets={s3PreviewData.preview_sheets}
+                        activeSheetId={s3PreviewActiveSheet}
+                        onActiveSheetChange={setS3PreviewActiveSheet}
+                        isEditing={false}
+                      />
                     </div>
                   ) : s3PreviewData?.content ? (
                     <div className="max-h-[60vh] overflow-y-auto">

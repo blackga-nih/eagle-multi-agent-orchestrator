@@ -64,6 +64,62 @@ def test_exec_create_document_routes_package_mode_to_canonical(monkeypatch):
     mock_s3.put_object.assert_not_called()
 
 
+def test_title_from_context_ignores_attachment_request_suffix():
+    from app.tools.document_generation import _title_from_context
+
+    title = _title_from_context(
+        "Statement of Work - I attached a document here, please take a look at it",
+        "sow",
+        {
+            "description": "I attached a document here, please take a look at it and generate an SOW using that document.",
+            "requirement": "I attached a document here, please take a look at it and generate an SOW using that document.",
+        },
+    )
+
+    assert title == "Statement of Work - I attached a document here, please take a look at it"
+
+
+def test_exec_create_document_does_not_promote_attachment_request_into_title(monkeypatch):
+    """Workspace docs should not use attachment instructions as the saved title."""
+    from app.tools.document_generation import exec_create_document as _exec_create_document
+
+    class FakeTemplateResult:
+        success = False
+        error = "template unavailable"
+
+    class FakeTemplateService:
+        def __init__(self, tenant_id, user_id, markdown_generators):
+            self.markdown_generators = markdown_generators
+
+        def generate_document(self, doc_type, title, data, output_format):
+            return FakeTemplateResult()
+
+    monkeypatch.setattr("app.template_service.TemplateService", FakeTemplateService)
+    monkeypatch.setattr(
+        "app.tools.document_generation._augment_document_data_from_context",
+        lambda doc_type, title, data, session_id: {
+            **(data or {}),
+            "description": "I attached a document here, please take a look at it and generate an SOW using that document.",
+            "requirement": "I attached a document here, please take a look at it and generate an SOW using that document.",
+        },
+    )
+    mock_s3 = mock.MagicMock()
+    monkeypatch.setattr("app.tools.document_generation.get_s3", lambda: mock_s3)
+
+    result = _exec_create_document(
+        {
+            "doc_type": "sow",
+            "title": "Statement of Work",
+            "data": {},
+        },
+        tenant_id="test-tenant",
+        session_id="test-tenant#advanced#test-user#sess-attachment-1",
+    )
+
+    assert result["title"] == "Statement of Work"
+    assert mock_s3.put_object.called
+
+
 def test_stream_generator_passes_package_context_to_sdk(monkeypatch):
     """Streaming route should pass resolved package_context to sdk_query_streaming."""
     from app.streaming_routes import stream_generator
@@ -143,6 +199,16 @@ def test_fast_path_detects_ige_alias():
     assert doc_type == "igce"
 
 
+def test_fast_path_skips_uploaded_document_requests():
+    from app.strands_agentic_service import _should_use_fast_document_path
+
+    should_fast_path, doc_type = _should_use_fast_document_path(
+        "Using the uploaded req document, generate an SOW for me."
+    )
+    assert should_fast_path is False
+    assert doc_type is None
+
+
 def test_force_document_creation_for_direct_request_without_tool(monkeypatch):
     from app.strands_agentic_service import _ensure_create_document_for_direct_request
 
@@ -192,6 +258,31 @@ def test_force_document_creation_skips_when_tool_already_called(monkeypatch):
             session_id="sess-123",
             package_context=None,
             tools_called=["create_document"],
+        )
+    )
+    assert forced is None
+    assert called["count"] == 0
+
+
+def test_force_document_creation_skips_uploaded_document_requests(monkeypatch):
+    from app.strands_agentic_service import _ensure_create_document_for_direct_request
+
+    called = {"count": 0}
+
+    def fake_exec_create_document(params, tenant_id, session_id):
+        called["count"] += 1
+        return {"status": "saved"}
+
+    monkeypatch.setattr("app.tools.document_generation.exec_create_document", fake_exec_create_document)
+
+    forced = asyncio.run(
+        _ensure_create_document_for_direct_request(
+            prompt="Using the uploaded req document, generate an SOW for me.",
+            tenant_id="test-tenant",
+            user_id="test-user",
+            session_id="sess-123",
+            package_context=None,
+            tools_called=[],
         )
     )
     assert forced is None

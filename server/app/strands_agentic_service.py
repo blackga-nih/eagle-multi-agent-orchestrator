@@ -58,6 +58,11 @@ from .config import (
     DEFAULT_BEDROCK_SONNET_40_MODEL,
 )
 from .tools.knowledge_tools import KNOWLEDGE_FETCH_TOOL, KNOWLEDGE_SEARCH_TOOL
+from .tools.user_document_tools import (
+    LIST_USER_DOCUMENTS_TOOL,
+    GET_DOCUMENT_CONTENT_TOOL,
+    make_user_document_tools,
+)
 from .tools.web_fetch import exec_web_fetch
 from .tools.web_search import exec_web_search
 
@@ -769,6 +774,27 @@ _DOC_REQUEST_BLOCKERS = (
     "difference between",
 )
 
+_USER_DOCUMENT_REFERENCE_HINTS = (
+    "uploaded document",
+    "uploaded req document",
+    "uploaded requirement document",
+    "attached document",
+    "attached file",
+    "attachment",
+    "my document",
+    "my file",
+    "this document",
+    "that document",
+    "from the document",
+    "using the document",
+    "using that document",
+    "using the uploaded",
+    "use the uploaded",
+    "use my uploaded",
+    "workspace document",
+    "in my workspace",
+)
+
 _PROMPT_SECTION_ALIASES = {
     "project description": "project_description",
     "technical requirements": "technical_requirements",
@@ -781,6 +807,11 @@ _PROMPT_SECTION_ALIASES = {
 
 def _normalize_prompt(prompt: str) -> str:
     return re.sub(r"\s+", " ", prompt.strip().lower())
+
+
+def _references_user_document(prompt: str) -> bool:
+    lowered = _normalize_prompt(prompt)
+    return any(hint in lowered for hint in _USER_DOCUMENT_REFERENCE_HINTS)
 
 
 def _extract_user_request_from_prompt(prompt: str) -> str:
@@ -1107,6 +1138,8 @@ def _should_use_fast_document_path(prompt: str) -> tuple[bool, str | None]:
     lowered = _normalize_prompt(prompt)
     if "[document context]" in lowered:
         return False, None
+    if _references_user_document(prompt):
+        return False, None
     if any(h in lowered for h in _SLOW_PATH_HINTS):
         return False, None
     return True, doc_type
@@ -1319,6 +1352,11 @@ async def _ensure_create_document_for_direct_request(
     """
     should_generate, doc_type = _is_document_generation_request(prompt)
     if not should_generate or not doc_type or "create_document" in tools_called:
+        return None
+    if _references_user_document(prompt):
+        logger.info(
+            "Skipping forced create_document for prompt referencing uploaded/user document"
+        )
         return None
 
     from .tools.legacy_dispatch import exec_create_document
@@ -1890,6 +1928,9 @@ EAGLE_TOOLS = [
             "required": ["title", "html_content"],
         },
     },
+    # User document tools for conversational attachment injection
+    LIST_USER_DOCUMENTS_TOOL,
+    GET_DOCUMENT_CONTENT_TOOL,
 ]
 
 # Max prompt size per subagent to avoid context overflow
@@ -3915,6 +3956,9 @@ def _build_all_service_tools(
             except Exception:
                 pass
 
+    # User document tools for conversational attachment injection
+    user_doc_tools = make_user_document_tools(tenant_id, user_id)
+
     return [
         s3_document_ops_tool,
         dynamodb_intake_tool,
@@ -3933,6 +3977,7 @@ def _build_all_service_tools(
         query_compliance_matrix_tool,
         manage_package_tool,
         generate_html_playground_tool,
+        *user_doc_tools,
     ]
 
 

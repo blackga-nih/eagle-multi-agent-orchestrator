@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from datetime import datetime
 from typing import Any
@@ -50,6 +51,23 @@ _DOC_TYPE_LABELS = {
     "cor_certification": "COR Certification",
     "contract_type_justification": "Contract Type Justification",
 }
+
+
+_LOW_SIGNAL_TITLE_CONTEXT_RE = re.compile(
+    r"\b(attached|uploaded|using|use|take a look|review|see)\b.*\b(document|file|attachment)\b"
+    r"|\b(this|that)\s+(document|file|attachment)\b"
+    r"|\bgenerate\b.*\busing that document\b",
+    re.IGNORECASE,
+)
+
+
+def _is_low_signal_title_context(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return True
+    if len(cleaned) < 8:
+        return True
+    return bool(_LOW_SIGNAL_TITLE_CONTEXT_RE.search(cleaned))
 
 
 def _title_from_context(title: str, doc_type: str, data: dict) -> str:
@@ -100,7 +118,7 @@ def _title_from_context(title: str, doc_type: str, data: dict) -> str:
             context = candidate
             break
 
-    if not context:
+    if not context or _is_low_signal_title_context(context):
         return title
 
     # Trim to the first sentence

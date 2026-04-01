@@ -574,9 +574,9 @@ async def api_export_session(
         )
 
 
-@router.get("")
-async def api_list_documents(user: UserContext = Depends(get_user_from_header)):
-    """List documents in S3 for the current user."""
+@router.get("/s3")
+async def api_list_s3_documents(user: UserContext = Depends(get_user_from_header)):
+    """List documents in S3 for the current user (legacy, for debugging)."""
     from botocore.exceptions import ClientError
 
     tenant_id = user.tenant_id
@@ -639,8 +639,15 @@ async def api_upload_document(
     package_id: Optional[str] = None,
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Upload a document to the user's S3 workspace with automatic classification."""
+    """Upload a document to the user's S3 workspace with automatic classification.
+
+    Documents are now durable from upload (no TTL expiry). They can be assigned
+    to a package immediately via package_id parameter, or later via PATCH.
+    """
     from botocore.exceptions import ClientError
+    import hashlib
+
+    from ..unified_document_store import create_document as create_unified_document
 
     content_type = file.content_type or "application/octet-stream"
     if content_type not in ALLOWED_UPLOAD_MIME_TYPES:
@@ -656,9 +663,16 @@ async def api_upload_document(
     tenant_id = user.tenant_id
     user_id = user.user_id
     bucket = _S3_BUCKET
-    upload_id = str(uuid.uuid4())
+
+    # Generate document_id upfront for the new key structure
+    document_id = str(uuid.uuid4())
     safe_name = re.sub(r"[^A-Za-z0-9._\-]", "_", file.filename or "upload")
-    key = f"eagle/{tenant_id}/{user_id}/uploads/{upload_id}/{safe_name}"
+
+    # New S3 key structure: documents/{document_id}/v1/{filename}
+    key = f"eagle/{tenant_id}/{user_id}/documents/{document_id}/v1/{safe_name}"
+
+    # Compute content hash for deduplication
+    content_hash = hashlib.sha256(body).hexdigest()
 
     try:
         s3 = get_s3()
@@ -671,7 +685,6 @@ async def api_upload_document(
         "extract_text_preview", extract_text_preview
     )
     classify = _resolve_main_override("classify_document", classify_document)
-    persist_upload = _resolve_main_override("_put_upload", _put_upload)
 
     content_preview = extract_preview(body, content_type)
     classification = classify(file.filename or safe_name, content_preview)
@@ -701,7 +714,7 @@ async def api_upload_document(
 
     markdown_s3_key = None
     if markdown_content:
-        md_key = f"{key}.parsed.md"
+        md_key = f"eagle/{tenant_id}/{user_id}/documents/{document_id}/v1/{safe_name}.content.md"
         try:
             s3 = get_s3()
             s3.put_object(
@@ -714,50 +727,231 @@ async def api_upload_document(
         except ClientError as e:
             logger.warning("Failed to upload markdown sibling: %s", e)
 
-    package_context = {"mode": "workspace", "package_id": None}
+    # Validate package_id if provided
+    resolved_package_id = None
     if package_id:
         pkg = get_package(tenant_id, package_id)
         if pkg:
-            package_context = {"mode": "package", "package_id": package_id}
+            resolved_package_id = package_id
 
-    persist_upload(
-        tenant_id,
-        upload_id,
-        {
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "s3_bucket": bucket,
-            "s3_key": key,
-            "filename": safe_name,
-            "original_filename": file.filename,
-            "content_type": content_type,
-            "size_bytes": len(body),
-            "classification": classification.to_dict(),
-            "session_id": session_id,
-            "markdown_s3_key": markdown_s3_key,
-            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        },
+    # Create unified document record (durable, no TTL)
+    doc = create_unified_document(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        s3_bucket=bucket,
+        s3_key=key,
+        filename=safe_name,
+        original_filename=file.filename or safe_name,
+        content_type=content_type,
+        size_bytes=len(body),
+        doc_type=classification.doc_type or "unknown",
+        title=classification.suggested_title or safe_name,
+        classification=classification.to_dict(),
+        markdown_s3_key=markdown_s3_key,
+        content_hash=content_hash,
+        package_id=resolved_package_id,
+        is_deliverable=False,
+        session_id=session_id,
+        document_id=document_id,
     )
 
     logger.info(
-        "Uploaded %s -> s3://%s/%s (upload_id=%s, classified=%s)",
+        "Uploaded %s -> s3://%s/%s (document_id=%s, classified=%s, package=%s)",
         safe_name,
         bucket,
         key,
-        upload_id,
+        document_id,
         classification.doc_type,
+        resolved_package_id,
     )
 
     return {
+        "document_id": doc["document_id"],
         "key": key,
-        "upload_id": upload_id,
+        "upload_id": doc["document_id"],  # Backwards compatibility
         "filename": safe_name,
         "size_bytes": len(body),
         "content_type": content_type,
         "classification": classification.to_dict(),
-        "package_context": package_context,
+        "package_id": resolved_package_id,
         "quality_score": quality_score,
     }
+
+
+# -- Unified Document Model Endpoints ------------------------------------------
+
+
+class UpdateDocumentRequest(BaseModel):
+    """Request body for updating a document."""
+
+    package_id: Optional[str] = None  # null to unassign
+    doc_type: Optional[str] = None
+    title: Optional[str] = None
+    is_deliverable: Optional[bool] = None
+
+
+@router.patch("/{document_id}")
+async def update_document_endpoint(
+    document_id: str,
+    body: UpdateDocumentRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Update a document's metadata (assign/unassign from package, etc.).
+
+    Use this to:
+    - Assign to package: {"package_id": "PKG-2026-0001"}
+    - Unassign from package: {"package_id": null}
+    - Update title: {"title": "New Title"}
+    - Mark as deliverable: {"is_deliverable": true}
+    """
+    from ..unified_document_store import get_document, update_document
+
+    doc = get_document(user.tenant_id, document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc.get("owner_user_id") != user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Build updates dict from non-None fields
+    updates = {}
+    if body.package_id is not None or "package_id" in (body.model_dump(exclude_unset=True) or {}):
+        # Validate package exists if assigning
+        if body.package_id:
+            pkg = get_package(user.tenant_id, body.package_id)
+            if not pkg:
+                raise HTTPException(
+                    status_code=404, detail=f"Package {body.package_id} not found"
+                )
+        updates["package_id"] = body.package_id
+
+    if body.doc_type is not None:
+        updates["doc_type"] = normalize_doc_type(body.doc_type)
+    if body.title is not None:
+        updates["title"] = body.title
+    if body.is_deliverable is not None:
+        updates["is_deliverable"] = body.is_deliverable
+
+    if not updates:
+        return doc
+
+    updated = update_document(user.tenant_id, document_id, updates)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update document")
+
+    logger.info("Updated document %s: %s", document_id, list(updates.keys()))
+    return updated
+
+
+@router.get("")
+async def list_documents_endpoint(
+    scope: Optional[str] = None,
+    package_id: Optional[str] = None,
+    deliverable: Optional[bool] = None,
+    limit: int = 100,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """List documents.
+
+    Query params:
+    - scope: "workspace" (unassigned), "assigned", or "all" (default)
+    - package_id: Filter by specific package
+    - deliverable: Filter by is_deliverable flag
+    - limit: Max documents to return (default 100)
+    """
+    from ..unified_document_store import list_user_documents, list_package_documents
+
+    if package_id:
+        # List documents in a specific package
+        docs = list_package_documents(
+            user.tenant_id,
+            package_id,
+            deliverable_only=deliverable,
+            limit=limit,
+        )
+    else:
+        # List user's documents
+        docs = list_user_documents(
+            user.tenant_id,
+            user.user_id,
+            scope=scope or "all",
+            limit=limit,
+        )
+        # Apply deliverable filter if specified
+        if deliverable is not None:
+            docs = [d for d in docs if d.get("is_deliverable") == deliverable]
+
+    return {"documents": docs, "count": len(docs)}
+
+
+@router.get("/{document_id}/content")
+async def get_document_content_endpoint(
+    document_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Get the text content of a document (for AI context injection).
+
+    Returns the markdown sidecar content if available, otherwise attempts
+    to extract text from the original file.
+    """
+    from botocore.exceptions import ClientError
+
+    from ..unified_document_store import get_document
+
+    doc = get_document(user.tenant_id, document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc.get("owner_user_id") != user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    s3 = get_s3()
+    content = None
+    truncated = False
+    max_chars = 50000  # Token budget limit
+
+    # Try markdown sidecar first
+    markdown_key = doc.get("markdown_s3_key")
+    if markdown_key:
+        try:
+            response = s3.get_object(Bucket=doc["s3_bucket"], Key=markdown_key)
+            content = response["Body"].read().decode("utf-8", errors="replace")
+        except ClientError:
+            logger.debug("Could not fetch markdown for document %s", document_id)
+
+    # Fall back to extracting from original
+    if not content:
+        try:
+            response = s3.get_object(Bucket=doc["s3_bucket"], Key=doc["s3_key"])
+            raw = response["Body"].read()
+
+            from ..document_markdown_service import convert_to_markdown
+
+            content = convert_to_markdown(
+                raw, doc.get("content_type", ""), doc.get("filename", "")
+            )
+        except ClientError as e:
+            logger.error("Failed to fetch document %s: %s", document_id, e)
+            raise HTTPException(status_code=500, detail="Failed to retrieve document")
+
+    if not content:
+        content = "[Could not extract text content]"
+
+    # Truncate if too long
+    if len(content) > max_chars:
+        content = content[:max_chars] + "\n\n[Content truncated...]"
+        truncated = True
+
+    return {
+        "document_id": document_id,
+        "title": doc.get("title"),
+        "doc_type": doc.get("doc_type"),
+        "content": content,
+        "truncated": truncated,
+    }
+
+
+# -- Legacy Endpoints (kept for backwards compatibility) -----------------------
 
 
 @router.post("/{upload_id}/assign-to-package")

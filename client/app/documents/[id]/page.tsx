@@ -13,6 +13,7 @@ import {
   Sparkles,
   Download,
   ChevronDown,
+  ChevronUp,
   Eye,
   Edit3,
   RefreshCw,
@@ -24,6 +25,7 @@ import TopNav from '@/components/layout/top-nav';
 import CollapsibleMarkdown from '@/components/ui/collapsible-markdown';
 import TemplateProvenanceBadge from '@/components/ui/template-provenance-badge';
 import TagEditor from '@/components/ui/tag-editor';
+import SpreadsheetPreview, { SpreadsheetPreviewHandle, PendingCellEdit } from '@/components/spreadsheet-preview';
 import { useAgentStream } from '@/hooks/use-agent-stream';
 import { useAuth } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
@@ -180,24 +182,27 @@ function normalizeXlsxPreviewSheets(sheets: unknown): XlsxPreviewSheet[] {
       const cells = rawRow.cells.flatMap((cell) => {
         if (!cell || typeof cell !== 'object') return [];
         const rawCell = cell as Record<string, unknown>;
+        // Required fields (but be lenient with types - coerce where reasonable)
         if (
           typeof rawCell.cell_ref !== 'string' ||
           typeof rawCell.row !== 'number' ||
-          typeof rawCell.col !== 'number' ||
-          typeof rawCell.display_value !== 'string' ||
-          typeof rawCell.value !== 'string' ||
-          typeof rawCell.editable !== 'boolean'
+          typeof rawCell.col !== 'number'
         ) {
           return [];
         }
+        // Coerce value and display_value to strings (backend may send numbers)
+        const cellValue = rawCell.value != null ? String(rawCell.value) : '';
+        const displayValue = rawCell.display_value != null ? String(rawCell.display_value) : cellValue;
+        // Coerce editable to boolean (backend may send 1/0, true/false, or "true"/"false")
+        const isEditable = rawCell.editable === true || rawCell.editable === 1 || rawCell.editable === 'true';
         return [
           {
             cell_ref: rawCell.cell_ref,
             row: rawCell.row,
             col: rawCell.col,
-            value: rawCell.value,
-            display_value: rawCell.display_value,
-            editable: rawCell.editable,
+            value: cellValue,
+            display_value: displayValue,
+            editable: isEditable,
             is_formula: typeof rawCell.is_formula === 'boolean' ? rawCell.is_formula : false,
           },
         ];
@@ -254,13 +259,15 @@ function xlsxPreviewSheetsEqual(left: XlsxPreviewSheet[], right: XlsxPreviewShee
       }
       return row.cells.every((cell, cellIndex) => {
         const otherCell = otherRow.cells[cellIndex];
-        return Boolean(
-          otherCell &&
-          cell.cell_ref === otherCell.cell_ref &&
-          cell.value === otherCell.value &&
-          cell.display_value === otherCell.display_value &&
-          cell.editable === otherCell.editable,
-        );
+        if (!otherCell || cell.cell_ref !== otherCell.cell_ref || cell.editable !== otherCell.editable) {
+          return false;
+        }
+        // Normalize to strings for comparison (backend may send numbers)
+        const valA = String(cell.value ?? '');
+        const valB = String(otherCell.value ?? '');
+        const dispA = String(cell.display_value ?? '');
+        const dispB = String(otherCell.display_value ?? '');
+        return valA === valB && dispA === dispB;
       });
     });
   });
@@ -286,7 +293,10 @@ function collectXlsxCellEdits(
         if (!cell.editable) continue;
         const original = originalMap.get(`${sheet.sheet_id}:${cell.cell_ref}`);
         if (!original) continue;
-        if (original.value !== cell.value) {
+        // Normalize to strings for comparison (backend may have sent numbers)
+        const originalStr = String(original.value ?? '');
+        const currentStr = String(cell.value ?? '');
+        if (originalStr !== currentStr) {
           edits.push({
             sheet_id: sheet.sheet_id,
             cell_ref: cell.cell_ref,
@@ -303,6 +313,18 @@ function autoResizeTextarea(element: HTMLTextAreaElement | null) {
   if (!element) return;
   element.style.height = '0px';
   element.style.height = `${element.scrollHeight}px`;
+}
+
+function shouldRenderCachedDocument(doc: DocumentInfo): boolean {
+  const cachedFileType = (doc.file_type || '').toLowerCase();
+  const cachedSheets = normalizeXlsxPreviewSheets(doc.preview_sheets);
+
+  // XLSX documents should not flash their text fallback before grid data arrives.
+  if (Boolean(doc.is_binary) && cachedFileType === 'xlsx' && cachedSheets.length === 0) {
+    return false;
+  }
+
+  return Boolean(doc.content);
 }
 
 // ---------------------------------------------------------------------------
@@ -530,6 +552,8 @@ export default function DocumentViewerPage({ params }: PageProps) {
 
   // Assistant panel tab state
   const [assistantTab, setAssistantTab] = useState<'chat' | 'changelog'>('chat');
+  // Bottom drawer state (for XLSX documents)
+  const [isBottomDrawerOpen, setIsBottomDrawerOpen] = useState(false);
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -548,6 +572,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const docxBlockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const spreadsheetRef = useRef<SpreadsheetPreviewHandle>(null);
 
   // Download state
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
@@ -752,9 +777,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
         setXlsxPreviewSheets(nextPreviewSheets);
         setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
         setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
-        if (doc.content) {
-          setDocumentContent(doc.content);
-          setEditContent(doc.content);
+        if (shouldRenderCachedDocument(doc)) {
+          setDocumentContent(doc.content ?? '');
+          setEditContent(doc.content ?? '');
           setIsLoading(false);
           loadedFromCache = true;
           // Don't return — still fetch fresh content from S3 in background
@@ -767,7 +792,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
     // Try localStorage (handles navigation from Documents page)
     if (!loadedFromCache) {
       const stored2 = getGeneratedDocument(id);
-      if (stored2?.content) {
+      if (stored2) {
         setDocumentTitle(stored2.title);
         setDocumentType(stored2.document_type);
         setPackageId(stored2.package_id);
@@ -786,11 +811,13 @@ export default function DocumentViewerPage({ params }: PageProps) {
         setXlsxPreviewSheets(nextPreviewSheets);
         setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(nextPreviewSheets));
         setActiveXlsxSheetId(nextPreviewSheets[0]?.sheet_id || null);
-        setDocumentContent(stored2.content);
-        setEditContent(stored2.content);
-        setIsLoading(false);
-        loadedFromCache = true;
-        // Don't return — still fetch fresh content from S3 in background
+        if (shouldRenderCachedDocument(stored2)) {
+          setDocumentContent(stored2.content || '');
+          setEditContent(stored2.content || '');
+          setIsLoading(false);
+          loadedFromCache = true;
+          // Don't return — still fetch fresh content from S3 in background
+        }
       }
     }
 
@@ -1330,6 +1357,13 @@ ${docSnippet}`;
 
   // Save handler - persists to S3
   const handleSave = async () => {
+    // Commit any pending cell edit before saving (for XLSX)
+    // IMPORTANT: commitPendingEdit returns the edit immediately because React setState is async
+    // and the state won't be updated by the time we call collectXlsxCellEdits
+    let pendingEdit: PendingCellEdit | null = null;
+    if (isBinaryDocument && isXlsxDocument) {
+      pendingEdit = spreadsheetRef.current?.commitPendingEdit() ?? null;
+    }
     if (!s3Key) {
       setSaveError('No document key available - cannot save');
       return;
@@ -1348,6 +1382,24 @@ ${docSnippet}`;
         docxPreviewMode === 'text_fallback'
           ? editDocxPreviewBlocks
           : collectChangedDocxPreviewBlocks(docxPreviewBlocks, editDocxPreviewBlocks);
+
+      // For XLSX: collect edits and merge in any pending edit that hasn't propagated to state yet
+      let xlsxCellEdits: Array<{ sheet_id: string; cell_ref: string; value: string }> = [];
+      if (isBinaryDocument && isXlsxDocument) {
+        xlsxCellEdits = collectXlsxCellEdits(xlsxPreviewSheets, editXlsxPreviewSheets);
+        if (pendingEdit) {
+          // Remove any existing edit for this cell, then add the pending one
+          xlsxCellEdits = xlsxCellEdits.filter(
+            (e) => !(e.sheet_id === pendingEdit!.sheetId && e.cell_ref === pendingEdit!.cellRef)
+          );
+          xlsxCellEdits.push({
+            sheet_id: pendingEdit.sheetId,
+            cell_ref: pendingEdit.cellRef,
+            value: pendingEdit.value,
+          });
+        }
+      }
+
       const requestBody =
         isBinaryDocument && isDocxDocument
           ? {
@@ -1357,13 +1409,24 @@ ${docSnippet}`;
             }
           : isBinaryDocument && isXlsxDocument
             ? {
-                cell_edits: collectXlsxCellEdits(xlsxPreviewSheets, editXlsxPreviewSheets),
+                cell_edits: xlsxCellEdits,
                 change_source: 'user_edit',
               }
             : {
                 content: editContent,
                 change_source: 'user_edit',
               };
+
+      // DEBUG: Log what we're sending
+      if (isBinaryDocument && isXlsxDocument) {
+        console.log('[XLSX Save Debug]', {
+          pendingEdit,
+          xlsxCellEdits,
+          originalSheetsCount: xlsxPreviewSheets.length,
+          editSheetsCount: editXlsxPreviewSheets.length,
+        });
+      }
+
       const res = await fetch(requestUrl, {
         method: isBinaryDocument ? 'POST' : 'PUT',
         headers: {
@@ -1381,6 +1444,9 @@ ${docSnippet}`;
         key?: string;
       };
 
+      // Track the new S3 key for cache clearing (may differ from old id/s3Key)
+      const savedS3Key = result.s3_key || result.key || s3Key;
+
       // Update local state with saved content
       if (isBinaryDocument && isDocxDocument) {
         const savedPreviewBlocks = normalizeDocxPreviewBlocks(result.preview_blocks);
@@ -1390,9 +1456,67 @@ ${docSnippet}`;
         setEditDocxPreviewBlocks(cloneDocxPreviewBlocks(savedPreviewBlocks));
         setCurrentDocumentId(result.document_id || currentDocumentId);
         setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
-        setDownloadUrl(null);
-        setS3Key(result.s3_key || result.key || s3Key);
+        const newS3Key = result.s3_key || result.key || s3Key;
+        setS3Key(newS3Key);
         setIsEditing(false);
+        // Use download_url from response directly if available
+        if (result.download_url) {
+          setDownloadUrl(result.download_url);
+        } else if (newS3Key) {
+          // Fallback: fetch fresh download URL for saved document
+          try {
+            const presignRes = await fetch(
+              `/api/documents/${encodeURIComponent(newS3Key)}?content=false`,
+              { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+            );
+            if (presignRes.ok) {
+              const presignData = await presignRes.json();
+              setDownloadUrl(presignData.download_url || null);
+            }
+          } catch {
+            // Keep download unavailable on error
+          }
+        }
+        // Update browser URL to new version so refresh loads the saved document
+        if (newS3Key && newS3Key !== s3Key) {
+          const searchParams = new URLSearchParams(window.location.search);
+          const newUrl = `/documents/${encodeURIComponent(newS3Key)}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+          window.history.replaceState({}, '', newUrl);
+        }
+      } else if (isBinaryDocument && isXlsxDocument) {
+        const savedPreviewSheets = normalizeXlsxPreviewSheets(result.preview_sheets);
+        setDocumentContent(result.content ?? documentContent);
+        setXlsxPreviewSheets(savedPreviewSheets);
+        setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(savedPreviewSheets));
+        setCurrentDocumentId(result.document_id || currentDocumentId);
+        setCurrentVersion(typeof result.version === 'number' ? result.version : currentVersion);
+        const newS3Key = result.s3_key || result.key || s3Key;
+        setS3Key(newS3Key);
+        setIsEditing(false);
+        // Use download_url from response directly if available
+        if (result.download_url) {
+          setDownloadUrl(result.download_url);
+        } else if (newS3Key) {
+          // Fallback: fetch fresh download URL for saved document
+          try {
+            const presignRes = await fetch(
+              `/api/documents/${encodeURIComponent(newS3Key)}?content=false`,
+              { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+            );
+            if (presignRes.ok) {
+              const presignData = await presignRes.json();
+              setDownloadUrl(presignData.download_url || null);
+            }
+          } catch {
+            // Keep download unavailable on error
+          }
+        }
+        // Update browser URL to new version so refresh loads the saved document
+        if (newS3Key && newS3Key !== s3Key) {
+          const searchParams = new URLSearchParams(window.location.search);
+          const newUrl = `/documents/${encodeURIComponent(newS3Key)}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+          window.history.replaceState({}, '', newUrl);
+        }
       } else {
         setDocumentContent(editContent);
       }
@@ -1400,8 +1524,12 @@ ${docSnippet}`;
       setTimeout(() => setDocUpdated(false), 2000);
 
       // Clear sessionStorage cache so reload fetches fresh content
+      // Clear both old key (id) and new key (savedS3Key) to handle version changes
       try {
         sessionStorage.removeItem(`doc-content-${id}`);
+        if (savedS3Key && savedS3Key !== id) {
+          sessionStorage.removeItem(`doc-content-${encodeURIComponent(savedS3Key)}`);
+        }
       } catch {
         // Ignore sessionStorage errors
       }
@@ -1656,13 +1784,15 @@ ${docSnippet}`;
               {/* Edit / Preview toggle */}
               <button
                 onClick={handleToggleEdit}
-                disabled={isBinaryDocument && !canEditDocxPreview}
+                disabled={isBinaryDocument && !canEditDocxPreview && !canEditXlsxPreview}
                 title={
-                  isBinaryDocument && !canEditDocxPreview
+                  isBinaryDocument && !canEditDocxPreview && !canEditXlsxPreview
                     ? 'Direct editing is unavailable for this binary document type.'
                     : isBinaryDocument && isDocxDocument
                       ? 'Edit this structured DOCX preview. Changes will be applied back to the source document with python-docx.'
-                      : undefined
+                      : isBinaryDocument && isXlsxDocument
+                        ? 'Edit spreadsheet cells. Formula cells are read-only.'
+                        : undefined
                 }
                 className="flex items-center gap-2 px-4 py-2 bg-[#003366] text-white rounded-xl text-sm font-medium hover:bg-[#004488] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
@@ -1688,7 +1818,9 @@ ${docSnippet}`;
                     !s3Key ||
                     (isBinaryDocument && isDocxDocument
                       ? !hasDocxPreviewChanges
-                      : editContent === documentContent)
+                      : isBinaryDocument && isXlsxDocument
+                        ? !hasXlsxPreviewChanges
+                        : editContent === documentContent)
                   }
                   className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   title={
@@ -1760,20 +1892,186 @@ ${docSnippet}`;
           </div>
         )}
 
-        {/* Main Content Area — 65/35 split */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Panel — Document */}
-          <div
-            className={`flex-1 flex flex-col border-r bg-white overflow-y-auto transition-colors duration-500 ${
-              docUpdated ? 'border-r-green-300' : 'border-r-gray-200'
-            }`}
-            style={{ width: '65%' }}
-          >
-            <div className="flex-1 overflow-y-auto p-8">
-              <div
-                className={`${isBinaryDocument && isDocxDocument && isEditing ? 'max-w-6xl' : 'max-w-3xl'} mx-auto`}
+        {/* Main Content Area — conditional layout based on document type */}
+        {isBinaryDocument && isXlsxDocument ? (
+          /* XLSX Layout: Full-width spreadsheet + bottom drawer chat */
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Full-width Spreadsheet */}
+            <div
+              className={`flex-1 flex flex-col bg-white overflow-hidden transition-colors duration-500 ${
+                docUpdated ? 'ring-2 ring-green-300' : ''
+              }`}
+            >
+              <div className="flex-1 overflow-auto p-4">
+                {displayedXlsxSheets.length > 0 ? (
+                  <div className="h-full">
+                    <SpreadsheetPreview
+                      ref={spreadsheetRef}
+                      sheets={displayedXlsxSheets}
+                      activeSheetId={activeXlsxSheetId}
+                      onActiveSheetChange={setActiveXlsxSheetId}
+                      isEditing={isEditing}
+                      onCellChange={updateXlsxPreviewCell}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full">
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center max-w-md">
+                      <FileSpreadsheet className="h-12 w-12 text-emerald-600 mx-auto" />
+                      <h3 className="mt-4 text-lg font-semibold text-gray-900">
+                        {documentTitle || 'Excel Spreadsheet'}
+                      </h3>
+                      <p className="mt-4 text-sm text-gray-600">
+                        Preview unavailable. Download to view in Excel.
+                      </p>
+                      {downloadUrl && (
+                        <a
+                          href={downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-6 py-3 text-sm font-medium text-white hover:bg-[#004488]"
+                        >
+                          <Download className="h-4 w-4" />
+                          Download Excel
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom Drawer — Chat */}
+            <div
+              className={`border-t border-gray-200 bg-gray-50 transition-all duration-300 ${
+                isBottomDrawerOpen ? 'h-80' : 'h-12'
+              }`}
+            >
+              {/* Drawer Header / Toggle */}
+              <button
+                onClick={() => setIsBottomDrawerOpen(!isBottomDrawerOpen)}
+                className="w-full h-12 px-4 flex items-center justify-between bg-white border-b border-gray-200 hover:bg-gray-50 transition-colors"
               >
-                {isBinaryDocument && isDocxDocument ? (
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-[#003366]" />
+                  <span className="text-sm font-medium text-gray-700">
+                    Chat about this {documentType?.replace(/_/g, ' ').toUpperCase() || 'spreadsheet'}
+                  </span>
+                  {chatMessages.length > 1 && (
+                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                      {chatMessages.length - 1} messages
+                    </span>
+                  )}
+                </div>
+                {isBottomDrawerOpen ? (
+                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                ) : (
+                  <ChevronUp className="w-4 h-4 text-gray-500" />
+                )}
+              </button>
+
+              {/* Drawer Content */}
+              {isBottomDrawerOpen && (
+                <div className="flex flex-col h-[calc(100%-48px)]">
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {displayChatMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                      >
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            msg.role === 'assistant'
+                              ? 'bg-gradient-to-br from-[#003366] to-[#004488]'
+                              : 'bg-blue-500'
+                          }`}
+                        >
+                          {msg.role === 'assistant' ? (
+                            <Sparkles className="w-3 h-3 text-white" />
+                          ) : (
+                            <User className="w-3 h-3 text-white" />
+                          )}
+                        </div>
+                        <div
+                          className={`max-w-[80%] px-3 py-2 rounded-xl text-sm ${
+                            msg.role === 'assistant'
+                              ? 'bg-white border border-gray-200 text-gray-700'
+                              : 'bg-[#003366] text-white'
+                          }`}
+                        >
+                          <ReactMarkdown
+                            components={{
+                              p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    ))}
+                    {isStreaming && !streamingAssistantMsg && (
+                      <div className="flex gap-2">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
+                          <Sparkles className="w-3 h-3 text-white" />
+                        </div>
+                        <div className="bg-white border border-gray-200 rounded-xl px-3 py-2">
+                          <div className="flex items-center gap-1">
+                            <div className="typing-dot" />
+                            <div className="typing-dot" />
+                            <div className="typing-dot" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Chat Input */}
+                  <div className="p-3 bg-white border-t border-gray-200">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+                            e.preventDefault();
+                            handleSendMessage();
+                          }
+                        }}
+                        placeholder="Ask about this spreadsheet..."
+                        disabled={isStreaming}
+                        className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      />
+                      <button
+                        onClick={handleSendMessage}
+                        disabled={!chatInput.trim() || isStreaming}
+                        className="px-3 py-2 bg-[#003366] text-white rounded-lg hover:bg-[#004488] disabled:opacity-30 transition-colors"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Non-XLSX Layout: 65/35 split with side panel */
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left Panel — Document */}
+            <div
+              className={`flex-1 flex flex-col border-r bg-white overflow-y-auto transition-colors duration-500 ${
+                docUpdated ? 'border-r-green-300' : 'border-r-gray-200'
+              }`}
+              style={{ width: '65%' }}
+            >
+              <div className="flex-1 overflow-y-auto p-8">
+                <div
+                  className={`${isBinaryDocument && isDocxDocument && isEditing ? 'max-w-6xl' : 'max-w-3xl'} mx-auto`}
+                >
+                  {isBinaryDocument && isDocxDocument ? (
                   <div className="space-y-6">
                     <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-sm text-blue-950">
                       <div className="flex items-center gap-2 text-base font-semibold">
@@ -1938,37 +2236,6 @@ ${docSnippet}`;
                         Preview unavailable for this DOCX. You can still download the current file.
                       </div>
                     )}
-                  </div>
-                ) : isBinaryDocument && isXlsxDocument ? (
-                  <div className="flex flex-col items-center justify-center py-16">
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center max-w-md">
-                      <FileSpreadsheet className="h-12 w-12 text-emerald-600 mx-auto" />
-                      <h3 className="mt-4 text-lg font-semibold text-gray-900">
-                        {documentTitle || 'Excel Spreadsheet'}
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-500">
-                        {documentType
-                          ? documentType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-                          : 'Excel Document'}{' '}
-                        (.xlsx)
-                      </p>
-                      <p className="mt-4 text-sm text-gray-600 leading-relaxed">
-                        This spreadsheet is best viewed in Microsoft Excel or Google Sheets.
-                      </p>
-                      {downloadUrl ? (
-                        <a
-                          href={downloadUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#003366] px-6 py-3 text-sm font-medium text-white hover:bg-[#004488] transition-colors"
-                        >
-                          <Download className="h-4 w-4" />
-                          Download Excel (.xlsx)
-                        </a>
-                      ) : (
-                        <p className="mt-6 text-sm text-gray-400">Download link loading...</p>
-                      )}
-                    </div>
                   </div>
                 ) : isBinaryDocument ? (
                   <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-sm text-blue-950">
@@ -2175,6 +2442,7 @@ ${docSnippet}`;
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Click-away for download menu */}
