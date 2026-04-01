@@ -12,7 +12,7 @@
 # main-branch file paths so they're immediately actionable.
 #
 # Requirements:
-#   - CLAUDE_CODE_OAUTH_TOKEN  (Claude Code auth)
+#   - CLAUDE_CODE_OAUTH_TOKEN  (Claude Code action auth)
 #   - DEPLOY_ROLE_ARN          (AWS OIDC for CloudWatch + DynamoDB)
 #   - LANGFUSE_PUBLIC_KEY      (optional — skips Langfuse if unset)
 #   - LANGFUSE_SECRET_KEY      (optional)
@@ -87,14 +87,6 @@ jobs:
       - name: Install Python dependencies
         run: pip install boto3 httpx python-dotenv awslabs.cloudwatch-mcp-server
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
-
       - name: Create server/.env for Langfuse + DynamoDB
         run: |
           cat > server/.env << EOF
@@ -126,44 +118,41 @@ jobs:
           MCPEOF
 
       - name: Run Claude Code Triage (${{ matrix.env }})
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: |
-          TRIAGE_ENV="${{ matrix.env }}"
-          TRIAGE_WINDOW="${{ inputs.time_window || '24h' }}"
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--model claude-opus-4-6 --max-turns 50"
+          prompt: |
+            You are running in CI (GitHub Actions). Read .claude/commands/triage.md and follow its
+            Phase 1 through Phase 4 instructions to produce a FULL triage report.
 
-          claude -p --model claude-opus-4-6 --dangerously-skip-permissions << PROMPT
-          You are running in CI (GitHub Actions). Read .claude/commands/triage.md and follow its
-          Phase 1 through Phase 4 instructions to produce a FULL triage report.
+            Parameters:
+            - MODE: full
+            - TIME_WINDOW: ${{ inputs.time_window || '24h' }}
+            - ENV: ${{ matrix.env }}
+            - TENANT_ID: default
+            - RESOLVED_TENANT: default-${{ matrix.env }}
 
-          Parameters:
-          - MODE: full
-          - TIME_WINDOW: ${TRIAGE_WINDOW}
-          - ENV: ${TRIAGE_ENV}
-          - TENANT_ID: default
-          - RESOLVED_TENANT: default-${TRIAGE_ENV}
+            IMPORTANT CI-specific notes:
+            1. AWS credentials are configured via OIDC — do NOT use --profile eagle.
+               boto3 and awscli will use environment credentials automatically.
+            2. For CloudWatch queries, use the MCP tool mcp__cloudwatch-mcp-server__execute_log_insights_query.
+               The MCP server is configured in .mcp.json. Pass region="us-east-1" (no profile_name).
+            3. For DynamoDB queries, use boto3 directly without profile.
+            4. For Langfuse, read server/.env for credentials. If keys are empty, skip Langfuse
+               and note the gap — continue with DynamoDB + CloudWatch only.
+            5. Write the triage report to docs/development/ and fix plan to .claude/specs/
+               using the naming conventions from CLAUDE.md.
+            6. Include "${{ matrix.env }}" in the report filename so dev and qa reports are distinct.
+            7. After generating files, print the filenames so CI can commit them.
 
-          IMPORTANT CI-specific notes:
-          1. AWS credentials are configured via OIDC — do NOT use --profile eagle.
-             boto3 and awscli will use environment credentials automatically.
-          2. For CloudWatch queries, use the MCP tool mcp__cloudwatch-mcp-server__execute_log_insights_query.
-             The MCP server is configured in .mcp.json. Pass region="us-east-1" (no profile_name).
-          3. For DynamoDB queries, use boto3 directly without profile.
-          4. For Langfuse, read server/.env for credentials. If keys are empty, skip Langfuse
-             and note the gap — continue with DynamoDB + CloudWatch only.
-          5. Write the triage report to docs/development/ and fix plan to .claude/specs/
-             using the naming conventions from CLAUDE.md.
-          6. Include "${TRIAGE_ENV}" in the report filename so dev and qa reports are distinct.
-          7. After generating files, print the filenames so CI can commit them.
+            Query log groups for ENV=${{ matrix.env }}:
+            - /eagle/ecs/backend-${{ matrix.env }}
+            - /eagle/ecs/frontend-${{ matrix.env }}
+            - /eagle/app
 
-          Query log groups for ENV=${TRIAGE_ENV}:
-          - /eagle/ecs/backend-${TRIAGE_ENV}
-          - /eagle/ecs/frontend-${TRIAGE_ENV}
-          - /eagle/app
-
-          The fix plan should reference file paths from this checkout (main branch).
-          This ensures fixes are immediately actionable against the production codebase.
-          PROMPT
+            The fix plan should reference file paths from this checkout (main branch).
+            This ensures fixes are immediately actionable against the production codebase.
 
       - name: Commit and push triage report
         run: |
@@ -202,6 +191,27 @@ jobs:
               sleep $((i * 2))
               git pull --rebase origin main
             done
+          fi
+
+      - name: Notify JIRA + Teams (triage plan)
+        if: success()
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT: EAGLE
+          TEAMS_TRIAGE_WEBHOOK_URL: ${{ secrets.TEAMS_TRIAGE_WEBHOOK_URL }}
+          EAGLE_BACKEND_URL: ${{ secrets.EAGLE_BACKEND_URL }}
+          FEEDBACK_ACTION_SECRET: ${{ secrets.FEEDBACK_ACTION_SECRET }}
+        run: |
+          PLAN_FILE=$(ls -t .claude/specs/*-plan-triage-*${{ matrix.env }}*.md 2>/dev/null | head -1)
+          REPORT_FILE=$(ls -t docs/development/*-report-triage-*${{ matrix.env }}*.md 2>/dev/null | head -1)
+          if [ -n "$PLAN_FILE" ]; then
+            python scripts/triage_notify.py \
+              --plan-file "$PLAN_FILE" \
+              --report-file "${REPORT_FILE:-}" \
+              --env "${{ matrix.env }}"
+          else
+            echo "::notice::No plan file found for ${{ matrix.env }}, skipping notification"
           fi
 
       - name: Upload triage artifacts

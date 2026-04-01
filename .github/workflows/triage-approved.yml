@@ -1,0 +1,248 @@
+# -----------------------------------------------------------------
+# Triage Approved
+# -----------------------------------------------------------------
+#
+# Triggered when a triage plan is approved via the Teams adaptive
+# card button. The backend fires a repository_dispatch with
+# event_type "triage-approved" and a client_payload containing
+# the JIRA key and triage_id.
+#
+# Pipeline:
+#   1. Read the triage fix plan from .claude/specs/
+#   2. Run Claude Code to implement the fixes
+#   3. Create a feature branch, commit, and push
+#   4. Open a PR targeting main
+#   5. Comment on JIRA with the PR link
+#
+# -----------------------------------------------------------------
+
+name: Triage Approved
+
+on:
+  repository_dispatch:
+    types: [triage-approved]
+  workflow_dispatch:
+    inputs:
+      jira_key:
+        description: 'JIRA ticket key (e.g. EAGLE-789)'
+        required: false
+        default: ''
+      triage_id:
+        description: 'Triage run ID'
+        required: false
+        default: ''
+      plan_file:
+        description: 'Path to plan file (blank = most recent)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  implement-fixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # ── Context ──────────────────────────────────────────────
+      - name: Extract payload
+        id: ctx
+        run: |
+          JIRA_KEY="${{ github.event.client_payload.jira_key || inputs.jira_key || '' }}"
+          TRIAGE_ID="${{ github.event.client_payload.triage_id || inputs.triage_id || '' }}"
+          echo "jira_key=$JIRA_KEY" >> "$GITHUB_OUTPUT"
+          echo "triage_id=$TRIAGE_ID" >> "$GITHUB_OUTPUT"
+          echo "Triage plan approved!"
+          echo "  JIRA Key:   $JIRA_KEY"
+          echo "  Triage ID:  $TRIAGE_ID"
+          echo "  Triggered:  ${{ github.event_name }}"
+          echo "  Timestamp:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      # ── Checkout + credentials ───────────────────────────────
+      - name: Checkout main
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── Find triage plan ─────────────────────────────────────
+      - name: Find triage plan file
+        id: plan
+        run: |
+          EXPLICIT="${{ inputs.plan_file || '' }}"
+          if [ -n "$EXPLICIT" ] && [ -f "$EXPLICIT" ]; then
+            PLAN_FILE="$EXPLICIT"
+          else
+            PLAN_FILE=$(ls -t .claude/specs/*-plan-triage-*.md 2>/dev/null | head -1)
+          fi
+
+          if [ -z "$PLAN_FILE" ]; then
+            echo "::error::No triage plan file found in .claude/specs/"
+            exit 1
+          fi
+
+          echo "plan_file=$PLAN_FILE" >> "$GITHUB_OUTPUT"
+          echo "Found plan: $PLAN_FILE"
+
+      # ── Feature branch ───────────────────────────────────────
+      - name: Create feature branch
+        id: branch
+        run: |
+          JIRA_KEY="${{ steps.ctx.outputs.jira_key }}"
+          DATE=$(date -u +%Y%m%d)
+          if [ -n "$JIRA_KEY" ]; then
+            BRANCH="triage/${JIRA_KEY}-fix-${DATE}"
+          else
+            BRANCH="triage/auto-fix-${DATE}-${GITHUB_RUN_NUMBER}"
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          git checkout -b "$BRANCH"
+          echo "Created branch: $BRANCH"
+
+      # ── Implement fixes via Claude Code ──────────────────────
+      - name: Implement fixes
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--model claude-opus-4-6 --max-turns 30"
+          prompt: |
+            You are running in CI (GitHub Actions). Your job is to implement the fixes
+            described in a triage plan that was approved by the team.
+
+            PLAN FILE: ${{ steps.plan.outputs.plan_file }}
+
+            Instructions:
+            1. Read the plan file above carefully.
+            2. Implement ONLY the fixes described in the plan. Do not add unrelated changes.
+            3. For each fix, modify the referenced files. The plan references main-branch paths.
+            4. After implementing, run the relevant validation commands:
+               - Python changes: ruff check app/ (from server/)
+               - TypeScript changes: npx tsc --noEmit (from client/)
+               - If lint/type errors arise from YOUR changes, fix them.
+            5. Do NOT commit or push — the CI pipeline handles that.
+            6. Print a summary of what you changed and why.
+
+            IMPORTANT:
+            - AWS credentials are configured via OIDC (environment variables).
+            - Do NOT create new files unless the plan explicitly calls for it.
+            - Do NOT modify tests unless the plan explicitly calls for it.
+            - If a fix is ambiguous or risky, skip it and note why in your summary.
+
+      # ── Commit + PR ──────────────────────────────────────────
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Claude made no file changes — skipping PR"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected:"
+            git diff --stat
+            git ls-files --others --exclude-standard
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          JIRA_KEY="${{ steps.ctx.outputs.jira_key }}"
+          PLAN_FILE="${{ steps.plan.outputs.plan_file }}"
+
+          git commit -m "$(cat <<EOF
+          fix: implement triage plan fixes${JIRA_KEY:+ ($JIRA_KEY)}
+
+          Automated implementation of approved triage fix plan.
+          Plan: $PLAN_FILE
+
+          Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+          EOF
+          )"
+
+          git push -u origin "${{ steps.branch.outputs.branch }}"
+
+      - name: Create pull request
+        if: steps.changes.outputs.has_changes == 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          JIRA_KEY="${{ steps.ctx.outputs.jira_key }}"
+          PLAN_FILE="${{ steps.plan.outputs.plan_file }}"
+          PLAN_CONTENT=$(head -100 "$PLAN_FILE")
+
+          PR_TITLE="fix: triage plan fixes${JIRA_KEY:+ ($JIRA_KEY)}"
+
+          PR_URL=$(gh pr create \
+            --title "$PR_TITLE" \
+            --body "$(cat <<'PREOF'
+          ## Summary
+
+          Automated implementation of an approved nightly triage fix plan.
+
+          - **JIRA**: ${{ steps.ctx.outputs.jira_key || 'N/A' }}
+          - **Triage ID**: ${{ steps.ctx.outputs.triage_id || 'N/A' }}
+          - **Plan file**: `${{ steps.plan.outputs.plan_file }}`
+
+          <details>
+          <summary>Plan excerpt (first 100 lines)</summary>
+
+          ```markdown
+          PREOF
+          )$(echo "$PLAN_CONTENT")$(cat <<'PREOF2'
+          ```
+
+          </details>
+
+          ## Review checklist
+
+          - [ ] Changes match the approved plan
+          - [ ] No unrelated modifications
+          - [ ] Lint / type checks pass
+          - [ ] Tests pass (if applicable)
+
+          ---
+          Triggered by triage approval via Teams adaptive card.
+          PREOF2
+          )" \
+            --base main)
+
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "::notice::PR created: $PR_URL"
+
+      # ── JIRA comment ─────────────────────────────────────────
+      - name: Comment on JIRA
+        if: steps.changes.outputs.has_changes == 'true' && steps.ctx.outputs.jira_key != ''
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          JIRA_KEY="${{ steps.ctx.outputs.jira_key }}"
+          PR_URL="${{ steps.pr.outputs.pr_url }}"
+
+          if [ -z "$JIRA_BASE_URL" ] || [ -z "$JIRA_API_TOKEN" ]; then
+            echo "::warning::JIRA credentials not configured, skipping comment"
+            exit 0
+          fi
+
+          curl -s -X POST \
+            "$JIRA_BASE_URL/rest/api/2/issue/$JIRA_KEY/comment" \
+            -H "Authorization: Bearer $JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": \"Triage fixes implemented automatically.\\n\\nPR: $PR_URL\\n\\nPlease review and merge.\"}" \
+            -o /dev/null -w "JIRA comment: HTTP %{http_code}\n"
