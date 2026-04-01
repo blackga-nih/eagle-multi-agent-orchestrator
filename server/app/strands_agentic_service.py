@@ -126,6 +126,27 @@ def _ensure_langfuse_exporter():
         logger.info("[EAGLE] Langfuse OTEL exporter injected → %s", endpoint)
         logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
 
+        # Startup probe: verify OTLP auth works so a 401 is caught immediately
+        # rather than silently failing on every span export.
+        try:
+            import httpx
+
+            probe = httpx.post(
+                endpoint,
+                headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-protobuf"},
+                content=b"",
+                timeout=5.0,
+            )
+            if probe.status_code == 401:
+                logger.error(
+                    "[EAGLE] Langfuse OTLP auth FAILED (401) — traces will be dropped. "
+                    "Check LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY."
+                )
+            else:
+                logger.info("[EAGLE] Langfuse OTLP auth verified (status=%d)", probe.status_code)
+        except Exception as probe_exc:
+            logger.warning("[EAGLE] Langfuse OTLP startup probe failed: %s", probe_exc)
+
         # Initialize Langfuse SDK client for parent span wrapping.
         # start_as_current_observation() creates a stable parent OTel span
         # so Strands child spans inherit the correct trace_id even when

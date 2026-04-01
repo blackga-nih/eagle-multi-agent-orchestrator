@@ -188,7 +188,7 @@ class ModelConfig:
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_HAIKU_MODEL)
     sdk_model: str = os.getenv("EAGLE_SDK_MODEL", "haiku")
     knowledge_search_model: str = os.getenv(
-        "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-3-haiku-20240307-v1:0"
+        "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-haiku-4-5-20251001-v1:0"
     )
 
 
@@ -196,7 +196,13 @@ class ModelConfig:
 class AppConfig:
     """Application-level configuration."""
 
-    environment: str = os.getenv("EAGLE_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev"))
+    environment: str = os.getenv(
+        "EAGLE_ENVIRONMENT",
+        os.getenv(
+            "ENVIRONMENT",
+            "dev" if os.getenv("ECS_CONTAINER_METADATA_URI") else "localhost",
+        ),
+    )
     port: int = _int("APP_PORT", 8000)
     is_ecs: bool = os.getenv("ECS_CONTAINER_METADATA_URI") is not None
 

@@ -66,7 +66,9 @@ def _create_jira_for_feedback(
         f"_Auto-created by EAGLE feedback pipeline_"
     )
 
-    labels = ["feedback", "auto-created"]
+    from ..config import app as app_config
+
+    labels = ["feedback", "auto-created", app_config.environment]
     if feedback_type and feedback_type != "general":
         labels.append(feedback_type)
 

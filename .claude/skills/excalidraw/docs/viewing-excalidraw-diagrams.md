@@ -1,6 +1,6 @@
 # Viewing Excalidraw Diagrams
 
-This repo has two Excalidraw file formats. Only one renders inside Obsidian; both can be viewed on the web.
+This repo includes two Excalidraw diagram file formats. Only one renders directly inside Obsidian, but both can be opened on the web. You can also always export or save diagrams as PNG images for sharing or documentation purposes.
 
 ---
 
