@@ -16,7 +16,6 @@ GSI2 (package's documents):
     GSI2SK:  DOC#{doc_type}#{version:04d}
 """
 
-import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
