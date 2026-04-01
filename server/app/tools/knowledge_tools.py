@@ -586,39 +586,61 @@ def _deterministic_match(
     keywords: list[str],
     items: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Fallback deterministic matching when AI ranking is unavailable."""
-    result = items
+    """Fallback deterministic matching when AI ranking is unavailable.
 
-    # Keyword filtering
-    if keywords:
-        keywords_lower = [k.lower() for k in keywords]
-        filtered = []
-        for item in result:
-            item_keywords = [k.lower() for k in item.get("keywords", [])]
-            if any(
-                kw in item_keywords or any(kw in ik for ik in item_keywords)
-                for kw in keywords_lower
-            ):
-                filtered.append(item)
-        result = filtered
+    Uses term-frequency scoring so partial matches still surface results.
+    Each query term that appears in a document's searchable text adds 1 point;
+    keyword matches add 2 points (higher signal). Documents are ranked by score
+    and only those matching at least 30% of query terms are returned.
+    """
+    if not items:
+        return []
 
-    # Free-text query filtering
-    if query:
-        query_lower = query.lower()
-        query_terms = query_lower.split()
-        filtered = []
-        for item in result:
-            doc_id = item.get("document_id", "").lower()
-            title = item.get("title", "").lower()
-            summary = item.get("summary", "").lower()
-            filename = item.get("filename", "").lower()
-            keywords_text = " ".join(item.get("keywords", [])).lower()
-            searchable = f"{doc_id} {filename} {title} {summary} {keywords_text}"
-            if query_lower in searchable or all(t in searchable for t in query_terms):
-                filtered.append(item)
-        result = filtered
+    query_lower = (query or "").lower()
+    query_terms = query_lower.split() if query_lower else []
+    keywords_lower = [k.lower() for k in (keywords or [])]
 
-    return result
+    scored: list[tuple[float, dict[str, Any]]] = []
+    min_term_ratio = 0.3  # require at least 30% of terms to match
+
+    for item in items:
+        doc_id = item.get("document_id", "").lower()
+        title = item.get("title", "").lower()
+        summary = item.get("summary", "").lower()
+        filename = item.get("filename", "").lower()
+        item_keywords = [k.lower() for k in item.get("keywords", [])]
+        keywords_text = " ".join(item_keywords)
+        searchable = f"{doc_id} {filename} {title} {summary} {keywords_text}"
+
+        score = 0.0
+
+        # Score query term matches (1 point each, bonus for title match)
+        if query_terms:
+            for term in query_terms:
+                if term in title:
+                    score += 2.0  # title match worth more
+                elif term in searchable:
+                    score += 1.0
+
+        # Score keyword matches (2 points each)
+        for kw in keywords_lower:
+            if kw in item_keywords or any(kw in ik for ik in item_keywords):
+                score += 2.0
+
+        # Exact substring match bonus
+        if query_lower and query_lower in searchable:
+            score += 5.0
+
+        # Only include if enough terms matched
+        term_count = len(query_terms) + len(keywords_lower)
+        if term_count > 0 and score / term_count >= min_term_ratio:
+            scored.append((score, item))
+        elif term_count == 0:
+            scored.append((0.0, item))
+
+    # Sort by score descending
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item for _, item in scored]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
