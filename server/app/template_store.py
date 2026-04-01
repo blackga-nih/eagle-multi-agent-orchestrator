@@ -358,7 +358,7 @@ def resolve_template(
 
     # 4. PLUGIN#templates canonical fallback
     try:
-        from plugin_store import get_plugin_item  # type: ignore[import]
+        from .plugin_store import get_plugin_item
 
         plugin_item = get_plugin_item("templates", doc_type)
         if plugin_item and plugin_item.get("content"):

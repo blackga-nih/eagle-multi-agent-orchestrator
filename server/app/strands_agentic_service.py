@@ -118,17 +118,9 @@ def _ensure_langfuse_exporter():
         endpoint = f"{base.rstrip('/')}/v1/traces"
         auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
 
-        exporter = OTLPSpanExporter(
-            endpoint=endpoint,
-            headers={"Authorization": f"Basic {auth}"},
-        )
-        provider.add_span_processor(SimpleSpanProcessor(exporter))
-        _langfuse_injected = True
-        logger.info("[EAGLE] Langfuse OTEL exporter injected → %s", endpoint)
-        logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
-
-        # Startup probe: verify OTLP auth works so a 401 is caught immediately
-        # rather than silently failing on every span export.
+        # Probe auth BEFORE registering the exporter — a 401 means the keys
+        # are invalid and we should skip registration entirely instead of
+        # flooding CloudWatch with OTLP export failures on every span.
         try:
             import httpx
 
@@ -140,13 +132,23 @@ def _ensure_langfuse_exporter():
             )
             if probe.status_code == 401:
                 logger.error(
-                    "[EAGLE] Langfuse OTLP auth FAILED (401) — traces will be dropped. "
+                    "[EAGLE] Langfuse OTLP auth FAILED (401) — exporter NOT registered. "
                     "Check LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY."
                 )
-            else:
-                logger.info("[EAGLE] Langfuse OTLP auth verified (status=%d)", probe.status_code)
+                _langfuse_injected = True  # prevent retry
+                return
+            logger.info("[EAGLE] Langfuse OTLP auth verified (status=%d)", probe.status_code)
         except Exception as probe_exc:
-            logger.warning("[EAGLE] Langfuse OTLP startup probe failed: %s", probe_exc)
+            logger.warning("[EAGLE] Langfuse OTLP startup probe failed: %s — registering exporter anyway", probe_exc)
+
+        exporter = OTLPSpanExporter(
+            endpoint=endpoint,
+            headers={"Authorization": f"Basic {auth}"},
+        )
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        _langfuse_injected = True
+        logger.info("[EAGLE] Langfuse OTEL exporter injected → %s", endpoint)
+        logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
 
         # Initialize Langfuse SDK client for parent span wrapping.
         # start_as_current_observation() creates a stable parent OTel span
