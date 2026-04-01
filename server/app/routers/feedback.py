@@ -108,8 +108,13 @@ def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
         log_group = os.environ.get("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
         region = os.environ.get("AWS_REGION", "us-east-1")
         import boto3
+        from botocore.config import Config
 
-        client = boto3.client("logs", region_name=region)
+        client = boto3.client(
+            "logs",
+            region_name=region,
+            config=Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 1}),
+        )
         now_ms = int(time.time() * 1000)
         day_ms = 24 * 60 * 60 * 1000
         response = client.filter_log_events(
@@ -144,8 +149,8 @@ async def api_submit_feedback(
     if not feedback_text:
         raise HTTPException(status_code=400, detail="feedback_text is required")
 
-    cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
-
+    # Write feedback to DynamoDB FIRST (fast, critical path).
+    # CloudWatch fetch is slow and non-critical — do it after.
     item = feedback_store.write_feedback(
         tenant_id=user.tenant_id,
         user_id=user.user_id,
@@ -153,10 +158,23 @@ async def api_submit_feedback(
         session_id=session_id,
         feedback_text=feedback_text,
         conversation_snapshot=json.dumps(conversation_snapshot, default=str),
-        cloudwatch_logs=json.dumps(cloudwatch_logs, default=str),
+        cloudwatch_logs="[]",
         page=page,
         last_message_id=last_message_id,
     )
+
+    # Best-effort: fetch CloudWatch logs and patch the record (non-blocking).
+    # This runs after the response is sent so it can't cause client timeouts.
+    try:
+        cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
+        if cloudwatch_logs:
+            feedback_store.patch_cloudwatch_logs(
+                item.get("feedback_id", ""),
+                user.tenant_id,
+                json.dumps(cloudwatch_logs, default=str),
+            )
+    except Exception:
+        logger.debug("feedback: cloudwatch patch failed (non-fatal)", exc_info=True)
 
     # Create JIRA issue (sync, graceful degradation — None on failure)
     jira_key = _create_jira_for_feedback(

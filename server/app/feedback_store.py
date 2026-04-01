@@ -142,6 +142,36 @@ def write_feedback(
     return item
 
 
+def patch_cloudwatch_logs(
+    feedback_id: str,
+    tenant_id: str,
+    cloudwatch_logs_json: str,
+) -> None:
+    """Patch the cloudwatch_logs field on an existing feedback record."""
+    pk = f"FEEDBACK#{tenant_id}"
+    try:
+        # Find the SK by querying for the feedback_id
+        response = get_table().query(
+            KeyConditionExpression=Key("PK").eq(pk)
+            & Key("SK").begins_with("FEEDBACK#"),
+            FilterExpression="feedback_id = :fid",
+            ExpressionAttributeValues={":fid": feedback_id},
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        if not items:
+            logger.debug("patch_cloudwatch_logs: feedback %s not found", feedback_id)
+            return
+        sk = items[0]["SK"]
+        get_table().update_item(
+            Key={"PK": pk, "SK": sk},
+            UpdateExpression="SET cloudwatch_logs = :cl",
+            ExpressionAttributeValues={":cl": cloudwatch_logs_json},
+        )
+    except (ClientError, BotoCoreError) as exc:
+        logger.debug("patch_cloudwatch_logs failed (non-fatal): %s", exc)
+
+
 def list_feedback(tenant_id: str, limit: int = 50) -> list[dict]:
     """Query feedback for a tenant, newest first."""
     pk = f"FEEDBACK#{tenant_id}"
