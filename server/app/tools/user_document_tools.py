@@ -93,6 +93,7 @@ def list_user_documents(
     try:
         if package_id:
             docs = list_package_documents(tenant_id, package_id, limit=50)
+            docs = [doc for doc in docs if doc.get("owner_user_id") == user_id]
         else:
             docs = store_list_user_docs(tenant_id, user_id, scope=scope, limit=50)
 

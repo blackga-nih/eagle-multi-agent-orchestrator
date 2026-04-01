@@ -100,6 +100,7 @@ def create_document(
     package_id: Optional[str] = None,
     is_deliverable: bool = False,
     session_id: Optional[str] = None,
+    document_id: Optional[str] = None,
 ) -> dict:
     """Create a new document record.
 
@@ -124,13 +125,14 @@ def create_document(
         package_id: Package to assign to (null = workspace)
         is_deliverable: True if this is a generated output
         session_id: Chat session that created this document
+        document_id: Optional precomputed document UUID to preserve external IDs
 
     Returns:
         Created document dict
     """
     table = get_table()
     now = _now_iso()
-    document_id = str(uuid.uuid4())
+    document_id = document_id or str(uuid.uuid4())
 
     item: dict = {
         "PK": _pk(tenant_id),

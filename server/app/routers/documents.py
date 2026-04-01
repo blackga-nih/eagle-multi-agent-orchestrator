@@ -752,6 +752,7 @@ async def api_upload_document(
         package_id=resolved_package_id,
         is_deliverable=False,
         session_id=session_id,
+        document_id=document_id,
     )
 
     logger.info(
