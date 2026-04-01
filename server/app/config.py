@@ -104,6 +104,10 @@ class BedrockConfig:
     max_attempts: int = _int("EAGLE_BEDROCK_MAX_ATTEMPTS", 4)
     retry_mode: str = os.getenv("EAGLE_BEDROCK_RETRY_MODE", "adaptive")
     use_bedrock: bool = _bool("USE_BEDROCK", "false")
+    pdf_parsing_enabled: bool = _bool("EAGLE_BEDROCK_PDF_PARSING", "true")
+    pdf_parsing_model: str = os.getenv(
+        "EAGLE_PDF_PARSING_MODEL", DEFAULT_BEDROCK_HAIKU_MODEL
+    )
 
 
 @dataclass(frozen=True)

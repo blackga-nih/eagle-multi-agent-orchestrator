@@ -686,17 +686,58 @@ async def api_upload_document(
     )
     classify = _resolve_main_override("classify_document", classify_document)
 
+    # ── Bedrock PDF parsing (single call: markdown + classification) ──
+    bedrock_result = None
+    bedrock_cls = None
+    from ..config import bedrock as _br_cfg
+
+    if content_type == "application/pdf" and _br_cfg.pdf_parsing_enabled:
+        try:
+            from ..bedrock_document_parser import parse_pdf_with_bedrock
+
+            bedrock_result = parse_pdf_with_bedrock(
+                body, file.filename or safe_name
+            )
+            if bedrock_result.success:
+                from ..document_classification_service import ClassificationResult
+
+                bedrock_cls = ClassificationResult(
+                    doc_type=bedrock_result.classification,
+                    confidence=bedrock_result.confidence,
+                    method="bedrock",
+                    suggested_title=bedrock_result.suggested_title,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Bedrock PDF parsing failed for %s: %s", safe_name, e)
+
+    # ── Classification ──
     content_preview = extract_preview(body, content_type)
-    classification = classify(file.filename or safe_name, content_preview)
-
-    from ..document_markdown_service import convert_to_markdown
-
-    markdown_content = convert_to_markdown(
-        body, content_type, file.filename or safe_name
+    classification = classify(
+        file.filename or safe_name,
+        content_preview,
+        bedrock_classification=bedrock_cls,
     )
 
+    # ── Markdown conversion ──
+    if bedrock_result and bedrock_result.success:
+        # Bedrock already produced quality markdown — use it directly
+        markdown_content = bedrock_result.markdown
+    else:
+        from ..document_markdown_service import convert_to_markdown
+
+        markdown_content = convert_to_markdown(
+            body, content_type, file.filename or safe_name
+        )
+
+    # ── Template standardization (only for non-Bedrock paths) ──
     quality_score = None
-    if markdown_content and classification.doc_type not in ("unknown", None):
+    if bedrock_result and bedrock_result.success:
+        # Bedrock parsing produces quality markdown — skip standardizer
+        from ..template_standardizer import assess_quality
+
+        quality_report = assess_quality(markdown_content, classification.doc_type)
+        quality_score = quality_report.score
+    elif markdown_content and classification.doc_type not in ("unknown", None):
         try:
             from ..template_standardizer import standardize_template as _standardize
 
@@ -755,13 +796,15 @@ async def api_upload_document(
         document_id=document_id,
     )
 
+    _parse_method = "bedrock" if (bedrock_result and bedrock_result.success) else "local"
     logger.info(
-        "Uploaded %s -> s3://%s/%s (document_id=%s, classified=%s, package=%s)",
+        "Uploaded %s -> s3://%s/%s (document_id=%s, classified=%s, method=%s, package=%s)",
         safe_name,
         bucket,
         key,
         document_id,
         classification.doc_type,
+        _parse_method,
         resolved_package_id,
     )
 
