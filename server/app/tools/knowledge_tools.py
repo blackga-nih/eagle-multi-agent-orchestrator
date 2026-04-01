@@ -283,7 +283,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
 ]
 
 SEARCH_MODEL_ID = os.environ.get(
-    "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-haiku-4-5-20251001-v1:0"
+    "KNOWLEDGE_SEARCH_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 )
 
 

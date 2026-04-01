@@ -188,7 +188,7 @@ class ModelConfig:
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_HAIKU_MODEL)
     sdk_model: str = os.getenv("EAGLE_SDK_MODEL", "haiku")
     knowledge_search_model: str = os.getenv(
-        "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-haiku-4-5-20251001-v1:0"
+        "KNOWLEDGE_SEARCH_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     )
 
 

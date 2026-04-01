@@ -31,7 +31,7 @@ class BedrockAgentService:
         )
         self.agent_id = agent_id
         self.agent_alias_id = agent_alias_id
-        self.model_id = "anthropic.claude-haiku-4-5-20251001-v1:0"
+        self.model_id = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
     def invoke_agent(
         self, message: str, tenant_context: TenantContext

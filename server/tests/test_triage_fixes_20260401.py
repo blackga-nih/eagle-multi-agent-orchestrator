@@ -19,7 +19,7 @@ import pytest
 # P1-2: Haiku model ID matches IAM policy
 # ═════════════════════════════════════════════════════════════════════════
 
-EXPECTED_HAIKU_MODEL = "anthropic.claude-haiku-4-5-20251001-v1:0"
+EXPECTED_HAIKU_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 OLD_HAIKU_MODEL = "anthropic.claude-3-haiku-20240307-v1:0"
 
 
