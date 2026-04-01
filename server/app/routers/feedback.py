@@ -26,6 +26,62 @@ from ..feedback_store import (
 from ..teams_notifier import notify_feedback
 from .dependencies import get_user_from_header
 
+# ── JIRA helpers ────────────────────────────────────────────────────
+
+
+def _create_jira_for_feedback(
+    feedback_id: str,
+    feedback_text: str,
+    feedback_type: str,
+    user_id: str,
+    tenant_id: str,
+    tier: str,
+    session_id: str,
+    page: str,
+    created_at: str,
+) -> Optional[str]:
+    """Create a JIRA issue for feedback. Returns ticket key or None."""
+    from ..config import jira as jira_config
+
+    if not jira_config.feedback_enabled:
+        return None
+
+    from ..jira_client import create_feedback_issue
+
+    summary_text = feedback_text[:80].replace("\n", " ")
+    summary = f"[Feedback][{feedback_type}] {summary_text}"
+
+    description = (
+        f"h3. User Feedback\n"
+        f"*User:* {user_id} ({tier})\n"
+        f"*Tenant:* {tenant_id}\n"
+        f"*Page:* {page or '(none)'}\n"
+        f"*Session:* {session_id[:36] if session_id else '(none)'}\n"
+        f"*Feedback Type:* {feedback_type}\n"
+        f"*Timestamp:* {created_at}\n"
+        f"*Feedback ID:* {feedback_id}\n\n"
+        f"----\n\n"
+        f"{feedback_text}\n\n"
+        f"----\n\n"
+        f"_Auto-created by EAGLE feedback pipeline_"
+    )
+
+    labels = ["feedback", "auto-created"]
+    if feedback_type and feedback_type != "general":
+        labels.append(feedback_type)
+
+    try:
+        return create_feedback_issue(
+            summary=summary,
+            description=description,
+            labels=labels,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to create JIRA issue for feedback %s", feedback_id, exc_info=True
+        )
+        return None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
@@ -52,8 +108,13 @@ def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
         log_group = os.environ.get("EAGLE_TELEMETRY_LOG_GROUP", "/eagle/telemetry")
         region = os.environ.get("AWS_REGION", "us-east-1")
         import boto3
+        from botocore.config import Config
 
-        client = boto3.client("logs", region_name=region)
+        client = boto3.client(
+            "logs",
+            region_name=region,
+            config=Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 1}),
+        )
         now_ms = int(time.time() * 1000)
         day_ms = 24 * 60 * 60 * 1000
         response = client.filter_log_events(
@@ -88,19 +149,46 @@ async def api_submit_feedback(
     if not feedback_text:
         raise HTTPException(status_code=400, detail="feedback_text is required")
 
-    cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
-
-    feedback_store.write_feedback(
+    # Write feedback to DynamoDB FIRST (fast, critical path).
+    # CloudWatch fetch is slow and non-critical — do it after.
+    item = feedback_store.write_feedback(
         tenant_id=user.tenant_id,
         user_id=user.user_id,
         tier=user.tier,
         session_id=session_id,
         feedback_text=feedback_text,
         conversation_snapshot=json.dumps(conversation_snapshot, default=str),
-        cloudwatch_logs=json.dumps(cloudwatch_logs, default=str),
+        cloudwatch_logs="[]",
         page=page,
         last_message_id=last_message_id,
     )
+
+    # Best-effort: fetch CloudWatch logs and patch the record (non-blocking).
+    # This runs after the response is sent so it can't cause client timeouts.
+    try:
+        cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
+        if cloudwatch_logs:
+            feedback_store.patch_cloudwatch_logs(
+                item.get("feedback_id", ""),
+                user.tenant_id,
+                json.dumps(cloudwatch_logs, default=str),
+            )
+    except Exception:
+        logger.debug("feedback: cloudwatch patch failed (non-fatal)", exc_info=True)
+
+    # Create JIRA issue (sync, graceful degradation — None on failure)
+    jira_key = _create_jira_for_feedback(
+        feedback_id=item.get("feedback_id", ""),
+        feedback_text=feedback_text,
+        feedback_type=item.get("feedback_type", "general"),
+        user_id=user.user_id,
+        tenant_id=user.tenant_id,
+        tier=user.tier,
+        session_id=session_id,
+        page=page,
+        created_at=item.get("created_at", ""),
+    )
+
     notify_feedback(
         tenant_id=user.tenant_id,
         user_id=user.user_id,
@@ -109,6 +197,8 @@ async def api_submit_feedback(
         feedback_text=feedback_text,
         feedback_type=body.get("feedback_type", "general"),
         page=page,
+        jira_key=jira_key,
+        feedback_id=item.get("feedback_id", ""),
     )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 

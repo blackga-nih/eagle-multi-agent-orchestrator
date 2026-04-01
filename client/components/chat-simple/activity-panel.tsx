@@ -15,7 +15,8 @@ import {
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
 import AgentLogs, { buildDisplayEntries } from './agent-logs';
-import { ChecklistTabContent } from './checklist-panel';
+import { ChecklistTabContent, docLabel } from './checklist-panel';
+import DocumentViewerModal from './document-viewer-modal';
 import type { PackageState } from '@/hooks/use-package-state';
 import { useAllPackages } from '@/hooks/use-all-packages';
 import type { PackageInfo, PackageDocument } from '@/lib/document-api';
@@ -557,6 +558,7 @@ export default function ActivityPanel({
   isRefreshingPackage,
 }: ActivityPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('package');
+  const [viewerDocType, setViewerDocType] = useState<string | null>(null);
 
   const docCount = Object.values(documents).flat().length;
   const logDisplayCount = useMemo(() => buildDisplayEntries(logs).length, [logs]);
@@ -648,7 +650,12 @@ export default function ActivityPanel({
         {activeTab === 'package' && (
           <>
             {/* Section A: Active package checklist (from SSE) */}
-            {packageState && <ChecklistTabContent state={packageState} />}
+            {packageState && (
+              <ChecklistTabContent
+                state={packageState}
+                onDocumentClick={setViewerDocType}
+              />
+            )}
 
             {/* Refresh: scan chat for latest document and link active package */}
             {onRefreshPackage && (
@@ -680,6 +687,16 @@ export default function ActivityPanel({
         {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
         {activeTab === 'logs' && <AgentLogs logs={logs} />}
       </div>
+
+      {/* Document viewer modal — opened by clicking completed checklist items */}
+      <DocumentViewerModal
+        isOpen={!!viewerDocType}
+        onClose={() => setViewerDocType(null)}
+        packageId={packageState?.packageId ?? ''}
+        docType={viewerDocType ?? ''}
+        docLabel={docLabel(viewerDocType ?? '')}
+        getToken={getToken}
+      />
     </div>
   );
 }

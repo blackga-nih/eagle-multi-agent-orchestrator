@@ -13,6 +13,7 @@ import PackageStatusPanel from './package-status-panel';
 import ComplianceResultPanel from './compliance-result-panel';
 import KnowledgeFetchPanel from './knowledge-fetch-panel';
 import WebSearchPanel from './web-search-panel';
+import MarkdownFallbackPanel from './markdown-fallback-panel';
 
 export { default as ToolTimingSummary } from './tool-timing-summary';
 
@@ -101,6 +102,6 @@ export function resolveResultPanel(
       return createElement(WebSearchPanel, { text: resultText });
 
     default:
-      return createElement(RawResultPanel, { text: resultText, errorText: null });
+      return createElement(MarkdownFallbackPanel, { text: resultText, toolName });
   }
 }

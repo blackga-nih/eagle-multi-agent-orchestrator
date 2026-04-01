@@ -893,9 +893,17 @@ def _update_document_content(
         return {
             "success": True,
             "mode": "update_package",
+            "package_id": package_id,
+            "doc_type": doc_type,
+            "document_type": doc_type,
+            "title": title,
+            "s3_key": result.s3_key,
             "key": result.s3_key,
             "version": result.version,
             "document_id": result.document_id,
+            "status": "draft",
+            "content": content,
+            "word_count": len(content.split()),
             "message": f"Document updated (version {result.version})",
         }
 
@@ -918,10 +926,19 @@ def _update_document_content(
             actor_user_id=user_id,
             session_id=session_id,
         )
+        # Extract doc_type from key filename (e.g., "sow_20260325.md" → "sow")
+        ws_filename = doc_key.rsplit("/", 1)[-1] if "/" in doc_key else doc_key
+        ws_doc_type = ws_filename.split("_", 1)[0] if "_" in ws_filename else ws_filename.rsplit(".", 1)[0]
         return {
             "success": True,
             "mode": "update_workspace",
+            "s3_key": doc_key,
             "key": doc_key,
+            "doc_type": ws_doc_type,
+            "document_type": ws_doc_type,
+            "title": ws_doc_type.replace("_", " ").title(),
+            "content": content,
+            "word_count": len(content.split()),
             "message": "Document updated",
         }
     except Exception as exc:

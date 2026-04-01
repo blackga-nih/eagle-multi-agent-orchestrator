@@ -264,9 +264,19 @@ export default function SimpleChatInterface() {
         if (!resp.ok) return;
         const ctx = await resp.json();
         if (ctx.package) {
+          const cl = ctx.package.checklist;
           handlePackageMetadata({
-            state_type: 'package_update',
-            ...ctx.package,
+            state_type: 'checklist_update',
+            package_id: ctx.package.package_id,
+            phase: ctx.package.status,
+            checklist: cl,
+            progress_pct: cl
+              ? Math.round(
+                  ((cl.completed?.length ?? 0) /
+                    Math.max(cl.required?.length ?? 1, 1)) *
+                    100,
+                )
+              : undefined,
           });
         }
       } catch {
@@ -439,6 +449,36 @@ export default function SimpleChatInterface() {
           if (merged.length === existing.length) return prev;
           return { ...prev, [msgId]: merged };
         });
+      }
+
+      // Post-stream: refresh package checklist from authoritative backend state
+      if (packageState.packageId && currentSessionId) {
+        void (async () => {
+          try {
+            const token = await getToken();
+            const resp = await fetch(
+              `/api/sessions/${encodeURIComponent(currentSessionId)}/context`,
+              { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+            );
+            if (!resp.ok) return;
+            const ctx = await resp.json();
+            if (ctx.package?.checklist) {
+              handlePackageMetadata({
+                state_type: 'checklist_update',
+                package_id: ctx.package.package_id,
+                phase: ctx.package.status,
+                checklist: ctx.package.checklist,
+                progress_pct: Math.round(
+                  ((ctx.package.checklist.completed?.length ?? 0) /
+                    Math.max(ctx.package.checklist.required?.length ?? 1, 1)) *
+                    100,
+                ),
+              });
+            }
+          } catch {
+            /* best-effort */
+          }
+        })();
       }
 
       // AI title generation — fire-and-forget on first assistant response

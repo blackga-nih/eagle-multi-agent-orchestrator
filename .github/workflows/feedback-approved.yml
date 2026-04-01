@@ -1,0 +1,39 @@
+name: Feedback Approved
+
+on:
+  repository_dispatch:
+    types: [feedback-approved]
+  workflow_dispatch:
+    inputs:
+      jira_key:
+        description: 'JIRA ticket key (e.g. EAGLE-456)'
+        required: false
+        default: ''
+      feedback_id:
+        description: 'DynamoDB feedback ID'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  feedback-approved:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log event
+        run: |
+          echo "Feedback approved!"
+          echo "JIRA Key: ${{ github.event.client_payload.jira_key || inputs.jira_key || '(none)' }}"
+          echo "Feedback ID: ${{ github.event.client_payload.feedback_id || inputs.feedback_id || '(none)' }}"
+          echo "Triggered by: ${{ github.event_name }}"
+          echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Placeholder for future work
+        run: |
+          echo "TODO: plan, implement, validate, and commit the fix"
+          echo "  - Checkout repo"
+          echo "  - Read JIRA issue description for context"
+          echo "  - Plan fix with Claude Code"
+          echo "  - Implement and validate"
+          echo "  - Commit and push"

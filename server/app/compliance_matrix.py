@@ -131,6 +131,153 @@ _TYPES_BY_ID = {t["id"]: t for t in TYPES}
 
 
 # ---------------------------------------------------------------------------
+# Normalization: alias maps + resolve functions
+# ---------------------------------------------------------------------------
+
+_METHOD_ALIASES: dict[str, str] = {
+    # Full and open / negotiated (FAR 15)
+    "full_and_open": "negotiated",
+    "full and open": "negotiated",
+    "full_and_open_competition": "negotiated",
+    "full_competition": "negotiated",
+    "full competition": "negotiated",
+    "far part 15": "negotiated",
+    "part 15": "negotiated",
+    "far_15": "negotiated",
+    "sealed_bidding": "negotiated",
+    "sealed bidding": "negotiated",
+    "far part 14": "negotiated",
+    "part 14": "negotiated",
+    # SAP / simplified (FAR 13)
+    "simplified_acquisition": "sap",
+    "simplified acquisition": "sap",
+    "simplified": "sap",
+    "far part 13": "sap",
+    "part 13": "sap",
+    "far_13": "sap",
+    # Micro-purchase
+    "micro_purchase": "micro",
+    "micro purchase": "micro",
+    "micropurchase": "micro",
+    "purchase_card": "micro",
+    # Sole source
+    "sole_source": "sole",
+    "sole source": "sole",
+    "j&a": "sole",
+    "limited_competition": "sole",
+    # IDIQ orders
+    "task_order": "idiq-order",
+    "task order": "idiq-order",
+    "delivery_order": "idiq-order",
+    "delivery order": "idiq-order",
+    "idiq_order": "idiq-order",
+    # IDIQ parent
+    "idiq_parent": "idiq",
+    "indefinite_delivery": "idiq",
+    "indefinite delivery": "idiq",
+    # BPA establishment
+    "bpa": "bpa-est",
+    "blanket_purchase_agreement": "bpa-est",
+    "bpa_establishment": "bpa-est",
+    "bpa_est": "bpa-est",
+    # BPA call
+    "bpa_call": "bpa-call",
+    "bpa call": "bpa-call",
+    "call_order": "bpa-call",
+    # FSS / schedules
+    "schedule": "fss",
+    "gsa": "fss",
+    "gsa_schedule": "fss",
+    "gsa schedule": "fss",
+    "gsa_schedules": "fss",
+    "federal_supply_schedule": "fss",
+    "far part 8": "fss",
+    "part 8": "fss",
+    "8a": "fss",
+    "sba 8(a)": "fss",
+    "far part 8(a)": "fss",
+}
+
+_TYPE_ALIASES: dict[str, str] = {
+    # FFP
+    "firm_fixed_price": "ffp",
+    "firm fixed price": "ffp",
+    "fixed_price": "ffp",
+    "fixed price": "ffp",
+    # FP-EPA
+    "fp_epa": "fp-epa",
+    "fixed_price_epa": "fp-epa",
+    "economic_price_adjustment": "fp-epa",
+    # FPI
+    "fixed_price_incentive": "fpi",
+    "fp_incentive": "fpi",
+    "fpif": "fpi",
+    # CPFF
+    "cost_plus_fixed_fee": "cpff",
+    "cost plus fixed fee": "cpff",
+    "cost_plus": "cpff",
+    "cost plus": "cpff",
+    "cost_reimbursement": "cpff",
+    # CPIF
+    "cost_plus_incentive_fee": "cpif",
+    "cost plus incentive fee": "cpif",
+    # CPAF
+    "cost_plus_award_fee": "cpaf",
+    "cost plus award fee": "cpaf",
+    # T&M
+    "time_and_materials": "tm",
+    "time and materials": "tm",
+    "time_and_material": "tm",
+    "t_and_m": "tm",
+    "t&m": "tm",
+    "t_m": "tm",
+    # LH
+    "labor_hour": "lh",
+    "labor hour": "lh",
+    "labor_hours": "lh",
+}
+
+
+def _normalize_method(raw: str) -> str | None:
+    """Resolve a raw acquisition method string to a canonical method ID."""
+    if not raw or not raw.strip():
+        return None
+    cleaned = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    if cleaned in _METHODS_BY_ID:
+        return cleaned
+    # Canonical IDs like bpa-est, bpa-call, idiq-order use hyphens
+    hyphenated = cleaned.replace("_", "-")
+    if hyphenated in _METHODS_BY_ID:
+        return hyphenated
+    # Alias lookup (underscore-normalized form, then original lowered)
+    if cleaned in _METHOD_ALIASES:
+        return _METHOD_ALIASES[cleaned]
+    lowered = raw.strip().lower()
+    if lowered in _METHOD_ALIASES:
+        return _METHOD_ALIASES[lowered]
+    return None
+
+
+def _normalize_type(raw: str) -> str | None:
+    """Resolve a raw contract type string to a canonical type ID."""
+    if not raw or not raw.strip():
+        return None
+    cleaned = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    if cleaned in _TYPES_BY_ID:
+        return cleaned
+    # Canonical IDs like fp-epa use hyphens
+    hyphenated = cleaned.replace("_", "-")
+    if hyphenated in _TYPES_BY_ID:
+        return hyphenated
+    if cleaned in _TYPE_ALIASES:
+        return _TYPE_ALIASES[cleaned]
+    lowered = raw.strip().lower()
+    if lowered in _TYPE_ALIASES:
+        return _TYPE_ALIASES[lowered]
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Helper functions (ported from HTML)
 # ---------------------------------------------------------------------------
 
@@ -182,8 +329,8 @@ def get_requirements(
         fee_caps, pmr_checklist, approvals_required
     """
     v = float(contract_value)
-    m = acquisition_method
-    t = contract_type
+    m = _normalize_method(acquisition_method)
+    t = _normalize_type(contract_type)
 
     flags = flags or {}
     is_it = flags.get("is_it", False)
@@ -192,13 +339,27 @@ def get_requirements(
     is_hs = flags.get("is_human_subjects", False)
     is_services = flags.get("is_services", True)
 
-    t_obj = _TYPES_BY_ID.get(t)
+    t_obj = _TYPES_BY_ID.get(t) if t else None
     if not t_obj:
-        return {"errors": [f"Unknown contract type: {t}"], "warnings": []}
+        valid_types = ", ".join(sorted(_TYPES_BY_ID.keys()))
+        return {
+            "errors": [
+                f"Unknown contract type: {contract_type}. "
+                f"Valid IDs: {valid_types}"
+            ],
+            "warnings": [],
+        }
 
-    m_obj = _METHODS_BY_ID.get(m)
+    m_obj = _METHODS_BY_ID.get(m) if m else None
     if not m_obj:
-        return {"errors": [f"Unknown acquisition method: {m}"], "warnings": []}
+        valid_methods = ", ".join(sorted(_METHODS_BY_ID.keys()))
+        return {
+            "errors": [
+                f"Unknown acquisition method: {acquisition_method}. "
+                f"Valid IDs: {valid_methods}"
+            ],
+            "warnings": [],
+        }
 
     is_cr = t_obj["category"] == "cr"
     is_loe = t_obj["category"] == "loe"

@@ -4,6 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
+
 EAGLE is a multi-tenant AI acquisition assistant for NCI (National Cancer Institute). It helps contracting officers navigate federal procurement — intake, FAR/DFARS guidance, document generation (SOW, IGCE, AP). Built with TAC methodology: supervisor orchestrates specialist subagents via Strands Agents SDK (boto3-native Bedrock), streamed over SSE to a Next.js frontend.
 
 ---

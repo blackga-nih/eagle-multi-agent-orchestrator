@@ -430,7 +430,7 @@ class TestDocumentListEndpoint:
 
     def test_get_documents_returns_list(self, app_with_mocked_s3):
         """GET /api/documents returns JSON array of documents."""
-        with patch("boto3.client", return_value=_mock_s3()):
+        with patch("app.routers.documents.get_s3", return_value=_mock_s3()):
             with TestClient(app_with_mocked_s3) as client:
                 resp = client.get("/api/documents")
 
@@ -511,7 +511,7 @@ class TestDocumentExportEndpoint:
         """Missing export dependencies surface as explicit 503 errors."""
         from app.document_export import ExportDependencyError
 
-        with patch("app.main.export_document", side_effect=ExportDependencyError("DOCX export dependency missing: install python-docx.")):
+        with patch("app.routers.documents.export_document", side_effect=ExportDependencyError("DOCX export dependency missing: install python-docx.")):
             with TestClient(app_with_mocked_s3) as client:
                 resp = client.post("/api/documents/export", json={
                     "content": "# Test",

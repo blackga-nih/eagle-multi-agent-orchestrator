@@ -155,3 +155,145 @@ def test_subagent_kb_search_normal_path_unchanged():
     result = json.loads(result_str)
     assert result["count"] == 1
     assert result["results"][0]["title"] == "Test Doc"
+
+
+# ---------------------------------------------------------------------------
+# Change 3: _sanitize_item breaks OTEL wrapper references
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_item_converts_decimals():
+    """_sanitize_item converts DynamoDB Decimal values to int/float."""
+    from decimal import Decimal
+
+    from app.tools.knowledge_tools import _sanitize_item
+
+    item = {
+        "confidence_score": Decimal("0.95"),
+        "count": Decimal("42"),
+        "keywords": ["test"],
+    }
+    sanitized = _sanitize_item(item)
+    assert sanitized["confidence_score"] == 0.95
+    assert isinstance(sanitized["confidence_score"], float)
+    assert sanitized["count"] == 42
+    assert isinstance(sanitized["count"], int)
+
+
+def test_sanitize_item_handles_otel_wrapped_types():
+    """_sanitize_item breaks OTEL wrapper references on list/dict subclasses."""
+    from app.tools.knowledge_tools import _sanitize_item
+
+    class OtelWrappedList(list):
+        """Simulates an OTEL-wrapped list with circular context."""
+
+        def __init__(self, *args):
+            super().__init__(*args)
+            self._otel_context = self  # circular reference
+
+    item = {
+        "document_id": "test-doc",
+        "keywords": OtelWrappedList(["keyword1", "keyword2"]),
+        "key_requirements": OtelWrappedList(["req1"]),
+    }
+
+    sanitized = _sanitize_item(item)
+
+    # Result should be plain types, JSON-serializable without RecursionError
+    assert type(sanitized["keywords"]) is list
+    assert sanitized["keywords"] == ["keyword1", "keyword2"]
+    json_str = json.dumps(sanitized)
+    assert "keyword1" in json_str
+
+
+def test_exec_knowledge_search_sanitizes_items():
+    """exec_knowledge_search produces JSON-serializable results from OTEL-wrapped items."""
+    from decimal import Decimal
+
+    from app.tools import knowledge_tools as kt
+
+    class OtelWrappedList(list):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self._otel_context = self
+
+    item = {
+        "document_id": "test-otel-doc",
+        "title": "OTEL Wrapped Doc",
+        "summary": "Test summary",
+        "document_type": "guidance",
+        "primary_topic": "compliance",
+        "primary_agent": "supervisor-core",
+        "authority_level": "guidance",
+        "complexity_level": "medium",
+        "key_requirements": OtelWrappedList(["req1"]),
+        "keywords": OtelWrappedList(["keyword1", "keyword2"]),
+        "s3_key": "kb/test.md",
+        "confidence_score": Decimal("0.9"),
+    }
+
+    table_mock = MagicMock()
+    table_mock.scan.return_value = {"Items": [item]}
+    ddb_mock = MagicMock()
+    ddb_mock.Table.return_value = table_mock
+
+    with patch.object(kt, "get_dynamodb", return_value=ddb_mock), patch.object(
+        kt, "BUILTIN_KB_ENTRIES", []
+    ):
+        result = kt.exec_knowledge_search({"limit": 5}, tenant_id="test-tenant")
+
+    assert result["count"] == 1
+    assert result["results"][0]["document_id"] == "test-otel-doc"
+
+    # Must be JSON-serializable without RecursionError
+    json_str = json.dumps(result, indent=2, default=str)
+    assert "test-otel-doc" in json_str
+
+
+# ---------------------------------------------------------------------------
+# Change 4: Service-tools knowledge_search coverage
+# ---------------------------------------------------------------------------
+
+
+def test_service_tools_kb_search_handles_recursion_error():
+    """Service-tools knowledge_search returns graceful JSON on RecursionError."""
+    from app.strands_agentic_service import _build_kb_service_tools
+
+    with patch(
+        "app.tools.knowledge_tools.exec_knowledge_search",
+        side_effect=RecursionError("maximum recursion depth exceeded"),
+    ):
+        tools = _build_kb_service_tools(
+            tenant_id="test-tenant",
+            user_id="test-user",
+            session_id="test-session",
+        )
+        kb_tool = next(t for t in tools if t.tool_name == "knowledge_search")
+        result_str = kb_tool._tool_func(query="test query")
+
+    result = json.loads(result_str)
+    assert result["count"] == 0
+    assert result["results"] == []
+    assert "RecursionError" in result["error"]
+
+
+def test_service_tools_kb_search_normal_path():
+    """Service-tools knowledge_search returns results normally."""
+    from app.strands_agentic_service import _build_kb_service_tools
+
+    mock_result = {"results": [{"title": "Test Doc"}], "count": 1}
+    with patch(
+        "app.tools.knowledge_tools.exec_knowledge_search",
+        return_value=mock_result,
+    ):
+        tools = _build_kb_service_tools(
+            tenant_id="test-tenant",
+            user_id="test-user",
+            session_id="test-session",
+        )
+        kb_tool = next(t for t in tools if t.tool_name == "knowledge_search")
+        result_str = kb_tool._tool_func(query="test query")
+
+    result = json.loads(result_str)
+    assert result["count"] == 1
+    assert result["results"][0]["title"] == "Test Doc"

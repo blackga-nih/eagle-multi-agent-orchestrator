@@ -9,6 +9,12 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
+
+# Build-time env vars (NEXT_PUBLIC_* are baked in at build)
+ARG NEXT_PUBLIC_COGNITO_USER_POOL_ID
+ARG NEXT_PUBLIC_COGNITO_CLIENT_ID
+ARG NEXT_PUBLIC_COGNITO_REGION=us-east-1
+
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 

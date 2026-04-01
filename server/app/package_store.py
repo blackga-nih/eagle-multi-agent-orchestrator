@@ -125,12 +125,12 @@ _ACQUISITION_METHOD_ALIASES: dict[str, str] = {
     "full and open": "negotiated",
     "full_competition": "negotiated",
     "full competition": "negotiated",
-    "far part 14": "sealed_bidding",
-    "part 14": "sealed_bidding",
-    "far part 13": "simplified",
-    "part 13": "simplified",
-    "sba 8(a)": "8a",
-    "far part 8(a)": "8a",
+    "far part 14": "negotiated",
+    "part 14": "negotiated",
+    "far part 13": "sap",
+    "part 13": "sap",
+    "sba 8(a)": "fss",
+    "far part 8(a)": "fss",
 }
 
 _CONTRACT_TYPE_ALIASES: dict[str, str] = {
@@ -142,10 +142,10 @@ _CONTRACT_TYPE_ALIASES: dict[str, str] = {
     "cost_plus_award_fee": "cpaf",
     "cost plus incentive fee": "cpif",
     "cost_plus_incentive_fee": "cpif",
-    "time and material": "t_and_m",
-    "time and materials": "t_and_m",
-    "time_and_materials": "t_and_m",
-    "t&m": "t_and_m",
+    "time and material": "tm",
+    "time and materials": "tm",
+    "time_and_materials": "tm",
+    "t&m": "tm",
 }
 
 

@@ -120,6 +120,9 @@ def _backfill_completed_docs(
     those docs live in S3 under the user prefix but aren't tracked in the
     package's ``completed_documents``. This scans the user's S3 documents
     prefix and registers any that match the package's required_documents.
+
+    Only documents created within the last 15 minutes are eligible for
+    backfill, preventing stale files from prior sessions from being linked.
     """
     try:
         pkg_id = package.get("package_id")
@@ -133,9 +136,18 @@ def _backfill_completed_docs(
         resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=200)
         contents = resp.get("Contents", [])
 
+        # Only backfill recent files (created during the current session).
+        # Stale files from prior sessions must not be auto-linked.
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+
         # Parse doc_types from S3 keys: {prefix}{doc_type}_{timestamp}.{ext}
         found: dict[str, str] = {}  # doc_type → s3_key (latest)
         for obj in contents:
+            last_modified = obj.get("LastModified")
+            if last_modified and last_modified < cutoff:
+                continue  # Skip stale files from prior sessions
             key = obj["Key"]
             filename = key[len(prefix) :]  # e.g. "sow_20260325_203000.md"
             parts = filename.split("_", 1)
@@ -143,6 +155,14 @@ def _backfill_completed_docs(
                 dt = parts[0].lower()
                 if dt in required and dt not in found:
                     found[dt] = key
+
+        skipped = len(contents) - sum(1 for o in contents if not o.get("LastModified") or o["LastModified"] >= cutoff)
+        if skipped:
+            logger.debug(
+                "Backfill skipped %d stale S3 objects (older than 15 min) for %s",
+                skipped,
+                pkg_id,
+            )
 
         if not found:
             return

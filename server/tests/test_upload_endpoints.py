@@ -74,9 +74,9 @@ class TestUploadEndpoint:
 
         with (
             patch("boto3.client") as mock_boto3_client,
-            patch("app.main.classify_document", return_value=mock_classification),
-            patch("app.main.extract_text_preview", return_value="preview text"),
-            patch("app.main._put_upload"),
+            patch("app.routers.documents.classify_document", return_value=mock_classification),
+            patch("app.routers.documents.extract_text_preview", return_value="preview text"),
+            patch("app.routers.documents._put_upload"),
         ):
             mock_boto3_client.return_value = MagicMock()
 
@@ -99,9 +99,9 @@ class TestUploadEndpoint:
 
         with (
             patch("boto3.client") as mock_boto3_client,
-            patch("app.main.classify_document", return_value=mock_classification),
-            patch("app.main.extract_text_preview", return_value=""),
-            patch("app.main._put_upload"),
+            patch("app.routers.documents.classify_document", return_value=mock_classification),
+            patch("app.routers.documents.extract_text_preview", return_value=""),
+            patch("app.routers.documents._put_upload"),
         ):
             mock_boto3_client.return_value = MagicMock()
 
@@ -145,9 +145,9 @@ class TestUploadEndpoint:
 
         with (
             patch("boto3.client") as mock_boto3_client,
-            patch("app.main.classify_document", return_value=mock_classification),
-            patch("app.main.extract_text_preview", return_value="preview"),
-            patch("app.main._put_upload") as mock_put,
+            patch("app.routers.documents.classify_document", return_value=mock_classification),
+            patch("app.routers.documents.extract_text_preview", return_value="preview"),
+            patch("app.routers.documents._put_upload") as mock_put,
         ):
             mock_boto3_client.return_value = MagicMock()
 
@@ -171,14 +171,14 @@ class TestUploadEndpoint:
 
     def test_put_upload_converts_float_metadata_to_decimal(self):
         """Upload metadata written to DynamoDB must not contain raw floats."""
-        import app.main as _main
+        from app.routers.documents import _put_upload
 
         mock_table = MagicMock()
         mock_resource = MagicMock()
         mock_resource.Table.return_value = mock_table
 
         with patch("boto3.resource", return_value=mock_resource):
-            _main._put_upload(
+            _put_upload(
                 "test-tenant",
                 "upload-123",
                 {
@@ -249,10 +249,10 @@ class TestAssignToPackage:
         mock_pkg = {"package_id": "pkg-1", "tenant_id": "test-tenant", "title": "Test Package"}
 
         with (
-            patch("app.main._get_upload", return_value=upload_meta),
-            patch("app.main.get_package", return_value=mock_pkg),
-            patch("app.main.create_package_document_version", return_value=self._mock_result()),
-            patch("app.main._delete_upload"),
+            patch("app.routers.documents._get_upload", return_value=upload_meta),
+            patch("app.routers.documents.get_package", return_value=mock_pkg),
+            patch("app.routers.documents.create_package_document_version", return_value=self._mock_result()),
+            patch("app.routers.documents._delete_upload"),
             patch("boto3.client") as mock_boto3_client,
         ):
             mock_s3 = MagicMock()
@@ -270,7 +270,7 @@ class TestAssignToPackage:
 
     def test_assign_returns_404_for_missing_upload(self, client):
         """When _get_upload returns None, the endpoint must raise HTTP 404."""
-        with patch("app.main._get_upload", return_value=None):
+        with patch("app.routers.documents._get_upload", return_value=None):
             response = client.post(
                 "/api/documents/nonexistent-id/assign-to-package",
                 json={"package_id": "pkg-1"},
@@ -284,7 +284,7 @@ class TestAssignToPackage:
         # upload_meta has a different tenant_id than the authed user's tenant
         upload_meta = self._mock_upload_meta(tenant_id="other-tenant", user_id="other-user")
 
-        with patch("app.main._get_upload", return_value=upload_meta):
+        with patch("app.routers.documents._get_upload", return_value=upload_meta):
             response = client.post(
                 "/api/documents/some-upload-id/assign-to-package",
                 json={"package_id": "pkg-1"},
@@ -298,8 +298,8 @@ class TestAssignToPackage:
         upload_meta = self._mock_upload_meta()
 
         with (
-            patch("app.main._get_upload", return_value=upload_meta),
-            patch("app.main.get_package", return_value=None),
+            patch("app.routers.documents._get_upload", return_value=upload_meta),
+            patch("app.routers.documents.get_package", return_value=None),
         ):
             response = client.post(
                 "/api/documents/fake-id/assign-to-package",
@@ -315,8 +315,8 @@ class TestAssignToPackage:
         mock_pkg = {"package_id": "pkg-1", "tenant_id": "test-tenant"}
 
         with (
-            patch("app.main._get_upload", return_value=upload_meta),
-            patch("app.main.get_package", return_value=mock_pkg),
+            patch("app.routers.documents._get_upload", return_value=upload_meta),
+            patch("app.routers.documents.get_package", return_value=mock_pkg),
         ):
             response = client.post(
                 "/api/documents/fake-id/assign-to-package",
@@ -339,10 +339,10 @@ class TestAssignToPackage:
             return self._mock_result()
 
         with (
-            patch("app.main._get_upload", return_value=upload_meta),
-            patch("app.main.get_package", return_value=mock_pkg),
-            patch("app.main.create_package_document_version", side_effect=fake_create),
-            patch("app.main._delete_upload"),
+            patch("app.routers.documents._get_upload", return_value=upload_meta),
+            patch("app.routers.documents.get_package", return_value=mock_pkg),
+            patch("app.routers.documents.create_package_document_version", side_effect=fake_create),
+            patch("app.routers.documents._delete_upload"),
             patch("boto3.client") as mock_boto3_client,
         ):
             mock_s3 = MagicMock()

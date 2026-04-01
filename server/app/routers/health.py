@@ -14,6 +14,12 @@ from ..health_checks import check_knowledge_base_health
 router = APIRouter(prefix="/api", tags=["health"])
 
 
+@router.get("/ping")
+async def ping():
+    """Lightweight liveness probe — no I/O, no dependencies."""
+    return {"status": "healthy"}
+
+
 @router.get("/health")
 async def health_check():
     """Backend health check endpoint."""

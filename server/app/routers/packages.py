@@ -6,6 +6,7 @@ Extracted from main.py for better organization.
 """
 
 from decimal import Decimal
+import logging
 import sys
 from typing import Any, Dict, Optional
 
@@ -42,6 +43,8 @@ from ..package_store import (
 )
 
 from .dependencies import get_user_from_header
+
+logger = logging.getLogger("eagle.packages")
 
 router = APIRouter(prefix="/api/packages", tags=["packages"])
 compat_router = APIRouter(tags=["packages"])
@@ -243,12 +246,9 @@ async def export_package_zip_endpoint(
         save_to_workspace: Save ZIP to user workspace in S3
     """
     import json as _json
-    import logging
 
     from ..db_client import get_s3
     from ..document_export import export_package_zip as _export_zip
-
-    logger = logging.getLogger("eagle.packages")
 
     parsed_format_map = None
     if format_map:
@@ -293,6 +293,24 @@ async def export_package_zip_endpoint(
             file_type = doc.get("file_type", "md")
             if file_type in ("md", "txt", "json", "html"):
                 doc["content"] = raw_content.decode("utf-8")
+            elif file_type in ("docx", "xlsx"):
+                # For DOCX/XLSX, check if a markdown sibling exists (the
+                # markdown source is more useful for format conversion and
+                # avoids exporting unfilled templates).
+                # Sidecar convention: {s3_key}.content.md  (stored by document_service)
+                # Also check DynamoDB record for explicit markdown_s3_key.
+                md_key = doc.get("markdown_s3_key") or f"{s3_key}.content.md"
+                try:
+                    md_obj = s3.get_object(Bucket=s3_bucket, Key=md_key)
+                    doc["content"] = md_obj["Body"].read().decode("utf-8")
+                    logger.debug("ZIP export: using markdown sibling for %s", s3_key)
+                except Exception:
+                    # No markdown sibling — include the binary DOCX directly
+                    doc["_binary"] = raw_content
+                    doc["filename"] = (
+                        f"{doc.get('doc_type', 'doc')}"
+                        f"_{doc.get('title', 'document')}.{file_type}"
+                    )
             else:
                 doc["_binary"] = raw_content
                 doc["filename"] = (
@@ -502,7 +520,7 @@ async def get_document_endpoint(
 ):
     """Get a specific document (latest version by default).
 
-    Includes a presigned download_url for the document's S3 content.
+    Includes a presigned download_url and content for the document viewer.
     """
     doc = get_document(user.tenant_id, package_id, doc_type, version)
     if not doc:
@@ -517,6 +535,31 @@ async def get_document_endpoint(
         )
         if url:
             doc["download_url"] = url
+
+    # Fetch content from S3 so the viewer modal can render a preview
+    if not doc.get("content"):
+        s3_key = doc.get("s3_key")
+        s3_bucket = doc.get("s3_bucket")
+        if s3_key and s3_bucket:
+            try:
+                from ..db_client import get_s3
+
+                s3 = get_s3()
+                file_type = doc.get("file_type", "md")
+                if file_type in ("md", "txt", "json", "html"):
+                    obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+                    doc["content"] = obj["Body"].read().decode("utf-8")
+                elif file_type in ("docx", "xlsx"):
+                    # Prefer markdown sidecar for human-readable preview
+                    md_key = doc.get("markdown_s3_key") or f"{s3_key}.content.md"
+                    try:
+                        md_obj = s3.get_object(Bucket=s3_bucket, Key=md_key)
+                        doc["content"] = md_obj["Body"].read().decode("utf-8")
+                    except Exception:
+                        pass  # No markdown sidecar; viewer will show download link
+            except Exception as e:
+                logger.warning("Failed to fetch content for %s: %s", s3_key, e)
+
     return doc
 
 

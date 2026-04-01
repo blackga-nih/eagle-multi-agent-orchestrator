@@ -107,8 +107,8 @@ jobs:
       significant: ${{ steps.filter.outputs.significant }}
       deploy_mode: ${{ steps.mode.outputs.deploy_mode }}
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
-    - uses: dorny/paths-filter@v3
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+    - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
       id: filter
       with:
         filters: |
@@ -162,10 +162,10 @@ jobs:
       tsc_result: ${{ steps.tsc.outcome }}
       detail: ${{ steps.summary.outputs.detail }}
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Setup Python 3.11
-      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:
         python-version: '3.11'
 
@@ -177,7 +177,7 @@ jobs:
       run: cd server && ruff check app/ 2>&1
 
     - name: Setup Node.js
-      uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8  # v4.0.2
+      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
       with:
         node-version: '20'
         cache: 'npm'
@@ -207,17 +207,17 @@ jobs:
       test_result: ${{ steps.pytest.outcome }}
       detail: ${{ steps.parse.outputs.detail }}
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Setup Python 3.11
-      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:
         python-version: '3.11'
         cache: 'pip'
         cache-dependency-path: server/requirements.txt
 
     - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
       with:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
@@ -255,7 +255,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
       with:
         name: unit-test-results-${{ github.sha }}
         path: server/test-results.xml
@@ -268,16 +268,16 @@ jobs:
     if: needs.changes.outputs.deploy_mode == 'full'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
       with:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8  # v4.0.2
+      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
       with:
         node-version: '20'
         cache: 'npm'
@@ -303,16 +303,16 @@ jobs:
       needs.cdk-synth.result == 'success'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
       with:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Setup Python 3.11
-      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:
         python-version: '3.11'
         cache: 'pip'
@@ -359,16 +359,16 @@ jobs:
       eval_detail: ${{ steps.parse.outputs.eval_detail }}
       mvp1_detail: ${{ steps.parse.outputs.mvp1_detail }}
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
       with:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Setup Python 3.11
-      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:
         python-version: '3.11'
         cache: 'pip'
@@ -437,7 +437,7 @@ jobs:
 
     - name: Upload eval artifacts
       if: always()
-      uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
       with:
         name: eval-results-${{ github.sha }}
         path: |
@@ -461,16 +461,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
       with:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8  # v4.0.2
+      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
       with:
         node-version: '20'
         cache: 'npm'
@@ -505,10 +505,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
       with:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
@@ -520,7 +520,7 @@ jobs:
         echo "uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/${{ needs.setup.outputs.backend_ecr }}" >> $GITHUB_OUTPUT
 
     - name: Login to ECR
-      uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2.0.1
+      uses: aws-actions/amazon-ecr-login@183a1442edf41672e66566b7fc560e297a290896  # v2.1.1
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -624,10 +624,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+      uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
       with:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
@@ -644,7 +644,7 @@ jobs:
         echo "client-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue')" >> $GITHUB_OUTPUT
 
     - name: Login to ECR
-      uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2.0.1
+      uses: aws-actions/amazon-ecr-login@183a1442edf41672e66566b7fc560e297a290896  # v2.1.1
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -761,10 +761,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Setup Python 3.11
-      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c  # v5.0.0
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:
         python-version: '3.11'
 
