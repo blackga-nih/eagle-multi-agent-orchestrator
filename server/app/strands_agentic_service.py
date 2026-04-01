@@ -640,9 +640,7 @@ def _build_conversation_manager(tier: str) -> SummarizingConversationManager:
 # arrives in ~1-2s instead of 45-120s.
 
 _TRIVIAL_RE = re.compile(
-    r"^(hi|hello|hey|good\s*(morning|afternoon|evening)|thanks|thank\s*you|"
-    r"ok|okay|yes|no|sure|bye|goodbye|howdy|sup|yo|hola|greetings|"
-    r"what'?s up|whats up|how are you|how'?s it going)\s*[?!.,]*$",
+    r"^(hi|hello|hey|good\s*(morning|afternoon|evening)|howdy|yo|hola|greetings)\s*[?!.,]*$",
     re.IGNORECASE,
 )
 
