@@ -321,6 +321,10 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            const { fireSessionExpired } = await import('@/contexts/auth-context');
+            fireSessionExpired();
+          }
           const errorText = await response.text();
           throw new Error(`Backend error: ${response.status} - ${errorText}`);
         }

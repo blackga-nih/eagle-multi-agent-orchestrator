@@ -61,6 +61,7 @@ from .routers.documents import (
 )
 from .routers.feedback import router as feedback_router
 from .routers.feedback_actions import router as feedback_actions_router
+from .routers.triage_actions import router as triage_actions_router
 from .routers.health import router as health_router
 from .routers.knowledge import router as knowledge_router
 from .routers.packages import router as packages_router
@@ -414,6 +415,7 @@ app.include_router(commands_router)
 app.include_router(documents_router)
 app.include_router(feedback_router)
 app.include_router(feedback_actions_router)
+app.include_router(triage_actions_router)
 app.include_router(health_router)
 app.include_router(knowledge_router)
 app.include_router(packages_router)

@@ -22,10 +22,21 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install httpx
+        run: pip install httpx requests python-dotenv
 
       - name: Generate and send morning report
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python scripts/morning_report.py
+
+      - name: Sync commits to Jira
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          python scripts/jira_commits_sync.py \
+            --since 24h \
+            --project EAGLE \
+            --author "blackga@nih.gov" \
+            --weekly-summary "Greg Dev Weekly Summary —"

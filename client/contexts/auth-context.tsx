@@ -18,6 +18,17 @@ import {
 } from 'amazon-cognito-identity-js';
 
 // ---------------------------------------------------------------------------
+// Session-expired event — any code can fire this without needing React context.
+// ---------------------------------------------------------------------------
+
+const SESSION_EXPIRED_EVENT = 'eagle:session-expired';
+
+/** Call from any fetch wrapper when a 401 is received. */
+export function fireSessionExpired() {
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -45,6 +56,8 @@ interface AuthContextValue {
   signOut: () => void;
   /** The most recent authentication error message, or null. */
   error: string | null;
+  /** Call when an API returns 401 to trigger the re-login modal. */
+  onSessionExpired: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // Keep a ref to the refresh timer so we can clear it on unmount or
   // sign-out without depending on state.
@@ -186,10 +200,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       cognitoUser.getSession((err: Error | null, refreshedSession: CognitoUserSession | null) => {
         if (err || !refreshedSession) {
-          // Token refresh failed -- force sign-out so the UI
-          // can prompt the user to re-authenticate.
+          // Token refresh failed -- show re-login modal.
           setUser(null);
-          setError('Session expired. Please sign in again.');
+          setSessionExpired(true);
           return;
         }
         setUser(userFromSession(refreshedSession));
@@ -245,12 +258,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     });
 
-    // Cleanup the refresh timer when the component unmounts.
+    // Cleanup the refresh timer when the component unmounts or on
+    // session-expired.
     return () => {
       clearTimeout(timeoutId);
       cancelRefreshTimer();
     };
   }, [scheduleTokenRefresh, cancelRefreshTimer]);
+
+  // -------------------------------------------------------------------
+  // Listen for global session-expired events (fired by API callers)
+  // -------------------------------------------------------------------
+
+  useEffect(() => {
+    const handler = () => setSessionExpired(true);
+    window.addEventListener(SESSION_EXPIRED_EVENT, handler);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handler);
+  }, []);
 
   // -------------------------------------------------------------------
   // getToken
@@ -341,8 +365,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // signOut
   // -------------------------------------------------------------------
 
+  const onSessionExpired = useCallback(() => {
+    setSessionExpired(true);
+  }, []);
+
   const signOut = useCallback(() => {
     setError(null);
+    setSessionExpired(false);
     cancelRefreshTimer();
 
     if (!isDevMode()) {
@@ -360,6 +389,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Context value
   // -------------------------------------------------------------------
 
+  const handleReLogin = useCallback(() => {
+    setSessionExpired(false);
+    cancelRefreshTimer();
+    if (!isDevMode()) {
+      const pool = getUserPool();
+      const cognitoUser = pool.getCurrentUser();
+      if (cognitoUser) cognitoUser.signOut();
+    }
+    setUser(null);
+  }, [cancelRefreshTimer]);
+
   const value: AuthContextValue = useMemo(
     () => ({
       user,
@@ -369,11 +409,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       error,
+      onSessionExpired,
     }),
-    [user, isLoading, getToken, signIn, signOut, error],
+    [user, isLoading, getToken, signIn, signOut, error, onSessionExpired],
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      {sessionExpired && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-8 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 mx-auto mb-4 bg-amber-100 rounded-full flex items-center justify-center">
+              <svg className="w-7 h-7 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Session Expired</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Your session has expired. Please sign in again to continue.
+            </p>
+            <button
+              onClick={handleReLogin}
+              className="w-full px-4 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Sign In
+            </button>
+          </div>
+        </div>
+      )}
+    </AuthContext.Provider>
+  );
 }
 
 // ---------------------------------------------------------------------------

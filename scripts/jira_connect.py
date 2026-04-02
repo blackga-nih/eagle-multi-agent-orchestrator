@@ -112,6 +112,7 @@ def create_issue(
     summary: str,
     issue_type: str = "Task",
     description: str | None = None,
+    labels: list[str] | None = None,
 ) -> str | None:
     """Create an issue. Returns issue key or None."""
     url = f"{JIRA_BASE_URL}/rest/api/2/issue"
@@ -124,6 +125,8 @@ def create_issue(
     }
     if description is not None:
         payload["fields"]["description"] = description
+    if labels:
+        payload["fields"]["labels"] = labels
     resp = requests.post(url, headers=get_headers(), json=payload)
     if resp.status_code in (200, 201):
         data = resp.json()

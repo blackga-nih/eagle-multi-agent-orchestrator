@@ -43,7 +43,10 @@ export interface EagleConfig {
 
   // JIRA + feedback triage
   jiraBaseUrl?: string;
+  jiraApiToken?: string;
   feedbackActionSecret?: string;
+  ghDispatchToken?: string;
+  teamsTriageWebhookUrl?: string;
 
   // CI/CD
   githubOwner: string;
@@ -84,7 +87,10 @@ export const DEV_CONFIG: EagleConfig = {
   langfuseProjectId: 'cmmsqvi2406aead071t0zhl7f',
 
   jiraBaseUrl: 'https://tracker.nci.nih.gov',
+  jiraApiToken: process.env.JIRA_API_TOKEN || '',
   feedbackActionSecret: process.env.FEEDBACK_ACTION_SECRET || 'eagle-feedback-action-key',
+  ghDispatchToken: process.env.GH_DISPATCH_TOKEN || '',
+  teamsTriageWebhookUrl: process.env.TEAMS_TRIAGE_WEBHOOK_URL || '',
 
   githubOwner: 'CBIIT',
   githubRepo: 'sm_eagle',

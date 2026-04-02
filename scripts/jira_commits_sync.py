@@ -96,10 +96,10 @@ def get_commit_log(since: str, branch: str = "HEAD", author: str | None = None) 
     return merged
 
 
-def weekly_issue_summary(suffix: str) -> str:
-    """Current ISO year+week and suffix, e.g. 'Greg Dev 202608'."""
+def weekly_issue_summary(prefix: str) -> str:
+    """Current ISO year+week with prefix, e.g. 'Greg Dev Weekly Summary — 2026-W14'."""
     year, week, _ = datetime.now().isocalendar()
-    return f"{suffix.strip()} {year}{week:02d}"
+    return f"{prefix.strip()} {year}-W{week:02d}"
 
 
 def get_or_create_weekly_issue(
@@ -114,7 +114,7 @@ def get_or_create_weekly_issue(
     key = find_issue_by_summary(project_key, summary, quiet=True)
     if key:
         return key
-    key = create_issue(project_key, summary, issue_type=issue_type)
+    key = create_issue(project_key, summary, issue_type=issue_type, labels=["catch-all-dev"])
     return key
 
 
