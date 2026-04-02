@@ -216,6 +216,74 @@ class TestXLSXPopulator:
         wb.save(output)
         return output.getvalue()
 
+    @pytest.fixture
+    def formula_xlsx(self):
+        """Create an XLSX with a preserved formula for regression testing."""
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            pytest.skip("openpyxl not installed")
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "IGCE"
+        ws["A1"] = 2
+        ws["B1"] = 5
+        ws["C1"] = "=A1*B1"
+
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+
+    @pytest.fixture
+    def commercial_igce_xlsx(self):
+        """Create a minimal workbook that matches the commercial IGCE layout."""
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            pytest.skip("openpyxl not installed")
+
+        wb = Workbook()
+        summary = wb.active
+        summary.title = "IGCE"
+        summary["G7"] = "=C7*E7"
+        summary["G8"] = "=C8*E8"
+        summary["G26"] = "=SUM(G7:G23)"
+        summary["G38"] = "=SUM(E30:E37)"
+        summary["H39"] = "=G26+G28+G38"
+
+        for row in (11, 12, 13, 16, 17, 18, 21, 22, 23):
+            summary[f"G{row}"] = f"=C{row}*E{row}"
+
+        services = wb.create_sheet("IT Services")
+        services["A5"] = "Expected Contract Type:"
+        services["A6"] = "Period of Performance:"
+        services["B6"] = "From:"
+        services["D6"] = "To:"
+        services["A12"] = "Senior Manager"
+        services["D12"] = "=B12*C12"
+        services["G12"] = "=E12*F12"
+        services["J12"] = "=H12*I12"
+        services["M12"] = "=K12*L12"
+        services["P12"] = "=N12*O12"
+        for row in (13, 14, 15, 16, 17, 18):
+            services[f"D{row}"] = f"=B{row}*C{row}"
+            services[f"G{row}"] = f"=E{row}*F{row}"
+            services[f"J{row}"] = f"=H{row}*I{row}"
+            services[f"M{row}"] = f"=K{row}*L{row}"
+            services[f"P{row}"] = f"=N{row}*O{row}"
+
+        goods = wb.create_sheet("IT Goods")
+        goods["A5"] = "Expected Contract Type:"
+        goods["A6"] = "Delivery Date"
+        goods["G10"] = "=F10*E10"
+        for row in (11, 12, 13, 14, 15, 16, 17):
+            goods[f"G{row}"] = f"=F{row}*E{row}"
+
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+
     def test_populate_replaces_placeholders(self, sample_xlsx):
         """Placeholders should be replaced with data values."""
         data = {
@@ -262,6 +330,108 @@ class TestXLSXPopulator:
         preview = XLSXPopulator.extract_text(sample_xlsx)
         assert "IGCE" in preview  # Sheet title
         assert "|" in preview  # Table format
+
+    def test_populate_preserves_existing_formulas(self, formula_xlsx):
+        """XLSX population should not flatten workbook formulas."""
+        result = XLSXPopulator.populate(formula_xlsx, {}, {})
+
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(result), data_only=False)
+        ws = wb.active
+
+        assert ws["C1"].value == "=A1*B1"
+
+    def test_populate_maps_commercial_igce_template(self, commercial_igce_xlsx):
+        """Commercial IGCE workbook should use the template-aware mapper."""
+        data = {
+            "description": "Cloud Migration Support Services",
+            "contract_type": "Firm-Fixed-Price",
+            "period_of_performance": "12 months",
+            "delivery_date": "2026-09-30",
+            "prepared_by": "EAGLE System",
+            "prepared_date": "2026-03-17",
+            "line_items": [
+                {
+                    "description": "Cloud Architect",
+                    "quantity": 2080,
+                    "unit": "HR",
+                    "unit_price": 175,
+                    "total": 364000,
+                },
+                {
+                    "description": "DevOps Engineer",
+                    "quantity": 2080,
+                    "unit": "HR",
+                    "unit_price": 150,
+                    "total": 312000,
+                },
+                {
+                    "description": "AWS Licensing",
+                    "quantity": 12,
+                    "unit": "MO",
+                    "unit_price": 15000,
+                    "total": 180000,
+                },
+            ],
+        }
+
+        result = XLSXPopulator.populate(commercial_igce_xlsx, data, {})
+
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(result), data_only=False)
+        summary = wb["IGCE"]
+        services = wb["IT Services"]
+        goods = wb["IT Goods"]
+
+        assert summary["A7"].value == "Cloud Architect"
+        assert summary["C7"].value == 2080
+        assert summary["E7"].value == 175
+        assert summary["A8"].value == "DevOps Engineer"
+        assert summary["E30"].value == 180000
+        assert summary["G7"].value == "=C7*E7"
+
+        assert services["B5"].value == "Firm-Fixed-Price"
+        assert services["C6"].value == "12 months"
+        assert services["A12"].value == "Cloud Architect"
+        assert services["B12"].value == 2080
+        assert services["C12"].value == 175
+        assert services["E12"].value == 0
+        assert services["D12"].value == "=B12*C12"
+
+        assert goods["B5"].value == "Firm-Fixed-Price"
+        assert goods["B6"].value == "2026-09-30"
+        assert goods["A10"].value == "AWS Licensing"
+        assert goods["E10"].value == 12
+        assert goods["F10"].value == 15000
+        assert goods["G10"].value == "=F10*E10"
+
+    def test_populate_maps_total_estimate_when_line_items_missing(
+        self,
+        commercial_igce_xlsx,
+    ):
+        """Total estimate should still populate a usable workbook when items are absent."""
+        result = XLSXPopulator.populate(
+            commercial_igce_xlsx,
+            {
+                "description": "Seed Estimate",
+                "total_estimate": "$12,500",
+            },
+            {},
+        )
+
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(result), data_only=False)
+        summary = wb["IGCE"]
+        goods = wb["IT Goods"]
+
+        assert summary["A30"].value == "Seed Estimate"
+        assert summary["E30"].value == 12500
+        assert goods["A10"].value == "Seed Estimate"
+        assert goods["E10"].value == 1
+        assert goods["F10"].value == 12500
 
 
 # ══════════════════════════════════════════════════════════════════════

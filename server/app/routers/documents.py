@@ -1239,16 +1239,19 @@ async def api_get_document(
                     tenant_id=tenant_id,
                     user_id=user_id,
                 )
+                preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
+                preview_blocks = preview_payload.get("preview_blocks", [])
+                preview_sheets = preview_payload.get("preview_sheets", [])
+
                 if sidecar_content is not None:
                     content = sidecar_content
-                    preview_mode = "markdown_sidecar"
-                else:
-                    preview_payload = _extract_binary_preview_payload(
-                        doc_key, raw_bytes
+                    preview_mode = (
+                        preview_payload.get("preview_mode")
+                        if preview_blocks or preview_sheets
+                        else "markdown_sidecar"
                     )
+                else:
                     content = preview_payload.get("content")
-                    preview_blocks = preview_payload.get("preview_blocks", [])
-                    preview_sheets = preview_payload.get("preview_sheets", [])
                     preview_mode = preview_payload.get("preview_mode")
             download_url = s3.generate_presigned_url(
                 "get_object",
