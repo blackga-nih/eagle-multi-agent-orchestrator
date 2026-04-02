@@ -460,7 +460,7 @@ if _ENV_MODEL_OVERRIDE:
     _MODEL_CHAIN_IDS.insert(0, _ENV_MODEL_OVERRIDE)
 
 _CB_FAILURE_THRESHOLD = int(os.getenv("EAGLE_CB_FAILURE_THRESHOLD", "2"))
-_CB_RECOVERY_TIMEOUT = float(os.getenv("EAGLE_CB_RECOVERY_TIMEOUT", "120"))
+_CB_RECOVERY_TIMEOUT = float(os.getenv("EAGLE_CB_RECOVERY_TIMEOUT", "300"))
 
 _circuit_breaker = ModelCircuitBreaker(
     model_ids=_MODEL_CHAIN_IDS,
@@ -473,7 +473,7 @@ MODEL = _MODEL_CHAIN_IDS[0]
 
 # -- Shared BedrockModel instances (one per unique model in chain) ---
 _bedrock_client_config = Config(
-    connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "60")),
+    connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "10")),
     read_timeout=int(os.getenv("EAGLE_BEDROCK_READ_TIMEOUT", "300")),
     retries={
         # Keep retries low (1 = no retry) — the circuit breaker handles
@@ -530,30 +530,40 @@ _ENABLE_STARTUP_PROBE = os.getenv("EAGLE_CB_STARTUP_PROBE", "true").lower() in (
 )
 
 
+def _ping_model(mid: str) -> bool:
+    """Send a minimal converse() to keep a model endpoint warm.
+
+    Uses the shared BedrockModel client so the TCP/TLS connection is the
+    same one real requests use.  Returns True on success.
+    """
+    bedrock_model = _bedrock_models.get(mid)
+    if not bedrock_model:
+        return False
+    try:
+        bedrock_model.client.converse(
+            modelId=mid,
+            messages=[{"role": "user", "content": [{"text": "hi"}]}],
+            inferenceConfig={"maxTokens": 1},
+        )
+        return True
+    except Exception as exc:
+        logger.warning("keepalive_ping: %s FAILED: %s", mid, exc)
+        return False
+
+
 def _run_startup_probe():
-    """Probe each model in the chain with a trivial request (parallel)."""
-    import boto3
+    """Probe each model in the chain via the shared BedrockModel instances.
 
-    probe_client = boto3.client(
-        "bedrock-runtime",
-        region_name=os.getenv("AWS_REGION", "us-east-1"),
-        config=Config(
-            connect_timeout=5, read_timeout=20, retries={"max_attempts": 1}
-        ),
-    )
-
+    Uses the same boto3 client that real requests will use, so the TCP
+    connection, TLS handshake, and endpoint DNS are all pre-warmed.
+    """
     def _probe_one(mid: str) -> None:
-        try:
-            probe_client.converse(
-                modelId=mid,
-                messages=[{"role": "user", "content": [{"text": "hi"}]}],
-                inferenceConfig={"maxTokens": 1},
-            )
+        if _ping_model(mid):
             logger.info("startup_probe: %s OK", mid)
-        except Exception as exc:
+        else:
             for _ in range(_CB_FAILURE_THRESHOLD):
                 _circuit_breaker.record_failure(mid)
-            logger.warning("startup_probe: %s FAILED: %s", mid, exc)
+            logger.warning("startup_probe: %s FAILED — circuit opened", mid)
 
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=len(_MODEL_CHAIN_IDS), thread_name_prefix="cb-probe"
@@ -561,9 +571,64 @@ def _run_startup_probe():
         list(pool.map(_probe_one, dict.fromkeys(_MODEL_CHAIN_IDS)))
 
 
+# -- Keepalive Loop (background) ------------------------------------
+# Bedrock cross-region inference endpoints go cold after ~60-90s of
+# inactivity, adding 5-10s of TTFT latency on the next request.
+# This loop pings the primary model periodically to keep the
+# inference path warm (TCP + TLS + model endpoint).
+
+_KEEPALIVE_INTERVAL = float(os.getenv("EAGLE_KEEPALIVE_INTERVAL", "45"))
+_ENABLE_KEEPALIVE = os.getenv("EAGLE_KEEPALIVE_ENABLED", "true").lower() in (
+    "true",
+    "1",
+)
+
+
+def _run_keepalive_loop():
+    """Ping the active model every N seconds to prevent cold starts."""
+    import time as _t
+
+    # Wait for startup probe to finish first
+    _t.sleep(5)
+    logger.info(
+        "keepalive_loop: started (interval=%ds, models=%s)",
+        _KEEPALIVE_INTERVAL,
+        _MODEL_CHAIN_IDS,
+    )
+    while True:
+        try:
+            _t.sleep(_KEEPALIVE_INTERVAL)
+            mid = _circuit_breaker.get_active_model_id()
+            start = _t.perf_counter()
+            ok = _ping_model(mid)
+            elapsed = _t.perf_counter() - start
+            if ok:
+                logger.debug(
+                    "keepalive_ping: %s OK (%.1fs)", mid, elapsed,
+                )
+                if elapsed > 8.0:
+                    logger.warning(
+                        "keepalive_ping: %s slow (%.1fs) — possible cold start despite keepalive",
+                        mid,
+                        elapsed,
+                    )
+            else:
+                _circuit_breaker.record_failure(mid)
+                logger.warning(
+                    "keepalive_ping: %s failed — circuit breaker notified", mid,
+                )
+        except Exception as exc:
+            logger.debug("keepalive_loop: unexpected error: %s", exc)
+
+
 if _ENABLE_STARTUP_PROBE:
     threading.Thread(
         target=_run_startup_probe, name="cb-startup-probe", daemon=True
+    ).start()
+
+if _ENABLE_KEEPALIVE:
+    threading.Thread(
+        target=_run_keepalive_loop, name="cb-keepalive", daemon=True
     ).start()
 
 # Backward-compat alias used by older code paths

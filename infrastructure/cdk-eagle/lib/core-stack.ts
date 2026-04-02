@@ -107,12 +107,40 @@ export class EagleCoreStack extends cdk.Stack {
       refreshTokenValidity: cdk.Duration.days(30),
     });
 
-    // ── CloudWatch Log Group ─────────────────────────────────
+    // ── CloudWatch Log Groups ────────────────────────────────
     const appLogGroup = new logs.LogGroup(this, 'AppLogGroup', {
       logGroupName: '/eagle/app',
       retention: logs.RetentionDays.THREE_MONTHS,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+
+    // Bedrock model invocation logs — captures per-call latency, input/output
+    // tokens, model ID, and error codes for every converse() call.
+    const bedrockInvocationLogGroup = new logs.LogGroup(this, 'BedrockInvocationLogGroup', {
+      logGroupName: '/aws/bedrock/modelinvocations',
+      retention: logs.RetentionDays.TWO_WEEKS,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Role assumed by Bedrock service to write invocation logs.
+    // NCI SCP requires power-user-* prefix + PermissionBoundary_PowerUser.
+    const bedrockLoggingRole = new iam.Role(this, 'BedrockLoggingRole', {
+      roleName: `power-user-eagle-bedrock-logging-${config.env}`,
+      assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
+      permissionsBoundary: iam.ManagedPolicy.fromManagedPolicyName(
+        this, 'PowerUserBoundary', 'PermissionBoundary_PowerUser',
+      ),
+    });
+
+    bedrockLoggingRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'logs:CreateLogStream',
+        'logs:PutLogEvents',
+      ],
+      resources: [
+        `${bedrockInvocationLogGroup.logGroupArn}:*`,
+      ],
+    }));
 
     // ── IAM App Execution Role ───────────────────────────────
     this.appRole = new iam.Role(this, 'AppRole', {
@@ -233,6 +261,11 @@ export class EagleCoreStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, 'AppLogGroupName', {
       value: appLogGroup.logGroupName,
+    });
+    new cdk.CfnOutput(this, 'BedrockLoggingRoleArn', {
+      value: bedrockLoggingRole.roleArn,
+      description: 'Role ARN for Bedrock model invocation logging',
+      exportName: `eagle-bedrock-logging-role-arn-${config.env}`,
     });
     new cdk.CfnOutput(this, 'EagleTableName', {
       value: eagleTable.tableName,
