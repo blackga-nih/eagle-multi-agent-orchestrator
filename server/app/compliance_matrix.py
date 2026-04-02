@@ -2,10 +2,11 @@
 NCI/NIH Contract Requirements Decision Tree — Python port.
 
 Deterministic compliance logic ported from contract-requirements-matrix.html.
-Backed by three JSON data files in eagle-plugin/data/:
-  - thresholds.json   — threshold tier definitions
+Backed by JSON data files in eagle-plugin/data/:
+  - matrix.json          — authoritative thresholds + rules (single source of truth)
   - contract-vehicles.json — vehicle catalog & selection guide
-  - far-database.json — FAR/HHSAR citation database
+  - far-database.json    — FAR/HHSAR citation database
+  - thresholds.json      — DEPRECATED: retained for backward compat on list_thresholds
 
 All functions are read-only (no tenant state, no side effects).
 """
@@ -13,6 +14,7 @@ All functions are read-only (no tenant state, no side effects).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -28,7 +30,8 @@ def _load_json(filename: str) -> dict | list:
         return json.load(f)
 
 
-_THRESHOLDS_DATA: dict = _load_json("thresholds.json")
+_MATRIX_DATA: dict = _load_json("matrix.json")
+_THRESHOLDS_DATA: dict = _load_json("thresholds.json")  # deprecated
 _VEHICLES_DATA: dict = _load_json("contract-vehicles.json")
 _FAR_DATABASE: list[dict] = _load_json("far-database.json")
 
@@ -110,21 +113,32 @@ TYPES = [
     {"id": "lh", "label": "Labor-Hour (LH)", "risk": 15, "category": "loe"},
 ]
 
-THRESHOLD_TIERS = [
-    {"value": 15_000, "label": "$15K MPT", "short": "$15K"},
-    {"value": 25_000, "label": "$25K Synopsis", "short": "$25K"},
-    {"value": 350_000, "label": "$350K SAT", "short": "$350K"},
-    {"value": 750_000, "label": "$750K SubK", "short": "$750K"},
-    {"value": 900_000, "label": "$900K J&A", "short": "$900K"},
-    {"value": 2_500_000, "label": "$2.5M TINA", "short": "$2.5M"},
-    {"value": 4_500_000, "label": "$4.5M Congress", "short": "$4.5M"},
-    {"value": 6_000_000, "label": "$6M IDIQ Enh", "short": "$6M"},
-    {"value": 20_000_000, "label": "$20M AP", "short": "$20M"},
-    {"value": 50_000_000, "label": "$50M HCA", "short": "$50M"},
-    {"value": 90_000_000, "label": "$90M SPE J&A", "short": "$90M"},
-    {"value": 100_000_000, "label": "$100M SPE", "short": "$100M"},
-    {"value": 150_000_000, "label": "$150M OAP", "short": "$150M"},
-]
+# Thresholds sourced from matrix.json (single source of truth).
+# Each entry has: value, label, short, triggers[].
+THRESHOLD_TIERS: list[dict] = _MATRIX_DATA["thresholds"]
+
+
+def _threshold(trigger: str) -> int:
+    """Look up a threshold value by its trigger name from matrix.json."""
+    for t in THRESHOLD_TIERS:
+        if trigger in t.get("triggers", []):
+            return t["value"]
+    raise ValueError(f"Unknown threshold trigger: {trigger}")
+
+
+# Convenience constants derived from matrix.json at import time.
+_MPT = _threshold("micro_purchase_threshold")
+_SAT = _threshold("simplified_acquisition_threshold")
+_SYNOPSIS = _threshold("sam_gov_synopsis_required")
+_SUBK = _threshold("subcontracting_plan_required")
+_JA_HCA = _threshold("ja_hca_approval_required")
+_TINA = _threshold("certified_cost_pricing_data_required")
+_CONGRESS = _threshold("8a_sole_source_services_ceiling")  # $4.5M
+_IDIQ_ENH = _threshold("idiq_enhanced_competition")
+_AP_OA = _threshold("written_acquisition_plan_required")  # $20M
+_HCA = _threshold("hca_approval_required")  # $50M
+_SPE_JA = _threshold("spe_ja_approval_required")  # $90M
+_OAP = _threshold("oap_approval_required")  # $150M
 
 _METHODS_BY_ID = {m["id"]: m for m in METHODS}
 _TYPES_BY_ID = {t["id"]: t for t in TYPES}
@@ -193,9 +207,9 @@ _METHOD_ALIASES: dict[str, str] = {
     "federal_supply_schedule": "fss",
     "far part 8": "fss",
     "part 8": "fss",
-    "8a": "fss",
-    "sba 8(a)": "fss",
-    "far part 8(a)": "fss",
+    # Note: "8a" / "sba 8(a)" should NOT map to FSS.
+    # 8(a) uses is_8a=True flag with the appropriate method (sap/negotiated).
+    # "far part 8" (FAR 8.4 schedules) correctly maps to fss above.
 }
 
 _TYPE_ALIASES: dict[str, str] = {
@@ -283,23 +297,29 @@ def _normalize_type(raw: str) -> str | None:
 
 
 def _ap_approval(v: float) -> str:
-    if v > 150_000_000:
-        return "HHS/OAP approval required (> $150M)"
-    if v > 50_000_000:
-        return "HCA-NIH approval required ($50M-$150M)"
-    if v > 20_000_000:
-        return "OA Director approval by HCA ($20M-$50M)"
-    return "One level above CO (SAT-$20M)"
+    if v > _OAP:
+        return f"HHS/OAP approval required (> ${_OAP:,})"
+    if v > _HCA:
+        return f"HCA-NIH approval required (${_HCA:,}-${_OAP:,})"
+    if v > _AP_OA:
+        return f"OA Director approval by HCA (${_AP_OA:,}-${_HCA:,})"
+    return f"One level above CO (SAT-${_AP_OA:,})"
 
 
-def _ja_approval(v: float) -> str:
-    if v > 90_000_000:
-        return "SPE through HHS/OAP (> $90M) - FAR 6.304(a)(4)"
-    if v > 20_000_000:
-        return "HCA + additional reviews ($20M-$90M) - FAR 6.304(a)(3)"
-    if v > 900_000:
-        return "HCA + NIH Competition Advocate ($900K-$20M) - FAR 6.304(a)(2)"
-    return "CO approval (<= $900K) - FAR 6.304(a)(1)"
+def _ja_approval(v: float, is_simplified_sole: bool = False) -> str:
+    if is_simplified_sole:
+        return (
+            "CO determination — FAR 13.106-1(b) simplified sole source. "
+            "Legal basis: FAR 6.302-1 / 41 U.S.C. 3304(a)(1). "
+            "No Competition Advocate or HCA approval required."
+        )
+    if v > _SPE_JA:
+        return f"SPE through HHS/OAP (> ${_SPE_JA:,}) - FAR 6.304(a)(4)"
+    if v > _AP_OA:
+        return f"HCA + additional reviews (${_AP_OA:,}-${_SPE_JA:,}) - FAR 6.304(a)(3)"
+    if v > _JA_HCA:
+        return f"HCA + NIH Competition Advocate (${_JA_HCA:,}-${_AP_OA:,}) - FAR 6.304(a)(2)"
+    return f"CO approval (<= ${_JA_HCA:,}) - FAR 6.304(a)(1)"
 
 
 # ---------------------------------------------------------------------------
@@ -333,11 +353,15 @@ def get_requirements(
     t = _normalize_type(contract_type)
 
     flags = flags or {}
-    is_it = flags.get("is_it", False)
-    is_sb = flags.get("is_small_business", False)
-    is_rd = flags.get("is_rd", False)
-    is_hs = flags.get("is_human_subjects", False)
-    is_services = flags.get("is_services", True)
+    f = flags  # short alias
+    is_it = f.get("is_it", False)
+    is_sb = f.get("is_small_business", False)
+    is_rd = f.get("is_rd", False)
+    is_hs = f.get("is_human_subjects", False)
+    is_services = f.get("is_services", True)
+    is_limited = f.get("is_limited_sources", False)
+    is_8a = f.get("is_8a", False)
+    is_mfg = f.get("is_manufacturing", False)
 
     t_obj = _TYPES_BY_ID.get(t) if t else None
     if not t_obj:
@@ -381,7 +405,7 @@ def get_requirements(
             "T&M/LH is LEAST PREFERRED. CO must prepare D&F that no other "
             "contract type is suitable (FAR 16.601)."
         )
-        if m == "bpa-est" and v > 350_000:
+        if m == "bpa-est" and v > _SAT:
             warnings.append(
                 "T&M/LH BPAs > 3 years require HCA approval (not just standard D&F)."
             )
@@ -392,12 +416,12 @@ def get_requirements(
             "Rollover of unearned fee is PROHIBITED (FAR 16.402-2)."
         )
 
-    if m == "micro" and v > 15_000:
-        errors.append("Micro-purchase threshold is $15,000 (HHS). Value exceeds MPT.")
+    if m == "micro" and v > _MPT:
+        errors.append(f"Micro-purchase threshold is ${_MPT:,} (HHS). Value exceeds MPT.")
 
-    if m == "sap" and v > 350_000:
+    if m == "sap" and v > _SAT:
         errors.append(
-            "SAP threshold is $350,000 (SAT). Value exceeds SAT "
+            f"SAP threshold is ${_SAT:,} (SAT). Value exceeds SAT "
             "- use Negotiated (FAR 15)."
         )
 
@@ -435,13 +459,13 @@ def get_requirements(
             "name": "IGCE",
             "required": m != "micro",
             "note": "Detailed breakdown required (HHSAM 307.105-71)"
-            if v > 350_000
+            if v > _SAT
             else "Sufficient detail/breakdown",
         }
     )
 
     # Market Research
-    if v > 350_000:
+    if v > _SAT:
         docs.append(
             {
                 "name": "Market Research Report",
@@ -449,7 +473,7 @@ def get_requirements(
                 "note": "HHS template required (HHSAM 310.000)",
             }
         )
-    elif v > 15_000:
+    elif v > _MPT:
         docs.append(
             {
                 "name": "Market Research",
@@ -467,7 +491,7 @@ def get_requirements(
         )
 
     # Acquisition Plan
-    if v > 350_000:
+    if v > _SAT:
         docs.append(
             {"name": "Acquisition Plan", "required": True, "note": _ap_approval(v)}
         )
@@ -476,26 +500,44 @@ def get_requirements(
             {
                 "name": "Acquisition Plan",
                 "required": False,
-                "note": "Not required below SAT ($350K)",
+                "note": f"Not required below SAT (${_SAT:,})",
             }
         )
 
     # J&A
+    is_simplified_sole = m == "sole" and v <= _SAT
+    is_fss_limited = m == "fss" and is_limited
+    is_bpa_call_limited = m == "bpa-call" and is_limited
+    is_bpa_est_limited = m == "bpa-est" and is_limited
+
     needs_ja = (
-        m == "sole" or (m == "fss" and v > 350_000) or (m == "bpa-call" and v > 350_000)
+        m == "sole"
+        or (m == "fss" and (v > _SAT or is_limited))
+        or (m == "bpa-call" and (v > _SAT or is_limited))
+        or is_bpa_est_limited
     )
-    docs.append(
-        {
-            "name": "J&A / Justification",
-            "required": needs_ja,
-            "note": _ja_approval(v)
-            if needs_ja
-            else "Only if sole source / limited competition",
-        }
-    )
+    ja_entry: dict = {
+        "name": "J&A / Justification",
+        "required": needs_ja,
+        "note": _ja_approval(v, is_simplified_sole=is_simplified_sole)
+        if needs_ja
+        else "Only if sole source / limited competition",
+    }
+    if needs_ja and is_simplified_sole:
+        ja_entry["variant"] = "simplified_under_sat"
+        ja_entry["authority"] = "FAR 13.106-1(b)"
+        ja_entry["template_hint"] = "6.a. Single Source J&A - up to SAT.docx"
+    elif needs_ja and (is_fss_limited or is_bpa_call_limited or is_bpa_est_limited) and v <= _SAT:
+        ja_entry["variant"] = "simplified_limited_sources"
+        ja_entry["authority"] = "FAR 8.405-6"
+        ja_entry["template_hint"] = "6.a. Single Source J&A - up to SAT.docx"
+    elif needs_ja:
+        ja_entry["variant"] = "full"
+        ja_entry["authority"] = "FAR 6.302 / 6.303 / 6.304"
+    docs.append(ja_entry)
 
     # D&F
-    needs_df = is_loe or (is_cr and v > 350_000) or t == "fpi" or t == "cpaf"
+    needs_df = is_loe or (is_cr and v > _SAT) or t == "fpi" or t == "cpaf"
     if is_loe:
         df_note = "Required: no other type suitable (FAR 16.601)"
     elif is_cr:
@@ -511,7 +553,7 @@ def get_requirements(
     )
 
     # Source Selection Plan
-    needs_ssp = m == "negotiated" and v > 350_000
+    needs_ssp = m == "negotiated" and v > _SAT
     docs.append(
         {
             "name": "Source Selection Plan",
@@ -523,13 +565,13 @@ def get_requirements(
     )
 
     # Subcontracting Plan
-    needs_subk = v > 750_000 and not is_sb
+    needs_subk = v > _SUBK and not is_sb
     if needs_subk:
-        subk_note = "Required for non-SB > $750K (FAR 19.705)"
+        subk_note = f"Required for non-SB > ${_SUBK:,} (FAR 19.705)"
     elif is_sb:
         subk_note = "Exempt - small business awardee"
     else:
-        subk_note = "Below $750K threshold"
+        subk_note = f"Below ${_SUBK:,} threshold"
     docs.append(
         {"name": "Subcontracting Plan", "required": needs_subk, "note": subk_note}
     )
@@ -550,9 +592,9 @@ def get_requirements(
     docs.append(
         {
             "name": "HHS-653 Small Business Review",
-            "required": v > 15_000,
+            "required": v > _MPT,
             "note": "Required > MPT (AA 2023-02 Amendment 3)"
-            if v > 15_000
+            if v > _MPT
             else "Below MPT",
         }
     )
@@ -569,7 +611,7 @@ def get_requirements(
         docs.append(
             {
                 "name": "Section 508 ICT Evaluation",
-                "required": v > 15_000,
+                "required": v > _MPT,
                 "note": "Required for IT > MPT",
             }
         )
@@ -607,33 +649,33 @@ def get_requirements(
     compliance.append(
         {
             "name": "SAM.gov Synopsis",
-            "status": "required" if v > 25_000 else "n/a",
-            "note": "Required > $25K (FAR 5.101)" if v > 25_000 else "Below $25K",
+            "status": "required" if v > _SYNOPSIS else "n/a",
+            "note": f"Required > ${_SYNOPSIS:,} (FAR 5.101)" if v > _SYNOPSIS else f"Below ${_SYNOPSIS:,}",
         }
     )
     compliance.append(
         {
             "name": "CPARS Evaluation",
-            "status": "required" if v > 350_000 else "n/a",
-            "note": "Required > SAT" if v > 350_000 else "Below SAT",
+            "status": "required" if v > _SAT else "n/a",
+            "note": "Required > SAT" if v > _SAT else "Below SAT",
         }
     )
     compliance.append(
         {
             "name": "Congressional Notification",
-            "status": "required" if v > 4_500_000 else "n/a",
-            "note": "Required > $4.5M - email grantfax@hhs.gov"
-            if v > 4_500_000
-            else "Below $4.5M",
+            "status": "required" if v > _CONGRESS else "n/a",
+            "note": f"Required > ${_CONGRESS:,} - email grantfax@hhs.gov"
+            if v > _CONGRESS
+            else f"Below ${_CONGRESS:,}",
         }
     )
     compliance.append(
         {
             "name": "Certified Cost/Pricing Data (TINA)",
-            "status": "required" if v > 2_500_000 else "n/a",
-            "note": "Required > $2.5M (with exceptions)"
-            if v > 2_500_000
-            else "Below $2.5M",
+            "status": "required" if v > _TINA else "n/a",
+            "note": f"Required > ${_TINA:,} (with exceptions)"
+            if v > _TINA
+            else f"Below ${_TINA:,}",
         }
     )
 
@@ -676,51 +718,82 @@ def get_requirements(
     if m == "micro":
         competition = "Single quote acceptable. Government purchase card preferred."
     elif m == "sap":
-        if v > 25_000:
+        if v > _SYNOPSIS:
             competition = "Maximum practicable competition. Minimum 3 sources if practicable. Synopsis on SAM.gov."
         else:
             competition = "Reasonable competition. Minimum 3 sources if practicable."
     elif m == "negotiated":
         competition = "Full and open competition required (FAR Part 6). Synopsis, evaluation factors, source selection."
     elif m == "fss":
-        if v > 350_000:
+        if v > _SAT:
             competition = "eBuy posting OR RFQ to enough contractors for 3 quotes. Price reduction attempt required."
         else:
             competition = "Consider quotes from at least 3 schedule contractors."
     elif m == "bpa-est":
-        if v > 350_000:
+        if v > _SAT:
             competition = "eBuy posting to ALL schedule holders OR 3-quote effort. Document award decision."
         else:
             competition = "Seek quotes from at least 3 schedule holders."
     elif m == "bpa-call":
-        if v > 350_000:
+        if v > _SAT:
             competition = "RFQ to all BPA holders OR limited sources justification. Fair opportunity required."
         else:
             competition = "Fair opportunity to all BPA holders > MPT, or justification."
     elif m == "idiq":
         competition = "Full and open competition for parent contract. Multiple award preference unless exception (FAR 16.504)."
     elif m == "idiq-order":
-        if v > 7_500_000:
+        if v > _IDIQ_ENH:
             competition = (
                 "Fair opportunity to all IDIQ holders. Clear requirements, "
                 "evaluation factors with relative importance, post-award notifications/debriefings."
             )
-        elif v > 350_000:
+        elif v > _SAT:
             competition = "Fair opportunity. Provide fair notice, issue solicitation/RFQ, document award basis."
         else:
             competition = "Fair opportunity. May place without further solicitation if fair consideration documented."
     elif m == "sole":
-        competition = "Exception to competition - FAR 6.302 authority required. Full J&A with CO certification."
+        if v <= _SAT:
+            competition = (
+                "Simplified sole source — FAR 13.106-1(b). CO determines competition "
+                "is not practicable. Legal basis: FAR 6.302-1 (Only One Responsible Source) / "
+                "41 U.S.C. 3304(a)(1). Simplified justification required, not full FAR Part 6 J&A."
+            )
+        else:
+            competition = (
+                "Exception to competition — FAR 6.302 authority required. "
+                "Full J&A per FAR 6.303, approval per FAR 6.304."
+            )
 
     # Enhanced IDIQ
-    if m == "idiq-order" and v > 6_000_000:
+    if m == "idiq-order" and v > _IDIQ_ENH:
         competition += (
-            " ENHANCED: Detailed evaluation factors + relative importance "
-            "+ post-award notification + debriefing (> $6M)."
+            f" ENHANCED: Detailed evaluation factors + relative importance "
+            f"+ post-award notification + debriefing (> ${_IDIQ_ENH:,})."
         )
 
+    # 8(a) override — applies on top of the method-based competition rules
+    if is_8a:
+        _8a_ceiling = (
+            _threshold("8a_sole_source_manufacturing_ceiling")
+            if is_mfg
+            else _threshold("8a_sole_source_services_ceiling")
+        )
+        _8a_type = "manufacturing" if is_mfg else "services"
+        if v <= _8a_ceiling:
+            competition = (
+                f"SBA 8(a) sole source authorized — FAR 19.805-1. "
+                f"{_8a_type.title()} ceiling: ${_8a_ceiling:,}. "
+                f"Requires SBA acceptance and offering letter."
+            )
+        else:
+            competition = (
+                f"SBA 8(a) competitive required — value ${v:,.0f} exceeds "
+                f"{_8a_type} sole source ceiling ${_8a_ceiling:,}. "
+                f"FAR 19.805-1(a)(2)."
+            )
+
     # --- PMR Checklist ---
-    if m == "sap" or (m == "negotiated" and v <= 350_000):
+    if m == "sap" or (m == "negotiated" and v <= _SAT):
         pmr = "HHS PMR SAP Checklist"
     elif m == "negotiated":
         pmr = "HHS PMR Negotiated + Common Requirements"
@@ -752,13 +825,13 @@ def get_requirements(
     time_min, time_max = timelines.get(m, (1, 5))
 
     # Approval escalation adds time
-    if v > 90_000_000:
+    if v > _SPE_JA:
         time_min += 6
         time_max += 8
-    elif v > 50_000_000:
+    elif v > _HCA:
         time_min += 4
         time_max += 6
-    elif v > 20_000_000:
+    elif v > _AP_OA:
         time_min += 2
         time_max += 4
 
@@ -776,7 +849,7 @@ def get_requirements(
 
     # --- Approvals Required ---
     approvals: list[dict] = []
-    if v > 350_000:
+    if v > _SAT:
         approvals.append({"type": "Acquisition Plan", "authority": _ap_approval(v)})
     if needs_ja:
         approvals.append({"type": "J&A", "authority": _ja_approval(v)})
@@ -784,7 +857,7 @@ def get_requirements(
         approvals.append(
             {"type": "D&F", "authority": "One level above CO" if is_loe else "CO"}
         )
-    if v > 2_500_000:
+    if v > _TINA:
         approvals.append(
             {
                 "type": "TINA / Cost Data",

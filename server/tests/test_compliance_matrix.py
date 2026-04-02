@@ -63,17 +63,17 @@ class TestGetRequirements:
         assert "Unknown contract type" in result["errors"][0]
 
     def test_threshold_500k_triggers_sat_not_tina(self):
-        """$500K triggers SAT ($350K) but not TINA ($2.5M)."""
+        """$500K triggers SAT ($350K) but not TINA ($2M per matrix.json)."""
         result = get_requirements(500_000, "negotiated", "ffp")
         triggered_values = [t["value"] for t in result["thresholds_triggered"]]
         assert 350_000 in triggered_values, "SAT threshold should be triggered"
-        assert 2_500_000 not in triggered_values, "TINA threshold should NOT be triggered"
+        assert 2_000_000 not in triggered_values, "TINA threshold should NOT be triggered"
 
     def test_threshold_3m_triggers_tina(self):
-        """$3M triggers TINA ($2.5M)."""
+        """$3M triggers TINA ($2M per matrix.json FAC 2025-06)."""
         result = get_requirements(3_000_000, "negotiated", "ffp")
         triggered_values = [t["value"] for t in result["thresholds_triggered"]]
-        assert 2_500_000 in triggered_values, "TINA threshold should be triggered at $3M"
+        assert 2_000_000 in triggered_values, "TINA threshold should be triggered at $3M"
         # TINA compliance item should be required
         tina_items = [c for c in result["compliance_items"] if "TINA" in c["name"]]
         assert len(tina_items) == 1
@@ -101,6 +101,38 @@ class TestGetRequirements:
         ja_docs = [d for d in result["documents_required"] if "J&A" in d["name"]]
         assert len(ja_docs) == 1
         assert ja_docs[0]["required"] is True
+
+    def test_sole_source_under_sat_simplified(self):
+        """Sole source under SAT uses simplified FAR 13.106-1(b) path."""
+        result = get_requirements(280_000, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+        assert ja["variant"] == "simplified_under_sat"
+        assert "13.106-1(b)" in ja["note"]
+        assert ja["authority"] == "FAR 13.106-1(b)"
+        assert ja["template_hint"] == "6.a. Single Source J&A - up to SAT.docx"
+        assert "13.106-1(b)" in result["competition_rules"]
+
+    def test_sole_source_over_sat_full_ja(self):
+        """Sole source over SAT uses full FAR 6.302/6.304 path."""
+        result = get_requirements(500_000, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+        assert ja["variant"] == "full"
+        assert "6.304" in ja["note"]
+        assert "FAR 6.302" in result["competition_rules"]
+
+    def test_sole_source_at_sat_boundary(self):
+        """Sole source at exactly SAT ($350K) uses simplified path."""
+        result = get_requirements(350_000, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["variant"] == "simplified_under_sat"
+
+    def test_sole_source_above_sat_boundary(self):
+        """Sole source at $350,001 uses full J&A path."""
+        result = get_requirements(350_001, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["variant"] == "full"
 
     def test_micro_purchase_exceeds_mpt_error(self):
         """Micro-purchase above $15K produces an error."""
