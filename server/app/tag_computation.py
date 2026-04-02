@@ -11,6 +11,8 @@ import logging
 from decimal import Decimal
 from typing import Optional
 
+from .compliance_matrix import THRESHOLD_TIERS as _MATRIX_TIERS
+
 logger = logging.getLogger("eagle.tag_computation")
 
 
@@ -283,8 +285,6 @@ def _value_to_risk(value: float) -> str:
 
 
 # Derived from matrix.json via compliance_matrix (single source of truth).
-from .compliance_matrix import THRESHOLD_TIERS as _MATRIX_TIERS
-
 # Map matrix.json triggers → internal tier names used by tag_computation.
 _TRIGGER_TO_TIER = {
     "micro_purchase_threshold": "micro",
