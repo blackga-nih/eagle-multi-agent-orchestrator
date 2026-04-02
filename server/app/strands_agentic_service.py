@@ -5577,18 +5577,23 @@ async def sdk_query_streaming(
                 pass
         return  # Stream was abandoned — skip cleanup yields
     except Exception as exc:
-        from botocore.exceptions import ClientError
+        from botocore.exceptions import ClientError, ReadTimeoutError, ConnectTimeoutError, EndpointConnectionError
         from strands.types.exceptions import ContextWindowOverflowException
 
-        # --- Circuit-breaker cascade on ServiceUnavailable or TTFT timeout ---
+        # --- Circuit-breaker cascade on ServiceUnavailable, read timeout, or TTFT timeout ---
         _is_service_unavailable = (
             isinstance(exc, ClientError)
             and exc.response.get("Error", {}).get("Code") == "ServiceUnavailableException"
         ) or "ServiceUnavailableException" in str(exc)
+        _is_bedrock_timeout = isinstance(exc, (ReadTimeoutError, ConnectTimeoutError, EndpointConnectionError))
         _is_ttft_timeout = isinstance(exc, TimeoutError) and "TTFT timeout" in str(exc)
 
-        if _is_service_unavailable or _is_ttft_timeout:
-            _fallback_reason = "TTFT timeout" if _is_ttft_timeout else "service unavailable"
+        if _is_service_unavailable or _is_bedrock_timeout or _is_ttft_timeout:
+            _fallback_reason = (
+                "TTFT timeout" if _is_ttft_timeout
+                else "read timeout" if _is_bedrock_timeout
+                else "service unavailable"
+            )
             _circuit_breaker.record_failure(_current_model_id)
             logger.warning(
                 "circuit_breaker: %s failed (%s), session=%s. Status: %s",
