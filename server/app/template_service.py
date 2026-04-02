@@ -17,7 +17,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.db_client import get_s3
-from app.formula_evaluation import evaluate_workbook_formulas_safe
+from app.formula_evaluation import calculate_workbook_formula_values
+from app.igce_xlsx_mapper import CommercialIGCEWorkbookMapper
 from app.template_registry import (
     TEMPLATE_BUCKET,
     get_alternate_s3_keys,
@@ -222,6 +223,22 @@ class XLSXPopulator:
     """Populates XLSX templates by replacing {{PLACEHOLDER}} tokens."""
 
     @staticmethod
+    def _resolve_display_value(raw_value: Any, cached_value: Any, calculated_value: Any) -> Any:
+        """Choose the best display value for a spreadsheet cell."""
+        is_formula = isinstance(raw_value, str) and raw_value.startswith("=")
+        if is_formula:
+            if calculated_value is not None:
+                return calculated_value
+            if cached_value is not None and not (
+                isinstance(cached_value, str) and cached_value.startswith("=")
+            ):
+                return cached_value
+            return ""
+        if cached_value is not None:
+            return cached_value
+        return raw_value
+
+    @staticmethod
     def populate(
         template_bytes: bytes,
         data: Dict[str, Any],
@@ -248,6 +265,11 @@ class XLSXPopulator:
             raise ImportError("openpyxl required for XLSX population")
 
         wb = load_workbook(io.BytesIO(template_bytes))
+
+        if CommercialIGCEWorkbookMapper.populate(wb, data):
+            output = io.BytesIO()
+            wb.save(output)
+            return output.getvalue()
 
         # Build replacement dict
         replacements = {}
@@ -285,10 +307,7 @@ class XLSXPopulator:
         # Save to bytes
         output = io.BytesIO()
         wb.save(output)
-        populated_bytes = output.getvalue()
-
-        # Evaluate formulas so preview shows calculated values
-        return evaluate_workbook_formulas_safe(populated_bytes)
+        return output.getvalue()
 
     @staticmethod
     def _insert_line_items(sheet, start_row: int, items: List[Dict]) -> None:
@@ -310,14 +329,21 @@ class XLSXPopulator:
             )
 
     @staticmethod
-    def extract_text(xlsx_bytes: bytes) -> str:
+    def extract_text(
+        xlsx_bytes: bytes,
+        formula_values: Optional[Dict[tuple[str, str], Any]] = None,
+    ) -> str:
         """Extract text from XLSX as markdown preview."""
         try:
             from openpyxl import load_workbook
         except ImportError:
             return "[XLSX preview unavailable - openpyxl not installed]"
 
-        wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
+        if formula_values is None:
+            formula_values, _ = calculate_workbook_formula_values(xlsx_bytes)
+
+        wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+        wb_values = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
         lines = []
 
         for sheet in wb.worksheets:
@@ -325,9 +351,15 @@ class XLSXPopulator:
             lines.append("")
 
             for row in sheet.iter_rows(max_row=50):  # Limit preview
-                cells = [
-                    str(cell.value) if cell.value is not None else "" for cell in row
-                ]
+                cells = []
+                for cell in row:
+                    cached_value = wb_values[sheet.title][cell.coordinate].value
+                    display_value = XLSXPopulator._resolve_display_value(
+                        cell.value,
+                        cached_value,
+                        formula_values.get((sheet.title, cell.coordinate.upper())),
+                    )
+                    cells.append(str(display_value) if display_value is not None else "")
                 if any(cells):
                     lines.append("| " + " | ".join(cells) + " |")
 

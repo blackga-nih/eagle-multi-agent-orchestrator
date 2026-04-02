@@ -20,7 +20,7 @@ from .document_key_utils import (
 )
 from .document_service import create_package_document_version
 from .document_store import get_document
-from .formula_evaluation import evaluate_workbook_formulas, evaluate_workbook_formulas_safe
+from .formula_evaluation import calculate_workbook_formula_values
 from .template_service import XLSXPopulator
 
 logger = logging.getLogger("eagle.spreadsheet_edit")
@@ -69,6 +69,22 @@ def _sheet_identity(ws) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ws.title.lower()).strip("-") or "sheet"
 
 
+def _resolve_display_value(raw_value: Any, cached_value: Any, calculated_value: Any) -> Any:
+    """Choose the best preview value for a spreadsheet cell."""
+    is_formula = isinstance(raw_value, str) and raw_value.startswith("=")
+    if is_formula:
+        if calculated_value is not None:
+            return calculated_value
+        if cached_value is not None and not (
+            isinstance(cached_value, str) and cached_value.startswith("=")
+        ):
+            return cached_value
+        return ""
+    if cached_value is not None:
+        return cached_value
+    return raw_value
+
+
 def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
     """Return text plus structured worksheets for browser preview/editing."""
     try:
@@ -80,11 +96,10 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
             "preview_sheets": [],
         }
 
-    # Evaluate formulas first so data_only=True gets calculated values
-    evaluated_bytes = evaluate_workbook_formulas_safe(xlsx_bytes)
+    formula_values, formulas_evaluated = calculate_workbook_formula_values(xlsx_bytes)
 
-    wb = load_workbook(io.BytesIO(evaluated_bytes), data_only=False)
-    wb_values = load_workbook(io.BytesIO(evaluated_bytes), data_only=True)
+    wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+    wb_values = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
     preview_sheets: list[dict[str, Any]] = []
 
     for sheet_index, ws in enumerate(wb.worksheets):
@@ -111,20 +126,13 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
                 value_cell = values_ws.cell(row=row_idx, column=col_idx)
                 raw_value = cell.value
                 is_formula = isinstance(raw_value, str) and raw_value.startswith("=")
-                # Determine display value: prefer cached calculation, avoid showing raw formulas
                 cached_value = value_cell.value
-                if is_formula:
-                    # For formula cells: use cached value if it's NOT the formula string
-                    # (data_only=True should give calculated value, but double-check)
-                    if cached_value is not None and not (isinstance(cached_value, str) and cached_value.startswith("=")):
-                        display_value = cached_value
-                    else:
-                        # No valid cached value - show empty rather than formula text
-                        display_value = ""
-                elif cached_value is not None:
-                    display_value = cached_value
-                else:
-                    display_value = raw_value
+                calculated_value = formula_values.get((ws.title, cell.coordinate.upper()))
+                display_value = _resolve_display_value(
+                    raw_value,
+                    cached_value,
+                    calculated_value,
+                )
                 is_hidden = cell.coordinate in hidden_cells
                 editable = not is_formula and not is_hidden
                 cell_payload = {
@@ -156,9 +164,13 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
             )
 
     return {
-        "content": XLSXPopulator.extract_text(xlsx_bytes),
+        "content": XLSXPopulator.extract_text(
+            xlsx_bytes,
+            formula_values=formula_values,
+        ),
         "preview_mode": "xlsx_grid",
         "preview_sheets": preview_sheets,
+        "formulas_calculated": formulas_evaluated,
     }
 
 
@@ -265,9 +277,8 @@ def save_xlsx_preview_edits(
             "missing": missing,
         }
 
-    # Evaluate formulas for PREVIEW only - don't save evaluated bytes (preserves formulas)
-    preview_bytes, formulas_evaluated = evaluate_workbook_formulas(updated_bytes)
-    preview_payload = extract_xlsx_preview_payload(preview_bytes)
+    preview_payload = extract_xlsx_preview_payload(updated_bytes)
+    formulas_evaluated = bool(preview_payload.get("formulas_calculated"))
 
     package_ref = extract_package_document_ref(doc_key)
     if package_ref:

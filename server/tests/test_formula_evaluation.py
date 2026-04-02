@@ -9,9 +9,9 @@ _server_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
-from openpyxl import Workbook
+from openpyxl import Workbook  # noqa: E402
 
-from app.formula_evaluation import evaluate_workbook_formulas, evaluate_workbook_formulas_safe
+from app.formula_evaluation import calculate_workbook_formula_values, evaluate_workbook_formulas, evaluate_workbook_formulas_safe  # noqa: E402
 
 
 def _build_formula_xlsx() -> bytes:
@@ -56,54 +56,16 @@ def _build_simple_xlsx() -> bytes:
 class TestEvaluateWorkbookFormulas:
     """Tests for evaluate_workbook_formulas function."""
 
-    def test_calculates_simple_addition(self):
-        """Formula =A1+B1 should evaluate to sum of cells."""
+    def test_reports_success_for_formula_workbook(self):
+        """Formula workbooks should report successful preview calculation."""
         xlsx_bytes = _build_formula_xlsx()
         result_bytes, success = evaluate_workbook_formulas(xlsx_bytes)
 
         assert success is True
+        assert result_bytes == xlsx_bytes
 
-        from openpyxl import load_workbook
-
-        wb = load_workbook(io.BytesIO(result_bytes), data_only=True)
-        ws = wb.active
-
-        # C1 = A1 + B1 = 10 + 20 = 30
-        assert ws["C1"].value == 30
-
-    def test_calculates_multiplication(self):
-        """Formula =A2*2 should evaluate correctly."""
-        xlsx_bytes = _build_formula_xlsx()
-        result_bytes, success = evaluate_workbook_formulas(xlsx_bytes)
-
-        assert success is True
-
-        from openpyxl import load_workbook
-
-        wb = load_workbook(io.BytesIO(result_bytes), data_only=True)
-        ws = wb.active
-
-        # B2 = A2 * 2 = 5 * 2 = 10
-        assert ws["B2"].value == 10
-
-    def test_calculates_sum_function(self):
-        """Formula =SUM(A1:B2) should evaluate correctly."""
-        xlsx_bytes = _build_formula_xlsx()
-        result_bytes, success = evaluate_workbook_formulas(xlsx_bytes)
-
-        assert success is True
-
-        from openpyxl import load_workbook
-
-        wb = load_workbook(io.BytesIO(result_bytes), data_only=True)
-        ws = wb.active
-
-        # C2 = SUM(A1:B2) = 10 + 20 + 5 + 10 = 45
-        # Note: B2 is a formula that evaluates to 10
-        assert ws["C2"].value == 45
-
-    def test_replaces_formulas_with_computed_values(self):
-        """After evaluation, formula cells contain computed values."""
+    def test_preserves_formulas_in_workbook(self):
+        """Formula cells should remain formulas after evaluation."""
         xlsx_bytes = _build_formula_xlsx()
         result_bytes, _ = evaluate_workbook_formulas(xlsx_bytes)
 
@@ -112,10 +74,9 @@ class TestEvaluateWorkbookFormulas:
         wb = load_workbook(io.BytesIO(result_bytes), data_only=False)
         ws = wb.active
 
-        # Formulas are replaced with their calculated values
-        assert ws["C1"].value == 30
-        assert ws["B2"].value == 10
-        assert ws["C2"].value == 45
+        assert ws["C1"].value == "=A1+B1"
+        assert ws["B2"].value == "=A2*2"
+        assert ws["C2"].value == "=SUM(A1:B2)"
 
     def test_handles_workbook_without_formulas(self):
         """Workbooks without formulas should pass through unchanged."""
@@ -132,38 +93,56 @@ class TestEvaluateWorkbookFormulas:
         assert ws["A1"].value == "Name"
         assert ws["B2"].value == 100
 
+
+class TestCalculateWorkbookFormulaValues:
+    """Tests for preview-only formula calculations."""
+
+    def test_calculates_simple_addition(self):
+        """Formula =A1+B1 should evaluate to the sum of cells."""
+        formula_values, success = calculate_workbook_formula_values(_build_formula_xlsx())
+
+        assert success is True
+        assert formula_values[("Calculations", "C1")] == 30
+
+    def test_calculates_multiplication(self):
+        """Formula =A2*2 should evaluate correctly."""
+        formula_values, success = calculate_workbook_formula_values(_build_formula_xlsx())
+
+        assert success is True
+        assert formula_values[("Calculations", "B2")] == 10
+
+    def test_calculates_sum_function(self):
+        """Formula =SUM(A1:B2) should evaluate correctly."""
+        formula_values, success = calculate_workbook_formula_values(_build_formula_xlsx())
+
+        assert success is True
+        assert formula_values[("Calculations", "C2")] == 45
+
     def test_handles_invalid_xlsx(self):
         """Invalid XLSX should return original bytes with success=False."""
         invalid_bytes = b"not a valid xlsx file"
-        result_bytes, success = evaluate_workbook_formulas(invalid_bytes)
+        result, success = calculate_workbook_formula_values(invalid_bytes)
 
         assert success is False
-        assert result_bytes == invalid_bytes
+        assert result == {}
 
     def test_handles_empty_bytes(self):
         """Empty bytes should return original with success=False."""
         empty_bytes = b""
-        result_bytes, success = evaluate_workbook_formulas(empty_bytes)
+        result, success = calculate_workbook_formula_values(empty_bytes)
 
         assert success is False
-        assert result_bytes == empty_bytes
+        assert result == {}
 
 
 class TestEvaluateWorkbookFormulasSafe:
     """Tests for the safe wrapper function."""
 
-    def test_returns_evaluated_bytes_on_success(self):
-        """Should return evaluated bytes when successful."""
+    def test_returns_original_bytes_on_success(self):
+        """Should return original workbook bytes when successful."""
         xlsx_bytes = _build_formula_xlsx()
         result_bytes = evaluate_workbook_formulas_safe(xlsx_bytes)
-
-        from openpyxl import load_workbook
-
-        wb = load_workbook(io.BytesIO(result_bytes), data_only=True)
-        ws = wb.active
-
-        # Should have calculated value
-        assert ws["C1"].value == 30
+        assert result_bytes == xlsx_bytes
 
     def test_returns_original_bytes_on_failure(self):
         """Should return original bytes on failure without raising."""
@@ -208,14 +187,8 @@ class TestIGCEStyleFormulas:
         xlsx_bytes = output.getvalue()
 
         # Evaluate
-        result_bytes, success = evaluate_workbook_formulas(xlsx_bytes)
+        formula_values, success = calculate_workbook_formula_values(xlsx_bytes)
         assert success is True
-
-        from openpyxl import load_workbook
-
-        wb_result = load_workbook(io.BytesIO(result_bytes), data_only=True)
-        ws_result = wb_result.active
-
-        assert ws_result["D2"].value == 3000
-        assert ws_result["D3"].value == 5000
-        assert ws_result["D4"].value == 8000
+        assert formula_values[("IGCE", "D2")] == 3000
+        assert formula_values[("IGCE", "D3")] == 5000
+        assert formula_values[("IGCE", "D4")] == 8000

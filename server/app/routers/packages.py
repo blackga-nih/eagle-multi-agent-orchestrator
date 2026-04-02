@@ -550,13 +550,34 @@ async def get_document_endpoint(
                     obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
                     doc["content"] = obj["Body"].read().decode("utf-8")
                 elif file_type in ("docx", "xlsx"):
-                    # Prefer markdown sidecar for human-readable preview
+                    obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+                    raw_bytes = obj["Body"].read()
+
+                    if file_type == "docx":
+                        from ..document_ai_edit_service import (
+                            extract_docx_preview_payload,
+                        )
+
+                        preview_payload = extract_docx_preview_payload(raw_bytes)
+                    else:
+                        from ..spreadsheet_edit_service import (
+                            extract_xlsx_preview_payload,
+                        )
+
+                        preview_payload = extract_xlsx_preview_payload(raw_bytes)
+
+                    doc["preview_blocks"] = preview_payload.get("preview_blocks", [])
+                    doc["preview_sheets"] = preview_payload.get("preview_sheets", [])
+                    doc["preview_mode"] = preview_payload.get("preview_mode")
+
+                    # Prefer markdown sidecar for human-readable text content,
+                    # but still return structured preview data for the viewer.
                     md_key = doc.get("markdown_s3_key") or f"{s3_key}.content.md"
                     try:
                         md_obj = s3.get_object(Bucket=s3_bucket, Key=md_key)
                         doc["content"] = md_obj["Body"].read().decode("utf-8")
                     except Exception:
-                        pass  # No markdown sidecar; viewer will show download link
+                        doc["content"] = preview_payload.get("content")
             except Exception as e:
                 logger.warning("Failed to fetch content for %s: %s", s3_key, e)
 
