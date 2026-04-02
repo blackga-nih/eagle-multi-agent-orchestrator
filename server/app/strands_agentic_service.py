@@ -69,6 +69,11 @@ from .tools.web_search import exec_web_search
 
 logger = logging.getLogger("eagle.strands_agent")
 
+# -- KB research depth enforcement thresholds --
+_MIN_KB_FETCH = int(os.environ.get("EAGLE_MIN_KB_FETCH", "2"))
+_MIN_KB_CHARS = int(os.environ.get("EAGLE_MIN_KB_CHARS", "5000"))
+_MAX_REMINDERS = 3  # cap _fetch_reminder injections to prevent infinite loops
+
 # Timeout (seconds) for the entire create_document tool dispatch.
 # Prevents indefinite hangs when S3/DynamoDB operations are slow.
 _DOC_TOOL_TIMEOUT = 120
@@ -2162,6 +2167,16 @@ def _build_subagent_kb_tools(
     # cascade violations (web_search before knowledge_search).
     _kb_tools_called: set[str] = set()
 
+    # Track research depth: fetch count, chars read, fetched keys.
+    _kb_depth: dict = {
+        "search_count": 0,
+        "fetch_count": 0,
+        "total_chars_read": 0,
+        "search_result_count": 0,
+        "fetched_keys": set(),
+        "reminder_count": 0,
+    }
+
     def _emit_input(name: str, tool_input: dict) -> None:
         """Push tool input so the stream can update the card with real params."""
         if result_queue and loop:
@@ -2169,6 +2184,46 @@ def _build_subagent_kb_tools(
                 result_queue.put_nowait,
                 {"type": "tool_input", "name": name, "input": tool_input},
             )
+
+    def _inject_fetch_reminder(result: dict) -> None:
+        """Append _fetch_reminder to result when fetch depth is insufficient."""
+        result_count = result.get("count", 0)
+        if (
+            result_count > 0
+            and _kb_depth["fetch_count"] < _MIN_KB_FETCH
+            and _kb_depth["reminder_count"] < _MAX_REMINDERS
+        ):
+            fetchable = [
+                r.get("s3_key") for r in result.get("results", [])
+                if r.get("s3_key")
+            ][:5]
+            result["_fetch_reminder"] = (
+                f"ACTION REQUIRED: You have only fetched {_kb_depth['fetch_count']} "
+                f"document(s) ({_kb_depth['total_chars_read']:,} chars). You MUST call "
+                f"knowledge_fetch on at least {_MIN_KB_FETCH} of these s3_keys before "
+                f"responding: {fetchable}. Summaries are insufficient — read the full "
+                f"document text for accurate answers."
+            )
+            _kb_depth["reminder_count"] += 1
+
+    def _inject_far_fetch_reminder(result: dict) -> None:
+        """Append _fetch_reminder to search_far result when fetch depth is insufficient."""
+        if (
+            _kb_depth["fetch_count"] < _MIN_KB_FETCH
+            and _kb_depth["reminder_count"] < _MAX_REMINDERS
+        ):
+            clauses = result.get("clauses", [])
+            fetchable = [
+                sk for c in clauses
+                for sk in (c.get("s3_keys") or [])
+            ][:5]
+            if fetchable:
+                result["_fetch_reminder"] = (
+                    f"ACTION REQUIRED: You have only fetched {_kb_depth['fetch_count']} "
+                    f"document(s) ({_kb_depth['total_chars_read']:,} chars). ALWAYS call "
+                    f"knowledge_fetch on returned s3_keys before responding: {fetchable}"
+                )
+                _kb_depth["reminder_count"] += 1
 
     @tool(name="knowledge_search")
     def kb_search(
@@ -2208,6 +2263,9 @@ def _build_subagent_kb_tools(
         _kb_tools_called.add("knowledge_search")
         try:
             result = exec_knowledge_search(params, tenant_id, session_id)
+            _kb_depth["search_count"] += 1
+            _kb_depth["search_result_count"] += result.get("count", 0)
+            _inject_fetch_reminder(result)
             return json.dumps(result, indent=2, default=str)
         except (TypeError, RecursionError) as e:
             logger.error("knowledge_search serialization error: %s", e)
@@ -2218,7 +2276,7 @@ def _build_subagent_kb_tools(
 
     @tool(name="knowledge_fetch")
     def kb_fetch(s3_key: str) -> str:
-        """Fetch full document content from the knowledge base by s3_key. REQUIRES an s3_key from a prior knowledge_search or search_far result.
+        """Fetch full document content from the knowledge base by s3_key. REQUIRES an s3_key from a prior knowledge_search or search_far result. You MUST call this on at least 2 results before responding — summaries are insufficient.
 
         Args:
             s3_key: S3 key path from a knowledge_search or search_far result
@@ -2226,6 +2284,10 @@ def _build_subagent_kb_tools(
         _emit_input("knowledge_fetch", {"s3_key": s3_key})
         _kb_tools_called.add("knowledge_fetch")
         result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+        if "error" not in result:
+            _kb_depth["fetch_count"] += 1
+            _kb_depth["total_chars_read"] += result.get("content_length", 0)
+            _kb_depth["fetched_keys"].add(s3_key)
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="search_far")
@@ -2238,7 +2300,9 @@ def _build_subagent_kb_tools(
         """
         _emit_input("search_far", {"query": query, "parts": parts})
         _kb_tools_called.add("search_far")
+        _kb_depth["search_count"] += 1
         result = exec_search_far({"query": query, "parts": parts}, tenant_id)
+        _inject_far_fetch_reminder(result)
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="web_search")
@@ -2282,7 +2346,7 @@ def _build_subagent_kb_tools(
         result = exec_web_fetch(url)
         return json.dumps(result, indent=2, default=str)
 
-    return [kb_search, kb_fetch, far_search, web_search, web_fetch]
+    return [kb_search, kb_fetch, far_search, web_search, web_fetch], _kb_depth
 
 
 def _build_subagent_doc_tools(
@@ -2545,7 +2609,7 @@ def _make_subagent_tool(
         _ensure_langfuse_exporter()
 
         # Give subagents KB tools so they can retrieve actual documents
-        kb_tools = _build_subagent_kb_tools(tenant_id, session_id, result_queue, loop)
+        kb_tools, _sub_kb_depth = _build_subagent_kb_tools(tenant_id, session_id, result_queue, loop)
         all_tools = kb_tools + (extra_tools or [])
 
         _, _active_bedrock_model = _get_active_model()
@@ -3789,12 +3853,17 @@ def _build_all_service_tools(
         is_rd: bool = False,
         is_human_subjects: bool = False,
         is_services: bool = True,
+        is_limited_sources: bool = False,
+        is_8a: bool = False,
+        is_manufacturing: bool = False,
         keyword: str = "",
     ) -> str:
-        """Query NCI/NIH contract requirements decision tree. Operations: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle.
+        """Query NCI/NIH contract requirements decision tree.
+        Operations: query, list_methods, list_types, list_thresholds, suggest_vehicle.
+        For FAR clause searches, use the search_far tool directly.
 
         Args:
-            operation: Matrix operation — 'query', 'list_methods', 'list_types', 'list_thresholds', 'search_far', 'suggest_vehicle'
+            operation: Matrix operation — 'query', 'list_methods', 'list_types', 'list_thresholds', 'suggest_vehicle'
             contract_value: Contract dollar value
             acquisition_method: Acquisition method ID. Valid values: micro, sap, negotiated, fss, bpa-est, bpa-call, idiq, idiq-order, sole. Common aliases also accepted (e.g. 'full_and_open' resolves to 'negotiated', 'simplified_acquisition' to 'sap').
             contract_type: Contract type ID. Valid values: ffp, fp-epa, fpi, cpff, cpif, cpaf, tm, lh. Common aliases also accepted (e.g. 'firm_fixed_price' resolves to 'ffp', 'time_and_materials' to 'tm').
@@ -3803,6 +3872,9 @@ def _build_all_service_tools(
             is_rd: Whether this is R&D
             is_human_subjects: Whether human subjects are involved
             is_services: Whether this is a services contract (default true)
+            is_limited_sources: Whether this is a limited/sole source FSS or BPA order (FAR 8.405-6)
+            is_8a: Whether this is an SBA 8(a) program acquisition
+            is_manufacturing: Whether 8(a) manufacturing ceiling applies (vs services)
             keyword: Keyword search term
         """
         parsed = {
@@ -3815,6 +3887,9 @@ def _build_all_service_tools(
             "is_rd": is_rd,
             "is_human_subjects": is_human_subjects,
             "is_services": is_services,
+            "is_limited_sources": is_limited_sources,
+            "is_8a": is_8a,
+            "is_manufacturing": is_manufacturing,
             "keyword": keyword,
         }
         try:
@@ -4098,6 +4173,16 @@ def _build_kb_service_tools(
     # Track KB tool calls for cascade violation detection.
     _kb_tools_called: set[str] = set()
 
+    # Track research depth: fetch count, chars read, fetched keys.
+    _kb_depth: dict = {
+        "search_count": 0,
+        "fetch_count": 0,
+        "total_chars_read": 0,
+        "search_result_count": 0,
+        "fetched_keys": set(),
+        "reminder_count": 0,
+    }
+
     def _emit_input(name: str, tool_input: dict) -> None:
         """Push tool input so the stream loop can update the card."""
         if result_queue and loop:
@@ -4121,6 +4206,46 @@ def _build_kb_service_tools(
                 {"type": "tool_result", "name": name, "result": truncated_result},
             )
 
+    def _inject_fetch_reminder(result: dict) -> None:
+        """Append _fetch_reminder to result when fetch depth is insufficient."""
+        result_count = result.get("count", 0)
+        if (
+            result_count > 0
+            and _kb_depth["fetch_count"] < _MIN_KB_FETCH
+            and _kb_depth["reminder_count"] < _MAX_REMINDERS
+        ):
+            fetchable = [
+                r.get("s3_key") for r in result.get("results", [])
+                if r.get("s3_key")
+            ][:5]
+            result["_fetch_reminder"] = (
+                f"ACTION REQUIRED: You have only fetched {_kb_depth['fetch_count']} "
+                f"document(s) ({_kb_depth['total_chars_read']:,} chars). You MUST call "
+                f"knowledge_fetch on at least {_MIN_KB_FETCH} of these s3_keys before "
+                f"responding: {fetchable}. Summaries are insufficient — read the full "
+                f"document text for accurate answers."
+            )
+            _kb_depth["reminder_count"] += 1
+
+    def _inject_far_fetch_reminder(result: dict) -> None:
+        """Append _fetch_reminder to search_far result when fetch depth is insufficient."""
+        if (
+            _kb_depth["fetch_count"] < _MIN_KB_FETCH
+            and _kb_depth["reminder_count"] < _MAX_REMINDERS
+        ):
+            clauses = result.get("clauses", [])
+            fetchable = [
+                sk for c in clauses
+                for sk in (c.get("s3_keys") or [])
+            ][:5]
+            if fetchable:
+                result["_fetch_reminder"] = (
+                    f"ACTION REQUIRED: You have only fetched {_kb_depth['fetch_count']} "
+                    f"document(s) ({_kb_depth['total_chars_read']:,} chars). ALWAYS call "
+                    f"knowledge_fetch on returned s3_keys before responding: {fetchable}"
+                )
+                _kb_depth["reminder_count"] += 1
+
     @tool(name="search_far")
     def search_far(query: str, parts: list[str] | None = None) -> str:
         """Search FAR/DFARS for clauses, requirements, and guidance. Returns s3_keys for full document retrieval — ALWAYS call knowledge_fetch on returned s3_keys before responding.
@@ -4131,7 +4256,9 @@ def _build_kb_service_tools(
         """
         _emit_input("search_far", {"query": query, "parts": parts})
         _kb_tools_called.add("search_far")
+        _kb_depth["search_count"] += 1
         result = exec_search_far({"query": query, "parts": parts}, tenant_id)
+        _inject_far_fetch_reminder(result)
         _emit("search_far", result)
         return json.dumps(result, indent=2, default=str)
 
@@ -4173,6 +4300,9 @@ def _build_kb_service_tools(
         _kb_tools_called.add("knowledge_search")
         try:
             result = exec_knowledge_search(params, tenant_id, session_id)
+            _kb_depth["search_count"] += 1
+            _kb_depth["search_result_count"] += result.get("count", 0)
+            _inject_fetch_reminder(result)
             _emit("knowledge_search", result)
             return json.dumps(result, indent=2, default=str)
         except (TypeError, RecursionError) as e:
@@ -4183,7 +4313,7 @@ def _build_kb_service_tools(
 
     @tool(name="knowledge_fetch")
     def knowledge_fetch(s3_key: str) -> str:
-        """Fetch full knowledge document content from S3. REQUIRES an s3_key from a prior knowledge_search or search_far result.
+        """Fetch full knowledge document content from S3. REQUIRES an s3_key from a prior knowledge_search or search_far result. You MUST call this on at least 2 results before responding — summaries are insufficient.
 
         Args:
             s3_key: S3 key path from a knowledge_search or search_far result
@@ -4191,6 +4321,10 @@ def _build_kb_service_tools(
         _emit_input("knowledge_fetch", {"s3_key": s3_key})
         _kb_tools_called.add("knowledge_fetch")
         result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+        if "error" not in result:
+            _kb_depth["fetch_count"] += 1
+            _kb_depth["total_chars_read"] += result.get("content_length", 0)
+            _kb_depth["fetched_keys"].add(s3_key)
         _emit("knowledge_fetch", result)
         return json.dumps(result, indent=2, default=str)
 
@@ -4243,7 +4377,7 @@ def _build_kb_service_tools(
         knowledge_fetch,
         web_search_tool,
         web_fetch_tool,
-    ]
+    ], _kb_depth
 
 
 def _build_service_tools(
@@ -4254,8 +4388,12 @@ def _build_service_tools(
     package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
-) -> list:
-    """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session."""
+) -> tuple[list, dict]:
+    """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session.
+
+    Returns:
+        Tuple of (tools list, kb_depth tracking dict).
+    """
     tools = _build_all_service_tools(
         tenant_id,
         user_id,
@@ -4266,14 +4404,13 @@ def _build_service_tools(
         loop=loop,
     )
     # Add KB tools with proper named parameters
-    tools.extend(
-        _build_kb_service_tools(tenant_id, user_id, session_id, result_queue, loop)
-    )
+    kb_tools, kb_depth = _build_kb_service_tools(tenant_id, user_id, session_id, result_queue, loop)
+    tools.extend(kb_tools)
     # Add progressive disclosure tools
     tools.append(_make_list_skills_tool(result_queue, loop))
     tools.append(_make_load_skill_tool(result_queue, loop))
     tools.append(_make_load_data_tool(result_queue, loop))
-    return tools
+    return tools, kb_depth
 
 
 # -- build_skill_tools() ---------------------------------------------
@@ -4525,7 +4662,10 @@ def _build_supervisor_prompt_body(
         "order strictly.\n\n"
         "  STEP 1 — Knowledge Base (ALWAYS first, NEVER skip):\n"
         "    a) Call knowledge_search with relevant query, topic, and/or keywords.\n"
-        "    b) If results found, call knowledge_fetch on the top 1-3 relevant s3_keys.\n"
+        "    b) If results found, you MUST call knowledge_fetch on at least 2 of the "
+        "top relevant s3_keys. Do NOT answer from summaries alone — summaries lack "
+        "critical details (checklists, exact regulatory text, case holdings, procedural "
+        "requirements). Reading the full document text is mandatory for accurate answers.\n"
         "    c) The KB is your primary source of truth — approved FAR/DFARS text, NIH policies, "
         "templates, checklists, and precedents.\n"
         "    d) The KB also contains templates (SOW, IGCE, AP, J&A, MRR) and checklists — "
@@ -4537,14 +4677,15 @@ def _build_supervisor_prompt_body(
         "    g) If a search_far result has empty s3_keys, the summary is the best available.\n"
         "    h) BEFORE delegating to a specialist, run knowledge_search and pass KB findings "
         "in the delegation context so the specialist does not skip straight to web.\n\n"
-        "  STEP 2 — Compliance Matrix:\n"
-        "    a) Call query_compliance_matrix when the question involves dollar thresholds, "
-        "required documents, contract types, acquisition methods, competition rules, "
-        "vehicle selection, or approval levels.\n"
-        "    b) The matrix encodes current FAR thresholds (FAC 2025-06), document requirements "
-        "by value tier, and NCI-specific rules — do NOT answer these from memory.\n"
-        "    c) For vehicle recommendations, use operation='suggest_vehicle'.\n"
-        "    d) For threshold/document checks, use operation='query' with contract_value.\n\n"
+        "  STEP 2 — Compliance Matrix (primary for requirements):\n"
+        "    a) Call query_compliance_matrix(operation='query') for dollar thresholds, "
+        "required documents, competition rules, approval levels, and vehicle selection.\n"
+        "    b) The matrix returns _related_far entries — review these for supporting citations.\n"
+        "    c) If you need deeper FAR research beyond what _related_far provides, "
+        "call search_far directly (NOT query_compliance_matrix with operation='search_far').\n"
+        "    d) When _verify.far_citations are returned, verify critical ones via search_far.\n"
+        "    e) When confidence scores are below 0.8, recommend user verify with legal/policy.\n"
+        "    f) For vehicle recommendations, use operation='suggest_vehicle'.\n\n"
         "  STEP 3 — Web Search (only when internal sources insufficient):\n"
         "    a) Use web_search for current market data, vendor info, pricing, GSA rates, "
         "recent policy changes, or any topic needing real-time info beyond the KB.\n"
@@ -4559,6 +4700,12 @@ def _build_supervisor_prompt_body(
         "results or knowledge_fetch content. Never invent or approximate FAR section numbers. "
         "For example, cite 16.505(b)(2)(i) not 16.507-6 — if a section number is not in the "
         "retrieved text, do not cite it.\n\n"
+        "RESEARCH DEPTH — The system tracks how many documents you fetch and how many "
+        "characters of primary source text you read. When search results include a "
+        "_fetch_reminder field, you MUST follow it by calling knowledge_fetch on the "
+        "listed s3_keys. Answering from summaries alone produces shallow responses "
+        "(missing checklists, non-verbatim quotes, wrong procedural details). Minimum: "
+        "2 documents fetched, 5,000+ chars of source text read per query.\n\n"
         "COLLECT BEFORE RESEARCH — Before performing web research for any document, you MUST\n"
         "first collect a minimum set of information from the user. If any item is missing,\n"
         "ASK the user — do NOT assume or invent values.\n\n"
@@ -4849,7 +4996,7 @@ async def sdk_query(
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
-    service_tools = _build_service_tools(
+    service_tools, kb_depth = _build_service_tools(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
@@ -5176,7 +5323,7 @@ async def sdk_query_streaming(
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
-    service_tools = _build_service_tools(
+    service_tools, kb_depth = _build_service_tools(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
@@ -5835,7 +5982,7 @@ async def sdk_query_streaming(
     except Exception:
         logger.debug("Failed to emit agent.timing telemetry", exc_info=True)
 
-    # Emit trace.completed telemetry
+    # Emit trace.completed telemetry (enriched with KB depth stats)
     try:
         from .telemetry.cloudwatch_emitter import emit_trace_completed
 
@@ -5848,10 +5995,47 @@ async def sdk_query_streaming(
                 "total_input_tokens": usage.get("inputTokens", 0),
                 "total_output_tokens": usage.get("outputTokens", 0),
                 "tools_called": tools_called,
+                "kb_search_count": kb_depth.get("search_count", 0),
+                "kb_fetch_count": kb_depth.get("fetch_count", 0),
+                "kb_total_chars_read": kb_depth.get("total_chars_read", 0),
             }
         )
     except Exception:
         logger.debug("Failed to emit trace.completed", exc_info=True)
+
+    # Detect shallow research — agent searched KB but did not fetch enough docs
+    if kb_depth.get("search_count", 0) > 0:
+        if (
+            kb_depth["fetch_count"] < _MIN_KB_FETCH
+            or kb_depth["total_chars_read"] < _MIN_KB_CHARS
+        ):
+            logger.warning(
+                "SHALLOW_RESEARCH: session=%s searches=%d fetches=%d chars=%d "
+                "(min: fetches=%d, chars=%d)",
+                session_id,
+                kb_depth["search_count"],
+                kb_depth["fetch_count"],
+                kb_depth["total_chars_read"],
+                _MIN_KB_FETCH,
+                _MIN_KB_CHARS,
+            )
+            try:
+                emit_telemetry_event(
+                    event_type="research.shallow",
+                    tenant_id=tenant_id,
+                    data={
+                        "search_count": kb_depth["search_count"],
+                        "fetch_count": kb_depth["fetch_count"],
+                        "total_chars_read": kb_depth["total_chars_read"],
+                        "search_result_count": kb_depth["search_result_count"],
+                        "fetched_keys": list(kb_depth.get("fetched_keys", set())),
+                        "session_id": session_id or "",
+                    },
+                    session_id=session_id,
+                    user_id=user_id,
+                )
+            except Exception:
+                logger.debug("Failed to emit research.shallow", exc_info=True)
 
     # End-of-turn state refresh — only when a package tool ran this turn,
     # otherwise stale package state leaks into unrelated conversations.

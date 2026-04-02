@@ -522,6 +522,17 @@ def get_placeholder_map(doc_type: str) -> Dict[str, str]:
     return {}
 
 
+def get_template_fields(filename: str) -> list[str] | None:
+    """Return placeholder field names for a template filename."""
+    for mapping in TEMPLATE_REGISTRY.values():
+        if mapping.s3_filename == filename:
+            return list(mapping.placeholder_map.keys()) if mapping.placeholder_map else None
+        for alt in mapping.alternates:
+            if alt == filename:
+                return list(mapping.placeholder_map.keys()) if mapping.placeholder_map else None
+    return None
+
+
 # ── Schema Accessors ──
 
 

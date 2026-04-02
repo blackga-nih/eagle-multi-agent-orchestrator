@@ -21,6 +21,7 @@ from app.formula_evaluation import calculate_workbook_formula_values
 from app.igce_xlsx_mapper import CommercialIGCEWorkbookMapper
 from app.template_registry import (
     TEMPLATE_BUCKET,
+    TEMPLATE_PREFIX,
     get_alternate_s3_keys,
     get_placeholder_map,
     get_template_mapping,
@@ -399,6 +400,7 @@ class TemplateService:
         title: str,
         data: Dict[str, Any],
         output_format: str = "docx",
+        template_hint: str | None = None,
     ) -> TemplateResult:
         """Generate a document using S3 template or markdown fallback.
 
@@ -407,6 +409,8 @@ class TemplateService:
             title: Document title
             data: Data to populate template with
             output_format: Desired output format (docx, xlsx, md)
+            template_hint: Optional S3 filename to try first (e.g. from
+                compliance matrix ``template_hint`` field).
 
         Returns:
             TemplateResult with populated document
@@ -424,7 +428,7 @@ class TemplateService:
 
         # Try to fetch and populate the template
         try:
-            result = self._generate_from_template(doc_type, title, data)
+            result = self._generate_from_template(doc_type, title, data, template_hint)
         except Exception as e:
             logger.warning(
                 "Template generation failed for %s: %s, falling back to markdown",
@@ -444,6 +448,7 @@ class TemplateService:
         doc_type: str,
         title: str,
         data: Dict[str, Any],
+        template_hint: str | None = None,
     ) -> TemplateResult:
         """Generate document from S3 template."""
         mapping = get_template_mapping(doc_type)
@@ -451,7 +456,7 @@ class TemplateService:
             raise ValueError(f"No template mapping for {doc_type}")
 
         # Fetch template from S3 (with cache)
-        template_bytes, s3_key = self._fetch_template(doc_type)
+        template_bytes, s3_key = self._fetch_template(doc_type, template_hint)
         if template_bytes is None:
             raise FileNotFoundError(f"Template not found for {doc_type}")
 
@@ -486,12 +491,27 @@ class TemplateService:
             template_path=s3_key,
         )
 
-    def _fetch_template(self, doc_type: str) -> Tuple[Optional[bytes], Optional[str]]:
+    def _fetch_template(
+        self, doc_type: str, template_hint: str | None = None
+    ) -> Tuple[Optional[bytes], Optional[str]]:
         """Fetch template from S3, trying primary then alternates.
+
+        Args:
+            doc_type: Document type slug.
+            template_hint: Optional S3 filename to try before the primary
+                (e.g. ``"6.a. Single Source J&A - up to SAT.docx"``).
 
         Returns (template_bytes, s3_key) or (None, None) if not found.
         """
         bucket = TEMPLATE_BUCKET
+
+        # Try hinted template first (from compliance matrix)
+        if template_hint:
+            hint_key = f"{TEMPLATE_PREFIX}/{template_hint}"
+            template_bytes = self._fetch_s3_object(bucket, hint_key)
+            if template_bytes:
+                logger.info("Using hinted template %s for %s", hint_key, doc_type)
+                return template_bytes, hint_key
 
         # Try primary template
         s3_key = get_template_s3_key(doc_type)

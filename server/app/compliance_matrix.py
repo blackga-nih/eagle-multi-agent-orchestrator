@@ -143,6 +143,26 @@ _OAP = _threshold("oap_approval_required")  # $150M
 _METHODS_BY_ID = {m["id"]: m for m in METHODS}
 _TYPES_BY_ID = {t["id"]: t for t in TYPES}
 
+# Phase 6: Confidence scores for matrix output items.
+_CONFIDENCE = {
+    "threshold_rule": 0.95,
+    "competition_rule": 0.90,
+    "document_requirement": 0.90,
+    "approval_chain": 0.85,
+    "8a_ceiling": 0.75,
+    "edge_case": 0.70,
+    "timeline": 0.60,
+}
+
+
+def _extract_far_citations(text: str) -> list[str]:
+    """Extract FAR/DFARS/HHSAR section references from text."""
+    pattern = r"(?:FAR|DFARS|HHSAR)\s+(\d+\.\d+(?:[-(]\S*[)0-9a-zA-Z])?)"
+    raw = re.findall(pattern, text, re.IGNORECASE)
+    # Strip trailing punctuation
+    cleaned = [c.rstrip(".,;:") for c in raw]
+    return sorted(set(cleaned))
+
 
 # ---------------------------------------------------------------------------
 # Normalization: alias maps + resolve functions
@@ -534,6 +554,16 @@ def get_requirements(
     elif needs_ja:
         ja_entry["variant"] = "full"
         ja_entry["authority"] = "FAR 6.302 / 6.303 / 6.304"
+    # Phase 5: Enrich template_hint with field list
+    if "template_hint" in ja_entry:
+        try:
+            from .template_registry import get_template_fields
+
+            fields = get_template_fields(ja_entry["template_hint"])
+            if fields:
+                ja_entry["template_fields"] = fields
+        except Exception:
+            pass
     docs.append(ja_entry)
 
     # D&F
@@ -865,6 +895,67 @@ def get_requirements(
             }
         )
 
+    # --- Phase 6: Confidence scores ---
+    for d in docs:
+        if "confidence" not in d:
+            d["confidence"] = _CONFIDENCE["document_requirement"]
+    for c in compliance:
+        if "confidence" not in c:
+            c["confidence"] = _CONFIDENCE["threshold_rule"]
+    for a in approvals:
+        if "confidence" not in a:
+            a["confidence"] = _CONFIDENCE["approval_chain"]
+    if is_8a:
+        # 8(a) rules are less codified — lower confidence
+        for d in docs:
+            if "8(a)" in d.get("note", "") or "8(a)" in d.get("name", ""):
+                d["confidence"] = _CONFIDENCE["8a_ceiling"]
+        if "8(a)" in competition:
+            pass  # competition confidence handled below
+
+    item_confidences = (
+        [d.get("confidence", 0.9) for d in docs]
+        + [c.get("confidence", 0.9) for c in compliance]
+        + [a.get("confidence", 0.85) for a in approvals]
+    )
+
+    # --- Phase 3: Pre-fetch related FAR entries ---
+    related_keywords: list[str] = []
+    if m == "sole":
+        related_keywords.extend(["sole source", "justification"])
+        if v <= _SAT:
+            related_keywords.extend(["13.106", "simplified"])
+        else:
+            related_keywords.extend(["6.302", "6.303", "6.304"])
+    elif m == "fss":
+        related_keywords.extend(["8.405", "schedule"])
+        if is_limited:
+            related_keywords.append("limited sources")
+    elif m in ("bpa-est", "bpa-call"):
+        related_keywords.extend(["8.405", "blanket purchase"])
+    elif m == "negotiated":
+        related_keywords.extend(["15.3", "source selection"])
+    elif m == "idiq" or m == "idiq-order":
+        related_keywords.extend(["16.505", "task order"])
+    if is_8a:
+        related_keywords.extend(["19.805", "8(a)"])
+    if v > _TINA:
+        related_keywords.extend(["15.403", "cost pricing data"])
+
+    _related_far = search_far(" ".join(related_keywords[:6]))[:5] if related_keywords else []
+
+    # --- Phase 4: Citation verification ---
+    all_citation_text = " ".join(
+        [
+            competition,
+            ja_entry.get("note", ""),
+            ja_entry.get("authority", ""),
+        ]
+        + [d.get("note", "") for d in docs]
+        + [c.get("note", "") for c in compliance]
+    )
+    far_citations = _extract_far_citations(all_citation_text)
+
     return {
         "errors": errors,
         "warnings": warnings,
@@ -873,7 +964,11 @@ def get_requirements(
         "competition_rules": competition,
         "thresholds_triggered": triggered,
         "thresholds_not_triggered": not_triggered,
-        "timeline_estimate": {"min_weeks": time_min, "max_weeks": time_max},
+        "timeline_estimate": {
+            "min_weeks": time_min,
+            "max_weeks": time_max,
+            "confidence": _CONFIDENCE["timeline"],
+        },
         "risk_allocation": {
             "contractor_risk_pct": risk_pct,
             "category": t_obj["category"],
@@ -883,6 +978,15 @@ def get_requirements(
         "approvals_required": approvals,
         "method": m_obj,
         "contract_type": t_obj,
+        "_related_far": _related_far,
+        "_verify": {
+            "far_citations": far_citations,
+            "note": "Verify critical citations via search_far before citing in response",
+        },
+        "confidence": {
+            "overall": min(item_confidences) if item_confidences else 0.9,
+            "note": "Values below 0.8 — recommend user verify with legal/policy team",
+        },
     }
 
 
@@ -1030,6 +1134,9 @@ def execute_operation(params: dict) -> dict:
                 "is_rd": params.get("is_rd", False),
                 "is_human_subjects": params.get("is_human_subjects", False),
                 "is_services": params.get("is_services", True),
+                "is_limited_sources": params.get("is_limited_sources", False),
+                "is_8a": params.get("is_8a", False),
+                "is_manufacturing": params.get("is_manufacturing", False),
             },
         )
 
@@ -1046,11 +1153,15 @@ def execute_operation(params: dict) -> dict:
         }
 
     if op == "search_far":
+        # Deprecated: use the standalone search_far tool directly.
         keyword = params.get("keyword", "")
         parts = params.get("parts")
         if not keyword:
             return {"error": "keyword is required for search_far operation"}
-        return {"results": search_far(keyword, parts)}
+        return {
+            "note": "Use the search_far tool directly instead of query_compliance_matrix(operation='search_far')",
+            "results": search_far(keyword, parts),
+        }
 
     if op == "suggest_vehicle":
         return suggest_vehicle(

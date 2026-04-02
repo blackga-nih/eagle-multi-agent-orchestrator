@@ -178,6 +178,11 @@ def exec_create_document(
     data = _augment_document_data_from_context(doc_type, title, data, session_id)
     data = normalize_field_names(data, doc_type)
 
+    # Extract template_hint before passing data to template service — the
+    # compliance matrix injects this for value-aware template selection
+    # (e.g. simplified J&A under SAT vs full J&A over SAT).
+    template_hint = data.pop("template_hint", None)
+
     # If session context provided a richer description than the prompt-derived
     # title, rebuild the title from it.  Before the fast-path was introduced
     # (commit b654a49), the LLM generated titles using the full conversation
@@ -249,7 +254,7 @@ def exec_create_document(
         try:
             service = TemplateService(tenant_id, user_id, markdown_generators)
             template_result = service.generate_document(
-                doc_type, title, data, output_format
+                doc_type, title, data, output_format, template_hint=template_hint
             )
             if template_result.success:
                 preview = template_result.preview or ""
@@ -270,7 +275,7 @@ def exec_create_document(
     else:
         try:
             service = TemplateService(tenant_id, user_id, markdown_generators)
-            result = service.generate_document(doc_type, title, data, output_format)
+            result = service.generate_document(doc_type, title, data, output_format, template_hint=template_hint)
 
             if not result.success:
                 generator = markdown_generators.get(doc_type)
