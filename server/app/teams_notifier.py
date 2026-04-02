@@ -36,11 +36,14 @@ WEBHOOK_URL: str = os.getenv(
 )
 _IS_ECS: bool = os.getenv("ECS_CONTAINER_METADATA_URI") is not None
 WEBHOOK_ENABLED: bool = os.getenv("TEAMS_WEBHOOK_ENABLED", "true").lower() == "true"
-# In local dev, only send if explicitly opted-in via env var
-if not _IS_ECS and os.getenv("TEAMS_WEBHOOK_ENABLED") is None:
-    WEBHOOK_ENABLED = False
 WEBHOOK_TIMEOUT: float = float(os.getenv("TEAMS_WEBHOOK_TIMEOUT", "5.0"))
-ENVIRONMENT: str = os.getenv("EAGLE_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev"))
+ENVIRONMENT: str = os.getenv(
+    "EAGLE_ENVIRONMENT",
+    os.getenv(
+        "ENVIRONMENT",
+        "dev" if os.getenv("ECS_CONTAINER_METADATA_URI") else "localhost",
+    ),
+)
 
 
 # ── Token-bucket rate limiter (per category) ─────────────────────────
@@ -156,9 +159,11 @@ def notify_feedback(
     session_id: str,
     feedback_text: str,
     feedback_type: str = "general",
+    feedback_area: str = "",
     page: str = "",
     jira_key: str | None = None,
     feedback_id: str = "",
+    screenshot_url: str | None = None,
 ) -> None:
     """Notify Teams when a user submits Ctrl+J feedback."""
     from .teams_cards import feedback_card
@@ -171,9 +176,11 @@ def notify_feedback(
         session_id=session_id,
         feedback_text=feedback_text,
         feedback_type=feedback_type,
+        feedback_area=feedback_area,
         page=page,
         jira_key=jira_key,
         feedback_id=feedback_id,
+        screenshot_url=screenshot_url,
     )
     _fire(payload, "feedback")
 

@@ -37,6 +37,9 @@ class TestLangfuseClientInit:
         mock_telemetry = MagicMock()
         mock_telemetry.tracer_provider = mock_provider
 
+        mock_probe_response = MagicMock()
+        mock_probe_response.status_code = 200
+
         with (
             patch.dict(os.environ, {
                 "LANGFUSE_PUBLIC_KEY": "pk-test-123",
@@ -45,6 +48,7 @@ class TestLangfuseClientInit:
             patch("app.strands_agentic_service.StrandsTelemetry", return_value=mock_telemetry) if hasattr(svc, "StrandsTelemetry") else patch("strands.telemetry.StrandsTelemetry", return_value=mock_telemetry),
             patch("opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter"),
             patch("opentelemetry.sdk.trace.export.SimpleSpanProcessor"),
+            patch("httpx.post", return_value=mock_probe_response),
             patch("langfuse.get_client", return_value=mock_client) as mock_get_client,
         ):
             svc._ensure_langfuse_exporter()

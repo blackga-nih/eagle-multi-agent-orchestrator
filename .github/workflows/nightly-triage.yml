@@ -12,7 +12,7 @@
 # main-branch file paths so they're immediately actionable.
 #
 # Requirements:
-#   - CLAUDE_CODE_OAUTH_TOKEN  (Claude Code auth)
+#   - CLAUDE_CODE_OAUTH_TOKEN  (Claude Code CLI auth)
 #   - DEPLOY_ROLE_ARN          (AWS OIDC for CloudWatch + DynamoDB)
 #   - LANGFUSE_PUBLIC_KEY      (optional — skips Langfuse if unset)
 #   - LANGFUSE_SECRET_KEY      (optional)
@@ -202,6 +202,27 @@ jobs:
               sleep $((i * 2))
               git pull --rebase origin main
             done
+          fi
+
+      - name: Notify JIRA + Teams (triage plan)
+        if: success()
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT: EAGLE
+          TEAMS_TRIAGE_WEBHOOK_URL: ${{ secrets.TEAMS_TRIAGE_WEBHOOK_URL }}
+          EAGLE_BACKEND_URL: ${{ secrets.EAGLE_BACKEND_URL }}
+          FEEDBACK_ACTION_SECRET: ${{ secrets.FEEDBACK_ACTION_SECRET }}
+        run: |
+          PLAN_FILE=$(ls -t .claude/specs/*-plan-triage-*${{ matrix.env }}*.md 2>/dev/null | head -1)
+          REPORT_FILE=$(ls -t docs/development/*-report-triage-*${{ matrix.env }}*.md 2>/dev/null | head -1)
+          if [ -n "$PLAN_FILE" ]; then
+            python scripts/triage_notify.py \
+              --plan-file "$PLAN_FILE" \
+              --report-file "${REPORT_FILE:-}" \
+              --env "${{ matrix.env }}"
+          else
+            echo "::notice::No plan file found for ${{ matrix.env }}, skipping notification"
           fi
 
       - name: Upload triage artifacts

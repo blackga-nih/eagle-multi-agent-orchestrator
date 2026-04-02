@@ -104,6 +104,10 @@ class BedrockConfig:
     max_attempts: int = _int("EAGLE_BEDROCK_MAX_ATTEMPTS", 4)
     retry_mode: str = os.getenv("EAGLE_BEDROCK_RETRY_MODE", "adaptive")
     use_bedrock: bool = _bool("USE_BEDROCK", "false")
+    pdf_parsing_enabled: bool = _bool("EAGLE_BEDROCK_PDF_PARSING", "true")
+    pdf_parsing_model: str = os.getenv(
+        "EAGLE_PDF_PARSING_MODEL", DEFAULT_BEDROCK_HAIKU_MODEL
+    )
 
 
 @dataclass(frozen=True)
@@ -188,7 +192,7 @@ class ModelConfig:
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_HAIKU_MODEL)
     sdk_model: str = os.getenv("EAGLE_SDK_MODEL", "haiku")
     knowledge_search_model: str = os.getenv(
-        "KNOWLEDGE_SEARCH_MODEL", "anthropic.claude-3-haiku-20240307-v1:0"
+        "KNOWLEDGE_SEARCH_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     )
 
 
@@ -196,7 +200,13 @@ class ModelConfig:
 class AppConfig:
     """Application-level configuration."""
 
-    environment: str = os.getenv("EAGLE_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev"))
+    environment: str = os.getenv(
+        "EAGLE_ENVIRONMENT",
+        os.getenv(
+            "ENVIRONMENT",
+            "dev" if os.getenv("ECS_CONTAINER_METADATA_URI") else "localhost",
+        ),
+    )
     port: int = _int("APP_PORT", 8000)
     is_ecs: bool = os.getenv("ECS_CONTAINER_METADATA_URI") is not None
 

@@ -34,8 +34,9 @@ FILENAME_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "igce",
     ),
-    # Market Research
-    (re.compile(r"\b(market[-_\s]?research|mrr)\b", re.IGNORECASE), "market_research"),
+    # Market Research — use lookahead instead of \b at end so "Market_Research_Report" matches
+    # (\b fails when next char is _ because _ is a word character)
+    (re.compile(r"\b(market[-_\s]?research|mrr)(?:\b|(?=[-_\s.]))", re.IGNORECASE), "market_research"),
     # Justification
     (
         re.compile(
@@ -366,16 +367,19 @@ def classify_by_content(content: str) -> Optional[ClassificationResult]:
 def classify_document(
     filename: str,
     content_preview: Optional[str] = None,
+    bedrock_classification: Optional[ClassificationResult] = None,
 ) -> ClassificationResult:
     """
     Classify a document by type.
 
     First attempts filename-based classification (fast path).
-    Falls back to content-based classification if filename is ambiguous.
+    Then checks for Bedrock AI classification (from document parser).
+    Falls back to content-based regex classification if both are unavailable.
 
     Args:
         filename: Original filename of the uploaded document
         content_preview: Optional extracted text content for fallback classification
+        bedrock_classification: Optional classification from Bedrock document parser
 
     Returns:
         ClassificationResult with doc_type, confidence, and method
@@ -390,6 +394,16 @@ def classify_document(
             result.confidence,
         )
         return result
+
+    # Use Bedrock AI classification if available and confident
+    if bedrock_classification and bedrock_classification.confidence >= 0.7:
+        logger.info(
+            "Classified %s as %s via bedrock (confidence=%.2f)",
+            filename,
+            bedrock_classification.doc_type,
+            bedrock_classification.confidence,
+        )
+        return bedrock_classification
 
     # Fall back to content analysis
     if content_preview:

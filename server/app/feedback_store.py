@@ -98,6 +98,7 @@ def write_feedback(
     cloudwatch_logs: str,
     page: str = "",
     last_message_id: str = "",
+    feedback_area: str = "",
 ) -> dict:
     """Write a feedback record and return the stored item."""
     feedback_id = str(uuid.uuid4())
@@ -117,6 +118,7 @@ def write_feedback(
         "session_id": session_id,
         "feedback_text": feedback_text,
         "feedback_type": _detect_feedback_type(feedback_text),
+        "feedback_area": feedback_area or "",
         "conversation_snapshot": conversation_snapshot,
         "cloudwatch_logs": cloudwatch_logs,
         "page": page,
@@ -170,6 +172,59 @@ def patch_cloudwatch_logs(
         )
     except (ClientError, BotoCoreError) as exc:
         logger.debug("patch_cloudwatch_logs failed (non-fatal): %s", exc)
+
+
+def get_feedback_by_id(feedback_id: str, tenant_id: str) -> dict | None:
+    """Look up a single feedback record by its feedback_id."""
+    pk = f"FEEDBACK#{tenant_id}"
+    try:
+        response = get_table().query(
+            KeyConditionExpression=Key("PK").eq(pk)
+            & Key("SK").begins_with("FEEDBACK#"),
+            FilterExpression="feedback_id = :fid",
+            ExpressionAttributeValues={":fid": feedback_id},
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        return items[0] if items else None
+    except (ClientError, BotoCoreError) as exc:
+        logger.warning("feedback_store: get_feedback_by_id failed: %s", exc)
+        return None
+
+
+def update_feedback_status(
+    feedback_id: str, tenant_id: str, status: str, acted_by: str = ""
+) -> bool:
+    """Set triage_status on a feedback record (approved / rejected / snoozed)."""
+    pk = f"FEEDBACK#{tenant_id}"
+    try:
+        response = get_table().query(
+            KeyConditionExpression=Key("PK").eq(pk)
+            & Key("SK").begins_with("FEEDBACK#"),
+            FilterExpression="feedback_id = :fid",
+            ExpressionAttributeValues={":fid": feedback_id},
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        if not items:
+            return False
+        sk = items[0]["SK"]
+        get_table().update_item(
+            Key={"PK": pk, "SK": sk},
+            UpdateExpression="SET triage_status = :s, triage_acted_by = :a, triage_at = :t",
+            ExpressionAttributeValues={
+                ":s": status,
+                ":a": acted_by,
+                ":t": now_iso(),
+            },
+        )
+        logger.info(
+            "feedback_store: updated status=%s for feedback %s", status, feedback_id
+        )
+        return True
+    except (ClientError, BotoCoreError) as exc:
+        logger.warning("feedback_store: update_feedback_status failed: %s", exc)
+        return False
 
 
 def list_feedback(tenant_id: str, limit: int = 50) -> list[dict]:

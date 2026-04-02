@@ -29,7 +29,8 @@ from botocore.config import Config
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models import BedrockModel
-from strands.models.model import CacheConfig
+# CacheConfig import removed — prompt caching disabled until Bedrock stabilises
+# from strands.models.model import CacheConfig
 
 # Add server/ to path for eagle_skill_constants
 _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -116,6 +117,29 @@ def _ensure_langfuse_exporter():
         )
         endpoint = f"{base.rstrip('/')}/v1/traces"
         auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+
+        # Probe auth BEFORE registering the exporter — a 401 means the keys
+        # are invalid and we should skip registration entirely instead of
+        # flooding CloudWatch with OTLP export failures on every span.
+        try:
+            import httpx
+
+            probe = httpx.post(
+                endpoint,
+                headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-protobuf"},
+                content=b"",
+                timeout=5.0,
+            )
+            if probe.status_code == 401:
+                logger.error(
+                    "[EAGLE] Langfuse OTLP auth FAILED (401) — exporter NOT registered. "
+                    "Check LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY."
+                )
+                _langfuse_injected = True  # prevent retry
+                return
+            logger.info("[EAGLE] Langfuse OTLP auth verified (status=%d)", probe.status_code)
+        except Exception as probe_exc:
+            logger.warning("[EAGLE] Langfuse OTLP startup probe failed: %s — registering exporter anyway", probe_exc)
 
         exporter = OTLPSpanExporter(
             endpoint=endpoint,
@@ -424,10 +448,9 @@ class ModelCircuitBreaker:
 # Build the ordered chain. EAGLE_BEDROCK_MODEL_ID (if set) is promoted
 # to position 0; duplicates are removed.
 
-# Only include models verified accessible in the NCI account.
-# Sonnet 4.5 and Sonnet 4.0 consistently fail with AccessDeniedException
-# at startup probe — removed to avoid wasting fallback attempts.
-_DEFAULT_MODEL_CHAIN = [_SONNET_46, _HAIKU]
+# Sonnet 4.0 removed — AccessDeniedException in NCI account (not in IAM policy).
+# Sonnet 4.5 restored after adding to core-stack.ts IAM policy.
+_DEFAULT_MODEL_CHAIN = [_SONNET_46, _SONNET_45, _HAIKU]
 _ENV_MODEL_OVERRIDE = os.getenv("EAGLE_BEDROCK_MODEL_ID")
 
 _MODEL_CHAIN_IDS: list[str] = list(_DEFAULT_MODEL_CHAIN)
@@ -437,7 +460,7 @@ if _ENV_MODEL_OVERRIDE:
     _MODEL_CHAIN_IDS.insert(0, _ENV_MODEL_OVERRIDE)
 
 _CB_FAILURE_THRESHOLD = int(os.getenv("EAGLE_CB_FAILURE_THRESHOLD", "2"))
-_CB_RECOVERY_TIMEOUT = float(os.getenv("EAGLE_CB_RECOVERY_TIMEOUT", "120"))
+_CB_RECOVERY_TIMEOUT = float(os.getenv("EAGLE_CB_RECOVERY_TIMEOUT", "300"))
 
 _circuit_breaker = ModelCircuitBreaker(
     model_ids=_MODEL_CHAIN_IDS,
@@ -450,11 +473,16 @@ MODEL = _MODEL_CHAIN_IDS[0]
 
 # -- Shared BedrockModel instances (one per unique model in chain) ---
 _bedrock_client_config = Config(
-    connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "60")),
+    connect_timeout=int(os.getenv("EAGLE_BEDROCK_CONNECT_TIMEOUT", "10")),
     read_timeout=int(os.getenv("EAGLE_BEDROCK_READ_TIMEOUT", "300")),
     retries={
-        "max_attempts": int(os.getenv("EAGLE_BEDROCK_MAX_ATTEMPTS", "4")),
-        "mode": os.getenv("EAGLE_BEDROCK_RETRY_MODE", "adaptive"),
+        # Keep retries low (1 = no retry) — the circuit breaker handles
+        # model failover.  With max_attempts=4, botocore's adaptive backoff
+        # burns 30-40s on internal 503 retries *before* our TTFT timer can
+        # react, so the 45s budget is consumed by silent retries instead of
+        # cascading to the next model promptly.
+        "max_attempts": int(os.getenv("EAGLE_BEDROCK_MAX_ATTEMPTS", "1")),
+        "mode": os.getenv("EAGLE_BEDROCK_RETRY_MODE", "standard"),
     },
     tcp_keepalive=True,
 )
@@ -466,10 +494,13 @@ for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         boto_client_config=_bedrock_client_config,
     )
-    # Enable prompt caching on Sonnet-class models
-    if "sonnet" in _mid:
-        _kwargs["cache_tools"] = "default"
-        _kwargs["cache_config"] = CacheConfig(strategy="auto")
+    # Prompt caching disabled — Bedrock cross-region inference has been
+    # unstable since 2026-03-30 (100% TTFT failures, now intermittent).
+    # Cache-miss overhead adds to TTFT on the first request.  Re-enable
+    # after Bedrock cross-region stabilises.
+    # if "sonnet" in _mid:
+    #     _kwargs["cache_tools"] = "default"
+    #     _kwargs["cache_config"] = CacheConfig(strategy="auto")
     _bedrock_models[_mid] = BedrockModel(**_kwargs)
 
 # Backward-compat alias
@@ -499,30 +530,40 @@ _ENABLE_STARTUP_PROBE = os.getenv("EAGLE_CB_STARTUP_PROBE", "true").lower() in (
 )
 
 
+def _ping_model(mid: str) -> bool:
+    """Send a minimal converse() to keep a model endpoint warm.
+
+    Uses the shared BedrockModel client so the TCP/TLS connection is the
+    same one real requests use.  Returns True on success.
+    """
+    bedrock_model = _bedrock_models.get(mid)
+    if not bedrock_model:
+        return False
+    try:
+        bedrock_model.client.converse(
+            modelId=mid,
+            messages=[{"role": "user", "content": [{"text": "hi"}]}],
+            inferenceConfig={"maxTokens": 1},
+        )
+        return True
+    except Exception as exc:
+        logger.warning("keepalive_ping: %s FAILED: %s", mid, exc)
+        return False
+
+
 def _run_startup_probe():
-    """Probe each model in the chain with a trivial request (parallel)."""
-    import boto3
+    """Probe each model in the chain via the shared BedrockModel instances.
 
-    probe_client = boto3.client(
-        "bedrock-runtime",
-        region_name=os.getenv("AWS_REGION", "us-east-1"),
-        config=Config(
-            connect_timeout=5, read_timeout=20, retries={"max_attempts": 1}
-        ),
-    )
-
+    Uses the same boto3 client that real requests will use, so the TCP
+    connection, TLS handshake, and endpoint DNS are all pre-warmed.
+    """
     def _probe_one(mid: str) -> None:
-        try:
-            probe_client.converse(
-                modelId=mid,
-                messages=[{"role": "user", "content": [{"text": "hi"}]}],
-                inferenceConfig={"maxTokens": 1},
-            )
+        if _ping_model(mid):
             logger.info("startup_probe: %s OK", mid)
-        except Exception as exc:
+        else:
             for _ in range(_CB_FAILURE_THRESHOLD):
                 _circuit_breaker.record_failure(mid)
-            logger.warning("startup_probe: %s FAILED: %s", mid, exc)
+            logger.warning("startup_probe: %s FAILED — circuit opened", mid)
 
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=len(_MODEL_CHAIN_IDS), thread_name_prefix="cb-probe"
@@ -530,9 +571,64 @@ def _run_startup_probe():
         list(pool.map(_probe_one, dict.fromkeys(_MODEL_CHAIN_IDS)))
 
 
+# -- Keepalive Loop (background) ------------------------------------
+# Bedrock cross-region inference endpoints go cold after ~60-90s of
+# inactivity, adding 5-10s of TTFT latency on the next request.
+# This loop pings the primary model periodically to keep the
+# inference path warm (TCP + TLS + model endpoint).
+
+_KEEPALIVE_INTERVAL = float(os.getenv("EAGLE_KEEPALIVE_INTERVAL", "45"))
+_ENABLE_KEEPALIVE = os.getenv("EAGLE_KEEPALIVE_ENABLED", "true").lower() in (
+    "true",
+    "1",
+)
+
+
+def _run_keepalive_loop():
+    """Ping the active model every N seconds to prevent cold starts."""
+    import time as _t
+
+    # Wait for startup probe to finish first
+    _t.sleep(5)
+    logger.info(
+        "keepalive_loop: started (interval=%ds, models=%s)",
+        _KEEPALIVE_INTERVAL,
+        _MODEL_CHAIN_IDS,
+    )
+    while True:
+        try:
+            _t.sleep(_KEEPALIVE_INTERVAL)
+            mid = _circuit_breaker.get_active_model_id()
+            start = _t.perf_counter()
+            ok = _ping_model(mid)
+            elapsed = _t.perf_counter() - start
+            if ok:
+                logger.debug(
+                    "keepalive_ping: %s OK (%.1fs)", mid, elapsed,
+                )
+                if elapsed > 8.0:
+                    logger.warning(
+                        "keepalive_ping: %s slow (%.1fs) — possible cold start despite keepalive",
+                        mid,
+                        elapsed,
+                    )
+            else:
+                _circuit_breaker.record_failure(mid)
+                logger.warning(
+                    "keepalive_ping: %s failed — circuit breaker notified", mid,
+                )
+        except Exception as exc:
+            logger.debug("keepalive_loop: unexpected error: %s", exc)
+
+
 if _ENABLE_STARTUP_PROBE:
     threading.Thread(
         target=_run_startup_probe, name="cb-startup-probe", daemon=True
+    ).start()
+
+if _ENABLE_KEEPALIVE:
+    threading.Thread(
+        target=_run_keepalive_loop, name="cb-keepalive", daemon=True
     ).start()
 
 # Backward-compat alias used by older code paths
@@ -5165,7 +5261,7 @@ async def sdk_query_streaming(
     # TTFT (Time To First Token) timeout: if no meaningful content arrives
     # within this window, abort and retry with the fallback model.
     # Bedrock cross-region inference can stall for 60-120s on cold paths.
-    _TTFT_TIMEOUT = float(os.getenv("EAGLE_TTFT_TIMEOUT", "45"))
+    _TTFT_TIMEOUT = float(os.getenv("EAGLE_TTFT_TIMEOUT", "15"))
     _first_content_received = False
 
     def _drain_tool_results() -> list[dict]:
@@ -5481,18 +5577,23 @@ async def sdk_query_streaming(
                 pass
         return  # Stream was abandoned — skip cleanup yields
     except Exception as exc:
-        from botocore.exceptions import ClientError
+        from botocore.exceptions import ClientError, ReadTimeoutError, ConnectTimeoutError, EndpointConnectionError
         from strands.types.exceptions import ContextWindowOverflowException
 
-        # --- Circuit-breaker cascade on ServiceUnavailable or TTFT timeout ---
+        # --- Circuit-breaker cascade on ServiceUnavailable, read timeout, or TTFT timeout ---
         _is_service_unavailable = (
             isinstance(exc, ClientError)
             and exc.response.get("Error", {}).get("Code") == "ServiceUnavailableException"
         ) or "ServiceUnavailableException" in str(exc)
+        _is_bedrock_timeout = isinstance(exc, (ReadTimeoutError, ConnectTimeoutError, EndpointConnectionError))
         _is_ttft_timeout = isinstance(exc, TimeoutError) and "TTFT timeout" in str(exc)
 
-        if _is_service_unavailable or _is_ttft_timeout:
-            _fallback_reason = "TTFT timeout" if _is_ttft_timeout else "service unavailable"
+        if _is_service_unavailable or _is_bedrock_timeout or _is_ttft_timeout:
+            _fallback_reason = (
+                "TTFT timeout" if _is_ttft_timeout
+                else "read timeout" if _is_bedrock_timeout
+                else "service unavailable"
+            )
             _circuit_breaker.record_failure(_current_model_id)
             logger.warning(
                 "circuit_breaker: %s failed (%s), session=%s. Status: %s",

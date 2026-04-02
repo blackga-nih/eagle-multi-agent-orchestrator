@@ -1,6 +1,6 @@
 ---
 description: Scan CloudWatch logs for errors across EAGLE ECS services. Run hourly with /loop 1h /check-logs or on-demand.
-argument-hint: [1h|4h|24h|7d] [keyword] [--backend|--frontend|--all]
+argument-hint: [1h|4h|24h|7d] [keyword] [--backend|--frontend|--bedrock|--all]
 ---
 
 # Check CloudWatch Logs for Errors
@@ -33,7 +33,7 @@ If this returns an error containing `expired` or `Token`, stop and tell the user
 | `/eagle/inference` | Model inference telemetry (Bedrock calls) | none |
 | `/eagle/lambda/metadata-extraction-dev` | Metadata extraction Lambda | 30 days |
 | `/aws/ecs/containerinsights/eagle-dev/performance` | Container insights | 1 day |
-| `/aws/bedrock/modelinvocations` | Bedrock API calls (shared) | none |
+| `/aws/bedrock/modelinvocations` | Bedrock per-call invocation logs (latency, tokens, model ID, errors) | 2 weeks |
 
 ## Instructions
 
@@ -58,7 +58,8 @@ filter @message like /(?i)(error|ERROR|exception|Exception|FATAL|fatal|crash|fai
    - A keyword like `AccessDenied`, `OOM`, `SIGTERM` — add to the filter
    - `--backend` — query only `/eagle/ecs/backend-dev`
    - `--frontend` — query only `/eagle/ecs/frontend-dev`
-   - `--all` — query ALL 7 log groups
+   - `--bedrock` — query only `/aws/bedrock/modelinvocations` (uses Bedrock-specific query below)
+   - `--all` — query ALL 7 log groups (includes Bedrock invocation logs)
 
 5. **Use these parameters for every query:**
    - `region: "us-east-1"`
@@ -69,6 +70,56 @@ filter @message like /(?i)(error|ERROR|exception|Exception|FATAL|fatal|crash|fai
    - Count occurrences
    - Mark as **ACTIONABLE** or **Noise**
    - For IAM errors: note exact role ARN, denied action, resource ARN
+
+## Bedrock Invocation Log Queries (`--bedrock` or `--all`)
+
+When querying `/aws/bedrock/modelinvocations`, use these Bedrock-specific Insights queries instead of the error-grep pattern. Bedrock invocation logs are structured JSON with fields like `modelId`, `inputTokenCount`, `outputTokenCount`, `invocationLatency`, `errorCode`.
+
+**Latency & TTFT overview** (default for `--bedrock`):
+
+```
+stats avg(invocationLatency) as avg_ms,
+      max(invocationLatency) as max_ms,
+      min(invocationLatency) as min_ms,
+      count(*) as calls
+by modelId
+| sort avg_ms desc
+```
+
+**Slow calls** (calls >10s — potential cold starts):
+
+```
+filter invocationLatency > 10000
+| fields @timestamp, modelId, invocationLatency, inputTokenCount, outputTokenCount, errorCode
+| sort invocationLatency desc
+| limit 20
+```
+
+**Errors only**:
+
+```
+filter errorCode != ""
+| fields @timestamp, modelId, errorCode, invocationLatency, inputTokenCount
+| sort @timestamp desc
+| limit 20
+```
+
+**Token usage breakdown**:
+
+```
+stats sum(inputTokenCount) as total_input,
+      sum(outputTokenCount) as total_output,
+      count(*) as calls
+by modelId
+| sort total_input desc
+```
+
+### Bedrock-specific setup
+
+- Log group: `/aws/bedrock/modelinvocations` (2-week retention, CDK-managed)
+- Logging role: `power-user-eagle-bedrock-logging-dev` (assumes `bedrock.amazonaws.com`, has `PermissionBoundary_PowerUser`)
+- Enabled via: `scripts/enable_bedrock_logging.py` (idempotent, re-run after CDK deploys)
+- Captures: text data delivery only (images/embeddings disabled)
 
 ## Known Error Patterns
 
@@ -86,6 +137,11 @@ filter @message like /(?i)(error|ERROR|exception|Exception|FATAL|fatal|crash|fai
 | `ThrottlingException` | Bedrock rate limit | Warning |
 | `ModelNotReadyException` | Bedrock cold start | Warning |
 | `SIGTERM` / `SIGKILL` | Container killed | ACTIONABLE |
+| `ModelTimeoutException` (Bedrock) | Bedrock inference timeout — cold start or overload | ACTIONABLE |
+| `invocationLatency > 10000` (Bedrock) | Slow call — likely cross-region cold start | Warning |
+| `AccessDeniedException` (Bedrock) | IAM role missing bedrock:InvokeModel | ACTIONABLE |
+| `ValidationException` (Bedrock) | Bad request (context too long, invalid params) | ACTIONABLE |
+| `ResourceNotFoundException` (Bedrock) | Model ID or inference profile not found | ACTIONABLE |
 
 ## Report Format
 
@@ -110,6 +166,15 @@ App (/eagle/app)
 ┌──────────────────────────────┬───────┬────────────┐
 │ ...                          │ ...   │ ...        │
 └──────────────────────────────┴───────┴────────────┘
+
+Bedrock Invocations (/aws/bedrock/modelinvocations) — if --bedrock or --all
+┌──────────────────────┬──────────┬──────────┬──────────┬───────┐
+│ Model                │ Avg (ms) │ Max (ms) │ Calls    │ Errors│
+├──────────────────────┼──────────┼──────────┼──────────┼───────┤
+│ us.anthropic.sonnet…  │ ...      │ ...      │ ...      │ ...   │
+└──────────────────────┴──────────┴──────────┴──────────┴───────┘
+Slow calls (>10s): {N} — potential cold starts
+Top error: {errorCode} ({N} occurrences)
 
 Summary: X actionable errors, Y warnings, Z noise
 ```

@@ -107,12 +107,21 @@ export class EagleCoreStack extends cdk.Stack {
       refreshTokenValidity: cdk.Duration.days(30),
     });
 
-    // ── CloudWatch Log Group ─────────────────────────────────
+    // ── CloudWatch Log Groups ────────────────────────────────
     const appLogGroup = new logs.LogGroup(this, 'AppLogGroup', {
       logGroupName: '/eagle/app',
       retention: logs.RetentionDays.THREE_MONTHS,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+
+    // Bedrock model invocation logs — pre-provisioned via CLI + enable_bedrock_logging.py.
+    // Captures per-call latency, input/output tokens, model ID, and error codes.
+    // Log group: /aws/bedrock/modelinvocations (2-week retention)
+    // Role: power-user-eagle-bedrock-logging-dev (bedrock.amazonaws.com, PermissionBoundary_PowerUser)
+    const bedrockLoggingRoleName = `power-user-eagle-bedrock-logging-${config.env}`;
+    const bedrockLoggingRole = iam.Role.fromRoleName(
+      this, 'BedrockLoggingRole', bedrockLoggingRoleName,
+    );
 
     // ── IAM App Execution Role ───────────────────────────────
     this.appRole = new iam.Role(this, 'AppRole', {
@@ -153,7 +162,11 @@ export class EagleCoreStack extends cdk.Stack {
         'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6',
         // Sonnet 4.6 cross-region inference profile (us.* prefix used by SDK)
         `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-6`,
-        // Haiku 4.5 foundation model (title generation)
+        // Sonnet 4.5 foundation model (circuit breaker fallback)
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0',
+        // Sonnet 4.5 cross-region inference profile
+        `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0`,
+        // Haiku 4.5 foundation model (last-resort fallback + title generation)
         'arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0',
         // Haiku 4.5 cross-region inference profile
         `arn:aws:bedrock:us-east-1:${this.account}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0`,
@@ -229,6 +242,11 @@ export class EagleCoreStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, 'AppLogGroupName', {
       value: appLogGroup.logGroupName,
+    });
+    new cdk.CfnOutput(this, 'BedrockLoggingRoleArn', {
+      value: `arn:aws:iam::${this.account}:role/${bedrockLoggingRoleName}`,
+      description: 'Role ARN for Bedrock model invocation logging (pre-provisioned)',
+      exportName: `eagle-bedrock-logging-role-arn-${config.env}`,
     });
     new cdk.CfnOutput(this, 'EagleTableName', {
       value: eagleTable.tableName,

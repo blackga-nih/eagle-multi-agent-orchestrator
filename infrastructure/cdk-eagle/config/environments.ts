@@ -41,6 +41,10 @@ export interface EagleConfig {
   langfuseHost: string;
   langfuseProjectId: string;
 
+  // JIRA + feedback triage
+  jiraBaseUrl?: string;
+  feedbackActionSecret?: string;
+
   // CI/CD
   githubOwner: string;
   githubRepo: string;
@@ -78,6 +82,9 @@ export const DEV_CONFIG: EagleConfig = {
   langfuseSecretKey: 'sk-lf-dbad2023-eede-420c-82e6-2ddec00fb7bb',
   langfuseHost: 'https://us.cloud.langfuse.com',
   langfuseProjectId: 'cmmsqvi2406aead071t0zhl7f',
+
+  jiraBaseUrl: 'https://tracker.nci.nih.gov',
+  feedbackActionSecret: process.env.FEEDBACK_ACTION_SECRET || 'eagle-feedback-action-key',
 
   githubOwner: 'CBIIT',
   githubRepo: 'sm_eagle',
