@@ -315,12 +315,14 @@ function autoResizeTextarea(element: HTMLTextAreaElement | null) {
   element.style.height = `${element.scrollHeight}px`;
 }
 
-function shouldRenderCachedDocument(doc: DocumentInfo): boolean {
-  const cachedFileType = (doc.file_type || '').toLowerCase();
-  const cachedSheets = normalizeXlsxPreviewSheets(doc.preview_sheets);
+function isCachedXlsxDocument(doc: Pick<DocumentInfo, 'is_binary' | 'file_type'>): boolean {
+  return Boolean(doc.is_binary) && (doc.file_type || '').toLowerCase() === 'xlsx';
+}
 
-  // XLSX documents should not flash their text fallback before grid data arrives.
-  if (Boolean(doc.is_binary) && cachedFileType === 'xlsx' && cachedSheets.length === 0) {
+function shouldRenderCachedDocument(doc: DocumentInfo): boolean {
+  // XLSX documents should always load from the backend so the viewer reflects
+  // the latest workbook version rather than a browser-side preview snapshot.
+  if (isCachedXlsxDocument(doc)) {
     return false;
   }
 
@@ -668,12 +670,14 @@ export default function DocumentViewerPage({ params }: PageProps) {
         preview_sheets: nextPreviewSheets,
       };
 
-      try {
-        // Update both current-route cache and resolved-target cache.
-        sessionStorage.setItem(`doc-content-${id}`, JSON.stringify(persistedDoc));
-        sessionStorage.setItem(`doc-content-${targetId}`, JSON.stringify(persistedDoc));
-      } catch {
-        // sessionStorage unavailable
+      if (!isCachedXlsxDocument(persistedDoc)) {
+        try {
+          // Update both current-route cache and resolved-target cache.
+          sessionStorage.setItem(`doc-content-${id}`, JSON.stringify(persistedDoc));
+          sessionStorage.setItem(`doc-content-${targetId}`, JSON.stringify(persistedDoc));
+        } catch {
+          // sessionStorage unavailable
+        }
       }
 
       setDocUpdated(true);
@@ -1526,9 +1530,14 @@ ${docSnippet}`;
       // Clear sessionStorage cache so reload fetches fresh content
       // Clear both old key (id) and new key (savedS3Key) to handle version changes
       try {
+        const legacyEncodedId = encodeURIComponent(decodeURIComponent(id)).replace(/\./g, '%2E');
         sessionStorage.removeItem(`doc-content-${id}`);
+        sessionStorage.removeItem(`doc-content-${legacyEncodedId}`);
         if (savedS3Key && savedS3Key !== id) {
           sessionStorage.removeItem(`doc-content-${encodeURIComponent(savedS3Key)}`);
+          sessionStorage.removeItem(
+            `doc-content-${encodeURIComponent(savedS3Key).replace(/\./g, '%2E')}`,
+          );
         }
       } catch {
         // Ignore sessionStorage errors

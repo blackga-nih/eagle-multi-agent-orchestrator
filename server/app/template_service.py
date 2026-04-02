@@ -17,10 +17,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.db_client import get_s3
-from app.formula_evaluation import (
-    evaluate_formulas_for_preview,
-    evaluate_workbook_formulas_safe,
-)
+from app.formula_evaluation import calculate_workbook_formula_values
+from app.igce_xlsx_mapper import CommercialIGCEWorkbookMapper
 from app.template_registry import (
     TEMPLATE_BUCKET,
     get_alternate_s3_keys,
@@ -225,6 +223,22 @@ class XLSXPopulator:
     """Populates XLSX templates by replacing {{PLACEHOLDER}} tokens."""
 
     @staticmethod
+    def _resolve_display_value(raw_value: Any, cached_value: Any, calculated_value: Any) -> Any:
+        """Choose the best display value for a spreadsheet cell."""
+        is_formula = isinstance(raw_value, str) and raw_value.startswith("=")
+        if is_formula:
+            if calculated_value is not None:
+                return calculated_value
+            if cached_value is not None and not (
+                isinstance(cached_value, str) and cached_value.startswith("=")
+            ):
+                return cached_value
+            return ""
+        if cached_value is not None:
+            return cached_value
+        return raw_value
+
+    @staticmethod
     def populate(
         template_bytes: bytes,
         data: Dict[str, Any],
@@ -251,6 +265,11 @@ class XLSXPopulator:
             raise ImportError("openpyxl required for XLSX population")
 
         wb = load_workbook(io.BytesIO(template_bytes))
+
+        if CommercialIGCEWorkbookMapper.populate(wb, data):
+            output = io.BytesIO()
+            wb.save(output)
+            return output.getvalue()
 
         # Build replacement dict
         replacements = {}
@@ -288,10 +307,7 @@ class XLSXPopulator:
         # Save to bytes
         output = io.BytesIO()
         wb.save(output)
-        populated_bytes = output.getvalue()
-
-        # Evaluate formulas so preview shows calculated values
-        return evaluate_workbook_formulas_safe(populated_bytes)
+        return output.getvalue()
 
     @staticmethod
     def _insert_line_items(sheet, start_row: int, items: List[Dict]) -> None:
@@ -313,14 +329,21 @@ class XLSXPopulator:
             )
 
     @staticmethod
-    def extract_text(xlsx_bytes: bytes) -> str:
+    def extract_text(
+        xlsx_bytes: bytes,
+        formula_values: Optional[Dict[tuple[str, str], Any]] = None,
+    ) -> str:
         """Extract text from XLSX as markdown preview."""
         try:
             from openpyxl import load_workbook
         except ImportError:
             return "[XLSX preview unavailable - openpyxl not installed]"
 
-        wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
+        if formula_values is None:
+            formula_values, _ = calculate_workbook_formula_values(xlsx_bytes)
+
+        wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+        wb_values = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
         lines = []
 
         for sheet in wb.worksheets:
@@ -328,242 +351,21 @@ class XLSXPopulator:
             lines.append("")
 
             for row in sheet.iter_rows(max_row=50):  # Limit preview
-                cells = [
-                    str(cell.value) if cell.value is not None else "" for cell in row
-                ]
+                cells = []
+                for cell in row:
+                    cached_value = wb_values[sheet.title][cell.coordinate].value
+                    display_value = XLSXPopulator._resolve_display_value(
+                        cell.value,
+                        cached_value,
+                        formula_values.get((sheet.title, cell.coordinate.upper())),
+                    )
+                    cells.append(str(display_value) if display_value is not None else "")
                 if any(cells):
                     lines.append("| " + " | ".join(cells) + " |")
 
             lines.append("")
 
         return "\n".join(lines)
-
-
-class IGCEPositionPopulator:
-    """Populates NCI IGCE Excel templates using fixed cell positions.
-
-    The NCI IGCE template (01.D_IGCE_for_Commercial_Organizations.xlsx) has
-    no {{PLACEHOLDER}} tokens — it's a structured government form with fixed
-    cell positions and pre-built formulas. This populator writes data directly
-    to known cell coordinates instead of doing string replacement.
-
-    IGCE sheet layout:
-      Rows 7-9:   Professional labor (A=name, C=hours, E=rate, G=C*E)
-      Rows 11-13: Professional Support
-      Rows 16-18: Administrative Support
-      Rows 21-23: Other Support
-      Row 24:     Total hours (=SUM(C7:C23))
-      Row 26:     Subtotal labor (=SUM(G7:G23))
-      B28:        Overhead rate (default 0.85)
-      Rows 30-37: ODCs in column E
-      B41:        G&A rate (default 0.10)
-      B44:        Fee/profit rate
-      H46:        Grand total (formula chain)
-
-    IT Services sheet layout:
-      Rows 12-18: Labor categories (A=name, B=hours, C=rate per year)
-      Multi-year with Base + 4 Option Years
-    """
-
-    # IGCE sheet: groups of (start_row, num_slots)
-    _LABOR_GROUPS = [
-        (7, 3),   # Professional: rows 7-9
-        (11, 3),  # Professional Support: rows 11-13
-        (16, 3),  # Administrative Support: rows 16-18
-        (21, 3),  # Other Support: rows 21-23
-    ]
-
-    # ODC row mapping: label -> row in IGCE sheet (values in column E)
-    _ODC_ROWS = {
-        "computer": 30,
-        "equipment": 31,
-        "materials": 32,
-        "supplies": 32,
-        "consultants": 33,
-        "travel": 34,
-        "subcontracts": 35,
-        "animal": 36,
-        "other": 37,
-    }
-
-    # IT Services sheet: rate columns per year (hours_col, rate_col)
-    _IT_SERVICES_YEARS = [
-        (2, 3),    # Base Year:   B=hours, C=rate
-        (5, 6),    # Option Yr 1: E=hours, F=rate
-        (8, 9),    # Option Yr 2: H=hours, I=rate
-        (11, 12),  # Option Yr 3: K=hours, L=rate
-        (14, 15),  # Option Yr 4: N=hours, O=rate
-    ]
-
-    @staticmethod
-    def populate(template_bytes: bytes, data: Dict[str, Any]) -> bytes:
-        """Populate NCI IGCE template by writing to fixed cell positions.
-
-        Args:
-            template_bytes: Raw XLSX template content
-            data: Dict with keys like title, line_items, overhead_rate,
-                  ga_rate, fee_rate, period_months, contract_type, odcs,
-                  prepared_by, prepared_date, num_years
-
-        Returns:
-            Populated XLSX bytes with formulas evaluated
-        """
-        try:
-            from openpyxl import load_workbook
-        except ImportError:
-            raise ImportError("openpyxl required for IGCE population")
-
-        wb = load_workbook(io.BytesIO(template_bytes))
-        line_items = data.get("line_items", [])
-        if not isinstance(line_items, list):
-            line_items = []
-
-        # --- IGCE sheet ---
-        if "IGCE" in wb.sheetnames:
-            ws = wb["IGCE"]
-            IGCEPositionPopulator._populate_igce_sheet(ws, data, line_items)
-
-        # --- IT Services sheet ---
-        if "IT Services" in wb.sheetnames and line_items:
-            ws_it = wb["IT Services"]
-            IGCEPositionPopulator._populate_it_services_sheet(
-                ws_it, data, line_items
-            )
-
-        # --- IT Goods sheet ---
-        goods = data.get("goods_items", [])
-        if not isinstance(goods, list):
-            goods = []
-        if "IT Goods" in wb.sheetnames and goods:
-            ws_goods = wb["IT Goods"]
-            IGCEPositionPopulator._populate_it_goods_sheet(ws_goods, data, goods)
-
-        output = io.BytesIO()
-        wb.save(output)
-        # Preserve formulas in the saved file — only set fullCalcOnLoad so
-        # Excel recalculates on open.  Preview extraction uses the separate
-        # evaluate_formulas_for_preview() which flattens values.
-        return evaluate_workbook_formulas_safe(output.getvalue())
-
-    @staticmethod
-    def _populate_igce_sheet(
-        ws, data: Dict[str, Any], line_items: List[Dict]
-    ) -> None:
-        """Write labor items and rates into the IGCE sheet."""
-        # Fill labor line items into available slots
-        slot_rows = []
-        for start_row, num_slots in IGCEPositionPopulator._LABOR_GROUPS:
-            for offset in range(num_slots):
-                slot_rows.append(start_row + offset)
-
-        for idx, item in enumerate(line_items[: len(slot_rows)]):
-            row = slot_rows[idx]
-            desc = item.get("description", item.get("name", ""))
-            hours = item.get("quantity", item.get("hours", 0))
-            rate = item.get("unit_price", item.get("rate", item.get("hourly_rate", 0)))
-
-            if desc:
-                ws.cell(row=row, column=1, value=desc)  # A: category name
-            if hours:
-                ws.cell(row=row, column=3, value=hours)  # C: hours/effort
-            if rate:
-                ws.cell(row=row, column=5, value=rate)   # E: hourly rate
-            # G column formula (=C*E) already exists in template
-
-        # Period of performance
-        period = data.get("period_months")
-        if period:
-            ws["C5"] = period
-
-        # Overhead rate
-        overhead = data.get("overhead_rate")
-        if overhead is not None:
-            ws["B28"] = overhead
-
-        # G&A rate
-        ga = data.get("ga_rate")
-        if ga is not None:
-            ws["B41"] = ga
-
-        # Fee/profit rate
-        fee = data.get("fee_rate")
-        if fee is not None:
-            ws["B44"] = fee
-
-        # ODCs
-        odcs = data.get("odcs", {})
-        if isinstance(odcs, dict):
-            for key, amount in odcs.items():
-                row = IGCEPositionPopulator._match_odc_row(key)
-                if row and amount:
-                    ws.cell(row=row, column=5, value=amount)  # E column
-
-        # Cancellation ceiling
-        ceiling = data.get("cancellation_ceiling")
-        if ceiling is not None:
-            ws["E47"] = ceiling
-
-    @staticmethod
-    def _populate_it_services_sheet(
-        ws, data: Dict[str, Any], line_items: List[Dict]
-    ) -> None:
-        """Write labor items into the IT Services sheet."""
-        max_rows = 7  # Rows 12-18
-        num_years = data.get("num_years", 1)
-        escalation = data.get("escalation_rate", 0.03)
-        contract_type = data.get("contract_type")
-
-        if contract_type:
-            ws["B5"] = contract_type
-
-        pop = data.get("period_of_performance") or data.get("pop")
-        if isinstance(pop, dict):
-            ws["B6"] = pop.get("from", "")
-            ws["D6"] = pop.get("to", "")
-
-        for idx, item in enumerate(line_items[:max_rows]):
-            row = 12 + idx
-            desc = item.get("description", item.get("name", ""))
-            hours = item.get("quantity", item.get("hours", 1872))
-            rate = item.get("unit_price", item.get("rate", item.get("hourly_rate", 0)))
-
-            ws.cell(row=row, column=1, value=desc)  # A: category name
-
-            # Fill each contract year with escalation
-            for yr_idx, (h_col, r_col) in enumerate(
-                IGCEPositionPopulator._IT_SERVICES_YEARS[:num_years]
-            ):
-                yr_rate = rate * ((1 + escalation) ** yr_idx) if rate else 0
-                ws.cell(row=row, column=h_col, value=hours)
-                ws.cell(row=row, column=r_col, value=round(yr_rate, 2))
-
-    @staticmethod
-    def _populate_it_goods_sheet(
-        ws, data: Dict[str, Any], goods: List[Dict]
-    ) -> None:
-        """Write goods items into the IT Goods sheet."""
-        contract_type = data.get("contract_type")
-        if contract_type:
-            ws["B5"] = contract_type
-
-        for idx, item in enumerate(goods[:8]):  # Rows 10-17
-            row = 10 + idx
-            ws.cell(row=row, column=1, value=item.get("product_name", item.get("description", "")))
-            ws.cell(row=row, column=2, value=item.get("manufacturer", ""))
-            ws.cell(row=row, column=3, value=item.get("manufacturer_number", ""))
-            ws.cell(row=row, column=4, value=item.get("brand_name_only", "N"))
-            ws.cell(row=row, column=5, value=item.get("quantity", 1))
-            ws.cell(row=row, column=6, value=item.get("unit_price", 0))
-            # G column formula (=F*E) already exists
-
-    @staticmethod
-    def _match_odc_row(key: str) -> Optional[int]:
-        """Match an ODC key to its row number in the IGCE sheet."""
-        key_lower = key.lower().strip()
-        for label, row in IGCEPositionPopulator._ODC_ROWS.items():
-            if label in key_lower:
-                return row
-        return IGCEPositionPopulator._ODC_ROWS.get("other")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -667,21 +469,10 @@ class TemplateService:
             preview = DOCXPopulator.extract_text(populated)
             file_type = "docx"
         elif mapping.file_type == "xlsx":
-            # Use position-based populator for IGCE (NCI template has no
-            # {{PLACEHOLDER}} tokens — it's a structured government form).
-            if doc_type == "igce":
-                populated = IGCEPositionPopulator.populate(
-                    template_bytes, data_with_title
-                )
-            else:
-                populated = XLSXPopulator.populate(
-                    template_bytes, data_with_title, placeholder_map
-                )
-            # Generate preview from a flattened copy (formulas replaced
-            # with values) so extract_text sees numbers, not "=C7*E7".
-            # The actual `populated` bytes keep live formulas for Excel.
-            preview_bytes = evaluate_formulas_for_preview(populated)
-            preview = XLSXPopulator.extract_text(preview_bytes)
+            populated = XLSXPopulator.populate(
+                template_bytes, data_with_title, placeholder_map
+            )
+            preview = XLSXPopulator.extract_text(populated)
             file_type = "xlsx"
         else:
             raise ValueError(f"Unknown file type: {mapping.file_type}")

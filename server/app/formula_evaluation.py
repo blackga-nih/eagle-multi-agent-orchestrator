@@ -1,215 +1,181 @@
-"""Excel formula evaluation using the formulas library.
+"""Excel formula calculation helpers for preview rendering.
 
-This module provides formula evaluation for XLSX files so that:
-1. Preview extraction shows calculated values instead of formula strings
-2. After cell edits, totals and dependent cells recalculate
-3. Template population produces files with cached formula results
+This module calculates workbook formulas for preview purposes without
+modifying the underlying XLSX bytes. Persisted/downloaded workbooks should
+retain their original Excel formulas so they continue recalculating in Excel.
 """
 
 from __future__ import annotations
 
-import io
 import logging
-import tempfile
 import os
-from typing import Tuple
+import tempfile
+from typing import Any, Tuple
 
 logger = logging.getLogger("eagle.formula_evaluation")
 
 
-def evaluate_workbook_formulas(xlsx_bytes: bytes) -> Tuple[bytes, bool]:
-    """
-    Evaluate all formulas in an XLSX workbook and return with cached values.
+def _scan_workbook_formulas(xlsx_bytes: bytes) -> tuple[bool, bool]:
+    """Return (is_valid_workbook, has_formula_cells)."""
+    try:
+        from openpyxl import load_workbook
+        import io
+    except ImportError:
+        return False, False
 
-    Uses the `formulas` library to calculate Excel formulas and write the
-    computed results as **cached values** while preserving the original
-    formulas.  This ensures:
-      - openpyxl's data_only=True mode returns actual numbers for previews
-      - Excel still sees live formulas when the user opens the file
+    try:
+        wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+    except Exception:
+        return False, False
 
-    Args:
-        xlsx_bytes: Raw XLSX file content
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.startswith("="):
+                    return True, True
+    return True, False
+
+
+def _extract_scalar_value(value: Any) -> Any:
+    """Normalize formula-engine outputs to native Python scalars."""
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover - numpy is available with formulas
+        np = None  # type: ignore[assignment]
+
+    scalar = value.value[0, 0] if hasattr(value, "value") else value
+
+    if isinstance(scalar, tuple):
+        if not scalar:
+            return None
+        if len(scalar) == 1:
+            return _extract_scalar_value(scalar[0])
+        return scalar[0]
+
+    if np is not None:
+        if isinstance(scalar, (np.integer,)):
+            return int(scalar)
+        if isinstance(scalar, (np.floating,)):
+            return float(scalar)
+        if isinstance(scalar, np.ndarray):
+            return scalar.item()
+
+    if str(scalar) == "empty":
+        return None
+
+    return scalar
+
+
+def _parse_solution_ref(ref: Any) -> tuple[str | None, str | None]:
+    """Parse a formulas-engine ref into (sheet_name, cell_ref)."""
+    try:
+        sheet_part, cell_ref = str(ref).rsplit("!", 1)
+        if ":" in cell_ref:
+            return None, None
+        sheet_name = sheet_part.strip("'")
+        if "]" in sheet_name:
+            sheet_name = sheet_name.split("]", 1)[1]
+        return sheet_name, cell_ref.upper()
+    except Exception:
+        return None, None
+
+
+def calculate_workbook_formula_values(
+    xlsx_bytes: bytes,
+) -> tuple[dict[tuple[str, str], Any], bool]:
+    """Calculate workbook formula results without mutating the workbook bytes.
 
     Returns:
-        Tuple of (processed_bytes, success_flag)
-        If evaluation fails, returns original bytes with success=False
+        (formula_values, success)
+        formula_values keys are (sheet_name, cell_ref), preserving the actual
+        workbook sheet name casing and uppercase cell refs.
     """
+    if not xlsx_bytes:
+        return {}, False
+
+    is_valid_workbook, has_formula_cells = _scan_workbook_formulas(xlsx_bytes)
+    if not is_valid_workbook:
+        return {}, False
+
+    if not has_formula_cells:
+        return {}, True
+
     try:
         import formulas
+        from openpyxl import load_workbook
     except ImportError:
-        logger.warning("formulas library not installed, skipping evaluation")
-        return xlsx_bytes, False
+        logger.warning("formulas/openpyxl not installed, skipping evaluation")
+        return {}, False
 
     tmp_path = None
     try:
-        from openpyxl import load_workbook
-        from openpyxl.cell.cell import Cell
-        import numpy as np
-
-        # formulas.ExcelModel requires a file path, not BytesIO
         fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
         os.write(fd, xlsx_bytes)
         os.close(fd)
 
-        # Load workbook into formulas engine and calculate
         logger.info("Loading workbook into formulas engine: %s", tmp_path)
         xl_model = formulas.ExcelModel().loads(tmp_path).finish()
         logger.info("Calculating formulas...")
         solution = xl_model.calculate()
         logger.info("Formula calculation complete, %d results", len(solution))
 
-        # Build a lookup from UPPER sheet name -> actual openpyxl sheet name
-        wb = load_workbook(tmp_path)
+        wb = load_workbook(tmp_path, data_only=False)
         sheet_lookup = {name.upper(): name for name in wb.sheetnames}
-
-        # Build a map of formula cells -> computed values for the preview
-        # without destroying the formulas themselves.
-        cached_values: dict[Cell, object] = {}
+        formula_values: dict[tuple[str, str], Any] = {}
 
         for ref, value in solution.items():
-            # ref looks like "'[tmp.xlsx]CALCULATIONS'!C1"
+            sheet_name, cell_ref = _parse_solution_ref(ref)
+            if not sheet_name or not cell_ref:
+                continue
+
+            actual_name = sheet_lookup.get(sheet_name.upper())
+            if not actual_name:
+                continue
+
             try:
-                sheet_part, cell_ref = str(ref).rsplit("!", 1)
-                # Strip quotes and book name
-                sheet_name = sheet_part.strip("'")
-                if "]" in sheet_name:
-                    sheet_name = sheet_name.split("]", 1)[1]
-
-                actual_name = sheet_lookup.get(sheet_name.upper())
-                if not actual_name:
-                    continue
-
-                # Extract scalar from Ranges object
-                val = value.value[0, 0] if hasattr(value, "value") else value
-                # Convert numpy types to native Python
-                if isinstance(val, (np.integer,)):
-                    val = int(val)
-                elif isinstance(val, (np.floating,)):
-                    val = float(val)
-                elif isinstance(val, np.ndarray):
-                    val = val.item()
-
-                cell = wb[actual_name][cell_ref.upper()]
-                if isinstance(cell.value, str) and cell.value.startswith("="):
-                    cached_values[cell] = val
-            except Exception:
-                continue  # skip unparseable refs
-
-        # Write cached values into formula cells.  openpyxl stores the
-        # formula in cell.value and the cached result in cell._value when
-        # the value is set *after* the formula.  The trick: set the cached
-        # value via the internal attribute so the formula string is
-        # preserved in the saved XML (<f> tag) while the cached result
-        # appears in the <v> tag.
-        #
-        # openpyxl's Cell stores formula in _value; there is no separate
-        # cache attribute.  Instead we use the worksheet's formula_attributes
-        # to tell Excel to recalculate on open (calcPr fullCalcOnLoad="1").
-        # For the preview we produce a *second* copy with values only.
-        #
-        # Simplest correct approach: keep formulas in the file, set the
-        # workbook to force-recalculate on open so Excel always shows
-        # fresh values.
-        wb.calculation = wb.calculation if wb.calculation else None
-        if hasattr(wb, "calculation") and wb.calculation is not None:
-            wb.calculation.calcMode = "auto"
-        # Force Excel to recalculate all formulas on open
-        from openpyxl.workbook.properties import CalcProperties
-
-        wb.calculation = CalcProperties(fullCalcOnLoad=True)
-
-        output = io.BytesIO()
-        wb.save(output)
-        result_bytes = output.getvalue()
-
-        # Validate we got valid output
-        if len(result_bytes) == 0:
-            logger.warning("Formula evaluation produced empty output")
-            return xlsx_bytes, False
-
-        return result_bytes, True
-
-    except Exception as exc:
-        logger.warning("Formula evaluation failed: %s", exc, exc_info=False)
-        # Log more details for debugging
-        logger.debug("Formula evaluation exception details:", exc_info=True)
-        return xlsx_bytes, False
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-
-
-def evaluate_formulas_for_preview(xlsx_bytes: bytes) -> bytes:
-    """Evaluate formulas and replace with values — for preview extraction only.
-
-    Unlike evaluate_workbook_formulas(), this destroys the formulas and is
-    only intended for generating the markdown preview text.  The file
-    returned by this function should NOT be saved to S3 as the downloadable
-    artifact.
-    """
-    try:
-        import formulas
-        from openpyxl import load_workbook
-        import numpy as np
-    except ImportError:
-        return xlsx_bytes
-
-    tmp_path = None
-    try:
-        fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
-        os.write(fd, xlsx_bytes)
-        os.close(fd)
-
-        xl_model = formulas.ExcelModel().loads(tmp_path).finish()
-        solution = xl_model.calculate()
-
-        wb = load_workbook(tmp_path)
-        sheet_lookup = {name.upper(): name for name in wb.sheetnames}
-
-        for ref, value in solution.items():
-            try:
-                sheet_part, cell_ref = str(ref).rsplit("!", 1)
-                sheet_name = sheet_part.strip("'")
-                if "]" in sheet_name:
-                    sheet_name = sheet_name.split("]", 1)[1]
-                actual_name = sheet_lookup.get(sheet_name.upper())
-                if not actual_name:
-                    continue
-                val = value.value[0, 0] if hasattr(value, "value") else value
-                if isinstance(val, (np.integer,)):
-                    val = int(val)
-                elif isinstance(val, (np.floating,)):
-                    val = float(val)
-                elif isinstance(val, np.ndarray):
-                    val = val.item()
-                cell = wb[actual_name][cell_ref.upper()]
-                if isinstance(cell.value, str) and cell.value.startswith("="):
-                    cell.value = val
+                cell = wb[actual_name][cell_ref]
             except Exception:
                 continue
 
-        output = io.BytesIO()
-        wb.save(output)
-        return output.getvalue() or xlsx_bytes
-    except Exception:
-        return xlsx_bytes
+            if not (isinstance(cell.value, str) and cell.value.startswith("=")):
+                continue
+
+            try:
+                normalized_value = _extract_scalar_value(value)
+            except Exception:
+                logger.debug(
+                    "Skipping unparseable formula result for %s!%s",
+                    actual_name,
+                    cell_ref,
+                    exc_info=True,
+                )
+                continue
+
+            formula_values[(actual_name, cell_ref)] = normalized_value
+
+        return formula_values, True
+
+    except Exception as exc:
+        logger.warning("Formula evaluation failed: %s", exc, exc_info=False)
+        logger.debug("Formula evaluation exception details:", exc_info=True)
+        return {}, False
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
 
+def evaluate_workbook_formulas(xlsx_bytes: bytes) -> Tuple[bytes, bool]:
+    """
+    Compatibility wrapper that preserves workbook formulas.
+
+    The returned bytes are the original workbook bytes. Success indicates
+    whether formula calculation succeeded for preview purposes.
+    """
+    _, success = calculate_workbook_formula_values(xlsx_bytes)
+    return xlsx_bytes, success
+
+
 def evaluate_workbook_formulas_safe(xlsx_bytes: bytes) -> bytes:
-    """
-    Evaluate formulas, returning original bytes on any failure.
-
-    Use this wrapper when you want silent fallback behavior without
-    needing to check the success flag.
-
-    Args:
-        xlsx_bytes: Raw XLSX file content
-
-    Returns:
-        Processed bytes with cached formula values, or original bytes on failure
-    """
+    """Compatibility wrapper that returns the original workbook bytes."""
     result, _ = evaluate_workbook_formulas(xlsx_bytes)
     return result
