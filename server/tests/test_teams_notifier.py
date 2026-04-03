@@ -309,3 +309,138 @@ def test_startup_card_good_style():
     card = startup_card("dev", "host-1", "2026-03-19T18:00:00Z")
     container = card["attachments"][0]["content"]["body"][0]
     assert container["style"] == "good"
+
+
+# ── triage_plan_card unit tests ────────────────────────────────────────
+
+
+def test_triage_plan_card_structure():
+    """triage_plan_card returns a valid Adaptive Card envelope with collapsible plan."""
+    from app.teams_cards import triage_plan_card
+
+    card = triage_plan_card(
+        environment="dev",
+        date="2026-04-01",
+        plan_text="## P1 Fix\nFix the thing.",
+        p1_count=1,
+        p2_count=2,
+        p3_count=0,
+        jira_key=None,
+        triage_id="abc12345",
+    )
+    assert card["type"] == "message"
+    content = card["attachments"][0]["content"]
+    assert content["type"] == "AdaptiveCard"
+    assert content["version"] == "1.4"
+    # Body should contain header, factset, and collapsible plan container
+    body = content["body"]
+    assert len(body) >= 3
+    assert body[0]["type"] == "Container"
+    assert body[1]["type"] == "FactSet"
+    # Collapsible plan container
+    plan_container = body[2]
+    assert plan_container["id"] == "planContent"
+    assert plan_container["isVisible"] is False
+
+
+def test_triage_plan_card_toggle_action():
+    """triage_plan_card includes Action.ToggleVisibility for the plan."""
+    from app.teams_cards import triage_plan_card
+
+    card = triage_plan_card(
+        environment="dev",
+        date="2026-04-01",
+        plan_text="Fix stuff.",
+        triage_id="abc12345",
+    )
+    content = card["attachments"][0]["content"]
+    actions = content["actions"]
+    toggle = next(a for a in actions if a["type"] == "Action.ToggleVisibility")
+    assert "planContent" in toggle["targetElements"]
+
+
+def test_triage_plan_card_truncates_long_plan():
+    """Plans longer than 2000 chars get truncated with a JIRA note."""
+    from app.teams_cards import triage_plan_card
+
+    long_plan = "x" * 3000
+    card = triage_plan_card(
+        environment="dev",
+        date="2026-04-01",
+        plan_text=long_plan,
+        triage_id="abc12345",
+    )
+    content = card["attachments"][0]["content"]
+    plan_container = content["body"][2]
+    plan_block = plan_container["items"][0]
+    assert len(plan_block["text"]) < 3000
+    assert "Full plan attached to JIRA issue" in plan_block["text"]
+
+
+def test_triage_plan_card_action_buttons_with_backend():
+    """triage_plan_card includes Approve/Deny/Delay buttons when BACKEND_URL is set."""
+    from unittest.mock import patch
+
+    with patch("app.teams_cards._BACKEND_URL", "https://eagle.example.com"), \
+         patch("app.teams_cards._JIRA_BASE_URL", "https://jira.example.com"):
+        from app.teams_cards import triage_plan_card
+
+        card = triage_plan_card(
+            environment="dev",
+            date="2026-04-01",
+            plan_text="Fix stuff.",
+            jira_key="EAGLE-789",
+            triage_id="abc12345",
+        )
+
+    content = card["attachments"][0]["content"]
+    actions = content["actions"]
+    action_titles = [a.get("title") for a in actions]
+    assert "Show / Hide Full Plan" in action_titles
+    assert "Approve" in action_titles
+    assert "Deny" in action_titles
+    assert "Delay 24hr" in action_titles
+    assert "View in JIRA" in action_titles
+
+
+def test_triage_plan_card_no_buttons_without_backend():
+    """No action buttons when BACKEND_URL is empty (only toggle remains)."""
+    from unittest.mock import patch
+
+    with patch("app.teams_cards._BACKEND_URL", ""), \
+         patch("app.teams_cards._JIRA_BASE_URL", ""):
+        from app.teams_cards import triage_plan_card
+
+        card = triage_plan_card(
+            environment="dev",
+            date="2026-04-01",
+            plan_text="Fix stuff.",
+            jira_key=None,
+            triage_id="",
+        )
+
+    content = card["attachments"][0]["content"]
+    actions = content["actions"]
+    assert len(actions) == 1
+    assert actions[0]["type"] == "Action.ToggleVisibility"
+
+
+def test_triage_plan_card_factset_shows_priorities():
+    """FactSet includes priority breakdown."""
+    from app.teams_cards import triage_plan_card
+
+    card = triage_plan_card(
+        environment="qa",
+        date="2026-04-01",
+        plan_text="Fix it.",
+        p1_count=3,
+        p2_count=1,
+        p3_count=5,
+        triage_id="abc12345",
+    )
+    content = card["attachments"][0]["content"]
+    facts = content["body"][1]["facts"]
+    issues_fact = next(f for f in facts if f["title"] == "Issues")
+    assert "3 P1" in issues_fact["value"]
+    assert "1 P2" in issues_fact["value"]
+    assert "5 P3" in issues_fact["value"]

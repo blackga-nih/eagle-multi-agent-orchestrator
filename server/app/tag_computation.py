@@ -11,6 +11,8 @@ import logging
 from decimal import Decimal
 from typing import Optional
 
+from .compliance_matrix import THRESHOLD_TIERS as _MATRIX_TIERS
+
 logger = logging.getLogger("eagle.tag_computation")
 
 
@@ -282,21 +284,29 @@ def _value_to_risk(value: float) -> str:
     return "low"
 
 
-_THRESHOLD_TIERS = [
-    (15_000, "micro"),
-    (25_000, "micro_plus"),
-    (350_000, "sat"),
-    (750_000, "subk_threshold"),
-    (900_000, "commercial_simplified"),
-    (2_500_000, "competition_advocate"),
-    (4_500_000, "contract_review"),
-    (6_000_000, "earned_value"),
-    (20_000_000, "congressional_notification"),
-    (50_000_000, "hca_approval"),
-    (90_000_000, "tina_threshold"),
-    (100_000_000, "agency_head"),
-    (150_000_000, "spe_approval"),
-]
+# Derived from matrix.json via compliance_matrix (single source of truth).
+# Map matrix.json triggers → internal tier names used by tag_computation.
+_TRIGGER_TO_TIER = {
+    "micro_purchase_threshold": "micro",
+    "sam_gov_synopsis_required": "micro_plus",
+    "simplified_acquisition_threshold": "sat",
+    "subcontracting_plan_required": "subk_threshold",
+    "ja_hca_approval_required": "commercial_simplified",
+    "certified_cost_pricing_data_required": "competition_advocate",
+    "8a_sole_source_services_ceiling": "contract_review",
+    "idiq_enhanced_competition": "earned_value",
+    "written_acquisition_plan_required": "congressional_notification",
+    "hca_approval_required": "hca_approval",
+    "spe_ja_approval_required": "tina_threshold",
+    "oap_approval_required": "spe_approval",
+}
+
+_THRESHOLD_TIERS = []
+for _t in _MATRIX_TIERS:
+    for _trigger in _t.get("triggers", []):
+        if _trigger in _TRIGGER_TO_TIER:
+            _THRESHOLD_TIERS.append((_t["value"], _TRIGGER_TO_TIER[_trigger]))
+            break
 
 
 def _value_to_threshold_tier(value: float) -> str:

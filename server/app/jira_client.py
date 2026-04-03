@@ -183,6 +183,82 @@ def add_comment(issue_key: str, body: str) -> bool:
         return False
 
 
+def add_attachment(issue_key: str, filename: str, content: bytes) -> bool:
+    """Attach a file to a JIRA issue.  Never raises."""
+    from .config import jira as jira_config
+
+    if not jira_config.base_url or not jira_config.api_token:
+        return False
+
+    try:
+        client = _get_client()
+        url = f"{jira_config.base_url}/rest/api/2/issue/{issue_key}/attachments"
+        headers = _headers()
+        headers["X-Atlassian-Token"] = "no-check"
+        # Multipart upload — drop Content-Type so httpx sets the boundary
+        headers.pop("Content-Type", None)
+        resp = client.post(
+            url,
+            headers=headers,
+            files={"file": (filename, content, "application/octet-stream")},
+        )
+        ok = resp.status_code in (200, 201)
+        if ok:
+            logger.info("jira_client: attached %s to %s", filename, issue_key)
+        else:
+            logger.warning(
+                "jira_client: attachment failed status=%d body=%s",
+                resp.status_code,
+                resp.text[:200],
+            )
+        return ok
+    except Exception:
+        logger.warning("jira_client: attachment failed for %s", issue_key, exc_info=True)
+        return False
+
+
+def update_labels(
+    issue_key: str,
+    add: list[str] | None = None,
+    remove: list[str] | None = None,
+) -> bool:
+    """Add or remove labels on a JIRA issue.  Never raises."""
+    from .config import jira as jira_config
+
+    if not jira_config.base_url or not jira_config.api_token:
+        return False
+
+    ops: list[dict] = []
+    for label in add or []:
+        ops.append({"add": label})
+    for label in remove or []:
+        ops.append({"remove": label})
+    if not ops:
+        return True
+
+    try:
+        client = _get_client()
+        url = f"{jira_config.base_url}/rest/api/2/issue/{issue_key}"
+        resp = client.put(
+            url,
+            headers=_headers(),
+            json={"update": {"labels": ops}},
+        )
+        ok = resp.status_code in (200, 204)
+        if ok:
+            logger.info("jira_client: updated labels on %s", issue_key)
+        else:
+            logger.warning(
+                "jira_client: label update failed status=%d body=%s",
+                resp.status_code,
+                resp.text[:200],
+            )
+        return ok
+    except Exception:
+        logger.warning("jira_client: label update failed for %s", issue_key, exc_info=True)
+        return False
+
+
 def get_issue_url(issue_key: str) -> str:
     """Return the browse URL for an issue."""
     from .config import jira as jira_config

@@ -63,17 +63,17 @@ class TestGetRequirements:
         assert "Unknown contract type" in result["errors"][0]
 
     def test_threshold_500k_triggers_sat_not_tina(self):
-        """$500K triggers SAT ($350K) but not TINA ($2.5M)."""
+        """$500K triggers SAT ($350K) but not TINA ($2M per matrix.json)."""
         result = get_requirements(500_000, "negotiated", "ffp")
         triggered_values = [t["value"] for t in result["thresholds_triggered"]]
         assert 350_000 in triggered_values, "SAT threshold should be triggered"
-        assert 2_500_000 not in triggered_values, "TINA threshold should NOT be triggered"
+        assert 2_000_000 not in triggered_values, "TINA threshold should NOT be triggered"
 
     def test_threshold_3m_triggers_tina(self):
-        """$3M triggers TINA ($2.5M)."""
+        """$3M triggers TINA ($2M per matrix.json FAC 2025-06)."""
         result = get_requirements(3_000_000, "negotiated", "ffp")
         triggered_values = [t["value"] for t in result["thresholds_triggered"]]
-        assert 2_500_000 in triggered_values, "TINA threshold should be triggered at $3M"
+        assert 2_000_000 in triggered_values, "TINA threshold should be triggered at $3M"
         # TINA compliance item should be required
         tina_items = [c for c in result["compliance_items"] if "TINA" in c["name"]]
         assert len(tina_items) == 1
@@ -101,6 +101,38 @@ class TestGetRequirements:
         ja_docs = [d for d in result["documents_required"] if "J&A" in d["name"]]
         assert len(ja_docs) == 1
         assert ja_docs[0]["required"] is True
+
+    def test_sole_source_under_sat_simplified(self):
+        """Sole source under SAT uses simplified FAR 13.106-1(b) path."""
+        result = get_requirements(280_000, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+        assert ja["variant"] == "simplified_under_sat"
+        assert "13.106-1(b)" in ja["note"]
+        assert ja["authority"] == "FAR 13.106-1(b)"
+        assert ja["template_hint"] == "6.a. Single Source J&A - up to SAT.docx"
+        assert "13.106-1(b)" in result["competition_rules"]
+
+    def test_sole_source_over_sat_full_ja(self):
+        """Sole source over SAT uses full FAR 6.302/6.304 path."""
+        result = get_requirements(500_000, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+        assert ja["variant"] == "full"
+        assert "6.304" in ja["note"]
+        assert "FAR 6.302" in result["competition_rules"]
+
+    def test_sole_source_at_sat_boundary(self):
+        """Sole source at exactly SAT ($350K) uses simplified path."""
+        result = get_requirements(350_000, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["variant"] == "simplified_under_sat"
+
+    def test_sole_source_above_sat_boundary(self):
+        """Sole source at $350,001 uses full J&A path."""
+        result = get_requirements(350_001, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["variant"] == "full"
 
     def test_micro_purchase_exceeds_mpt_error(self):
         """Micro-purchase above $15K produces an error."""
@@ -456,3 +488,232 @@ class TestConstants:
 
     def test_threshold_tiers_all_positive(self):
         assert all(t["value"] > 0 for t in THRESHOLD_TIERS)
+
+
+# ---------------------------------------------------------------------------
+# 6. Phase 2e: Flags wired through execute_operation
+# ---------------------------------------------------------------------------
+
+class TestExecuteOperationFlags:
+    """Verify is_limited_sources, is_8a, is_manufacturing pass through."""
+
+    def test_limited_sources_flag_passes_through(self):
+        result = execute_operation({
+            "operation": "query",
+            "contract_value": 200_000,
+            "acquisition_method": "fss",
+            "contract_type": "ffp",
+            "is_limited_sources": True,
+        })
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+        assert ja["variant"] == "simplified_limited_sources"
+
+    def test_8a_flag_passes_through(self):
+        result = execute_operation({
+            "operation": "query",
+            "contract_value": 3_000_000,
+            "acquisition_method": "sap",
+            "contract_type": "ffp",
+            "is_8a": True,
+        })
+        assert "8(a) sole source authorized" in result["competition_rules"]
+
+    def test_manufacturing_flag_passes_through(self):
+        result = execute_operation({
+            "operation": "query",
+            "contract_value": 5_000_000,
+            "acquisition_method": "sap",
+            "contract_type": "ffp",
+            "is_8a": True,
+            "is_manufacturing": True,
+        })
+        assert "Manufacturing" in result["competition_rules"]
+
+
+# ---------------------------------------------------------------------------
+# 7. Phase 2: J&A / Competition Paths — FSS, BPA, 8(a)
+# ---------------------------------------------------------------------------
+
+class TestJACompetitionPaths:
+    """Expanded J&A coverage: FSS limited, BPA limited, 8(a) ceilings."""
+
+    def test_fss_limited_sources_under_sat(self):
+        """FSS limited sources under SAT → simplified J&A."""
+        result = get_requirements(200_000, "fss", "ffp", flags={"is_limited_sources": True})
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+        assert ja["variant"] == "simplified_limited_sources"
+        assert ja["authority"] == "FAR 8.405-6"
+
+    def test_fss_limited_sources_over_sat(self):
+        """FSS limited sources over SAT → full J&A."""
+        result = get_requirements(500_000, "fss", "ffp", flags={"is_limited_sources": True})
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+        assert ja["variant"] == "full"
+
+    def test_bpa_call_limited_under_sat(self):
+        """BPA-call limited under SAT → simplified J&A."""
+        result = get_requirements(100_000, "bpa-call", "ffp", flags={"is_limited_sources": True})
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+        assert ja["variant"] == "simplified_limited_sources"
+        assert ja["authority"] == "FAR 8.405-6"
+
+    def test_bpa_est_sole_source(self):
+        """BPA-est limited → J&A required."""
+        result = get_requirements(100_000, "bpa-est", "ffp", flags={"is_limited_sources": True})
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert ja["required"] is True
+
+    def test_8a_sole_source_services_under_ceiling(self):
+        """8(a) services under $4.5M → sole source authorized."""
+        result = get_requirements(3_000_000, "sap", "ffp", flags={"is_8a": True})
+        assert "8(a) sole source authorized" in result["competition_rules"]
+        assert "19.805-1" in result["competition_rules"]
+
+    def test_8a_sole_source_services_over_ceiling(self):
+        """8(a) services over $4.5M → competitive required."""
+        result = get_requirements(5_000_000, "negotiated", "ffp", flags={"is_8a": True})
+        assert "8(a) competitive required" in result["competition_rules"]
+
+    def test_8a_sole_source_manufacturing_ceiling(self):
+        """8(a) manufacturing ceiling is $7M, not $4.5M."""
+        result = get_requirements(5_000_000, "sap", "ffp", flags={"is_8a": True, "is_manufacturing": True})
+        assert "8(a) sole source authorized" in result["competition_rules"]
+        assert "Manufacturing" in result["competition_rules"]
+
+    def test_8a_alias_removed(self):
+        """'8a' should NOT map to 'fss' anymore."""
+        from app.compliance_matrix import _normalize_method
+        assert _normalize_method("8a") is None
+
+
+# ---------------------------------------------------------------------------
+# 8. Phase 3: Tool Consolidation — _related_far
+# ---------------------------------------------------------------------------
+
+class TestRelatedFar:
+    """_related_far enrichment in get_requirements() output."""
+
+    def test_sole_source_includes_related_far(self):
+        result = get_requirements(280_000, "sole", "ffp")
+        assert "_related_far" in result
+        assert isinstance(result["_related_far"], list)
+        assert len(result["_related_far"]) > 0
+
+    def test_fss_includes_related_far(self):
+        result = get_requirements(200_000, "fss", "ffp")
+        assert len(result["_related_far"]) > 0
+
+    def test_negotiated_includes_related_far(self):
+        result = get_requirements(1_000_000, "negotiated", "ffp")
+        assert len(result["_related_far"]) > 0
+
+    def test_search_far_op_returns_deprecation_note(self):
+        result = execute_operation({"operation": "search_far", "keyword": "competition"})
+        assert "note" in result
+        assert "search_far tool directly" in result["note"]
+        assert len(result["results"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# 9. Phase 4: FAR Citation Verification — _verify
+# ---------------------------------------------------------------------------
+
+class TestVerifyCitations:
+    """_verify.far_citations extracted from matrix output text."""
+
+    def test_get_requirements_includes_verify(self):
+        result = get_requirements(280_000, "sole", "ffp")
+        assert "_verify" in result
+        assert "far_citations" in result["_verify"]
+        assert isinstance(result["_verify"]["far_citations"], list)
+
+    def test_sole_source_cites_far_6302(self):
+        """Sole source over SAT should cite FAR 6.302."""
+        result = get_requirements(500_000, "sole", "ffp")
+        citations = result["_verify"]["far_citations"]
+        assert any("6.302" in c for c in citations)
+
+    def test_simplified_sole_cites_far_13106(self):
+        """Simplified sole source under SAT should cite FAR 13.106-1(b)."""
+        result = get_requirements(200_000, "sole", "ffp")
+        citations = result["_verify"]["far_citations"]
+        assert any("13.106" in c for c in citations)
+
+    def test_extract_far_citations_helper(self):
+        from app.compliance_matrix import _extract_far_citations
+        text = "See FAR 6.302-1 and DFARS 215.404-1 for details. Also FAR 19.805-1(a)(2)."
+        citations = _extract_far_citations(text)
+        assert "6.302-1" in citations
+        assert "215.404-1" in citations
+        assert "19.805-1(a)(2)." in citations or "19.805-1(a)(2)" in citations
+
+
+# ---------------------------------------------------------------------------
+# 10. Phase 5: Template Field Visibility
+# ---------------------------------------------------------------------------
+
+class TestTemplateFieldVisibility:
+    """Template fields surfaced in compliance matrix output."""
+
+    def test_sole_source_ja_has_template_hint(self):
+        """Simplified sole source J&A should have template_hint."""
+        result = get_requirements(280_000, "sole", "ffp")
+        ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
+        assert "template_hint" in ja
+
+    def test_get_template_fields_known_template(self):
+        from app.template_registry import get_template_fields
+        # SOW template has fields
+        fields = get_template_fields("statement-of-work-template-eagle-v2.docx")
+        assert fields is not None
+        assert "title" in fields
+
+    def test_get_template_fields_unknown_template(self):
+        from app.template_registry import get_template_fields
+        assert get_template_fields("nonexistent-template.docx") is None
+
+
+# ---------------------------------------------------------------------------
+# 11. Phase 6: Confidence Signals
+# ---------------------------------------------------------------------------
+
+class TestConfidenceSignals:
+    """Confidence scores on documents, compliance items, and overall."""
+
+    def test_documents_have_confidence(self):
+        result = get_requirements(500_000, "negotiated", "ffp")
+        for doc in result["documents_required"]:
+            assert "confidence" in doc, f"Missing confidence on {doc['name']}"
+            assert 0.0 < doc["confidence"] <= 1.0
+
+    def test_compliance_items_have_confidence(self):
+        result = get_requirements(500_000, "negotiated", "ffp")
+        for item in result["compliance_items"]:
+            assert "confidence" in item, f"Missing confidence on {item['name']}"
+            assert 0.0 < item["confidence"] <= 1.0
+
+    def test_overall_confidence_present(self):
+        result = get_requirements(500_000, "negotiated", "ffp")
+        assert "confidence" in result
+        assert "overall" in result["confidence"]
+        assert 0.0 < result["confidence"]["overall"] <= 1.0
+
+    def test_timeline_has_confidence(self):
+        result = get_requirements(500_000, "negotiated", "ffp")
+        assert "confidence" in result["timeline_estimate"]
+        assert result["timeline_estimate"]["confidence"] == 0.60
+
+    def test_confidence_in_valid_range(self):
+        """All confidence values must be between 0 and 1."""
+        result = get_requirements(3_000_000, "sole", "cpff", flags={"is_8a": True})
+        for doc in result["documents_required"]:
+            assert 0.0 < doc["confidence"] <= 1.0, f"Bad confidence on {doc['name']}"
+
+    def test_8a_confidence_lower_than_standard(self):
+        """8(a) items should have lower confidence than standard rules."""
+        from app.compliance_matrix import _CONFIDENCE
+        assert _CONFIDENCE["8a_ceiling"] < _CONFIDENCE["document_requirement"]

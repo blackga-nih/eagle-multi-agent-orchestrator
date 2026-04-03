@@ -93,8 +93,12 @@ export class EagleComputeStack extends cdk.Stack {
         LANGFUSE_HOST: config.langfuseHost,
         LANGFUSE_PROJECT_ID: config.langfuseProjectId,
         JIRA_BASE_URL: config.jiraBaseUrl || '',
+        JIRA_API_TOKEN: config.jiraApiToken || '',
         JIRA_FEEDBACK_ENABLED: config.jiraBaseUrl ? 'true' : 'false',
         FEEDBACK_ACTION_SECRET: config.feedbackActionSecret || 'eagle-feedback-default-secret',
+        GH_DISPATCH_TOKEN: config.ghDispatchToken || '',
+        GITHUB_REPO: `${config.githubOwner}/${config.githubRepo}`,
+        TEAMS_TRIAGE_WEBHOOK_URL: config.teamsTriageWebhookUrl || '',
       },
       logging: ecs.LogDrivers.awsLogs({
         logGroup: backendLogGroup,

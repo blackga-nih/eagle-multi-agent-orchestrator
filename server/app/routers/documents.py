@@ -1317,8 +1317,14 @@ async def api_get_document(
                 )
                 if sidecar_content is not None:
                     content = sidecar_content
+                    preview_mode = (
+                        preview_payload.get("preview_mode")
+                        if preview_blocks or preview_sheets
+                        else "markdown_sidecar"
+                    )
                 else:
                     content = preview_payload.get("content")
+                    preview_mode = preview_payload.get("preview_mode")
             download_url = s3.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": bucket, "Key": doc_key},

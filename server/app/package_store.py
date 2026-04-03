@@ -18,13 +18,14 @@ from typing import Optional
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .compliance_matrix import _MPT, _SAT
 from .db_client import get_table, now_iso
 
 logger = logging.getLogger("eagle.packages")
 
-# -- FAR Thresholds ---------------------------------------------------------
-_MICRO_PURCHASE_THRESHOLD = Decimal("15000")
-_SIMPLIFIED_THRESHOLD = Decimal("350000")
+# -- FAR Thresholds (from matrix.json via compliance_matrix) ----------------
+_MICRO_PURCHASE_THRESHOLD = Decimal(str(_MPT))
+_SIMPLIFIED_THRESHOLD = Decimal(str(_SAT))
 
 # -- Required documents by acquisition pathway ------------------------------
 _REQUIRED_DOCS: dict[str, list[str]] = {
