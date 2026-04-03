@@ -177,5 +177,49 @@
     "letter":       "Letter contracts must be definitized within 180 days or 40% of estimated contract cost, whichever comes first. Failure to definitize triggers FAR 16.603-2 remedies.",
     "idiq_protest": "IDIQ task orders over $10M are protestable at GAO under the Fair Acquisition through Interagency Contracting Act. Ensure competitive procedures among awardees.",
     "tm":           "T&M contracts provide no positive incentive for cost control. Use only when no other type is suitable and the CO executes a D&F approved one level above. Establish a firm ceiling price."
+  },
+
+  "hhs_nih_docs": {
+    "_note": "HHS/NIH-specific document requirements from File Reviewer's Checklist (FRC) and HHS PMR Common Requirements. Supplements the FAR-based doc_rules above.",
+    "always": [
+      { "name": "Required & Priority Sources Checklist", "ref": "FRC A2 / FAR 8.002", "note": "Mandatory sources checked in priority order" },
+      { "name": "Section 889 Compliance Documentation", "ref": "FAR 52.204-24/25", "note": "Covered telecom equipment prohibition" },
+      { "name": "SAM Registration & Exclusions Check", "ref": "FRC D1 / FAR 9.405(e)", "note": "Check at receipt AND prior to award; document both" }
+    ],
+    "above_threshold": [
+      {
+        "above": 0,
+        "docs": [
+          { "name": "Price Reasonableness Determination", "ref": "FRC C1", "note": "Documented basis (market research, historical pricing)" }
+        ]
+      },
+      {
+        "above": 25000,
+        "docs": [
+          { "name": "FPDS-NG Report", "ref": "FRC D7", "note": "Within 3 business days of award" }
+        ]
+      },
+      {
+        "above": 150000,
+        "condition": "is_services",
+        "docs": [
+          { "name": "Inherently Governmental Certification", "ref": "FRC D2 / FAR 7.503", "note": "Required for services > $150K" }
+        ]
+      }
+    ],
+    "by_method": {
+      "negotiated": [
+        { "name": "COR Designation Letter", "ref": "HHS PMR", "note": "COR with valid FAC-COR cert or SPE waiver" }
+      ],
+      "sole": [
+        { "name": "COR Designation Letter", "ref": "HHS PMR", "note": "COR with valid FAC-COR cert or SPE waiver" }
+      ],
+      "sap": [
+        { "name": "COR Designation Letter", "ref": "HHS PMR", "note": "COR with valid FAC-COR cert or SPE waiver" }
+      ]
+    },
+    "conditional": [
+      { "name": "Wage Determination (SCA/SCLS)", "ref": "FAR 22.10", "condition": "is_services", "above": 2500, "note": "Service Contract Labor Standards > $2,500" }
+    ]
   }
 }

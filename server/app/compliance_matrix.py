@@ -656,6 +656,52 @@ def get_requirements(
             }
         )
 
+    # --- HHS/NIH-specific documents (FRC + PMR) ---
+    _hhs_nih = _MATRIX_DATA.get("hhs_nih_docs", {})
+    _existing_names = {d["name"] for d in docs}
+
+    def _add_hhs_doc(entry: dict) -> None:
+        """Append an HHS/NIH doc, merging ref into existing entry if duplicate."""
+        name = entry["name"]
+        ref = entry.get("ref", "")
+        note = entry.get("note", ref)
+        if name in _existing_names:
+            # Merge: upgrade note on existing entry
+            for d in docs:
+                if d["name"] == name:
+                    if ref and ref not in d.get("note", ""):
+                        d["note"] = f"{d.get('note', '')} ({ref})"
+                    d["source"] = "hhs_nih"
+                    break
+        else:
+            docs.append(
+                {"name": name, "required": True, "note": note, "source": "hhs_nih"}
+            )
+            _existing_names.add(name)
+
+    for entry in _hhs_nih.get("always", []):
+        _add_hhs_doc(entry)
+
+    for rule in _hhs_nih.get("above_threshold", []):
+        if v >= rule.get("above", 0):
+            cond = rule.get("condition")
+            if cond and not f.get(cond, False):
+                continue
+            for entry in rule.get("docs", []):
+                _add_hhs_doc(entry)
+
+    method_docs = _hhs_nih.get("by_method", {}).get(m, [])
+    for entry in method_docs:
+        _add_hhs_doc(entry)
+
+    for entry in _hhs_nih.get("conditional", []):
+        cond = entry.get("condition")
+        above = entry.get("above", 0)
+        if cond and not f.get(cond, False):
+            continue
+        if v >= above:
+            _add_hhs_doc(entry)
+
     # --- Thresholds ---
     triggered = [th for th in THRESHOLD_TIERS if v >= th["value"]]
     not_triggered = [th for th in THRESHOLD_TIERS if v < th["value"]]
@@ -823,6 +869,19 @@ def get_requirements(
             )
 
     # --- PMR Checklist ---
+    _PMR_S3_KEYS: dict[str, str | None] = {
+        "sap": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_SAP_Checklist.txt",
+        "negotiated": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "fss": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_FSS_Checklist.txt",
+        "bpa-est": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
+        "bpa-call": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
+        "idiq": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
+        "idiq-order": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
+        "sole": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "micro": None,
+    }
+    _FRC_S3_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/File_Reviewers_Checklist_FRC.txt"
+
     if m == "sap" or (m == "negotiated" and v <= _SAT):
         pmr = "HHS PMR SAP Checklist"
     elif m == "negotiated":
@@ -839,6 +898,7 @@ def get_requirements(
         pmr = "Micro-Purchase - Minimal file documentation"
     else:
         pmr = "HHS PMR Common Requirements"
+    pmr_s3_key = _PMR_S3_KEYS.get(m)
 
     # --- Timeline (weeks) ---
     timelines = {
@@ -975,6 +1035,8 @@ def get_requirements(
         },
         "fee_caps": fee_caps,
         "pmr_checklist": pmr,
+        "pmr_checklist_s3_key": pmr_s3_key,
+        "frc_checklist_s3_key": _FRC_S3_KEY,
         "approvals_required": approvals,
         "method": m_obj,
         "contract_type": t_obj,

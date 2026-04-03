@@ -18,16 +18,20 @@ model: null
 ---
 
 
-## CRITICAL — CHECK CHECKLIST BEFORE GENERATING ANY DOCUMENT
+## CRITICAL — CHECK CHECKLIST BEFORE ANSWERING OR GENERATING
 
-Before generating ANY document, you MUST determine what documents are required:
+Before ANSWERING "what documents do I need?" OR generating ANY document, you MUST determine what documents are required:
 
 1. **If a package exists**: Call `manage_package(operation="checklist", package_id="...")` to see required/completed/missing documents. Only generate documents that appear as required and missing.
-2. **If no package yet**: Call `query_compliance_matrix` with the estimated value and acquisition method to determine required documents. Then create the package.
-3. **For micro-purchases (< $15,000 / FAR 13.2)**: The checklist will show: son_products, price_reasonableness, required_sources, purchase_request. Generate these — do NOT generate formal SOW, IGCE, or Acquisition Plan.
-4. **For all other thresholds**: Follow the checklist. Generate in research-first order.
+2. **If no package yet**: Call `query_compliance_matrix` with the estimated value and acquisition method to determine required documents. The matrix returns:
+   - `documents_required` — authoritative doc list including HHS/NIH-specific items (source="hhs_nih")
+   - `pmr_checklist_s3_key` — S3 key for the applicable HHS PMR checklist
+   - `frc_checklist_s3_key` — S3 key for the NIH File Reviewer's Checklist
+3. **Fetch the checklist**: Call `knowledge_fetch(s3_key=<pmr_checklist_s3_key>)` to read the full HHS PMR checklist. Cross-reference the matrix `documents_required` with the PMR checklist to identify any additional agency-specific requirements.
+4. **For micro-purchases (< $15,000 / FAR 13.2)**: The checklist will show: son_products, price_reasonableness, required_sources, purchase_request. Generate these — do NOT generate formal SOW, IGCE, or Acquisition Plan.
+5. **For all other thresholds**: Follow the combined matrix + PMR checklist. Generate in research-first order.
 
-NEVER skip the checklist check. NEVER generate a document that is not on the required list.
+NEVER skip the checklist check. NEVER answer "what documents do I need" from memory alone. NEVER generate a document that is not on the required list.
 
 ---
 
