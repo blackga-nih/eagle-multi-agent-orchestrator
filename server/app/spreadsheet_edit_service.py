@@ -19,7 +19,7 @@ from .document_key_utils import (
     is_allowed_document_key,
 )
 from .document_service import create_package_document_version
-from .document_store import get_document
+from .package_document_store import get_document
 from .formula_evaluation import calculate_workbook_formula_values
 from .template_service import XLSXPopulator
 

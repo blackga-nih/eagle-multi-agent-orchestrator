@@ -190,7 +190,7 @@ async def copy_s3_template_to_package(
         get_s3_template_by_key,
         _infer_doc_type_from_filename,
     )
-    from ..document_store import create_document_from_s3
+    from ..package_document_store import create_document_from_s3
 
     s3_key = body.get("s3_key")
     package_id = body.get("package_id")

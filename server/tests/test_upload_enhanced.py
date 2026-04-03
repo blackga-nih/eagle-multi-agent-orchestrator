@@ -83,7 +83,7 @@ class TestUploadMarkdownPersistence:
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=_MOCK_CLASSIFICATION),
             patch("app.routers.documents.extract_text_preview", return_value="preview"),
-            patch("app.unified_document_store.create_document", return_value=mock_doc) as mock_create,
+            patch("app.user_document_store.create_document", return_value=mock_doc) as mock_create,
         ):
             response = client.post(
                 "/api/documents/upload",
@@ -106,7 +106,7 @@ class TestUploadMarkdownPersistence:
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=_MOCK_CLASSIFICATION),
             patch("app.routers.documents.extract_text_preview", return_value="plain text"),
-            patch("app.unified_document_store.create_document", return_value=mock_doc) as mock_create,
+            patch("app.user_document_store.create_document", return_value=mock_doc) as mock_create,
         ):
             response = client.post(
                 "/api/documents/upload",

@@ -216,7 +216,7 @@ class TestPackageDocumentTools:
             }
         ]
 
-        with mock.patch("app.document_store.get_document", return_value=fake_document), \
+        with mock.patch("app.package_document_store.get_document", return_value=fake_document), \
              mock.patch("app.changelog_store.list_changelog_entries", return_value=fake_changes):
             result = exec_get_latest_document(
                 {"package_id": "pkg-1", "doc_type": "sow"},

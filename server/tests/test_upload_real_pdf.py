@@ -73,7 +73,7 @@ class TestRealPdfUpload:
         with (
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch(
-                "app.unified_document_store.create_document", return_value=mock_doc
+                "app.user_document_store.create_document", return_value=mock_doc
             ) as mock_create,
             patch("app.bedrock_document_parser.parse_pdf_with_bedrock", side_effect=Exception("disabled")),
             patch("app.template_standardizer.standardize_template", side_effect=Exception("skip")),
@@ -109,7 +109,7 @@ class TestRealPdfUpload:
         with (
             patch("app.routers.documents.get_s3", return_value=mock_s3),
             patch(
-                "app.unified_document_store.create_document", return_value=mock_doc
+                "app.user_document_store.create_document", return_value=mock_doc
             ) as mock_create,
             patch("app.bedrock_document_parser.parse_pdf_with_bedrock", side_effect=Exception("disabled")),
             patch("app.template_standardizer.standardize_template", side_effect=Exception("skip")),
@@ -166,7 +166,7 @@ class TestRealPdfUpload:
         with (
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch(
-                "app.unified_document_store.create_document", return_value=mock_doc
+                "app.user_document_store.create_document", return_value=mock_doc
             ),
             patch("app.bedrock_document_parser.parse_pdf_with_bedrock", side_effect=Exception("disabled")),
             patch("app.template_standardizer.standardize_template", side_effect=Exception("skip")),
@@ -193,7 +193,7 @@ class TestRealPdfUpload:
         with (
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch(
-                "app.unified_document_store.create_document", return_value=mock_doc
+                "app.user_document_store.create_document", return_value=mock_doc
             ),
             patch("app.bedrock_document_parser.parse_pdf_with_bedrock", side_effect=Exception("disabled")),
             patch("app.template_standardizer.standardize_template", side_effect=Exception("skip")),
@@ -234,7 +234,7 @@ class TestBedrockUploadPipeline:
         with (
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch(
-                "app.unified_document_store.create_document", return_value=mock_doc
+                "app.user_document_store.create_document", return_value=mock_doc
             ) as mock_create,
         ):
             response = client.post(
@@ -273,7 +273,7 @@ class TestBedrockUploadPipeline:
         with (
             patch("app.routers.documents.get_s3", return_value=mock_s3),
             patch(
-                "app.unified_document_store.create_document", return_value=mock_doc
+                "app.user_document_store.create_document", return_value=mock_doc
             ),
         ):
             response = client.post(
@@ -312,7 +312,7 @@ class TestBedrockUploadPipeline:
         with (
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch(
-                "app.unified_document_store.create_document", return_value=mock_doc
+                "app.user_document_store.create_document", return_value=mock_doc
             ),
         ):
             response = client.post(

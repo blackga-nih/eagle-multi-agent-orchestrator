@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 class TestValidatePackageCompleteness:
     """Test validate_package_completeness in package_store."""
 
-    @patch("app.document_store.list_package_documents")
+    @patch("app.package_document_store.list_package_documents")
     @patch("app.package_store.get_package")
     def test_all_docs_present_and_final_returns_ready_true(self, mock_get, mock_list):
         """When all required docs are present and finalized, ready=True."""
@@ -29,7 +29,7 @@ class TestValidatePackageCompleteness:
         assert result["draft_documents"] == []
         assert result["unfilled_templates"] == []
 
-    @patch("app.document_store.list_package_documents")
+    @patch("app.package_document_store.list_package_documents")
     @patch("app.package_store.get_package")
     def test_missing_documents_detected(self, mock_get, mock_list):
         """Missing documents should be reported."""
@@ -50,7 +50,7 @@ class TestValidatePackageCompleteness:
         assert "igce" in result["missing_documents"]
         assert "market_research" in result["missing_documents"]
 
-    @patch("app.document_store.list_package_documents")
+    @patch("app.package_document_store.list_package_documents")
     @patch("app.package_store.get_package")
     def test_draft_documents_detected(self, mock_get, mock_list):
         """Documents still in draft status should be flagged."""
@@ -71,7 +71,7 @@ class TestValidatePackageCompleteness:
         assert result["ready"] is False
         assert "igce" in result["draft_documents"]
 
-    @patch("app.document_store.list_package_documents")
+    @patch("app.package_document_store.list_package_documents")
     @patch("app.package_store.get_package")
     def test_unfilled_template_markers_detected(self, mock_get, mock_list):
         """Documents with {{PLACEHOLDER}} markers should be flagged."""
@@ -93,7 +93,7 @@ class TestValidatePackageCompleteness:
         assert result["unfilled_templates"][0]["doc_type"] == "sow"
         assert "{{PROJECT_NAME}}" in result["unfilled_templates"][0]["markers"]
 
-    @patch("app.document_store.list_package_documents")
+    @patch("app.package_document_store.list_package_documents")
     @patch("app.package_store.get_package")
     def test_compliance_warnings_included(self, mock_get, mock_list):
         """When method/type available, compliance warnings should be included."""

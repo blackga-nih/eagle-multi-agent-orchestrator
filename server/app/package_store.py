@@ -819,7 +819,7 @@ def validate_package_completeness(tenant_id: str, package_id: str) -> dict:
     Returns a validation report with readiness status, missing documents,
     draft documents, unfilled template markers, and compliance warnings.
     """
-    from .document_store import list_package_documents
+    from .package_document_store import list_package_documents
 
     pkg = get_package(tenant_id, package_id)
     if pkg is None:
@@ -923,7 +923,7 @@ def recompute_package_metadata(tenant_id: str, package_id: str) -> Optional[dict
     Called after document creation/update to keep package-level tags in sync.
     Returns the updated package dict, or None on failure.
     """
-    from .document_store import list_package_documents
+    from .package_document_store import list_package_documents
 
     pkg = get_package(tenant_id, package_id)
     if not pkg:

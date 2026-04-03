@@ -23,7 +23,7 @@ from ..document_service import (
     finalize_document as finalize_document_version,
     get_document_download_url,
 )
-from ..document_store import get_document, get_document_history, list_package_documents
+from ..package_document_store import get_document, get_document_history, list_package_documents
 from ..package_context_service import (
     clear_active_package,
     detect_package_from_session,

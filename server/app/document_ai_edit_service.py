@@ -22,7 +22,7 @@ from .document_key_utils import (
     is_allowed_document_key,
 )
 from .document_service import create_package_document_version
-from .document_store import get_document
+from .package_document_store import get_document
 from .template_service import DOCXPopulator
 
 logger = logging.getLogger("eagle.document_ai_edit")

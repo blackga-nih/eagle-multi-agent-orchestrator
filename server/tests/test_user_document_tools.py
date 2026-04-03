@@ -2,7 +2,7 @@ def test_list_user_documents_filters_package_results_to_current_user(monkeypatch
     from app.tools.user_document_tools import list_user_documents
 
     monkeypatch.setattr(
-        "app.unified_document_store.list_package_documents",
+        "app.user_document_store.list_package_documents",
         lambda tenant_id, package_id, limit=50: [
             {
                 "document_id": "doc-1",

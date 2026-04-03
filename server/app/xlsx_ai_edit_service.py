@@ -16,7 +16,7 @@ from .document_key_utils import (
     extract_workspace_document_ref,
     is_allowed_document_key,
 )
-from .document_store import get_document
+from .package_document_store import get_document
 from .igce_xlsx_edit_resolver import (
     CommercialIgceWorkbookContext,
     ResolvedEditRequest,
@@ -406,7 +406,7 @@ def edit_igce_xlsx_document(
         )
         effective_package_id = package_id or str(package_ref["package_id"])
     else:
-        from .unified_document_store import find_document_by_s3_key
+        from .user_document_store import find_document_by_s3_key
 
         doc = find_document_by_s3_key(tenant_id, user_id, doc_key)
         effective_package_id = package_id or (doc or {}).get("package_id")

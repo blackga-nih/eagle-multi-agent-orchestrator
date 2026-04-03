@@ -327,7 +327,7 @@ def test_edit_igce_xlsx_workspace_document_uses_unified_metadata():
         "app.xlsx_ai_edit_service._augment_document_data_from_context",
         return_value={"description": "Cloud hosting support"},
     ), patch(
-        "app.unified_document_store.find_document_by_s3_key",
+        "app.user_document_store.find_document_by_s3_key",
         return_value={
             "document_id": "doc-123",
             "title": "Workspace IGCE",

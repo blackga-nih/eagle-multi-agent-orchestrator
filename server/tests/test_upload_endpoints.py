@@ -78,7 +78,7 @@ class TestUploadEndpoint:
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=mock_classification),
             patch("app.routers.documents.extract_text_preview", return_value="preview text"),
-            patch("app.unified_document_store.create_document", return_value=mock_doc),
+            patch("app.user_document_store.create_document", return_value=mock_doc),
             patch("app.document_markdown_service.convert_to_markdown", return_value=None),
         ):
             response = client.post(
@@ -104,7 +104,7 @@ class TestUploadEndpoint:
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=mock_classification),
             patch("app.routers.documents.extract_text_preview", return_value=""),
-            patch("app.unified_document_store.create_document", return_value=mock_doc),
+            patch("app.user_document_store.create_document", return_value=mock_doc),
             patch("app.document_markdown_service.convert_to_markdown", return_value=None),
         ):
             response = client.post(
@@ -151,7 +151,7 @@ class TestUploadEndpoint:
             patch("app.routers.documents.get_s3", return_value=MagicMock()),
             patch("app.routers.documents.classify_document", return_value=mock_classification),
             patch("app.routers.documents.extract_text_preview", return_value="preview"),
-            patch("app.unified_document_store.create_document", return_value=mock_doc) as mock_create,
+            patch("app.user_document_store.create_document", return_value=mock_doc) as mock_create,
             patch("app.document_markdown_service.convert_to_markdown", return_value=None),
         ):
             response = client.post(
@@ -437,7 +437,7 @@ class TestS3TemplateEndpoints:
         with (
             patch("app.template_registry.get_s3_template_by_key", return_value=fake_content),
             patch("app.template_registry._infer_doc_type_from_filename", return_value="sow"),
-            patch("app.document_store.create_document_from_s3", return_value=fake_document),
+            patch("app.package_document_store.create_document_from_s3", return_value=fake_document),
         ):
             response = client.post(
                 "/api/templates/s3/copy",

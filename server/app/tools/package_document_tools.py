@@ -49,7 +49,7 @@ def exec_document_changelog_search(params: dict, tenant_id: str) -> dict:
 def exec_get_latest_document(params: dict, tenant_id: str) -> dict:
     """Get latest document version with recent changelog entries."""
     from app.changelog_store import list_changelog_entries
-    from app.document_store import get_document
+    from app.package_document_store import get_document
 
     package_id = params.get("package_id")
     doc_type = params.get("doc_type")

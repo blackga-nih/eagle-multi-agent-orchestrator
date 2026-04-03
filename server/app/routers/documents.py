@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from ..cognito_auth import UserContext
 from ..db_client import get_s3, get_table
 from ..document_export import export_document, ExportDependencyError
-from ..document_store import get_document
+from ..package_document_store import get_document
 from ..document_service import (
     create_package_document_version,
     get_document_markdown_s3_key,
@@ -261,7 +261,7 @@ def _build_document_response(
     elif package_ref:
         title = package_ref["doc_type"].replace("_", " ").title()
     else:
-        from ..unified_document_store import find_document_by_s3_key
+        from ..user_document_store import find_document_by_s3_key
 
         metadata = find_document_by_s3_key(tenant_id, user_id, doc_key)
         if metadata:
@@ -694,7 +694,7 @@ async def api_upload_document(
     from botocore.exceptions import ClientError
     import hashlib
 
-    from ..unified_document_store import create_document as create_unified_document
+    from ..user_document_store import create_document as create_unified_document
 
     content_type = file.content_type or "application/octet-stream"
     if content_type not in ALLOWED_UPLOAD_MIME_TYPES:
@@ -894,7 +894,7 @@ async def update_document_endpoint(
     - Update title: {"title": "New Title"}
     - Mark as deliverable: {"is_deliverable": true}
     """
-    from ..unified_document_store import get_document, update_document
+    from ..user_document_store import get_document, update_document
 
     doc = get_document(user.tenant_id, document_id)
     if not doc:
@@ -949,7 +949,7 @@ async def list_documents_endpoint(
     - deliverable: Filter by is_deliverable flag
     - limit: Max documents to return (default 100)
     """
-    from ..unified_document_store import list_user_documents, list_package_documents
+    from ..user_document_store import list_user_documents, list_package_documents
 
     if package_id:
         # List documents in a specific package
@@ -986,7 +986,7 @@ async def get_document_content_endpoint(
     """
     from botocore.exceptions import ClientError
 
-    from ..unified_document_store import get_document
+    from ..user_document_store import get_document
 
     doc = get_document(user.tenant_id, document_id)
     if not doc:

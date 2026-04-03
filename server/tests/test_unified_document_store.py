@@ -3,10 +3,10 @@ from unittest.mock import MagicMock
 
 
 def test_create_document_converts_nested_float_metadata(monkeypatch):
-    from app.unified_document_store import create_document
+    from app.user_document_store import create_document
 
     mock_table = MagicMock()
-    monkeypatch.setattr("app.unified_document_store.get_table", lambda: mock_table)
+    monkeypatch.setattr("app.user_document_store.get_table", lambda: mock_table)
 
     create_document(
         tenant_id="test-tenant",
@@ -33,10 +33,10 @@ def test_create_document_converts_nested_float_metadata(monkeypatch):
 
 
 def test_create_document_preserves_caller_supplied_document_id(monkeypatch):
-    from app.unified_document_store import create_document
+    from app.user_document_store import create_document
 
     mock_table = MagicMock()
-    monkeypatch.setattr("app.unified_document_store.get_table", lambda: mock_table)
+    monkeypatch.setattr("app.user_document_store.get_table", lambda: mock_table)
 
     result = create_document(
         tenant_id="test-tenant",
@@ -52,5 +52,5 @@ def test_create_document_preserves_caller_supplied_document_id(monkeypatch):
 
     item = mock_table.put_item.call_args.kwargs["Item"]
     assert item["document_id"] == "doc-fixed"
-    assert item["SK"] == "DOC#doc-fixed"
+    assert item["SK"] == "USER_DOC#doc-fixed"
     assert result["document_id"] == "doc-fixed"

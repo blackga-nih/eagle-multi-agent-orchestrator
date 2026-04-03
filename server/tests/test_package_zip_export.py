@@ -117,7 +117,7 @@ class TestZipEndpoint:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 with patch("app.package_store.get_package", return_value={"title": "Test"}), \
-                     patch("app.document_store.list_package_documents", return_value=[]):
+                     patch("app.package_document_store.list_package_documents", return_value=[]):
                     response = await client.get(
                         "/api/packages/PKG-0001/export/zip",
                         headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},

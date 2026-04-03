@@ -41,7 +41,7 @@ def _fetch_preferences(tenant_id: str, user_id: str) -> dict:
 
 def _fetch_package_and_docs(tenant_id: str, package_id: str) -> dict:
     from .package_store import get_package, get_package_checklist
-    from .document_store import list_package_documents
+    from .package_document_store import list_package_documents
 
     pkg = get_package(tenant_id, package_id)
     checklist = get_package_checklist(tenant_id, package_id)

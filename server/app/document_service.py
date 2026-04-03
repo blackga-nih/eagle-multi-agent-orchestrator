@@ -23,7 +23,7 @@ from typing import Optional, Tuple
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .db_client import get_table, get_s3
-from .document_store import (
+from .package_document_store import (
     get_document_history,
     get_document,
     get_document_by_id as store_get_document_by_id,

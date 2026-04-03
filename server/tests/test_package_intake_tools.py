@@ -633,7 +633,7 @@ class TestDocumentChangelogSearch:
 class TestGetLatestDocument:
     @patch("app.changelog_store.list_changelog_entries", return_value=[])
     @patch(
-        "app.document_store.get_document",
+        "app.package_document_store.get_document",
         return_value={
             "doc_type": "sow",
             "version": 2,
@@ -657,7 +657,7 @@ class TestGetLatestDocument:
         assert "error" in result2
 
     @patch("app.changelog_store.list_changelog_entries", return_value=[])
-    @patch("app.document_store.get_document", return_value=None)
+    @patch("app.package_document_store.get_document", return_value=None)
     def test_document_not_found_returns_error(self, mock_doc, mock_cl):
         result = exec_get_latest_document(
             {"package_id": "pkg-001", "doc_type": "sow"}, TENANT

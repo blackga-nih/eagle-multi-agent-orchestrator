@@ -1,19 +1,21 @@
-"""Unified Document Store -- Single document model for uploads and package documents.
+"""User Document Store -- user uploads and workspace documents.
 
-Replaces the TTL-based UPLOAD# records and separate DOCUMENT# records with a
-unified DOC# entity where package_id is nullable.
+Manages durable document records for user-uploaded files and workspace
+documents. Documents can optionally be assigned to acquisition packages.
+Separate from package_document_store.py which handles agent-generated
+versioned acquisition documents (DOCUMENT# prefix).
 
 Entity format:
-    PK:  DOC#{tenant_id}
-    SK:  DOC#{document_id}
+    PK:  USER_DOC#{tenant_id}
+    SK:  USER_DOC#{document_id}
 
 GSI1 (user's documents):
     GSI1PK:  OWNER#{tenant_id}#{user_id}
-    GSI1SK:  DOC#{created_at}
+    GSI1SK:  USER_DOC#{created_at}
 
 GSI2 (package's documents):
     GSI2PK:  PKG#{tenant_id}#{package_id}
-    GSI2SK:  DOC#{doc_type}#{version:04d}
+    GSI2SK:  USER_DOC#{doc_type}#{version:04d}
 """
 
 import logging
@@ -27,18 +29,18 @@ from botocore.exceptions import ClientError
 
 from .db_client import get_table, item_to_dict
 
-logger = logging.getLogger("eagle.unified_document_store")
+logger = logging.getLogger("eagle.user_document_store")
 
 
 # -- Key Helpers --------------------------------------------------------------
 
 
 def _pk(tenant_id: str) -> str:
-    return f"DOC#{tenant_id}"
+    return f"USER_DOC#{tenant_id}"
 
 
 def _sk(document_id: str) -> str:
-    return f"DOC#{document_id}"
+    return f"USER_DOC#{document_id}"
 
 
 def _gsi1_pk(tenant_id: str, user_id: str) -> str:
@@ -46,7 +48,7 @@ def _gsi1_pk(tenant_id: str, user_id: str) -> str:
 
 
 def _gsi1_sk(created_at: str) -> str:
-    return f"DOC#{created_at}"
+    return f"USER_DOC#{created_at}"
 
 
 def _gsi2_pk(tenant_id: str, package_id: Optional[str]) -> str:
@@ -56,7 +58,7 @@ def _gsi2_pk(tenant_id: str, package_id: Optional[str]) -> str:
 
 
 def _gsi2_sk(doc_type: str, version: int) -> str:
-    return f"DOC#{doc_type}#{version:04d}"
+    return f"USER_DOC#{doc_type}#{version:04d}"
 
 
 def _now_iso() -> str:

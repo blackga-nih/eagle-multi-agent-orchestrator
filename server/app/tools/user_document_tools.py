@@ -87,8 +87,8 @@ def list_user_documents(
     Returns:
         Dict with documents list and count
     """
-    from ..unified_document_store import list_user_documents as store_list_user_docs
-    from ..unified_document_store import list_package_documents
+    from ..user_document_store import list_user_documents as store_list_user_docs
+    from ..user_document_store import list_package_documents
 
     try:
         if package_id:
@@ -146,7 +146,7 @@ def get_document_content(
 
     from ..db_client import get_s3
     from ..document_markdown_service import convert_to_markdown
-    from ..unified_document_store import get_document
+    from ..user_document_store import get_document
 
     try:
         doc = get_document(tenant_id, document_id)

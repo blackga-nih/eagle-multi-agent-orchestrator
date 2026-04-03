@@ -491,7 +491,7 @@ def exec_create_document(
             document_id = None
             markdown_s3_key = f"{s3_key}.content.md" if content and isinstance(content, str) else None
 
-            from app.unified_document_store import create_document as create_unified_document
+            from app.user_document_store import create_document as create_unified_document
 
             stored_doc = create_unified_document(
                 tenant_id=tenant_id,
