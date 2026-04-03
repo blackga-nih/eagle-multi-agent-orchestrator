@@ -40,6 +40,8 @@ class SpreadsheetCellEdit:
 def _serialize_cell_value(value: Any) -> str:
     if value is None:
         return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
     return str(value)
 
 
@@ -305,8 +307,6 @@ def save_xlsx_preview_edits(
         if not result.success:
             return {"error": result.error or "Failed to save document version"}
         message = f"Saved spreadsheet version {result.version}."
-        if not formulas_evaluated:
-            message += " Note: Formulas will calculate when opened in Excel."
         # Generate presigned download URL for the saved document
         download_url = None
         try:
@@ -361,8 +361,6 @@ def save_xlsx_preview_edits(
         return {"error": "Failed to save spreadsheet."}
 
     ws_message = "Spreadsheet saved."
-    if not formulas_evaluated:
-        ws_message += " Note: Formulas will calculate when opened in Excel."
     # Generate presigned download URL for the saved document
     ws_download_url = None
     try:

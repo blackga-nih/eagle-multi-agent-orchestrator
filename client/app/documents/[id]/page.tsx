@@ -528,6 +528,10 @@ export default function DocumentViewerPage({ params }: PageProps) {
   const [packageId, setPackageId] = useState<string | undefined>(undefined);
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
   const [currentVersion, setCurrentVersion] = useState<number | null>(null);
+  const [documentSessionId, setDocumentSessionId] = useState('');
+  const [originContextAvailable, setOriginContextAvailable] = useState(false);
+  const [documentCapabilities, setDocumentCapabilities] =
+    useState<DocumentInfo['document_capabilities']>(undefined);
   const [editContent, setEditContent] = useState('');
   const [docxPreviewMode, setDocxPreviewMode] = useState<DocumentInfo['preview_mode']>(null);
   const [docxPreviewBlocks, setDocxPreviewBlocks] = useState<DocxPreviewBlock[]>([]);
@@ -569,6 +573,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [streamingAssistantMsg, setStreamingAssistantMsg] = useState<ChatMessage | null>(null);
+  const [isXlsxAiEditing, setIsXlsxAiEditing] = useState(false);
   const streamingAssistantMsgRef = useRef<ChatMessage | null>(null);
   const generatedDocFetchSeqRef = useRef(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -588,9 +593,13 @@ export default function DocumentViewerPage({ params }: PageProps) {
 
   const { getToken } = useAuth();
   const { loadSession } = useSession();
+  const effectiveSessionId = sessionId || documentSessionId;
   const isDocxDocument = (fileType || '').toLowerCase() === 'docx';
   const isXlsxDocument = (fileType || '').toLowerCase() === 'xlsx';
-  const canUseAiDocAssistant = !isBinaryDocument || isDocxDocument;
+  const canUseAiDocAssistant =
+    !isBinaryDocument ||
+    isDocxDocument ||
+    Boolean(documentCapabilities?.supports_xlsx_ai_edit);
   const canEditDocxPreview = isBinaryDocument && isDocxDocument && docxPreviewBlocks.length > 0;
   const canEditXlsxPreview = isBinaryDocument && isXlsxDocument && xlsxPreviewSheets.length > 0;
   const hasDocxPreviewChanges =
@@ -636,6 +645,15 @@ export default function DocumentViewerPage({ params }: PageProps) {
       if (doc.version !== undefined) {
         setCurrentVersion(typeof doc.version === 'number' ? doc.version : null);
       }
+      if (doc.session_id !== undefined) {
+        setDocumentSessionId(doc.session_id || '');
+      }
+      if (doc.origin_context_available !== undefined) {
+        setOriginContextAvailable(Boolean(doc.origin_context_available));
+      }
+      if (doc.document_capabilities !== undefined) {
+        setDocumentCapabilities(doc.document_capabilities);
+      }
 
       const nextPreviewBlocks = normalizeDocxPreviewBlocks(doc.preview_blocks);
       const nextPreviewSheets = normalizeXlsxPreviewSheets(doc.preview_sheets);
@@ -668,6 +686,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
         preview_mode: doc.preview_mode,
         preview_blocks: nextPreviewBlocks,
         preview_sheets: nextPreviewSheets,
+        session_id: doc.session_id,
+        origin_context_available: doc.origin_context_available,
+        document_capabilities: doc.document_capabilities,
       };
 
       if (!isCachedXlsxDocument(persistedDoc)) {
@@ -713,6 +734,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
           setS3Key(data.s3_key || doc.s3_key || rawId);
           setCurrentDocumentId(data.document_id || doc.document_id || rawId);
           setCurrentVersion(typeof data.version === 'number' ? data.version : null);
+          setDocumentSessionId(data.session_id || '');
+          setOriginContextAvailable(Boolean(data.origin_context_available));
+          setDocumentCapabilities(data.document_capabilities);
           const nextPreviewBlocks = normalizeDocxPreviewBlocks(data.preview_blocks);
           const nextPreviewSheets = normalizeXlsxPreviewSheets(data.preview_sheets);
           setDocxPreviewMode(data.preview_mode ?? null);
@@ -773,6 +797,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
         setS3Key(doc.s3_key || doc.document_id || null);
         setCurrentDocumentId(doc.document_id || null);
         setCurrentVersion(typeof doc.version === 'number' ? doc.version : null);
+        setDocumentSessionId(doc.session_id || '');
+        setOriginContextAvailable(Boolean(doc.origin_context_available));
+        setDocumentCapabilities(doc.document_capabilities);
         const nextPreviewBlocks = normalizeDocxPreviewBlocks(doc.preview_blocks);
         const nextPreviewSheets = normalizeXlsxPreviewSheets(doc.preview_sheets);
         setDocxPreviewMode(doc.preview_mode ?? null);
@@ -807,6 +834,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
         setS3Key(stored2.s3_key || stored2.id || null);
         setCurrentDocumentId(stored2.document_id || stored2.id || null);
         setCurrentVersion(typeof stored2.version === 'number' ? stored2.version : null);
+        setDocumentSessionId(stored2.session_id || '');
+        setOriginContextAvailable(Boolean(stored2.origin_context_available));
+        setDocumentCapabilities(stored2.document_capabilities);
         const nextPreviewBlocks = normalizeDocxPreviewBlocks(stored2.preview_blocks);
         const nextPreviewSheets = normalizeXlsxPreviewSheets(stored2.preview_sheets);
         setDocxPreviewMode(stored2.preview_mode ?? null);
@@ -849,6 +879,9 @@ export default function DocumentViewerPage({ params }: PageProps) {
           setS3Key(data.s3_key || data.key || data.document_id || null);
           setCurrentDocumentId(data.document_id || data.key || null);
           setCurrentVersion(typeof data.version === 'number' ? data.version : null);
+          setDocumentSessionId(data.session_id || '');
+          setOriginContextAvailable(Boolean(data.origin_context_available));
+          setDocumentCapabilities(data.document_capabilities);
           if (data.template_provenance) setTemplateProvenance(data.template_provenance);
           if (Array.isArray(data.system_tags)) setSystemTags(data.system_tags);
           if (Array.isArray(data.user_tags)) setUserTags(data.user_tags);
@@ -1060,10 +1093,11 @@ export default function DocumentViewerPage({ params }: PageProps) {
 
   // Layer 1: Immediate hydration from session context
   useEffect(() => {
-    if (isBinaryDocument || isLoading || !documentContent || !sessionId || !documentType) return;
+    if (isBinaryDocument || isLoading || !documentContent || !effectiveSessionId || !documentType)
+      return;
     if (!hasPlaceholders(documentContent)) return;
 
-    const sessionData = loadSession(sessionId);
+    const sessionData = loadSession(effectiveSessionId);
     if (!sessionData) return;
 
     const context = buildHydrationContext(
@@ -1079,7 +1113,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
     }
     // Run once after initial content loads
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBinaryDocument, isLoading]);
+  }, [documentContent, documentType, effectiveSessionId, isBinaryDocument, isLoading, loadSession]);
 
   // Agent stream for the document chat
   const { sendQuery, isStreaming } = useAgentStream({
@@ -1119,6 +1153,7 @@ export default function DocumentViewerPage({ params }: PageProps) {
       void refreshGeneratedDocumentFromS3(doc);
     },
   });
+  const isAssistantBusy = isStreaming || isXlsxAiEditing;
 
   // Layer 2: LLM auto-fill for remaining unfilled sections
   useEffect(() => {
@@ -1128,14 +1163,14 @@ export default function DocumentViewerPage({ params }: PageProps) {
       isStreaming ||
       autoPromptSentRef.current ||
       !showHydrationBanner ||
-      !sessionId ||
+      !effectiveSessionId ||
       isBinaryDocument
     )
       return;
 
     autoPromptSentRef.current = true;
 
-    const sessionData = loadSession(sessionId);
+    const sessionData = loadSession(effectiveSessionId);
     const contextSnippet = sessionData
       ? extractBackgroundFromMessages(
           (sessionData.messages || [])
@@ -1166,9 +1201,9 @@ ${docSnippet}`;
       timestamp: new Date(),
     };
     setChatMessages((prev) => [...prev, userMsg]);
-    sendQuery(autoPrompt, sessionId, packageId);
+    sendQuery(autoPrompt, effectiveSessionId, packageId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unfilledCount, isBinaryDocument, isLoading, isStreaming, showHydrationBanner, packageId]);
+  }, [unfilledCount, effectiveSessionId, isBinaryDocument, isLoading, isStreaming, loadSession, packageId, showHydrationBanner]);
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -1200,7 +1235,7 @@ ${docSnippet}`;
           ? `${sanitizedDoc.slice(0, 1000)}\n...\n${sanitizedDoc.slice(-1000)}`
           : sanitizedDoc;
 
-      const sessionData = sessionId ? loadSession(sessionId) : null;
+      const sessionData = effectiveSessionId ? loadSession(effectiveSessionId) : null;
       const sessionMessages = (sessionData?.messages || [])
         .filter((m) => m.role === 'user')
         .slice(0, 5)
@@ -1249,13 +1284,122 @@ ${docSnippet}`;
       isBinaryDocument,
       isDocxDocument,
       loadSession,
-      sessionId,
+        effectiveSessionId,
       s3Key,
     ],
   );
 
+  const handleSendXlsxAiEdit = useCallback(
+    async (userRequest: string) => {
+      if (!s3Key) {
+        throw new Error('No spreadsheet document key is available.');
+      }
+
+      setIsXlsxAiEditing(true);
+      try {
+        const token = await getToken();
+        const response = await fetch(`/api/documents/${encodeURIComponent(s3Key)}/xlsx-ai-edit`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            request: userRequest,
+            session_id: effectiveSessionId || undefined,
+            package_id: packageId,
+            change_source: 'ai_edit',
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(await extractResponseError(response));
+        }
+
+        const result = (await response.json()) as DocumentInfo & {
+          assistant_message?: string;
+          clarification_needed?: boolean;
+          applied_changes?: Array<{
+            sheet_id: string;
+            cell_ref: string;
+            before: string;
+            after: string;
+            label: string;
+          }>;
+          key?: string;
+          message?: string;
+        };
+
+        if (result.preview_sheets) {
+          const savedPreviewSheets = normalizeXlsxPreviewSheets(result.preview_sheets);
+          setXlsxPreviewSheets(savedPreviewSheets);
+          setEditXlsxPreviewSheets(cloneXlsxPreviewSheets(savedPreviewSheets));
+          if (savedPreviewSheets.length > 0) {
+            const hasExistingSheet = savedPreviewSheets.some(
+              (sheet) => sheet.sheet_id === activeXlsxSheetId,
+            );
+            setActiveXlsxSheetId(
+              hasExistingSheet ? activeXlsxSheetId : savedPreviewSheets[0]?.sheet_id || null,
+            );
+          }
+        }
+
+        if (result.content !== undefined) {
+          setDocumentContent(result.content || '');
+          setEditContent(result.content || '');
+        }
+        if (result.document_id !== undefined) {
+          setCurrentDocumentId(result.document_id || null);
+        }
+        if (result.version !== undefined) {
+          setCurrentVersion(typeof result.version === 'number' ? result.version : null);
+        }
+        if (result.download_url !== undefined) {
+          setDownloadUrl(result.download_url || null);
+        }
+        if (result.s3_key || result.key) {
+          const newS3Key = result.s3_key || result.key || s3Key;
+          setS3Key(newS3Key);
+          if (newS3Key !== s3Key) {
+            const nextUrlParams = new URLSearchParams(window.location.search);
+            const nextUrl = `/documents/${encodeURIComponent(newS3Key)}${
+              nextUrlParams.toString() ? `?${nextUrlParams.toString()}` : ''
+            }`;
+            window.history.replaceState({}, '', nextUrl);
+          }
+        }
+        if (result.session_id !== undefined) {
+          setDocumentSessionId(result.session_id || '');
+        }
+        if (result.origin_context_available !== undefined) {
+          setOriginContextAvailable(Boolean(result.origin_context_available));
+        }
+
+        const assistantContent =
+          result.assistant_message || result.message || 'Spreadsheet updated.';
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: assistantContent,
+            timestamp: new Date(),
+          },
+        ]);
+
+        if (result.preview_sheets) {
+          setDocUpdated(true);
+          window.setTimeout(() => setDocUpdated(false), 2000);
+        }
+      } finally {
+        setIsXlsxAiEditing(false);
+      }
+    },
+    [activeXlsxSheetId, effectiveSessionId, getToken, packageId, s3Key],
+  );
+
   const handleSendMessage = async () => {
-    if (!chatInput.trim() || isStreaming || !canUseAiDocAssistant) return;
+    if (!chatInput.trim() || isAssistantBusy || !canUseAiDocAssistant) return;
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -1264,10 +1408,31 @@ ${docSnippet}`;
       timestamp: new Date(),
     };
     setChatMessages((prev) => [...prev, userMsg]);
-    const query = buildDocumentAssistantPrompt(chatInput);
+    const userRequest = chatInput;
     setChatInput('');
 
-    await sendQuery(query, sessionId || undefined, packageId);
+    if (isXlsxDocument) {
+      try {
+        await handleSendXlsxAiEdit(userRequest);
+      } catch (error) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `assistant-error-${Date.now()}`,
+            role: 'assistant',
+            content:
+              error instanceof Error
+                ? error.message
+                : 'I could not apply that spreadsheet edit request.',
+            timestamp: new Date(),
+          },
+        ]);
+      }
+      return;
+    }
+
+    const query = buildDocumentAssistantPrompt(userRequest);
+    await sendQuery(query, effectiveSessionId || undefined, packageId);
   };
 
   const displayChatMessages = streamingAssistantMsg
@@ -2019,7 +2184,7 @@ ${docSnippet}`;
                         </div>
                       </div>
                     ))}
-                    {isStreaming && !streamingAssistantMsg && (
+                    {isAssistantBusy && !streamingAssistantMsg && (
                       <div className="flex gap-2">
                         <div className="w-6 h-6 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
                           <Sparkles className="w-3 h-3 text-white" />
@@ -2044,18 +2209,18 @@ ${docSnippet}`;
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+                          if (e.key === 'Enter' && !e.shiftKey && !isAssistantBusy) {
                             e.preventDefault();
                             handleSendMessage();
                           }
                         }}
                         placeholder="Ask about this spreadsheet..."
-                        disabled={isStreaming}
+                        disabled={isAssistantBusy}
                         className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                       />
                       <button
                         onClick={handleSendMessage}
-                        disabled={!chatInput.trim() || isStreaming}
+                        disabled={!chatInput.trim() || isAssistantBusy}
                         className="px-3 py-2 bg-[#003366] text-white rounded-lg hover:bg-[#004488] disabled:opacity-30 transition-colors"
                       >
                         <Send className="w-4 h-4" />
@@ -2377,7 +2542,7 @@ ${docSnippet}`;
                   ))}
 
                   {/* Typing indicator */}
-                  {isStreaming && !streamingAssistantMsg && (
+                  {isAssistantBusy && !streamingAssistantMsg && (
                     <div className="flex gap-3">
                       <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-[#003366] to-[#004488]">
                         <Sparkles className="w-3.5 h-3.5 text-white" />
@@ -2406,7 +2571,7 @@ ${docSnippet}`;
                         if (
                           e.key === 'Enter' &&
                           !e.shiftKey &&
-                          !isStreaming &&
+                          !isAssistantBusy &&
                           canUseAiDocAssistant
                         ) {
                           e.preventDefault();
@@ -2415,23 +2580,27 @@ ${docSnippet}`;
                       }}
                       placeholder={
                         !canUseAiDocAssistant
-                          ? 'AI editing is currently available for text documents and DOCX previews only.'
+                          ? 'AI editing is not available for this document.'
                           : isBinaryDocument
-                            ? 'Ask for a targeted DOCX revision...'
-                            : isStreaming
+                            ? isXlsxDocument
+                              ? originContextAvailable
+                                ? 'Ask me to update this IGCE workbook using the conversation context...'
+                                : 'Ask me to update this IGCE workbook...'
+                              : 'Ask for a targeted DOCX revision...'
+                            : isAssistantBusy
                               ? 'Waiting for response...'
                               : 'Ask about this document...'
                       }
-                      disabled={isStreaming || !canUseAiDocAssistant}
+                      disabled={isAssistantBusy || !canUseAiDocAssistant}
                       rows={1}
                       className={`flex-1 resize-none px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
-                        isStreaming || !canUseAiDocAssistant ? 'opacity-50' : ''
+                        isAssistantBusy || !canUseAiDocAssistant ? 'opacity-50' : ''
                       }`}
                       style={{ maxHeight: 120 }}
                     />
                     <button
                       onClick={handleSendMessage}
-                      disabled={!chatInput.trim() || isStreaming || !canUseAiDocAssistant}
+                      disabled={!chatInput.trim() || isAssistantBusy || !canUseAiDocAssistant}
                       className="px-3.5 py-2.5 bg-[#003366] text-white rounded-xl hover:bg-[#004488] disabled:opacity-30 transition-colors"
                     >
                       <Send className="w-4 h-4" />

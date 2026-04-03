@@ -10,6 +10,7 @@ import json
 import os
 import re
 import time
+import hashlib
 from datetime import datetime
 from typing import Any
 
@@ -177,6 +178,11 @@ def exec_create_document(
 
     data = _augment_document_data_from_context(doc_type, title, data, session_id)
     data = normalize_field_names(data, doc_type)
+
+    # For IGCE XLSX, extract structured workbook data (line items, goods, etc.)
+    if doc_type == "igce" and output_format == "xlsx":
+        from app.igce_generation_extractor import extract_igce_generation_data
+        data = extract_igce_generation_data(data, session_id)
 
     # Extract template_hint before passing data to template service — the
     # compliance matrix injects this for value-aware template selection
@@ -366,6 +372,37 @@ def exec_create_document(
     if not (result and result.success and file_type in ("docx", "xlsx")):
         content_to_store = content
 
+    # Build origin context for IGCE XLSX generation (Phase 4)
+    source_context_type = None
+    source_data_summary = None
+    source_data = None
+    if doc_type == "igce" and output_format == "xlsx":
+        source_context_type = "igce_xlsx_generation"
+        # Build compact summary
+        line_items = data.get("line_items", [])
+        goods_items = data.get("goods_items", [])
+        summary_parts = []
+        if line_items:
+            summary_parts.append(f"{len(line_items)} labor items")
+        if goods_items:
+            summary_parts.append(f"{len(goods_items)} goods items")
+        if data.get("contract_type"):
+            summary_parts.append(f"contract: {data.get('contract_type')}")
+        if data.get("period_months"):
+            summary_parts.append(f"period: {data.get('period_months')} months")
+        source_data_summary = ", ".join(summary_parts) if summary_parts else "IGCE from context"
+        # Store compact source data (limited to key fields, ~10KB max)
+        source_data = {
+            "line_items": line_items[:12] if line_items else [],  # Max 12 labor slots
+            "goods_items": goods_items[:8] if goods_items else [],  # Max 8 goods slots
+            "contract_type": data.get("contract_type"),
+            "period_months": data.get("period_months"),
+            "period_of_performance": data.get("period_of_performance"),
+            "delivery_date": data.get("delivery_date"),
+            "estimated_value": data.get("estimated_value"),
+            "description": data.get("description"),
+        }
+
     if package_id:
         from app.document_service import create_package_document_version
 
@@ -386,6 +423,9 @@ def exec_create_document(
             template_id=effective_template_id,
             template_provenance=template_provenance,
             markdown_content=_md_content,
+            source_context_type=source_context_type,
+            source_data_summary=source_data_summary,
+            source_data=source_data,
         )
         if not canonical.success:
             return {"error": canonical.error or "Failed to create package document"}
@@ -448,6 +488,52 @@ def exec_create_document(
 
     if save_status == "saved":
         try:
+            document_id = None
+            markdown_s3_key = f"{s3_key}.content.md" if content and isinstance(content, str) else None
+
+            from app.unified_document_store import create_document as create_unified_document
+
+            stored_doc = create_unified_document(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                s3_bucket=bucket,
+                s3_key=s3_key,
+                filename=s3_key.rsplit("/", 1)[-1],
+                original_filename=s3_key.rsplit("/", 1)[-1],
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    if file_type == "docx"
+                    else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    if file_type == "xlsx"
+                    else "text/markdown"
+                ),
+                size_bytes=(
+                    len(content_to_store)
+                    if isinstance(content_to_store, bytes)
+                    else len(content_to_store.encode("utf-8"))
+                ),
+                doc_type=doc_type,
+                title=title,
+                file_type=ext,
+                markdown_s3_key=markdown_s3_key,
+                content_hash=hashlib.sha256(
+                    content_to_store if isinstance(content_to_store, bytes) else content_to_store.encode("utf-8")
+                ).hexdigest(),
+                package_id=None,
+                is_deliverable=True,
+                session_id=session_id,
+                template_id=effective_template_id,
+                template_provenance=template_provenance,
+                source_context_type=source_context_type,
+                source_data_summary=source_data_summary,
+                source_data=source_data,
+            )
+            document_id = stored_doc.get("document_id")
+        except Exception as exc:
+            document_id = None
+            logger.warning("Failed to create unified document metadata for %s: %s", s3_key, exc)
+
+        try:
             from app.changelog_store import write_document_changelog_entry
 
             write_document_changelog_entry(
@@ -464,6 +550,7 @@ def exec_create_document(
             logger.warning("Failed to write changelog for document creation: %s", exc)
 
     response = {
+        "document_id": document_id if save_status == "saved" else None,
         "document_type": doc_type,
         "title": title,
         "status": save_status,

@@ -63,6 +63,7 @@ export interface DocumentInfo {
   package_id?: string;
   document_type: string;
   doc_type?: string;
+  session_id?: string;
   title: string;
   content?: string;
   file_type?: string;
@@ -86,4 +87,11 @@ export interface DocumentInfo {
   user_tags?: string[];
   far_tags?: string[];
   completeness_pct?: number;
+  origin_context_available?: boolean;
+  source_data_summary?: string;
+  document_capabilities?: {
+    supports_docx_ai_edit?: boolean;
+    supports_xlsx_ai_edit?: boolean;
+    supports_manual_xlsx_edit?: boolean;
+  };
 }

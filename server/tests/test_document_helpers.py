@@ -2,6 +2,7 @@
 
 import os
 import sys
+from typing import Optional
 from unittest.mock import patch
 
 import pytest
@@ -341,7 +342,7 @@ class TestNormalizeFieldNames:
 # ── Markdown Sidecar Fallback ──────────────────────────────────────────
 
 class TestMarkdownSidecarFallback:
-    """Tests the api_get_document markdown sidecar preference over binary extraction."""
+    """Tests sidecar text loading without dropping binary preview payloads."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
@@ -408,7 +409,7 @@ class TestMarkdownSidecarFallback:
 
         self.app.dependency_overrides[self._dep_func] = _test_user
 
-    def _build_s3_with_sidecar(self, sidecar_content: str | None):
+    def _build_s3_with_sidecar(self, sidecar_content: Optional[str]):
         from docx import Document as DocxDocument
 
         s3 = self.MagicMock()
@@ -462,5 +463,5 @@ class TestMarkdownSidecarFallback:
         assert resp.status_code == 200
         data = resp.json()
         assert "Rich markdown content from AI" in data["content"]
-        assert data["preview_mode"] == "markdown_sidecar"
-
+        assert data["preview_mode"] == "docx_blocks"
+        assert data["preview_blocks"]

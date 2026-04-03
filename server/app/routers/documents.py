@@ -220,6 +220,8 @@ def _build_document_response(
     response: dict,
     content: Optional[str],
     download_url: Optional[str],
+    tenant_id: str,
+    user_id: str,
     preview_blocks: Optional[List[dict[str, Any]]] = None,
     preview_sheets: Optional[List[dict[str, Any]]] = None,
     preview_mode: Optional[str] = None,
@@ -234,6 +236,11 @@ def _build_document_response(
     is_binary = _is_binary_document(filename, content_type)
     title = None
     document_id = doc_key
+    # Origin context fields (Phase 5)
+    session_id = None
+    source_context_type = None
+    source_data_summary = None
+    template_provenance = None
     if package_ref and version is not None:
         metadata = _get_document_metadata(
             package_ref["tenant_id"],
@@ -246,8 +253,35 @@ def _build_document_response(
             document_id = metadata.get("document_id", document_id)
             file_type = metadata.get("file_type", file_type)
             version = metadata.get("version", version)
+            # Extract origin context fields
+            session_id = metadata.get("session_id")
+            source_context_type = metadata.get("source_context_type")
+            source_data_summary = metadata.get("source_data_summary")
+            template_provenance = metadata.get("template_provenance")
     elif package_ref:
         title = package_ref["doc_type"].replace("_", " ").title()
+    else:
+        from ..unified_document_store import find_document_by_s3_key
+
+        metadata = find_document_by_s3_key(tenant_id, user_id, doc_key)
+        if metadata:
+            title = metadata.get("title")
+            document_id = metadata.get("document_id", document_id)
+            file_type = metadata.get("file_type", file_type)
+            doc_type = metadata.get("doc_type", doc_type)
+            session_id = metadata.get("session_id")
+            source_context_type = metadata.get("source_context_type")
+            source_data_summary = metadata.get("source_data_summary")
+            template_provenance = metadata.get("template_provenance")
+
+    # Build document capabilities based on file type and origin context
+    origin_context_available = bool(source_context_type or session_id)
+    document_capabilities = {
+        "supports_docx_ai_edit": file_type == "docx",
+        "supports_xlsx_ai_edit": file_type == "xlsx" and doc_type == "igce",
+        "supports_manual_xlsx_edit": file_type == "xlsx",
+    }
+
     return {
         "key": doc_key,
         "s3_key": doc_key,
@@ -268,6 +302,12 @@ def _build_document_response(
         "document_type": doc_type,
         "version": version,
         "title": title,
+        # Origin context fields (Phase 5)
+        "session_id": session_id,
+        "origin_context_available": origin_context_available,
+        "source_data_summary": source_data_summary,
+        "document_capabilities": document_capabilities,
+        "template_provenance": template_provenance,
     }
 
 
@@ -444,6 +484,13 @@ class DocxPreviewEditRequest(BaseModel):
 class XlsxPreviewEditRequest(BaseModel):
     cell_edits: List[Dict[str, Any]]
     change_source: str = "user_edit"
+
+
+class XlsxAiEditRequest(BaseModel):
+    request: str
+    session_id: Optional[str] = None
+    package_id: Optional[str] = None
+    change_source: str = "ai_edit"
 
 
 class AssignToPackageRequest(BaseModel):
@@ -1196,6 +1243,31 @@ async def api_update_xlsx_preview_document(
     }
 
 
+@router.post("/xlsx-ai-edit/{doc_key:path}")
+async def api_update_xlsx_with_ai(
+    doc_key: str,
+    request: XlsxAiEditRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Apply AI-resolved structured edits to a supported XLSX workbook."""
+    from ..xlsx_ai_edit_service import edit_igce_xlsx_document
+
+    result = edit_igce_xlsx_document(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        doc_key=doc_key,
+        request_text=request.request,
+        session_id=request.session_id,
+        package_id=request.package_id,
+        change_source=request.change_source,
+    )
+    error = result.get("error")
+    if error:
+        logger.warning("XLSX AI edit failed: %s", error)
+        raise HTTPException(status_code=400, detail=GENERIC_EDIT_ERROR)
+    return result
+
+
 # ── Get/Update Single Document ────────────────────────────────────────
 
 
@@ -1232,6 +1304,10 @@ async def api_get_document(
         else:
             if include_content and _supports_binary_preview(doc_key):
                 raw_bytes = response["Body"].read()
+                preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
+                preview_blocks = preview_payload.get("preview_blocks", [])
+                preview_sheets = preview_payload.get("preview_sheets", [])
+                preview_mode = preview_payload.get("preview_mode")
                 sidecar_content = _load_document_markdown_sidecar(
                     s3=s3,
                     bucket=bucket,
@@ -1239,10 +1315,6 @@ async def api_get_document(
                     tenant_id=tenant_id,
                     user_id=user_id,
                 )
-                preview_payload = _extract_binary_preview_payload(doc_key, raw_bytes)
-                preview_blocks = preview_payload.get("preview_blocks", [])
-                preview_sheets = preview_payload.get("preview_sheets", [])
-
                 if sidecar_content is not None:
                     content = sidecar_content
                     preview_mode = (
@@ -1264,6 +1336,8 @@ async def api_get_document(
             response=response,
             content=content,
             download_url=download_url,
+            tenant_id=tenant_id,
+            user_id=user_id,
             preview_blocks=preview_blocks,
             preview_sheets=preview_sheets,
             preview_mode=preview_mode,
@@ -1283,6 +1357,23 @@ async def api_get_document(
                 result["title"] = metadata.get("title", result.get("title"))
                 result["file_type"] = metadata.get("file_type", result["file_type"])
                 result["version"] = metadata.get("version", result["version"])
+                result["session_id"] = metadata.get("session_id")
+                result["template_id"] = metadata.get("template_id")
+                result["template_provenance"] = metadata.get("template_provenance")
+                result["origin_context_available"] = bool(
+                    metadata.get("session_id") or metadata.get("source_context_type")
+                )
+        result["document_capabilities"] = {
+            "supports_docx_ai_edit": bool(result.get("is_binary") and result.get("file_type") == "docx"),
+            "supports_xlsx_ai_edit": bool(
+                result.get("is_binary")
+                and result.get("file_type") == "xlsx"
+                and result.get("document_type") == "igce"
+            ),
+            "supports_manual_xlsx_edit": bool(
+                result.get("is_binary") and result.get("file_type") == "xlsx"
+            ),
+        }
         return result
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchKey":
