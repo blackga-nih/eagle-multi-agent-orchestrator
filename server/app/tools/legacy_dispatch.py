@@ -43,6 +43,7 @@ TOOLS_NEEDING_SESSION = {
     "edit_docx_document",
     "get_intake_status",
     "manage_package",
+    "research",
 }
 
 
@@ -52,6 +53,15 @@ def exec_create_document(
     from .document_generation import exec_create_document as _exec_create_document
 
     return _exec_create_document(params, tenant_id, session_id)
+
+
+def exec_research(
+    params: dict, tenant_id: str, session_id: str | None = None
+) -> dict:
+    """Legacy dispatch wrapper for the composite research tool."""
+    from .research_tool import exec_research as _exec_research
+
+    return _exec_research(params, tenant_id, session_id)
 
 
 def get_tool_dispatch() -> dict[str, ToolHandler]:
@@ -74,6 +84,7 @@ def get_tool_dispatch() -> dict[str, ToolHandler]:
         "get_latest_document": exec_get_latest_document,
         "finalize_package": exec_finalize_package,
         "manage_package": exec_manage_package,
+        "research": exec_research,
     }
 
 

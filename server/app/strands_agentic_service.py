@@ -4371,12 +4371,176 @@ def _build_kb_service_tools(
         _emit("web_fetch", result)
         return json.dumps(result, indent=2, default=str)
 
+    # --- PMR checklist S3 keys by acquisition method ---
+    _RESEARCH_PMR_KEYS: dict[str, str | None] = {
+        "sap": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_SAP_Checklist.txt",
+        "negotiated": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "fss": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_FSS_Checklist.txt",
+        "bpa-est": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
+        "bpa-call": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
+        "idiq": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
+        "idiq-order": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
+        "sole": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "micro": None,
+    }
+    _RESEARCH_PMR_COMMON_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt"
+    _RESEARCH_FRC_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/File_Reviewers_Checklist_FRC.txt"
+
+    def _detect_method(acquisition_method: str, query: str, contract_value: float) -> str:
+        """Infer acquisition method from explicit param, query text signals, or value."""
+        if acquisition_method:
+            am = acquisition_method.lower().strip()
+            # Map common aliases
+            aliases = {
+                "sole source": "sole", "sole-source": "sole", "j&a": "sole",
+                "gsa": "fss", "schedule": "fss", "fss": "fss",
+                "bpa": "bpa-est", "blanket purchase": "bpa-est",
+                "idiq": "idiq-order", "task order": "idiq-order",
+                "micro": "micro", "purchase card": "micro", "gpc": "micro",
+                "sap": "sap", "simplified": "sap",
+                "negotiated": "negotiated", "full and open": "negotiated",
+            }
+            for alias, method in aliases.items():
+                if alias in am:
+                    return method
+            if am in _RESEARCH_PMR_KEYS:
+                return am
+
+        # Scan query text for signals
+        q = query.lower()
+        if any(s in q for s in ("sole source", "sole-source", "only one source", "j&a")):
+            return "sole"
+        if any(s in q for s in ("gsa", "schedule", "fss")):
+            return "fss"
+        if any(s in q for s in ("bpa", "blanket purchase")):
+            return "bpa-est"
+        if any(s in q for s in ("idiq", "task order")):
+            return "idiq-order"
+        if any(s in q for s in ("micro", "purchase card", "gpc")):
+            return "micro"
+
+        # Fall back to value-based detection
+        if contract_value > 0:
+            if contract_value < 15000:
+                return "micro"
+            if contract_value <= 350000:
+                return "sap"
+            return "negotiated"
+
+        return "sap"
+
+    @tool(name="research")
+    def research_tool(
+        query: str,
+        contract_value: float = 0,
+        acquisition_method: str = "",
+        is_it: bool = False,
+        is_services: bool = False,
+        include_checklist: bool = True,
+        topic: str = "",
+        document_type: str = "",
+    ) -> str:
+        """Comprehensive research tool — bundles KB search, auto-fetch, and dynamic checklist selection into one call. Use this for ANY question about documents, requirements, compliance, or acquisition guidance. Returns a complete research packet with KB results, fetched document content, and applicable HHS PMR/FRC checklists.
+
+        Args:
+            query: Natural language query — describe the acquisition scenario
+            contract_value: Estimated contract value in dollars (for threshold-based checklist selection)
+            acquisition_method: Acquisition method hint — sole, sap, negotiated, fss, bpa, idiq, micro
+            is_it: True if this is an IT acquisition (triggers Section 508 / FISMA docs)
+            is_services: True if this is a services acquisition (triggers SCA / inherently governmental docs)
+            include_checklist: Whether to fetch PMR/FRC checklists (default True)
+            topic: Optional topic filter for KB search
+            document_type: Optional document type filter for KB search
+        """
+        _emit_input("research", {
+            "query": query, "contract_value": contract_value,
+            "acquisition_method": acquisition_method,
+            "is_it": is_it, "is_services": is_services,
+        })
+        _kb_tools_called.add("research")
+
+        # 1. Run knowledge_search
+        search_params = {
+            k: v for k, v in {
+                "query": query, "topic": topic,
+                "document_type": document_type, "limit": 10,
+            }.items() if v
+        }
+        search_result = exec_knowledge_search(search_params, tenant_id, session_id)
+        _kb_depth["search_count"] += 1
+        _kb_depth["search_result_count"] += search_result.get("count", 0)
+
+        # 2. Auto-fetch top 4 KB results
+        fetched_docs = []
+        for r in search_result.get("results", [])[:4]:
+            s3_key = r.get("s3_key")
+            if s3_key and s3_key not in _kb_depth["fetched_keys"]:
+                content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                if "error" not in content:
+                    _kb_depth["fetch_count"] += 1
+                    _kb_depth["total_chars_read"] += content.get("content_length", 0)
+                    _kb_depth["fetched_keys"].add(s3_key)
+                    fetched_docs.append({
+                        "title": r.get("title", ""),
+                        "s3_key": s3_key,
+                        "content": content.get("content", "")[:15000],
+                    })
+
+        # 3. Dynamic checklist selection
+        checklist_content: dict[str, str] = {}
+        if include_checklist:
+            method = _detect_method(acquisition_method, query, contract_value)
+            checklists_to_fetch: list[tuple[str, str]] = []
+
+            # Always include PMR Common Requirements as baseline (unless micro)
+            if method != "micro":
+                checklists_to_fetch.append(("HHS PMR Common Requirements", _RESEARCH_PMR_COMMON_KEY))
+
+                # Add method-specific checklist if different from common
+                method_key = _RESEARCH_PMR_KEYS.get(method)
+                if method_key and method_key != _RESEARCH_PMR_COMMON_KEY:
+                    checklists_to_fetch.append((f"HHS PMR {method.upper()} Checklist", method_key))
+
+                # Add FRC for any non-micro acquisition
+                checklists_to_fetch.append(("NIH File Reviewer's Checklist", _RESEARCH_FRC_KEY))
+
+            for label, key in checklists_to_fetch:
+                if key not in _kb_depth["fetched_keys"]:
+                    result = exec_knowledge_fetch({"s3_key": key}, tenant_id, session_id)
+                    if "content" in result:
+                        _kb_depth["fetch_count"] += 1
+                        _kb_depth["total_chars_read"] += result.get("content_length", 0)
+                        _kb_depth["fetched_keys"].add(key)
+                        checklist_content[label] = result["content"][:20000]
+
+        # 4. Build combined packet
+        packet = {
+            "kb_results": search_result.get("results", []),
+            "fetched_documents": fetched_docs,
+            "checklists": checklist_content,
+            "detected_method": _detect_method(acquisition_method, query, contract_value),
+            "_guidance": (
+                "Use checklists to cross-reference document requirements. "
+                "The PMR checklist is HHS/NIH-specific — items there supplement FAR requirements. "
+                "The FRC (File Reviewer's Checklist) is NIH's internal review standard. "
+                "Cite KB documents and checklist references in your response."
+            ),
+        }
+        _emit("research", {
+            "kb_results_count": len(packet["kb_results"]),
+            "fetched_count": len(fetched_docs),
+            "checklists_loaded": list(checklist_content.keys()),
+            "detected_method": packet["detected_method"],
+        })
+        return json.dumps(packet, indent=2, default=str)
+
     return [
         search_far,
         knowledge_search,
         knowledge_fetch,
         web_search_tool,
         web_fetch_tool,
+        research_tool,
     ], _kb_depth
 
 
@@ -4657,41 +4821,27 @@ def _build_supervisor_prompt_body(
         "  as a substitute for knowledge_search or query_compliance_matrix.\n"
         "  Only spawn a specialist subagent when you need expert reasoning, not for simple lookups.\n\n"
         "RESEARCH CASCADE — INTERNAL SOURCES FIRST (applies to MOST responses):\n"
-        "CRITICAL: You MUST call knowledge_search BEFORE web_search. Telemetry shows 79% cascade "
-        "violation rate — this degrades answer quality and wastes web queries. Follow this mandatory "
-        "order strictly.\n\n"
-        "  STEP 1 — Knowledge Base (ALWAYS first, NEVER skip):\n"
-        "    a) Call knowledge_search with relevant query, topic, and/or keywords.\n"
-        "    b) If results found, you MUST call knowledge_fetch on at least 2 of the "
-        "top relevant s3_keys. Do NOT answer from summaries alone — summaries lack "
-        "critical details (checklists, exact regulatory text, case holdings, procedural "
-        "requirements). Reading the full document text is mandatory for accurate answers.\n"
-        "    c) The KB is your primary source of truth — approved FAR/DFARS text, NIH policies, "
-        "templates, checklists, and precedents.\n"
-        "    d) The KB also contains templates (SOW, IGCE, AP, J&A, MRR) and checklists — "
-        "search for these BEFORE generating documents from scratch.\n"
-        "    e) Prefer knowledge_search/knowledge_fetch over search_far when KB can answer.\n"
-        "    f) When search_far returns results with non-empty s3_keys, you MUST call "
-        "knowledge_fetch on the top result's s3_key to read the full FAR document "
-        "BEFORE responding. Never answer from the summary alone.\n"
-        "    g) If a search_far result has empty s3_keys, the summary is the best available.\n"
-        "    h) BEFORE delegating to a specialist, run knowledge_search and pass KB findings "
-        "in the delegation context so the specialist does not skip straight to web.\n\n"
-        "  STEP 2 — Compliance Matrix (primary for requirements):\n"
+        "CRITICAL: The `research` tool enforces the cascade server-side — use it as your "
+        "primary research method. It bundles KB search + auto-fetch + dynamic checklist "
+        "selection into one call.\n\n"
+        "  STEP 1 — Research Tool (preferred for comprehensive queries):\n"
+        "    a) Call research(query='...', contract_value=..., acquisition_method='...'). "
+        "This single call runs KB search, auto-fetches top results, and selects/fetches "
+        "the right HHS PMR and NIH FRC checklists based on acquisition method.\n"
+        "    b) The response includes: kb_results, fetched_documents (full text), "
+        "checklists (PMR + FRC content), and detected_method.\n"
+        "    c) Use the checklists to cross-reference document requirements — PMR is "
+        "HHS/NIH-specific, FRC is NIH's internal file review standard.\n"
+        "    d) BEFORE delegating to a specialist, run research first and pass findings "
+        "in the delegation context.\n\n"
+        "  STEP 1b — Knowledge Search (for targeted single-doc lookups):\n"
+        "    If you only need a specific document, use knowledge_search + knowledge_fetch.\n\n"
+        "  STEP 2 — Compliance Matrix (for threshold/vehicle queries):\n"
         "    a) Call query_compliance_matrix(operation='query') for dollar thresholds, "
         "required documents, competition rules, approval levels, and vehicle selection.\n"
         "    b) The matrix returns _related_far entries — review these for supporting citations.\n"
-        "    c) If you need deeper FAR research beyond what _related_far provides, "
-        "call search_far directly (NOT query_compliance_matrix with operation='search_far').\n"
-        "    d) When _verify.far_citations are returned, verify critical ones via search_far.\n"
-        "    e) When confidence scores are below 0.8, recommend user verify with legal/policy.\n"
-        "    f) For vehicle recommendations, use operation='suggest_vehicle'.\n"
-        "    g) When the matrix returns pmr_checklist_s3_key, call knowledge_fetch on that key "
-        "to read the full HHS PMR checklist before presenting document requirements.\n"
-        "    h) When the matrix returns frc_checklist_s3_key, call knowledge_fetch on that key "
-        "to cross-reference with the NIH File Reviewer's Checklist.\n"
-        "    i) For 'what documents do I need?' questions, the matrix + PMR checklist is your "
-        "minimum — present the combined list, noting FAR-mandated vs. HHS/NIH-specific items.\n\n"
+        "    c) For vehicle recommendations, use operation='suggest_vehicle'.\n"
+        "    d) When confidence scores are below 0.8, recommend user verify with legal/policy.\n\n"
         "  STEP 3 — Web Search (only when internal sources insufficient):\n"
         "    a) Use web_search for current market data, vendor info, pricing, GSA rates, "
         "recent policy changes, or any topic needing real-time info beyond the KB.\n"

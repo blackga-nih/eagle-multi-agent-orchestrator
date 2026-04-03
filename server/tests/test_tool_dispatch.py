@@ -54,11 +54,12 @@ class TestDispatchRouting:
         "get_latest_document",
         "finalize_package",
         "manage_package",
+        "research",
     }
 
-    def test_get_tool_dispatch_returns_all_18_tools(self):
+    def test_get_tool_dispatch_returns_all_19_tools(self):
         dispatch = get_tool_dispatch()
-        assert len(dispatch) == 18
+        assert len(dispatch) == 19
         assert set(dispatch.keys()) == self.EXPECTED_TOOLS
 
     def test_execute_tool_unknown_tool_returns_error_json(self):
@@ -155,6 +156,7 @@ class TestDispatchRouting:
             "edit_docx_document",
             "get_intake_status",
             "manage_package",
+            "research",
         }
 
 

@@ -12,6 +12,19 @@ triggers:
 
 Search the comprehensive knowledge base for federal acquisition regulations, policies, procedures, past acquisitions, and technical documentation.
 
+## Preferred Tool: `research`
+
+For comprehensive research, use the `research` tool instead of separate
+knowledge_search → knowledge_fetch calls. It bundles:
+- KB search + auto-fetch of top 4 results
+- Dynamic checklist selection (PMR, FRC based on acquisition method)
+- Returns a complete research packet in one call
+
+Parameters: `query`, `contract_value`, `acquisition_method`, `is_it`, `is_services`,
+`include_checklist`, `topic`, `document_type`
+
+Use `knowledge_search` / `knowledge_fetch` directly only for targeted single-doc lookups.
+
 ## Knowledge Base Contents
 
 ### 1. Federal Acquisition Regulation (FAR)
