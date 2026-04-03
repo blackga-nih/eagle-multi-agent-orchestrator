@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import os
+import threading
 import time
 from typing import Optional
 
@@ -166,6 +167,91 @@ def _fetch_cloudwatch_logs_for_session(session_id: str) -> list:
 # ── Endpoints ────────────────────────────────────────────────────────
 
 
+def _process_feedback_side_effects(
+    item: dict,
+    session_id: str,
+    feedback_text: str,
+    feedback_area: str,
+    display_name: str,
+    tenant_id: str,
+    tier: str,
+    page: str,
+    feedback_type_from_body: str,
+    screenshot_data: str | None,
+) -> None:
+    """Run all non-critical feedback side effects (CloudWatch, JIRA, S3, Teams).
+
+    Spawned in a daemon thread — fully fire-and-forget.
+    """
+    feedback_id = item.get("feedback_id", "")
+
+    # CloudWatch logs
+    try:
+        cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
+        if cloudwatch_logs:
+            feedback_store.patch_cloudwatch_logs(
+                feedback_id,
+                tenant_id,
+                json.dumps(cloudwatch_logs, default=str),
+            )
+    except Exception:
+        logger.debug("feedback: cloudwatch patch failed (non-fatal)", exc_info=True)
+
+    # JIRA issue
+    jira_key = _create_jira_for_feedback(
+        feedback_id=feedback_id,
+        feedback_text=feedback_text,
+        feedback_type=item.get("feedback_type", "general"),
+        user_id=display_name,
+        tenant_id=tenant_id,
+        tier=tier,
+        session_id=session_id,
+        page=page,
+        created_at=item.get("created_at", ""),
+        feedback_area=feedback_area,
+    )
+
+    # Screenshot → S3 + JIRA attachment
+    screenshot_url: Optional[str] = None
+    if screenshot_data and isinstance(screenshot_data, str):
+        s3_key = _upload_screenshot_to_s3(feedback_id, screenshot_data)
+        if s3_key:
+            try:
+                from ..db_client import get_s3
+                from ..config import aws as aws_config
+
+                screenshot_url = get_s3().generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": aws_config.s3_bucket, "Key": s3_key},
+                    ExpiresIn=7 * 24 * 3600,
+                )
+            except Exception:
+                logger.debug("feedback: presigned URL failed (non-fatal)", exc_info=True)
+            if jira_key:
+                try:
+                    image_bytes = base64.b64decode(screenshot_data.split(",", 1)[1])
+                    from ..jira_client import add_attachment
+
+                    add_attachment(jira_key, f"feedback-{feedback_id[:8]}.png", image_bytes)
+                except Exception:
+                    logger.debug("feedback: jira attachment failed (non-fatal)", exc_info=True)
+
+    # Teams notification
+    notify_feedback(
+        tenant_id=tenant_id,
+        user_id=display_name,
+        tier=tier,
+        session_id=session_id,
+        feedback_text=feedback_text,
+        feedback_type=feedback_type_from_body,
+        feedback_area=feedback_area,
+        page=page,
+        jira_key=jira_key,
+        feedback_id=feedback_id,
+        screenshot_url=screenshot_url,
+    )
+
+
 @router.post("")
 async def api_submit_feedback(
     request: Request,
@@ -183,11 +269,9 @@ async def api_submit_feedback(
     if not feedback_text:
         raise HTTPException(status_code=400, detail="feedback_text is required")
 
-    # Prefer human-readable name for display (Teams card, Jira)
     display_name = user.email or user.username or user.user_id
 
-    # Write feedback to DynamoDB FIRST (fast, critical path).
-    # CloudWatch fetch is slow and non-critical — do it after.
+    # Critical path: DynamoDB write only — returns fast.
     item = feedback_store.write_feedback(
         tenant_id=user.tenant_id,
         user_id=user.user_id,
@@ -201,75 +285,24 @@ async def api_submit_feedback(
         feedback_area=feedback_area,
     )
 
-    # Best-effort: fetch CloudWatch logs and patch the record (non-blocking).
-    # This runs after the response is sent so it can't cause client timeouts.
-    try:
-        cloudwatch_logs = _fetch_cloudwatch_logs_for_session(session_id)
-        if cloudwatch_logs:
-            feedback_store.patch_cloudwatch_logs(
-                item.get("feedback_id", ""),
-                user.tenant_id,
-                json.dumps(cloudwatch_logs, default=str),
-            )
-    except Exception:
-        logger.debug("feedback: cloudwatch patch failed (non-fatal)", exc_info=True)
+    # Fire-and-forget: daemon thread for all slow side effects.
+    threading.Thread(
+        target=_process_feedback_side_effects,
+        kwargs=dict(
+            item=item,
+            session_id=session_id,
+            feedback_text=feedback_text,
+            feedback_area=feedback_area,
+            display_name=display_name,
+            tenant_id=user.tenant_id,
+            tier=user.tier,
+            page=page,
+            feedback_type_from_body=body.get("feedback_type", "general"),
+            screenshot_data=body.get("screenshot"),
+        ),
+        daemon=True,
+    ).start()
 
-    # Create JIRA issue (sync, graceful degradation — None on failure)
-    jira_key = _create_jira_for_feedback(
-        feedback_id=item.get("feedback_id", ""),
-        feedback_text=feedback_text,
-        feedback_type=item.get("feedback_type", "general"),
-        user_id=display_name,
-        tenant_id=user.tenant_id,
-        tier=user.tier,
-        session_id=session_id,
-        page=page,
-        created_at=item.get("created_at", ""),
-        feedback_area=feedback_area,
-    )
-
-    # Best-effort: upload screenshot to S3 + attach to Jira ticket
-    screenshot_url: Optional[str] = None
-    screenshot_data = body.get("screenshot")
-    if screenshot_data and isinstance(screenshot_data, str):
-        feedback_id = item.get("feedback_id", "")
-        s3_key = _upload_screenshot_to_s3(feedback_id, screenshot_data)
-        if s3_key:
-            # Generate presigned URL for Teams card (7-day expiry)
-            try:
-                from ..db_client import get_s3
-                from ..config import aws as aws_config
-
-                screenshot_url = get_s3().generate_presigned_url(
-                    "get_object",
-                    Params={"Bucket": aws_config.s3_bucket, "Key": s3_key},
-                    ExpiresIn=7 * 24 * 3600,
-                )
-            except Exception:
-                logger.debug("feedback: presigned URL failed (non-fatal)", exc_info=True)
-            # Attach to Jira ticket
-            if jira_key:
-                try:
-                    image_bytes = base64.b64decode(screenshot_data.split(",", 1)[1])
-                    from ..jira_client import add_attachment
-
-                    add_attachment(jira_key, f"feedback-{feedback_id[:8]}.png", image_bytes)
-                except Exception:
-                    logger.debug("feedback: jira attachment failed (non-fatal)", exc_info=True)
-
-    notify_feedback(
-        tenant_id=user.tenant_id,
-        user_id=display_name,
-        tier=user.tier,
-        session_id=session_id,
-        feedback_text=feedback_text,
-        feedback_type=body.get("feedback_type", "general"),
-        feedback_area=feedback_area,
-        page=page,
-        jira_key=jira_key,
-        feedback_id=item.get("feedback_id", ""),
-        screenshot_url=screenshot_url,
-    )
     return {"status": "ok", "message": "Feedback recorded. Thank you!"}
 
 

@@ -107,7 +107,7 @@ export default function FeedbackModal() {
   }, [resetForm]);
 
   const handleSubmit = async () => {
-    if (!comment.trim() && !feedbackType) return;
+    if (!comment.trim() && !feedbackType && !feedbackArea) return;
     setSubmitting(true);
     setError(null);
 
@@ -124,8 +124,12 @@ export default function FeedbackModal() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      // Backend expects `feedback_text`; build it from comment + type tag
-      const feedbackText = [comment.trim(), feedbackType ? `[${feedbackType}]` : '']
+      // Backend expects `feedback_text`; build from comment + type + area tags
+      const feedbackText = [
+        comment.trim(),
+        feedbackType ? `[${feedbackType}]` : '',
+        feedbackArea ? `[${feedbackArea}]` : '',
+      ]
         .filter(Boolean)
         .join(' ');
 
@@ -204,7 +208,7 @@ export default function FeedbackModal() {
             </button>
             <button
               onClick={handleSubmit}
-              disabled={(!comment.trim() && !feedbackType) || submitting}
+              disabled={(!comment.trim() && !feedbackType && !feedbackArea) || submitting}
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? 'Submitting...' : 'Submit'}
