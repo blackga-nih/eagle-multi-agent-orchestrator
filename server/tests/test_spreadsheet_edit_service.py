@@ -9,7 +9,7 @@ _server_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 
-from app.spreadsheet_edit_service import (
+from app.spreadsheet_edit_service import (  # noqa: E402
     SpreadsheetCellEdit,
     apply_xlsx_cell_edits,
     extract_xlsx_preview_payload,
@@ -41,11 +41,20 @@ def test_extract_xlsx_preview_payload_returns_structured_sheets():
 
     assert payload["preview_mode"] == "xlsx_grid"
     assert "IGCE" in payload["content"]
+    assert "3000" in payload["content"]
     assert payload["preview_sheets"]
     first_sheet = payload["preview_sheets"][0]
     first_row = first_sheet["rows"][0]
+    formula_row = next(row for row in first_sheet["rows"] if row["row_index"] == 2)
     assert first_sheet["title"] == "IGCE"
     assert any(cell["cell_ref"] == "A1" and cell["display_value"] == "Item" for cell in first_row["cells"])
+    assert any(
+        cell["cell_ref"] == "D2"
+        and cell["display_value"] == "3000"
+        and cell["editable"] is False
+        and cell["is_formula"] is True
+        for cell in formula_row["cells"]
+    )
 
 
 def test_apply_xlsx_cell_edits_updates_only_input_cells():

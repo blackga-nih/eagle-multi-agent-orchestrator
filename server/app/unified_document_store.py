@@ -100,6 +100,12 @@ def create_document(
     is_deliverable: bool = False,
     session_id: Optional[str] = None,
     document_id: Optional[str] = None,
+    # Origin context for IGCE XLSX generation (Phase 4)
+    template_id: Optional[str] = None,
+    template_provenance: Optional[dict] = None,
+    source_context_type: Optional[str] = None,
+    source_data_summary: Optional[str] = None,
+    source_data: Optional[dict] = None,
 ) -> dict:
     """Create a new document record.
 
@@ -125,6 +131,11 @@ def create_document(
         is_deliverable: True if this is a generated output
         session_id: Chat session that created this document
         document_id: Optional precomputed document UUID to preserve external IDs
+        template_id: Template identifier used for generation
+        template_provenance: Dict with template source info (s3_key, source, etc.)
+        source_context_type: Type of generation context (e.g., "igce_xlsx_generation")
+        source_data_summary: Human-readable summary of generation context
+        source_data: Compact dict of generation data for follow-up edits
 
     Returns:
         Created document dict
@@ -175,6 +186,17 @@ def create_document(
         item["content_hash"] = content_hash
     if session_id:
         item["session_id"] = session_id
+    # Origin context for IGCE XLSX generation
+    if template_id:
+        item["template_id"] = template_id
+    if template_provenance:
+        item["template_provenance"] = template_provenance
+    if source_context_type:
+        item["source_context_type"] = source_context_type
+    if source_data_summary:
+        item["source_data_summary"] = source_data_summary
+    if source_data:
+        item["source_data"] = source_data
 
     try:
         table.put_item(Item=_to_dynamodb_value(item))
@@ -511,5 +533,18 @@ def find_document_by_content_hash(
     documents = list_user_documents(tenant_id, user_id, scope="all", limit=500)
     for doc in documents:
         if doc.get("content_hash") == content_hash:
+            return doc
+    return None
+
+
+def find_document_by_s3_key(
+    tenant_id: str,
+    user_id: str,
+    s3_key: str,
+) -> Optional[dict]:
+    """Find a document by its current S3 key for a given user."""
+    documents = list_user_documents(tenant_id, user_id, scope="all", limit=500)
+    for doc in documents:
+        if doc.get("s3_key") == s3_key or doc.get("markdown_s3_key") == s3_key:
             return doc
     return None

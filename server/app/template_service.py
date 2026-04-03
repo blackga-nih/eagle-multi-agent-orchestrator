@@ -21,6 +21,18 @@ from app.formula_evaluation import (
     evaluate_formulas_for_preview,
     evaluate_workbook_formulas_safe,
 )
+from app.igce_workbook_schema import (
+    IT_GOODS_CONTRACT_TYPE_CELL,
+    IT_GOODS_DELIVERY_DATE_CELL,
+    IT_GOODS_ROWS,
+    IT_SERVICES_CONTRACT_TYPE_CELL,
+    IT_SERVICES_LABOR_ROWS,
+    IT_SERVICES_POP_FROM_CELL,
+    IT_SERVICES_POP_TO_CELL,
+    IT_SERVICES_YEAR_COLUMNS,
+    get_labor_slot_rows,
+    get_odc_row,
+)
 from app.template_registry import (
     TEMPLATE_BUCKET,
     get_alternate_s3_keys,
@@ -365,35 +377,7 @@ class IGCEPositionPopulator:
       Multi-year with Base + 4 Option Years
     """
 
-    # IGCE sheet: groups of (start_row, num_slots)
-    _LABOR_GROUPS = [
-        (7, 3),   # Professional: rows 7-9
-        (11, 3),  # Professional Support: rows 11-13
-        (16, 3),  # Administrative Support: rows 16-18
-        (21, 3),  # Other Support: rows 21-23
-    ]
-
-    # ODC row mapping: label -> row in IGCE sheet (values in column E)
-    _ODC_ROWS = {
-        "computer": 30,
-        "equipment": 31,
-        "materials": 32,
-        "supplies": 32,
-        "consultants": 33,
-        "travel": 34,
-        "subcontracts": 35,
-        "animal": 36,
-        "other": 37,
-    }
-
-    # IT Services sheet: rate columns per year (hours_col, rate_col)
-    _IT_SERVICES_YEARS = [
-        (2, 3),    # Base Year:   B=hours, C=rate
-        (5, 6),    # Option Yr 1: E=hours, F=rate
-        (8, 9),    # Option Yr 2: H=hours, I=rate
-        (11, 12),  # Option Yr 3: K=hours, L=rate
-        (14, 15),  # Option Yr 4: N=hours, O=rate
-    ]
+    # Cell mappings now imported from igce_workbook_schema
 
     @staticmethod
     def populate(template_bytes: bytes, data: Dict[str, Any]) -> bytes:
@@ -450,11 +434,7 @@ class IGCEPositionPopulator:
         ws, data: Dict[str, Any], line_items: List[Dict]
     ) -> None:
         """Write labor items and rates into the IGCE sheet."""
-        # Fill labor line items into available slots
-        slot_rows = []
-        for start_row, num_slots in IGCEPositionPopulator._LABOR_GROUPS:
-            for offset in range(num_slots):
-                slot_rows.append(start_row + offset)
+        slot_rows = get_labor_slot_rows()
 
         for idx, item in enumerate(line_items[: len(slot_rows)]):
             row = slot_rows[idx]
@@ -497,6 +477,24 @@ class IGCEPositionPopulator:
                 row = IGCEPositionPopulator._match_odc_row(key)
                 if row and amount:
                     ws.cell(row=row, column=5, value=amount)  # E column
+        else:
+            odcs = {}
+
+        goods_items = data.get("goods_items", [])
+        if isinstance(goods_items, list):
+            for goods_item in goods_items:
+                key = goods_item.get("product_name") or goods_item.get("description") or "other"
+                amount = goods_item.get("total")
+                if amount is None:
+                    quantity = goods_item.get("quantity") or 0
+                    unit_price = goods_item.get("unit_price") or 0
+                    try:
+                        amount = float(quantity) * float(unit_price)
+                    except (TypeError, ValueError):
+                        amount = None
+                row = IGCEPositionPopulator._match_odc_row(str(key))
+                if row and amount is not None and not ws.cell(row=row, column=5).value:
+                    ws.cell(row=row, column=5, value=amount)  # E column
 
         # Cancellation ceiling
         ceiling = data.get("cancellation_ceiling")
@@ -514,15 +512,15 @@ class IGCEPositionPopulator:
         contract_type = data.get("contract_type")
 
         if contract_type:
-            ws["B5"] = contract_type
+            ws[IT_SERVICES_CONTRACT_TYPE_CELL] = contract_type
 
         pop = data.get("period_of_performance") or data.get("pop")
         if isinstance(pop, dict):
-            ws["B6"] = pop.get("from", "")
-            ws["D6"] = pop.get("to", "")
+            ws[IT_SERVICES_POP_FROM_CELL] = pop.get("from", "")
+            ws[IT_SERVICES_POP_TO_CELL] = pop.get("to", "")
 
         for idx, item in enumerate(line_items[:max_rows]):
-            row = 12 + idx
+            row = IT_SERVICES_LABOR_ROWS[idx]
             desc = item.get("description", item.get("name", ""))
             hours = item.get("quantity", item.get("hours", 1872))
             rate = item.get("unit_price", item.get("rate", item.get("hourly_rate", 0)))
@@ -531,7 +529,7 @@ class IGCEPositionPopulator:
 
             # Fill each contract year with escalation
             for yr_idx, (h_col, r_col) in enumerate(
-                IGCEPositionPopulator._IT_SERVICES_YEARS[:num_years]
+                IT_SERVICES_YEAR_COLUMNS[:num_years]
             ):
                 yr_rate = rate * ((1 + escalation) ** yr_idx) if rate else 0
                 ws.cell(row=row, column=h_col, value=hours)
@@ -544,10 +542,14 @@ class IGCEPositionPopulator:
         """Write goods items into the IT Goods sheet."""
         contract_type = data.get("contract_type")
         if contract_type:
-            ws["B5"] = contract_type
+            ws[IT_GOODS_CONTRACT_TYPE_CELL] = contract_type
 
-        for idx, item in enumerate(goods[:8]):  # Rows 10-17
-            row = 10 + idx
+        delivery_date = data.get("delivery_date")
+        if delivery_date:
+            ws[IT_GOODS_DELIVERY_DATE_CELL] = delivery_date
+
+        for idx, item in enumerate(goods[: len(IT_GOODS_ROWS)]):
+            row = IT_GOODS_ROWS[idx]
             ws.cell(row=row, column=1, value=item.get("product_name", item.get("description", "")))
             ws.cell(row=row, column=2, value=item.get("manufacturer", ""))
             ws.cell(row=row, column=3, value=item.get("manufacturer_number", ""))
@@ -559,11 +561,7 @@ class IGCEPositionPopulator:
     @staticmethod
     def _match_odc_row(key: str) -> Optional[int]:
         """Match an ODC key to its row number in the IGCE sheet."""
-        key_lower = key.lower().strip()
-        for label, row in IGCEPositionPopulator._ODC_ROWS.items():
-            if label in key_lower:
-                return row
-        return IGCEPositionPopulator._ODC_ROWS.get("other")
+        return get_odc_row(key)
 
 
 # ══════════════════════════════════════════════════════════════════════

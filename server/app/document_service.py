@@ -101,6 +101,10 @@ def create_package_document_version(
     far_tags: Optional[list] = None,
     completeness_pct: Optional[float] = None,
     original_filename: Optional[str] = None,
+    # Origin context for IGCE XLSX generation (Phase 4)
+    source_context_type: Optional[str] = None,
+    source_data_summary: Optional[str] = None,
+    source_data: Optional[dict] = None,
 ) -> DocumentResult:
     """Create a new versioned document for a package.
 
@@ -185,6 +189,9 @@ def create_package_document_version(
         change_source=change_source,
         template_id=template_id,
         template_provenance=template_provenance,
+        source_context_type=source_context_type,
+        source_data_summary=source_data_summary,
+        source_data=source_data,
         status="pending",
         created_at=now,
     )
@@ -381,6 +388,9 @@ def _create_document_record(
     change_source: str,
     template_id: Optional[str],
     template_provenance: Optional[dict] = None,
+    source_context_type: Optional[str] = None,
+    source_data_summary: Optional[str] = None,
+    source_data: Optional[dict] = None,
     status: str = "pending",
     created_at: str = "",
 ) -> Tuple[Optional[str], Optional[str]]:
@@ -420,6 +430,13 @@ def _create_document_record(
         item["template_id"] = template_id
     if template_provenance:
         item["template_provenance"] = template_provenance
+    # Origin context for IGCE XLSX generation
+    if source_context_type:
+        item["source_context_type"] = source_context_type
+    if source_data_summary:
+        item["source_data_summary"] = source_data_summary
+    if source_data:
+        item["source_data"] = source_data
 
     try:
         table = get_table()

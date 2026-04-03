@@ -33,6 +33,8 @@ export interface StoredDocument {
   preview_blocks?: DocumentInfo['preview_blocks'];
   preview_sheets?: DocumentInfo['preview_sheets'];
   session_id: string;
+  origin_context_available?: boolean;
+  document_capabilities?: DocumentInfo['document_capabilities'];
   created_at: string;
   updated_at: string;
 }
@@ -172,6 +174,8 @@ export function saveGeneratedDocument(
     preview_blocks: doc.preview_blocks,
     preview_sheets: doc.preview_sheets,
     session_id: sessionId,
+    origin_context_available: doc.origin_context_available,
+    document_capabilities: doc.document_capabilities,
     created_at: existing?.created_at || now,
     updated_at: now,
   };

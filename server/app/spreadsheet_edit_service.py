@@ -20,7 +20,7 @@ from .document_key_utils import (
 )
 from .document_service import create_package_document_version
 from .document_store import get_document
-from .formula_evaluation import evaluate_workbook_formulas, evaluate_workbook_formulas_safe
+from .formula_evaluation import evaluate_formulas_for_preview
 from .template_service import XLSXPopulator
 
 logger = logging.getLogger("eagle.spreadsheet_edit")
@@ -80,11 +80,13 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
             "preview_sheets": [],
         }
 
-    # Evaluate formulas first so data_only=True gets calculated values
-    evaluated_bytes = evaluate_workbook_formulas_safe(xlsx_bytes)
+    # Use a preview-only flattened copy so the browser sees calculated values
+    # while the downloadable workbook retains live formulas.
+    preview_bytes = evaluate_formulas_for_preview(xlsx_bytes)
+    formulas_evaluated = preview_bytes != xlsx_bytes
 
-    wb = load_workbook(io.BytesIO(evaluated_bytes), data_only=False)
-    wb_values = load_workbook(io.BytesIO(evaluated_bytes), data_only=True)
+    wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+    wb_values = load_workbook(io.BytesIO(preview_bytes), data_only=True)
     preview_sheets: list[dict[str, Any]] = []
 
     for sheet_index, ws in enumerate(wb.worksheets):
@@ -156,9 +158,10 @@ def extract_xlsx_preview_payload(xlsx_bytes: bytes) -> dict[str, Any]:
             )
 
     return {
-        "content": XLSXPopulator.extract_text(xlsx_bytes),
+        "content": XLSXPopulator.extract_text(preview_bytes),
         "preview_mode": "xlsx_grid",
         "preview_sheets": preview_sheets,
+        "formulas_calculated": formulas_evaluated,
     }
 
 
@@ -265,9 +268,10 @@ def save_xlsx_preview_edits(
             "missing": missing,
         }
 
-    # Evaluate formulas for PREVIEW only - don't save evaluated bytes (preserves formulas)
-    preview_bytes, formulas_evaluated = evaluate_workbook_formulas(updated_bytes)
-    preview_payload = extract_xlsx_preview_payload(preview_bytes)
+    # Build the browser preview from a flattened copy while keeping the
+    # saved workbook bytes formula-safe.
+    preview_payload = extract_xlsx_preview_payload(updated_bytes)
+    formulas_evaluated = bool(preview_payload.get("formulas_calculated"))
 
     package_ref = extract_package_document_ref(doc_key)
     if package_ref:
@@ -294,8 +298,6 @@ def save_xlsx_preview_edits(
         if not result.success:
             return {"error": result.error or "Failed to save document version"}
         message = f"Saved spreadsheet version {result.version}."
-        if not formulas_evaluated:
-            message += " Note: Formulas will calculate when opened in Excel."
         # Generate presigned download URL for the saved document
         download_url = None
         try:
@@ -350,8 +352,6 @@ def save_xlsx_preview_edits(
         return {"error": "Failed to save spreadsheet."}
 
     ws_message = "Spreadsheet saved."
-    if not formulas_evaluated:
-        ws_message += " Note: Formulas will calculate when opened in Excel."
     # Generate presigned download URL for the saved document
     ws_download_url = None
     try:
