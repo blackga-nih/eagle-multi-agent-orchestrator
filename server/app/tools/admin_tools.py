@@ -3,16 +3,58 @@
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger("eagle.admin_tools")
+
+
+def _fetch_s3_text(s3_key: str, max_length: int = 30000) -> str | None:
+    """Fetch a text document from the KB S3 bucket. Returns None on failure."""
+    try:
+        from ..db_client import get_s3
+
+        bucket = __import__("os").environ.get(
+            "DOCUMENT_BUCKET", "eagle-documents-695681773636-dev"
+        )
+        response = get_s3().get_object(Bucket=bucket, Key=s3_key)
+        raw = response["Body"].read()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("latin-1", errors="replace")
+        return text[:max_length]
+    except Exception as exc:
+        logger.warning("_fetch_s3_text failed for %s: %s", s3_key, exc)
+        return None
 
 
 def exec_query_compliance_matrix(params: dict, tenant_id: str) -> dict:
-    """Execute a compliance matrix operation (read-only, no tenant scoping)."""
+    """Execute a compliance matrix operation (read-only, no tenant scoping).
+
+    For 'query' operations, auto-fetches the PMR checklist content so the
+    agent does not need a separate knowledge_fetch call.
+    """
     from ..compliance_matrix import execute_operation
 
     raw = params.get("params", params)
     if isinstance(raw, str):
         raw = json.loads(raw)
-    return execute_operation(raw)
+    result = execute_operation(raw)
+
+    # Auto-attach PMR checklist content for query operations
+    if raw.get("operation") == "query":
+        pmr_key = result.get("pmr_checklist_s3_key")
+        if pmr_key:
+            content = _fetch_s3_text(pmr_key)
+            if content:
+                result["pmr_checklist_content"] = content
+                result["_checklist_note"] = (
+                    "The pmr_checklist_content field contains the full HHS PMR "
+                    "checklist. Cross-reference documents_required with this "
+                    "checklist when presenting document requirements to the user."
+                )
+
+    return result
 
 
 def exec_manage_skills(params: dict, tenant_id: str) -> dict:
