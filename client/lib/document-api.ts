@@ -162,6 +162,24 @@ export async function listPackages(token?: string | null): Promise<PackageInfo[]
   return response.json();
 }
 
+/**
+ * Delete a package (only intake/drafting status allowed).
+ */
+export async function deletePackage(packageId: string, token?: string | null): Promise<void> {
+  const response = await fetch(`/api/packages/${encodeURIComponent(packageId)}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({ detail: 'Delete failed' }))) as {
+      detail?: string;
+      error?: string;
+    };
+    throw new Error(error.detail || error.error || `Delete failed: ${response.status}`);
+  }
+}
+
 // ── Package Document & Checklist API ─────────────────────────────
 
 export interface PackageDocument {

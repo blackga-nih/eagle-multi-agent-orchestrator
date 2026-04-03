@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { listPackages, getPackageDocuments } from '@/lib/document-api';
+import { listPackages, getPackageDocuments, deletePackage as apiDeletePackage } from '@/lib/document-api';
 import type { PackageInfo, PackageDocument } from '@/lib/document-api';
 
 export interface UseAllPackagesResult {
@@ -9,6 +9,8 @@ export interface UseAllPackagesResult {
   loading: boolean;
   error: string | null;
   refetch: () => void;
+  /** Delete a package by ID (optimistic removal from local state). */
+  removePackage: (packageId: string) => Promise<void>;
   /** Fetch documents for a package (cached after first call). */
   fetchDocuments: (packageId: string) => Promise<PackageDocument[]>;
   /** Cached documents keyed by package ID. */
@@ -82,11 +84,26 @@ export function useAllPackages(getToken: () => Promise<string | null>): UseAllPa
     [documentsCache],
   );
 
+  const removePackage = useCallback(
+    async (packageId: string) => {
+      const token = await getTokenRef.current();
+      await apiDeletePackage(packageId, token);
+      setPackages((prev) => prev.filter((p) => p.package_id !== packageId));
+      setDocumentsCache((prev) => {
+        const next = { ...prev };
+        delete next[packageId];
+        return next;
+      });
+    },
+    [],
+  );
+
   return {
     packages,
     loading,
     error,
     refetch: fetchPackages,
+    removePackage,
     fetchDocuments,
     documentsCache,
     loadingDocs,

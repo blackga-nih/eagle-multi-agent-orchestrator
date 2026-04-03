@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
@@ -140,12 +141,14 @@ function PackageCard({
   pkg,
   isExpanded,
   onToggle,
+  onDelete,
   documents,
   isLoadingDocs,
 }: {
   pkg: PackageInfo;
   isExpanded: boolean;
   onToggle: () => void;
+  onDelete?: () => void;
   documents: PackageDocument[];
   isLoadingDocs: boolean;
 }) {
@@ -189,6 +192,21 @@ function PackageCard({
             <p className="text-[9px] text-gray-400 mt-0.5">{relativeTime(pkg.created_at)}</p>
           )}
         </div>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(`Delete package "${pkg.title}"? This cannot be undone.`)) {
+                onDelete();
+              }
+            }}
+            className="shrink-0 p-1 text-gray-300 hover:text-red-500 rounded transition"
+            title="Delete package"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
       </button>
 
       {/* Expanded: show documents */}
@@ -251,7 +269,7 @@ function AllPackagesList({
   activePackageId?: string;
   isStreaming?: boolean;
 }) {
-  const { packages, loading, error, refetch, fetchDocuments, documentsCache, loadingDocs } =
+  const { packages, loading, error, refetch, removePackage, fetchDocuments, documentsCache, loadingDocs } =
     useAllPackages(getToken);
   const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
   const wasStreamingRef = useRef(false);
@@ -328,6 +346,11 @@ function AllPackagesList({
             pkg={pkg}
             isExpanded={expandedPkg === pkg.package_id}
             onToggle={() => handleToggle(pkg.package_id)}
+            onDelete={
+              ['intake', 'drafting'].includes(pkg.status ?? '')
+                ? () => removePackage(pkg.package_id)
+                : undefined
+            }
             documents={documentsCache[pkg.package_id] ?? []}
             isLoadingDocs={loadingDocs.has(pkg.package_id)}
           />
