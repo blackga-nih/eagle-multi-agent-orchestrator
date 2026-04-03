@@ -42,13 +42,22 @@ def delete_items(table, items: list[dict]) -> int:
     return deleted
 
 
+# Prefixes to delete from S3.  eagle-knowledge-base/ is EXCLUDED — those are
+# curated KB documents that must never be wiped by this script.
+S3_DELETE_PREFIXES = ["eagle/"]
+
+
 def list_s3_objects(s3, bucket: str) -> list[str]:
-    """List all object keys in the bucket."""
+    """List S3 object keys under S3_DELETE_PREFIXES only.
+
+    Excludes eagle-knowledge-base/ to prevent accidental KB wipes.
+    """
     keys = []
     paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=bucket):
-        for obj in page.get("Contents", []):
-            keys.append(obj["Key"])
+    for prefix in S3_DELETE_PREFIXES:
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                keys.append(obj["Key"])
     return keys
 
 

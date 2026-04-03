@@ -16,6 +16,7 @@ The JSON formatter produces one-line JSON objects:
 import contextvars
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 # Context variables — set per-request, inherited by async tasks
@@ -92,6 +93,10 @@ def configure_logging(level: int = logging.INFO):
     """Replace the root logger's handler with structured JSON output.
 
     Call once at startup (main.py) *instead of* logging.basicConfig().
+
+    On ECS the awslogs driver captures stdout automatically.  When running
+    locally (no ECS_CONTAINER_METADATA_URI), we additionally attach a
+    watchtower handler so application logs reach CloudWatch for triage parity.
     """
     root = logging.getLogger()
     root.setLevel(level)
@@ -104,3 +109,25 @@ def configure_logging(level: int = logging.INFO):
     handler.setFormatter(JSONFormatter())
     handler.addFilter(EagleContextFilter())
     root.addHandler(handler)
+
+    # When NOT on ECS, also push logs to CloudWatch directly
+    if not os.getenv("ECS_CONTAINER_METADATA_URI"):
+        try:
+            import watchtower
+            from ..db_client import get_logs
+
+            cw_handler = watchtower.CloudWatchLogHandler(
+                boto3_client=get_logs(),
+                log_group_name=os.getenv(
+                    "EAGLE_BACKEND_LOG_GROUP", "/eagle/ecs/backend-dev"
+                ),
+                log_stream_name="localhost",
+                send_interval=5,
+                max_batch_count=100,
+            )
+            cw_handler.setFormatter(JSONFormatter())
+            cw_handler.addFilter(EagleContextFilter())
+            root.addHandler(cw_handler)
+            root.info("CloudWatch logging enabled for local dev")
+        except Exception as e:
+            root.warning("CloudWatch logging unavailable locally: %s", e)

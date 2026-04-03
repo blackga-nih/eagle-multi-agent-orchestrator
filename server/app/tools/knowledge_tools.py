@@ -607,6 +607,9 @@ KNOWLEDGE_FETCH_TOOL = {
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+_AI_RANK_MAX_CANDIDATES = 200  # max items to send to LLM for ranking
+
+
 def _ai_rank_documents(
     query: str,
     keywords: list[str],
@@ -615,15 +618,29 @@ def _ai_rank_documents(
 ) -> list[dict[str, Any]]:
     """Use Bedrock Haiku to semantically rank documents against a query.
 
-    Sends the full metadata catalog to the LLM and asks it to pick
-    the most relevant documents. With ~350 docs this is ~7K input tokens
-    on Haiku — fast (<1s) and cheap (~$0.002/call).
+    When the catalog exceeds _AI_RANK_MAX_CANDIDATES items, pre-filters
+    using deterministic keyword matching to stay within Haiku's 200K
+    context window.
 
     Returns:
         Ordered list of items ranked by relevance, or empty list on failure.
     """
     if not items:
         return []
+
+    # Pre-filter large catalogs to avoid context overflow (208K+ tokens).
+    # Deterministic match narrows to the top candidates by keyword relevance,
+    # then AI ranking re-orders those for semantic precision.
+    if len(items) > _AI_RANK_MAX_CANDIDATES:
+        original_count = len(items)
+        pre_filtered = _deterministic_match(query, keywords, items)
+        if pre_filtered:
+            items = pre_filtered[:_AI_RANK_MAX_CANDIDATES]
+            logger.info(
+                "knowledge_search AI: pre-filtered %d -> %d candidates",
+                original_count,
+                len(items),
+            )
 
     # Build compact catalog: index | doc_id | title | keywords | related | summary
     catalog_lines = []
@@ -922,9 +939,24 @@ def exec_knowledge_search(
             logger.info("knowledge_search: using deterministic fallback")
             items = _deterministic_match(query or "", keywords, items)
 
+    # Ensure checklists are included in results for acquisition queries.
+    # The agent sometimes calls knowledge_search directly instead of
+    # the composite research tool, so we guarantee checklist visibility here.
+    top_items = items[:limit]
+    top_ids = {it.get("document_id") for it in top_items}
+    checklist_extras = [
+        it for it in items[limit:]
+        if it.get("document_type") == "checklist" and it.get("document_id") not in top_ids
+    ]
+    if checklist_extras:
+        top_items.extend(checklist_extras)
+        logger.info(
+            "knowledge_search: injected %d checklists beyond limit", len(checklist_extras)
+        )
+
     # Format results
     results = []
-    for item in items[:limit]:
+    for item in top_items:
         results.append(
             {
                 "document_id": item.get("document_id", ""),
