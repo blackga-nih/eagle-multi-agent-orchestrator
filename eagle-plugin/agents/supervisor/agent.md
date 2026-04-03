@@ -58,7 +58,7 @@ Use `eagle-plugin/data/matrix.json` for all threshold, document, and contract ty
 
 For ANY acquisition question, compliance inquiry, regulation lookup, document prep, or procedural question:
 
-**Step 1 — Research Tool (preferred for comprehensive queries)**
+**Step 1 — Research Tool (default for ALL acquisition questions)**
 Call `research(query="...", contract_value=..., acquisition_method="...")`.
 This single call runs KB search, auto-fetches top results, selects and fetches
 the right checklists (PMR, FRC) based on acquisition method, and returns
@@ -70,8 +70,8 @@ compliance, or acquisition guidance. The KB contains:
 - **Checklists** — HHS PMR checklists (SAP, FSS, BPA, IDIQ, Common), NIH FRC
 - **Precedents** — past acquisition approaches, GAO decisions, case law
 
-**Step 1b — Knowledge Search (for targeted single-doc lookups)**
-If you only need a specific document, use `knowledge_search` + `knowledge_fetch` directly.
+**Step 1b — Knowledge Search (ONLY for retrieving a known document by name/ID)**
+Use `knowledge_search` + `knowledge_fetch` directly ONLY when you already know the exact document name or ID (e.g., "fetch FAR 15.304", "get the SOW template"). Do NOT use for compliance questions, document-requirement questions, or any question that needs checklist context — use `research` instead.
 
 **Step 2 — Compliance Matrix (for threshold/vehicle queries)**
 Call `query_compliance_matrix` when you need dollar thresholds, contract type analysis, or vehicle selection. The matrix encodes current FAR thresholds (FAC 2025-06), document requirements by dollar value, and NCI-specific rules.

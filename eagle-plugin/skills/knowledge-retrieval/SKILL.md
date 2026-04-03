@@ -23,7 +23,7 @@ knowledge_search → knowledge_fetch calls. It bundles:
 Parameters: `query`, `contract_value`, `acquisition_method`, `is_it`, `is_services`,
 `include_checklist`, `topic`, `document_type`
 
-Use `knowledge_search` / `knowledge_fetch` directly only for targeted single-doc lookups.
+Use `knowledge_search` / `knowledge_fetch` directly ONLY when retrieving a specific known document by name or ID. For any question about requirements, compliance, or what documents are needed, always use `research`.
 
 ## Knowledge Base Contents
 

@@ -12,19 +12,16 @@ from .knowledge_tools import exec_knowledge_fetch, exec_knowledge_search
 
 logger = logging.getLogger("eagle.tools.research")
 
-_PMR_KEYS: dict[str, str | None] = {
-    "sap": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_SAP_Checklist.txt",
-    "negotiated": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
-    "fss": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_FSS_Checklist.txt",
-    "bpa-est": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
-    "bpa-call": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
-    "idiq": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
-    "idiq-order": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
-    "sole": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
-    "micro": None,
+_CHECKLIST_QUERIES: dict[str, str] = {
+    "sap": "simplified acquisition SAP PMR checklist",
+    "negotiated": "negotiated procurement PMR common requirements checklist",
+    "fss": "federal supply schedule FSS PMR checklist",
+    "bpa-est": "blanket purchase agreement BPA PMR checklist",
+    "bpa-call": "blanket purchase agreement BPA call order PMR checklist",
+    "idiq": "IDIQ indefinite delivery PMR checklist",
+    "idiq-order": "IDIQ task order PMR checklist",
+    "sole": "sole source PMR common requirements checklist",
 }
-_PMR_COMMON_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt"
-_FRC_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/File_Reviewers_Checklist_FRC.txt"
 
 
 def _detect_method(acquisition_method: str, query: str, contract_value: float) -> str:
@@ -43,7 +40,7 @@ def _detect_method(acquisition_method: str, query: str, contract_value: float) -
         for alias, method in aliases.items():
             if alias in am:
                 return method
-        if am in _PMR_KEYS:
+        if am in _CHECKLIST_QUERIES:
             return am
 
     q = query.lower()
@@ -103,25 +100,26 @@ def exec_research(
                     "content": content.get("content", "")[:15000],
                 })
 
-    # 3. Dynamic checklist selection
+    # 3. Dynamic checklist search (isolated query — separate from general KB search)
     checklist_content: dict[str, str] = {}
     method = _detect_method(acquisition_method, query, contract_value)
 
     if include_checklist and method != "micro":
-        checklists_to_fetch: list[tuple[str, str]] = [
-            ("HHS PMR Common Requirements", _PMR_COMMON_KEY),
-        ]
-        method_key = _PMR_KEYS.get(method)
-        if method_key and method_key != _PMR_COMMON_KEY:
-            checklists_to_fetch.append((f"HHS PMR {method.upper()} Checklist", method_key))
-        checklists_to_fetch.append(("NIH File Reviewer's Checklist", _FRC_KEY))
+        cl_query = _CHECKLIST_QUERIES.get(method, "PMR common requirements checklist")
+        cl_query += " file reviewer FRC"
 
-        for label, key in checklists_to_fetch:
-            if key not in fetched_keys:
-                result = exec_knowledge_fetch({"s3_key": key}, tenant_id, session_id)
+        cl_result = exec_knowledge_search(
+            {"document_type": "checklist", "query": cl_query, "limit": 5},
+            tenant_id, session_id,
+        )
+
+        for r in cl_result.get("results", [])[:4]:
+            s3_key = r.get("s3_key")
+            if s3_key and s3_key not in fetched_keys:
+                result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
                 if "content" in result:
-                    fetched_keys.add(key)
-                    checklist_content[label] = result["content"][:20000]
+                    fetched_keys.add(s3_key)
+                    checklist_content[r.get("title", s3_key)] = result["content"][:20000]
 
     return {
         "kb_results": search_result.get("results", []),

@@ -4371,20 +4371,17 @@ def _build_kb_service_tools(
         _emit("web_fetch", result)
         return json.dumps(result, indent=2, default=str)
 
-    # --- PMR checklist S3 keys by acquisition method ---
-    _RESEARCH_PMR_KEYS: dict[str, str | None] = {
-        "sap": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_SAP_Checklist.txt",
-        "negotiated": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
-        "fss": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_FSS_Checklist.txt",
-        "bpa-est": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
-        "bpa-call": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
-        "idiq": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
-        "idiq-order": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
-        "sole": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
-        "micro": None,
+    # --- Method-aware checklist search queries ---
+    _CHECKLIST_QUERIES: dict[str, str] = {
+        "sap": "simplified acquisition SAP PMR checklist",
+        "negotiated": "negotiated procurement PMR common requirements checklist",
+        "fss": "federal supply schedule FSS PMR checklist",
+        "bpa-est": "blanket purchase agreement BPA PMR checklist",
+        "bpa-call": "blanket purchase agreement BPA call order PMR checklist",
+        "idiq": "IDIQ indefinite delivery PMR checklist",
+        "idiq-order": "IDIQ task order PMR checklist",
+        "sole": "sole source PMR common requirements checklist",
     }
-    _RESEARCH_PMR_COMMON_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt"
-    _RESEARCH_FRC_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/File_Reviewers_Checklist_FRC.txt"
 
     def _detect_method(acquisition_method: str, query: str, contract_value: float) -> str:
         """Infer acquisition method from explicit param, query text signals, or value."""
@@ -4403,7 +4400,7 @@ def _build_kb_service_tools(
             for alias, method in aliases.items():
                 if alias in am:
                     return method
-            if am in _RESEARCH_PMR_KEYS:
+            if am in _CHECKLIST_QUERIES:
                 return am
 
         # Scan query text for signals
@@ -4486,32 +4483,29 @@ def _build_kb_service_tools(
                         "content": content.get("content", "")[:15000],
                     })
 
-        # 3. Dynamic checklist selection
+        # 3. Dynamic checklist search (isolated query — separate from general KB search)
         checklist_content: dict[str, str] = {}
         if include_checklist:
             method = _detect_method(acquisition_method, query, contract_value)
-            checklists_to_fetch: list[tuple[str, str]] = []
-
-            # Always include PMR Common Requirements as baseline (unless micro)
             if method != "micro":
-                checklists_to_fetch.append(("HHS PMR Common Requirements", _RESEARCH_PMR_COMMON_KEY))
+                cl_query = _CHECKLIST_QUERIES.get(method, "PMR common requirements checklist")
+                cl_query += " file reviewer FRC"
 
-                # Add method-specific checklist if different from common
-                method_key = _RESEARCH_PMR_KEYS.get(method)
-                if method_key and method_key != _RESEARCH_PMR_COMMON_KEY:
-                    checklists_to_fetch.append((f"HHS PMR {method.upper()} Checklist", method_key))
+                cl_result = exec_knowledge_search(
+                    {"document_type": "checklist", "query": cl_query, "limit": 5},
+                    tenant_id, session_id,
+                )
+                _kb_depth["search_count"] += 1
 
-                # Add FRC for any non-micro acquisition
-                checklists_to_fetch.append(("NIH File Reviewer's Checklist", _RESEARCH_FRC_KEY))
-
-            for label, key in checklists_to_fetch:
-                if key not in _kb_depth["fetched_keys"]:
-                    result = exec_knowledge_fetch({"s3_key": key}, tenant_id, session_id)
-                    if "content" in result:
-                        _kb_depth["fetch_count"] += 1
-                        _kb_depth["total_chars_read"] += result.get("content_length", 0)
-                        _kb_depth["fetched_keys"].add(key)
-                        checklist_content[label] = result["content"][:20000]
+                for r in cl_result.get("results", [])[:4]:
+                    s3_key = r.get("s3_key")
+                    if s3_key and s3_key not in _kb_depth["fetched_keys"]:
+                        result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                        if "content" in result:
+                            _kb_depth["fetch_count"] += 1
+                            _kb_depth["total_chars_read"] += result.get("content_length", 0)
+                            _kb_depth["fetched_keys"].add(s3_key)
+                            checklist_content[r.get("title", s3_key)] = result["content"][:20000]
 
         # 4. Build combined packet
         packet = {

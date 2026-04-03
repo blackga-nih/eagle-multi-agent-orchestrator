@@ -895,9 +895,20 @@ def exec_knowledge_search(
             response = table.scan(**scan_kwargs)
             items.extend(_sanitize_item(it) for it in response.get("Items", []))
 
+        # Exclude checklists from general search — they are fetched via
+        # the research tool's dedicated checklist step (document_type="checklist").
+        if document_type != "checklist":
+            items = [
+                it for it in items
+                if it.get("document_type") != "checklist"
+            ]
+
         # Inject built-in template/checklist entries so they participate in search.
         # Filter them the same way DynamoDB results are filtered.
         for entry in BUILTIN_KB_ENTRIES:
+            # Exclude checklists from general search — fetched via research tool's dedicated checklist step
+            if entry.get("document_type") == "checklist" and document_type != "checklist":
+                continue
             if topic and entry.get("primary_topic") != topic:
                 continue
             if document_type and entry.get("document_type") != document_type:
@@ -939,20 +950,7 @@ def exec_knowledge_search(
             logger.info("knowledge_search: using deterministic fallback")
             items = _deterministic_match(query or "", keywords, items)
 
-    # Ensure checklists are included in results for acquisition queries.
-    # The agent sometimes calls knowledge_search directly instead of
-    # the composite research tool, so we guarantee checklist visibility here.
     top_items = items[:limit]
-    top_ids = {it.get("document_id") for it in top_items}
-    checklist_extras = [
-        it for it in items[limit:]
-        if it.get("document_type") == "checklist" and it.get("document_id") not in top_ids
-    ]
-    if checklist_extras:
-        top_items.extend(checklist_extras)
-        logger.info(
-            "knowledge_search: injected %d checklists beyond limit", len(checklist_extras)
-        )
 
     # Format results
     results = []
