@@ -1409,6 +1409,30 @@ async def _maybe_fast_path_document_generation(
             }
 
     from .tools.legacy_dispatch import exec_create_document
+    from .tools.knowledge_tools import exec_knowledge_search
+
+    # -- Template search (EAGLE-77) --
+    # Always search KB for the relevant template before generating.
+    _tpl_info = ""
+    try:
+        tpl_result = await asyncio.to_thread(
+            exec_knowledge_search,
+            {"query": f"{doc_type} template", "document_type": "template", "limit": 3},
+            tenant_id,
+            session_id,
+        )
+        tpl_results = tpl_result.get("results", [])
+        if tpl_results:
+            top = tpl_results[0]
+            _tpl_info = (
+                f"Using template: {top.get('title', 'Unknown')} "
+                f"({top.get('s3_key', 'path unavailable')})"
+            )
+        else:
+            _tpl_info = f"No KB template found for document type '{doc_type}'."
+    except Exception as exc:
+        logger.warning("Fast-path template search failed: %s", exc)
+        _tpl_info = f"Template search unavailable; generating {doc_type} without template reference."
 
     doc_ctx = _extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
@@ -1435,6 +1459,7 @@ async def _maybe_fast_path_document_generation(
     return {
         "doc_type": doc_type,
         "result": result,
+        "template_info": _tpl_info,
     }
 
 
@@ -2410,6 +2435,11 @@ def _build_subagent_doc_tools(
     ) -> str:
         """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification, SON, Purchase Request, Price Reasonableness, Required Sources). Documents are saved to S3.
 
+        BEFORE calling this tool, you MUST:
+        1. Search the knowledge base for the relevant template (knowledge_search with document_type='template' and query matching the doc type, e.g., 'SOW template')
+        2. State in your response which template you found, its title, and its S3 path
+        3. If no template exists in KB, say so explicitly before proceeding
+
         CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
 
         Args:
@@ -3031,6 +3061,7 @@ def _build_all_service_tools(
     package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    template_search_done: dict | None = None,
 ) -> list:
     """Build 14 service @tool functions with proper named parameters."""
     from .tools.legacy_dispatch import get_tool_dispatch
@@ -3209,6 +3240,11 @@ def _build_all_service_tools(
     ) -> str:
         """Generate acquisition documents (SOW, IGCE, Market Research, J&A, Acquisition Plan, Eval Criteria, Security Checklist, Section 508, COR Certification, Contract Type Justification, SON, Purchase Request, Price Reasonableness, Required Sources). Documents are saved to S3.
 
+        BEFORE calling this tool, you MUST:
+        1. Search the knowledge base for the relevant template (knowledge_search with document_type='template' and query matching the doc type, e.g., 'SOW template')
+        2. State in your response which template you found, its title, and its S3 path
+        3. If no template exists in KB, say so explicitly before proceeding
+
         CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
 
         Args:
@@ -3245,6 +3281,22 @@ def _build_all_service_tools(
             session_id or "",
         )
         try:
+            # -- Template search guardrail (EAGLE-77) --
+            _tpl = template_search_done or {"done": False}
+            if not _tpl["done"]:
+                logger.info(
+                    "create_document BLOCKED: no template search yet (service) doc_type=%s session=%s",
+                    doc_type,
+                    session_id or "",
+                )
+                return json.dumps({
+                    "status": "blocked",
+                    "error": "TEMPLATE SEARCH REQUIRED: Before generating a document, you MUST "
+                    "first call knowledge_search with document_type='template' and a query "
+                    f"matching '{doc_type}' (e.g., '{doc_type} template'). State which template "
+                    "you found and its S3 path, then call create_document again.",
+                })
+
             # -- Micro-purchase guardrail (FAR 13.2) --
             _mp_block = _check_micropurchase_guardrail(parsed)
             if _mp_block:
@@ -4158,6 +4210,7 @@ def _build_kb_service_tools(
     session_id: str | None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    template_search_done: dict | None = None,
 ) -> list:
     """Build KB tools with proper named parameters so Bedrock models send structured args.
 
@@ -4172,6 +4225,9 @@ def _build_kb_service_tools(
 
     # Track KB tool calls for cascade violation detection.
     _kb_tools_called: set[str] = set()
+
+    # Shared template search flag — set by knowledge_search, checked by create_document.
+    _tpl_flag = template_search_done if template_search_done is not None else {"done": False}
 
     # Track research depth: fetch count, chars read, fetched keys.
     _kb_depth: dict = {
@@ -4298,6 +4354,8 @@ def _build_kb_service_tools(
         }
         _emit_input("knowledge_search", params)
         _kb_tools_called.add("knowledge_search")
+        if str(document_type).strip().lower() == "template":
+            _tpl_flag["done"] = True
         try:
             result = exec_knowledge_search(params, tenant_id, session_id)
             _kb_depth["search_count"] += 1
@@ -4455,6 +4513,8 @@ def _build_kb_service_tools(
             "is_it": is_it, "is_services": is_services,
         })
         _kb_tools_called.add("research")
+        if str(document_type).strip().lower() == "template":
+            _tpl_flag["done"] = True
 
         # 1. Run knowledge_search
         search_params = {
@@ -4552,6 +4612,9 @@ def _build_service_tools(
     Returns:
         Tuple of (tools list, kb_depth tracking dict).
     """
+    # Shared mutable flag — KB tools set it, create_document checks it.
+    _tpl_search_done: dict = {"done": False}
+
     tools = _build_all_service_tools(
         tenant_id,
         user_id,
@@ -4560,9 +4623,13 @@ def _build_service_tools(
         package_context=package_context,
         result_queue=result_queue,
         loop=loop,
+        template_search_done=_tpl_search_done,
     )
     # Add KB tools with proper named parameters
-    kb_tools, kb_depth = _build_kb_service_tools(tenant_id, user_id, session_id, result_queue, loop)
+    kb_tools, kb_depth = _build_kb_service_tools(
+        tenant_id, user_id, session_id, result_queue, loop,
+        template_search_done=_tpl_search_done,
+    )
     tools.extend(kb_tools)
     # Add progressive disclosure tools
     tools.append(_make_list_skills_tool(result_queue, loop))
@@ -4848,8 +4915,16 @@ def _build_supervisor_prompt_body(
         "and URL for web sources. If no KB results, explicitly say so.\n"
         "  FAR SECTION ACCURACY — Only cite FAR section numbers that appear in the search_far "
         "results or knowledge_fetch content. Never invent or approximate FAR section numbers. "
-        "For example, cite 16.505(b)(2)(i) not 16.507-6 — if a section number is not in the "
-        "retrieved text, do not cite it.\n\n"
+        "KB documents may use HHS RFO (Class Deviation 2026-01) numbering — ALWAYS translate "
+        "RFO numbers to standard FAR numbers in your citations using these mappings: "
+        "16.507-6 = 16.505(b)(2)(i), 16.507-6(b)(1)-(6) = 16.505(b)(2)(i)(A)-(G), "
+        "16.507-6(c) small business = 16.505(b)(2)(i)(F). "
+        "There are 7 exceptions to fair opportunity under 16.505(b)(2)(i)(A)-(G), including "
+        "(F) small business set-asides. Never cite 16.507-x to users.\n\n"
+        "  DOCUMENT GENERATION — Before calling create_document, ALWAYS state which template "
+        "you are using and its S3 path from the knowledge base. For example: "
+        "'Using template: SOW_Template.docx (eagle-knowledge-base/approved/templates/SOW_Template.docx)'. "
+        "If no KB template exists for the document type, say so explicitly.\n\n"
         "RESEARCH DEPTH — The system tracks how many documents you fetch and how many "
         "characters of primary source text you read. When search results include a "
         "_fetch_reminder field, you MUST follow it by calling knowledge_fetch on the "
@@ -5094,9 +5169,11 @@ async def sdk_query(
             )
             return
 
+        tpl_info = fast_path.get("template_info", "")
+        tpl_line = f"\n\n**Template:** {tpl_info}" if tpl_info else ""
         text = (
             f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
-            "You can open it from the document card."
+            f"You can open it from the document card.{tpl_line}"
         )
         yield AssistantMessage(
             content=[
@@ -5106,7 +5183,7 @@ async def sdk_query(
         )
         yield ResultMessage(
             result=text,
-            usage={"tools_called": 1, "tools": ["create_document"], "fast_path": True},
+            usage={"tools_called": 1, "tools": ["create_document", "knowledge_search"], "fast_path": True},
         )
         return
 
@@ -5411,9 +5488,11 @@ async def sdk_query_streaming(
         # Emit package state update for fast-path document creation
         for state_evt in _build_state_updates(result, "create_document", tenant_id):
             yield state_evt
+        tpl_info = fast_path.get("template_info", "")
+        tpl_line = f"\n\n**Template:** {tpl_info}" if tpl_info else ""
         text = (
             f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
-            "Open the document card to review or edit it."
+            f"Open the document card to review or edit it.{tpl_line}"
         )
         yield {"type": "text", "data": text}
         # End-of-turn state refresh for fast-path
@@ -5422,10 +5501,10 @@ async def sdk_query_streaming(
         yield {
             "type": "complete",
             "text": text,
-            "tools_called": ["create_document"],
+            "tools_called": ["create_document", "knowledge_search"],
             "usage": {
                 "tools_called": 1,
-                "tools": ["create_document"],
+                "tools": ["create_document", "knowledge_search"],
                 "fast_path": True,
             },
         }
