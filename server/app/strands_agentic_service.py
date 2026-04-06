@@ -29,8 +29,7 @@ from botocore.config import Config
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models import BedrockModel
-# CacheConfig import removed — prompt caching disabled until Bedrock stabilises
-# from strands.models.model import CacheConfig
+from strands.models.bedrock import CacheConfig
 
 # Add server/ to path for eagle_skill_constants
 _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -499,24 +498,29 @@ for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         boto_client_config=_bedrock_client_config,
     )
-    # Prompt caching disabled — Bedrock cross-region inference has been
-    # unstable since 2026-03-30 (100% TTFT failures, now intermittent).
-    # Cache-miss overhead adds to TTFT on the first request.  Re-enable
-    # after Bedrock cross-region stabilises.
-    # if "sonnet" in _mid:
-    #     _kwargs["cache_tools"] = "default"
-    #     _kwargs["cache_config"] = CacheConfig(strategy="auto")
+    _kwargs["cache_tools"] = "default"
+    _kwargs["cache_config"] = CacheConfig(strategy="auto")
     _bedrock_models[_mid] = BedrockModel(**_kwargs)
 
 # Backward-compat alias
 _model = _bedrock_models[MODEL]
 
-logger.info("EAGLE model chain: %s", _MODEL_CHAIN_IDS)
+logger.info("EAGLE model chain: %s (prompt caching enabled)", _MODEL_CHAIN_IDS)
 logger.info(
     "EAGLE circuit breaker: threshold=%d, recovery=%ds",
     _CB_FAILURE_THRESHOLD,
     _CB_RECOVERY_TIMEOUT,
 )
+
+
+def _cacheable_system_prompt(text: str) -> list[dict[str, Any]]:
+    """Wrap a system prompt string with a cachePoint for Bedrock prompt caching.
+
+    Returns a list of SystemContentBlocks that Strands Agent accepts as system_prompt.
+    The cachePoint tells Bedrock to cache everything up to this marker, so the large
+    supervisor prompt (~18K tokens) is only processed once per 5-minute window.
+    """
+    return [{"text": text}, {"cachePoint": {"type": "default"}}]
 
 
 def _get_active_model() -> tuple[str, BedrockModel]:
@@ -2210,6 +2214,22 @@ def _build_subagent_kb_tools(
                 {"type": "tool_input", "name": name, "input": tool_input},
             )
 
+    def _emit_source(title: str, s3_key: str, doc_type: str, source_tool: str, chars_read: int) -> None:
+        """Push a sources_read state_update so the frontend can show which documents were read."""
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {
+                    "type": "state_update",
+                    "state_type": "sources_read",
+                    "title": title,
+                    "s3_key": s3_key,
+                    "doc_type": doc_type,
+                    "source_tool": source_tool,
+                    "chars_read": chars_read,
+                },
+            )
+
     def _inject_fetch_reminder(result: dict) -> None:
         """Append _fetch_reminder to result when fetch depth is insufficient."""
         result_count = result.get("count", 0)
@@ -2313,6 +2333,14 @@ def _build_subagent_kb_tools(
             _kb_depth["fetch_count"] += 1
             _kb_depth["total_chars_read"] += result.get("content_length", 0)
             _kb_depth["fetched_keys"].add(s3_key)
+            _fallback_title = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+            _emit_source(
+                title=result.get("title", _fallback_title),
+                s3_key=s3_key,
+                doc_type=result.get("document_type", "document"),
+                source_tool="knowledge_fetch",
+                chars_read=result.get("content_length", 0),
+            )
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="search_far")
@@ -2645,7 +2673,7 @@ def _make_subagent_tool(
         _, _active_bedrock_model = _get_active_model()
         agent = Agent(
             model=_active_bedrock_model,
-            system_prompt=subagent_context + prompt_body,
+            system_prompt=_cacheable_system_prompt(subagent_context + prompt_body),
             tools=all_tools,
             callback_handler=(
                 _SubagentEventForwarder(safe_name, result_queue, loop)
@@ -4247,6 +4275,22 @@ def _build_kb_service_tools(
                 {"type": "tool_input", "name": name, "input": tool_input},
             )
 
+    def _emit_source(title: str, s3_key: str, doc_type: str, source_tool: str, chars_read: int) -> None:
+        """Push a sources_read state_update so the frontend can show which documents were read."""
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {
+                    "type": "state_update",
+                    "state_type": "sources_read",
+                    "title": title,
+                    "s3_key": s3_key,
+                    "doc_type": doc_type,
+                    "source_tool": source_tool,
+                    "chars_read": chars_read,
+                },
+            )
+
     def _emit(name: str, result: dict) -> None:
         if result_queue and loop:
             truncated_result = (
@@ -4315,6 +4359,14 @@ def _build_kb_service_tools(
         _kb_depth["search_count"] += 1
         result = exec_search_far({"query": query, "parts": parts}, tenant_id)
         _inject_far_fetch_reminder(result)
+        for _clause in result.get("clauses", [])[:5]:
+            _emit_source(
+                title=_clause.get("title", _clause.get("clause_number", "FAR clause")),
+                s3_key=(_clause.get("s3_keys") or [""])[0],
+                doc_type="regulation",
+                source_tool="search_far",
+                chars_read=len(str(_clause.get("text", ""))),
+            )
         _emit("search_far", result)
         return json.dumps(result, indent=2, default=str)
 
@@ -4383,6 +4435,14 @@ def _build_kb_service_tools(
             _kb_depth["fetch_count"] += 1
             _kb_depth["total_chars_read"] += result.get("content_length", 0)
             _kb_depth["fetched_keys"].add(s3_key)
+            _fallback_title = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+            _emit_source(
+                title=result.get("title", _fallback_title),
+                s3_key=s3_key,
+                doc_type=result.get("document_type", "document"),
+                source_tool="knowledge_fetch",
+                chars_read=result.get("content_length", 0),
+            )
         _emit("knowledge_fetch", result)
         return json.dumps(result, indent=2, default=str)
 
@@ -5271,7 +5331,7 @@ async def sdk_query(
     _current_model_id, _current_bedrock_model = _get_active_model()
     supervisor = Agent(
         model=_current_bedrock_model,
-        system_prompt=system_prompt,
+        system_prompt=_cacheable_system_prompt(system_prompt),
         tools=skill_tools + service_tools,
         callback_handler=None,
         messages=strands_history or None,
@@ -5610,7 +5670,7 @@ async def sdk_query_streaming(
     _current_model_id, _current_bedrock_model = _get_active_model()
     supervisor = Agent(
         model=_current_bedrock_model,
-        system_prompt=system_prompt,
+        system_prompt=_cacheable_system_prompt(system_prompt),
         tools=skill_tools + service_tools,
         callback_handler=None,  # stream_async yields events directly
         messages=strands_history or None,
@@ -5997,7 +6057,7 @@ async def sdk_query_streaming(
                 try:
                     fallback_supervisor = Agent(
                         model=_next_bedrock_model,
-                        system_prompt=system_prompt,
+                        system_prompt=_cacheable_system_prompt(system_prompt),
                         tools=skill_tools + service_tools,
                         callback_handler=None,
                         messages=strands_history or None,
@@ -6276,6 +6336,17 @@ async def sdk_query_streaming(
         for state_evt in _build_end_of_turn_state(package_context, tenant_id):
             yield state_evt
 
+    # Emit sources_summary so the frontend can show aggregate research stats
+    if kb_depth.get("fetch_count", 0) > 0:
+        yield {
+            "type": "state_update",
+            "state_type": "sources_summary",
+            "search_count": kb_depth["search_count"],
+            "fetch_count": kb_depth["fetch_count"],
+            "total_chars_read": kb_depth["total_chars_read"],
+            "fetched_keys": list(kb_depth.get("fetched_keys", set())),
+        }
+
     if error_holder:
         yield {"type": "error", "error": str(error_holder[0])}
     else:
@@ -6348,7 +6419,7 @@ async def sdk_query_single_skill(
     _, _active_bedrock_model = _get_active_model()
     agent = Agent(
         model=_active_bedrock_model,
-        system_prompt=tenant_context + skill_content,
+        system_prompt=_cacheable_system_prompt(tenant_context + skill_content),
         callback_handler=None,
         trace_attributes=_build_trace_attrs(
             tenant_id=tenant_id,
