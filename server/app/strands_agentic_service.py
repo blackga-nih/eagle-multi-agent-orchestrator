@@ -5471,7 +5471,14 @@ async def sdk_query(
         if metrics:
             acc = getattr(metrics, "accumulated_usage", None)
             if acc and isinstance(acc, dict):
-                usage = acc
+                # Normalize camelCase Strands keys to snake_case
+                usage = {
+                    "input_tokens": acc.get("input_tokens") or acc.get("inputTokens", 0),
+                    "output_tokens": acc.get("output_tokens") or acc.get("outputTokens", 0),
+                    "total_tokens": acc.get("total_tokens") or acc.get("totalTokens", 0),
+                    "cache_read_input_tokens": acc.get("cache_read_input_tokens") or acc.get("cacheReadInputTokens", 0),
+                    "cache_creation_input_tokens": acc.get("cache_creation_input_tokens") or acc.get("cacheWriteInputTokens", 0),
+                }
             else:
                 # Fallback: report cycle count and tool call count
                 usage = {
@@ -5693,6 +5700,8 @@ async def sdk_query_streaming(
     tools_called: list[str] = []
     _current_tool_id: str | None = None
     error_holder: list[Exception] = []
+    _stream_cache_read: int = 0
+    _stream_cache_write: int = 0
     agent_result = None
     # TTFT (Time To First Token) timeout: if no meaningful content arrives
     # within this window, abort and retry with the fallback model.
@@ -5819,8 +5828,17 @@ async def sdk_query_streaming(
                 break
             _pending_next = None
 
-            # --- Reasoning / extended thinking + tool input deltas ---
+            # --- Capture per-cycle usage (including cache tokens) from metadata ---
             raw_event = event.get("event", {})
+            if isinstance(raw_event, dict):
+                _meta_usage = raw_event.get("metadata", {}).get("usage")
+                if _meta_usage and isinstance(_meta_usage, dict):
+                    _cache_read = _meta_usage.get("cacheReadInputTokens", 0) or 0
+                    _cache_write = _meta_usage.get("cacheWriteInputTokens", 0) or 0
+                    _stream_cache_read += _cache_read
+                    _stream_cache_write += _cache_write
+
+            # --- Reasoning / extended thinking + tool input deltas ---
             if isinstance(raw_event, dict):
                 delta = raw_event.get("contentBlockDelta", {}).get("delta", {})
                 reasoning_text = delta.get("reasoningContent", {}).get("text", "")
@@ -6191,7 +6209,24 @@ async def sdk_query_streaming(
             if metrics:
                 acc = getattr(metrics, "accumulated_usage", None)
                 if acc and isinstance(acc, dict):
-                    usage = acc
+                    # Normalize camelCase Strands keys to snake_case;
+                    # accumulated_usage often drops cache fields, so overlay
+                    # per-cycle totals captured from metadata events.
+                    usage = {
+                        "input_tokens": acc.get("input_tokens") or acc.get("inputTokens", 0),
+                        "output_tokens": acc.get("output_tokens") or acc.get("outputTokens", 0),
+                        "total_tokens": acc.get("total_tokens") or acc.get("totalTokens", 0),
+                        "cache_read_input_tokens": (
+                            acc.get("cache_read_input_tokens")
+                            or acc.get("cacheReadInputTokens")
+                            or _stream_cache_read
+                        ),
+                        "cache_creation_input_tokens": (
+                            acc.get("cache_creation_input_tokens")
+                            or acc.get("cacheWriteInputTokens")
+                            or _stream_cache_write
+                        ),
+                    }
                 else:
                     usage = {
                         "cycle_count": getattr(metrics, "cycle_count", 0),
@@ -6440,7 +6475,13 @@ async def sdk_query_single_skill(
         if metrics:
             acc = getattr(metrics, "accumulated_usage", None)
             if acc and isinstance(acc, dict):
-                usage = acc
+                usage = {
+                    "input_tokens": acc.get("input_tokens") or acc.get("inputTokens", 0),
+                    "output_tokens": acc.get("output_tokens") or acc.get("outputTokens", 0),
+                    "total_tokens": acc.get("total_tokens") or acc.get("totalTokens", 0),
+                    "cache_read_input_tokens": acc.get("cache_read_input_tokens") or acc.get("cacheReadInputTokens", 0),
+                    "cache_creation_input_tokens": acc.get("cache_creation_input_tokens") or acc.get("cacheWriteInputTokens", 0),
+                }
             else:
                 usage = {"cycle_count": getattr(metrics, "cycle_count", 0)}
     except Exception:
