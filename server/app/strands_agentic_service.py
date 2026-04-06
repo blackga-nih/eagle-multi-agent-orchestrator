@@ -523,6 +523,36 @@ def _cacheable_system_prompt(text: str) -> list[dict[str, Any]]:
     return [{"text": text}, {"cachePoint": {"type": "default"}}]
 
 
+def _append_kb_sources(
+    text: str, kb_depth: dict
+) -> str:
+    """Append a Sources section if KB docs were read but not cited."""
+    fetched = kb_depth.get("fetched_keys", set())
+    if not fetched:
+        return text
+    # Check if the model already cited KB paths
+    cited = sum(
+        1 for k in fetched
+        if k in text or k.rsplit("/", 1)[-1] in text
+    )
+    if cited >= len(fetched):
+        return text  # All sources already cited
+    # Append missing sources
+    uncited = sorted(
+        k for k in fetched
+        if k not in text
+        and k.rsplit("/", 1)[-1] not in text
+    )
+    if not uncited:
+        return text
+    lines = [f"- `{k}`" for k in uncited]
+    extra = "\n".join(lines)
+    # Merge into existing Sources section if present
+    if "**Sources:**" in text:
+        return text.rstrip() + "\n" + extra + "\n"
+    return text.rstrip() + "\n\n**Sources:**\n" + extra + "\n"
+
+
 def _get_active_model() -> tuple[str, BedrockModel]:
     """Return (model_id, BedrockModel) for the currently active model."""
     mid = _circuit_breaker.get_active_model_id()
@@ -2636,6 +2666,7 @@ def _make_subagent_tool(
     tier: str = "",
     session_id: str = "",
     extra_tools: list | None = None,
+    parent_kb_depth: dict | None = None,
 ):
     """Create a @tool-wrapped subagent from skill registry entry.
 
@@ -2689,6 +2720,45 @@ def _make_subagent_tool(
             ),
         )
         raw = str(agent(query))
+
+        # --- Merge subagent KB depth into supervisor's tracker ---
+        if parent_kb_depth is not None:
+            _sd = _sub_kb_depth
+            parent_kb_depth["search_count"] += _sd.get(
+                "search_count", 0
+            )
+            parent_kb_depth["fetch_count"] += _sd.get(
+                "fetch_count", 0
+            )
+            parent_kb_depth["total_chars_read"] += _sd.get(
+                "total_chars_read", 0
+            )
+            parent_kb_depth["search_result_count"] += _sd.get(
+                "search_result_count", 0
+            )
+            parent_kb_depth["fetched_keys"].update(
+                _sd.get("fetched_keys", set())
+            )
+
+        # --- Append structured document manifest to subagent response ---
+        _sub_fetched = _sub_kb_depth.get("fetched_keys", set())
+        if _sub_fetched:
+            _doc_lines = [
+                f"- `{k}`" for k in sorted(_sub_fetched)
+            ]
+            raw += (
+                "\n\n---\n**KB_SOURCES_CITED "
+                "(IMPORTANT — include these in your Sources "
+                "section):**\n"
+                + "\n".join(_doc_lines)
+                + "\n"
+            )
+            logger.info(
+                "Subagent %s read %d KB docs: %s",
+                safe_name,
+                len(_sub_fetched),
+                sorted(_sub_fetched),
+            )
 
         # Emit tool_result so the frontend can show the specialist's report
         if result_queue and loop:
@@ -4239,6 +4309,7 @@ def _build_kb_service_tools(
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
     template_search_done: dict | None = None,
+    kb_depth_ref: dict | None = None,
 ) -> list:
     """Build KB tools with proper named parameters so Bedrock models send structured args.
 
@@ -4258,7 +4329,9 @@ def _build_kb_service_tools(
     _tpl_flag = template_search_done if template_search_done is not None else {"done": False}
 
     # Track research depth: fetch count, chars read, fetched keys.
-    _kb_depth: dict = {
+    # Reuse an externally created dict if provided (allows subagent
+    # tools created by build_skill_tools to share the same tracker).
+    _kb_depth: dict = kb_depth_ref if kb_depth_ref is not None else {
         "search_count": 0,
         "fetch_count": 0,
         "total_chars_read": 0,
@@ -4666,6 +4739,7 @@ def _build_service_tools(
     package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    kb_depth_ref: dict | None = None,
 ) -> tuple[list, dict]:
     """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session.
 
@@ -4689,6 +4763,7 @@ def _build_service_tools(
     kb_tools, kb_depth = _build_kb_service_tools(
         tenant_id, user_id, session_id, result_queue, loop,
         template_search_done=_tpl_search_done,
+        kb_depth_ref=kb_depth_ref,
     )
     tools.extend(kb_tools)
     # Add progressive disclosure tools
@@ -4710,6 +4785,7 @@ def build_skill_tools(
     session_id: str = "",
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    parent_kb_depth: dict | None = None,
 ) -> list:
     """Build @tool-wrapped subagent functions from skill registry.
 
@@ -4776,6 +4852,7 @@ def build_skill_tools(
                 tier=tier,
                 session_id=session_id,
                 extra_tools=extra,
+                parent_kb_depth=parent_kb_depth,
             )
         )
 
@@ -4804,6 +4881,7 @@ def build_skill_tools(
                     user_id=user_id,
                     tier=tier,
                     session_id=session_id,
+                    parent_kb_depth=parent_kb_depth,
                 )
             )
     except Exception as exc:
@@ -5273,6 +5351,17 @@ async def sdk_query(
         preload_session_context(tenant_id, user_id, package_id=_pkg_id),
     )
 
+    # Create shared KB depth tracker so subagent document reads
+    # are merged into the supervisor's tracker.
+    kb_depth: dict = {
+        "search_count": 0,
+        "fetch_count": 0,
+        "total_chars_read": 0,
+        "search_result_count": 0,
+        "fetched_keys": set(),
+        "reminder_count": 0,
+    }
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -5280,6 +5369,7 @@ async def sdk_query(
         user_id=user_id,
         workspace_id=resolved_workspace_id,
         session_id=session_id or "",
+        parent_kb_depth=kb_depth,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -5289,6 +5379,7 @@ async def sdk_query(
         session_id=session_id,
         prompt_context=prompt,
         package_context=package_context,
+        kb_depth_ref=kb_depth,
     )
 
     preloaded_ctx = await _preload_task
@@ -5379,7 +5470,7 @@ async def sdk_query(
     try:
         # Synchronous call -- Strands handles the agentic loop internally
         result = supervisor(prompt)
-        result_text = str(result)
+        result_text = _append_kb_sources(str(result), kb_depth)
 
         if _root_span is not None:
             try:
@@ -5607,6 +5698,17 @@ async def sdk_query_streaming(
         preload_session_context(tenant_id, user_id, package_id=_pkg_id),
     )
 
+    # Create shared KB depth tracker so subagent document reads
+    # are merged into the supervisor's tracker.
+    kb_depth: dict = {
+        "search_count": 0,
+        "fetch_count": 0,
+        "total_chars_read": 0,
+        "search_result_count": 0,
+        "fetched_keys": set(),
+        "reminder_count": 0,
+    }
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -5616,6 +5718,7 @@ async def sdk_query_streaming(
         session_id=session_id or "",
         result_queue=result_queue,
         loop=loop,
+        parent_kb_depth=kb_depth,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -5627,6 +5730,7 @@ async def sdk_query_streaming(
         package_context=package_context,
         result_queue=result_queue,
         loop=loop,
+        kb_depth_ref=kb_depth,
     )
 
     preloaded_ctx = await _preload_task
@@ -6392,6 +6496,8 @@ async def sdk_query_streaming(
                 "I completed the tool steps but did not receive a final answer text. "
                 f"Tools called: {called}. Please retry your request."
             )
+        # Append KB sources the model failed to cite
+        final_text = _append_kb_sources(final_text, kb_depth)
         yield {
             "type": "complete",
             "text": final_text,
