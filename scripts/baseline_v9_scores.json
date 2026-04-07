@@ -1,0 +1,106 @@
+{
+  "1": {
+    "acc": 5,
+    "comp": 5,
+    "src": 4,
+    "act": 5,
+    "total": 19,
+    "verdict": "EAGLE V9 = RO (comparable)"
+  },
+  "2": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved)"
+  },
+  "3": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved)"
+  },
+  "4": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved)"
+  },
+  "5": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved)"
+  },
+  "6": {
+    "acc": 5,
+    "comp": 5,
+    "src": 3,
+    "act": 5,
+    "total": 18,
+    "verdict": "EAGLE V9 = RO (comparable)"
+  },
+  "7": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved) [NEW QUESTION]"
+  },
+  "8": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved) [NEW QUESTION -- enhanced Q1]"
+  },
+  "9": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved) [NEW QUESTION -- enhanced Q2]"
+  },
+  "10": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved) [NEW QUESTION -- enhanced Q3]"
+  },
+  "11": {
+    "acc": 5,
+    "comp": 5,
+    "src": 4,
+    "act": 5,
+    "total": 19,
+    "verdict": "EAGLE V9 = RO (comparable) [NEW QUESTION -- enhanced Q4]"
+  },
+  "12": {
+    "acc": 5,
+    "comp": 5,
+    "src": 5,
+    "act": 5,
+    "total": 20,
+    "verdict": "EAGLE V9 > RO (improved) [NEW QUESTION -- enhanced Q5/SBIR protest]"
+  },
+  "13": {
+    "acc": 4,
+    "comp": 3,
+    "src": 4,
+    "act": 3,
+    "total": 14,
+    "verdict": "EAGLE V9 < RO (regression) [NEW QUESTION -- SOW generation]"
+  }
+}
