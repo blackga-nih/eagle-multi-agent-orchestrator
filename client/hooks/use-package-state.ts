@@ -8,6 +8,10 @@ export interface PackageChecklist {
   completed: string[];
   missing: string[];
   complete: boolean;
+  /** Checklist provenance (null for legacy packages). */
+  pmr_checklist_name?: string | null;
+  pmr_checklist_s3_key?: string | null;
+  nih_oag_section?: string | null;
 }
 
 /** A single compliance finding item. */
