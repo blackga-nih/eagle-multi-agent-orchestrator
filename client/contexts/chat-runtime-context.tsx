@@ -23,6 +23,17 @@ export interface StateChangeEntry {
   progressPct?: number;
   textSnapshotLength: number;
   timestamp: number;
+  // Sources transparency fields (sources_read / sources_summary events)
+  sourceTitle?: string;
+  sourceS3Key?: string;
+  sourceDocType?: string;
+  sourceCharsRead?: number;
+  sourceTool?: string;
+  // sources_summary aggregate fields
+  searchCount?: number;
+  fetchCount?: number;
+  totalCharsRead?: number;
+  fetchedKeys?: string[];
 }
 
 // ---------------------------------------------------------------------------

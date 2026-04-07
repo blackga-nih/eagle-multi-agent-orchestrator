@@ -483,6 +483,17 @@ export class ChatStreamManager {
           progressPct: event.metadata.progress_pct as number | undefined,
           textSnapshotLength: accumulatedText.length,
           timestamp: Date.now(),
+          // Sources transparency fields
+          sourceTitle: event.metadata.title as string | undefined,
+          sourceS3Key: event.metadata.s3_key as string | undefined,
+          sourceDocType: event.metadata.doc_type as string | undefined,
+          sourceCharsRead: event.metadata.chars_read as number | undefined,
+          sourceTool: event.metadata.source_tool as string | undefined,
+          // sources_summary aggregate fields
+          searchCount: event.metadata.search_count as number | undefined,
+          fetchCount: event.metadata.fetch_count as number | undefined,
+          totalCharsRead: event.metadata.total_chars_read as number | undefined,
+          fetchedKeys: event.metadata.fetched_keys as string[] | undefined,
         };
         dispatch({
           type: 'generation/stateChange',

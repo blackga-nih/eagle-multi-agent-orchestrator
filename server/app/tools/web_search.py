@@ -200,11 +200,6 @@ def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
         }
         if unfetched:
             result["unfetched_urls"] = unfetched
-            result["_instruction"] = (
-                f"The top {auto_fetch_count} source pages were auto-fetched "
-                f"(see page_content in sources). Call web_fetch on the "
-                f"remaining URLs above if you need more detail."
-            )
         return result
 
     except ClientError as e:
