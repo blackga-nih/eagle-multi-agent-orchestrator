@@ -244,6 +244,24 @@ def exec_manage_package(
         )
         # Backfill: link pre-existing session documents to the new package
         _backfill_completed_docs(result, tenant_id, owner, session_id)
+        # Auto-fetch applicable checklist so the agent has it in context
+        pmr_s3_key = result.get("pmr_checklist_s3_key")
+        if pmr_s3_key:
+            try:
+                from .knowledge_tools import exec_knowledge_fetch
+                fetched = exec_knowledge_fetch({"s3_key": pmr_s3_key}, tenant_id, session_id)
+                if "content" in fetched:
+                    result["_pmr_checklist_content"] = fetched["content"][:20000]
+                oag_section = result.get("nih_oag_section")
+                checklist_name = result.get("pmr_checklist_name", "PMR Checklist")
+                oag_ref = f" and NIH OAG Checklist {oag_section}" if oag_section else ""
+                result["_checklist_guidance"] = (
+                    f"Required documents are determined by: {checklist_name}{oag_ref}. "
+                    "You MUST cite this checklist when presenting required documents to the user. "
+                    "Do not suggest documents that are not on the required list."
+                )
+            except Exception:
+                logger.debug("Auto-fetch PMR checklist failed (non-critical)")
         return result
 
     if operation == "get":

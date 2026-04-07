@@ -62,6 +62,7 @@ async def api_list_knowledge_base(
                 "limit": limit,
             },
             tenant_id=user.tenant_id,
+            user_id=user.user_id,
         )
         return {"documents": result.get("results", []), "count": result.get("count", 0)}
 
@@ -178,7 +179,7 @@ async def api_kb_document(
     """Fetch full document content from S3."""
     from ..tools.knowledge_tools import exec_knowledge_fetch
 
-    result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id=user.tenant_id)
+    result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id=user.tenant_id, user_id=user.user_id)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result

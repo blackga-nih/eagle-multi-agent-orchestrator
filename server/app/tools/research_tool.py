@@ -66,7 +66,8 @@ def _detect_method(acquisition_method: str, query: str, contract_value: float) -
 
 
 def exec_research(
-    params: dict, tenant_id: str, session_id: str | None = None
+    params: dict, tenant_id: str, session_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict:
     """Execute the composite research tool for the legacy dispatch path."""
     query = params.get("query", "")
@@ -83,7 +84,7 @@ def exec_research(
             "document_type": document_type, "limit": 10,
         }.items() if v
     }
-    search_result = exec_knowledge_search(search_params, tenant_id, session_id)
+    search_result = exec_knowledge_search(search_params, tenant_id, session_id, user_id=user_id)
 
     # 2. Auto-fetch top 4
     fetched_docs = []
@@ -91,7 +92,7 @@ def exec_research(
     for r in search_result.get("results", [])[:4]:
         s3_key = r.get("s3_key")
         if s3_key and s3_key not in fetched_keys:
-            content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+            content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id, user_id=user_id)
             if "error" not in content:
                 fetched_keys.add(s3_key)
                 fetched_docs.append({
@@ -110,13 +111,13 @@ def exec_research(
 
         cl_result = exec_knowledge_search(
             {"document_type": "checklist", "query": cl_query, "limit": 5},
-            tenant_id, session_id,
+            tenant_id, session_id, user_id=user_id,
         )
 
         for r in cl_result.get("results", [])[:4]:
             s3_key = r.get("s3_key")
             if s3_key and s3_key not in fetched_keys:
-                result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id, user_id=user_id)
                 if "content" in result:
                     fetched_keys.add(s3_key)
                     checklist_content[r.get("title", s3_key)] = result["content"][:20000]

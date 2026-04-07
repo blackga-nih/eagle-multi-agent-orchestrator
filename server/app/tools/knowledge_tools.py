@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -27,6 +28,78 @@ logger = logging.getLogger("eagle.knowledge_tools")
 # Configuration (separate from main EAGLE table)
 METADATA_TABLE = os.environ.get("METADATA_TABLE", "eagle-document-metadata-dev")
 DOCUMENT_BUCKET = os.environ.get("DOCUMENT_BUCKET", "eagle-documents-695681773636-dev")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# User-level isolation helpers
+# Filter knowledge search results so users only see shared KB + their own packages.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Matches: eagle/{tenant}/packages/{package_id}/...
+_PACKAGE_KEY_RE = re.compile(r"^eagle/[^/]+/packages/([^/]+)/")
+# Matches: eagle/{tenant}/{user_id}/...  (workspace docs)
+_USER_KEY_RE = re.compile(r"^eagle/[^/]+/([^/]+)/")
+
+
+def get_user_package_ids(tenant_id: str, user_id: str) -> set[str]:
+    """Return the set of package_ids owned by a user (GSI query, not scan)."""
+    from ..package_store import list_packages
+
+    packages = list_packages(tenant_id, owner_user_id=user_id)
+    return {p["package_id"] for p in packages if p.get("package_id")}
+
+
+def _is_key_accessible(
+    s3_key: str,
+    tenant_id: str,
+    user_id: str,
+    user_package_ids: set[str],
+) -> bool:
+    """Check whether an s3_key is accessible to the given user.
+
+    Rules:
+    1. Shared KB (eagle-knowledge-base/...) -> always allowed
+    2. Package docs (eagle/{tenant}/packages/{pkg_id}/...) -> allowed if pkg_id owned by user
+    3. User workspace docs (eagle/{tenant}/{user_id}/...) -> allowed if user_id matches
+    4. No key / unrecognized pattern -> allowed (BUILTIN entries, legacy)
+    """
+    if not s3_key:
+        return True
+    if s3_key.startswith("eagle-knowledge-base/"):
+        return True
+
+    pkg_match = _PACKAGE_KEY_RE.match(s3_key)
+    if pkg_match:
+        return pkg_match.group(1) in user_package_ids
+
+    user_match = _USER_KEY_RE.match(s3_key)
+    if user_match:
+        return user_match.group(1) == user_id
+
+    return True  # Unrecognized patterns pass through
+
+
+def filter_results_for_user(
+    items: list[dict[str, Any]],
+    tenant_id: str,
+    user_id: str | None,
+    user_package_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Filter search result items to only those accessible by user_id.
+
+    If user_id is None, returns items unfiltered (backward compatibility).
+    If user_package_ids is provided, uses it directly; otherwise computes it.
+    """
+    if not user_id:
+        return items
+    if user_package_ids is None:
+        user_package_ids = get_user_package_ids(tenant_id, user_id)
+    return [
+        item for item in items
+        if _is_key_accessible(
+            item.get("s3_key", ""), tenant_id, user_id, user_package_ids
+        )
+    ]
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Built-in KB entries for templates and checklists
@@ -830,13 +903,16 @@ def exec_knowledge_search(
     params: dict[str, Any],
     tenant_id: str,
     session_id: str | None = None,
+    user_id: str | None = None,
+    _allowed_package_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Search knowledge base metadata in DynamoDB with AI-powered ranking.
 
     Steps:
     1. Scan DynamoDB with exact-match filters (topic, document_type, etc.)
-    2. If query or keywords provided, use LLM to semantically rank results
-    3. Fall back to deterministic matching if LLM call fails
+    2. Filter results by user access (shared KB + user's own packages)
+    3. If query or keywords provided, use LLM to semantically rank results
+    4. Fall back to deterministic matching if LLM call fails
     """
     table = get_dynamodb().Table(METADATA_TABLE)
 
@@ -938,6 +1014,15 @@ def exec_knowledge_search(
         logger.error("knowledge_search DynamoDB error: %s", e)
         return {"error": str(e), "results": [], "count": 0}
 
+    # User isolation — filter out documents from other users' packages
+    pre_filter_count = len(items)
+    items = filter_results_for_user(items, tenant_id, user_id, _allowed_package_ids)
+    if len(items) < pre_filter_count:
+        logger.info(
+            "knowledge_search: user isolation filtered %d -> %d items (user=%s)",
+            pre_filter_count, len(items), user_id,
+        )
+
     # Semantic ranking via AI when query or keywords are provided
     if query or keywords:
         search_query = query or ""
@@ -983,6 +1068,8 @@ def exec_path_search(
     tenant_id: str,
     agent_folder: str | None = None,
     limit: int = 20,
+    user_id: str | None = None,
+    _allowed_package_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Search knowledge base by matching query terms against S3 key paths.
 
@@ -1014,6 +1101,9 @@ def exec_path_search(
     except ClientError as e:
         logger.error("exec_path_search DynamoDB error: %s", e)
         return {"results": [], "count": 0}
+
+    # User isolation — filter out documents from other users' packages
+    items = filter_results_for_user(items, tenant_id, user_id, _allowed_package_ids)
 
     # Filter by agent folder if provided
     if agent_folder:
@@ -1068,6 +1158,8 @@ def exec_knowledge_fetch(
     params: dict[str, Any],
     tenant_id: str,
     session_id: str | None = None,
+    user_id: str | None = None,
+    _allowed_package_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Fetch full document content from S3.
 
@@ -1086,6 +1178,8 @@ def exec_knowledge_fetch(
                 {"query": query, "limit": 1},
                 tenant_id,
                 session_id,
+                user_id=user_id,
+                _allowed_package_ids=_allowed_package_ids,
             )
             results = search_result.get("results", [])
             if results:
@@ -1099,6 +1193,13 @@ def exec_knowledge_fetch(
         }
 
     logger.info("knowledge_fetch: tenant=%s key=%s", tenant_id, key)
+
+    # User isolation — validate the user can access this key
+    if user_id:
+        pkg_ids = _allowed_package_ids if _allowed_package_ids is not None else get_user_package_ids(tenant_id, user_id)
+        if not _is_key_accessible(key, tenant_id, user_id, pkg_ids):
+            logger.warning("knowledge_fetch: access denied user=%s key=%s", user_id, key)
+            return {"error": "Access denied: document belongs to another user's package"}
 
     try:
         response = s3.get_object(Bucket=DOCUMENT_BUCKET, Key=key)

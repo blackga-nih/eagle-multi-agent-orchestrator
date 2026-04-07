@@ -882,6 +882,16 @@ def get_requirements(
     }
     _FRC_S3_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/File_Reviewers_Checklist_FRC.txt"
 
+    # --- NIH OAG Acquisition File Checklists (OAG-FY25-01) ---
+    _NIH_OAG_S3_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/OAG_FY25_01_NIH_Acquisition_File_Checklists_MERGED_CORRECTED.txt"
+    _NIH_OAG_SECTIONS: dict[str, str | None] = {
+        "fss": "A-1", "bpa-est": "A-1", "bpa-call": "A-1",
+        "negotiated": "A-4", "sole": "A-4",
+        "sap": "A-4",
+        "idiq": "A-8", "idiq-order": "A-8",
+        "micro": None,
+    }
+
     if m == "sap" or (m == "negotiated" and v <= _SAT):
         pmr = "HHS PMR SAP Checklist"
     elif m == "negotiated":
@@ -1037,6 +1047,8 @@ def get_requirements(
         "pmr_checklist": pmr,
         "pmr_checklist_s3_key": pmr_s3_key,
         "frc_checklist_s3_key": _FRC_S3_KEY,
+        "nih_oag_checklist_s3_key": _NIH_OAG_S3_KEY if _NIH_OAG_SECTIONS.get(m) else None,
+        "nih_oag_section": _NIH_OAG_SECTIONS.get(m),
         "approvals_required": approvals,
         "method": m_obj,
         "contract_type": t_obj,

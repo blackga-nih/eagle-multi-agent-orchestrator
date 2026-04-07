@@ -22,17 +22,21 @@ model: null
 
 Before ANSWERING "what documents do I need?" OR generating ANY document, you MUST determine what documents are required:
 
-1. **If a package exists**: Call `manage_package(operation="checklist", package_id="...")` to see required/completed/missing documents. Only generate documents that appear as required and missing.
-2. **If no package yet**: Call `research(query="...", contract_value=..., acquisition_method="...", include_checklist=true)`. This single call returns:
-   - `kb_results` — relevant knowledge base documents (FAR, policies, templates)
-   - `fetched_documents` — full text of top 2 KB results
-   - `checklists` — full PMR and FRC checklist content, dynamically selected by acquisition method
-   - `detected_method` — the acquisition method used for checklist selection
-3. **Cross-reference `checklists`** with the document requirements when presenting to the user. The PMR checklist is HHS/NIH-specific and supplements FAR requirements. The FRC is NIH's internal file review standard.
-4. **For micro-purchases (< $15,000 / FAR 13.2)**: No checklists are fetched. Generate only: purchase description, price reasonableness, required sources check, purchase request.
-5. **For all other thresholds**: Follow the combined checklist guidance. Generate in research-first order.
+1. **On package creation**: `manage_package(operation="create")` now returns checklist metadata:
+   - `pmr_checklist_name` — the exact PMR checklist that determined requirements (e.g., "HHS PMR FSS Order Checklist")
+   - `nih_oag_section` — the applicable NIH OAG-FY25-01 checklist section (e.g., "A-1" for GSA FSS, "A-4" for negotiated, "A-8" for task orders)
+   - `_pmr_checklist_content` — full text of the applicable PMR checklist (auto-fetched)
+   - `_checklist_guidance` — citation instructions
+   **You MUST cite `pmr_checklist_name` and `nih_oag_section` when presenting required documents.**
+2. **If a package exists**: Call `manage_package(operation="checklist", package_id="...")` to see required/completed/missing documents plus checklist provenance (`pmr_checklist_name`, `nih_oag_section`). Only generate documents that appear as required and missing.
+3. **If no package yet**: Call `research(query="...", contract_value=..., acquisition_method="...", include_checklist=true)`. This single call returns KB results, fetched documents, PMR/FRC checklists, and detected method.
+4. **When presenting documents to the user**, always state:
+   - "Per [pmr_checklist_name] and NIH OAG Checklist [nih_oag_section], the following documents are required for this [method] procurement..."
+   - Example: "Per HHS PMR FSS Order Checklist and NIH OAG Checklist A-1 (GSA FSS Presolicitation to Award), these documents are required..."
+5. **For micro-purchases (< $15,000 / FAR 13.2)**: No checklists are fetched. Generate only: purchase description, price reasonableness, required sources check, purchase request.
+6. **For all other thresholds**: Follow the combined checklist guidance. Generate in research-first order.
 
-NEVER skip the checklist check. NEVER answer "what documents do I need" from memory alone. NEVER generate a document that is not on the required list.
+NEVER skip the checklist check. NEVER answer "what documents do I need" from memory alone. NEVER generate a document that is not on the required list. NEVER present documents without citing the checklist that determined them.
 
 ---
 

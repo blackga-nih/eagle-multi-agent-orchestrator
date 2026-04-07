@@ -77,6 +77,12 @@ _UPDATABLE_FIELDS = {
     "required_documents",
     "completed_documents",
     "far_citations",
+    # Checklist provenance
+    "pmr_checklist_name",
+    "pmr_checklist_s3_key",
+    "frc_checklist_s3_key",
+    "nih_oag_checklist_s3_key",
+    "nih_oag_section",
     # Tag attributes
     "system_tags",
     "user_tags",
@@ -150,18 +156,25 @@ _CONTRACT_TYPE_ALIASES: dict[str, str] = {
 }
 
 
-def compute_required_docs(
+def compute_required_docs_with_checklist(
     estimated_value: float,
     acquisition_method: str,
     contract_type: str,
     flags: dict | None = None,
-) -> list[str]:
-    """Compute required document slugs via the compliance matrix.
+) -> dict:
+    """Compute required document slugs and checklist metadata via the compliance matrix.
 
-    Calls ``compliance_matrix.get_requirements()`` and maps the resulting
-    ``documents_required`` entries (where ``required=True``) to package slugs.
-    Falls back to the static ``_required_docs_for()`` on any error.
+    Returns dict with keys: ``slugs``, ``pmr_checklist``, ``pmr_checklist_s3_key``,
+    ``frc_checklist_s3_key``, ``nih_oag_checklist_s3_key``, ``nih_oag_section``.
+    Falls back to static pathway on error (with empty checklist metadata).
     """
+    empty_checklist = {
+        "pmr_checklist": None,
+        "pmr_checklist_s3_key": None,
+        "frc_checklist_s3_key": None,
+        "nih_oag_checklist_s3_key": None,
+        "nih_oag_section": None,
+    }
     try:
         from .compliance_matrix import get_requirements
 
@@ -178,9 +191,8 @@ def compute_required_docs(
         )
 
         if result.get("errors"):
-            # Compliance matrix returned validation errors — fall back
             pathway = _pathway_from_value(Decimal(str(estimated_value)))
-            return _required_docs_for(pathway)
+            return {"slugs": _required_docs_for(pathway), **empty_checklist}
 
         slugs: list[str] = []
         seen: set[str] = set()
@@ -192,11 +204,33 @@ def compute_required_docs(
                 slugs.append(slug)
                 seen.add(slug)
 
-        return slugs
+        return {
+            "slugs": slugs,
+            "pmr_checklist": result.get("pmr_checklist"),
+            "pmr_checklist_s3_key": result.get("pmr_checklist_s3_key"),
+            "frc_checklist_s3_key": result.get("frc_checklist_s3_key"),
+            "nih_oag_checklist_s3_key": result.get("nih_oag_checklist_s3_key"),
+            "nih_oag_section": result.get("nih_oag_section"),
+        }
     except Exception:
-        logger.exception("compute_required_docs failed, falling back to static")
+        logger.exception("compute_required_docs_with_checklist failed, falling back to static")
         pathway = _pathway_from_value(Decimal(str(estimated_value)))
-        return _required_docs_for(pathway)
+        return {"slugs": _required_docs_for(pathway), **empty_checklist}
+
+
+def compute_required_docs(
+    estimated_value: float,
+    acquisition_method: str,
+    contract_type: str,
+    flags: dict | None = None,
+) -> list[str]:
+    """Compute required document slugs via the compliance matrix.
+
+    Calls ``compute_required_docs_with_checklist()`` and returns only the slugs.
+    """
+    return compute_required_docs_with_checklist(
+        estimated_value, acquisition_method, contract_type, flags
+    )["slugs"]
 
 
 def _generate_descriptive_title(
@@ -331,10 +365,19 @@ def create_package(
     pathway = _pathway_from_value(estimated_value)
 
     # Dynamic docs via compliance matrix when method+type available
+    checklist_meta: dict = {}
     if acquisition_method and contract_type:
-        required_docs = compute_required_docs(
+        info = compute_required_docs_with_checklist(
             float(estimated_value), acquisition_method, contract_type, flags
         )
+        required_docs = info["slugs"]
+        checklist_meta = {
+            "pmr_checklist_name": info.get("pmr_checklist"),
+            "pmr_checklist_s3_key": info.get("pmr_checklist_s3_key"),
+            "frc_checklist_s3_key": info.get("frc_checklist_s3_key"),
+            "nih_oag_checklist_s3_key": info.get("nih_oag_checklist_s3_key"),
+            "nih_oag_section": info.get("nih_oag_section"),
+        }
     else:
         required_docs = _required_docs_for(pathway)
 
@@ -380,6 +423,10 @@ def create_package(
         item["contract_type"] = contract_type
     if flags is not None:
         item["flags"] = flags
+    # Checklist provenance (from compliance matrix)
+    for ck, cv in checklist_meta.items():
+        if cv is not None:
+            item[ck] = cv
 
     # Auto-compute system tags and compliance metadata
     try:
@@ -474,9 +521,17 @@ def update_package(tenant_id: str, package_id: str, updates: dict) -> Optional[d
             ctype = allowed.get("contract_type") or existing.get("contract_type")
             flags = allowed.get("flags") or existing.get("flags")
             if method and ctype:
-                allowed["required_documents"] = compute_required_docs(
+                info = compute_required_docs_with_checklist(
                     float(new_value), method, ctype, flags
                 )
+                allowed["required_documents"] = info["slugs"]
+                # Update checklist provenance
+                if info.get("pmr_checklist"):
+                    allowed["pmr_checklist_name"] = info["pmr_checklist"]
+                for ck in ("pmr_checklist_s3_key", "frc_checklist_s3_key",
+                           "nih_oag_checklist_s3_key", "nih_oag_section"):
+                    if info.get(ck) is not None:
+                        allowed[ck] = info[ck]
             else:
                 allowed["required_documents"] = _required_docs_for(new_pathway)
 
@@ -675,6 +730,10 @@ def get_package_checklist(tenant_id: str, package_id: str) -> dict:
         "completed": completed,
         "missing": missing,
         "complete": len(missing) == 0,
+        # Checklist provenance (None for legacy packages)
+        "pmr_checklist_name": pkg.get("pmr_checklist_name"),
+        "pmr_checklist_s3_key": pkg.get("pmr_checklist_s3_key"),
+        "nih_oag_section": pkg.get("nih_oag_section"),
     }
 
 
