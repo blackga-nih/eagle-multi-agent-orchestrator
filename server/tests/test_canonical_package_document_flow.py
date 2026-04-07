@@ -21,7 +21,7 @@ def test_exec_create_document_routes_package_mode_to_canonical(monkeypatch):
         def __init__(self, tenant_id, user_id, markdown_generators):
             self.markdown_generators = markdown_generators
 
-        def generate_document(self, doc_type, title, data, output_format):
+        def generate_document(self, doc_type, title, data, output_format, **kwargs):
             return FakeTemplateResult()
 
     def fake_create_package_document_version(**kwargs):
@@ -91,7 +91,7 @@ def test_exec_create_document_does_not_promote_attachment_request_into_title(mon
         def __init__(self, tenant_id, user_id, markdown_generators):
             self.markdown_generators = markdown_generators
 
-        def generate_document(self, doc_type, title, data, output_format):
+        def generate_document(self, doc_type, title, data, output_format, **kwargs):
             return FakeTemplateResult()
 
     monkeypatch.setattr("app.template_service.TemplateService", FakeTemplateService)
@@ -227,7 +227,7 @@ def test_force_document_creation_for_direct_request_without_tool(monkeypatch):
 
     forced = asyncio.run(
         _ensure_create_document_for_direct_request(
-            prompt="Research FAR requirements and then draft a Statement of Work.",
+            prompt="Research FAR requirements and then draft a Statement of Work for cloud hosting services providing AWS infrastructure support for NCI cancer research data management, 12-month base period.",
             tenant_id="test-tenant",
             user_id="test-user",
             session_id="sess-123",
@@ -356,7 +356,7 @@ def test_sdk_query_streaming_fast_path_emits_document_events(monkeypatch):
     async def _collect():
         chunks = []
         async for chunk in sdk_query_streaming(
-            prompt="Generate a Statement of Work for IT services at NCI.",
+            prompt="Generate a Statement of Work for cloud hosting services providing AWS infrastructure support for NCI cancer research data management, 12-month base period with two option years.",
             tenant_id="test-tenant",
             user_id="test-user",
             tier="advanced",

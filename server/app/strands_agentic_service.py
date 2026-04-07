@@ -1576,7 +1576,7 @@ async def _ensure_create_document_for_direct_request(
     )
     if not _has_package:
         _prereq_block = _check_document_prerequisites({
-            "doc_type": doc_type, "content": "", "data": contextual_data,
+            "doc_type": doc_type, "content": prompt, "data": contextual_data,
         })
         if _prereq_block:
             logger.info(
@@ -2265,6 +2265,7 @@ def _build_subagent_kb_tools(
     session_id: str,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    user_id: str | None = None,
 ) -> list:
     """Build knowledge-base tools that subagents can use to ground analysis.
 
@@ -2275,8 +2276,11 @@ def _build_subagent_kb_tools(
     Uses proper named parameters (not ``params: str``) so the Strands-generated
     schema matches what Bedrock models naturally send.
     """
-    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
+    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch, get_user_package_ids
     from .tools.legacy_dispatch import exec_search_far
+
+    # Pre-compute user's allowed package IDs for isolation filtering.
+    _user_pkg_ids: set[str] = get_user_package_ids(tenant_id, user_id) if user_id else set()
 
     # Track which research tools have been called in this session to detect
     # cascade violations (web_search before knowledge_search).
@@ -2393,7 +2397,10 @@ def _build_subagent_kb_tools(
         _emit_input("knowledge_search", params)
         _kb_tools_called.add("knowledge_search")
         try:
-            result = exec_knowledge_search(params, tenant_id, session_id)
+            result = exec_knowledge_search(
+                params, tenant_id, session_id,
+                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+            )
             _kb_depth["search_count"] += 1
             _kb_depth["search_result_count"] += result.get("count", 0)
             _inject_fetch_reminder(result)
@@ -2414,7 +2421,10 @@ def _build_subagent_kb_tools(
         """
         _emit_input("knowledge_fetch", {"s3_key": s3_key})
         _kb_tools_called.add("knowledge_fetch")
-        result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+        result = exec_knowledge_fetch(
+            {"s3_key": s3_key}, tenant_id, session_id,
+            user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+        )
         if "error" not in result:
             _kb_depth["fetch_count"] += 1
             _kb_depth["total_chars_read"] += result.get("content_length", 0)
@@ -2754,7 +2764,7 @@ def _make_subagent_tool(
         _ensure_langfuse_exporter()
 
         # Give subagents KB tools so they can retrieve actual documents
-        kb_tools, _sub_kb_depth = _build_subagent_kb_tools(tenant_id, session_id, result_queue, loop)
+        kb_tools, _sub_kb_depth = _build_subagent_kb_tools(tenant_id, session_id, result_queue, loop, user_id=user_id)
         all_tools = kb_tools + (extra_tools or [])
 
         _, _active_bedrock_model = _get_active_model()
@@ -3436,20 +3446,35 @@ def _build_all_service_tools(
         )
         try:
             # -- Template search guardrail (EAGLE-77) --
+            # If no explicit template search was done, auto-search instead of blocking.
+            # Same pattern as fast-path (lines 1487-1508).
             _tpl = template_search_done or {"done": False}
             if not _tpl["done"]:
+                from .tools.knowledge_tools import exec_knowledge_search as _exec_ks
                 logger.info(
-                    "create_document BLOCKED: no template search yet (service) doc_type=%s session=%s",
-                    doc_type,
-                    session_id or "",
+                    "create_document: auto-searching template for doc_type=%s session=%s",
+                    doc_type, session_id or "",
                 )
-                return json.dumps({
-                    "status": "blocked",
-                    "error": "TEMPLATE SEARCH REQUIRED: Before generating a document, you MUST "
-                    "first call knowledge_search with document_type='template' and a query "
-                    f"matching '{doc_type}' (e.g., '{doc_type} template'). State which template "
-                    "you found and its S3 path, then call create_document again.",
-                })
+                try:
+                    _auto_tpl = _exec_ks(
+                        {"query": f"{doc_type} template", "document_type": "template", "limit": 3},
+                        tenant_id, session_id,
+                    )
+                    _auto_hits = _auto_tpl.get("results", [])
+                    if _auto_hits:
+                        _top = _auto_hits[0]
+                        _tpl_ref = f"{_top.get('title', '')} ({_top.get('s3_key', '')})"
+                        logger.info("create_document: auto-found template: %s", _tpl_ref)
+                        _d = parsed.get("data")
+                        if not isinstance(_d, dict):
+                            _d = {}
+                            parsed["data"] = _d
+                        _d.setdefault("template_reference", _tpl_ref)
+                    else:
+                        logger.info("create_document: no template found for %s — proceeding without", doc_type)
+                except Exception as exc:
+                    logger.warning("create_document: auto template search failed: %s — proceeding", exc)
+                _tpl["done"] = True
 
             # -- Micro-purchase guardrail (FAR 13.2) --
             _mp_block = _check_micropurchase_guardrail(parsed)
@@ -4376,8 +4401,11 @@ def _build_kb_service_tools(
     so the model schema matches natural tool-calling behaviour.
     """
     from .tools.legacy_dispatch import exec_search_far
-    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch, exec_path_search
+    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch, exec_path_search, get_user_package_ids
     from .compliance_matrix import execute_operation as exec_compliance_matrix
+
+    # Pre-compute user's allowed package IDs for isolation filtering.
+    _user_pkg_ids: set[str] = get_user_package_ids(tenant_id, user_id) if user_id else set()
 
     # Track KB tool calls for cascade violation detection.
     _kb_tools_called: set[str] = set()
@@ -4504,7 +4532,10 @@ def _build_kb_service_tools(
             if len(fetched_docs) < 3 and s3_keys:
                 s3_key = s3_keys[0]
                 if s3_key not in _kb_depth["fetched_keys"]:
-                    content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                    content = exec_knowledge_fetch(
+                        {"s3_key": s3_key}, tenant_id, session_id,
+                        user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                    )
                     if "error" not in content:
                         _kb_depth["fetch_count"] += 1
                         _kb_depth["total_chars_read"] += content.get("content_length", 0)
@@ -4560,7 +4591,10 @@ def _build_kb_service_tools(
         if str(document_type).strip().lower() == "template":
             _tpl_flag["done"] = True
         try:
-            result = exec_knowledge_search(params, tenant_id, session_id)
+            result = exec_knowledge_search(
+                params, tenant_id, session_id,
+                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+            )
             _kb_depth["search_count"] += 1
             _kb_depth["search_result_count"] += result.get("count", 0)
             _inject_fetch_reminder(result)
@@ -4581,7 +4615,10 @@ def _build_kb_service_tools(
         """
         _emit_input("knowledge_fetch", {"s3_key": s3_key})
         _kb_tools_called.add("knowledge_fetch")
-        result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+        result = exec_knowledge_fetch(
+            {"s3_key": s3_key}, tenant_id, session_id,
+            user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+        )
         if "error" not in result:
             _kb_depth["fetch_count"] += 1
             _kb_depth["total_chars_read"] += result.get("content_length", 0)
@@ -4726,7 +4763,10 @@ def _build_kb_service_tools(
                 "document_type": document_type, "limit": 15,
             }.items() if v
         }
-        search_result = exec_knowledge_search(search_params, tenant_id, session_id)
+        search_result = exec_knowledge_search(
+            search_params, tenant_id, session_id,
+            user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+        )
         _kb_depth["search_count"] += 1
         _kb_depth["search_result_count"] += search_result.get("count", 0)
         all_results = list(search_result.get("results", []))
@@ -4740,7 +4780,10 @@ def _build_kb_service_tools(
             if document_type:
                 secondary_params["document_type"] = document_type
             # Don't pass topic filter — lets it find docs in adjacent topics
-            secondary_result = exec_knowledge_search(secondary_params, tenant_id, session_id)
+            secondary_result = exec_knowledge_search(
+                secondary_params, tenant_id, session_id,
+                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+            )
             _kb_depth["search_count"] += 1
             _kb_depth["search_result_count"] += secondary_result.get("count", 0)
             # Merge deduplicated results
@@ -4755,7 +4798,10 @@ def _build_kb_service_tools(
         # Keep path results separate so we can guarantee top 4 get fetched.
         path_only_results: list[dict] = []
         if query:
-            path_result = exec_path_search(query, tenant_id, limit=15)
+            path_result = exec_path_search(
+                query, tenant_id, limit=15,
+                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+            )
             for r in path_result.get("results", []):
                 if r.get("s3_key") and r["s3_key"] not in seen_keys:
                     all_results.append(r)
@@ -4796,7 +4842,10 @@ def _build_kb_service_tools(
         for r in all_results[:8]:
             s3_key = r.get("s3_key")
             if s3_key and s3_key not in _kb_depth["fetched_keys"]:
-                content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                content = exec_knowledge_fetch(
+                    {"s3_key": s3_key}, tenant_id, session_id,
+                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                )
                 if "error" not in content:
                     _kb_depth["fetch_count"] += 1
                     _kb_depth["total_chars_read"] += content.get("content_length", 0)
@@ -4814,7 +4863,10 @@ def _build_kb_service_tools(
                 break
             s3_key = r.get("s3_key")
             if s3_key and s3_key not in _kb_depth["fetched_keys"]:
-                content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                content = exec_knowledge_fetch(
+                    {"s3_key": s3_key}, tenant_id, session_id,
+                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                )
                 if "error" not in content:
                     _kb_depth["fetch_count"] += 1
                     _kb_depth["total_chars_read"] += content.get("content_length", 0)
@@ -4837,13 +4889,17 @@ def _build_kb_service_tools(
                 cl_result = exec_knowledge_search(
                     {"document_type": "checklist", "query": cl_query, "limit": 5},
                     tenant_id, session_id,
+                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
                 )
                 _kb_depth["search_count"] += 1
 
                 for r in cl_result.get("results", [])[:4]:
                     s3_key = r.get("s3_key")
                     if s3_key and s3_key not in _kb_depth["fetched_keys"]:
-                        result = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                        result = exec_knowledge_fetch(
+                            {"s3_key": s3_key}, tenant_id, session_id,
+                            user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                        )
                         if "content" in result:
                             _kb_depth["fetch_count"] += 1
                             _kb_depth["total_chars_read"] += result.get("content_length", 0)

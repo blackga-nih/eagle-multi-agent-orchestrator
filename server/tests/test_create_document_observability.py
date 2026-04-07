@@ -73,6 +73,7 @@ def _build_tools_with_fake_dispatch(monkeypatch, dispatch_fn=None, dispatch_erro
         package_context=None,
         result_queue=None,
         loop=None,
+        template_search_done={"done": True},
     )
     create_doc = next(t for t in tools if t.tool_name == "create_document")
     return create_doc
@@ -109,7 +110,7 @@ def test_create_document_restores_log_context(monkeypatch):
         }
 
     tool = _build_tools_with_fake_dispatch(monkeypatch, dispatch_fn=spy_dispatch)
-    result = json.loads(tool(doc_type="sow", title="Test SOW", content="# SOW"))
+    result = json.loads(tool(doc_type="sow", title="Test SOW", content="# SOW", data={"requirement_description": "Cloud hosting services for NCI research data"}))
 
     assert result["status"] == "saved"
     assert captured_ctx["tenant_id"] == TENANT_ID
@@ -141,7 +142,7 @@ def test_create_document_emits_tool_completed(monkeypatch):
     )
 
     tool = _build_tools_with_fake_dispatch(monkeypatch)
-    result = json.loads(tool(doc_type="sow", title="Test SOW", content="# SOW"))
+    result = json.loads(tool(doc_type="sow", title="Test SOW", content="# SOW", data={"requirement_description": "Cloud hosting services for NCI research data"}))
 
     assert result["status"] == "saved"
     assert len(emitted) == 1
@@ -170,7 +171,7 @@ def test_create_document_emits_timing_on_error(monkeypatch):
         monkeypatch,
         dispatch_error=RuntimeError("S3 upload failed"),
     )
-    result = json.loads(tool(doc_type="sow", title="Test SOW", content="# SOW"))
+    result = json.loads(tool(doc_type="sow", title="Test SOW", content="# SOW", data={"requirement_description": "Cloud hosting services for NCI research data"}))
 
     # Tool should return error JSON (not raise)
     assert "error" in result
@@ -188,7 +189,7 @@ def test_create_document_logs_entry_and_done(monkeypatch, caplog):
     tool = _build_tools_with_fake_dispatch(monkeypatch)
 
     with caplog.at_level(logging.INFO, logger="eagle.strands_agent"):
-        result = json.loads(tool(doc_type="sow", title="Test SOW", content="# SOW"))
+        result = json.loads(tool(doc_type="sow", title="Test SOW", content="# SOW", data={"requirement_description": "Cloud hosting services for NCI research data"}))
 
     assert result["status"] == "saved"
 
@@ -235,7 +236,7 @@ def test_create_document_timing_reflects_actual_duration(monkeypatch):
         }
 
     tool = _build_tools_with_fake_dispatch(monkeypatch, dispatch_fn=slow_dispatch)
-    tool(doc_type="sow", title="Test SOW", content="# SOW")
+    tool(doc_type="sow", title="Test SOW", content="# SOW", data={"requirement_description": "Cloud hosting services for NCI research data"})
 
     assert len(emitted) == 1
     # Should be at least close to the sleep duration
@@ -253,6 +254,9 @@ def test_all_doc_types_through_tool_wrapper(monkeypatch):
     # Some doc types require prerequisite data fields to pass guardrails
     # Field names must match _DOC_PREREQUISITES in strands_agentic_service.py
     prereq_data = {
+        "sow": {
+            "requirement_description": "Cloud hosting services for NCI research data",
+        },
         "igce": {
             "requirement_description": "Cloud hosting services for NCI",
             "labor_categories": "Cloud Engineer, DevOps, SRE",
@@ -342,6 +346,7 @@ def test_manage_package_emits_tool_completed(monkeypatch):
         package_context=None,
         result_queue=None,
         loop=None,
+        template_search_done={"done": True},
     )
     manage_pkg = next(t for t in tools if t.tool_name == "manage_package")
     result = json.loads(manage_pkg(operation="list"))
