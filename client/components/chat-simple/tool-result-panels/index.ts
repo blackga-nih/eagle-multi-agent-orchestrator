@@ -13,6 +13,7 @@ import PackageStatusPanel from './package-status-panel';
 import ComplianceResultPanel from './compliance-result-panel';
 import KnowledgeFetchPanel from './knowledge-fetch-panel';
 import WebSearchPanel from './web-search-panel';
+import ResearchResultPanel from './research-result-panel';
 import MarkdownFallbackPanel from './markdown-fallback-panel';
 
 export { default as ToolTimingSummary } from './tool-timing-summary';
@@ -100,6 +101,9 @@ export function resolveResultPanel(
 
     case 'web_search':
       return createElement(WebSearchPanel, { text: resultText });
+
+    case 'research':
+      return createElement(ResearchResultPanel, { text: resultText });
 
     default:
       return createElement(MarkdownFallbackPanel, { text: resultText, toolName });

@@ -36,6 +36,7 @@ export const TOOL_META: Record<string, { icon: string; label: string }> = {
   policy_supervisor: { icon: '👤', label: 'Policy Review' },
   ingest_document: { icon: '📥', label: 'Document Ingestion' },
   knowledge_retrieval: { icon: '🔍', label: 'Knowledge Search' },
+  research: { icon: '📖', label: 'Research' },
   // Service tools
   s3_document_ops: { icon: '📁', label: 'Document Storage' },
   dynamodb_intake: { icon: '🗃️', label: 'Intake Records' },
@@ -103,6 +104,10 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
       const op = String(input.operation ?? 'list');
       const key = String(input.key ?? '');
       return key ? `${op} · ${key.split('/').pop()}` : op;
+    }
+    case 'research': {
+      const q = String(input.query ?? '');
+      return q.length > 80 ? q.slice(0, 80) + '...' : q;
     }
     case 'search_far': {
       return String(input.query ?? '');
@@ -437,6 +442,79 @@ function StreamingPreview({ rawJson, toolName }: { rawJson: string; toolName: st
   );
 }
 
+// ── Research input display ──────────────────────────────────────────
+
+const RESEARCH_METHOD_LABELS: Record<string, string> = {
+  negotiated: 'Negotiated',
+  sap: 'Simplified (SAP)',
+  sole: 'Sole Source',
+  fss: 'Federal Supply Schedule',
+  bpa: 'BPA',
+  idiq: 'IDIQ',
+  micro: 'Micro-Purchase',
+};
+
+function ResearchInputDisplay({ input }: { input: Record<string, unknown> }) {
+  const query = String(input.query ?? '');
+  const method = String(input.acquisition_method ?? '');
+  const value = Number(input.contract_value ?? 0);
+  const isIt = Boolean(input.is_it);
+  const isServices = Boolean(input.is_services);
+  const includeChecklist = input.include_checklist !== false;
+  const topic = String(input.topic ?? '');
+  const docType = String(input.document_type ?? '');
+
+  return (
+    <div>
+      <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">
+        Research Query
+      </h3>
+      {/* Query text */}
+      <div className="bg-gray-50 rounded-lg p-3 mb-3">
+        <p className="text-sm text-gray-800 leading-relaxed">{query}</p>
+      </div>
+      {/* Parameter badges */}
+      <div className="flex flex-wrap gap-2">
+        {method && (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700">
+            {RESEARCH_METHOD_LABELS[method] || method}
+          </span>
+        )}
+        {value > 0 && (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border border-green-200 bg-green-50 text-green-700">
+            ${value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1_000 ? `${(value / 1_000).toFixed(0)}K` : value.toLocaleString()}
+          </span>
+        )}
+        {isIt && (
+          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700">
+            IT Acquisition
+          </span>
+        )}
+        {isServices && (
+          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-purple-200 bg-purple-50 text-purple-700">
+            Services
+          </span>
+        )}
+        {includeChecklist && (
+          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-gray-200 bg-gray-50 text-gray-600">
+            + Checklists
+          </span>
+        )}
+        {topic && (
+          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
+            Topic: {topic}
+          </span>
+        )}
+        {docType && (
+          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-teal-200 bg-teal-50 text-teal-700">
+            {docType.replace(/_/g, ' ')}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────
 
 export default function ToolUseDisplay({
@@ -514,7 +592,9 @@ export default function ToolUseDisplay({
           </div>
 
           {/* Input parameters */}
-          {Object.keys(input).length > 0 && (
+          {Object.keys(input).length > 0 && toolName === 'research' ? (
+            <ResearchInputDisplay input={input} />
+          ) : Object.keys(input).length > 0 ? (
             <div>
               <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">
                 Input
@@ -530,7 +610,7 @@ export default function ToolUseDisplay({
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Streaming content preview */}
           {streamingInput && status !== 'done' && (

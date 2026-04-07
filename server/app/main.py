@@ -326,14 +326,19 @@ async def api_chat(
                         _tools_called.append(getattr(_block, "name", ""))
             elif _msg_type == "ResultMessage":
                 _raw = getattr(_sdk_msg, "usage", {})
-                _usage = (
-                    _raw
-                    if isinstance(_raw, dict)
-                    else {
+                if not isinstance(_raw, dict):
+                    _raw = {
                         "input_tokens": getattr(_raw, "input_tokens", 0),
                         "output_tokens": getattr(_raw, "output_tokens", 0),
                     }
-                )
+                # Strands SDK uses camelCase (inputTokens); normalize to snake_case
+                _usage = {
+                    "input_tokens": _raw.get("input_tokens") or _raw.get("inputTokens", 0),
+                    "output_tokens": _raw.get("output_tokens") or _raw.get("outputTokens", 0),
+                    "total_tokens": _raw.get("total_tokens") or _raw.get("totalTokens", 0),
+                    "cache_read_input_tokens": _raw.get("cache_read_input_tokens") or _raw.get("cacheReadInputTokens", 0),
+                    "cache_creation_input_tokens": _raw.get("cache_creation_input_tokens") or _raw.get("cacheWriteInputTokens", 0),
+                }
                 _final_text = str(getattr(_sdk_msg, "result", "") or "")
         _response_text = "".join(_text_parts) or _final_text
         result = {

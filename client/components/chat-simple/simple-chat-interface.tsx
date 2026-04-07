@@ -994,6 +994,7 @@ export default function SimpleChatInterface() {
         getToken={getToken}
         onRefreshPackage={handleRefreshPackage}
         isRefreshingPackage={isRefreshingPackage}
+        stateChangesByMsg={stateChangesByMsg}
       />
 
       {/* Package selector modal for uploaded documents */}

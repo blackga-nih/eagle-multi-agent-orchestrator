@@ -607,7 +607,7 @@ KNOWLEDGE_FETCH_TOOL = {
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-_AI_RANK_MAX_CANDIDATES = 200  # max items to send to LLM for ranking
+_AI_RANK_MAX_CANDIDATES = 350  # max items to send to LLM for ranking
 
 
 def _ai_rank_documents(
@@ -693,6 +693,8 @@ def _ai_rank_documents(
         "   - 'IDIQ' + 'minimum' <-> 'funding' + 'obligation'\n"
         "   - 'protest' + 'debriefing' <-> 'stay' + 'timeliness'\n"
         "   - 'fair opportunity' <-> 'exceptions' + 'IDIQ' + '16.505'\n"
+        "   - 'sole source' / 'single source' <-> 'competition' + 'J&A' + 'justification' + 'FAR Part 6' + 'approval thresholds' + 'HCA'\n"
+        "   - 'sole source' + 'justification' <-> 'competition requirements' + 'SAP checklist' + 'PMR'\n"
         "2. CASE NUMBERS — if the query contains a case number (e.g., B-302358, B-421835),\n"
         "   prioritize documents whose document_id, title, or keywords contain that number.\n"
         "3. SYNONYMS — treat these as equivalent:\n"
@@ -973,6 +975,92 @@ def exec_knowledge_search(
         )
 
     logger.info("knowledge_search: returning %d results", len(results))
+    return {"results": results, "count": len(results)}
+
+
+def exec_path_search(
+    query: str,
+    tenant_id: str,
+    agent_folder: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Search knowledge base by matching query terms against S3 key paths.
+
+    Mimics the RO (Research Optimizer) search strategy: normalize the S3 key,
+    split query into terms, score by matched_terms / total_terms ratio.
+    Returns documents sorted by path-match score.
+
+    This supplements the metadata-based exec_knowledge_search by catching
+    documents whose file names/paths contain the search terms but whose
+    DynamoDB metadata may not match the AI ranking well.
+    """
+    table = get_dynamodb().Table(METADATA_TABLE)
+
+    # Scan all items (table is small)
+    scan_kwargs: dict[str, Any] = {}
+    try:
+        items: list[dict[str, Any]] = []
+        response = table.scan(**scan_kwargs)
+        items.extend(_sanitize_item(it) for it in response.get("Items", []))
+        while "LastEvaluatedKey" in response:
+            scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+            response = table.scan(**scan_kwargs)
+            items.extend(_sanitize_item(it) for it in response.get("Items", []))
+
+        # Include built-in KB entries
+        for entry in BUILTIN_KB_ENTRIES:
+            if not any(it.get("document_id") == entry["document_id"] for it in items):
+                items.append(entry)
+    except ClientError as e:
+        logger.error("exec_path_search DynamoDB error: %s", e)
+        return {"results": [], "count": 0}
+
+    # Filter by agent folder if provided
+    if agent_folder:
+        agent_lower = agent_folder.lower()
+        items = [
+            it for it in items
+            if agent_lower in (it.get("s3_key", "") or it.get("document_id", "")).lower()
+        ]
+
+    # Normalize and score by path matching (RO's algorithm)
+    def normalize(s: str) -> str:
+        return s.lower().replace("_", " ").replace("-", " ")
+
+    terms = [t for t in normalize(query).split() if len(t) >= 3]
+    if not terms:
+        return {"results": [], "count": 0}
+
+    scored = []
+    for item in items:
+        s3_key = item.get("s3_key") or item.get("document_id", "")
+        path_text = normalize(s3_key)
+        # Also check title for broader matching
+        title_text = normalize(item.get("title", ""))
+        combined = f"{path_text} {title_text}"
+
+        matched = [t for t in terms if t in combined]
+        if matched:
+            score = len(matched) / len(terms)
+            scored.append((score, item))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_items = [item for _, item in scored[:limit]]
+
+    results = []
+    for item in top_items:
+        results.append({
+            "document_id": item.get("document_id", ""),
+            "title": item.get("title", ""),
+            "summary": item.get("summary", ""),
+            "document_type": item.get("document_type", ""),
+            "primary_topic": item.get("primary_topic", ""),
+            "primary_agent": item.get("primary_agent", ""),
+            "s3_key": item.get("s3_key", ""),
+            "confidence_score": float(item.get("confidence_score", 0)),
+        })
+
+    logger.info("exec_path_search: %d results for query=%s agent=%s", len(results), query, agent_folder)
     return {"results": results, "count": len(results)}
 
 

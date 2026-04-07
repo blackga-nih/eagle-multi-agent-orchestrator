@@ -18,29 +18,22 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-# ── The 6 baseline questions (fixed) ──────────────────────────────────
-QUESTIONS = {
-    2: "What are the simplified acquisition threshold and micro-purchase threshold under FAC 2025-06?",
-    3: "What did GAO hold in B-302358 regarding IDIQ minimum obligation requirements?",
-    4: "How does the severable vs. non-severable distinction affect which fiscal year's appropriation must fund a contract?",
-    5: "What are the fair opportunity exceptions that allow a single-award task order under FAR 16.505?",
-    6: (
-        "An offeror eliminated from a SBIR competition simultaneously requests a debriefing "
-        "and files a protest on Day 8 after receiving the elimination notice. The debriefing "
-        "hasn't been provided yet. Walk through the correct procedural sequence, applicable "
-        "protest timeliness rules, and how the choice between pre-award and post-award "
-        "debriefing affects the protest stay and timeline."
-    ),
-    7: (
-        "were coming back to the original questions. how to start that discussion - we told "
-        "eagle we wanted to buy cloud services and it shot out a quick SOW with only a few "
-        "questions. not bad. but we think about what if i went to price it and it was too "
-        "expensive and I had to go backwards. we have those multiple points of entry and "
-        "balance before we can get to the end of the document workflow. we used to come in "
-        "with figuring out the background and objectives etc. that was a good approach but "
-        "it did sometimes get distracted and chat theory forever. hard to tune."
-    ),
-}
+
+def load_questions_from_excel(xlsx_path: str) -> dict:
+    """Read questions from column D of the 'Baseline questions' sheet.
+
+    Returns {row_number: question_text} for every non-empty cell in column D
+    starting from row 2.
+    """
+    wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+    ws = wb["Baseline questions"]
+    questions = {}
+    for row in range(2, ws.max_row + 1):
+        val = ws.cell(row=row, column=4).value
+        if val and str(val).strip():
+            questions[row] = str(val).strip()
+    wb.close()
+    return questions
 
 
 def find_next_column(ws) -> int:
@@ -92,7 +85,7 @@ async def run_question(
         print(f"Tools: {tools}")
         print(f"Tokens: in={usage.get('input_tokens', 0):,} out={usage.get('output_tokens', 0):,}")
         print(f"Response length: {len(response_text):,} chars")
-        print(f"\nFirst 500 chars:\n{response_text[:500]}")
+        print(f"\nFull response:\n{response_text}")
 
         return {
             "row": row,
@@ -121,12 +114,30 @@ async def run_question(
         }
 
 
+def _parse_question_spec(spec: str) -> list[int]:
+    """Parse a question spec like '1,3,5' or '7-10' or '2,8-12' into Q numbers."""
+    nums: list[int] = []
+    for part in spec.split(","):
+        part = part.strip().lstrip("qQ")
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            nums.extend(range(int(lo), int(hi) + 1))
+        else:
+            nums.append(int(part))
+    return sorted(set(nums))
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Run EAGLE baseline evaluation")
     parser.add_argument("--version", required=True, help="Version label (e.g., v5)")
     parser.add_argument("--server", default="http://localhost:8000", help="Server URL")
     parser.add_argument("--xlsx", default=None, help="Excel workbook path")
     parser.add_argument("--tenant", default="dev-tenant", help="Tenant ID")
+    parser.add_argument(
+        "--questions", default=None,
+        help="Run specific questions only. Comma-separated Q numbers (e.g., 1,3,5) "
+             "or a range (e.g., 7-10). Omit to run all.",
+    )
     args = parser.parse_args()
 
     # Default xlsx path: repo root / Use Case List.xlsx
@@ -139,6 +150,32 @@ async def main():
 
     today = datetime.now().strftime("%Y-%m-%d")
     version = args.version.upper() if not args.version[0].isupper() else args.version
+
+    # ── Load questions from Excel ──
+    ALL_QUESTIONS = load_questions_from_excel(xlsx_path)
+    if not ALL_QUESTIONS:
+        print("ERROR: No questions found in column D of 'Baseline questions' sheet")
+        sys.exit(1)
+
+    # ── Filter to specific questions if --questions flag provided ──
+    if args.questions:
+        requested = _parse_question_spec(args.questions)
+        # Map Q numbers to Excel rows (Q1=row2, Q2=row3, etc.)
+        all_by_qnum = {row - 1: row for row in ALL_QUESTIONS}
+        QUESTIONS = {}
+        for qn in requested:
+            if qn in all_by_qnum:
+                row = all_by_qnum[qn]
+                QUESTIONS[row] = ALL_QUESTIONS[row]
+            else:
+                print(f"WARNING: Q{qn} not found in Excel (available: Q{min(all_by_qnum)}-Q{max(all_by_qnum)})")
+        if not QUESTIONS:
+            print("ERROR: None of the requested questions exist")
+            sys.exit(1)
+        print(f"Running {len(QUESTIONS)} of {len(ALL_QUESTIONS)} questions: "
+              f"Q{', Q'.join(str(r-1) for r in sorted(QUESTIONS))}")
+    else:
+        QUESTIONS = ALL_QUESTIONS
 
     print(f"EAGLE {version} Baseline Evaluation")
     print(f"Server: {args.server}")
@@ -160,11 +197,24 @@ async def main():
             print(f"  cd server && uvicorn app.main:app --reload --port 8000")
             sys.exit(1)
 
+    # ── Open workbook and read RO reference responses from column E ──
+    wb = openpyxl.load_workbook(xlsx_path)
+    ws = wb["Baseline questions"]
+
+    ro_responses = {}
+    for row in sorted(QUESTIONS.keys()):
+        ro_val = ws.cell(row=row, column=5).value
+        ro_responses[row] = str(ro_val) if ro_val else ""
+    ro_count = sum(1 for v in ro_responses.values() if v)
+    print(f"RO reference responses loaded: {ro_count}/{len(QUESTIONS)} from column E")
+
     # ── Run questions sequentially ──
     results = {}
     async with httpx.AsyncClient() as client:
         for row in sorted(QUESTIONS.keys()):
             result = await run_question(client, args.server, args.tenant, row, QUESTIONS[row])
+            result["ro_response"] = ro_responses.get(row, "")
+            result["question"] = QUESTIONS[row]
             results[row] = result
 
     # ── Save raw JSON ──
@@ -178,9 +228,6 @@ async def main():
 
     # ── Write to Excel ──
     print(f"\nWriting to {xlsx_path}...")
-    wb = openpyxl.load_workbook(xlsx_path)
-    ws = wb["Baseline questions"]
-
     col = find_next_column(ws)
     wrap = Alignment(wrap_text=True, vertical="top")
     header_fill = PatternFill(start_color="2E7D32", end_color="2E7D32", fill_type="solid")
@@ -208,21 +255,24 @@ async def main():
     print(f"\n{'='*80}")
     print("SUMMARY")
     print(f"{'='*80}")
-    print(f"{'Q#':<5} {'Status':<8} {'Time':>6} {'Chars':>8}  Tools")
+    print(f"{'Q#':<5} {'Status':<8} {'Time':>6} {'EAGLE':>8} {'RO Ref':>8}  Tools")
     print("-" * 80)
     for row in sorted(results.keys()):
         r = results[row]
         status = "OK" if r["status"] == "ok" else "ERROR"
+        ro_len = len(r.get("ro_response", ""))
         print(
-            f"Q{r['q_num']:<4} {status:<8} {r['elapsed_s']:>5.1f}s {len(r['response']):>7,}  {r['tools']}"
+            f"Q{r['q_num']:<4} {status:<8} {r['elapsed_s']:>5.1f}s {len(r['response']):>7,} {ro_len:>7,}  {r['tools']}"
         )
 
     total_time = sum(r["elapsed_s"] for r in results.values())
     total_chars = sum(len(r["response"]) for r in results.values())
+    total_ro = sum(len(r.get("ro_response", "")) for r in results.values())
     errors = sum(1 for r in results.values() if r["status"] == "error")
-    print(f"\nTotal: {total_time:.0f}s | {total_chars:,} chars | {errors} errors")
+    print(f"\nTotal: {total_time:.0f}s | EAGLE {total_chars:,} chars | RO {total_ro:,} chars | {errors} errors")
     print(f"Response column: {col_letter} (col {col})")
     print(f"JSON: {json_path}")
+    print(f"\nRO reference responses (column E) included in JSON for judging comparison.")
 
     # ── Tool usage analysis ──
     print(f"\n{'='*80}")

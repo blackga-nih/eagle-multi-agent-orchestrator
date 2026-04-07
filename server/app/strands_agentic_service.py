@@ -29,8 +29,7 @@ from botocore.config import Config
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models import BedrockModel
-# CacheConfig import removed — prompt caching disabled until Bedrock stabilises
-# from strands.models.model import CacheConfig
+from strands.models.bedrock import CacheConfig
 
 # Add server/ to path for eagle_skill_constants
 _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -70,8 +69,8 @@ from .tools.web_search import exec_web_search
 logger = logging.getLogger("eagle.strands_agent")
 
 # -- KB research depth enforcement thresholds --
-_MIN_KB_FETCH = int(os.environ.get("EAGLE_MIN_KB_FETCH", "2"))
-_MIN_KB_CHARS = int(os.environ.get("EAGLE_MIN_KB_CHARS", "5000"))
+_MIN_KB_FETCH = int(os.environ.get("EAGLE_MIN_KB_FETCH", "3"))
+_MIN_KB_CHARS = int(os.environ.get("EAGLE_MIN_KB_CHARS", "8000"))
 _MAX_REMINDERS = 3  # cap _fetch_reminder injections to prevent infinite loops
 
 # Timeout (seconds) for the entire create_document tool dispatch.
@@ -499,24 +498,59 @@ for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         boto_client_config=_bedrock_client_config,
     )
-    # Prompt caching disabled — Bedrock cross-region inference has been
-    # unstable since 2026-03-30 (100% TTFT failures, now intermittent).
-    # Cache-miss overhead adds to TTFT on the first request.  Re-enable
-    # after Bedrock cross-region stabilises.
-    # if "sonnet" in _mid:
-    #     _kwargs["cache_tools"] = "default"
-    #     _kwargs["cache_config"] = CacheConfig(strategy="auto")
+    _kwargs["cache_tools"] = "default"
+    _kwargs["cache_config"] = CacheConfig(strategy="auto")
     _bedrock_models[_mid] = BedrockModel(**_kwargs)
 
 # Backward-compat alias
 _model = _bedrock_models[MODEL]
 
-logger.info("EAGLE model chain: %s", _MODEL_CHAIN_IDS)
+logger.info("EAGLE model chain: %s (prompt caching enabled)", _MODEL_CHAIN_IDS)
 logger.info(
     "EAGLE circuit breaker: threshold=%d, recovery=%ds",
     _CB_FAILURE_THRESHOLD,
     _CB_RECOVERY_TIMEOUT,
 )
+
+
+def _cacheable_system_prompt(text: str) -> list[dict[str, Any]]:
+    """Wrap a system prompt string with a cachePoint for Bedrock prompt caching.
+
+    Returns a list of SystemContentBlocks that Strands Agent accepts as system_prompt.
+    The cachePoint tells Bedrock to cache everything up to this marker, so the large
+    supervisor prompt (~18K tokens) is only processed once per 5-minute window.
+    """
+    return [{"text": text}, {"cachePoint": {"type": "default"}}]
+
+
+def _append_kb_sources(
+    text: str, kb_depth: dict
+) -> str:
+    """Append a Sources section if KB docs were read but not cited."""
+    fetched = kb_depth.get("fetched_keys", set())
+    if not fetched:
+        return text
+    # Check if the model already cited KB paths
+    cited = sum(
+        1 for k in fetched
+        if k in text or k.rsplit("/", 1)[-1] in text
+    )
+    if cited >= len(fetched):
+        return text  # All sources already cited
+    # Append missing sources
+    uncited = sorted(
+        k for k in fetched
+        if k not in text
+        and k.rsplit("/", 1)[-1] not in text
+    )
+    if not uncited:
+        return text
+    lines = [f"- `{k}`" for k in uncited]
+    extra = "\n".join(lines)
+    # Merge into existing Sources section if present
+    if "**Sources:**" in text:
+        return text.rstrip() + "\n" + extra + "\n"
+    return text.rstrip() + "\n\n**Sources:**\n" + extra + "\n"
 
 
 def _get_active_model() -> tuple[str, BedrockModel]:
@@ -987,6 +1021,12 @@ def _check_micropurchase_guardrail(parsed: dict) -> str | None:
 # The guardrail checks both `data` dict fields AND scans `content` for evidence.
 
 _DOC_PREREQUISITES: dict[str, list[tuple[str, str]]] = {
+    "sow": [
+        (
+            "requirement_description",
+            "description of the requirement (what is being acquired)",
+        ),
+    ],
     "market_research": [
         (
             "requirement_description",
@@ -1408,6 +1448,39 @@ async def _maybe_fast_path_document_generation(
                 "guardrail": True,
             }
 
+    # -- Document prerequisites guardrail --
+    # Skip if user has a package (intake already done)
+    _has_package = (
+        package_context is not None
+        and getattr(package_context, "is_package_mode", False)
+    )
+    if not _has_package:
+        _fp_data = _extract_context_data_from_prompt(prompt, doc_type)
+        _prereq_block = _check_document_prerequisites({
+            "doc_type": doc_type, "content": "", "data": _fp_data,
+        })
+        if _prereq_block:
+            _prereq_data = json.loads(_prereq_block)
+            _missing = _prereq_data.get("missing_fields", [])
+            _doc_label = _DOC_TYPE_LABELS.get(
+                doc_type, doc_type.replace("_", " ").title()
+            )
+            return {
+                "doc_type": doc_type,
+                "result": {
+                    "status": "guardrail",
+                    "message": (
+                        f"I'd be happy to help create a {_doc_label}, but I need some "
+                        "information first.\n\nPlease tell me:\n"
+                        + "\n".join(f"- {field}" for field in _missing)
+                        + "\n\nDescribe your acquisition in a few sentences, or say "
+                        '**"start intake"** and I\'ll walk you through it step by step.'
+                    ),
+                    "word_count": 0,
+                },
+                "guardrail": True,
+            }
+
     from .tools.legacy_dispatch import exec_create_document
     from .tools.knowledge_tools import exec_knowledge_search
 
@@ -1495,6 +1568,23 @@ async def _ensure_create_document_for_direct_request(
     contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
     if contextual_data:
         params["data"] = contextual_data
+
+    # -- Document prerequisites guardrail --
+    _has_package = (
+        package_context is not None
+        and getattr(package_context, "is_package_mode", False)
+    )
+    if not _has_package:
+        _prereq_block = _check_document_prerequisites({
+            "doc_type": doc_type, "content": "", "data": contextual_data,
+        })
+        if _prereq_block:
+            logger.info(
+                "Skipping forced create_document — prerequisites not met for %s",
+                doc_type,
+            )
+            return None  # Let the agent's text response stand
+
     if (
         package_context is not None
         and getattr(package_context, "is_package_mode", False)
@@ -2210,6 +2300,22 @@ def _build_subagent_kb_tools(
                 {"type": "tool_input", "name": name, "input": tool_input},
             )
 
+    def _emit_source(title: str, s3_key: str, doc_type: str, source_tool: str, chars_read: int) -> None:
+        """Push a sources_read state_update so the frontend can show which documents were read."""
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {
+                    "type": "state_update",
+                    "state_type": "sources_read",
+                    "title": title,
+                    "s3_key": s3_key,
+                    "doc_type": doc_type,
+                    "source_tool": source_tool,
+                    "chars_read": chars_read,
+                },
+            )
+
     def _inject_fetch_reminder(result: dict) -> None:
         """Append _fetch_reminder to result when fetch depth is insufficient."""
         result_count = result.get("count", 0)
@@ -2221,7 +2327,7 @@ def _build_subagent_kb_tools(
             fetchable = [
                 r.get("s3_key") for r in result.get("results", [])
                 if r.get("s3_key")
-            ][:5]
+            ][:8]
             result["_fetch_reminder"] = (
                 f"ACTION REQUIRED: You have only fetched {_kb_depth['fetch_count']} "
                 f"document(s) ({_kb_depth['total_chars_read']:,} chars). You MUST call "
@@ -2241,7 +2347,7 @@ def _build_subagent_kb_tools(
             fetchable = [
                 sk for c in clauses
                 for sk in (c.get("s3_keys") or [])
-            ][:5]
+            ][:8]
             if fetchable:
                 result["_fetch_reminder"] = (
                     f"ACTION REQUIRED: You have only fetched {_kb_depth['fetch_count']} "
@@ -2313,6 +2419,14 @@ def _build_subagent_kb_tools(
             _kb_depth["fetch_count"] += 1
             _kb_depth["total_chars_read"] += result.get("content_length", 0)
             _kb_depth["fetched_keys"].add(s3_key)
+            _fallback_title = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+            _emit_source(
+                title=result.get("title", _fallback_title),
+                s3_key=s3_key,
+                doc_type=result.get("document_type", "document"),
+                source_tool="knowledge_fetch",
+                chars_read=result.get("content_length", 0),
+            )
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="search_far")
@@ -2608,6 +2722,7 @@ def _make_subagent_tool(
     tier: str = "",
     session_id: str = "",
     extra_tools: list | None = None,
+    parent_kb_depth: dict | None = None,
 ):
     """Create a @tool-wrapped subagent from skill registry entry.
 
@@ -2645,7 +2760,7 @@ def _make_subagent_tool(
         _, _active_bedrock_model = _get_active_model()
         agent = Agent(
             model=_active_bedrock_model,
-            system_prompt=subagent_context + prompt_body,
+            system_prompt=_cacheable_system_prompt(subagent_context + prompt_body),
             tools=all_tools,
             callback_handler=(
                 _SubagentEventForwarder(safe_name, result_queue, loop)
@@ -2661,6 +2776,45 @@ def _make_subagent_tool(
             ),
         )
         raw = str(agent(query))
+
+        # --- Merge subagent KB depth into supervisor's tracker ---
+        if parent_kb_depth is not None:
+            _sd = _sub_kb_depth
+            parent_kb_depth["search_count"] += _sd.get(
+                "search_count", 0
+            )
+            parent_kb_depth["fetch_count"] += _sd.get(
+                "fetch_count", 0
+            )
+            parent_kb_depth["total_chars_read"] += _sd.get(
+                "total_chars_read", 0
+            )
+            parent_kb_depth["search_result_count"] += _sd.get(
+                "search_result_count", 0
+            )
+            parent_kb_depth["fetched_keys"].update(
+                _sd.get("fetched_keys", set())
+            )
+
+        # --- Append structured document manifest to subagent response ---
+        _sub_fetched = _sub_kb_depth.get("fetched_keys", set())
+        if _sub_fetched:
+            _doc_lines = [
+                f"- `{k}`" for k in sorted(_sub_fetched)
+            ]
+            raw += (
+                "\n\n---\n**KB_SOURCES_CITED "
+                "(IMPORTANT — include these in your Sources "
+                "section):**\n"
+                + "\n".join(_doc_lines)
+                + "\n"
+            )
+            logger.info(
+                "Subagent %s read %d KB docs: %s",
+                safe_name,
+                len(_sub_fetched),
+                sorted(_sub_fetched),
+            )
 
         # Emit tool_result so the frontend can show the specialist's report
         if result_queue and loop:
@@ -4211,6 +4365,7 @@ def _build_kb_service_tools(
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
     template_search_done: dict | None = None,
+    kb_depth_ref: dict | None = None,
 ) -> list:
     """Build KB tools with proper named parameters so Bedrock models send structured args.
 
@@ -4221,7 +4376,8 @@ def _build_kb_service_tools(
     so the model schema matches natural tool-calling behaviour.
     """
     from .tools.legacy_dispatch import exec_search_far
-    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch
+    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch, exec_path_search
+    from .compliance_matrix import execute_operation as exec_compliance_matrix
 
     # Track KB tool calls for cascade violation detection.
     _kb_tools_called: set[str] = set()
@@ -4230,7 +4386,9 @@ def _build_kb_service_tools(
     _tpl_flag = template_search_done if template_search_done is not None else {"done": False}
 
     # Track research depth: fetch count, chars read, fetched keys.
-    _kb_depth: dict = {
+    # Reuse an externally created dict if provided (allows subagent
+    # tools created by build_skill_tools to share the same tracker).
+    _kb_depth: dict = kb_depth_ref if kb_depth_ref is not None else {
         "search_count": 0,
         "fetch_count": 0,
         "total_chars_read": 0,
@@ -4245,6 +4403,22 @@ def _build_kb_service_tools(
             loop.call_soon_threadsafe(
                 result_queue.put_nowait,
                 {"type": "tool_input", "name": name, "input": tool_input},
+            )
+
+    def _emit_source(title: str, s3_key: str, doc_type: str, source_tool: str, chars_read: int) -> None:
+        """Push a sources_read state_update so the frontend can show which documents were read."""
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {
+                    "type": "state_update",
+                    "state_type": "sources_read",
+                    "title": title,
+                    "s3_key": s3_key,
+                    "doc_type": doc_type,
+                    "source_tool": source_tool,
+                    "chars_read": chars_read,
+                },
             )
 
     def _emit(name: str, result: dict) -> None:
@@ -4273,7 +4447,7 @@ def _build_kb_service_tools(
             fetchable = [
                 r.get("s3_key") for r in result.get("results", [])
                 if r.get("s3_key")
-            ][:5]
+            ][:8]
             result["_fetch_reminder"] = (
                 f"ACTION REQUIRED: You have only fetched {_kb_depth['fetch_count']} "
                 f"document(s) ({_kb_depth['total_chars_read']:,} chars). You MUST call "
@@ -4293,7 +4467,7 @@ def _build_kb_service_tools(
             fetchable = [
                 sk for c in clauses
                 for sk in (c.get("s3_keys") or [])
-            ][:5]
+            ][:8]
             if fetchable:
                 result["_fetch_reminder"] = (
                     f"ACTION REQUIRED: You have only fetched {_kb_depth['fetch_count']} "
@@ -4304,7 +4478,7 @@ def _build_kb_service_tools(
 
     @tool(name="search_far")
     def search_far(query: str, parts: list[str] | None = None) -> str:
-        """Search FAR/DFARS for clauses, requirements, and guidance. Returns s3_keys for full document retrieval — ALWAYS call knowledge_fetch on returned s3_keys before responding.
+        """Search FAR/DFARS for clauses and auto-fetch the top results. Returns clause summaries plus full document content for the top matches.
 
         Args:
             query: Search query — topic, clause number, or keyword
@@ -4314,7 +4488,36 @@ def _build_kb_service_tools(
         _kb_tools_called.add("search_far")
         _kb_depth["search_count"] += 1
         result = exec_search_far({"query": query, "parts": parts}, tenant_id)
-        _inject_far_fetch_reminder(result)
+
+        # Auto-fetch top 3 clause documents (eliminates cascade violations)
+        fetched_docs = []
+        for _clause in result.get("clauses", [])[:5]:
+            s3_keys = _clause.get("s3_keys") or []
+            _emit_source(
+                title=_clause.get("title", _clause.get("clause_number", "FAR clause")),
+                s3_key=s3_keys[0] if s3_keys else "",
+                doc_type="regulation",
+                source_tool="search_far",
+                chars_read=len(str(_clause.get("text", ""))),
+            )
+            # Auto-fetch the first s3_key for top 3 clauses
+            if len(fetched_docs) < 3 and s3_keys:
+                s3_key = s3_keys[0]
+                if s3_key not in _kb_depth["fetched_keys"]:
+                    content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                    if "error" not in content:
+                        _kb_depth["fetch_count"] += 1
+                        _kb_depth["total_chars_read"] += content.get("content_length", 0)
+                        _kb_depth["fetched_keys"].add(s3_key)
+                        fetched_docs.append({
+                            "title": _clause.get("title", ""),
+                            "s3_key": s3_key,
+                            "content": content.get("content", "")[:15000],
+                        })
+
+        if fetched_docs:
+            result["fetched_documents"] = fetched_docs
+
         _emit("search_far", result)
         return json.dumps(result, indent=2, default=str)
 
@@ -4383,14 +4586,22 @@ def _build_kb_service_tools(
             _kb_depth["fetch_count"] += 1
             _kb_depth["total_chars_read"] += result.get("content_length", 0)
             _kb_depth["fetched_keys"].add(s3_key)
+            _fallback_title = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+            _emit_source(
+                title=result.get("title", _fallback_title),
+                s3_key=s3_key,
+                doc_type=result.get("document_type", "document"),
+                source_tool="knowledge_fetch",
+                chars_read=result.get("content_length", 0),
+            )
         _emit("knowledge_fetch", result)
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="web_search")
     def web_search_tool(query: str) -> str:
-        """Search the web for real-time information. Use for current market data, vendor info, pricing, policy updates, or any topic needing up-to-date info beyond the knowledge base.
+        """Search the web for real-time information and auto-fetch top source pages. Use for current market data, vendor info, pricing, policy updates, or any topic needing up-to-date info beyond the knowledge base. Returns answer with source citations AND full page content for top sources — no separate fetch needed.
 
-        IMPORTANT: You MUST call knowledge_search or search_far BEFORE using web_search. After EVERY web_search call, you MUST call web_fetch on the top 5 source URLs returned. Search snippets are incomplete — they miss pricing tiers, licensing terms, compliance details, and contract vehicle numbers. Never cite a source you have not web_fetched.
+        IMPORTANT: You MUST call research or search_far BEFORE using web_search.
 
         Args:
             query: Natural language search query
@@ -4399,16 +4610,16 @@ def _build_kb_service_tools(
             logger.warning(
                 "CASCADE VIOLATION: web_search called without prior KB lookup "
                 "(session=%s, query='%s'). The research cascade requires "
-                "knowledge_search or search_far BEFORE web_search.",
+                "research or search_far BEFORE web_search.",
                 session_id,
                 query[:100],
             )
             return json.dumps(
                 {
-                    "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
+                    "error": "CASCADE VIOLATION: You must call research or search_far "
                     "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
                     "query": query,
-                    "action_required": "Call knowledge_search or search_far with this query first.",
+                    "action_required": "Call research or search_far with this query first.",
                 },
                 indent=2,
             )
@@ -4417,17 +4628,9 @@ def _build_kb_service_tools(
         _emit("web_search", result)
         return json.dumps(result, indent=2, default=str)
 
-    @tool(name="web_fetch")
-    def web_fetch_tool(url: str) -> str:
-        """Fetch a web page and return its content as clean markdown. MUST be called on top 5 source URLs after EVERY web_search. Search snippets alone are unreliable — always read the full page.
-
-        Args:
-            url: The URL to fetch (must be http or https)
-        """
-        _emit_input("web_fetch", {"url": url})
-        result = exec_web_fetch(url)
-        _emit("web_fetch", result)
-        return json.dumps(result, indent=2, default=str)
+    # web_fetch removed from supervisor — exec_web_search already auto-fetches
+    # top 3 source pages (WEB_SEARCH_AUTO_FETCH env var). Subagents that need
+    # manual URL fetching still have web_fetch via _build_subagent_kb_tools().
 
     # --- Method-aware checklist search queries ---
     _CHECKLIST_QUERIES: dict[str, str] = {
@@ -4516,20 +4719,81 @@ def _build_kb_service_tools(
         if str(document_type).strip().lower() == "template":
             _tpl_flag["done"] = True
 
-        # 1. Run knowledge_search
+        # 1. Run primary knowledge_search (wider net — 15 results)
         search_params = {
             k: v for k, v in {
                 "query": query, "topic": topic,
-                "document_type": document_type, "limit": 10,
+                "document_type": document_type, "limit": 15,
             }.items() if v
         }
         search_result = exec_knowledge_search(search_params, tenant_id, session_id)
         _kb_depth["search_count"] += 1
         _kb_depth["search_result_count"] += search_result.get("count", 0)
+        all_results = list(search_result.get("results", []))
 
-        # 2. Auto-fetch top 4 KB results
+        # 1b. Secondary broadened search — different angle to catch more docs.
+        # Extract key terms and search without topic filter for broader coverage.
+        seen_keys = {r.get("s3_key") for r in all_results if r.get("s3_key")}
+        if query and len(query) > 20:
+            # Build a shorter keyword-focused query for the secondary search
+            secondary_params: dict[str, Any] = {"query": query, "limit": 10}
+            if document_type:
+                secondary_params["document_type"] = document_type
+            # Don't pass topic filter — lets it find docs in adjacent topics
+            secondary_result = exec_knowledge_search(secondary_params, tenant_id, session_id)
+            _kb_depth["search_count"] += 1
+            _kb_depth["search_result_count"] += secondary_result.get("count", 0)
+            # Merge deduplicated results
+            for r in secondary_result.get("results", []):
+                if r.get("s3_key") and r["s3_key"] not in seen_keys:
+                    all_results.append(r)
+                    seen_keys.add(r["s3_key"])
+
+        # 1c. Path-based search (RO strategy) — matches query terms against
+        # S3 key paths/filenames. Catches docs that metadata AI ranking misses
+        # because their file names contain the search terms directly.
+        # Keep path results separate so we can guarantee top 4 get fetched.
+        path_only_results: list[dict] = []
+        if query:
+            path_result = exec_path_search(query, tenant_id, limit=15)
+            for r in path_result.get("results", []):
+                if r.get("s3_key") and r["s3_key"] not in seen_keys:
+                    all_results.append(r)
+                    path_only_results.append(r)
+                    seen_keys.add(r["s3_key"])
+
+        # 1d. Compliance matrix query — adds threshold context, required docs,
+        # approval levels. Runs on most research calls (skipped only for design/
+        # general questions with no acquisition indicators).
+        compliance_data: dict | None = None
+        _threshold_terms = {"threshold", "sat", "mpt", "micro", "simplified", "dollar",
+                            "value", "cost", "price", "budget", "sole", "source",
+                            "competition", "approval", "clearance", "j&a", "jofoc"}
+        query_lower = query.lower()
+        has_value = contract_value > 0
+        has_method = bool(acquisition_method)
+        has_threshold_term = any(t in query_lower for t in _threshold_terms)
+        if has_value or has_method or has_threshold_term:
+            try:
+                cm_params = {
+                    "operation": "query",
+                    "contract_value": contract_value or 100000,
+                    "acquisition_method": acquisition_method or _detect_method(
+                        acquisition_method, query, contract_value),
+                    "is_it": is_it,
+                    "is_services": is_services,
+                }
+                compliance_data = exec_compliance_matrix(cm_params)
+            except Exception:
+                logger.debug("research: compliance_matrix query failed, continuing")
+
+        # 2. Auto-fetch top 8 AI-ranked + top 4 path-search results
+        # AI-ranked results (Layers 1-2) get 8 fetch slots as before.
+        # Path-search results (Layer 3 / RO strategy) get 4 guaranteed
+        # fetch slots for any docs not already fetched by AI ranking.
+        # This closes the gap where RO finds docs EAGLE misses.
         fetched_docs = []
-        for r in search_result.get("results", [])[:4]:
+        for r in all_results[:8]:
             s3_key = r.get("s3_key")
             if s3_key and s3_key not in _kb_depth["fetched_keys"]:
                 content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
@@ -4542,6 +4806,25 @@ def _build_kb_service_tools(
                         "s3_key": s3_key,
                         "content": content.get("content", "")[:15000],
                     })
+
+        # 2b. Guaranteed path-search fetch — top 4 not already fetched above
+        _path_fetched = 0
+        for r in path_only_results:
+            if _path_fetched >= 4:
+                break
+            s3_key = r.get("s3_key")
+            if s3_key and s3_key not in _kb_depth["fetched_keys"]:
+                content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                if "error" not in content:
+                    _kb_depth["fetch_count"] += 1
+                    _kb_depth["total_chars_read"] += content.get("content_length", 0)
+                    _kb_depth["fetched_keys"].add(s3_key)
+                    fetched_docs.append({
+                        "title": r.get("title", ""),
+                        "s3_key": s3_key,
+                        "content": content.get("content", "")[:15000],
+                    })
+                    _path_fetched += 1
 
         # 3. Dynamic checklist search (isolated query — separate from general KB search)
         checklist_content: dict[str, str] = {}
@@ -4568,11 +4851,12 @@ def _build_kb_service_tools(
                             checklist_content[r.get("title", s3_key)] = result["content"][:20000]
 
         # 4. Build combined packet
-        packet = {
-            "kb_results": search_result.get("results", []),
+        detected = _detect_method(acquisition_method, query, contract_value)
+        packet: dict[str, Any] = {
+            "kb_results": all_results,
             "fetched_documents": fetched_docs,
             "checklists": checklist_content,
-            "detected_method": _detect_method(acquisition_method, query, contract_value),
+            "detected_method": detected,
             "_guidance": (
                 "Use checklists to cross-reference document requirements. "
                 "The PMR checklist is HHS/NIH-specific — items there supplement FAR requirements. "
@@ -4580,20 +4864,25 @@ def _build_kb_service_tools(
                 "Cite KB documents and checklist references in your response."
             ),
         }
+        if compliance_data:
+            packet["compliance_matrix"] = compliance_data
         _emit("research", {
             "kb_results_count": len(packet["kb_results"]),
             "fetched_count": len(fetched_docs),
             "checklists_loaded": list(checklist_content.keys()),
-            "detected_method": packet["detected_method"],
+            "detected_method": detected,
+            "compliance_matrix_included": compliance_data is not None,
         })
         return json.dumps(packet, indent=2, default=str)
 
     return [
         search_far,
-        knowledge_search,
-        knowledge_fetch,
+        # knowledge_search and knowledge_fetch removed from supervisor —
+        # research() calls them internally.  Subagents still get their own
+        # copies via _build_subagent_kb_tools().  Keeping them here confused
+        # the model into doing search-without-fetch (cascade violations).
         web_search_tool,
-        web_fetch_tool,
+        # web_fetch removed — exec_web_search auto-fetches top 3 pages.
         research_tool,
     ], _kb_depth
 
@@ -4606,6 +4895,7 @@ def _build_service_tools(
     package_context: Any = None,
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    kb_depth_ref: dict | None = None,
 ) -> tuple[list, dict]:
     """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session.
 
@@ -4629,6 +4919,7 @@ def _build_service_tools(
     kb_tools, kb_depth = _build_kb_service_tools(
         tenant_id, user_id, session_id, result_queue, loop,
         template_search_done=_tpl_search_done,
+        kb_depth_ref=kb_depth_ref,
     )
     tools.extend(kb_tools)
     # Add progressive disclosure tools
@@ -4650,6 +4941,7 @@ def build_skill_tools(
     session_id: str = "",
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
+    parent_kb_depth: dict | None = None,
 ) -> list:
     """Build @tool-wrapped subagent functions from skill registry.
 
@@ -4716,6 +5008,7 @@ def build_skill_tools(
                 tier=tier,
                 session_id=session_id,
                 extra_tools=extra,
+                parent_kb_depth=parent_kb_depth,
             )
         )
 
@@ -4744,6 +5037,7 @@ def build_skill_tools(
                     user_id=user_id,
                     tier=tier,
                     session_id=session_id,
+                    parent_kb_depth=parent_kb_depth,
                 )
             )
     except Exception as exc:
@@ -4930,7 +5224,10 @@ def _build_supervisor_prompt_body(
         "_fetch_reminder field, you MUST follow it by calling knowledge_fetch on the "
         "listed s3_keys. Answering from summaries alone produces shallow responses "
         "(missing checklists, non-verbatim quotes, wrong procedural details). Minimum: "
-        "2 documents fetched, 5,000+ chars of source text read per query.\n\n"
+        "3 documents fetched, 8,000+ chars of source text read per query. For complex "
+        "questions (protests, appropriations, multi-factor analysis), aim for 5+ documents "
+        "and 15,000+ chars. When knowledge_search returns 10+ results, fetch at least "
+        "the top 4-5 before responding.\n\n"
         "COLLECT BEFORE RESEARCH — Before performing web research for any document, you MUST\n"
         "first collect a minimum set of information from the user. If any item is missing,\n"
         "ASK the user — do NOT assume or invent values.\n\n"
@@ -5213,6 +5510,17 @@ async def sdk_query(
         preload_session_context(tenant_id, user_id, package_id=_pkg_id),
     )
 
+    # Create shared KB depth tracker so subagent document reads
+    # are merged into the supervisor's tracker.
+    kb_depth: dict = {
+        "search_count": 0,
+        "fetch_count": 0,
+        "total_chars_read": 0,
+        "search_result_count": 0,
+        "fetched_keys": set(),
+        "reminder_count": 0,
+    }
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -5220,6 +5528,7 @@ async def sdk_query(
         user_id=user_id,
         workspace_id=resolved_workspace_id,
         session_id=session_id or "",
+        parent_kb_depth=kb_depth,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -5229,6 +5538,7 @@ async def sdk_query(
         session_id=session_id,
         prompt_context=prompt,
         package_context=package_context,
+        kb_depth_ref=kb_depth,
     )
 
     preloaded_ctx = await _preload_task
@@ -5271,7 +5581,7 @@ async def sdk_query(
     _current_model_id, _current_bedrock_model = _get_active_model()
     supervisor = Agent(
         model=_current_bedrock_model,
-        system_prompt=system_prompt,
+        system_prompt=_cacheable_system_prompt(system_prompt),
         tools=skill_tools + service_tools,
         callback_handler=None,
         messages=strands_history or None,
@@ -5319,7 +5629,7 @@ async def sdk_query(
     try:
         # Synchronous call -- Strands handles the agentic loop internally
         result = supervisor(prompt)
-        result_text = str(result)
+        result_text = _append_kb_sources(str(result), kb_depth)
 
         if _root_span is not None:
             try:
@@ -5411,7 +5721,14 @@ async def sdk_query(
         if metrics:
             acc = getattr(metrics, "accumulated_usage", None)
             if acc and isinstance(acc, dict):
-                usage = acc
+                # Normalize camelCase Strands keys to snake_case
+                usage = {
+                    "input_tokens": acc.get("input_tokens") or acc.get("inputTokens", 0),
+                    "output_tokens": acc.get("output_tokens") or acc.get("outputTokens", 0),
+                    "total_tokens": acc.get("total_tokens") or acc.get("totalTokens", 0),
+                    "cache_read_input_tokens": acc.get("cache_read_input_tokens") or acc.get("cacheReadInputTokens", 0),
+                    "cache_creation_input_tokens": acc.get("cache_creation_input_tokens") or acc.get("cacheWriteInputTokens", 0),
+                }
             else:
                 # Fallback: report cycle count and tool call count
                 usage = {
@@ -5540,6 +5857,17 @@ async def sdk_query_streaming(
         preload_session_context(tenant_id, user_id, package_id=_pkg_id),
     )
 
+    # Create shared KB depth tracker so subagent document reads
+    # are merged into the supervisor's tracker.
+    kb_depth: dict = {
+        "search_count": 0,
+        "fetch_count": 0,
+        "total_chars_read": 0,
+        "search_result_count": 0,
+        "fetched_keys": set(),
+        "reminder_count": 0,
+    }
+
     skill_tools = build_skill_tools(
         tier=tier,
         skill_names=skill_names,
@@ -5549,6 +5877,7 @@ async def sdk_query_streaming(
         session_id=session_id or "",
         result_queue=result_queue,
         loop=loop,
+        parent_kb_depth=kb_depth,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -5560,6 +5889,7 @@ async def sdk_query_streaming(
         package_context=package_context,
         result_queue=result_queue,
         loop=loop,
+        kb_depth_ref=kb_depth,
     )
 
     preloaded_ctx = await _preload_task
@@ -5610,7 +5940,7 @@ async def sdk_query_streaming(
     _current_model_id, _current_bedrock_model = _get_active_model()
     supervisor = Agent(
         model=_current_bedrock_model,
-        system_prompt=system_prompt,
+        system_prompt=_cacheable_system_prompt(system_prompt),
         tools=skill_tools + service_tools,
         callback_handler=None,  # stream_async yields events directly
         messages=strands_history or None,
@@ -5633,6 +5963,8 @@ async def sdk_query_streaming(
     tools_called: list[str] = []
     _current_tool_id: str | None = None
     error_holder: list[Exception] = []
+    _stream_cache_read: int = 0
+    _stream_cache_write: int = 0
     agent_result = None
     # TTFT (Time To First Token) timeout: if no meaningful content arrives
     # within this window, abort and retry with the fallback model.
@@ -5759,8 +6091,17 @@ async def sdk_query_streaming(
                 break
             _pending_next = None
 
-            # --- Reasoning / extended thinking + tool input deltas ---
+            # --- Capture per-cycle usage (including cache tokens) from metadata ---
             raw_event = event.get("event", {})
+            if isinstance(raw_event, dict):
+                _meta_usage = raw_event.get("metadata", {}).get("usage")
+                if _meta_usage and isinstance(_meta_usage, dict):
+                    _cache_read = _meta_usage.get("cacheReadInputTokens", 0) or 0
+                    _cache_write = _meta_usage.get("cacheWriteInputTokens", 0) or 0
+                    _stream_cache_read += _cache_read
+                    _stream_cache_write += _cache_write
+
+            # --- Reasoning / extended thinking + tool input deltas ---
             if isinstance(raw_event, dict):
                 delta = raw_event.get("contentBlockDelta", {}).get("delta", {})
                 reasoning_text = delta.get("reasoningContent", {}).get("text", "")
@@ -5997,7 +6338,7 @@ async def sdk_query_streaming(
                 try:
                     fallback_supervisor = Agent(
                         model=_next_bedrock_model,
-                        system_prompt=system_prompt,
+                        system_prompt=_cacheable_system_prompt(system_prompt),
                         tools=skill_tools + service_tools,
                         callback_handler=None,
                         messages=strands_history or None,
@@ -6131,7 +6472,24 @@ async def sdk_query_streaming(
             if metrics:
                 acc = getattr(metrics, "accumulated_usage", None)
                 if acc and isinstance(acc, dict):
-                    usage = acc
+                    # Normalize camelCase Strands keys to snake_case;
+                    # accumulated_usage often drops cache fields, so overlay
+                    # per-cycle totals captured from metadata events.
+                    usage = {
+                        "input_tokens": acc.get("input_tokens") or acc.get("inputTokens", 0),
+                        "output_tokens": acc.get("output_tokens") or acc.get("outputTokens", 0),
+                        "total_tokens": acc.get("total_tokens") or acc.get("totalTokens", 0),
+                        "cache_read_input_tokens": (
+                            acc.get("cache_read_input_tokens")
+                            or acc.get("cacheReadInputTokens")
+                            or _stream_cache_read
+                        ),
+                        "cache_creation_input_tokens": (
+                            acc.get("cache_creation_input_tokens")
+                            or acc.get("cacheWriteInputTokens")
+                            or _stream_cache_write
+                        ),
+                    }
                 else:
                     usage = {
                         "cycle_count": getattr(metrics, "cycle_count", 0),
@@ -6276,6 +6634,17 @@ async def sdk_query_streaming(
         for state_evt in _build_end_of_turn_state(package_context, tenant_id):
             yield state_evt
 
+    # Emit sources_summary so the frontend can show aggregate research stats
+    if kb_depth.get("fetch_count", 0) > 0:
+        yield {
+            "type": "state_update",
+            "state_type": "sources_summary",
+            "search_count": kb_depth["search_count"],
+            "fetch_count": kb_depth["fetch_count"],
+            "total_chars_read": kb_depth["total_chars_read"],
+            "fetched_keys": list(kb_depth.get("fetched_keys", set())),
+        }
+
     if error_holder:
         yield {"type": "error", "error": str(error_holder[0])}
     else:
@@ -6286,6 +6655,8 @@ async def sdk_query_streaming(
                 "I completed the tool steps but did not receive a final answer text. "
                 f"Tools called: {called}. Please retry your request."
             )
+        # Append KB sources the model failed to cite
+        final_text = _append_kb_sources(final_text, kb_depth)
         yield {
             "type": "complete",
             "text": final_text,
@@ -6348,7 +6719,7 @@ async def sdk_query_single_skill(
     _, _active_bedrock_model = _get_active_model()
     agent = Agent(
         model=_active_bedrock_model,
-        system_prompt=tenant_context + skill_content,
+        system_prompt=_cacheable_system_prompt(tenant_context + skill_content),
         callback_handler=None,
         trace_attributes=_build_trace_attrs(
             tenant_id=tenant_id,
@@ -6369,7 +6740,13 @@ async def sdk_query_single_skill(
         if metrics:
             acc = getattr(metrics, "accumulated_usage", None)
             if acc and isinstance(acc, dict):
-                usage = acc
+                usage = {
+                    "input_tokens": acc.get("input_tokens") or acc.get("inputTokens", 0),
+                    "output_tokens": acc.get("output_tokens") or acc.get("outputTokens", 0),
+                    "total_tokens": acc.get("total_tokens") or acc.get("totalTokens", 0),
+                    "cache_read_input_tokens": acc.get("cache_read_input_tokens") or acc.get("cacheReadInputTokens", 0),
+                    "cache_creation_input_tokens": acc.get("cache_creation_input_tokens") or acc.get("cacheWriteInputTokens", 0),
+                }
             else:
                 usage = {"cycle_count": getattr(metrics, "cycle_count", 0)}
     except Exception:

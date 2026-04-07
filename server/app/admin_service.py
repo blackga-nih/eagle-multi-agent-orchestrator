@@ -360,7 +360,8 @@ def get_tool_usage(tenant_id: str, days: int = 30) -> Dict[str, Any]:
 RATE_LIMITS = {
     "free": {"requests_per_hour": 20, "tokens_per_day": 50000},
     "basic": {"requests_per_hour": 100, "tokens_per_day": 500000},
-    "premium": {"requests_per_hour": 500, "tokens_per_day": 2000000},
+    "advanced": {"requests_per_hour": 1000, "tokens_per_day": 50000000},
+    "premium": {"requests_per_hour": 500, "tokens_per_day": 50000000},
     "enterprise": {"requests_per_hour": 2000, "tokens_per_day": 10000000},
 }
 

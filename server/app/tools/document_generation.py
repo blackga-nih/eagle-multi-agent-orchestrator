@@ -136,6 +136,31 @@ def _title_from_context(title: str, doc_type: str, data: dict) -> str:
     return f"{base_label} - {context}"
 
 
+_PROMPT_FRAGMENT_TITLE_RE = re.compile(
+    r"^(.*?)\s*-\s*"
+    r"(?:can you |could you |please |help me |i need to |i want to |i'd like to )*"
+    r"(?:help\s+(?:me\s+)?)?(?:create|generate|draft|write|produce|make|build|prepare)"
+    r"\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_title(title: str, doc_type: str) -> str:
+    """Strip raw user prompt fragments from document titles.
+
+    Catches titles like "Statement of Work - can you help me create an sow"
+    and returns just "Statement of Work".  Leaves meaningful titles like
+    "Statement of Work - Cloud Hosting Services" untouched.
+    """
+    if not title:
+        return title
+    m = _PROMPT_FRAGMENT_TITLE_RE.match(title)
+    if m:
+        base = m.group(1).strip()
+        return base or _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ").title())
+    return title
+
+
 def exec_create_document(
     params: dict[str, Any], tenant_id: str, session_id: str | None = None
 ) -> dict:
@@ -194,6 +219,7 @@ def exec_create_document(
     # (commit b654a49), the LLM generated titles using the full conversation
     # context.  This restores that behaviour for the fast-path.
     title = _title_from_context(title, doc_type, data)
+    title = _sanitize_title(title, doc_type)
     if not title:
         title = _DOC_TYPE_LABELS.get(doc_type, "") or doc_type.replace("_", " ").title() or "Acquisition Document"
 

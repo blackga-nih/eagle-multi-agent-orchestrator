@@ -1,10 +1,11 @@
 ---
 name: baseline-questions
 description: >
-  Run the EAGLE baseline evaluation suite — sends 6 standardized acquisition
-  questions to the running EAGLE server, captures responses with full metadata,
-  writes results to the Use Case List Excel workbook, then judges and scores
-  against the previous version. Use when someone says "run baseline", "baseline
+  Run the EAGLE baseline evaluation suite — sends all baseline acquisition
+  questions (read dynamically from Excel) to the running EAGLE server, captures
+  responses with full metadata, writes results to the Use Case List Excel
+  workbook, judges and scores against the previous version, and generates an
+  HTML comparison report. Use when someone says "run baseline", "baseline
   questions", "baseline eval", "run the baseline questions", "re-run baseline",
   "test against baseline", "score baseline", or references comparing EAGLE
   versions on the standard question set.
@@ -13,9 +14,9 @@ model: opus
 
 # Baseline Questions — EAGLE Version Evaluation
 
-Run 6 standardized federal acquisition questions against the live EAGLE server,
-capture responses with metadata, write to Excel, judge against the prior version,
-and produce a scored comparison report.
+Run all baseline federal acquisition questions (read dynamically from Excel column D)
+against the live EAGLE server, capture responses with metadata, write to Excel, judge
+against the previous version, and produce a scored HTML comparison report.
 
 ## Arguments
 
@@ -27,8 +28,15 @@ and produce a scored comparison report.
 - `--run-only` — run questions and save responses, skip judging
 - `--judge-only` — skip running, judge the most recent responses column
 - `--tenant=ID` — tenant for API calls (default: `dev-tenant`)
+- `--questions=SPEC` — run specific questions only (e.g., `7`, `1,3,5`, `7-10`, `Q8,Q12-14`). Omit to run all.
 
-Parse `$ARGUMENTS` to extract VERSION_LABEL (first word matching `v\d+`) and flags.
+Parse `$ARGUMENTS` to extract VERSION_LABEL (first word matching `v\d+`), flags, and
+question specs. Examples:
+- `/baseline-questions v13` — run all questions
+- `/baseline-questions v13 --questions=7` — run Q7 only
+- `/baseline-questions v13 --questions=7,8` — run Q7 and Q8
+- `/baseline-questions v13 --questions=7-10` — run Q7 through Q10
+- `/baseline-questions v13 --run-only --questions=8,12-14` — run Q8 and Q12-Q14, skip judging
 
 ---
 
@@ -62,11 +70,12 @@ Col N+2: "EAGLE {version} Completeness (0-5)"
 Col N+3: "EAGLE {version} Sources (0-5)"
 Col N+4: "EAGLE {version} Actionability (0-5)"
 Col N+5: "EAGLE {version} Total (0-20)"
-Col N+6: "{version} vs {prev_version} Comparative Judgment"
+Col N+6: "{version} vs RO + {prev_version} Comparative Judgment"
 ```
 
 Scan row 1 to find the first empty column. Also identify the previous version's
-response column and score columns for comparison during judging.
+response column and score columns for comparison during judging. **Always read
+column E (RO Response) — this is the reference standard for all judging.**
 
 ---
 
@@ -80,7 +89,8 @@ cd server && python ../.claude/skills/baseline-questions/scripts/run_baseline.py
   --version {VERSION_LABEL} \
   --server {SERVER_URL} \
   --xlsx "{XLSX_PATH}" \
-  --tenant {TENANT_ID}
+  --tenant {TENANT_ID} \
+  [--questions {QUESTION_SPEC}]
 ```
 
 The script:
@@ -115,36 +125,45 @@ If `--run-only` was passed, stop here. Otherwise proceed to Phase 3.
 
 ## Phase 3: Judge and Score
 
-This phase requires human-quality judgment. Read BOTH the new responses AND the
-previous version's responses from the Excel file, then score each on 4 dimensions.
+This phase requires human-quality judgment. Read the new EAGLE responses, the
+**RO (Research Optimizer) reference responses from column E**, and the previous
+version's responses, then score each on 4 dimensions.
 
-### 3a. Read Both Versions
+### 3a. Read All Versions
 
-Read the raw JSON results file for the new version. Also read the previous version's
-responses from the Excel (the column immediately before the scoring columns for the
-prior version).
+Read the raw JSON results file for the new version — it includes both the EAGLE
+response and the RO reference response for each question. Also read the previous
+version's responses from the Excel (the column immediately before the scoring
+columns for the prior version).
+
+**Column E (RO Response) is the gold-standard reference.** These are the responses
+from the Research Optimizer — the predecessor system. Every EAGLE response should be
+compared against the RO response to assess whether EAGLE matches or exceeds it in
+accuracy, completeness, sources, and actionability.
 
 ### 3b. Score Each Question
 
-For each question (Q1-Q6), evaluate the new response on 4 dimensions (0-5 each):
+For each question (Q1-Q6), evaluate the new EAGLE response on 4 dimensions (0-5 each),
+**comparing against the RO reference response in column E**:
 
 | Dimension | What to assess |
 |-----------|---------------|
-| **Accuracy** | Are the facts, citations, dollar amounts, FAR references correct? Deduct for wrong FAR section numbers, incorrect thresholds, fabricated case citations |
-| **Completeness** | Does it cover all aspects of the question? Are there missing exceptions, missing procedural steps, or incomplete analysis? |
-| **Sources** | Does it cite primary sources (KB files, FAR sections, case law)? Are citations specific (file paths, section numbers) vs vague? Did it fetch full documents or answer from summaries? |
-| **Actionability** | Can a CO act on this response? Does it include practical next steps, decision tables, checklists, or worked examples? |
+| **Accuracy** | Are the facts, citations, dollar amounts, FAR references correct? Compare against the RO response — does EAGLE match the RO's factual claims? Deduct for wrong FAR section numbers, incorrect thresholds, fabricated case citations |
+| **Completeness** | Does it cover all aspects of the question? Compare against the RO response — does EAGLE cover the same topics? Are there missing exceptions, missing procedural steps, or incomplete analysis that the RO covered? |
+| **Sources** | Does it cite primary sources (KB files, FAR sections, case law)? Compare against the RO's citations — does EAGLE cite the same or better sources? Are citations specific (file paths, section numbers) vs vague? Did it fetch full documents or answer from summaries? |
+| **Actionability** | Can a CO act on this response? Does it include practical next steps, decision tables, checklists, or worked examples? Compare against the RO — is EAGLE's output as actionable? |
 
 ### 3c. Write Comparative Judgment
 
 For each question, write a comparative judgment that includes:
 
-1. **Winner declaration** — first line: `v{N} > v{N-1} (improved)` or `v{N} = v{N-1} (no change)` or `v{N} < v{N-1} (regression)`
-2. **Key improvements or regressions** — what specifically changed
-3. **Tools comparison** — `v{N-1}=tools_list | v{N}=tools_list`
-4. **Cascade effect** — did the KB cascade enforcement produce different behavior?
-5. **Source gap status** — if source gaps were identified for the prior version, are they now closed?
-6. **Verdict** — one-line summary
+1. **Winner declaration** — first line: `EAGLE {v} > RO (improved)` or `EAGLE {v} = RO (comparable)` or `EAGLE {v} < RO (regression)`
+2. **RO comparison** — what did the RO response cover that EAGLE did/didn't? What did EAGLE add beyond the RO?
+3. **Key improvements or regressions vs prior EAGLE version** — what specifically changed from vN-1
+4. **Tools comparison** — `v{N-1}=tools_list | v{N}=tools_list`
+5. **Cascade effect** — did the KB cascade enforcement produce different behavior?
+6. **Source gap status** — which sources from the RO response are missing in EAGLE? Which are now covered?
+7. **Verdict** — one-line summary
 
 ### 3d. Write Scores to Excel
 
@@ -234,17 +253,48 @@ target of cascade enforcement). Q6 tests general reasoning with no tools.
 
 ---
 
+## Phase 4: Generate HTML Report
+
+**ALWAYS generate the HTML report after scoring.** Run the report generator:
+
+```bash
+cd server && python ../.claude/skills/baseline-questions/scripts/generate_report.py \
+  --version {VERSION_LABEL} \
+  --scores scripts/baseline_{version}_scores.json
+```
+
+The report includes:
+- Summary bar (total score, wins/ties/losses, docs cited)
+- Per-question score strip
+- KB coverage comparison (shared/EAGLE-only/RO-only documents)
+- Per-question cards with: tools, doc pills, score grid, verdict, side-by-side responses
+- System prompt comparison (EAGLE vs RO supervisor)
+
+Output: `scripts/baseline_{version}_report.html`
+
+---
+
 ## Output Files
 
 | File | Location | Contents |
 |------|----------|---------|
 | Raw JSON | `scripts/baseline_{version}_results.json` | Full response data per question |
+| Scores JSON | `scripts/baseline_{version}_scores.json` | Per-question scores and verdicts |
+| HTML Report | `scripts/baseline_{version}_report.html` | Visual comparison report |
 | Excel responses | `Use Case List.xlsx` col N | Response text |
 | Excel scores | `Use Case List.xlsx` cols N+1 to N+6 | Scores + judgment |
 
 ---
 
 ## Interpreting Results
+
+**Comparing against the RO (Research Optimizer) reference in column E:**
+- The RO response is the gold standard from the predecessor system
+- Every EAGLE response should **match or exceed** the RO in accuracy and completeness
+- If an EAGLE response misses facts, citations, or procedural steps that the RO covered,
+  note these as "source gaps" in the comparative judgment
+- If EAGLE adds content beyond the RO (e.g., decision tables, additional FAR citations,
+  worked examples), note these as improvements
 
 **What to look for in the cascade enforcement:**
 - Q3 and Q4 are the primary canaries — in v4 these were answered from summaries.

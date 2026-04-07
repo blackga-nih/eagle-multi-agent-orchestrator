@@ -12,9 +12,11 @@ import {
   ChevronRight,
   RefreshCw,
   Trash2,
+  BookOpenText,
 } from 'lucide-react';
 import { AuditLogEntry } from '@/types/stream';
 import { DocumentInfo } from '@/types/chat';
+import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 import AgentLogs, { buildDisplayEntries } from './agent-logs';
 import { ChecklistTabContent, docLabel } from './checklist-panel';
 import DocumentViewerModal from './document-viewer-modal';
@@ -38,9 +40,10 @@ interface ActivityPanelProps {
   getToken: () => Promise<string | null>;
   onRefreshPackage?: () => void;
   isRefreshingPackage?: boolean;
+  stateChangesByMsg?: Record<string, StateChangeEntry[]>;
 }
 
-type TabId = 'package' | 'documents' | 'notifications' | 'logs';
+type TabId = 'package' | 'documents' | 'sources' | 'notifications' | 'logs';
 
 interface TabDef {
   id: TabId;
@@ -51,6 +54,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'package', label: 'Package', icon: ClipboardCheck },
   { id: 'documents', label: 'Documents', icon: FileText },
+  { id: 'sources', label: 'Sources', icon: BookOpenText },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'logs', label: 'Agent Logs', icon: Terminal },
 ];
@@ -564,6 +568,141 @@ function NotificationsTab({ documents }: { documents: Record<string, DocumentInf
 }
 
 // ---------------------------------------------------------------------------
+// Sources Tab — surfaces all documents the system read
+// ---------------------------------------------------------------------------
+
+const SOURCE_DOC_TYPE_ICONS: Record<string, string> = {
+  template: '\u{1F4DD}',    // memo
+  checklist: '\u{2705}',    // checkmark
+  regulation: '\u{2696}',   // scales
+  guidance: '\u{1F4D8}',    // blue book
+  policy: '\u{1F3DB}',      // classical building
+  document: '\u{1F4C4}',    // page
+  memo: '\u{1F4E8}',        // envelope
+  reference: '\u{1F4DA}',   // books
+};
+
+const SOURCE_DOC_TYPE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
+  template: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Template' },
+  checklist: { bg: 'bg-amber-100', text: 'text-amber-800', label: 'Checklist' },
+  regulation: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'FAR/DFARS' },
+  guidance: { bg: 'bg-green-100', text: 'text-green-800', label: 'Guidance' },
+  policy: { bg: 'bg-teal-100', text: 'text-teal-800', label: 'Policy' },
+  document: { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Document' },
+  memo: { bg: 'bg-indigo-100', text: 'text-indigo-800', label: 'Memo' },
+  reference: { bg: 'bg-slate-100', text: 'text-slate-800', label: 'Reference' },
+};
+
+const SOURCE_GROUP_ORDER = ['regulation', 'checklist', 'template', 'guidance', 'policy', 'document', 'memo', 'reference'];
+
+interface SourcesTabContentProps {
+  stateChangesByMsg: Record<string, StateChangeEntry[]>;
+}
+
+function SourcesTabContent({ stateChangesByMsg }: SourcesTabContentProps) {
+  const sources = useMemo(() => {
+    const seen = new Set<string>();
+    const result: StateChangeEntry[] = [];
+    for (const entries of Object.values(stateChangesByMsg)) {
+      for (const entry of entries) {
+        if (entry.stateType !== 'sources_read') continue;
+        const key = entry.sourceS3Key || entry.sourceTitle || '';
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+        result.push(entry);
+      }
+    }
+    return result;
+  }, [stateChangesByMsg]);
+
+  // Summary entry (if present)
+  const summary = useMemo(() => {
+    for (const entries of Object.values(stateChangesByMsg)) {
+      for (const entry of entries) {
+        if (entry.stateType === 'sources_summary') return entry;
+      }
+    }
+    return null;
+  }, [stateChangesByMsg]);
+
+  // Group by docType
+  const grouped = useMemo(() => {
+    const groups: Record<string, StateChangeEntry[]> = {};
+    for (const src of sources) {
+      const dt = src.sourceDocType || 'document';
+      if (!groups[dt]) groups[dt] = [];
+      groups[dt].push(src);
+    }
+    return groups;
+  }, [sources]);
+
+  const totalChars = summary?.totalCharsRead ?? sources.reduce((sum, s) => sum + (s.sourceCharsRead ?? 0), 0);
+
+  if (sources.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+        <BookOpenText className="w-8 h-8 mb-2 opacity-50" />
+        <p className="text-xs">No documents read yet</p>
+        <p className="text-[10px] mt-1">Sources will appear here as the agent reads documents</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary header */}
+      <div className="flex items-center justify-between px-1">
+        <span className="text-xs font-medium text-[#003366]">
+          {sources.length} source{sources.length !== 1 ? 's' : ''} read
+        </span>
+        <span className="text-[10px] text-gray-400">
+          {totalChars.toLocaleString()} chars total
+        </span>
+      </div>
+
+      {/* Grouped source list */}
+      {SOURCE_GROUP_ORDER.filter((dt) => grouped[dt]).map((dt) => {
+        const style = SOURCE_DOC_TYPE_STYLES[dt] ?? SOURCE_DOC_TYPE_STYLES.document;
+        const items = grouped[dt];
+        return (
+          <div key={dt}>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-sm">{SOURCE_DOC_TYPE_ICONS[dt] ?? '\u{1F4C4}'}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${style.bg} ${style.text}`}>
+                {style.label}
+              </span>
+              <span className="text-[10px] text-gray-400">({items.length})</span>
+            </div>
+            <ul className="space-y-1 ml-1">
+              {items.map((src, i) => (
+                <li
+                  key={src.sourceS3Key || i}
+                  className="flex items-start gap-2 text-xs px-2 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-700 font-medium truncate">{src.sourceTitle || 'Untitled'}</p>
+                    {src.sourceS3Key && (
+                      <p className="font-mono text-[10px] text-gray-400 truncate">
+                        {src.sourceS3Key.includes('/') ? src.sourceS3Key.split('/').pop() : src.sourceS3Key}
+                      </p>
+                    )}
+                  </div>
+                  {src.sourceCharsRead != null && src.sourceCharsRead > 0 && (
+                    <span className="text-[10px] text-gray-400 whitespace-nowrap shrink-0">
+                      {src.sourceCharsRead.toLocaleString()} chars
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Panel
 // ---------------------------------------------------------------------------
 
@@ -579,6 +718,7 @@ export default function ActivityPanel({
   getToken,
   onRefreshPackage,
   isRefreshingPackage,
+  stateChangesByMsg,
 }: ActivityPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('package');
   const [viewerDocType, setViewerDocType] = useState<string | null>(null);
@@ -588,6 +728,20 @@ export default function ActivityPanel({
   const notifCount = docCount;
   const packageRequired = packageState?.checklist?.required?.length ?? 0;
   const packageCompleted = packageState?.checklist?.completed?.length ?? 0;
+
+  // Count unique sources for badge
+  const sourcesCount = useMemo(() => {
+    if (!stateChangesByMsg) return 0;
+    const seen = new Set<string>();
+    for (const entries of Object.values(stateChangesByMsg)) {
+      for (const entry of entries) {
+        if (entry.stateType !== 'sources_read') continue;
+        const key = entry.sourceS3Key || entry.sourceTitle || '';
+        if (key) seen.add(key);
+      }
+    }
+    return seen.size;
+  }, [stateChangesByMsg]);
 
   // Collapsed strip
   if (!isOpen) {
@@ -611,13 +765,15 @@ export default function ActivityPanel({
           const badge =
             tab.id === 'package' && packageRequired > 0
               ? `${packageCompleted}/${packageRequired}`
-              : tab.id === 'logs' && logDisplayCount > 0
-                ? logDisplayCount
-                : tab.id === 'documents' && docCount > 0
-                  ? docCount
-                  : tab.id === 'notifications' && notifCount > 0
-                    ? notifCount
-                    : 0;
+              : tab.id === 'sources' && sourcesCount > 0
+                ? sourcesCount
+                : tab.id === 'logs' && logDisplayCount > 0
+                  ? logDisplayCount
+                  : tab.id === 'documents' && docCount > 0
+                    ? docCount
+                    : tab.id === 'notifications' && notifCount > 0
+                      ? notifCount
+                      : 0;
 
           return (
             <button
@@ -707,6 +863,9 @@ export default function ActivityPanel({
           </>
         )}
         {activeTab === 'documents' && <DocumentsTab documents={documents} sessionId={sessionId} />}
+        {activeTab === 'sources' && stateChangesByMsg && (
+          <SourcesTabContent stateChangesByMsg={stateChangesByMsg} />
+        )}
         {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
         {activeTab === 'logs' && <AgentLogs logs={logs} />}
       </div>
