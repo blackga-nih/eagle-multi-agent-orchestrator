@@ -143,6 +143,7 @@ client/client/
 # Office documents (stored in SharePoint, not repo)
 *.docx
 *.xlsx
+!Use Case List.xlsx
 
 # One-off reports at repo root
 20260320-refactor-0319-ah-report.md
@@ -154,6 +155,40 @@ EAGLE-DEMO-SCRIPT*.bak
 
 # One-off scratch docs at root
 micro-purchase-RO.md
+triage-plan-dev.md
+triage-report-dev.md
+
+# Plan docs at root (local scratch)
+EAGLE-PLUGIN-PLAN.md
+PI_AGENT_MIRROR_DEV_ENV_PLAN.md
+STRANDS_SKILLS_IMPLEMENTATION_PLAN.md
+
+# One-off scripts at root
+collect_eagle_data.py
+generate_dashboard.py
+
+# Generated HTML reports at root
+*.html
+!client/**/*.html
+!server/**/*.html
+!docs/**/*.html
+!e2e-judge-workspace/**/*.html
+
+# MCP config (machine-specific)
+.mcp.json
+
+# Baseline run artifacts
+scripts/baseline_*.json
+scripts/baseline_*.html
+scripts/write_v*_scores.py
+scripts/score_v*_baseline.py
+scripts/v*_responses_preview.txt
+scripts/prompt_cache_test_results.json
+scripts/eagle_tool_decision_tree.html
+server/scripts/
+
+# Claude specs (local planning)
+.claude/specs/
 
 # Separate plugin projects (own repos)
 tac-experts-plugin/
