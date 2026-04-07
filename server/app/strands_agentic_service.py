@@ -4752,11 +4752,14 @@ def _build_kb_service_tools(
         # 1c. Path-based search (RO strategy) — matches query terms against
         # S3 key paths/filenames. Catches docs that metadata AI ranking misses
         # because their file names contain the search terms directly.
+        # Keep path results separate so we can guarantee top 4 get fetched.
+        path_only_results: list[dict] = []
         if query:
             path_result = exec_path_search(query, tenant_id, limit=15)
             for r in path_result.get("results", []):
                 if r.get("s3_key") and r["s3_key"] not in seen_keys:
                     all_results.append(r)
+                    path_only_results.append(r)
                     seen_keys.add(r["s3_key"])
 
         # 1d. Compliance matrix query — adds threshold context, required docs,
@@ -4784,7 +4787,11 @@ def _build_kb_service_tools(
             except Exception:
                 logger.debug("research: compliance_matrix query failed, continuing")
 
-        # 2. Auto-fetch top 8 KB results (catches more from merged search pool)
+        # 2. Auto-fetch top 8 AI-ranked + top 4 path-search results
+        # AI-ranked results (Layers 1-2) get 8 fetch slots as before.
+        # Path-search results (Layer 3 / RO strategy) get 4 guaranteed
+        # fetch slots for any docs not already fetched by AI ranking.
+        # This closes the gap where RO finds docs EAGLE misses.
         fetched_docs = []
         for r in all_results[:8]:
             s3_key = r.get("s3_key")
@@ -4799,6 +4806,25 @@ def _build_kb_service_tools(
                         "s3_key": s3_key,
                         "content": content.get("content", "")[:15000],
                     })
+
+        # 2b. Guaranteed path-search fetch — top 4 not already fetched above
+        _path_fetched = 0
+        for r in path_only_results:
+            if _path_fetched >= 4:
+                break
+            s3_key = r.get("s3_key")
+            if s3_key and s3_key not in _kb_depth["fetched_keys"]:
+                content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id)
+                if "error" not in content:
+                    _kb_depth["fetch_count"] += 1
+                    _kb_depth["total_chars_read"] += content.get("content_length", 0)
+                    _kb_depth["fetched_keys"].add(s3_key)
+                    fetched_docs.append({
+                        "title": r.get("title", ""),
+                        "s3_key": s3_key,
+                        "content": content.get("content", "")[:15000],
+                    })
+                    _path_fetched += 1
 
         # 3. Dynamic checklist search (isolated query — separate from general KB search)
         checklist_content: dict[str, str] = {}

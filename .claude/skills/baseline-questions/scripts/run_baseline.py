@@ -85,7 +85,7 @@ async def run_question(
         print(f"Tools: {tools}")
         print(f"Tokens: in={usage.get('input_tokens', 0):,} out={usage.get('output_tokens', 0):,}")
         print(f"Response length: {len(response_text):,} chars")
-        print(f"\nFirst 500 chars:\n{response_text[:500]}")
+        print(f"\nFull response:\n{response_text}")
 
         return {
             "row": row,
@@ -114,12 +114,30 @@ async def run_question(
         }
 
 
+def _parse_question_spec(spec: str) -> list[int]:
+    """Parse a question spec like '1,3,5' or '7-10' or '2,8-12' into Q numbers."""
+    nums: list[int] = []
+    for part in spec.split(","):
+        part = part.strip().lstrip("qQ")
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            nums.extend(range(int(lo), int(hi) + 1))
+        else:
+            nums.append(int(part))
+    return sorted(set(nums))
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Run EAGLE baseline evaluation")
     parser.add_argument("--version", required=True, help="Version label (e.g., v5)")
     parser.add_argument("--server", default="http://localhost:8000", help="Server URL")
     parser.add_argument("--xlsx", default=None, help="Excel workbook path")
     parser.add_argument("--tenant", default="dev-tenant", help="Tenant ID")
+    parser.add_argument(
+        "--questions", default=None,
+        help="Run specific questions only. Comma-separated Q numbers (e.g., 1,3,5) "
+             "or a range (e.g., 7-10). Omit to run all.",
+    )
     args = parser.parse_args()
 
     # Default xlsx path: repo root / Use Case List.xlsx
@@ -134,10 +152,30 @@ async def main():
     version = args.version.upper() if not args.version[0].isupper() else args.version
 
     # ── Load questions from Excel ──
-    QUESTIONS = load_questions_from_excel(xlsx_path)
-    if not QUESTIONS:
+    ALL_QUESTIONS = load_questions_from_excel(xlsx_path)
+    if not ALL_QUESTIONS:
         print("ERROR: No questions found in column D of 'Baseline questions' sheet")
         sys.exit(1)
+
+    # ── Filter to specific questions if --questions flag provided ──
+    if args.questions:
+        requested = _parse_question_spec(args.questions)
+        # Map Q numbers to Excel rows (Q1=row2, Q2=row3, etc.)
+        all_by_qnum = {row - 1: row for row in ALL_QUESTIONS}
+        QUESTIONS = {}
+        for qn in requested:
+            if qn in all_by_qnum:
+                row = all_by_qnum[qn]
+                QUESTIONS[row] = ALL_QUESTIONS[row]
+            else:
+                print(f"WARNING: Q{qn} not found in Excel (available: Q{min(all_by_qnum)}-Q{max(all_by_qnum)})")
+        if not QUESTIONS:
+            print("ERROR: None of the requested questions exist")
+            sys.exit(1)
+        print(f"Running {len(QUESTIONS)} of {len(ALL_QUESTIONS)} questions: "
+              f"Q{', Q'.join(str(r-1) for r in sorted(QUESTIONS))}")
+    else:
+        QUESTIONS = ALL_QUESTIONS
 
     print(f"EAGLE {version} Baseline Evaluation")
     print(f"Server: {args.server}")

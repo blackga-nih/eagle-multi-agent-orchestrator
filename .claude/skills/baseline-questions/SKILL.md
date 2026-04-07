@@ -28,8 +28,15 @@ against the previous version, and produce a scored HTML comparison report.
 - `--run-only` — run questions and save responses, skip judging
 - `--judge-only` — skip running, judge the most recent responses column
 - `--tenant=ID` — tenant for API calls (default: `dev-tenant`)
+- `--questions=SPEC` — run specific questions only (e.g., `7`, `1,3,5`, `7-10`, `Q8,Q12-14`). Omit to run all.
 
-Parse `$ARGUMENTS` to extract VERSION_LABEL (first word matching `v\d+`) and flags.
+Parse `$ARGUMENTS` to extract VERSION_LABEL (first word matching `v\d+`), flags, and
+question specs. Examples:
+- `/baseline-questions v13` — run all questions
+- `/baseline-questions v13 --questions=7` — run Q7 only
+- `/baseline-questions v13 --questions=7,8` — run Q7 and Q8
+- `/baseline-questions v13 --questions=7-10` — run Q7 through Q10
+- `/baseline-questions v13 --run-only --questions=8,12-14` — run Q8 and Q12-Q14, skip judging
 
 ---
 
@@ -82,7 +89,8 @@ cd server && python ../.claude/skills/baseline-questions/scripts/run_baseline.py
   --version {VERSION_LABEL} \
   --server {SERVER_URL} \
   --xlsx "{XLSX_PATH}" \
-  --tenant {TENANT_ID}
+  --tenant {TENANT_ID} \
+  [--questions {QUESTION_SPEC}]
 ```
 
 The script:
