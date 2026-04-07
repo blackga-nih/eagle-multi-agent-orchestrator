@@ -116,6 +116,9 @@ export default function FeedbackModal() {
       try {
         token = await getToken();
       } catch {
+        // explicit error path
+      }
+      if (!token) {
         setError('Session expired. Please sign in again to submit feedback.');
         setSubmitting(false);
         return;
@@ -166,7 +169,8 @@ export default function FeedbackModal() {
         if (res.status === 401) {
           throw new Error('auth');
         }
-        throw new Error('Submit failed');
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Submit failed (${res.status})`);
       }
 
       setSuccess(true);
@@ -181,6 +185,8 @@ export default function FeedbackModal() {
           msg = 'Session expired. Please sign in again.';
         } else if (err.name === 'TimeoutError') {
           msg = 'Request timed out. Please try again.';
+        } else if (err.message !== 'Submit failed') {
+          msg = err.message;
         }
       }
       setError(msg);
