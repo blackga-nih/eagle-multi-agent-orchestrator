@@ -218,8 +218,21 @@ def delete_session(
 ) -> bool:
     """
     Delete a session and its messages.
+
+    Also detaches any acquisition packages that reference this session so
+    they are not left with orphaned session_id pointers.
     """
     try:
+        # Detach packages before deleting the session
+        from .package_store import detach_session_from_packages
+
+        detached = detach_session_from_packages(tenant_id, session_id)
+        if detached:
+            logger.info(
+                "Detached %d package(s) from session %s before deletion",
+                detached, session_id,
+            )
+
         table = get_table()
 
         # Delete session record

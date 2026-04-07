@@ -558,6 +558,51 @@ def update_package(tenant_id: str, package_id: str, updates: dict) -> Optional[d
     return _serialize(response["Attributes"])
 
 
+def detach_session_from_packages(tenant_id: str, session_id: str) -> int:
+    """Null out session_id on all packages linked to the given session.
+
+    Called before a session is deleted to prevent orphaned references.
+    Returns the count of packages that were detached.
+    """
+    table = get_table()
+    detached = 0
+
+    try:
+        response = table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=Key("GSI1PK").eq(f"TENANT#{tenant_id}")
+            & Key("GSI1SK").begins_with("PACKAGE#"),
+            FilterExpression=Attr("session_id").eq(session_id),
+            ProjectionExpression="PK, SK, package_id",
+        )
+    except (ClientError, BotoCoreError):
+        logger.exception(
+            "detach_session_from_packages: query failed (tenant=%s, session=%s)",
+            tenant_id, session_id,
+        )
+        return 0
+
+    for item in response.get("Items", []):
+        try:
+            table.update_item(
+                Key={"PK": item["PK"], "SK": item["SK"]},
+                UpdateExpression="REMOVE session_id SET updated_at = :now",
+                ExpressionAttributeValues={":now": now_iso()},
+            )
+            detached += 1
+            logger.info(
+                "Detached package %s from deleted session %s",
+                item.get("package_id"), session_id,
+            )
+        except (ClientError, BotoCoreError):
+            logger.exception(
+                "detach_session_from_packages: update failed for package %s",
+                item.get("package_id"),
+            )
+
+    return detached
+
+
 def list_packages(
     tenant_id: str,
     status: Optional[str] = None,

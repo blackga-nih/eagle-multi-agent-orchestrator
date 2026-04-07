@@ -331,6 +331,13 @@ export function useSessionPersistence(): UseSessionPersistenceReturn {
         if (sessionId === currentSessionId) {
           createNewSession();
         }
+
+        // Delete from backend (also detaches linked packages) — fire-and-forget
+        fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+          method: 'DELETE',
+        }).catch((err) =>
+          console.error('[use-session-persistence] deleteSession backend sync error:', err),
+        );
       } catch (error) {
         console.error('Error deleting session:', error);
       }

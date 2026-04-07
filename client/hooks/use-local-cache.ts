@@ -496,6 +496,13 @@ export function useLocalCache(userId: string, tenantId: string): UseLocalCacheRe
           createNewSession();
         }
 
+        // Delete from backend (also detaches linked packages) — fire-and-forget
+        fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+          method: 'DELETE',
+        }).catch((err) =>
+          console.error('[use-local-cache] deleteSession backend sync error:', err),
+        );
+
         // Also delete from IDB — fire-and-forget
         void (async () => {
           const db = dbRef.current;
