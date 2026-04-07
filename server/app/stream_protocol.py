@@ -162,11 +162,14 @@ class MultiAgentStreamWriter:
         )
         await queue.put(event.to_sse())
 
-    async def write_tool_result(self, queue, tool_name: str, result: Any):
+    async def write_tool_result(self, queue, tool_name: str, result: Any, tool_use_id: str = ""):
         """Emit a TOOL_RESULT event with the output of a tool invocation."""
+        payload: dict[str, Any] = {"name": tool_name, "result": result}
+        if tool_use_id:
+            payload["tool_use_id"] = tool_use_id
         event = self._create_event(
             StreamEventType.TOOL_RESULT,
-            tool_result={"name": tool_name, "result": result},
+            tool_result=payload,
         )
         await queue.put(event.to_sse())
 

@@ -43,6 +43,7 @@ export interface ToolUse {
 export interface ToolResult {
   name: string;
   result: any;
+  tool_use_id?: string;
 }
 
 export interface ElicitationField {

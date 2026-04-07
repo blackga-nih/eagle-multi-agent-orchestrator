@@ -153,6 +153,7 @@ async def stream_generator(
     # Tool timing: track start times when tool_use arrives, compute duration on tool_result
     _tool_start_times: dict[str, list[float]] = {}  # tool_name → FIFO of perf_counter
     _tool_name_to_ids: dict[str, list[str]] = {}  # tool_name → FIFO of tool_use_ids
+    _tool_name_to_result_ids: dict[str, list[str]] = {}  # tool_name → FIFO for tool_result matching
     _tool_timings: list[dict] = []  # collected {tool_name, duration_ms}
     _tool_failures: list[dict] = []  # collected {tool_name, error_message, duration_ms}
 
@@ -255,6 +256,7 @@ async def stream_generator(
                 # Remember id so tool_input updates can reference it (FIFO per name)
                 if tool_name and tool_use_id:
                     _tool_name_to_ids.setdefault(tool_name, []).append(tool_use_id)
+                    _tool_name_to_result_ids.setdefault(tool_name, []).append(tool_use_id)
                 await writer.write_tool_use(
                     sse_queue,
                     tool_name,
@@ -321,7 +323,10 @@ async def stream_generator(
                             "duration_ms": duration_ms,
                         }
                     )
-                await writer.write_tool_result(sse_queue, tr_name, result_data)
+                # Look up the tool_use_id from our FIFO for precise frontend matching
+                result_id_queue = _tool_name_to_result_ids.get(tr_name, [])
+                tr_tool_use_id = result_id_queue.pop(0) if result_id_queue else ""
+                await writer.write_tool_result(sse_queue, tr_name, result_data, tool_use_id=tr_tool_use_id)
                 yield await sse_queue.get()
 
             elif chunk_type == "state_update":

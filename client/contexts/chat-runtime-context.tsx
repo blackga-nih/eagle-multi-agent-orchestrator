@@ -97,6 +97,7 @@ export type ChatRuntimeAction =
       requestId: string;
       msgId: string;
       toolName: string;
+      toolUseId?: string;
       result: unknown;
     }
   | {
@@ -141,6 +142,30 @@ export type ChatRuntimeAction =
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Force any non-terminal tool call to the given terminal status.
+ *  Prevents "Writing..." indicators from persisting after stream ends. */
+function sweepStuckTools(
+  toolCallsByMsg: ToolCallsByMessageId,
+  terminalStatus: 'done' | 'error',
+): ToolCallsByMessageId {
+  let changed = false;
+  const swept: ToolCallsByMessageId = {};
+  for (const [msgId, calls] of Object.entries(toolCallsByMsg)) {
+    const hasStuck = calls.some((tc) => tc.status !== 'done' && tc.status !== 'error');
+    if (hasStuck) {
+      changed = true;
+      swept[msgId] = calls.map((tc) =>
+        tc.status !== 'done' && tc.status !== 'error'
+          ? { ...tc, status: terminalStatus, streamingInput: undefined }
+          : tc,
+      );
+    } else {
+      swept[msgId] = calls;
+    }
+  }
+  return changed ? swept : toolCallsByMsg;
+}
 
 function dedupeDocuments(docs: DocumentInfo[]): DocumentInfo[] {
   const seen = new Set<string>();
@@ -234,13 +259,20 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
 
     case 'generation/toolResult': {
       const calls = session.toolCallsByMsg[action.msgId] ?? [];
-      const idx = calls.findIndex((tc) => tc.toolName === action.toolName && tc.status !== 'done');
+      // Prefer exact match by toolUseId, fall back to name-based matching
+      let idx = action.toolUseId
+        ? calls.findIndex((tc) => tc.toolUseId === action.toolUseId)
+        : -1;
+      if (idx === -1) {
+        idx = calls.findIndex((tc) => tc.toolName === action.toolName && tc.status !== 'done');
+      }
       if (idx === -1) return state;
       const updated = calls.slice();
       updated[idx] = {
         ...updated[idx],
         status: 'done',
         result: action.result as TrackedToolCall['result'],
+        streamingInput: undefined,
       };
       return {
         ...state,
@@ -313,7 +345,10 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
       };
     }
 
-    case 'generation/complete':
+    case 'generation/complete': {
+      // Sweep stuck tools: force any tool not in a terminal state to 'done'
+      // so "Writing..." indicators don't persist after the stream ends.
+      const completedTools = sweepStuckTools(session.toolCallsByMsg, 'done');
       return {
         ...state,
         [sessionId]: {
@@ -323,10 +358,13 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
           streamingMessage: null,
           agentStatus: null,
           completedMessage: action.finalMessage ?? session.streamingMessage ?? null,
+          toolCallsByMsg: completedTools,
         },
       };
+    }
 
-    case 'generation/error':
+    case 'generation/error': {
+      const errorTools = sweepStuckTools(session.toolCallsByMsg, 'error');
       return {
         ...state,
         [sessionId]: {
@@ -335,8 +373,10 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
           error: action.error,
           streamingMessage: null,
           agentStatus: null,
+          toolCallsByMsg: errorTools,
         },
       };
+    }
 
     case 'generation/stopping':
       return {

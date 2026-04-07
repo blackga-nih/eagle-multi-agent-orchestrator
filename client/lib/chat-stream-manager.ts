@@ -385,6 +385,7 @@ export class ChatStreamManager {
           requestId,
           msgId,
           toolName: tr.name,
+          toolUseId: tr.tool_use_id ?? '',
           result: { success: true, result: tr.result },
         });
 

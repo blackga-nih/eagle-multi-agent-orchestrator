@@ -6232,6 +6232,11 @@ async def sdk_query_streaming(
             if "result" in event and hasattr(event.get("result"), "metrics"):
                 agent_result = event["result"]
 
+        # Final drain: tool results pushed during the last tool execution
+        # may still be sitting in the queue after the stream loop exits.
+        for tool_result_chunk in _drain_tool_results():
+            yield tool_result_chunk
+
         _circuit_breaker.record_success(_current_model_id)
 
     except GeneratorExit:
