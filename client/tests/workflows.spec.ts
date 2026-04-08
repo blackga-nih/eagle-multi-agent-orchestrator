@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Workflows Page', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/workflows/');
+    await page.goto('/packages/');
   });
 
   test('displays page header and structure', async ({ page }) => {
@@ -37,9 +37,9 @@ test.describe('Workflows Page', () => {
 
   test('filter tabs are clickable', async ({ page }) => {
     await page.getByRole('button', { name: /In Progress/ }).click();
-    await expect(page).toHaveURL(/\/workflows/);
+    await expect(page).toHaveURL(/\/packages/);
 
     await page.getByRole('button', { name: /Completed/ }).click();
-    await expect(page).toHaveURL(/\/workflows/);
+    await expect(page).toHaveURL(/\/packages/);
   });
 });

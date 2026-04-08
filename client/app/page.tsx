@@ -27,7 +27,7 @@ const features = [
     icon: Package,
     title: 'Acquisition Packages',
     description: 'View, manage, and track your acquisition packages and workflows',
-    href: '/workflows',
+    href: '/packages',
     color: 'text-purple-600',
     bgColor: 'bg-purple-50',
   },
