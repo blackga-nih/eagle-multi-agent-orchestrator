@@ -4,6 +4,8 @@ Covers:
 - Plan 1: Streaming noise reduction (tool_input_delta filtering, tool_input dedup)
 - Plan 3: Statement of Need (SON) template generation pipeline
 - Plan 4: Package checklist endpoint (backend portion)
+- Plan 5: XLSX document page renders markdown above spreadsheet
+- Plan 8: Baseline questions skill updated for 14-question suite
 
 Run: pytest server/tests/test_huddle_20260408_fixes.py -v
 """
@@ -366,3 +368,143 @@ class TestPackageSessionLinking:
         sig = inspect.signature(create_package)
         param = sig.parameters["session_id"]
         assert param.default is None
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PLAN 5 — XLSX document page: markdown above spreadsheet
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestXlsxMarkdownAboveSpreadsheet:
+    """The document viewer XLSX layout must render CollapsibleMarkdown above SpreadsheetPreview."""
+
+    _PAGE_PATH = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "client", "app", "documents", "[id]", "page.tsx")
+    )
+
+    def _read_page_source(self) -> str:
+        with open(self._PAGE_PATH, encoding="utf-8") as f:
+            return f.read()
+
+    def test_xlsx_branch_contains_collapsible_markdown(self):
+        """The XLSX layout branch must include CollapsibleMarkdown."""
+        source = self._read_page_source()
+        # Find the XLSX layout comment marker
+        xlsx_start = source.find("XLSX Layout:")
+        assert xlsx_start != -1, "XLSX Layout comment not found"
+        # CollapsibleMarkdown must appear within the XLSX layout block
+        xlsx_block = source[xlsx_start:xlsx_start + 2000]
+        assert "CollapsibleMarkdown" in xlsx_block, (
+            "CollapsibleMarkdown not found in XLSX layout — markdown should render above spreadsheet"
+        )
+
+    def test_markdown_renders_before_spreadsheet(self):
+        """CollapsibleMarkdown must appear BEFORE SpreadsheetPreview in XLSX layout."""
+        source = self._read_page_source()
+        xlsx_start = source.find("XLSX Layout:")
+        assert xlsx_start != -1
+        xlsx_block = source[xlsx_start:xlsx_start + 2000]
+        md_pos = xlsx_block.find("CollapsibleMarkdown")
+        sp_pos = xlsx_block.find("SpreadsheetPreview")
+        assert md_pos < sp_pos, (
+            f"CollapsibleMarkdown (pos {md_pos}) must appear before SpreadsheetPreview (pos {sp_pos})"
+        )
+
+    def test_markdown_is_conditionally_rendered(self):
+        """Markdown block should only render when documentContent exists."""
+        source = self._read_page_source()
+        xlsx_start = source.find("XLSX Layout:")
+        xlsx_block = source[xlsx_start:xlsx_start + 2000]
+        assert "documentContent &&" in xlsx_block or "{documentContent &&" in xlsx_block, (
+            "CollapsibleMarkdown in XLSX layout must be conditional on documentContent"
+        )
+
+    def test_bottom_drawer_chat_still_present(self):
+        """Bottom drawer chat must still exist after the spreadsheet."""
+        source = self._read_page_source()
+        xlsx_start = source.find("XLSX Layout:")
+        xlsx_block = source[xlsx_start:xlsx_start + 4000]
+        assert "Bottom Drawer" in xlsx_block, "Bottom drawer chat section missing from XLSX layout"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PLAN 8 — Baseline questions skill updated for 14 questions
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestBaselineQuestionsSkillUpdate:
+    """SKILL.md must document all 14 baseline questions."""
+
+    _SKILL_PATH = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", ".claude", "skills", "baseline-questions", "SKILL.md")
+    )
+
+    def _read_skill(self) -> str:
+        with open(self._SKILL_PATH, encoding="utf-8") as f:
+            return f.read()
+
+    def test_no_hardcoded_six_questions(self):
+        """SKILL.md must not reference '6 questions' as fixed count."""
+        content = self._read_skill()
+        assert "sends 6 questions" not in content, "Still references '6 questions' as fixed count"
+        assert "The 6 Baseline Questions" not in content, "Still has old '6 Baseline Questions' heading"
+
+    def test_no_hardcoded_rows_2_7(self):
+        """SKILL.md must not hard-code 'rows 2-7'."""
+        content = self._read_skill()
+        assert "rows 2-7" not in content, "Still hard-codes 'rows 2-7'"
+
+    def test_documents_14_questions(self):
+        """SKILL.md must reference 14 questions."""
+        content = self._read_skill()
+        assert "14 questions" in content
+
+    def test_q7_sole_source_documented(self):
+        """Q7 (Illumina sole-source) must be in the question reference table."""
+        content = self._read_skill()
+        assert "Q7" in content
+        assert "Sole-source" in content or "sole-source" in content
+
+    def test_q13_document_gen_documented(self):
+        """Q13 (SOW generation) must be in the question reference table."""
+        content = self._read_skill()
+        assert "Q13" in content
+        assert "Document Gen" in content or "SOW" in content
+
+    def test_q14_cor_gsa_documented(self):
+        """Q14 (COR/GSA Purchase) must be in the question reference table."""
+        content = self._read_skill()
+        assert "Q14" in content
+        assert "GSA" in content
+
+    def test_extended_questions_section_exists(self):
+        """Must have an Extended Questions section for Q7-Q14."""
+        content = self._read_skill()
+        assert "Extended Questions" in content
+
+    def test_expected_tool_patterns_include_q7(self):
+        """Expected tool patterns must include Q7."""
+        content = self._read_skill()
+        assert "Q7 (Sole-source" in content or "Q7 (Sole-source J&A)" in content
+
+    def test_expected_tool_patterns_include_q13(self):
+        """Expected tool patterns must include Q13."""
+        content = self._read_skill()
+        assert "Q13 (SOW Generation)" in content
+
+    def test_excel_questions_match_skill_count(self):
+        """Excel must have at least 14 questions matching SKILL.md documentation."""
+        xlsx_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "Use Case List.xlsx")
+        )
+        if not os.path.exists(xlsx_path):
+            pytest.skip("Use Case List.xlsx not found")
+        import openpyxl
+        wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+        ws = wb["Baseline questions"]
+        count = 0
+        for row in range(2, ws.max_row + 1):
+            if ws.cell(row=row, column=4).value:
+                count += 1
+        wb.close()
+        assert count >= 14, f"Excel has {count} questions, expected at least 14"
