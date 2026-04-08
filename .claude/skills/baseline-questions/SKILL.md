@@ -118,7 +118,7 @@ The script:
 - Q7 (Sole-source J&A): `knowledge_search` + `search_far` — J&A authority under FAR 6.302, brand-name justification
 - Q8-Q12 (Enhanced Q1-Q5): Same tools as Q1-Q5 but with deeper KB search requirements
 - Q13 (SOW Generation): `create_document` — document generation pipeline
-- Q14 (COR/GSA Purchase): `knowledge_search` + `search_far` — GSA Schedule procedures
+- Q14 (Zeiss/Brand-name GSA): `knowledge_search` + `search_far` + `web_search` — brand-name justification, GSA Schedule procedures, market research
 
 If a question gets no tools at all (except Q6), that is a yellow flag — the cascade
 enforcement may not be working.
@@ -230,11 +230,12 @@ target of cascade enforcement). Q6 tests general reasoning with no tools.
 | Q11 | 12 | IDIQ (enhanced) | Complete fair opportunity exception list with citations |
 | Q12 | 13 | Protest (enhanced) | SBIR Phase II protest + KB search requirement |
 | Q13 | 14 | Document Gen | Generate SOW for $200K IT help desk support contract |
-| Q14 | 15 | COR/GSA Purchase | $45K microscope via GSA Schedule — COR procedures |
+| Q14 | 15 | Brand-name/GSA | Zeiss AXIO Imager $45K microscope via GSA Schedule — brand-name justification + COR procedures |
 
 Q7 tests brand-name/sole-source justification authority. Q8-Q12 are enhanced
 versions of Q1-Q5 requiring deeper KB engagement. Q13 tests the document
-generation pipeline. Q14 tests GSA Schedule procurement procedures.
+generation pipeline. Q14 tests brand-name justification and GSA Schedule
+procurement for Zeiss microscopes — the newest addition from the 2026-04-08 huddle.
 
 ---
 

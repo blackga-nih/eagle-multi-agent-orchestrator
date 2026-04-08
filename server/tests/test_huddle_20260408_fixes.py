@@ -471,11 +471,12 @@ class TestBaselineQuestionsSkillUpdate:
         assert "Q13" in content
         assert "Document Gen" in content or "SOW" in content
 
-    def test_q14_cor_gsa_documented(self):
-        """Q14 (COR/GSA Purchase) must be in the question reference table."""
+    def test_q14_zeiss_brand_name_documented(self):
+        """Q14 (Zeiss brand-name/GSA) must be in the question reference table."""
         content = self._read_skill()
         assert "Q14" in content
-        assert "GSA" in content
+        assert "Zeiss" in content
+        assert "Brand-name" in content or "brand-name" in content
 
     def test_extended_questions_section_exists(self):
         """Must have an Extended Questions section for Q7-Q14."""
