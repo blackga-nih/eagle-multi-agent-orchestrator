@@ -878,6 +878,7 @@ export default function ActivityPanel({
         docType={viewerDocType ?? ''}
         docLabel={docLabel(viewerDocType ?? '')}
         getToken={getToken}
+        completedDocTypes={packageState?.checklist?.completed}
       />
     </div>
   );

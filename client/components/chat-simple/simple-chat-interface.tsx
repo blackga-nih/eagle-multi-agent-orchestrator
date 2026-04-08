@@ -30,6 +30,7 @@ import type { MatrixTab } from '../contract-matrix/matrix-types';
 import { UploadResult, assignToPackage } from '@/lib/document-api';
 import { usePackageState } from '@/hooks/use-package-state';
 import { useAnalytics } from '@/hooks/use-analytics';
+import { useUsageSummary } from '@/hooks/use-usage-summary';
 
 // -----------------------------------------------------------------------
 // Types for per-message tool call tracking
@@ -164,6 +165,7 @@ export default function SimpleChatInterface() {
   } = usePackageState();
 
   const { track } = useAnalytics();
+  const usage = useUsageSummary(getToken);
 
   // Load session data
   useEffect(() => {
@@ -974,9 +976,20 @@ export default function SimpleChatInterface() {
                 </button>
               )}
             </div>
-            <p className="text-center text-[10px] text-[#8896A6] mt-2">
-              EAGLE &middot; National Cancer Institute
-            </p>
+            <div className="flex items-center justify-between mt-2 text-[10px] text-[#8896A6]">
+              <div className="flex items-center gap-3">
+                {usage && (
+                  <>
+                    <span title="Total cost (30 days)">${usage.totalCostUsd.toFixed(2)}</span>
+                    <span className="opacity-40">|</span>
+                    <span title="Total requests (30 days)">{usage.totalRequests.toLocaleString()} requests</span>
+                    <span className="opacity-40">|</span>
+                    <span title="Total tokens (30 days)">{(usage.totalTokens / 1000).toFixed(0)}K tokens</span>
+                  </>
+                )}
+              </div>
+              <span>EAGLE &middot; National Cancer Institute</span>
+            </div>
           </div>
         </footer>
       </div>
