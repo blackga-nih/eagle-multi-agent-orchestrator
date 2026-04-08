@@ -634,8 +634,8 @@ def create_streaming_router(
                 explicit_package_id=message.package_id,
             )
             if (
-                message.package_id
-                and message.session_id
+                message.session_id
+                and resolved_package_context
                 and resolved_package_context.is_package_mode
             ):
                 set_active_package(

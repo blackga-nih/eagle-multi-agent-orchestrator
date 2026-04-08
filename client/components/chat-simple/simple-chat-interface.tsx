@@ -255,35 +255,45 @@ export default function SimpleChatInterface() {
       }
     }
 
-    // Background: preload context from backend (non-blocking)
+    // Background: preload context from backend (non-blocking, retry once)
     void (async () => {
-      try {
-        const token = await getToken();
-        if (!token) return;
-        const resp = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/context`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!resp.ok) return;
-        const ctx = await resp.json();
-        if (ctx.package) {
-          const cl = ctx.package.checklist;
-          handlePackageMetadata({
-            state_type: 'checklist_update',
-            package_id: ctx.package.package_id,
-            phase: ctx.package.status,
-            checklist: cl,
-            progress_pct: cl
-              ? Math.round(
-                  ((cl.completed?.length ?? 0) /
-                    Math.max(cl.required?.length ?? 1, 1)) *
-                    100,
-                )
-              : undefined,
+      const fetchContext = async (attempt = 0): Promise<void> => {
+        try {
+          const token = await getToken();
+          if (!token) return;
+          const resp = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/context`, {
+            headers: { Authorization: `Bearer ${token}` },
           });
+          if (!resp.ok) {
+            if (attempt < 1) { await new Promise(r => setTimeout(r, 1000)); return fetchContext(attempt + 1); }
+            return;
+          }
+          const ctx = await resp.json();
+          if (ctx.package) {
+            const cl = ctx.package.checklist;
+            handlePackageMetadata({
+              state_type: 'checklist_update',
+              package_id: ctx.package.package_id,
+              phase: ctx.package.status,
+              checklist: cl,
+              progress_pct: cl
+                ? Math.round(
+                    ((cl.completed?.length ?? 0) /
+                      Math.max(cl.required?.length ?? 1, 1)) *
+                      100,
+                  )
+                : undefined,
+            });
+          } else if (attempt < 1) {
+            // Backend may have timed out internally — retry once
+            await new Promise(r => setTimeout(r, 1000));
+            return fetchContext(attempt + 1);
+          }
+        } catch {
+          if (attempt < 1) { await new Promise(r => setTimeout(r, 1000)); return fetchContext(attempt + 1); }
         }
-      } catch {
-        // Non-blocking — swallow errors
-      }
+      };
+      await fetchContext();
     })();
   }, [currentSessionId, loadSession, resetPackageState, getToken, handlePackageMetadata, dispatch]);
 
@@ -453,8 +463,10 @@ export default function SimpleChatInterface() {
         });
       }
 
-      // Post-stream: refresh package checklist from authoritative backend state
-      if (packageState.packageId && currentSessionId) {
+      // Post-stream: refresh package checklist from authoritative backend state.
+      // Always fetch — even if packageState.packageId is null a package may have
+      // been created or linked during the stream.
+      if (currentSessionId) {
         void (async () => {
           try {
             const token = await getToken();

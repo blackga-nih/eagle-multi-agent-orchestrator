@@ -79,7 +79,7 @@ async def preload_session_context(
     tenant_id: str,
     user_id: str,
     package_id: Optional[str] = None,
-    timeout_ms: int = 500,
+    timeout_ms: int = 2000,
 ) -> PreloadedContext:
     """Fetch preferences, package state, and feature flags in parallel.
 
@@ -107,7 +107,13 @@ async def preload_session_context(
         ctx.checklist = result["checklist"]
         ctx.documents = result["documents"]
 
-        # Warm template cache for missing doc types (fire-and-forget)
+    async def _warm_templates() -> None:
+        """Warm template cache — separate from package fetch so it doesn't
+        consume the timeout budget for the critical path."""
+        if not package_id:
+            return
+        # Wait for package to load first so we have the checklist
+        await _load_package_task
         missing = (ctx.checklist or {}).get("missing", [])
         if missing:
             await asyncio.to_thread(
@@ -121,10 +127,13 @@ async def preload_session_context(
         ctx.feature_flags = await asyncio.to_thread(_fetch_feature_flags)
 
     try:
+        _load_package_task = asyncio.ensure_future(_load_package())
         await asyncio.wait_for(
-            asyncio.gather(_load_prefs(), _load_package(), _load_flags()),
+            asyncio.gather(_load_prefs(), _load_package_task, _load_flags()),
             timeout=timeout_ms / 1000,
         )
+        # Template warming is best-effort, separate timeout
+        asyncio.ensure_future(_warm_templates())
     except asyncio.TimeoutError:
         logger.warning(
             "session_preloader: timed out after %dms — returning partial context",

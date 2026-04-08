@@ -6729,13 +6729,11 @@ async def sdk_query_streaming(
             except Exception:
                 logger.debug("Failed to emit research.shallow", exc_info=True)
 
-    # End-of-turn state refresh — only when a package tool ran this turn,
-    # otherwise stale package state leaks into unrelated conversations.
-    _PACKAGE_TOOLS = {
-        "create_document", "manage_package", "finalize_package",
-        "update_document", "policy_analyst", "legal_counsel",
-    }
-    if tools_called and _PACKAGE_TOOLS & set(tools_called):
+    # End-of-turn state refresh — emit whenever an active package context
+    # exists so the frontend always has the latest checklist state, even
+    # when no package tool was called this turn.  Workspace-mode contexts
+    # (is_package_mode=False) are skipped by _build_end_of_turn_state.
+    if package_context and getattr(package_context, "is_package_mode", False):
         for state_evt in _build_end_of_turn_state(package_context, tenant_id):
             yield state_evt
 
