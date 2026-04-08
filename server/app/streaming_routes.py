@@ -274,7 +274,10 @@ async def stream_generator(
                 ti_input = chunk.get("input", {})
                 id_queue = _tool_name_to_ids.get(ti_name, [])
                 ti_id = id_queue.pop(0) if id_queue else ""
-                if ti_name and ti_input:
+                # Only emit if we have a valid tool_use_id to match.
+                # Without one, the frontend generates a new ID and
+                # creates a duplicate card instead of patching.
+                if ti_name and ti_input and ti_id:
                     await writer.write_tool_use(
                         sse_queue,
                         ti_name,
@@ -355,7 +358,10 @@ async def stream_generator(
                 tid_delta = chunk.get("delta", "")
                 tid_id = chunk.get("tool_use_id", "")
                 tid_name = chunk.get("name", "")
-                if tid_delta and tid_id:
+                # Only stream deltas for document-creation tools (live preview).
+                # Other tools produce noisy intermediate JSON that clutters the UI.
+                _STREAMABLE_DELTA_TOOLS = {"create_document", "update_document"}
+                if tid_delta and tid_id and tid_name in _STREAMABLE_DELTA_TOOLS:
                     await writer.write_tool_input_delta(
                         sse_queue,
                         tid_id,

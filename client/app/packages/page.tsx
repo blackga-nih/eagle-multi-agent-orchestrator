@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Plus,
@@ -61,7 +61,7 @@ function backendToWorkflow(pkg: Record<string, unknown>): Workflow {
     urgency_level: pkg.urgency_level as Workflow['urgency_level'],
     created_at: (pkg.created_at as string) || new Date().toISOString(),
     updated_at: (pkg.updated_at as string) || new Date().toISOString(),
-    metadata: { _source: 'backend' },
+    metadata: { _source: 'backend', session_id: pkg.session_id as string | undefined },
     archived: false,
   };
 }
@@ -79,6 +79,10 @@ export default function WorkflowsPage() {
   const [localPackages, setLocalPackages] = useState<PackageData[]>([]);
   const [backendWorkflows, setBackendWorkflows] = useState<Workflow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [backendChecklist, setBackendChecklist] = useState<
+    { doc_type: string; label: string; status: string; document_id?: string }[]
+  >([]);
+  const [checklistLoading, setChecklistLoading] = useState(false);
 
   // Load localStorage packages on mount
   useEffect(() => {
@@ -151,6 +155,39 @@ export default function WorkflowsPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const fetchBackendChecklist = useCallback(
+    async (packageId: string) => {
+      setChecklistLoading(true);
+      setBackendChecklist([]);
+      try {
+        const token = await getToken();
+        const res = await fetch(`/api/packages/${encodeURIComponent(packageId)}/checklist`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const items = Array.isArray(data) ? data : data.checklist || data.items || [];
+          setBackendChecklist(
+            items.map((item: Record<string, unknown>) => ({
+              doc_type: (item.doc_type as string) || (item.document_type as string) || '',
+              label:
+                (item.label as string) ||
+                (item.display_name as string) ||
+                ((item.doc_type as string) || '').replace(/_/g, ' '),
+              status: (item.status as string) || 'pending',
+              document_id: (item.document_id as string) || undefined,
+            })),
+          );
+        }
+      } catch {
+        // Checklist fetch failed — show modal without it
+      } finally {
+        setChecklistLoading(false);
+      }
+    },
+    [getToken],
+  );
+
   const handleWorkflowClick = (workflow: Workflow) => {
     // If it's a localStorage package, show the document checklist modal
     if ((workflow.metadata as Record<string, unknown>)?._source === 'localStorage') {
@@ -158,6 +195,7 @@ export default function WorkflowsPage() {
       setSelectedPackage(pkg);
     } else {
       setSelectedWorkflow(workflow);
+      fetchBackendChecklist(workflow.id);
     }
   };
 
@@ -361,7 +399,10 @@ export default function WorkflowsPage() {
         {/* Backend Workflow Detail Modal */}
         <Modal
           isOpen={!!selectedWorkflow}
-          onClose={() => setSelectedWorkflow(null)}
+          onClose={() => {
+            setSelectedWorkflow(null);
+            setBackendChecklist([]);
+          }}
           title={selectedWorkflow?.title}
           size="lg"
           footer={
@@ -431,6 +472,64 @@ export default function WorkflowsPage() {
                 <p className="mt-1 text-sm text-gray-700">
                   {selectedWorkflow.description || 'No description'}
                 </p>
+              </div>
+
+              {/* Document Checklist */}
+              <div>
+                <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
+                  Document Checklist
+                </label>
+                {checklistLoading ? (
+                  <div className="flex items-center gap-2 py-4 text-gray-400 text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading documents...
+                  </div>
+                ) : backendChecklist.length > 0 ? (
+                  <div className="space-y-2">
+                    {backendChecklist.map((item) => (
+                      <div
+                        key={item.doc_type}
+                        className={`flex items-center gap-3 p-3 rounded-lg ${
+                          item.status === 'completed' ? 'bg-green-50' : 'bg-gray-50'
+                        } ${item.document_id ? 'cursor-pointer hover:bg-green-100 transition-colors' : ''}`}
+                        onClick={() => {
+                          if (item.document_id) {
+                            router.push(`/documents/${item.document_id}`);
+                          }
+                        }}
+                      >
+                        {item.status === 'completed' ? (
+                          <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
+                        ) : (
+                          <Circle className="w-5 h-5 text-gray-300 shrink-0" />
+                        )}
+                        <div className="flex-1">
+                          <p
+                            className={`text-sm font-medium ${item.status === 'completed' ? 'text-green-900' : 'text-gray-700'}`}
+                          >
+                            {item.label}
+                          </p>
+                        </div>
+                        <span
+                          className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${
+                            item.status === 'completed'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          {item.status}
+                        </span>
+                        {item.document_id && (
+                          <FileText className="w-4 h-4 text-green-600 shrink-0" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 py-2">
+                    No documents in this package yet.
+                  </p>
+                )}
               </div>
             </div>
           )}

@@ -30,6 +30,8 @@ from .create_document_support import (
     _generate_market_research,
     _generate_section_508,
     _generate_security_checklist,
+    _generate_son_products,
+    _generate_son_services,
     _generate_sow,
     get_s3,
     _looks_like_unfilled_template_preview,
@@ -266,6 +268,8 @@ def exec_create_document(
         "section_508": _generate_section_508,
         "cor_certification": _generate_cor_certification,
         "contract_type_justification": _generate_contract_type_justification,
+        "son_products": _generate_son_products,
+        "son_services": _generate_son_services,
     }
 
     user_id = extract_user_id(session_id)
