@@ -688,6 +688,7 @@ def _ai_rank_documents(
     keywords: list[str],
     items: list[dict[str, Any]],
     limit: int,
+    boost_hints: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Use Bedrock Haiku to semantically rank documents against a query.
 
@@ -755,6 +756,23 @@ def _ai_rank_documents(
             "regulatory compliance."
         )
 
+    # Build boost context from soft filters (topic/agent/authority_level)
+    boost_filter_ctx = ""
+    if boost_hints:
+        boost_parts = []
+        if boost_hints.get("topic"):
+            boost_parts.append(f"primary_topic='{boost_hints['topic']}'")
+        if boost_hints.get("agent"):
+            boost_parts.append(f"primary_agent='{boost_hints['agent']}'")
+        if boost_hints.get("authority_level"):
+            boost_parts.append(f"authority_level='{boost_hints['authority_level']}'")
+        if boost_parts:
+            boost_filter_ctx = (
+                "\n6. BOOST PREFERENCE — rank higher (but do not limit to) documents "
+                "matching: " + ", ".join(boost_parts) + ". Still include relevant "
+                "documents from adjacent topics or agents."
+            )
+
     prompt = (
         "You are a document relevance matcher for a federal acquisition knowledge base.\n"
         "Given the search query and document catalog, return the indices of the most "
@@ -777,7 +795,8 @@ def _ai_rank_documents(
         "4. RELATED TOPICS — if a document's RELATED field contains a query concept,\n"
         "   boost its relevance score.\n"
         "5. PREFER knowledge-base documents (s3_key contains 'eagle-knowledge-base/approved')\n"
-        "   over user-generated package documents for regulatory/policy queries.\n\n"
+        "   over user-generated package documents for regulatory/policy queries."
+        f"{boost_filter_ctx}\n\n"
         f"Search query: {query}{keywords_ctx}{checklist_boost}\n\n"
         "Document catalog (index|document_id|title|keywords|summary):\n"
         f"{catalog}\n\n"
@@ -909,9 +928,11 @@ def exec_knowledge_search(
     """Search knowledge base metadata in DynamoDB with AI-powered ranking.
 
     Steps:
-    1. Scan DynamoDB with exact-match filters (topic, document_type, etc.)
+    1. Scan DynamoDB (only document_type hard filter; topic/agent/authority
+       become boost signals for AI ranking to avoid excluding adjacent topics)
     2. Filter results by user access (shared KB + user's own packages)
     3. If query or keywords provided, use LLM to semantically rank results
+       with boost preference for requested topic/agent/authority_level
     4. Fall back to deterministic matching if LLM call fails
     """
     table = get_dynamodb().Table(METADATA_TABLE)
@@ -935,26 +956,25 @@ def exec_knowledge_search(
         limit,
     )
 
-    # Build DynamoDB filter for exact-match attributes
+    # Build DynamoDB filter — only structural filters (document_type).
+    # Topic, agent, and authority_level become boost signals for AI ranking
+    # instead of hard filters, so adjacent-topic documents aren't excluded.
     filter_parts = []
     expr_attr_names: dict[str, str] = {}
     expr_attr_values: dict[str, Any] = {}
-
-    if topic:
-        filter_parts.append("primary_topic = :topic")
-        expr_attr_values[":topic"] = topic
 
     if document_type:
         filter_parts.append("document_type = :doc_type")
         expr_attr_values[":doc_type"] = document_type
 
+    # Soft filters — passed to AI ranker as preference boosts, not hard gates
+    boost_hints: dict[str, str] = {}
+    if topic:
+        boost_hints["topic"] = topic
     if agent:
-        filter_parts.append("primary_agent = :agent")
-        expr_attr_values[":agent"] = agent
-
+        boost_hints["agent"] = agent
     if authority_level:
-        filter_parts.append("authority_level = :auth_level")
-        expr_attr_values[":auth_level"] = authority_level
+        boost_hints["authority_level"] = authority_level
 
     # Full-table scan with pagination (no Limit — table is small)
     scan_kwargs: dict[str, Any] = {}
@@ -987,13 +1007,7 @@ def exec_knowledge_search(
             # Exclude checklists from general search — fetched via research tool's dedicated checklist step
             if entry.get("document_type") == "checklist" and document_type != "checklist":
                 continue
-            if topic and entry.get("primary_topic") != topic:
-                continue
             if document_type and entry.get("document_type") != document_type:
-                continue
-            if agent and entry.get("primary_agent") != agent:
-                continue
-            if authority_level and entry.get("authority_level") != authority_level:
                 continue
             # Avoid duplicates if a DynamoDB entry already has the same document_id
             if not any(it.get("document_id") == entry["document_id"] for it in items):
@@ -1029,7 +1043,7 @@ def exec_knowledge_search(
         if keywords and not query:
             search_query = " ".join(keywords)
 
-        ranked_items = _ai_rank_documents(search_query, keywords, items, limit)
+        ranked_items = _ai_rank_documents(search_query, keywords, items, limit, boost_hints)
         if ranked_items:
             items = ranked_items
         else:
