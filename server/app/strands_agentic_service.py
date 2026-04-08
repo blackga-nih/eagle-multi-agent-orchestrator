@@ -2463,6 +2463,7 @@ def _build_subagent_kb_tools(
         Args:
             query: Natural language search query
         """
+        _emit_input("web_search", {"query": query})
         if not _kb_tools_called:
             logger.warning(
                 "CASCADE VIOLATION: web_search called without prior KB lookup "
@@ -2471,17 +2472,16 @@ def _build_subagent_kb_tools(
                 session_id,
                 query[:100],
             )
-            return json.dumps(
-                {
-                    "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
-                    "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
-                    "query": query,
-                    "action_required": "Call knowledge_search or search_far with this query first.",
-                },
-                indent=2,
-            )
-        _emit_input("web_search", {"query": query})
+            cascade_result = {
+                "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
+                "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
+                "query": query,
+                "action_required": "Call knowledge_search or search_far with this query first.",
+            }
+            _emit_tool_result("web_search", json.dumps(cascade_result), result_queue, loop)
+            return json.dumps(cascade_result, indent=2)
         result = exec_web_search(query)
+        _emit_tool_result("web_search", json.dumps(result, default=str), result_queue, loop)
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="web_fetch")
@@ -4643,6 +4643,7 @@ def _build_kb_service_tools(
         Args:
             query: Natural language search query
         """
+        _emit_input("web_search", {"query": query})
         if not _kb_tools_called:
             logger.warning(
                 "CASCADE VIOLATION: web_search called without prior KB lookup "
@@ -4651,16 +4652,14 @@ def _build_kb_service_tools(
                 session_id,
                 query[:100],
             )
-            return json.dumps(
-                {
-                    "error": "CASCADE VIOLATION: You must call research or search_far "
-                    "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
-                    "query": query,
-                    "action_required": "Call research or search_far with this query first.",
-                },
-                indent=2,
-            )
-        _emit_input("web_search", {"query": query})
+            cascade_result = {
+                "error": "CASCADE VIOLATION: You must call research or search_far "
+                "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
+                "query": query,
+                "action_required": "Call research or search_far with this query first.",
+            }
+            _emit("web_search", cascade_result)
+            return json.dumps(cascade_result, indent=2)
         result = exec_web_search(query)
         _emit("web_search", result)
         return json.dumps(result, indent=2, default=str)
