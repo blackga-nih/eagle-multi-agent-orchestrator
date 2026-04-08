@@ -22,6 +22,10 @@ from app.template_service import (
     _cache_set,
     _MISS,
 )
+from app.xlsx_workbook_handlers import (
+    detect_xlsx_handler_for_template_id,
+    detect_xlsx_handler_for_workbook,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -284,6 +288,85 @@ class TestXLSXPopulator:
         wb.save(output)
         return output.getvalue()
 
+    @pytest.fixture
+    def ige_products_xlsx(self):
+        """Create a minimal workbook that matches the IGE for Products layout."""
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            pytest.skip("openpyxl not installed")
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "Sheet1"
+        sheet["A1"] = "INDEPENDENT GOVERNMENT ESTIMATE (IGE) FOR PRODUCTS"
+        sheet["B3"] = "Products (including software, licenses)"
+        sheet["A4"] = "Item #"
+        sheet["B4"] = "Manufacturer/Description/Part/Model Number*"
+        sheet["C4"] = "Qty"
+        sheet["D4"] = "Price"
+        sheet["E4"] = "Extended Amount"
+        for row in range(5, 10):
+            sheet[f"E{row}"] = f"=SUM(C{row}*D{row})"
+        sheet["B10"] = "Shipping (include as needed)"
+        sheet["E10"] = "=SUM(C10*D10)"
+        sheet["B11"] = "Installation (include as needed)"
+        sheet["E11"] = "=SUM(C11*D11)"
+        sheet["B12"] = "Training (include as needed)"
+        sheet["E13"] = "=SUM(C13*D13)"
+        sheet["B14"] = "  SUBTOTAL (Products)"
+        sheet["E14"] = "=SUM(E5:E13)"
+        sheet["B16"] = "TOTAL IGE"
+        sheet["E16"] = "=E14"
+
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+
+    @pytest.fixture
+    def ige_services_xlsx(self):
+        """Create a minimal workbook matching the services catalog template layout."""
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            pytest.skip("openpyxl not installed")
+
+        wb = Workbook()
+        base = wb.active
+        base.title = "Base Period"
+        base["A1"] = "INDEPENDENT GOVERNMENT ESTIMATE (IGE) FOR SERVICES"
+        base["B3"] = "Services"
+        base["A4"] = "Brief Description of Service*"
+        base["C4"] = "Period of Performance\n(Base)"
+        base.merge_cells("C4:D4")
+        for row in range(5, 14):
+            base.merge_cells(f"A{row}:B{row}")
+            base.merge_cells(f"C{row}:D{row}")
+            base[f"E{row}"] = f"=SUM(C{row}*D{row})"
+        base["B14"] = "  SUBTOTAL (Services)"
+        base.merge_cells("C14:D14")
+        base["B16"] = "TOTAL IGE"
+        base["E16"] = "=E14"
+
+        option = wb.create_sheet("Option Period One")
+        option["A1"] = "INDEPENDENT GOVERNMENT COST ESTIMATE (IGCE)"
+        option["B3"] = "Services"
+        option["A4"] = "Brief Description of Service*"
+        option["C4"] = "Period of Performance\n(Option Period 1)"
+        option.merge_cells("C4:D4")
+        for row in range(5, 14):
+            option.merge_cells(f"A{row}:B{row}")
+            option.merge_cells(f"C{row}:D{row}")
+            option[f"E{row}"] = f"=SUM(C{row}*D{row})"
+        option["B14"] = "  SUBTOTAL (Services)"
+        option.merge_cells("C14:D14")
+        option["B16"] = "TOTAL IGCE"
+        option["E16"] = "=E14"
+
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+
     def test_populate_replaces_placeholders(self, sample_xlsx):
         """Placeholders should be replaced with data values."""
         data = {
@@ -432,6 +515,101 @@ class TestXLSXPopulator:
         assert goods["A10"].value == "Seed Estimate"
         assert goods["E10"].value == 1
         assert goods["F10"].value == 12500
+
+    def test_populate_maps_ige_products_template(self, ige_products_xlsx):
+        result = XLSXPopulator.populate(
+            ige_products_xlsx,
+            {
+                "line_items": [
+                    {
+                        "description": "Microscope",
+                        "manufacturer": "Acme",
+                        "part_number": "M-100",
+                        "quantity": 2,
+                        "unit_price": 5000,
+                        "total": 10000,
+                    },
+                    {
+                        "description": "Shipping",
+                        "quantity": 1,
+                        "unit_price": 400,
+                        "total": 400,
+                    },
+                ]
+            },
+            {},
+        )
+
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(result), data_only=False)
+        sheet = wb["Sheet1"]
+
+        assert sheet["A5"].value == 1
+        assert sheet["B5"].value == "Microscope / Acme / M-100"
+        assert sheet["C5"].value == 2
+        assert sheet["D5"].value == 5000
+        assert sheet["E5"].value == "=SUM(C5*D5)"
+
+        assert sheet["B10"].value == "Shipping (include as needed)"
+        assert sheet["C10"].value == 1
+        assert sheet["D10"].value == 400
+        assert sheet["E10"].value == "=SUM(C10*D10)"
+
+    def test_detects_registered_xlsx_handlers(self, commercial_igce_xlsx, ige_products_xlsx):
+        from openpyxl import load_workbook
+
+        commercial = load_workbook(io.BytesIO(commercial_igce_xlsx), data_only=False)
+        products = load_workbook(io.BytesIO(ige_products_xlsx), data_only=False)
+
+        assert detect_xlsx_handler_for_workbook(commercial).handler_id == "commercial_igce"
+        assert detect_xlsx_handler_for_workbook(products).handler_id == "ige_products"
+        assert (
+            detect_xlsx_handler_for_template_id(
+                "eagle-knowledge-base/approved/supervisor-core/essential-templates/4.a. IGE for Products.xlsx"
+            ).handler_id
+            == "ige_products"
+        )
+
+    def test_populate_maps_ige_services_catalog_template(self, ige_services_xlsx):
+        result = XLSXPopulator.populate(
+            ige_services_xlsx,
+            {
+                "line_items": [
+                    {
+                        "description": "Cloud Hosting",
+                        "quantity": 12,
+                        "unit_price": 5000,
+                    }
+                ],
+                "option_period_one_items": [
+                    {
+                        "description": "Cloud Hosting Option 1",
+                        "quantity": 12,
+                        "unit_price": 5500,
+                    }
+                ],
+            },
+            {},
+        )
+
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(result), data_only=False)
+        base = wb["Base Period"]
+        option = wb["Option Period One"]
+
+        assert not any(str(rng) == "C5:D5" for rng in base.merged_cells.ranges)
+        assert base["A5"].value == "Cloud Hosting"
+        assert base["C5"].value == 12
+        assert base["D5"].value == 5000
+        assert base["E5"].value == "=SUM(C5*D5)"
+        assert base["E14"].value == "=SUM(E5:E13)"
+
+        assert option["A5"].value == "Cloud Hosting Option 1"
+        assert option["C5"].value == 12
+        assert option["D5"].value == 5500
+        assert option["E5"].value == "=SUM(C5*D5)"
 
 
 # ══════════════════════════════════════════════════════════════════════

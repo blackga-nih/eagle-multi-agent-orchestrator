@@ -1,4 +1,4 @@
-"""AI-assisted XLSX editing for commercial IGCE workbooks."""
+"""AI-assisted XLSX editing for supported mapped workbooks."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -25,6 +26,16 @@ from .igce_xlsx_edit_resolver import (
     resolve_igce_edit_request,
     validate_ai_intents,
 )
+from .ige_products_xlsx_edit_resolver import (
+    apply_products_resolved_intents,
+    build_ige_products_workbook_context,
+    resolve_ige_products_edit_request,
+)
+from .ige_services_catalog_xlsx_edit_resolver import (
+    apply_services_resolved_intents,
+    build_ige_services_catalog_workbook_context,
+    resolve_ige_services_catalog_edit_request,
+)
 from .package_store import get_package
 from .spreadsheet_edit_service import extract_xlsx_preview_payload, save_xlsx_preview_edits
 from .tools.create_document_support import (
@@ -33,10 +44,16 @@ from .tools.create_document_support import (
     _get_doc_gen_bedrock,
 )
 from .workbook_xlsx_edit_resolver import resolve_workbook_edit_request
+from .xlsx_workbook_handlers import (
+    detect_xlsx_handler_for_preview,
+    detect_xlsx_handler_for_template_id,
+)
 
 logger = logging.getLogger("eagle.xlsx_ai_edit")
 
 S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+
+ClarificationResponse = dict[str, Any]
 
 
 def _build_origin_context(
@@ -346,6 +363,80 @@ def _proposals_to_edits(
     return cell_edits, applied_changes
 
 
+def _build_clarification_response(
+    message: str,
+    *,
+    origin_context_available: bool,
+) -> ClarificationResponse:
+    return {
+        "success": True,
+        "clarification_needed": True,
+        "assistant_message": message,
+        "origin_context_available": origin_context_available,
+    }
+
+
+def _resolve_generic_fallback_edits(
+    request_text: str,
+    preview_sheets: list[dict[str, Any]],
+) -> tuple[list[dict[str, str]], list[dict[str, str]], str | None]:
+    generic_resolution = resolve_workbook_edit_request(request_text, preview_sheets)
+    if generic_resolution.proposals:
+        cell_edits, applied_changes = _proposals_to_edits(generic_resolution.proposals)
+        return cell_edits, applied_changes, None
+    return [], [], generic_resolution.clarification
+
+
+def _resolve_simple_variant_edits(
+    *,
+    request_text: str,
+    preview_sheets: list[dict[str, Any]],
+    origin_context_available: bool,
+    build_workbook_context: Callable[[list[dict[str, Any]]], Any],
+    resolve_request: Callable[[str, Any], Any],
+    apply_resolved_intents: Callable[
+        [Any, Any], tuple[list[dict[str, str]], list[dict[str, str]], str | None]
+    ],
+    unsupported_layout_message: str,
+) -> tuple[list[dict[str, str]], list[dict[str, str]]] | ClarificationResponse:
+    workbook = build_workbook_context(preview_sheets)
+    if not workbook.is_supported:
+        return _build_clarification_response(
+            unsupported_layout_message,
+            origin_context_available=origin_context_available,
+        )
+
+    resolved = resolve_request(request_text, workbook)
+    if resolved.clarification:
+        cell_edits, applied_changes, generic_clarification = _resolve_generic_fallback_edits(
+            request_text, preview_sheets
+        )
+        if cell_edits:
+            return cell_edits, applied_changes
+        if generic_clarification:
+            return _build_clarification_response(
+                generic_clarification,
+                origin_context_available=origin_context_available,
+            )
+        return _build_clarification_response(
+            resolved.clarification,
+            origin_context_available=origin_context_available,
+        )
+
+    cell_edits, applied_changes, resolution_error = apply_resolved_intents(workbook, resolved)
+    if resolution_error:
+        return _build_clarification_response(
+            resolution_error,
+            origin_context_available=origin_context_available,
+        )
+    if not cell_edits:
+        return _build_clarification_response(
+            "I could not translate that request into editable workbook changes.",
+            origin_context_available=origin_context_available,
+        )
+    return cell_edits, applied_changes
+
+
 def edit_igce_xlsx_document(
     *,
     tenant_id: str,
@@ -368,17 +459,15 @@ def edit_igce_xlsx_document(
     package_ref = extract_package_document_ref(doc_key)
     workspace_ref = extract_workspace_document_ref(doc_key)
     if package_ref and str(package_ref.get("doc_type")) != "igce":
-        return {
-            "success": True,
-            "clarification_needed": True,
-            "assistant_message": "This AI spreadsheet edit path currently supports only commercial IGCE workbooks.",
-        }
+        return _build_clarification_response(
+            "This AI spreadsheet edit path currently supports only commercial IGCE workbooks.",
+            origin_context_available=False,
+        )
     if not package_ref and not workspace_ref:
-        return {
-            "success": True,
-            "clarification_needed": True,
-            "assistant_message": "This AI spreadsheet edit path currently supports only commercial IGCE workbooks.",
-        }
+        return _build_clarification_response(
+            "This AI spreadsheet edit path currently supports only commercial IGCE workbooks.",
+            origin_context_available=False,
+        )
 
     try:
         s3 = get_s3()
@@ -387,15 +476,6 @@ def edit_igce_xlsx_document(
     except (ClientError, BotoCoreError) as exc:
         logger.error("Failed to load XLSX AI edit source: %s", exc, exc_info=True)
         return {"error": "Failed to load spreadsheet."}
-
-    preview_payload = extract_xlsx_preview_payload(xlsx_bytes)
-    workbook = build_commercial_igce_workbook_context(preview_payload.get("preview_sheets", []))
-    if not workbook.is_supported:
-        return {
-            "success": True,
-            "clarification_needed": True,
-            "assistant_message": "I can only apply chat edits to the commercial IGCE workbook layout right now.",
-        }
 
     if package_ref:
         doc = get_document(
@@ -412,14 +492,25 @@ def edit_igce_xlsx_document(
         effective_package_id = package_id or (doc or {}).get("package_id")
 
     if workspace_ref and doc and str(doc.get("doc_type", "")).lower() != "igce":
-        return {
-            "success": True,
-            "clarification_needed": True,
-            "assistant_message": "This AI spreadsheet edit path currently supports only commercial IGCE workbooks.",
-        }
+        return _build_clarification_response(
+            "This AI spreadsheet edit path currently supports only commercial IGCE workbooks.",
+            origin_context_available=False,
+        )
 
     effective_session_id = session_id or (doc or {}).get("session_id")
     title = (doc or {}).get("title") or "IGCE"
+    preview_payload = extract_xlsx_preview_payload(xlsx_bytes)
+    preview_sheets = preview_payload.get("preview_sheets", [])
+    handler = detect_xlsx_handler_for_template_id((doc or {}).get("template_id"))
+    if handler is None:
+        handler = detect_xlsx_handler_for_preview(preview_sheets)
+
+    if handler is None:
+        return _build_clarification_response(
+            "I can only apply chat edits to supported mapped workbook layouts right now.",
+            origin_context_available=False,
+        )
+
     origin_context = _build_origin_context(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -429,90 +520,119 @@ def edit_igce_xlsx_document(
         stored_source_data=(doc or {}).get("source_data"),
         stored_source_context_type=(doc or {}).get("source_context_type"),
     )
-
-    preview_sheets = preview_payload.get("preview_sheets", [])
-    resolved = resolve_igce_edit_request(request_text, workbook)
-    fallback_clarification = resolved.clarification
     skipped_fields: list[dict[str, str]] = []
     generic_cell_edits: list[dict[str, str]] = []
     generic_applied_changes: list[dict[str, str]] = []
 
-    # Handle context-fill requests: "fill from context", "complete the IGCE", etc.
-    if resolved.is_context_fill_request:
-        source_data = (doc or {}).get("source_data")
-        if not source_data:
-            return {
-                "success": True,
-                "clarification_needed": True,
-                "assistant_message": "I don't have enough context from the original conversation to auto-fill this workbook. Please specify what values to update.",
-                "origin_context_available": origin_context.get("origin_context_available", False),
-                "skipped_fields": [{"field": "all", "reason": "No origin context available"}],
-            }
-        context_fill_result = build_context_fill_intents(source_data, workbook)
-        if context_fill_result.intents:
-            resolved = ResolvedEditRequest(intents=context_fill_result.intents)
-            skipped_fields = context_fill_result.skipped_fields
-        else:
-            return {
-                "success": True,
-                "clarification_needed": True,
-                "assistant_message": "The workbook already has values filled in, or I couldn't match the context data to empty cells. Try specifying what to update directly.",
-                "origin_context_available": True,
-                "skipped_fields": context_fill_result.skipped_fields,
-            }
-    elif not resolved.intents:
-        ai_resolved = _extract_intents_with_bedrock(
-            request=request_text,
-            workbook=workbook,
-            origin_context=origin_context,
-        )
-        if ai_resolved.intents or ai_resolved.clarification:
-            resolved = ai_resolved
-        elif fallback_clarification:
-            resolved = ResolvedEditRequest(clarification=fallback_clarification)
-
-    if not resolved.intents and not resolved.is_context_fill_request:
-        generic_resolution = resolve_workbook_edit_request(request_text, preview_sheets)
-        if generic_resolution.proposals:
-            generic_cell_edits, generic_applied_changes = _proposals_to_edits(
-                generic_resolution.proposals
+    if handler.handler_id == "commercial_igce":
+        workbook = build_commercial_igce_workbook_context(preview_sheets)
+        if not workbook.is_supported:
+            return _build_clarification_response(
+                "I can only apply chat edits to the commercial IGCE workbook layout right now.",
+                origin_context_available=origin_context.get("origin_context_available", False),
             )
-            resolved = ResolvedEditRequest()
-        elif generic_resolution.clarification:
-            return {
-                "success": True,
-                "clarification_needed": True,
-                "assistant_message": generic_resolution.clarification,
-                "origin_context_available": origin_context.get("origin_context_available", False),
-            }
+        resolved = resolve_igce_edit_request(request_text, workbook)
+        fallback_clarification = resolved.clarification
 
-    if resolved.clarification:
-        return {
-            "success": True,
-            "clarification_needed": True,
-            "assistant_message": resolved.clarification,
-            "origin_context_available": origin_context.get("origin_context_available", False),
-        }
+        if resolved.is_context_fill_request:
+            source_data = (doc or {}).get("source_data")
+            if not source_data:
+                response = _build_clarification_response(
+                    "I don't have enough context from the original conversation to auto-fill this workbook. Please specify what values to update.",
+                    origin_context_available=origin_context.get("origin_context_available", False),
+                )
+                response["skipped_fields"] = [
+                    {"field": "all", "reason": "No origin context available"}
+                ]
+                return response
+            context_fill_result = build_context_fill_intents(source_data, workbook)
+            if context_fill_result.intents:
+                resolved = ResolvedEditRequest(intents=context_fill_result.intents)
+                skipped_fields = context_fill_result.skipped_fields
+            else:
+                response = _build_clarification_response(
+                    "The workbook already has values filled in, or I couldn't match the context data to empty cells. Try specifying what to update directly.",
+                    origin_context_available=True,
+                )
+                response["skipped_fields"] = context_fill_result.skipped_fields
+                return response
+        elif not resolved.intents:
+            ai_resolved = _extract_intents_with_bedrock(
+                request=request_text,
+                workbook=workbook,
+                origin_context=origin_context,
+            )
+            if ai_resolved.intents or ai_resolved.clarification:
+                resolved = ai_resolved
+            elif fallback_clarification:
+                resolved = ResolvedEditRequest(clarification=fallback_clarification)
 
-    if generic_cell_edits:
-        cell_edits = generic_cell_edits
-        applied_changes = generic_applied_changes
+        if not resolved.intents and not resolved.is_context_fill_request:
+            (
+                generic_cell_edits,
+                generic_applied_changes,
+                generic_clarification,
+            ) = _resolve_generic_fallback_edits(request_text, preview_sheets)
+            if generic_cell_edits:
+                resolved = ResolvedEditRequest()
+            elif generic_clarification:
+                return _build_clarification_response(
+                    generic_clarification,
+                    origin_context_available=origin_context.get("origin_context_available", False),
+                )
+
+        if resolved.clarification:
+            return _build_clarification_response(
+                resolved.clarification,
+                origin_context_available=origin_context.get("origin_context_available", False),
+            )
+
+        if generic_cell_edits:
+            cell_edits = generic_cell_edits
+            applied_changes = generic_applied_changes
+        else:
+            cell_edits, applied_changes, resolution_error = _apply_resolved_intents(workbook, resolved)
+            if resolution_error:
+                return _build_clarification_response(
+                    resolution_error,
+                    origin_context_available=origin_context.get("origin_context_available", False),
+                )
+            if not cell_edits:
+                return _build_clarification_response(
+                    "I could not translate that request into editable workbook changes.",
+                    origin_context_available=origin_context.get("origin_context_available", False),
+                )
+    elif handler.handler_id == "ige_products":
+        variant_result = _resolve_simple_variant_edits(
+            request_text=request_text,
+            preview_sheets=preview_sheets,
+            origin_context_available=origin_context.get("origin_context_available", False),
+            build_workbook_context=build_ige_products_workbook_context,
+            resolve_request=resolve_ige_products_edit_request,
+            apply_resolved_intents=apply_products_resolved_intents,
+            unsupported_layout_message="I could not read the IGE products workbook layout.",
+        )
+        if isinstance(variant_result, dict):
+            return variant_result
+        cell_edits, applied_changes = variant_result
+    elif handler.handler_id == "ige_services_catalog":
+        variant_result = _resolve_simple_variant_edits(
+            request_text=request_text,
+            preview_sheets=preview_sheets,
+            origin_context_available=origin_context.get("origin_context_available", False),
+            build_workbook_context=build_ige_services_catalog_workbook_context,
+            resolve_request=resolve_ige_services_catalog_edit_request,
+            apply_resolved_intents=apply_services_resolved_intents,
+            unsupported_layout_message="I could not read the IGE services workbook layout.",
+        )
+        if isinstance(variant_result, dict):
+            return variant_result
+        cell_edits, applied_changes = variant_result
     else:
-        cell_edits, applied_changes, resolution_error = _apply_resolved_intents(workbook, resolved)
-        if resolution_error:
-            return {
-                "success": True,
-                "clarification_needed": True,
-                "assistant_message": resolution_error,
-                "origin_context_available": origin_context.get("origin_context_available", False),
-            }
-        if not cell_edits:
-            return {
-                "success": True,
-                "clarification_needed": True,
-                "assistant_message": "I could not translate that request into editable workbook changes.",
-                "origin_context_available": origin_context.get("origin_context_available", False),
-            }
+        return _build_clarification_response(
+            "This workbook variant is not wired into chat edits yet.",
+            origin_context_available=origin_context.get("origin_context_available", False),
+        )
 
     save_result = save_xlsx_preview_edits(
         tenant_id=tenant_id,
