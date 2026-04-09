@@ -64,7 +64,6 @@ class ServicesWorkbookContext:
         query_tokens = {token for token in normalized_query.split() if len(token) > 2}
         exact_matches: list[ServiceWorkbookItem] = []
         token_matches: list[ServiceWorkbookItem] = []
-        matches: list[ServiceWorkbookItem] = []
         for item in self.items:
             normalized_name = _normalize_label(item.name)
             if normalized_name and normalized_name in normalized_query:
