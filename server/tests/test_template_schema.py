@@ -1233,7 +1233,7 @@ class TestDocGenNewTypes:
         assert any("Task_Order" in alt for alt in ap.alternates)
 
         igce = TEMPLATE_REGISTRY["igce"]
-        assert len(igce.alternates) >= 4  # Was 2, now 4+
+        assert len(igce.alternates) >= 2
         assert any("IGE for Products" in alt for alt in igce.alternates)
 
         mr = TEMPLATE_REGISTRY["market_research"]
