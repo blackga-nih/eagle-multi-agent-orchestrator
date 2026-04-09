@@ -128,8 +128,25 @@ def _auto_fetch_pages(
     return results
 
 
+_MARKET_RESEARCH_KEYWORDS = {
+    "market research", "market survey", "vendor", "vendor comparison",
+    "pricing", "competitive analysis", "industry", "commercial",
+    "manufacturer", "supplier", "product comparison", "market analysis",
+}
+
+
+def _is_market_research(query: str) -> bool:
+    """Return True if the query is for market research purposes."""
+    q = query.lower()
+    return any(kw in q for kw in _MARKET_RESEARCH_KEYWORDS)
+
+
 def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
     """Call Nova 2 Lite with nova_grounding to perform a web search.
+
+    By default, searches are scoped to .gov sites only (federal acquisition
+    context). Market-research queries (detected by keyword) are allowed to
+    search the full web so the agent can find vendor/pricing data.
 
     Args:
         query: The search query string.
@@ -139,10 +156,15 @@ def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
         dict with keys: query, answer, sources, source_count
         On error: dict with keys: error, query
     """
+    gov_scoped = not _is_market_research(query)
+    search_query = f"{query} site:.gov" if gov_scoped else query
+    if gov_scoped:
+        logger.info("web_search: .gov scoped query — '%s'", search_query[:120])
+
     try:
         response = _get_client().converse(
             modelId=WEB_SEARCH_MODEL_ID,
-            messages=[{"role": "user", "content": [{"text": query}]}],
+            messages=[{"role": "user", "content": [{"text": search_query}]}],
             toolConfig={
                 "tools": [{"systemTool": {"name": "nova_grounding"}}],
             },
@@ -197,6 +219,7 @@ def exec_web_search(query: str, max_sources: int = 10) -> dict[str, Any]:
             "sources": sources,
             "source_count": len(sources),
             "pages_fetched": len(fetched_pages),
+            "gov_scoped": gov_scoped,
         }
         if unfetched:
             result["unfetched_urls"] = unfetched

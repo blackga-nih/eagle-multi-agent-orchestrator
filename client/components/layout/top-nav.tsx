@@ -20,7 +20,7 @@ import { useSettings } from '@/contexts/settings-context';
 const allNavLinks = [
   { href: '/chat', label: 'Chat', icon: <MessageSquare className="w-4 h-4" />, admin: false },
   {
-    href: '/workflows',
+    href: '/packages',
     label: 'Packages',
     icon: <FolderKanban className="w-4 h-4" />,
     admin: false,

@@ -2463,6 +2463,7 @@ def _build_subagent_kb_tools(
         Args:
             query: Natural language search query
         """
+        _emit_input("web_search", {"query": query})
         if not _kb_tools_called:
             logger.warning(
                 "CASCADE VIOLATION: web_search called without prior KB lookup "
@@ -2471,17 +2472,16 @@ def _build_subagent_kb_tools(
                 session_id,
                 query[:100],
             )
-            return json.dumps(
-                {
-                    "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
-                    "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
-                    "query": query,
-                    "action_required": "Call knowledge_search or search_far with this query first.",
-                },
-                indent=2,
-            )
-        _emit_input("web_search", {"query": query})
+            cascade_result = {
+                "error": "CASCADE VIOLATION: You must call knowledge_search or search_far "
+                "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
+                "query": query,
+                "action_required": "Call knowledge_search or search_far with this query first.",
+            }
+            _emit_tool_result("web_search", json.dumps(cascade_result), result_queue, loop)
+            return json.dumps(cascade_result, indent=2)
         result = exec_web_search(query)
+        _emit_tool_result("web_search", json.dumps(result, default=str), result_queue, loop)
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="web_fetch")
@@ -4643,6 +4643,7 @@ def _build_kb_service_tools(
         Args:
             query: Natural language search query
         """
+        _emit_input("web_search", {"query": query})
         if not _kb_tools_called:
             logger.warning(
                 "CASCADE VIOLATION: web_search called without prior KB lookup "
@@ -4651,16 +4652,14 @@ def _build_kb_service_tools(
                 session_id,
                 query[:100],
             )
-            return json.dumps(
-                {
-                    "error": "CASCADE VIOLATION: You must call research or search_far "
-                    "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
-                    "query": query,
-                    "action_required": "Call research or search_far with this query first.",
-                },
-                indent=2,
-            )
-        _emit_input("web_search", {"query": query})
+            cascade_result = {
+                "error": "CASCADE VIOLATION: You must call research or search_far "
+                "BEFORE web_search. Please search the knowledge base first, then retry web_search.",
+                "query": query,
+                "action_required": "Call research or search_far with this query first.",
+            }
+            _emit("web_search", cascade_result)
+            return json.dumps(cascade_result, indent=2)
         result = exec_web_search(query)
         _emit("web_search", result)
         return json.dumps(result, indent=2, default=str)
@@ -4771,9 +4770,27 @@ def _build_kb_service_tools(
         _kb_depth["search_result_count"] += search_result.get("count", 0)
         all_results = list(search_result.get("results", []))
 
+        # Helpers for KB-only filtering and .docx/.content.md dedup
+        def _is_kb_doc(key: str) -> bool:
+            return key.startswith("eagle-knowledge-base/")
+
+        def _stem(key: str) -> str:
+            """Normalize .docx/.content.md siblings to a common stem.
+
+            Sidecar pattern: {s3_key}.content.md (e.g. doc.docx.content.md).
+            Strip .content.md first, then .docx, so both map to the same base.
+            """
+            if key.endswith(".content.md"):
+                key = key[: -len(".content.md")]
+            if key.endswith(".docx"):
+                key = key[: -len(".docx")]
+            return key
+
         # 1b. Secondary broadened search — different angle to catch more docs.
         # Extract key terms and search without topic filter for broader coverage.
+        # Use stem-based dedup so .docx and .content.md siblings don't waste slots.
         seen_keys = {r.get("s3_key") for r in all_results if r.get("s3_key")}
+        seen_stems = {_stem(k) for k in seen_keys}
         if query and len(query) > 20:
             # Build a shorter keyword-focused query for the secondary search
             secondary_params: dict[str, Any] = {"query": query, "limit": 10}
@@ -4786,11 +4803,14 @@ def _build_kb_service_tools(
             )
             _kb_depth["search_count"] += 1
             _kb_depth["search_result_count"] += secondary_result.get("count", 0)
-            # Merge deduplicated results
+            # Merge deduplicated results (stem-dedup catches .docx/.content.md siblings)
             for r in secondary_result.get("results", []):
-                if r.get("s3_key") and r["s3_key"] not in seen_keys:
+                key = r.get("s3_key", "")
+                stem = _stem(key) if key else ""
+                if key and key not in seen_keys and stem not in seen_stems:
                     all_results.append(r)
-                    seen_keys.add(r["s3_key"])
+                    seen_keys.add(key)
+                    seen_stems.add(stem)
 
         # 1c. Path-based search (RO strategy) — matches query terms against
         # S3 key paths/filenames. Catches docs that metadata AI ranking misses
@@ -4803,10 +4823,13 @@ def _build_kb_service_tools(
                 user_id=user_id, _allowed_package_ids=_user_pkg_ids,
             )
             for r in path_result.get("results", []):
-                if r.get("s3_key") and r["s3_key"] not in seen_keys:
+                key = r.get("s3_key", "")
+                stem = _stem(key) if key else ""
+                if key and key not in seen_keys and stem not in seen_stems:
                     all_results.append(r)
                     path_only_results.append(r)
-                    seen_keys.add(r["s3_key"])
+                    seen_keys.add(key)
+                    seen_stems.add(stem)
 
         # 1d. Compliance matrix query — adds threshold context, required docs,
         # approval levels. Runs on most research calls (skipped only for design/
@@ -4834,48 +4857,55 @@ def _build_kb_service_tools(
                 logger.debug("research: compliance_matrix query failed, continuing")
 
         # 2. Auto-fetch top 8 AI-ranked + top 4 path-search results
-        # AI-ranked results (Layers 1-2) get 8 fetch slots as before.
-        # Path-search results (Layer 3 / RO strategy) get 4 guaranteed
-        # fetch slots for any docs not already fetched by AI ranking.
-        # This closes the gap where RO finds docs EAGLE misses.
+        # Only fetch KB docs (eagle-knowledge-base/...) — user-generated
+        # package docs have their own retrieval path and shouldn't pollute
+        # research results with AI-generated content.
+        # Also dedup .docx/.content.md siblings — prefer .content.md (markdown).
+        fetched_stems: set[str] = set()
         fetched_docs = []
+
+        def _should_fetch(key: str) -> bool:
+            """True if key is a KB doc not yet fetched (stem-deduped)."""
+            if not key or not _is_kb_doc(key):
+                return False
+            if key in _kb_depth["fetched_keys"]:
+                return False
+            stem = _stem(key)
+            if stem in fetched_stems:
+                return False
+            return True
+
+        def _do_fetch(r: dict) -> bool:
+            """Fetch a doc and append to fetched_docs. Returns True on success."""
+            s3_key = r.get("s3_key", "")
+            content = exec_knowledge_fetch(
+                {"s3_key": s3_key}, tenant_id, session_id,
+                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+            )
+            if "error" not in content:
+                _kb_depth["fetch_count"] += 1
+                _kb_depth["total_chars_read"] += content.get("content_length", 0)
+                _kb_depth["fetched_keys"].add(s3_key)
+                fetched_stems.add(_stem(s3_key))
+                fetched_docs.append({
+                    "title": r.get("title", ""),
+                    "s3_key": s3_key,
+                    "content": content.get("content", "")[:15000],
+                })
+                return True
+            return False
+
         for r in all_results[:8]:
-            s3_key = r.get("s3_key")
-            if s3_key and s3_key not in _kb_depth["fetched_keys"]:
-                content = exec_knowledge_fetch(
-                    {"s3_key": s3_key}, tenant_id, session_id,
-                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-                )
-                if "error" not in content:
-                    _kb_depth["fetch_count"] += 1
-                    _kb_depth["total_chars_read"] += content.get("content_length", 0)
-                    _kb_depth["fetched_keys"].add(s3_key)
-                    fetched_docs.append({
-                        "title": r.get("title", ""),
-                        "s3_key": s3_key,
-                        "content": content.get("content", "")[:15000],
-                    })
+            if _should_fetch(r.get("s3_key", "")):
+                _do_fetch(r)
 
         # 2b. Guaranteed path-search fetch — top 4 not already fetched above
         _path_fetched = 0
         for r in path_only_results:
             if _path_fetched >= 4:
                 break
-            s3_key = r.get("s3_key")
-            if s3_key and s3_key not in _kb_depth["fetched_keys"]:
-                content = exec_knowledge_fetch(
-                    {"s3_key": s3_key}, tenant_id, session_id,
-                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-                )
-                if "error" not in content:
-                    _kb_depth["fetch_count"] += 1
-                    _kb_depth["total_chars_read"] += content.get("content_length", 0)
-                    _kb_depth["fetched_keys"].add(s3_key)
-                    fetched_docs.append({
-                        "title": r.get("title", ""),
-                        "s3_key": s3_key,
-                        "content": content.get("content", "")[:15000],
-                    })
+            if _should_fetch(r.get("s3_key", "")):
+                if _do_fetch(r):
                     _path_fetched += 1
 
         # 3. Dynamic checklist search (isolated query — separate from general KB search)
@@ -4906,10 +4936,23 @@ def _build_kb_service_tools(
                             _kb_depth["fetched_keys"].add(s3_key)
                             checklist_content[r.get("title", s3_key)] = result["content"][:20000]
 
-        # 4. Build combined packet
+        # 4. Build combined packet — filter out package docs and dedup
+        # .docx/.content.md siblings so the agent sees clean KB results only.
+        _seen_stems: set[str] = set()
+        kb_only_results: list[dict] = []
+        for r in all_results:
+            key = r.get("s3_key", "")
+            if not _is_kb_doc(key):
+                continue
+            stem = _stem(key)
+            if stem in _seen_stems:
+                continue
+            _seen_stems.add(stem)
+            kb_only_results.append(r)
+
         detected = _detect_method(acquisition_method, query, contract_value)
         packet: dict[str, Any] = {
-            "kb_results": all_results,
+            "kb_results": kb_only_results,
             "fetched_documents": fetched_docs,
             "checklists": checklist_content,
             "detected_method": detected,
@@ -6685,13 +6728,11 @@ async def sdk_query_streaming(
             except Exception:
                 logger.debug("Failed to emit research.shallow", exc_info=True)
 
-    # End-of-turn state refresh — only when a package tool ran this turn,
-    # otherwise stale package state leaks into unrelated conversations.
-    _PACKAGE_TOOLS = {
-        "create_document", "manage_package", "finalize_package",
-        "update_document", "policy_analyst", "legal_counsel",
-    }
-    if tools_called and _PACKAGE_TOOLS & set(tools_called):
+    # End-of-turn state refresh — emit whenever an active package context
+    # exists so the frontend always has the latest checklist state, even
+    # when no package tool was called this turn.  Workspace-mode contexts
+    # (is_package_mode=False) are skipped by _build_end_of_turn_state.
+    if package_context and getattr(package_context, "is_package_mode", False):
         for state_evt in _build_end_of_turn_state(package_context, tenant_id):
             yield state_evt
 

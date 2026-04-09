@@ -2068,17 +2068,24 @@ ${docSnippet}`;
 
         {/* Main Content Area — conditional layout based on document type */}
         {isBinaryDocument && isXlsxDocument ? (
-          /* XLSX Layout: Full-width spreadsheet + bottom drawer chat */
+          /* XLSX Layout: Markdown summary (if any) + spreadsheet + bottom drawer chat */
           <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Full-width Spreadsheet */}
             <div
               className={`flex-1 flex flex-col bg-white overflow-hidden transition-colors duration-500 ${
                 docUpdated ? 'ring-2 ring-green-300' : ''
               }`}
             >
               <div className="flex-1 overflow-auto p-4">
+                {/* Markdown content rendered above the spreadsheet */}
+                {documentContent && (
+                  <div className="mb-6">
+                    <CollapsibleMarkdown content={documentContent} defaultExpanded />
+                  </div>
+                )}
+
+                {/* Spreadsheet preview */}
                 {displayedXlsxSheets.length > 0 ? (
-                  <div className="h-full">
+                  <div className={documentContent ? '' : 'h-full'}>
                     <SpreadsheetPreview
                       ref={spreadsheetRef}
                       sheets={displayedXlsxSheets}

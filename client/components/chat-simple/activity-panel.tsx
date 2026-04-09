@@ -268,10 +268,12 @@ function AllPackagesList({
   getToken,
   activePackageId,
   isStreaming,
+  hasActiveChecklist,
 }: {
   getToken: () => Promise<string | null>;
   activePackageId?: string;
   isStreaming?: boolean;
+  hasActiveChecklist?: boolean;
 }) {
   const { packages, loading, error, refetch, removePackage, fetchDocuments, documentsCache, loadingDocs } =
     useAllPackages(getToken);
@@ -295,8 +297,8 @@ function AllPackagesList({
     }
   };
 
-  // Filter out the active package to avoid duplicate display
-  const filteredPackages = activePackageId
+  // Only hide the active package when its checklist is visible above
+  const filteredPackages = activePackageId && hasActiveChecklist
     ? packages.filter((p) => p.package_id !== activePackageId)
     : packages;
 
@@ -859,6 +861,7 @@ export default function ActivityPanel({
               getToken={getToken}
               activePackageId={packageState?.packageId ?? undefined}
               isStreaming={isStreaming}
+              hasActiveChecklist={!!packageState?.checklist}
             />
           </>
         )}
@@ -878,6 +881,7 @@ export default function ActivityPanel({
         docType={viewerDocType ?? ''}
         docLabel={docLabel(viewerDocType ?? '')}
         getToken={getToken}
+        completedDocTypes={packageState?.checklist?.completed}
       />
     </div>
   );

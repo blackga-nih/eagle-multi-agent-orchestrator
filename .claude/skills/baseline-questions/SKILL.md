@@ -56,7 +56,7 @@ uvicorn app.main:app --reload --port 8000
 ### 1b. Verify Excel Exists
 
 Check that the Use Case List workbook exists at the expected path. The workbook
-must have a sheet named "Baseline questions" with questions in column D (rows 2-7).
+must have a sheet named "Baseline questions" with questions in column D (rows 2+).
 
 ### 1c. Detect Next Available Columns
 
@@ -81,7 +81,7 @@ column E (RO Response) — this is the reference standard for all judging.**
 
 ## Phase 2: Run Baseline Questions
 
-Run the baseline script. It sends 6 questions sequentially (each needs full model
+Run the baseline script. It sends all questions sequentially (each needs full model
 attention) with a fresh session per question.
 
 ```bash
@@ -94,7 +94,7 @@ cd server && python ../.claude/skills/baseline-questions/scripts/run_baseline.py
 ```
 
 The script:
-1. Reads questions from Excel column D, rows 2-7
+1. Reads questions from Excel column D, rows 2+ (all non-empty rows)
 2. Sends each to `POST /api/chat` with headers:
    - `X-User-Id: baseline-eval`
    - `X-Tenant-Id: {tenant}`
@@ -115,6 +115,10 @@ The script:
 - Q4 (Fair Opportunity): `search_far` + `knowledge_fetch`
 - Q5 (SBIR Protest): `knowledge_search` + `search_far` + `knowledge_fetch` — most complex
 - Q6 (Design): No tools — design discussion, not regulatory
+- Q7 (Sole-source J&A): `knowledge_search` + `search_far` — J&A authority under FAR 6.302, brand-name justification
+- Q8-Q12 (Enhanced Q1-Q5): Same tools as Q1-Q5 but with deeper KB search requirements
+- Q13 (SOW Generation): `create_document` — document generation pipeline
+- Q14 (Zeiss/Brand-name GSA): `knowledge_search` + `search_far` + `web_search` — brand-name justification, GSA Schedule procedures, market research
 
 If a question gets no tools at all (except Q6), that is a yellow flag — the cascade
 enforcement may not be working.
@@ -143,7 +147,7 @@ accuracy, completeness, sources, and actionability.
 
 ### 3b. Score Each Question
 
-For each question (Q1-Q6), evaluate the new EAGLE response on 4 dimensions (0-5 each),
+For each question, evaluate the new EAGLE response on 4 dimensions (0-5 each),
 **comparing against the RO reference response in column E**:
 
 | Dimension | What to assess |
@@ -186,7 +190,7 @@ Q1      5     5    4    5  19/20      18/20      +1  v5 = v4 (no change)
 ...
 AVG                      19.5/20    18.5/20    +1.0
 
-v{N} wins: X/6 | Ties: Y/6 | v{N-1} wins: Z/6
+v{N} wins: X/N | Ties: Y/N | v{N-1} wins: Z/N
 ```
 
 Then print the KB CASCADE ENFORCEMENT IMPACT section showing:
@@ -196,10 +200,12 @@ Then print the KB CASCADE ENFORCEMENT IMPACT section showing:
 
 ---
 
-## The 6 Baseline Questions
+## Baseline Questions
 
-These are fixed — they test a range of complexity from simple threshold lookups
-to multi-layered procedural analysis:
+Questions are read dynamically from column D of the "Baseline questions" sheet.
+The suite currently has 14 questions across two tiers:
+
+### Core Questions (Q1-Q6) — Original Baseline
 
 | Q# | Row | Category | Question Summary |
 |----|-----|----------|-----------------|
@@ -212,6 +218,24 @@ to multi-layered procedural analysis:
 
 Q1 tests the compliance matrix tool. Q2-Q5 test KB research depth (the primary
 target of cascade enforcement). Q6 tests general reasoning with no tools.
+
+### Extended Questions (Q7-Q14) — Scenario & Enhanced
+
+| Q# | Row | Category | Question Summary |
+|----|-----|----------|-----------------|
+| Q7 | 8 | Sole-source J&A | Illumina $280K sole-source maintenance — J&A authority + required docs |
+| Q8 | 9 | Threshold (enhanced) | Thresholds + NIH-specific supplements, purchase card policies |
+| Q9 | 10 | Case Law (enhanced) | GAO B-302358 + deep KB search requirement |
+| Q10 | 11 | Appropriations (enhanced) | Bona fide needs rule + severable/non-severable interaction |
+| Q11 | 12 | IDIQ (enhanced) | Complete fair opportunity exception list with citations |
+| Q12 | 13 | Protest (enhanced) | SBIR Phase II protest + KB search requirement |
+| Q13 | 14 | Document Gen | Generate SOW for $200K IT help desk support contract |
+| Q14 | 15 | Brand-name/GSA | Zeiss AXIO Imager $45K microscope via GSA Schedule — brand-name justification + COR procedures |
+
+Q7 tests brand-name/sole-source justification authority. Q8-Q12 are enhanced
+versions of Q1-Q5 requiring deeper KB engagement. Q13 tests the document
+generation pipeline. Q14 tests brand-name justification and GSA Schedule
+procurement for Zeiss microscopes — the newest addition from the 2026-04-08 huddle.
 
 ---
 
