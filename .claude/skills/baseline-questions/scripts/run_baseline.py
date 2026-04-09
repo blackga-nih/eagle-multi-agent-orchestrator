@@ -19,6 +19,14 @@ from openpyxl.styles import Font, Alignment, PatternFill
 sys.stdout.reconfigure(encoding="utf-8")
 
 
+class BackendUnreachableError(Exception):
+    """Raised when the EAGLE backend returns 5xx or refuses connections.
+
+    Once this fires, every subsequent question will fail the same way, so the
+    run aborts immediately to avoid wasting time and polluting results.
+    """
+
+
 def load_questions_from_excel(xlsx_path: str) -> dict:
     """Read questions from column D of the 'Baseline questions' sheet.
 
@@ -71,9 +79,19 @@ async def run_question(
                 "X-User-Email": "baseline@eval.test",
                 "X-User-Tier": "advanced",
             },
-            timeout=300.0,
+            timeout=600.0,
         )
         elapsed = time.time() - start
+
+        # Abort the whole run if the backend is unreachable / overloaded.
+        # Subsequent questions will all fail the same way, so there's no value
+        # in continuing — every empty result just pollutes the output file.
+        if resp.status_code >= 500:
+            raise BackendUnreachableError(
+                f"Backend returned HTTP {resp.status_code} on Q{q_num} "
+                f"after {elapsed:.1f}s. Aborting baseline run."
+            )
+
         data = resp.json()
 
         response_text = data.get("response", "")
@@ -98,6 +116,16 @@ async def run_question(
             "session_id": session_id,
             "status": "ok",
         }
+    except BackendUnreachableError:
+        # Re-raise so the main loop can abort the entire run.
+        raise
+    except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as e:
+        elapsed = time.time() - start
+        # Connection-level failures mean the backend is gone — abort the run.
+        raise BackendUnreachableError(
+            f"Connection to backend failed on Q{q_num} after {elapsed:.1f}s: {e}. "
+            f"Aborting baseline run."
+        ) from e
     except Exception as e:
         elapsed = time.time() - start
         print(f"\nERROR after {elapsed:.1f}s: {e}")
@@ -210,18 +238,43 @@ async def main():
 
     # ── Run questions sequentially ──
     results = {}
+    aborted = False
+    abort_reason = ""
     async with httpx.AsyncClient() as client:
         for row in sorted(QUESTIONS.keys()):
-            result = await run_question(client, args.server, args.tenant, row, QUESTIONS[row])
+            try:
+                result = await run_question(client, args.server, args.tenant, row, QUESTIONS[row])
+            except BackendUnreachableError as e:
+                aborted = True
+                abort_reason = str(e)
+                print(f"\n{'='*80}")
+                print(f"BACKEND UNREACHABLE — ABORTING RUN")
+                print(f"{'='*80}")
+                print(f"  {e}")
+                print(f"  Completed: Q{[r-1 for r in sorted(results.keys())]}")
+                print(f"  Skipped:   Q{[r-1 for r in sorted(QUESTIONS.keys()) if r not in results]}")
+                print(f"\nFix the backend, then re-run with --questions to resume the missing ones.")
+                break
             result["ro_response"] = ro_responses.get(row, "")
             result["question"] = QUESTIONS[row]
             results[row] = result
 
+    if aborted and not results:
+        # Nothing completed — bail without writing anything to Excel/JSON.
+        sys.exit(2)
+
     # ── Save raw JSON ──
     json_dir = Path(__file__).resolve().parent.parent.parent.parent.parent / "scripts"
     json_dir.mkdir(exist_ok=True)
-    json_path = json_dir / f"baseline_{args.version}_results.json"
+    suffix = "_partial" if aborted else ""
+    json_path = json_dir / f"baseline_{args.version}{suffix}_results.json"
     serializable = {str(row): r for row, r in results.items()}
+    if aborted:
+        serializable["_aborted"] = {
+            "reason": abort_reason,
+            "completed": [r - 1 for r in sorted(results.keys())],
+            "skipped": [r - 1 for r in sorted(QUESTIONS.keys()) if r not in results],
+        }
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(serializable, f, indent=2, ensure_ascii=False)
     print(f"\nRaw results saved to {json_path}")

@@ -1271,6 +1271,21 @@ def _is_document_generation_request(prompt: str) -> tuple[bool, str | None]:
     return False, None
 
 
+def _should_use_fast_document_path(prompt: str) -> tuple[bool, str | None]:
+    should_generate, doc_type = _is_document_generation_request(prompt)
+    if not should_generate or not doc_type:
+        return False, None
+
+    lowered = _normalize_prompt(prompt)
+    if "[document context]" in lowered:
+        return False, None
+    if _references_user_document(prompt):
+        return False, None
+    if any(h in lowered for h in _SLOW_PATH_HINTS):
+        return False, None
+    return True, doc_type
+
+
 def _extract_prompt_sections(prompt: str) -> dict[str, list[str]]:
     sections: dict[str, list[str]] = {}
     current: str | None = None
@@ -1396,6 +1411,129 @@ def _build_scoped_session_id(
     if session_id and "#" in session_id:
         return session_id
     return f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
+
+
+async def _maybe_fast_path_document_generation(
+    prompt: str,
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None,
+    package_context: Any = None,
+) -> dict | None:
+    should_fast_path, doc_type = _should_use_fast_document_path(prompt)
+    if not should_fast_path or not doc_type:
+        return None
+
+    # -- Micro-purchase guardrail (FAR 13.2) --
+    if doc_type in ("sow", "acquisition_plan", "igce"):
+        import re as _re_mp_fp
+
+        _dollar_matches = _re_mp_fp.findall(r"\$\s*([\d,]+(?:\.\d+)?)", prompt)
+        _amounts = [float(m.replace(",", "")) for m in _dollar_matches]
+        _amounts_under = [a for a in _amounts if 0 < a < 15000]
+        if _amounts_under:
+            _ev = min(_amounts_under)
+            return {
+                "doc_type": doc_type,
+                "result": {
+                    "status": "guardrail",
+                    "message": (
+                        f"Micro-purchase guardrail (FAR 13.2): ${_ev:,.0f} is below the "
+                        f"$15,000 micro-purchase threshold. A formal {doc_type.upper()} is "
+                        f"not required. Micro-purchases use simplified procedures — purchase "
+                        f"card or micro-purchase order. No formal acquisition package is needed."
+                    ),
+                    "word_count": 0,
+                },
+                "guardrail": True,
+            }
+
+    # -- Document prerequisites guardrail --
+    # Skip if user has a package (intake already done)
+    _has_package = (
+        package_context is not None
+        and getattr(package_context, "is_package_mode", False)
+    )
+    if not _has_package:
+        _fp_data = _extract_context_data_from_prompt(prompt, doc_type)
+        _prereq_block = _check_document_prerequisites({
+            "doc_type": doc_type, "content": "", "data": _fp_data,
+        })
+        if _prereq_block:
+            _prereq_data = json.loads(_prereq_block)
+            _missing = _prereq_data.get("missing_fields", [])
+            _doc_label = _DOC_TYPE_LABELS.get(
+                doc_type, doc_type.replace("_", " ").title()
+            )
+            return {
+                "doc_type": doc_type,
+                "result": {
+                    "status": "guardrail",
+                    "message": (
+                        f"I'd be happy to help create a {_doc_label}, but I need some "
+                        "information first.\n\nPlease tell me:\n"
+                        + "\n".join(f"- {field}" for field in _missing)
+                        + "\n\nDescribe your acquisition in a few sentences, or say "
+                        '**"start intake"** and I\'ll walk you through it step by step.'
+                    ),
+                    "word_count": 0,
+                },
+                "guardrail": True,
+            }
+
+    from .tools.legacy_dispatch import exec_create_document
+    from .tools.knowledge_tools import exec_knowledge_search
+
+    # -- Template search (EAGLE-77) --
+    # Always search KB for the relevant template before generating.
+    _tpl_info = ""
+    try:
+        tpl_result = await asyncio.to_thread(
+            exec_knowledge_search,
+            {"query": f"{doc_type} template", "document_type": "template", "limit": 3},
+            tenant_id,
+            session_id,
+        )
+        tpl_results = tpl_result.get("results", [])
+        if tpl_results:
+            top = tpl_results[0]
+            _tpl_info = (
+                f"Using template: {top.get('title', 'Unknown')} "
+                f"({top.get('s3_key', 'path unavailable')})"
+            )
+        else:
+            _tpl_info = f"No KB template found for document type '{doc_type}'."
+    except Exception as exc:
+        logger.warning("Fast-path template search failed: %s", exc)
+        _tpl_info = f"Template search unavailable; generating {doc_type} without template reference."
+
+    doc_ctx = _extract_document_context_from_prompt(prompt)
+    params: dict[str, Any] = {
+        "doc_type": doc_type,
+        "title": doc_ctx.get("title") or _fast_path_title(prompt, doc_type),
+    }
+    contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
+    if contextual_data:
+        params["data"] = contextual_data
+    if (
+        package_context is not None
+        and getattr(package_context, "is_package_mode", False)
+        and getattr(package_context, "package_id", None)
+    ):
+        params["package_id"] = package_context.package_id
+
+    scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
+    result = await asyncio.to_thread(
+        exec_create_document,
+        params,
+        tenant_id,
+        scoped_session_id,
+    )
+    return {
+        "doc_type": doc_type,
+        "result": result,
+        "template_info": _tpl_info,
+    }
 
 
 async def _ensure_create_document_for_direct_request(
@@ -1814,16 +1952,7 @@ EAGLE_TOOLS = [
                 },
                 "data": {
                     "type": "object",
-                    "description": (
-                        "Document-specific fields for template population. "
-                        "Use CANONICAL field names: 'description' (not requirement), "
-                        "'estimated_value' (not estimated_cost/budget), "
-                        "'period_of_performance' (not duration/pop), "
-                        "'competition' (not competition_type), "
-                        "'contract_type' (use ffp/cpff/t&m), "
-                        "'vendors_identified' (not vendors), "
-                        "'contractor' (not contractor_name/vendor)."
-                    ),
+                    "description": "Document-specific fields (description, estimated_value, period_of_performance, competition, contract_type, etc.) for template population.",
                 },
             },
             "required": ["doc_type", "title"],
@@ -4272,7 +4401,7 @@ def _build_kb_service_tools(
     so the model schema matches natural tool-calling behaviour.
     """
     from .tools.legacy_dispatch import exec_search_far
-    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch, exec_path_search, get_user_package_ids
+    from .tools.knowledge_tools import exec_knowledge_search, exec_knowledge_fetch, exec_path_search, exec_semantic_search, get_user_package_ids
     from .compliance_matrix import execute_operation as exec_compliance_matrix
 
     # Pre-compute user's allowed package IDs for isolation filtering.
@@ -4597,7 +4726,6 @@ def _build_kb_service_tools(
     @tool(name="research")
     def research_tool(
         query: str,
-        keyword: str = "",
         contract_value: float = 0,
         acquisition_method: str = "",
         is_it: bool = False,
@@ -4605,21 +4733,12 @@ def _build_kb_service_tools(
         include_checklist: bool = True,
         topic: str = "",
         document_type: str = "",
+        keyword: str = "",
     ) -> str:
         """Comprehensive research tool — bundles KB search, auto-fetch, and dynamic checklist selection into one call. Use this for ANY question about documents, requirements, compliance, or acquisition guidance. Returns a complete research packet with KB results, fetched document content, and applicable HHS PMR/FRC checklists.
 
         Args:
-            query: Natural language query — describe the acquisition scenario. Used
-                for AI-ranked semantic search (understands synonyms and concepts)
-                and for compliance matrix / checklist routing.
-            keyword: Concept phrase for RO-style path/filename matching. Pass 2-8
-                regulatory concept terms — NOT the natural-language question. These
-                are matched against the literal KB filename paths, so use words
-                that plausibly appear in filenames (e.g. "sole source justification
-                proprietary software maintenance", "FAR Part 6 competition
-                exception", "HHS PMR SAP checklist approval threshold"). Omit to
-                fall back to the raw query (weak — only works if the question
-                literally contains filename-style tokens).
+            query: Natural language query — describe the acquisition scenario
             contract_value: Estimated contract value in dollars (for threshold-based checklist selection)
             acquisition_method: Acquisition method hint — sole, sap, negotiated, fss, bpa, idiq, micro
             is_it: True if this is an IT acquisition (triggers Section 508 / FISMA docs)
@@ -4627,10 +4746,13 @@ def _build_kb_service_tools(
             include_checklist: Whether to fetch PMR/FRC checklists (default True)
             topic: Optional topic filter for KB search
             document_type: Optional document type filter for KB search
+            keyword: Optional concise regulatory concept phrase (4-10 words) extracted
+                from the query for path-based KB matching. When provided, path hits
+                are promoted to front of the fetch queue (RO-style retrieval).
+                Example: "sole source justification proprietary software maintenance"
         """
         _emit_input("research", {
-            "query": query, "keyword": keyword,
-            "contract_value": contract_value,
+            "query": query, "contract_value": contract_value,
             "acquisition_method": acquisition_method,
             "is_it": is_it, "is_services": is_services,
         })
@@ -4695,17 +4817,17 @@ def _build_kb_service_tools(
                     seen_keys.add(key)
                     seen_stems.add(stem)
 
-        # 1c. Path-based search (RO strategy) — matches supervisor-extracted
-        # concept terms against S3 key paths/filenames. When `keyword` is
-        # supplied (the recommended path), we mirror RO's "agent extracts
-        # concepts then path-matches" approach; the raw `query` fallback is a
-        # safety net that only works when the question literally contains
-        # filename-style tokens.
+        # 1c. Path-based search (RO strategy) — matches query terms against
+        # S3 key paths/filenames. Catches docs that metadata AI ranking misses
+        # because their file names contain the search terms directly.
+        # Use LLM-extracted `keyword` when supplied (RO-style concept phrase);
+        # fall back to raw query otherwise.
+        # Keep path results separate so we can guarantee the top slots get fetched.
         path_only_results: list[dict] = []
-        path_query = keyword.strip() if keyword else query
-        if path_query:
+        path_search_input = keyword.strip() if keyword and keyword.strip() else query
+        if path_search_input:
             path_result = exec_path_search(
-                path_query, tenant_id, limit=25,
+                path_search_input, tenant_id, limit=15,
                 user_id=user_id, _allowed_package_ids=_user_pkg_ids,
             )
             for r in path_result.get("results", []):
@@ -4716,6 +4838,30 @@ def _build_kb_service_tools(
                     path_only_results.append(r)
                     seen_keys.add(key)
                     seen_stems.add(stem)
+
+        # 1e. Semantic search (NEW lane — S3 Vectors + Titan Embed v2)
+        # Additive benchmark lane. Embeds query, queries S3 Vectors index
+        # for top-K nearest chunks, collapses to doc-level hits. Dedups
+        # against the existing seen_keys/seen_stems sets so semantic hits
+        # never double-count. Gated by SEMANTIC_LANE_ENABLED env var; fails
+        # silently if Bedrock or S3 Vectors errors — never blocks research.
+        semantic_only_results: list[dict] = []
+        if os.environ.get("SEMANTIC_LANE_ENABLED", "true").lower() != "false":
+            try:
+                semantic_result = exec_semantic_search(
+                    query, tenant_id, limit=15,
+                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                )
+                for r in semantic_result.get("results", []):
+                    key = r.get("s3_key", "")
+                    stem = _stem(key) if key else ""
+                    if key and key not in seen_keys and stem not in seen_stems:
+                        all_results.append(r)
+                        semantic_only_results.append(r)
+                        seen_keys.add(key)
+                        seen_stems.add(stem)
+            except Exception as _sem_exc:
+                logger.warning("research: semantic lane failed, continuing: %s", _sem_exc)
 
         # 1d. Compliance matrix query — adds threshold context, required docs,
         # approval levels. Runs on most research calls (skipped only for design/
@@ -4742,20 +4888,11 @@ def _build_kb_service_tools(
             except Exception:
                 logger.debug("research: compliance_matrix query failed, continuing")
 
-        # 2. Auto-fetch KB docs. Fetch budget depends on whether the supervisor
-        # supplied an LLM-extracted `keyword`:
-        #   - With keyword (RO-style): promote path hits to front of queue and
-        #     fetch up to 8 path matches first (trust the concept extraction),
-        #     then fill up to 8 more from AI-ranked results.
-        #   - Without keyword: keep the AI-first order — 8 AI-ranked + 8 path
-        #     supplemental (path search on the raw query is noisy, but doubled
-        #     budget gives more room to rescue RO-matching docs).
+        # 2. Auto-fetch top 8 AI-ranked + top 4 path-search results
         # Only fetch KB docs (eagle-knowledge-base/...) — user-generated
-        # package docs have their own retrieval path. Dedup .docx/.content.md
-        # siblings so we don't waste slots on the same doc twice.
-        AI_FETCH_BUDGET = 8
-        PATH_FETCH_BUDGET = 8
-
+        # package docs have their own retrieval path and shouldn't pollute
+        # research results with AI-generated content.
+        # Also dedup .docx/.content.md siblings — prefer .content.md (markdown).
         fetched_stems: set[str] = set()
         fetched_docs = []
 
@@ -4790,6 +4927,12 @@ def _build_kb_service_tools(
                 return True
             return False
 
+        # Fetch budgets — path budget is larger when keyword supplied (RO-style)
+        _keyword_supplied = bool(keyword and keyword.strip())
+        AI_FETCH_BUDGET = 8
+        PATH_FETCH_BUDGET = 8 if _keyword_supplied else 4
+        SEMANTIC_FETCH_BUDGET = 8 if _keyword_supplied else 4
+
         def _fetch_capped(results_iter, budget: int) -> int:
             count = 0
             for r in results_iter:
@@ -4800,15 +4943,23 @@ def _build_kb_service_tools(
                         count += 1
             return count
 
-        _keyword_supplied = bool(keyword and keyword.strip())
+        # Track semantic contribution so we can emit telemetry for benchmarking.
+        _fetched_before_semantic = 0
+
+        # When keyword is supplied, trust the LLM-extracted concept phrase
+        # and fetch path hits FIRST. Otherwise fall back to AI-ranked first.
+        # Semantic slots in between — gets credit for unique docs it surfaces.
         if _keyword_supplied:
-            # Option 3: path-first ordering when keyword is explicitly supplied.
             _fetch_capped(path_only_results, PATH_FETCH_BUDGET)
+            _fetched_before_semantic = len(fetched_docs)
+            _fetch_capped(semantic_only_results, SEMANTIC_FETCH_BUDGET)
             _fetch_capped(all_results, AI_FETCH_BUDGET)
         else:
-            # Default: AI-ranked first, path as supplement.
             _fetch_capped(all_results, AI_FETCH_BUDGET)
+            _fetched_before_semantic = len(fetched_docs)
+            _fetch_capped(semantic_only_results, SEMANTIC_FETCH_BUDGET)
             _fetch_capped(path_only_results, PATH_FETCH_BUDGET)
+        _semantic_fetched_count = len(fetched_docs) - _fetched_before_semantic
 
         # 3. Dynamic checklist search (isolated query — separate from general KB search)
         checklist_content: dict[str, str] = {}
@@ -4870,6 +5021,8 @@ def _build_kb_service_tools(
         _emit("research", {
             "kb_results_count": len(packet["kb_results"]),
             "fetched_count": len(fetched_docs),
+            "semantic_hit_count": len(semantic_only_results),
+            "semantic_fetched_count": _semantic_fetched_count,
             "checklists_loaded": list(checklist_content.keys()),
             "detected_method": detected,
             "compliance_matrix_included": compliance_data is not None,
@@ -5442,6 +5595,49 @@ async def sdk_query(
         )
         return
 
+    # --- Document generation fast-path ---
+    fast_path = await _maybe_fast_path_document_generation(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        package_context=package_context,
+    )
+    if fast_path is not None:
+        result = fast_path["result"]
+        if fast_path.get("guardrail"):
+            yield AssistantMessage(content=[TextBlock(text=result["message"])])
+            yield ResultMessage(result=result["message"], usage={})
+            return
+        if "error" in result:
+            yield AssistantMessage(
+                content=[
+                    TextBlock(text=f"Document generation failed: {result['error']}")
+                ]
+            )
+            yield ResultMessage(
+                result=f"Document generation failed: {result['error']}", usage={}
+            )
+            return
+
+        tpl_info = fast_path.get("template_info", "")
+        tpl_line = f"\n\n**Template:** {tpl_info}" if tpl_info else ""
+        text = (
+            f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
+            f"You can open it from the document card.{tpl_line}"
+        )
+        yield AssistantMessage(
+            content=[
+                TextBlock(text=text),
+                ToolUseBlock(name="create_document"),
+            ]
+        )
+        yield ResultMessage(
+            result=text,
+            usage={"tools_called": 1, "tools": ["create_document", "knowledge_search"], "fast_path": True},
+        )
+        return
+
     # Resolve active workspace when none provided
     resolved_workspace_id = workspace_id
     if not resolved_workspace_id:
@@ -5733,6 +5929,55 @@ async def sdk_query_streaming(
             "tools_called": [],
             "usage": greeting_result.get("usage", {}),
             "fast_path": True,
+        }
+        return
+
+    # --- Document generation fast-path ---
+    fast_path = await _maybe_fast_path_document_generation(
+        prompt=prompt,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        package_context=package_context,
+    )
+    if fast_path is not None:
+        result = fast_path["result"]
+        if fast_path.get("guardrail"):
+            yield {"type": "text", "data": result["message"]}
+            yield {
+                "type": "complete",
+                "text": result["message"],
+                "tools_called": [],
+                "usage": {},
+            }
+            return
+        if "error" in result:
+            yield {"type": "error", "error": result["error"]}
+            return
+        yield {"type": "tool_use", "name": "create_document"}
+        yield {"type": "tool_result", "name": "create_document", "result": result}
+        # Emit package state update for fast-path document creation
+        for state_evt in _build_state_updates(result, "create_document", tenant_id):
+            yield state_evt
+        tpl_info = fast_path.get("template_info", "")
+        tpl_line = f"\n\n**Template:** {tpl_info}" if tpl_info else ""
+        text = (
+            f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
+            f"Open the document card to review or edit it.{tpl_line}"
+        )
+        yield {"type": "text", "data": text}
+        # End-of-turn state refresh for fast-path
+        for state_evt in _build_end_of_turn_state(package_context, tenant_id):
+            yield state_evt
+        yield {
+            "type": "complete",
+            "text": text,
+            "tools_called": ["create_document", "knowledge_search"],
+            "usage": {
+                "tools_called": 1,
+                "tools": ["create_document", "knowledge_search"],
+                "fast_path": True,
+            },
         }
         return
 

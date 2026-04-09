@@ -1168,6 +1168,159 @@ def exec_path_search(
     return {"results": results, "count": len(results)}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Semantic search (S3 Vectors + Titan Embed Text v2) — Lane 1e
+# Additive benchmark lane alongside metadata search (1/1b) and path search (1c).
+# Feature-flagged via SEMANTIC_LANE_ENABLED; returns empty and logs on any error
+# so the main research path is never blocked by semantic failures.
+# ══════════════════════════════════════════════════════════════════════════════
+
+S3_VECTORS_BUCKET = os.environ.get("S3_VECTORS_BUCKET", "rh-eagle")
+S3_VECTORS_INDEX = os.environ.get("S3_VECTORS_INDEX", "eagle-kb-approved")
+EMBED_MODEL_ID = os.environ.get("EMBED_MODEL_ID", "amazon.titan-embed-text-v2:0")
+EMBED_DIM = int(os.environ.get("EMBED_DIM", "1024"))
+
+_embed_client_lock = threading.Lock()
+_embed_client = None
+_s3vectors_client = None
+
+
+def _get_bedrock_runtime():
+    """Lazy singleton for the Bedrock runtime client (embeddings)."""
+    global _embed_client
+    if _embed_client is None:
+        with _embed_client_lock:
+            if _embed_client is None:
+                _embed_client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+    return _embed_client
+
+
+def _get_s3vectors_client():
+    """Lazy singleton for the S3 Vectors client."""
+    global _s3vectors_client
+    if _s3vectors_client is None:
+        with _embed_client_lock:
+            if _s3vectors_client is None:
+                _s3vectors_client = boto3.client("s3vectors", region_name=AWS_REGION)
+    return _s3vectors_client
+
+
+def embed_text(text: str, dimensions: int = EMBED_DIM) -> list[float] | None:
+    """Embed a single string via Titan Embed Text v2. Returns None on failure."""
+    if not text:
+        return None
+    try:
+        runtime = _get_bedrock_runtime()
+        body = json.dumps({
+            "inputText": text[:8000],  # Titan v2 max ~8k tokens
+            "dimensions": dimensions,
+            "normalize": True,
+        })
+        resp = runtime.invoke_model(
+            modelId=EMBED_MODEL_ID,
+            body=body,
+            contentType="application/json",
+            accept="application/json",
+        )
+        payload = json.loads(resp["body"].read())
+        return payload.get("embedding")
+    except (BotoCoreError, ClientError, Exception) as e:
+        logger.warning("embed_text failed: %s", e)
+        return None
+
+
+def exec_semantic_search(
+    query: str,
+    tenant_id: str,
+    limit: int = 15,
+    user_id: str | None = None,
+    _allowed_package_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Semantic search via S3 Vectors + Titan Embed Text v2.
+
+    Embeds query through Bedrock, queries the S3 Vectors index for top-K
+    nearest chunks, collapses chunks -> unique s3_keys (keep best score per
+    document), and returns results shaped to match exec_knowledge_search /
+    exec_path_search so research_tool can merge lanes uniformly.
+
+    Returns {"results": [], "count": 0} (no-op) if SEMANTIC_LANE_ENABLED is
+    false, the embedding call fails, or S3 Vectors query fails. Semantic is
+    purely additive and never blocks the main research path.
+    """
+    if os.environ.get("SEMANTIC_LANE_ENABLED", "true").lower() == "false":
+        return {"results": [], "count": 0}
+
+    if not query or not query.strip():
+        return {"results": [], "count": 0}
+
+    # 1. Embed the query
+    embedding = embed_text(query)
+    if embedding is None:
+        logger.warning("exec_semantic_search: embedding failed, skipping")
+        return {"results": [], "count": 0}
+
+    # 2. Query S3 Vectors — over-fetch chunks so we can collapse to doc-level
+    over_fetch = max(limit * 4, 40)
+    try:
+        sv = _get_s3vectors_client()
+        resp = sv.query_vectors(
+            vectorBucketName=S3_VECTORS_BUCKET,
+            indexName=S3_VECTORS_INDEX,
+            queryVector={"float32": embedding},
+            topK=over_fetch,
+            returnMetadata=True,
+            returnDistance=True,
+        )
+    except (BotoCoreError, ClientError) as e:
+        logger.warning("exec_semantic_search: S3 Vectors query failed: %s", e)
+        return {"results": [], "count": 0}
+
+    vectors = resp.get("vectors", [])
+    if not vectors:
+        return {"results": [], "count": 0}
+
+    # 3. Collapse chunks -> best score per s3_key
+    # cosine distance in [0, 2] — confidence = 1 - (distance / 2) clamped [0, 1]
+    best_per_key: dict[str, dict[str, Any]] = {}
+    for v in vectors:
+        metadata = v.get("metadata", {}) or {}
+        s3_key = metadata.get("s3_key", "")
+        if not s3_key:
+            continue
+        distance = float(v.get("distance", 1.0))
+        confidence = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+        existing = best_per_key.get(s3_key)
+        if existing is None or confidence > existing["confidence_score"]:
+            best_per_key[s3_key] = {
+                "document_id": metadata.get("document_id", s3_key),
+                "title": metadata.get("title", s3_key.rsplit("/", 1)[-1]),
+                "summary": metadata.get("summary", ""),
+                "document_type": metadata.get("document_type", ""),
+                "primary_topic": metadata.get("primary_topic", ""),
+                "primary_agent": metadata.get("primary_agent", ""),
+                "s3_key": s3_key,
+                "confidence_score": confidence,
+                "_semantic_distance": distance,
+            }
+
+    # 4. Sort by score desc
+    ranked = sorted(
+        best_per_key.values(),
+        key=lambda r: r["confidence_score"],
+        reverse=True,
+    )
+
+    # 5. Apply user isolation
+    ranked = filter_results_for_user(ranked, tenant_id, user_id, _allowed_package_ids)
+
+    top = ranked[:limit]
+    logger.info(
+        "exec_semantic_search: %d chunks -> %d unique docs -> %d after filter/limit (query=%.60s)",
+        len(vectors), len(best_per_key), len(top), query,
+    )
+    return {"results": top, "count": len(top)}
+
+
 def exec_knowledge_fetch(
     params: dict[str, Any],
     tenant_id: str,
