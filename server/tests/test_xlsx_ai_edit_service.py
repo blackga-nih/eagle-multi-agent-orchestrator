@@ -80,6 +80,85 @@ def _build_partial_context_fill_xlsx() -> bytes:
     return output.getvalue()
 
 
+def _build_ige_products_xlsx() -> bytes:
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws["A1"] = "INDEPENDENT GOVERNMENT ESTIMATE (IGE) FOR PRODUCTS"
+    ws["B3"] = "Products (including software, licenses)"
+    ws["A4"] = "Item #"
+    ws["B4"] = "Manufacturer/Description/Part/Model Number*"
+    ws["C4"] = "Qty"
+    ws["D4"] = "Price"
+    ws["E4"] = "Extended Amount"
+    ws["A5"] = 1
+    ws["B5"] = "Microscope / Acme / M-100"
+    ws["C5"] = 2
+    ws["D5"] = 5000
+    ws["E5"] = "=SUM(C5*D5)"
+    for row in (6, 7, 8, 9):
+        ws[f"E{row}"] = f"=SUM(C{row}*D{row})"
+    ws["B10"] = "Shipping (include as needed)"
+    ws["C10"] = 1
+    ws["D10"] = 400
+    ws["E10"] = "=SUM(C10*D10)"
+    ws["B11"] = "Installation (include as needed)"
+    ws["E11"] = "=SUM(C11*D11)"
+    ws["B12"] = "Training (include as needed)"
+    ws["E13"] = "=SUM(C13*D13)"
+    ws["B14"] = "  SUBTOTAL (Products)"
+    ws["E14"] = "=SUM(E5:E13)"
+    ws["B16"] = "TOTAL IGE"
+    ws["E16"] = "=E14"
+    wb.create_sheet("Sheet2")
+    wb.create_sheet("Sheet3")
+
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
+def _build_ige_services_xlsx() -> bytes:
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    base = wb.active
+    base.title = "Base Period"
+    base["A1"] = "INDEPENDENT GOVERNMENT ESTIMATE (IGE) FOR SERVICES"
+    base["A4"] = "Brief Description of Service*"
+    base["C4"] = "Period of Performance\n(Base)"
+    base.merge_cells("C4:D4")
+    base["A5"] = "Cloud Hosting"
+    base["C5"] = 12
+    base["D5"] = 5000
+    base["E5"] = "=SUM(C5*D5)"
+    for row in (6, 7, 8, 9, 10, 11, 12, 13):
+        base[f"E{row}"] = f"=SUM(C{row}*D{row})"
+    base["E14"] = "=SUM(E5:E13)"
+    base["E16"] = "=E14"
+
+    option = wb.create_sheet("Option Period One")
+    option["A1"] = "INDEPENDENT GOVERNMENT COST ESTIMATE (IGCE)"
+    option["A4"] = "Brief Description of Service*"
+    option["C4"] = "Period of Performance\n(Option Period 1)"
+    option.merge_cells("C4:D4")
+    option["A5"] = "Cloud Hosting Option 1"
+    option["C5"] = 12
+    option["D5"] = 5500
+    option["E5"] = "=SUM(C5*D5)"
+    for row in (6, 7, 8, 9, 10, 11, 12, 13):
+        option[f"E{row}"] = f"=SUM(C{row}*D{row})"
+    option["E14"] = "=SUM(E5:E13)"
+    option["E16"] = "=E14"
+
+    wb.create_sheet("Sheet3")
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
 def test_edit_igce_xlsx_document_updates_labor_rate():
     xlsx_bytes = _build_commercial_igce_xlsx()
     preview = extract_xlsx_preview_payload(xlsx_bytes)
@@ -196,6 +275,100 @@ def test_edit_igce_xlsx_document_supports_direct_cell_edit_request():
     sent_edits = save_mock.call_args.kwargs["cell_edits"]
     assert {"sheet_id": "2:it-goods", "cell_ref": "F10", "value": "12000"} in sent_edits
     assert "IT Goods F10" in result["assistant_message"]
+
+
+def test_edit_igce_xlsx_document_supports_ige_products_updates():
+    xlsx_bytes = _build_ige_products_xlsx()
+    preview = extract_xlsx_preview_payload(xlsx_bytes)
+    s3 = MagicMock()
+    s3.get_object.return_value = {"Body": io.BytesIO(xlsx_bytes)}
+
+    with patch("app.xlsx_ai_edit_service.get_s3", return_value=s3), patch(
+        "app.xlsx_ai_edit_service.find_document_by_s3_key",
+        create=True,
+        return_value=None,
+    ), patch(
+        "app.user_document_store.find_document_by_s3_key",
+        return_value={
+            "document_id": "doc-prod-1",
+            "title": "IGE Products",
+            "doc_type": "igce",
+            "session_id": "sess-123",
+            "template_id": "eagle-knowledge-base/approved/supervisor-core/essential-templates/4.a. IGE for Products.xlsx",
+        },
+    ), patch(
+        "app.xlsx_ai_edit_service.get_package", return_value=None
+    ), patch(
+        "app.xlsx_ai_edit_service._augment_document_data_from_context",
+        return_value={"description": "Lab equipment"},
+    ), patch(
+        "app.xlsx_ai_edit_service.save_xlsx_preview_edits",
+        return_value={
+            "success": True,
+            "preview_mode": "xlsx_grid",
+            "preview_sheets": preview["preview_sheets"],
+            "content": preview["content"],
+            "version": 0,
+            "s3_key": "eagle/dev-tenant/dev-user/documents/ige_products.xlsx",
+        },
+    ) as save_mock:
+        result = edit_igce_xlsx_document(
+            tenant_id="dev-tenant",
+            user_id="dev-user",
+            doc_key="eagle/dev-tenant/dev-user/documents/ige_products.xlsx",
+            request_text="Set microscope quantity to 3",
+        )
+
+    assert result["success"] is True
+    assert result["clarification_needed"] is False
+    sent_edits = save_mock.call_args.kwargs["cell_edits"]
+    assert {"sheet_id": "0:sheet1", "cell_ref": "C5", "value": "3"} in sent_edits
+    assert "Microscope / Acme / M-100 quantity" in result["assistant_message"]
+
+
+def test_edit_igce_xlsx_document_supports_ige_services_updates():
+    xlsx_bytes = _build_ige_services_xlsx()
+    preview = extract_xlsx_preview_payload(xlsx_bytes)
+    s3 = MagicMock()
+    s3.get_object.return_value = {"Body": io.BytesIO(xlsx_bytes)}
+
+    with patch("app.xlsx_ai_edit_service.get_s3", return_value=s3), patch(
+        "app.user_document_store.find_document_by_s3_key",
+        return_value={
+            "document_id": "doc-svc-1",
+            "title": "IGE Services",
+            "doc_type": "igce",
+            "session_id": "sess-456",
+            "template_id": "eagle-knowledge-base/approved/supervisor-core/essential-templates/4.b. IGE for Services based on Catalog Price.xlsx",
+        },
+    ), patch(
+        "app.xlsx_ai_edit_service.get_package", return_value=None
+    ), patch(
+        "app.xlsx_ai_edit_service._augment_document_data_from_context",
+        return_value={"description": "Cloud hosting services"},
+    ), patch(
+        "app.xlsx_ai_edit_service.save_xlsx_preview_edits",
+        return_value={
+            "success": True,
+            "preview_mode": "xlsx_grid",
+            "preview_sheets": preview["preview_sheets"],
+            "content": preview["content"],
+            "version": 0,
+            "s3_key": "eagle/dev-tenant/dev-user/documents/ige_services.xlsx",
+        },
+    ) as save_mock:
+        result = edit_igce_xlsx_document(
+            tenant_id="dev-tenant",
+            user_id="dev-user",
+            doc_key="eagle/dev-tenant/dev-user/documents/ige_services.xlsx",
+            request_text="Set cloud hosting unit price to 6000",
+        )
+
+    assert result["success"] is True
+    assert result["clarification_needed"] is False
+    sent_edits = save_mock.call_args.kwargs["cell_edits"]
+    assert {"sheet_id": "0:base-period", "cell_ref": "D5", "value": "6000"} in sent_edits
+    assert "Base Period Cloud Hosting unit price" in result["assistant_message"]
 
 
 def test_edit_igce_xlsx_document_uses_ai_extractor_for_contextual_request():

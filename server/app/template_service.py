@@ -18,7 +18,6 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from app.db_client import get_s3
 from app.formula_evaluation import calculate_workbook_formula_values
-from app.igce_xlsx_mapper import CommercialIGCEWorkbookMapper
 from app.template_registry import (
     TEMPLATE_BUCKET,
     TEMPLATE_PREFIX,
@@ -29,6 +28,7 @@ from app.template_registry import (
     has_template,
     is_markdown_only,
 )
+from app.xlsx_workbook_handlers import populate_supported_xlsx_workbook
 
 logger = logging.getLogger("eagle.template_service")
 
@@ -267,7 +267,7 @@ class XLSXPopulator:
 
         wb = load_workbook(io.BytesIO(template_bytes))
 
-        if CommercialIGCEWorkbookMapper.populate(wb, data):
+        if populate_supported_xlsx_workbook(wb, data):
             output = io.BytesIO()
             wb.save(output)
             return output.getvalue()

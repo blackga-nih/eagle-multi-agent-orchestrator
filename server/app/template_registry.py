@@ -203,8 +203,6 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "prepared_date": "{{PREPARED_DATE}}",
         },
         alternates=[
-            "02.D_IGCE_for_Educational_Institutions.xlsx",
-            "03.D_IGCE_for_Nonprofit_Organizations.xlsx",
             "4.a. IGE for Products.xlsx",
             "4.b. IGE for Services based on Catalog Price.xlsx",
         ],
