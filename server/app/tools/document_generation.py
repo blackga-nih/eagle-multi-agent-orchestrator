@@ -35,11 +35,15 @@ from .create_document_support import (
     _generate_sow,
     get_s3,
     _looks_like_unfilled_template_preview,
-    _normalize_create_document_doc_type,
     _update_document_content,
     logger,
 )
 from ..session_scope import extract_user_id
+from ..ai_document_schema import (
+    normalize_and_validate_document_payload,
+    get_create_document_types,
+    normalize_doc_type,
+)
 
 # Doc-type labels mirrored from strands_agentic_service._DOC_TYPE_LABELS
 _DOC_TYPE_LABELS = {
@@ -175,7 +179,6 @@ def exec_create_document(
     of creating a new one.
     """
     from app.template_service import TemplateService
-    from app.template_registry import normalize_field_names
 
     update_key = params.get("update_existing_key")
     if update_key:
@@ -188,7 +191,8 @@ def exec_create_document(
         )
 
     title = params.get("title") or ""
-    doc_type = _normalize_create_document_doc_type(params.get("doc_type"), title)
+    # Initial doc_type normalization (canonical schema handles full validation later)
+    doc_type = normalize_doc_type(params.get("doc_type") or "")
     raw_data = params.get("data", {})
     if isinstance(raw_data, str):
         try:
@@ -203,8 +207,49 @@ def exec_create_document(
     )
     timestamp = time.strftime("%Y%m%d_%H%M%S")
 
+    # Augment data from session context
     data = _augment_document_data_from_context(doc_type, title, data, session_id)
-    data = normalize_field_names(data, doc_type)
+
+    # Canonical schema validation and normalization (Phase 1 of schema propagation)
+    canonical_payload = normalize_and_validate_document_payload(
+        raw_doc_type=doc_type,
+        title=title,
+        data=data,
+    )
+    doc_type = canonical_payload.doc_type
+    data = canonical_payload.data
+
+    # Log and emit telemetry for schema normalization (Phase 6 observability)
+    if canonical_payload.warnings:
+        logger.warning(
+            "Document payload warnings: %s", canonical_payload.warnings
+        )
+    if canonical_payload.normalized_aliases:
+        logger.info(
+            "Document payload normalized: %s", canonical_payload.normalized_aliases
+        )
+
+    # Emit telemetry for schema drift analysis
+    if canonical_payload.normalized_aliases or canonical_payload.warnings or canonical_payload.unknown_fields:
+        try:
+            from app.telemetry.cloudwatch_emitter import emit_telemetry_event
+            emit_telemetry_event(
+                event_type="schema.normalized",
+                tenant_id=tenant_id,
+                session_id=session_id,
+                data={
+                    "doc_type": doc_type,
+                    "original_doc_type": params.get("doc_type"),
+                    "normalized_aliases": canonical_payload.normalized_aliases,
+                    "warnings": canonical_payload.warnings,
+                    "unknown_fields": canonical_payload.unknown_fields,
+                    "alias_count": len(canonical_payload.normalized_aliases),
+                    "warning_count": len(canonical_payload.warnings),
+                    "unknown_field_count": len(canonical_payload.unknown_fields),
+                },
+            )
+        except Exception as e:
+            logger.debug("Schema telemetry emission failed: %s", e)
 
     # For IGCE XLSX, extract structured workbook data (line items, goods, etc.)
     if doc_type == "igce" and output_format == "xlsx":
@@ -234,24 +279,8 @@ def exec_create_document(
                 current_content, edit_request
             )
 
-    valid_doc_types = {
-        "sow",
-        "igce",
-        "market_research",
-        "justification",
-        "acquisition_plan",
-        "eval_criteria",
-        "security_checklist",
-        "section_508",
-        "cor_certification",
-        "contract_type_justification",
-        # Micro-purchase / simplified package documents
-        "son_products",
-        "son_services",
-        "purchase_request",
-        "price_reasonableness",
-        "required_sources",
-    }
+    # Use canonical schema for valid doc_types (Phase 1 of schema propagation)
+    valid_doc_types = get_create_document_types()
     if doc_type not in valid_doc_types:
         return {
             "error": f"Unknown document type: {doc_type}. Supported: {', '.join(sorted(valid_doc_types))}."

@@ -27,25 +27,40 @@ export type UrgencyLevel = 'standard' | 'urgent' | 'critical';
 
 export type DocumentStatus = 'not_started' | 'in_progress' | 'draft' | 'final' | 'approved';
 
-/** All document types supported by the backend create_document tool. */
+/**
+ * All document types supported by the backend create_document tool.
+ * Aligned with canonical schema in server/app/ai_document_schema.py (Phase 5)
+ */
 export type DocumentType =
+  // Core document types (create_document supported)
   | 'sow'
   | 'igce'
   | 'market_research'
   | 'acquisition_plan'
   | 'justification'
-  | 'funding_doc'
   | 'eval_criteria'
   | 'security_checklist'
   | 'section_508'
   | 'cor_certification'
   | 'contract_type_justification'
+  | 'son_products'
+  | 'son_services'
+  | 'purchase_request'
+  | 'price_reasonableness'
+  | 'required_sources'
+  // Template/form types
+  | 'subk_plan'
+  | 'subk_review'
+  | 'buy_american'
+  | 'conference_request'
+  | 'conference_waiver'
+  | 'bpa_call_order'
+  // Frontend-only types (kept for compatibility, pending backend support)
+  | 'funding_doc'
   | 'd_f'
   | 'qasp'
   | 'source_selection_plan'
-  | 'subcontracting_plan'
   | 'sb_review'
-  | 'purchase_request'
   | 'human_subjects';
 
 export type ChecklistStepStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
@@ -86,45 +101,69 @@ export type FeedbackArea =
 
 /** Human-readable labels for each document type. */
 export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+  // Core document types
   sow: 'Statement of Work',
   igce: 'Cost Estimate (IGCE)',
   market_research: 'Market Research',
   acquisition_plan: 'Acquisition Plan',
   justification: 'Justification & Approval',
-  funding_doc: 'Funding Documentation',
   eval_criteria: 'Evaluation Criteria',
   security_checklist: 'Security Checklist',
   section_508: 'Section 508 Compliance',
   cor_certification: 'COR Certification',
   contract_type_justification: 'Contract Type Justification',
+  son_products: 'Statement of Need — Products',
+  son_services: 'Statement of Need — Services',
+  purchase_request: 'Purchase Request',
+  price_reasonableness: 'Price Reasonableness Determination',
+  required_sources: 'Required Sources Checklist',
+  // Template/form types
+  subk_plan: 'Subcontracting Plan',
+  subk_review: 'Subcontracting Review',
+  buy_american: 'Buy American Determination',
+  conference_request: 'Conference Request',
+  conference_waiver: 'Conference Waiver',
+  bpa_call_order: 'BPA Call Order',
+  // Frontend-only types
+  funding_doc: 'Funding Documentation',
   d_f: 'Determination & Findings (D&F)',
   qasp: 'Quality Assurance Surveillance Plan',
   source_selection_plan: 'Source Selection Plan',
-  subcontracting_plan: 'Subcontracting Plan',
   sb_review: 'Small Business Review (HHS-653)',
-  purchase_request: 'Purchase Request',
   human_subjects: 'Human Subjects Provisions',
 };
 
 /** Emoji icons for each document type (used in activity panel, doc cards). */
 export const DOCUMENT_TYPE_ICONS: Record<DocumentType, string> = {
+  // Core document types
   sow: '\u{1F4DD}', // memo
   igce: '\u{1F4B0}', // money bag
   market_research: '\u{1F50D}', // magnifying glass
   acquisition_plan: '\u{1F4CB}', // clipboard
   justification: '\u{2696}', // scales
-  funding_doc: '\u{1F4B5}', // dollar
   eval_criteria: '\u{2705}', // check mark
   security_checklist: '\u{1F512}', // lock
   section_508: '\u{267F}', // wheelchair
   cor_certification: '\u{1F3C5}', // medal
   contract_type_justification: '\u{1F4C3}', // page with curl
+  son_products: '\u{1F4E6}', // package
+  son_services: '\u{1F6E0}', // tools
+  purchase_request: '\u{1F4E5}', // inbox tray
+  price_reasonableness: '\u{1F4B2}', // dollar sign
+  required_sources: '\u{2611}', // checkbox
+  // Template/form types
+  subk_plan: '\u{1F91D}', // handshake
+  subk_review: '\u{1F50E}', // magnifying glass right
+  buy_american: '\u{1F1FA}\u{1F1F8}', // US flag
+  conference_request: '\u{1F4C5}', // calendar
+  conference_waiver: '\u{1F4DD}', // memo
+  bpa_call_order: '\u{1F4DE}', // telephone
+  // Frontend-only types
+  funding_doc: '\u{1F4B5}', // dollar
   d_f: '\u{1F4DC}', // scroll
   qasp: '\u{1F50E}', // magnifying glass right
   source_selection_plan: '\u{1F3AF}', // target
-  subcontracting_plan: '\u{1F91D}', // handshake
   sb_review: '\u{1F3E2}', // office building
-  purchase_request: '\u{1F4E5}', // inbox tray
   human_subjects: '\u{1F9EC}', // dna
 };
 

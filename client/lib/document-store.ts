@@ -74,7 +74,7 @@ const SLUG_TO_DOC_TYPE: Record<string, DocumentType> = {
   'd-f': 'd_f',
   qasp: 'qasp',
   'source-selection-plan': 'source_selection_plan',
-  'subcontracting-plan': 'subcontracting_plan',
+  'subcontracting-plan': 'subk_plan', // Canonical name (Phase 5)
   'sb-review': 'sb_review',
   'purchase-request': 'purchase_request',
   'security-checklist': 'security_checklist',

@@ -167,6 +167,13 @@ def _extract_far_citations(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Normalization: alias maps + resolve functions
 # ---------------------------------------------------------------------------
+# NOTE: Canonical schema exists in ai_document_schema.py with common aliases.
+# These compliance-specific aliases are EXTENSIONS for compliance matrix logic:
+# - More granular method categories (bpa-est, bpa-call, idiq-order, fss)
+# - FAR Part references (far part 8, far part 13, far part 15)
+# - Compliance-specific contract type mappings
+# Phase 4 of Canonical Schema Propagation (2026-04-09)
+# ---------------------------------------------------------------------------
 
 _METHOD_ALIASES: dict[str, str] = {
     # Full and open / negotiated (FAR 15)
