@@ -1952,7 +1952,16 @@ EAGLE_TOOLS = [
                 },
                 "data": {
                     "type": "object",
-                    "description": "Document-specific fields (description, estimated_value, period_of_performance, competition, contract_type, etc.) for template population.",
+                    "description": (
+                        "Document-specific fields for template population. "
+                        "Use CANONICAL field names: 'description' (not requirement), "
+                        "'estimated_value' (not estimated_cost/budget), "
+                        "'period_of_performance' (not duration/pop), "
+                        "'competition' (not competition_type), "
+                        "'contract_type' (use ffp/cpff/t&m), "
+                        "'vendors_identified' (not vendors), "
+                        "'contractor' (not contractor_name/vendor)."
+                    ),
                 },
             },
             "required": ["doc_type", "title"],

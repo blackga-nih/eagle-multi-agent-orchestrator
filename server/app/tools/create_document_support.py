@@ -665,6 +665,10 @@ def _augment_document_data_from_context(
     return merged
 
 
+# DEPRECATED: Use ai_document_schema.DOC_TYPE_ALIASES instead.
+# This alias map is kept for backward compatibility with tests.
+# The canonical source of truth is now server/app/ai_document_schema.py
+# Phase 1 of Canonical Schema Propagation (2026-04-09)
 _DOC_TYPE_ALIASES = {
     "ige": "igce",
     "igce": "igce",
@@ -717,10 +721,16 @@ def _infer_doc_type_from_title(title: str) -> str | None:
 
 
 def _normalize_create_document_doc_type(raw_doc_type: Any, title: str) -> str:
-    requested = (
-        str(raw_doc_type or "").strip().lower().replace("-", "_").replace(" ", "_")
-    )
-    normalized = _DOC_TYPE_ALIASES.get(requested, requested)
+    """DEPRECATED: Use ai_document_schema.normalize_doc_type() instead.
+
+    This function is kept for backward compatibility with existing tests.
+    The canonical source of truth is now server/app/ai_document_schema.py
+    Phase 2 of Canonical Schema Propagation (2026-04-09)
+    """
+    # Delegate to canonical schema for normalization
+    from app.ai_document_schema import normalize_doc_type
+
+    normalized = normalize_doc_type(str(raw_doc_type or ""))
     inferred = _infer_doc_type_from_title(title)
 
     if normalized == "sow" and inferred == "igce":

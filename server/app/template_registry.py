@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from botocore.exceptions import ClientError
 
 from .db_client import get_s3
+from .ai_document_schema import FIELD_NAME_ALIASES  # Canonical source (Phase 4)
 
 logger = logging.getLogger("eagle.template_registry")
 
@@ -343,52 +344,19 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
 }
 
 # ── Field Name Aliases ────────────────────────────────────────────────
-# Maps common AI-sent field names to canonical placeholder_map keys.
-# The AI often sends e.g. "competition_type" but the template expects "competition".
-FIELD_NAME_ALIASES: Dict[str, str] = {
-    # competition variants
-    "competition_type": "competition",
-    "competition_strategy": "competition",
-    "full_open": "competition",
-    # period variants
-    "contract_period": "period_of_performance",
-    "duration": "period_of_performance",
-    "pop": "period_of_performance",
-    "performance_period": "period_of_performance",
-    # cost/value variants
-    "estimated_cost": "estimated_value",
-    "budget": "estimated_value",
-    "total_cost": "total_estimate",
-    "total_value": "estimated_value",
-    # description variants
-    "requirement": "description",
-    "requirement_description": "description",
-    "objective": "description",
-    "requirement_summary": "description",
-    # contractor variants
-    "contractor_name": "contractor",
-    "vendor": "contractor",
-    "vendor_name": "contractor",
-    # set-aside variants
-    "set_aside_recommendation": "set_aside",
-    "set_aside_type": "set_aside",
-    "small_business": "set_aside",
-    # justification variants
-    "authority_cited": "authority",
-    "far_authority": "authority",
-    "justification_authority": "authority",
-    "justification_rationale": "rationale",
-    # market research variants
-    "vendors": "vendors_identified",
-    "vendor_list": "vendors_identified",
-    "market_analysis": "market_conditions",
-}
+# CONSOLIDATED: Imported from ai_document_schema.py (Phase 4 of schema propagation)
+# The canonical source of truth is now server/app/ai_document_schema.py
+# See FIELD_NAME_ALIASES import at top of file.
 
 
 def normalize_field_names(data: Dict[str, Any], doc_type: str) -> Dict[str, Any]:
     """Normalize AI-sent field names to canonical placeholder_map names.
 
     Preserves unrecognized keys for downstream markdown generators.
+
+    NOTE: For new code, prefer ai_document_schema.normalize_field_names() which
+    provides doc-type-agnostic normalization. This function adds template-specific
+    logic (checking against placeholder_map) on top of the canonical aliases.
     """
     mapping = get_template_mapping(doc_type)
     if not mapping:

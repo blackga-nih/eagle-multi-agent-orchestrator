@@ -47,7 +47,8 @@ function docLabel(slug: string): string {
     section_508: 'Section 508 Compliance',
     cor_certification: 'COR Certification',
     contract_type_justification: 'Contract Type Justification',
-    subcontracting_plan: 'Subcontracting Plan',
+    subk_plan: 'Subcontracting Plan', // Canonical name (Phase 5)
+    subcontracting_plan: 'Subcontracting Plan', // Legacy alias
   };
   return map[slug] || slug.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }

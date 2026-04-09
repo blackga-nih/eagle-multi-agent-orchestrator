@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "description": "Tool definitions for EAGLE acquisition assistant in Anthropic tool_use format",
+  "version": "2.0.0",
+  "description": "Tool definitions for EAGLE acquisition assistant in Anthropic tool_use format. Updated 2026-04-09 for canonical schema propagation.",
   "tools": [
     {
       "name": "search_far",
@@ -25,18 +25,41 @@
     },
     {
       "name": "create_document",
-      "description": "Generate acquisition documents including Statement of Work (SOW), Independent Government Cost Estimate (IGCE), Market Research Report, and Justification & Approval (J&A). Documents are saved to S3. Can also update existing documents by providing update_existing_key.",
+      "description": "Generate acquisition documents including SOW, IGCE, Market Research, J&A, Acquisition Plan, Evaluation Criteria, Security Checklist, Section 508 Statement, COR Certification, Contract Type Justification, Statement of Need, Buy American DF, Subcontracting Plan, and Conference Request. Documents are saved to S3. Each doc_type has a defined section structure — fill EVERY section.",
       "input_schema": {
         "type": "object",
         "properties": {
           "doc_type": {
             "type": "string",
-            "enum": ["sow", "igce", "market_research", "justification", "acquisition_plan"],
-            "description": "Type of acquisition document to generate"
+            "enum": [
+              "sow",
+              "igce",
+              "market_research",
+              "justification",
+              "acquisition_plan",
+              "eval_criteria",
+              "security_checklist",
+              "section_508",
+              "cor_certification",
+              "contract_type_justification",
+              "son_products",
+              "son_services",
+              "buy_american",
+              "subk_plan",
+              "conference_request",
+              "purchase_request",
+              "price_reasonableness",
+              "required_sources"
+            ],
+            "description": "Type of acquisition document to generate. Use canonical values only."
           },
           "title": {
             "type": "string",
-            "description": "Title of the acquisition/document"
+            "description": "Descriptive document title including the program or acquisition name (e.g. 'SOW - Cloud Computing Services for NCI Research Portal'). Never use a generic type label alone."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full document content as markdown. Write complete, section-by-section content using the conversation context before calling this tool. This becomes the saved document body. Cover ALL sections defined in the template schema."
           },
           "update_existing_key": {
             "type": "string",
@@ -44,47 +67,66 @@
           },
           "data": {
             "type": "object",
-            "description": "Document-specific fields (description, line_items, vendors, etc.)",
+            "description": "Document-specific fields for template population. Use CANONICAL field names only.",
             "properties": {
               "description": {
                 "type": "string",
-                "description": "Detailed description of the requirement"
+                "description": "Detailed description of the requirement. Use 'description' NOT 'requirement'."
+              },
+              "estimated_value": {
+                "type": "number",
+                "description": "Estimated contract value in dollars. Use 'estimated_value' NOT 'estimated_cost' or 'budget'."
               },
               "period_of_performance": {
                 "type": "string",
-                "description": "Duration of the contract (e.g., '12 months from award')"
+                "description": "Duration of the contract (e.g., '12 months from award'). Use 'period_of_performance' NOT 'duration' or 'pop'."
+              },
+              "contract_type": {
+                "type": "string",
+                "enum": ["ffp", "fp-epa", "fpi", "cpff", "cpif", "cpaf", "t&m", "lh", "idiq", "bpa"],
+                "description": "Contract type. Use canonical values: ffp, cpff, t&m, etc."
+              },
+              "competition": {
+                "type": "string",
+                "description": "Competition strategy. Use 'competition' NOT 'competition_type' or 'competition_strategy'."
               },
               "deliverables": {
                 "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "List of deliverables"
+                "items": { "type": "string" },
+                "description": "List of deliverables (for SOW)"
               },
               "tasks": {
                 "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "List of tasks to be performed"
+                "items": { "type": "string" },
+                "description": "List of tasks to be performed (for SOW)"
               },
               "line_items": {
                 "type": "array",
                 "items": {
                   "type": "object",
                   "properties": {
-                    "description": {
-                      "type": "string"
-                    },
-                    "quantity": {
-                      "type": "number"
-                    },
-                    "unit_price": {
-                      "type": "number"
-                    }
+                    "description": { "type": "string", "description": "Labor category name" },
+                    "rate": { "type": "number", "description": "Hourly rate" },
+                    "hours": { "type": "integer", "description": "Total hours" }
                   }
                 },
-                "description": "Line items for IGCE"
+                "description": "Labor line items for IGCE"
+              },
+              "goods_items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "product_name": { "type": "string" },
+                    "quantity": { "type": "integer" },
+                    "unit_price": { "type": "number" }
+                  }
+                },
+                "description": "Equipment/goods items for IGCE"
+              },
+              "period_months": {
+                "type": "integer",
+                "description": "Period of performance in months (for IGCE)"
               },
               "overhead_rate": {
                 "type": "number",
@@ -100,40 +142,35 @@
               },
               "contractor": {
                 "type": "string",
-                "description": "Proposed contractor name for J&A"
+                "description": "Proposed contractor name for J&A. Use 'contractor' NOT 'contractor_name' or 'vendor'."
               },
               "rationale": {
                 "type": "string",
                 "description": "Rationale for sole source"
               },
-              "estimated_value": {
-                "type": "string",
-                "description": "Estimated contract value"
-              },
               "naics_code": {
                 "type": "string",
                 "description": "NAICS code for market research"
               },
-              "vendors": {
+              "vendors_identified": {
                 "type": "array",
                 "items": {
                   "type": "object",
                   "properties": {
-                    "name": {
-                      "type": "string"
-                    },
-                    "size": {
-                      "type": "string"
-                    },
-                    "vehicles": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
+                    "name": { "type": "string" },
+                    "size": { "type": "string" },
+                    "vehicles": { "type": "array", "items": { "type": "string" } }
                   }
                 },
-                "description": "Potential vendors for market research"
+                "description": "Potential vendors for market research. Use 'vendors_identified' NOT 'vendors'."
+              },
+              "market_conditions": {
+                "type": "string",
+                "description": "Market conditions analysis. Use 'market_conditions' NOT 'market_analysis'."
+              },
+              "set_aside": {
+                "type": "string",
+                "description": "Set-aside recommendation. Use 'set_aside' NOT 'set_aside_recommendation'."
               }
             }
           }
@@ -199,7 +236,7 @@
             "type": "object",
             "description": "Data fields for create/update operations",
             "properties": {
-              "requirement": {
+              "description": {
                 "type": "string",
                 "description": "Description of the requirement"
               },
