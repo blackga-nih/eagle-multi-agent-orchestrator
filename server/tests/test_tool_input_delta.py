@@ -66,10 +66,9 @@ def _agent_result_event() -> dict:
 def _base_patches():
     return [
         patch("app.strands_agentic_service.build_skill_tools", return_value=[]),
-        patch("app.strands_agentic_service._build_service_tools", return_value=[]),
+        patch("app.strands_agentic_service._build_service_tools", return_value=([], {})),
         patch("app.strands_agentic_service.build_supervisor_prompt", return_value="You are EAGLE."),
         patch("app.strands_agentic_service._to_strands_messages", return_value=None),
-        patch("app.strands_agentic_service._maybe_fast_path_document_generation", new_callable=AsyncMock, return_value=None),
         patch("app.strands_agentic_service._ensure_create_document_for_direct_request", new_callable=AsyncMock, return_value=None),
     ]
 
@@ -88,7 +87,7 @@ async def _run_with_events(events: list[dict]) -> list[dict]:
         patch("app.strands_agentic_service.Agent", return_value=mock_agent),
     ]
 
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
         return await _collect(sdk_query_streaming(
             prompt="test query",
             tenant_id="test-tenant",

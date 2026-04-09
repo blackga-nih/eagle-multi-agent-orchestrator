@@ -38,7 +38,7 @@ def test_cascade_step_ordering(supervisor_prompt):
 
 
 def test_kb_is_primary_source(supervisor_prompt):
-    assert "primary source of truth" in supervisor_prompt
+    assert "primary research method" in supervisor_prompt
 
 
 def test_no_skip_to_web(supervisor_prompt):

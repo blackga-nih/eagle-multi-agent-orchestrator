@@ -102,7 +102,7 @@ def test_subagent_kb_search_handles_type_error():
         "app.tools.knowledge_tools.exec_knowledge_search",
         side_effect=TypeError("cannot pickle '_thread.lock' object"),
     ):
-        tools = _build_subagent_kb_tools(
+        tools, _kb_depth = _build_subagent_kb_tools(
             tenant_id="test-tenant",
             session_id="test-session",
         )
@@ -123,7 +123,7 @@ def test_subagent_kb_search_handles_recursion_error():
         "app.tools.knowledge_tools.exec_knowledge_search",
         side_effect=RecursionError("maximum recursion depth exceeded"),
     ):
-        tools = _build_subagent_kb_tools(
+        tools, _kb_depth = _build_subagent_kb_tools(
             tenant_id="test-tenant",
             session_id="test-session",
         )
@@ -145,7 +145,7 @@ def test_subagent_kb_search_normal_path_unchanged():
         "app.tools.knowledge_tools.exec_knowledge_search",
         return_value=mock_result,
     ):
-        tools = _build_subagent_kb_tools(
+        tools, _kb_depth = _build_subagent_kb_tools(
             tenant_id="test-tenant",
             session_id="test-session",
         )
@@ -255,45 +255,47 @@ def test_exec_knowledge_search_sanitizes_items():
 # ---------------------------------------------------------------------------
 
 
-def test_service_tools_kb_search_handles_recursion_error():
-    """Service-tools knowledge_search returns graceful JSON on RecursionError."""
+def test_service_tools_returns_expected_tools():
+    """_build_kb_service_tools returns search_far, web_search, research (knowledge_search is internal)."""
     from app.strands_agentic_service import _build_kb_service_tools
 
-    with patch(
-        "app.tools.knowledge_tools.exec_knowledge_search",
-        side_effect=RecursionError("maximum recursion depth exceeded"),
-    ):
-        tools = _build_kb_service_tools(
-            tenant_id="test-tenant",
-            user_id="test-user",
-            session_id="test-session",
-        )
-        kb_tool = next(t for t in tools if t.tool_name == "knowledge_search")
-        result_str = kb_tool._tool_func(query="test query")
-
-    result = json.loads(result_str)
-    assert result["count"] == 0
-    assert result["results"] == []
-    assert "RecursionError" in result["error"]
+    tools, _kb_depth = _build_kb_service_tools(
+        tenant_id="test-tenant",
+        user_id="test-user",
+        session_id="test-session",
+    )
+    tool_names = [t.tool_name for t in tools]
+    assert "search_far" in tool_names
+    assert "web_search" in tool_names or "web_search_tool" in tool_names
+    assert "research" in tool_names
+    # knowledge_search is used internally by research, not exposed directly
+    assert "knowledge_search" not in tool_names
 
 
-def test_service_tools_kb_search_normal_path():
-    """Service-tools knowledge_search returns results normally."""
+def test_service_tools_research_normal_path():
+    """Service-tools research tool returns results normally."""
     from app.strands_agentic_service import _build_kb_service_tools
 
-    mock_result = {"results": [{"title": "Test Doc"}], "count": 1}
+    mock_result = {"results": [{"title": "Test Doc", "s3_key": "eagle-knowledge-base/test.md"}], "count": 1}
+    mock_fetch = {"content": "test content", "content_length": 12, "title": "Test Doc", "document_type": "guidance"}
     with patch(
         "app.tools.knowledge_tools.exec_knowledge_search",
         return_value=mock_result,
+    ), patch(
+        "app.tools.knowledge_tools.exec_knowledge_fetch",
+        return_value=mock_fetch,
+    ), patch(
+        "app.tools.knowledge_tools.exec_path_search",
+        return_value={"results": []},
     ):
-        tools = _build_kb_service_tools(
+        tools, _kb_depth = _build_kb_service_tools(
             tenant_id="test-tenant",
             user_id="test-user",
             session_id="test-session",
         )
-        kb_tool = next(t for t in tools if t.tool_name == "knowledge_search")
-        result_str = kb_tool._tool_func(query="test query")
+        research = next(t for t in tools if t.tool_name == "research")
+        result_str = research._tool_func(query="test query", include_checklist=False)
 
     result = json.loads(result_str)
-    assert result["count"] == 1
-    assert result["results"][0]["title"] == "Test Doc"
+    assert len(result["kb_results"]) >= 1
+    assert result["kb_results"][0]["title"] == "Test Doc"

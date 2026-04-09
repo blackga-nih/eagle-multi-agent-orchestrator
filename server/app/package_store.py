@@ -60,6 +60,13 @@ _COMPLIANCE_DOC_TO_SLUG: dict[str, str] = {
     "Human Subjects Provisions": "human_subjects",
     "Price Reasonableness Determination": "price_reasonableness",
     "Required Sources Documentation": "required_sources",
+    "Required & Priority Sources Checklist": "priority_sources_checklist",
+    "Section 889 Compliance Documentation": "section_889",
+    "SAM Registration & Exclusions Check": "sam_exclusions_check",
+    "FPDS-NG Report": "fpds_report",
+    "Inherently Governmental Certification": "inherently_governmental",
+    "COR Designation Letter": "cor_designation",
+    "Wage Determination (SCA/SCLS)": "wage_determination",
 }
 
 # -- Valid updatable fields --------------------------------------------------

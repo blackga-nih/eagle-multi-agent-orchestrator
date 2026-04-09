@@ -298,7 +298,7 @@ class TestCreateDocumentTool:
             def __init__(self, tenant_id, user_id, markdown_generators):
                 pass
 
-            def generate_document(self, doc_type, title, data, output_format):
+            def generate_document(self, doc_type, title, data, output_format, **kwargs):
                 captured["doc_type"] = doc_type
                 captured["output_format"] = output_format
                 return FakeTemplateResult()
@@ -430,9 +430,14 @@ class TestDocumentListEndpoint:
 
     def test_get_documents_returns_list(self, app_with_mocked_s3):
         """GET /api/documents returns JSON array of documents."""
+        fake_docs = [
+            {"document_id": "doc-1", "doc_type": "sow", "title": "SOW v1"},
+            {"document_id": "doc-2", "doc_type": "igce", "title": "IGCE v1"},
+        ]
         with patch("app.routers.documents.get_s3", return_value=_mock_s3()):
-            with TestClient(app_with_mocked_s3) as client:
-                resp = client.get("/api/documents")
+            with patch("app.user_document_store.list_user_documents", return_value=fake_docs):
+                with TestClient(app_with_mocked_s3) as client:
+                    resp = client.get("/api/documents")
 
         assert resp.status_code == 200
         data = resp.json()

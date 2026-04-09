@@ -159,56 +159,6 @@ def test_stream_generator_passes_package_context_to_sdk(monkeypatch):
     assert captured.get("package_context") == package_context
 
 
-def test_fast_path_detects_direct_document_request():
-    from app.strands_agentic_service import _should_use_fast_document_path
-
-    should_fast_path, doc_type = _should_use_fast_document_path(
-        "Generate a Statement of Work for an IT services contract."
-    )
-    assert should_fast_path is True
-    assert doc_type == "sow"
-
-
-def test_fast_path_skips_research_heavy_prompt():
-    from app.strands_agentic_service import _should_use_fast_document_path
-
-    should_fast_path, doc_type = _should_use_fast_document_path(
-        "Research FAR requirements and then draft a Statement of Work."
-    )
-    assert should_fast_path is False
-    assert doc_type is None
-
-
-def test_fast_path_detects_multiline_document_prompt():
-    from app.strands_agentic_service import _should_use_fast_document_path
-
-    should_fast_path, doc_type = _should_use_fast_document_path(
-        "Generate a\n\nStatement of Work for IT services."
-    )
-    assert should_fast_path is True
-    assert doc_type == "sow"
-
-
-def test_fast_path_detects_ige_alias():
-    from app.strands_agentic_service import _should_use_fast_document_path
-
-    should_fast_path, doc_type = _should_use_fast_document_path(
-        "Generate an IGE for refurbished Olympus CK2 microscopes."
-    )
-    assert should_fast_path is True
-    assert doc_type == "igce"
-
-
-def test_fast_path_skips_uploaded_document_requests():
-    from app.strands_agentic_service import _should_use_fast_document_path
-
-    should_fast_path, doc_type = _should_use_fast_document_path(
-        "Using the uploaded req document, generate an SOW for me."
-    )
-    assert should_fast_path is False
-    assert doc_type is None
-
-
 def test_force_document_creation_for_direct_request_without_tool(monkeypatch):
     from app.strands_agentic_service import _ensure_create_document_for_direct_request
 
@@ -335,41 +285,6 @@ def test_forced_document_creation_carries_document_context(monkeypatch):
     assert captured["params"]["doc_type"] == "sow"
     assert captured["params"]["data"]["edit_request"] == "make section 3 cleared too"
     assert "## 3. PERIOD OF PERFORMANCE" in captured["params"]["data"]["current_content"]
-
-
-def test_sdk_query_streaming_fast_path_emits_document_events(monkeypatch):
-    from app.strands_agentic_service import sdk_query_streaming
-
-    def fake_exec_create_document(params, tenant_id, session_id):
-        assert params["doc_type"] == "sow"
-        return {
-            "mode": "workspace",
-            "document_type": "sow",
-            "title": "Statement of Work",
-            "status": "saved",
-            "s3_key": "eagle/test-tenant/test-user/documents/sow_20260306_120000.md",
-            "word_count": 1200,
-        }
-
-    monkeypatch.setattr("app.tools.document_generation.exec_create_document", fake_exec_create_document)
-
-    async def _collect():
-        chunks = []
-        async for chunk in sdk_query_streaming(
-            prompt="Generate a Statement of Work for cloud hosting services providing AWS infrastructure support for NCI cancer research data management, 12-month base period with two option years.",
-            tenant_id="test-tenant",
-            user_id="test-user",
-            tier="advanced",
-            session_id="sess-123",
-        ):
-            chunks.append(chunk)
-        return chunks
-
-    chunks = asyncio.run(_collect())
-    types = [c.get("type") for c in chunks]
-    assert "tool_use" in types
-    assert "tool_result" in types
-    assert "complete" in types
 
 
 def test_extract_document_context_from_prompt():

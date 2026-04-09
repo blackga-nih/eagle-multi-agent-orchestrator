@@ -16,6 +16,14 @@ SESSION_ID = "test-tenant#advanced#test-user#sess-001"
 TENANT_ID = "test-tenant"
 EXISTING_PKG_ID = "PKG-2026-0099"
 
+# Content long enough to satisfy the document_prerequisites guardrail
+# (requirement_description check accepts content > 100 chars).
+_SUFFICIENT_CONTENT = (
+    "This Statement of Work covers IT modernization services for NCI. "
+    "The contractor shall provide cloud migration, DevOps, and application "
+    "development support for a 12-month base period with two option years."
+)
+
 
 def _get_create_document_tool(monkeypatch, list_packages_return, create_package_return=None):
     """Helper: build tools with mocked package_store and patched get_tool_dispatch."""
@@ -57,6 +65,12 @@ def _get_create_document_tool(monkeypatch, list_packages_return, create_package_
 
     monkeypatch.setattr(legacy_dispatch, "get_tool_dispatch", patched_get_tool_dispatch)
 
+    # Bypass the template auto-search guardrail so it doesn't hit real KB
+    monkeypatch.setattr(
+        "app.tools.knowledge_tools.exec_knowledge_search",
+        lambda params, tenant_id, session_id=None: {"results": []},
+    )
+
     tools = _build_all_service_tools(
         tenant_id=TENANT_ID,
         user_id="test-user",
@@ -81,7 +95,7 @@ def test_reuses_existing_session_package(monkeypatch):
         list_packages_return=existing_packages,
     )
 
-    result_json = create_doc_tool(doc_type="sow", title="Statement of Work")
+    result_json = create_doc_tool(doc_type="sow", title="Statement of Work", content=_SUFFICIENT_CONTENT)
     result = json.loads(result_json)
 
     # Should reuse existing package, not create a new one
@@ -99,7 +113,7 @@ def test_creates_new_package_when_none_exists_for_session(monkeypatch):
         create_package_return={"package_id": new_pkg_id, "status": "draft"},
     )
 
-    result_json = create_doc_tool(doc_type="sow", title="Statement of Work")
+    result_json = create_doc_tool(doc_type="sow", title="Statement of Work", content=_SUFFICIENT_CONTENT)
     result = json.loads(result_json)
 
     # Should have created a new package
@@ -121,7 +135,7 @@ def test_ignores_packages_from_different_sessions(monkeypatch):
         create_package_return={"package_id": new_pkg_id, "status": "draft"},
     )
 
-    result_json = create_doc_tool(doc_type="sow", title="Statement of Work")
+    result_json = create_doc_tool(doc_type="sow", title="Statement of Work", content=_SUFFICIENT_CONTENT)
     result = json.loads(result_json)
 
     # Should NOT reuse the other session's package — should create new
@@ -163,6 +177,12 @@ def test_skips_lookup_when_package_id_already_provided(monkeypatch):
 
     monkeypatch.setattr(legacy_dispatch, "get_tool_dispatch", patched_get_tool_dispatch)
 
+    # Bypass template auto-search
+    monkeypatch.setattr(
+        "app.tools.knowledge_tools.exec_knowledge_search",
+        lambda params, tenant_id, session_id=None: {"results": []},
+    )
+
     tools = _build_all_service_tools(
         tenant_id=TENANT_ID,
         user_id="test-user",
@@ -174,7 +194,7 @@ def test_skips_lookup_when_package_id_already_provided(monkeypatch):
     )
     create_doc_tool = next(t for t in tools if t.tool_name == "create_document")
 
-    result_json = create_doc_tool(doc_type="sow", title="SOW", package_id=explicit_pkg_id)
+    result_json = create_doc_tool(doc_type="sow", title="SOW", content=_SUFFICIENT_CONTENT, package_id=explicit_pkg_id)
     result = json.loads(result_json)
 
     # list_packages should never have been called
@@ -209,6 +229,12 @@ def test_owner_user_id_passed_to_list_packages(monkeypatch):
 
     monkeypatch.setattr(legacy_dispatch, "get_tool_dispatch", patched_get_tool_dispatch)
 
+    # Bypass template auto-search
+    monkeypatch.setattr(
+        "app.tools.knowledge_tools.exec_knowledge_search",
+        lambda params, tenant_id, session_id=None: {"results": []},
+    )
+
     tools = _build_all_service_tools(
         tenant_id=TENANT_ID,
         user_id="test-user",
@@ -219,7 +245,7 @@ def test_owner_user_id_passed_to_list_packages(monkeypatch):
         loop=None,
     )
     create_doc_tool = next(t for t in tools if t.tool_name == "create_document")
-    create_doc_tool(doc_type="sow", title="SOW")
+    create_doc_tool(doc_type="sow", title="SOW", content=_SUFFICIENT_CONTENT)
 
     assert len(captured_calls) == 1
     assert captured_calls[0]["tenant_id"] == TENANT_ID

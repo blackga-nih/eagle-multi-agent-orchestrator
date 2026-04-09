@@ -140,10 +140,8 @@ def _sdk_query_patches(mock_agent_instance):
     """Return a list of patches needed to run sdk_query without real AWS/DB."""
     mock_preload = AsyncMock(return_value={})
     return [
-        patch("app.strands_agentic_service._maybe_fast_path_document_generation",
-              new_callable=AsyncMock, return_value=None),
         patch("app.strands_agentic_service.build_skill_tools", return_value=[]),
-        patch("app.strands_agentic_service._build_service_tools", return_value=[]),
+        patch("app.strands_agentic_service._build_service_tools", return_value=([], {})),
         patch("app.strands_agentic_service.build_supervisor_prompt", return_value="test prompt"),
         patch("app.strands_agentic_service._build_conversation_manager",
               return_value=MagicMock(get_state=MagicMock(return_value={}))),

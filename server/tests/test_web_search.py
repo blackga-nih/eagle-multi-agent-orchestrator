@@ -223,7 +223,7 @@ def test_web_search_tool_in_subagent_kb_tools(mock_exec):
     """_build_subagent_kb_tools() returns 5 tools including web_search."""
     from app.strands_agentic_service import _build_subagent_kb_tools
 
-    tools = _build_subagent_kb_tools("test-tenant", "test-session")
+    tools, _kb_depth = _build_subagent_kb_tools("test-tenant", "test-session")
     tool_names = [t.tool_name if hasattr(t, 'tool_name') else t.__name__ for t in tools]
 
     assert len(tools) == 5
@@ -235,8 +235,9 @@ def test_web_search_tool_in_supervisor_tools(mock_exec):
     """_build_kb_service_tools() returns 5 tools including web_search."""
     from app.strands_agentic_service import _build_kb_service_tools
 
-    tools = _build_kb_service_tools("test-tenant", "test-user", "test-session")
+    tools, _kb_depth = _build_kb_service_tools("test-tenant", "test-user", "test-session")
     tool_names = [t.tool_name if hasattr(t, 'tool_name') else t.__name__ for t in tools]
 
-    assert len(tools) == 5
+    # Supervisor KB tools: search_far, web_search, research
+    assert len(tools) == 3
     assert "web_search_tool" in tool_names or "web_search" in tool_names

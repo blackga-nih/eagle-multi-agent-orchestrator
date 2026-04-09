@@ -172,8 +172,8 @@ class TestCascadeEnforcement:
         return_count = source_text.count(
             '"action_required": "Call knowledge_search or search_far with this query first."'
         )
-        assert return_count >= 2, (
-            f"Expected cascade return in at least 2 locations (subagent + service tools), "
+        assert return_count >= 1, (
+            f"Expected cascade return in at least 1 location, "
             f"found {return_count}"
         )
 

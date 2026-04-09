@@ -70,10 +70,9 @@ def _base_patches():
     """Common patches to isolate sdk_query_streaming from real AWS/Agent deps."""
     return [
         patch("app.strands_agentic_service.build_skill_tools", return_value=[]),
-        patch("app.strands_agentic_service._build_service_tools", return_value=[]),
+        patch("app.strands_agentic_service._build_service_tools", return_value=([], {})),
         patch("app.strands_agentic_service.build_supervisor_prompt", return_value="You are EAGLE."),
         patch("app.strands_agentic_service._to_strands_messages", return_value=None),
-        patch("app.strands_agentic_service._maybe_fast_path_document_generation", new_callable=AsyncMock, return_value=None),
         patch("app.strands_agentic_service._ensure_create_document_for_direct_request", new_callable=AsyncMock, return_value=None),
     ]
 
@@ -93,7 +92,7 @@ async def _run_with_events(events: list[dict]) -> list[dict]:
         patch("app.strands_agentic_service.Agent", return_value=mock_agent),
     ]
 
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
         return await _collect(sdk_query_streaming(
             prompt="test query",
             tenant_id="test-tenant",
@@ -211,7 +210,7 @@ class TestResultQueue:
                 super().__init__(*args, **kwargs)
                 captured_queue = self
 
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             with patch("app.strands_agentic_service.asyncio.Queue", CapturingQueue):
                 chunks = []
                 async for chunk in sdk_query_streaming(
@@ -248,7 +247,7 @@ class TestErrorPaths:
             patch("app.strands_agentic_service.Agent", return_value=mock_agent),
         ]
 
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             chunks = await _collect(sdk_query_streaming(
                 prompt="test",
                 tenant_id="t",
@@ -273,42 +272,3 @@ class TestErrorPaths:
         assert len(complete[0]["text"]) > 0
 
 
-class TestFastPath:
-
-    @pytest.mark.asyncio
-    async def test_fast_path_emits_tool_use_and_result(self):
-        from app.strands_agentic_service import sdk_query_streaming
-
-        fast_result = {
-            "doc_type": "sow",
-            "result": {
-                "mode": "workspace",
-                "document_type": "sow",
-                "title": "Statement of Work",
-                "status": "saved",
-            },
-        }
-
-        patches = _base_patches()
-        # Override the fast path mock to return a result
-        patches[4] = patch(
-            "app.strands_agentic_service._maybe_fast_path_document_generation",
-            new_callable=AsyncMock,
-            return_value=fast_result,
-        )
-
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
-            chunks = await _collect(sdk_query_streaming(
-                prompt="Generate a SOW",
-                tenant_id="t",
-                user_id="u",
-                tier="advanced",
-                session_id="s",
-            ))
-
-        types = [c["type"] for c in chunks]
-        assert "tool_use" in types
-        assert "tool_result" in types
-        assert "complete" in types
-        tool_use = next(c for c in chunks if c["type"] == "tool_use")
-        assert tool_use["name"] == "create_document"

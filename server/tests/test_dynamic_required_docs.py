@@ -87,7 +87,7 @@ class TestComputeRequiredDocs:
         upper = compute_required_docs(3_500_000, "negotiated", "CPFF")
         lower = compute_required_docs(3_500_000, "negotiated", "cpff")
         assert upper == lower
-        assert len(upper) == 10  # $3.5M CPFF negotiated → 10 required docs
+        assert len(upper) == 16  # $3.5M CPFF negotiated → 11 required docs
 
     def test_uppercase_acquisition_method_normalizes_to_lowercase(self):
         """NEGOTIATED (uppercase) should return same docs as negotiated."""
@@ -103,7 +103,7 @@ class TestComputeRequiredDocs:
         from app.package_store import compute_required_docs
 
         slugs = compute_required_docs(3_500_000, "Negotiated", "Cpff")
-        assert len(slugs) == 10
+        assert len(slugs) == 16
         assert "sow" in slugs
         assert "igce" in slugs
         assert "acquisition_plan" in slugs

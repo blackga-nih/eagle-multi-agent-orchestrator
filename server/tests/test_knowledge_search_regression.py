@@ -338,7 +338,7 @@ def test_ai_ranking_success_returns_ranked_results(monkeypatch):
     _mock_scan_with_docs(monkeypatch, ACQUISITION_DOCS)
 
     # AI ranking returns the first two docs in order
-    def good_ai_rank(query, keywords, items, limit):
+    def good_ai_rank(query, keywords, items, limit, boost_hints=None):
         return [items[0], items[2]]
 
     with patch.object(kt, "_ai_rank_documents", side_effect=good_ai_rank):

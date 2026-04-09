@@ -298,11 +298,10 @@ class TestAgentTimingEmission:
         """After successful streaming, agent.timing event should be emitted."""
         # We test the emission by checking that emit_telemetry_event is called
         # with event_type="agent.timing" after the generator completes.
-        with patch("app.strands_agentic_service._maybe_fast_path_document_generation", return_value=None):
-            with patch("app.strands_agentic_service._build_service_tools", return_value=[]):
-                with patch("app.strands_agentic_service.build_skill_tools", return_value=[]):
-                    with patch("app.strands_agentic_service.build_supervisor_prompt", return_value="test prompt"):
-                        with patch("app.strands_agentic_service._ensure_langfuse_exporter"):
+        with patch("app.strands_agentic_service._build_service_tools", return_value=([], {})):
+            with patch("app.strands_agentic_service.build_skill_tools", return_value=[]):
+                with patch("app.strands_agentic_service.build_supervisor_prompt", return_value="test prompt"):
+                    with patch("app.strands_agentic_service._ensure_langfuse_exporter"):
                             # Mock the Agent class
                             mock_agent = MagicMock()
 
