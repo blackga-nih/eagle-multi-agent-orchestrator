@@ -1,6 +1,16 @@
-# Checklist B: EC2 Runner Deployment (Standard)
+# Checklist B: EC2 Runner Manual Deployment
 
-> **This is the recommended deploy path for NCI.** No local Docker required — all builds happen on the EC2 runner inside the VPC using its instance-role credentials.
+> GitHub Actions is the standard deployment path. This EC2 runner flow is the manual in-VPC deployment option when you need direct operator control or an environment with instance-role credentials.
+
+## When to Use This Guide
+
+Use the EC2 runner when:
+
+- GitHub Actions is unavailable or blocked
+- You need a manual in-VPC deploy path
+- You want to inspect or deploy from the same trusted runtime used for operational troubleshooting
+
+For the standard release workflow, see [../development/ci-cd.md](../development/ci-cd.md).
 
 ## B0 — Prerequisites
 
@@ -26,7 +36,7 @@ su -s /bin/bash eagle
 cd /home/eagle/eagle
 
 # Pull latest from your branch
-git pull origin dev/greg   # or main for production
+git pull origin <branch>
 ```
 
 > **Updating from Windows**: If git pull fails (no direct GitHub access from EC2), use the bundle method:
@@ -55,7 +65,7 @@ just deploy-frontend
 1. Logs into ECR using instance role credentials
 2. Reads Cognito config from CloudFormation outputs (no manual env vars)
 3. Builds both Docker images (Linux, matching container OS)
-4. Pushes to ECR with `latest` and `$COMMIT_SHA` tags
+4. Pushes `latest` images to ECR
 5. Triggers ECS rolling updates and waits for `services-stable`
 
 ## B4 — Verify
@@ -99,3 +109,8 @@ just smoke mid
 ```
 
 > Playwright and Chromium are pre-installed on the runner. Browsers are in `/home/eagle/.cache/ms-playwright`.
+
+## Notes
+
+- Treat this as a manual/operator workflow, not the default release narrative
+- If you are doing a normal dev or QA deployment, prefer the GitHub Actions flow in [../development/ci-cd.md](../development/ci-cd.md)

@@ -5,7 +5,8 @@
 | Guide | Description |
 |-------|-------------|
 | [Local Development](setup/local-development.md) | Docker Compose on your laptop |
-| [EC2 Runner Deployment](setup/ec2-runner-deployment.md) | Standard NCI deploy path |
+| [CI/CD and Deployment](development/ci-cd.md) | Standard GitHub Actions deploy flow plus manual options |
+| [EC2 Runner Deployment](setup/ec2-runner-deployment.md) | Manual in-VPC/operator deploy path |
 | [CDK Bootstrap](setup/cdk-bootstrap.md) | First-time AWS account setup |
 
 ## Architecture
@@ -18,6 +19,7 @@
 ## Development
 
 - [Reports & Audits](development/) — sprint reports, code reviews, triage
+- [CI/CD and Deployment](development/ci-cd.md)
 - [GitHub Workflow](development/github-workflow.md)
 - [Langfuse Trace Guide](development/langfuse-trace-aggregation-guide.md)
 

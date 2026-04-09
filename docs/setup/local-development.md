@@ -1,6 +1,12 @@
 # Checklist A: Local Development
 
-Run the full stack on your laptop using Docker Compose. No cloud account required for the app itself — you only need AWS credentials for DynamoDB session storage and optionally Bedrock.
+Run the full stack on your laptop using Docker Compose or local processes. This guide is for development and validation, not the standard release path. Standard deployments go through GitHub Actions; use this guide when you are iterating locally.
+
+## Deployment Context
+
+- Standard deployment path: GitHub Actions
+- Local deploy commands like `just deploy` exist, but they are manual/operator workflows
+- EC2 runner deploys are covered separately in [ec2-runner-deployment.md](ec2-runner-deployment.md)
 
 ## A0 — Prerequisites
 
@@ -26,8 +32,11 @@ EAGLE_SESSIONS_TABLE=eagle          # Still needs AWS credentials for DynamoDB
 AWS_DEFAULT_REGION=us-east-1
 ```
 
-> **DynamoDB note**: Session storage still uses the real `eagle` DynamoDB table.
-> Set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in `.env`, or configure `aws configure`.
+Notes:
+
+- Pure UI work can often proceed without live Bedrock access
+- Session storage still targets the real `eagle` DynamoDB table unless you change that wiring
+- For AWS-backed local development, configure `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, `aws configure`, or AWS SSO
 
 ### Using AWS SSO for Bedrock
 
@@ -105,7 +114,21 @@ just e2e full       # all three workflows in sequence
 
 `just e2e full` opens a Chromium window and walks through three real acquisition scenarios end-to-end — proof the AI pipeline, agent routing, and domain knowledge are all working.
 
-## A5 — Tear Down
+## A5 — If You Need to Deploy
+
+Local development is not the standard release path. If you need to deploy, prefer the GitHub Actions workflow described in [../development/ci-cd.md](../development/ci-cd.md).
+
+Common choices:
+
+```bash
+# Standard
+gh workflow run deploy.yml --ref main -f environment=dev
+
+# Manual/operator fallback
+just deploy
+```
+
+## A6 — Tear Down
 
 ```bash
 just dev-down

@@ -59,16 +59,15 @@ User Login -> JWT with tenant_id -> Session Attributes -> Strands Agents SDK (vi
 
 ## Deployment Methods
 
-Two paths for running EAGLE. **EC2 Runner is the standard method** — no local Docker required and uses instance-role credentials for zero-config AWS access.
+GitHub Actions is the standard deployment path for EAGLE. Local `just` commands and the EC2 runner remain supported as manual/operator workflows.
 
-| | Local Development | EC2 Runner (Standard) |
-|---|---|---|
-| **Use when** | Iterating locally, UI changes | All deployments to NCI AWS |
-| **Docker** | Local Docker Desktop | Instance has Docker installed |
-| **AWS creds** | SSO or access keys | Instance role (automatic) |
-| **Bedrock access** | VPN / SSO required | Native VPC access |
-| **Command** | `just dev` | SSM → `just deploy` |
-| **Speed** | ~2 min startup | ~5 min (build + ECR push) |
+| | Local Development | GitHub Actions (Standard) | Manual Operator Deploy |
+|---|---|---|---|
+| **Use when** | Iterating locally, UI changes | Normal dev and QA releases | Need a direct/manual deploy path |
+| **Primary command** | `just dev` | merge to `main` or `gh workflow run deploy.yml ...` | `just deploy` or EC2 runner + `just deploy` |
+| **AWS creds** | Optional for some local-only work, required for AWS-backed flows | OIDC in GitHub Actions | SSO, access keys, or instance role |
+| **Audit trail** | Local only | Workflow runs + commit SHA | Operator-managed |
+| **Build location** | Your machine | GitHub-hosted runner | Your machine or EC2 runner |
 
 ---
 
@@ -78,21 +77,37 @@ Two paths for running EAGLE. **EC2 Runner is the standard method** — no local 
 
 - **Python 3.11+**, **Node.js 20+**, **Docker**, **AWS CLI** configured
 - **[just](https://github.com/casey/just)** task runner (`cargo install just` or `brew install just`)
-- AWS account with Bedrock model access enabled (Claude Sonnet 4.6 / Haiku 4.5, or override with `EAGLE_BEDROCK_MODEL_ID`)
+- For AWS-backed development or deployment: AWS account access with Bedrock model access enabled
 
-### Standard Deployment (EC2 Runner)
+### Standard Deployment (GitHub Actions)
 
 ```bash
-# 1. Open SSM session to the EC2 runner (no SSH keys needed)
+# Deploy main to dev
+gh workflow run deploy.yml --ref main -f environment=dev
+
+# Deploy a branch to QA
+gh workflow run deploy.yml --ref <branch> -f environment=qa
+
+# Watch the latest run
+gh run watch
+```
+
+See [docs/development/ci-cd.md](docs/development/ci-cd.md) for the full pipeline, deploy modes, and manual QA flow.
+
+### Manual Deployment Options
+
+```bash
+# Option A: local/operator deploy
+just deploy
+
+# Option B: open SSM session to the EC2 runner and deploy there
 AWS_PROFILE=eagle aws ssm start-session \
   --target i-0390c06d166d18926 \
   --region us-east-1
 
-# 2. Switch to the eagle user and deploy
 su -s /bin/bash eagle
 cd /home/eagle/eagle
-just deploy          # build → ECR push → ECS rolling update → wait
-just check-aws       # verify all 7 resources are healthy
+just deploy
 ```
 
 ### Local Development
@@ -154,7 +169,7 @@ just cdk-deploy     # Deploy all stacks
 # Operations
 just status         # ECS health + live URLs
 just urls           # Print frontend/backend URLs
-just check-aws      # Verify AWS connectivity (all 8 resources)
+just check-aws      # Verify AWS connectivity (7 core resources)
 just logs           # Tail backend ECS logs
 just logs frontend  # Tail frontend ECS logs
 
@@ -245,7 +260,7 @@ The backend uses the **Strands Agents SDK** with boto3-native **`BedrockModel`**
 
 The active path (`strands_agentic_service.py`) implements the supervisor/subagent pattern where each skill gets its own context window, enabling better separation of concerns for complex multi-step acquisition workflows. A legacy Anthropic path remains for compatibility/reference.
 
-### AWS Infrastructure (5 CDK Stacks)
+### AWS Infrastructure (6 Primary Stacks + QA Compute Stack)
 
 All stacks in `infrastructure/cdk-eagle/`:
 
@@ -256,15 +271,19 @@ All stacks in `infrastructure/cdk-eagle/`:
 | **EagleStorageStack** | `eagle-documents-{env}` S3 (versioned), `eagle-document-metadata-{env}` DDB, metadata extraction Lambda (Claude via Bedrock) |
 | **EagleComputeStack** | ECR repos, ECS Fargate cluster, backend ALB (internal), frontend ALB (internal), auto-scaling |
 | **EagleEvalStack** | `eagle-eval-artifacts` S3, CloudWatch dashboards + alarms, SNS alerts |
+| **EagleBackupStack** | Backup policies and retention for core resources |
+| **EagleComputeStackQA** | Separate QA compute plane in the QA VPC |
 
 ### Environment Tiers
 
-| Setting | Dev | Staging | Prod |
-|---------|-----|---------|------|
+| Setting | Dev | QA | Prod |
+|---------|-----|----|------|
 | Backend CPU/Memory | 512 / 1024 MiB | 512 / 1024 MiB | 1024 / 2048 MiB |
 | Frontend CPU/Memory | 256 / 512 MiB | 256 / 512 MiB | 512 / 1024 MiB |
-| Desired / Max Tasks | 1 / 4 | 2 / 6 | 2 / 10 |
-| AZs / NAT Gateways | 2 / 1 | 2 / 2 | 3 / 3 |
+| Desired / Max Tasks | 1 / 4 | 1 / 2 | 2 / 10 |
+| Deploy path in workflow | automatic/manual | manual only | not wired into default workflow |
+
+`staging` and `prod` config shapes exist in `infrastructure/cdk-eagle/config/environments.ts`, but the default GitHub deploy workflow currently targets `dev` and `qa`.
 
 ---
 
@@ -311,7 +330,8 @@ All stacks in `infrastructure/cdk-eagle/`:
 | Guide | When to Use | Link |
 |-------|------------|------|
 | **Local Development** | Iterating on UI/backend, running tests locally | [docs/setup/local-development.md](docs/setup/local-development.md) |
-| **EC2 Runner** (standard) | All NCI AWS deployments | [docs/setup/ec2-runner-deployment.md](docs/setup/ec2-runner-deployment.md) |
+| **CI/CD and Deployment** | Standard release path, deploy modes, QA promotion | [docs/development/ci-cd.md](docs/development/ci-cd.md) |
+| **EC2 Runner Manual Deploy** | Manual in-VPC deployment and troubleshooting | [docs/setup/ec2-runner-deployment.md](docs/setup/ec2-runner-deployment.md) |
 | **CDK Bootstrap** | First-time AWS account setup | [docs/setup/cdk-bootstrap.md](docs/setup/cdk-bootstrap.md) |
 
 **Quick start (local):**
@@ -325,16 +345,16 @@ just dev                 # start full stack via Docker Compose
 
 ## Validation Ladder
 
-Every change type has a minimum required validation level. All levels are runnable via `just`:
+The local validation ladder is driven by `just`. GitHub Actions uses related but not identical gates in `.github/workflows/deploy.yml`.
 
 | Level | Gate | Command | When |
 |-------|------|---------|------|
 | **L1 — Lint** | `ruff check` + `tsc --noEmit` | `just lint` | Every change |
 | **L2 — Unit** | `pytest tests/` | `just test` | Backend logic changes |
-| **L3 — E2E** | Playwright smoke (local stack) | `just smoke mid` | Frontend/UI changes |
+| **L3 — Smoke / UI** | Playwright smoke (local stack) | `just smoke mid` | Frontend/UI changes |
 | **L4 — Infra** | `cdk synth --quiet` | `just cdk-synth` | CDK changes |
 | **L5 — Integration** | Docker Compose + smoke | `just validate` | Before any PR |
-| **L6 — Eval** | 28-test eval suite + AWS tools | `just validate-full` | Before merging to main |
+| **L6 — Eval** | AWS-backed eval suite | `just validate-full` | Before high-risk merges or manual release checks |
 
 ```bash
 just validate       # L1-L5: full local gate — lint, unit, CDK synth, docker stack, smoke
@@ -349,45 +369,58 @@ just ship           # deploy gate: lint + CDK synth + deploy + smoke-prod verify
 | Frontend UI | L1 + L3 |
 | CDK change | L1 + L4 |
 | Cross-stack feature | L1–L5 (`just validate`) |
-| Merge to main | L1–L6 (`just validate-full`) |
+| High-risk release candidate | L1–L6 (`just validate-full`) |
 
 ---
 
 
 ## CI/CD Pipeline
 
-The GitHub Actions workflow (`.github/workflows/deploy.yml`) runs on push to `main` or manual `workflow_dispatch`.
+The standard deployment pipeline is the GitHub Actions workflow [`deploy.yml`](.github/workflows/deploy.yml). It deploys automatically to `dev` on push to `main`, and supports manual `workflow_dispatch` runs for both `dev` and `qa`.
 
-| Job | Steps |
-|-----|-------|
-| **deploy-infra** | OIDC auth → `cdk deploy --all` → extract stack outputs |
-| **deploy-backend** | Docker build+push → ECS rolling update → wait for stable |
-| **deploy-frontend** | Docker build+push (Cognito build-args from CDK outputs) → ECS rolling update |
-| **verify** | Health check `/api/health` + `/` |
+| Stage | What Happens |
+|------|---------------|
+| **setup + changes** | resolve environment, detect changed paths, pick `mini` vs `full` deploy mode |
+| **lint** | run Ruff and TypeScript checks |
+| **full-mode gates** | run unit tests, CDK synth, integration health check, and optional eval |
+| **deploy-infra** | run CDK deploy when infra changes are present or manually requested |
+| **deploy-backend** | build and push backend image, pin ECS task definition to commit SHA |
+| **deploy-frontend** | build and push frontend image, update ECS service, sync ALB target |
+| **report** | send Teams notification with job results |
 
 Authentication uses **GitHub OIDC federation** — no static IAM keys stored in secrets.
 
 Required secrets:
-- `DEPLOY_ROLE_ARN` — IAM role ARN from `EagleCiCdStack` (e.g. `arn:aws:iam::695681773636:role/eagle-github-actions-dev`)
+- `DEPLOY_ROLE_ARN`
+- `TEAMS_WEBHOOK_URL`
+- optional eval and observability secrets used by downstream jobs
 
 ```bash
-# Enable the workflow (if disabled)
-gh workflow enable "Deploy EAGLE Platform"
+# Manual dev deploy
+gh workflow run deploy.yml --ref main -f environment=dev
 
-# Trigger manually
-gh workflow run deploy.yml --ref main
+# Manual QA deploy
+gh workflow run deploy.yml --ref <branch> -f environment=qa
 
 # Watch the run
 gh run watch
 ```
 
-> **Note**: The EC2 runner (`just deploy`) is the standard deploy path. GitHub Actions CI/CD automates this on merge to `main` — it runs the same build+push+ECS update steps as the EC2 script.
+Important behavior:
 
-The local equivalent of the full CI+deploy pipeline:
+- `qa` always resolves to `mini` mode in the workflow
+- eval is optional and only runs when explicitly requested
+- local `just deploy` remains available, but it is a manual/operator path rather than the standard release flow
+
+For the full deployment runbook, see [docs/development/ci-cd.md](docs/development/ci-cd.md).
+
+Related manual commands:
 
 ```bash
-just ci     # L1 lint + L2 unit + L4 CDK synth + L6 eval-aws (pre-deploy check)
-just ship   # lint + CDK synth gate + deploy + L5 smoke-prod verify (full ship)
+just deploy-ci main        # trigger deploy workflow for dev
+just deploy-qa-ci <branch> # trigger deploy workflow for QA
+just deploy                # manual operator deploy
+just ship                  # local gate + manual deploy + smoke-prod
 ```
 
 

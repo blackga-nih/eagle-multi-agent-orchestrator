@@ -1,4 +1,4 @@
-# GitHub Workflow & Best Practices
+# GitHub Workflow and Deployment Flow
 
 ## Branch Strategy
 
@@ -35,7 +35,7 @@ gh pr create --title "Add subscription validation"
 3. **Require 1 approval** before merge
 4. **Use squash merge** into main — keeps history clean
 
-## Branch Protection (GitHub Settings)
+## Branch Protection (Recommended GitHub Settings)
 
 ```
 Settings → Branches → Add rule for "main":
@@ -74,7 +74,7 @@ chore:    build, CI, dependencies
 |-------|---------|-------|
 | Local (no Docker) | Code + debug | Seconds |
 | Local Docker | Validate containers | Minutes |
-| Fargate (dev) | Integration / demos | CI/CD pipeline |
+| Dev / QA deploy | Shared environment validation | GitHub Actions pipeline |
 
 ### Local Development (no Docker)
 
@@ -92,6 +92,31 @@ cd client && npm run dev
 docker compose -f deployment/docker-compose.dev.yml up --build
 ```
 
-### Deploy to Fargate
+## Deployment Flow
 
-Push to your branch → open PR → merge to main → CI/CD auto-deploys.
+### Standard path
+
+Push to your branch -> open PR -> merge to `main` -> GitHub Actions deploys to `dev`.
+
+QA deploys are manual:
+
+```bash
+gh workflow run deploy.yml --ref <branch> -f environment=qa
+```
+
+### Manual helper commands
+
+The `Justfile` includes helpers that trigger the GitHub Actions workflow:
+
+```bash
+just deploy-ci main
+just deploy-qa-ci <branch>
+just deploy-watch
+just deploy-status
+```
+
+### Manual operator deploys
+
+Direct `just deploy` commands still exist and are useful for operator workflows, but they should not be treated as the default CI/CD path.
+
+See [ci-cd.md](ci-cd.md) for the full deployment runbook.
