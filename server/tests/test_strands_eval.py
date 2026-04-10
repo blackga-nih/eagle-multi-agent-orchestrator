@@ -2588,7 +2588,7 @@ async def test_28_strands_skill_tool_orchestration():
     expected_skills = {
         "legal_counsel", "market_intelligence", "tech_translator",
         "public_interest", "policy_supervisor", "policy_librarian", "policy_analyst",
-        "oa_intake", "document_generator", "compliance", "knowledge_retrieval", "tech_review",
+        "oa_intake", "document_generator", "compliance", "tech_review",
     }
     tools_ok = len(skill_tools) > 0
     print(f"    Tools built successfully: {tools_ok}")
@@ -4043,7 +4043,7 @@ async def test_47_supervisor_delegates_not_answers():
         # Subagent wrappers (future/alternative architecture)
         "oa_intake", "legal_counsel", "market_intelligence", "tech_translator",
         "public_interest", "policy_supervisor", "policy_librarian", "policy_analyst",
-        "document_generator", "compliance", "knowledge_retrieval", "tech_review",
+        "document_generator", "compliance", "tech_review",
         # Direct domain tools (current Strands architecture)
         "search_far", "query_compliance_matrix", "web_search", "web_fetch",
         "knowledge_search", "knowledge_fetch", "create_document", "load_data",

@@ -20,7 +20,6 @@ SKILL_DISPLAY_NAMES = {
     "oa-intake": "Intake Workflow",
     "document-generator": "Document Generator",
     "compliance": "Compliance Checker",
-    "knowledge-retrieval": "Knowledge Search",
     "tech-review": "Technical Review",
 }
 

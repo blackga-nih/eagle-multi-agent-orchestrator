@@ -10,7 +10,6 @@ triggers:
 tools:
   - search_far
   - create_document
-  - s3_document_ops
   - dynamodb_intake
   - get_intake_status
   - manage_package
@@ -42,7 +41,7 @@ NEVER skip the checklist check. NEVER answer "what documents do I need" from mem
 
 ## PACKAGE CREATION — DO THIS EARLY
 
-As soon as you have the user's **requirement description**, **estimated value**, and **requirement type** (product/service/both), IMMEDIATELY call `manage_package(operation="create", title="...", estimated_value=..., requirement_type="...")`. Do NOT wait for all clarifying questions — the package can be updated later. Creating the package early activates the checklist panel in the UI so users see progress in real time.
+Only create a package when the user is **actively starting an acquisition** — i.e., they are going through the intake flow, answering intake questions, or explicitly say "start a package" / "create a package" / "new procurement". Do NOT create a package for general research questions, policy lookups, or regulatory inquiries. Once you confirm the user wants to start an acquisition and have their **requirement description**, **estimated value**, and **requirement type** (product/service/both), call `manage_package(operation="create", title="...", estimated_value=..., requirement_type="...")`. Creating the package activates the checklist panel in the UI so users see progress in real time.
 
 After each subsequent determination, call `manage_package(operation="update", package_id="...", ...)`:
 - Vehicle selected → add `contract_vehicle`

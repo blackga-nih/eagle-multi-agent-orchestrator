@@ -51,6 +51,12 @@ def exec_s3_document_ops(
         if operation == "read":
             if not key:
                 return {"error": "Missing 'key' parameter for read operation"}
+            if key.startswith("eagle-knowledge-base/"):
+                return {
+                    "error": "Cannot read knowledge base documents via s3_document_ops. "
+                    "Use knowledge_fetch(s3_key=...) or research(query=...) instead.",
+                    "key": key,
+                }
             if not is_tenant_scoped_key(key, tenant_id):
                 key = prefix + key
             resp = s3.get_object(Bucket=bucket, Key=key)

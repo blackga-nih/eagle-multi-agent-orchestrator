@@ -2110,6 +2110,7 @@ def _build_subagent_kb_tools(
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
     user_id: str | None = None,
+    parent_kb_called: set | None = None,
 ) -> list:
     """Build knowledge-base tools that subagents can use to ground analysis.
 
@@ -2128,7 +2129,8 @@ def _build_subagent_kb_tools(
 
     # Track which research tools have been called in this session to detect
     # cascade violations (web_search before knowledge_search).
-    _kb_tools_called: set[str] = set()
+    # Pre-seed from parent (supervisor) so subagents inherit cascade state.
+    _kb_tools_called: set[str] = set(parent_kb_called) if parent_kb_called else set()
 
     # Track research depth: fetch count, chars read, fetched keys.
     _kb_depth: dict = {
@@ -2577,6 +2579,7 @@ def _make_subagent_tool(
     session_id: str = "",
     extra_tools: list | None = None,
     parent_kb_depth: dict | None = None,
+    parent_kb_called: set | None = None,
 ):
     """Create a @tool-wrapped subagent from skill registry entry.
 
@@ -2608,7 +2611,7 @@ def _make_subagent_tool(
         _ensure_langfuse_exporter()
 
         # Give subagents KB tools so they can retrieve actual documents
-        kb_tools, _sub_kb_depth = _build_subagent_kb_tools(tenant_id, session_id, result_queue, loop, user_id=user_id)
+        kb_tools, _sub_kb_depth = _build_subagent_kb_tools(tenant_id, session_id, result_queue, loop, user_id=user_id, parent_kb_called=parent_kb_called)
         all_tools = kb_tools + (extra_tools or [])
 
         _, _active_bedrock_model = _get_active_model()
@@ -4235,6 +4238,7 @@ def _build_kb_service_tools(
     loop: asyncio.AbstractEventLoop | None = None,
     template_search_done: dict | None = None,
     kb_depth_ref: dict | None = None,
+    kb_tools_called_ref: set | None = None,
 ) -> list:
     """Build KB tools with proper named parameters so Bedrock models send structured args.
 
@@ -4252,7 +4256,8 @@ def _build_kb_service_tools(
     _user_pkg_ids: set[str] = get_user_package_ids(tenant_id, user_id) if user_id else set()
 
     # Track KB tool calls for cascade violation detection.
-    _kb_tools_called: set[str] = set()
+    # Reuse externally created set if provided (shared with subagents).
+    _kb_tools_called: set[str] = kb_tools_called_ref if kb_tools_called_ref is not None else set()
 
     # Shared template search flag — set by knowledge_search, checked by create_document.
     _tpl_flag = template_search_done if template_search_done is not None else {"done": False}
@@ -4896,6 +4901,7 @@ def _build_service_tools(
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
     kb_depth_ref: dict | None = None,
+    kb_tools_called_ref: set | None = None,
 ) -> tuple[list, dict]:
     """Build @tool wrappers for AWS service tools, scoped to the current tenant/user/session.
 
@@ -4920,6 +4926,7 @@ def _build_service_tools(
         tenant_id, user_id, session_id, result_queue, loop,
         template_search_done=_tpl_search_done,
         kb_depth_ref=kb_depth_ref,
+        kb_tools_called_ref=kb_tools_called_ref,
     )
     tools.extend(kb_tools)
     # Add progressive disclosure tools
@@ -4942,6 +4949,7 @@ def build_skill_tools(
     result_queue: asyncio.Queue | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
     parent_kb_depth: dict | None = None,
+    parent_kb_called: set | None = None,
 ) -> list:
     """Build @tool-wrapped subagent functions from skill registry.
 
@@ -5009,6 +5017,7 @@ def build_skill_tools(
                 session_id=session_id,
                 extra_tools=extra,
                 parent_kb_depth=parent_kb_depth,
+                parent_kb_called=parent_kb_called,
             )
         )
 
@@ -5038,6 +5047,7 @@ def build_skill_tools(
                     tier=tier,
                     session_id=session_id,
                     parent_kb_depth=parent_kb_depth,
+                    parent_kb_called=parent_kb_called,
                 )
             )
     except Exception as exc:
@@ -5477,6 +5487,9 @@ async def sdk_query(
         "fetched_keys": set(),
         "reminder_count": 0,
     }
+    # Shared cascade tracker — supervisor and subagents share the same set
+    # so subagents inherit cascade state (no false CASCADE VIOLATION errors).
+    kb_tools_called: set[str] = set()
 
     skill_tools = build_skill_tools(
         tier=tier,
@@ -5486,6 +5499,7 @@ async def sdk_query(
         workspace_id=resolved_workspace_id,
         session_id=session_id or "",
         parent_kb_depth=kb_depth,
+        parent_kb_called=kb_tools_called,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -5496,6 +5510,7 @@ async def sdk_query(
         prompt_context=prompt,
         package_context=package_context,
         kb_depth_ref=kb_depth,
+        kb_tools_called_ref=kb_tools_called,
     )
 
     preloaded_ctx = await _preload_task
@@ -5775,6 +5790,9 @@ async def sdk_query_streaming(
         "fetched_keys": set(),
         "reminder_count": 0,
     }
+    # Shared cascade tracker — supervisor and subagents share the same set
+    # so subagents inherit cascade state (no false CASCADE VIOLATION errors).
+    kb_tools_called: set[str] = set()
 
     skill_tools = build_skill_tools(
         tier=tier,
@@ -5786,6 +5804,7 @@ async def sdk_query_streaming(
         result_queue=result_queue,
         loop=loop,
         parent_kb_depth=kb_depth,
+        parent_kb_called=kb_tools_called,
     )
 
     # Build service tools (S3, DynamoDB, create_document, search_far, etc.)
@@ -5798,6 +5817,7 @@ async def sdk_query_streaming(
         result_queue=result_queue,
         loop=loop,
         kb_depth_ref=kb_depth,
+        kb_tools_called_ref=kb_tools_called,
     )
 
     preloaded_ctx = await _preload_task
