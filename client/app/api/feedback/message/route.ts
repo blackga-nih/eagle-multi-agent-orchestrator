@@ -16,11 +16,22 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8_000),
     });
 
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error(`[feedback/message proxy] Backend returned ${response.status}: ${errorText}`);
+      let detail = 'Failed to submit feedback';
+      try { detail = JSON.parse(errorText).detail || detail; } catch {}
+      return NextResponse.json({ error: detail }, { status: response.status });
+    }
+
     const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
-  } catch {
-    return NextResponse.json({ error: 'Failed to submit feedback' }, { status: 500 });
+    return NextResponse.json(data);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[feedback/message proxy] Failed to forward feedback to backend:', msg);
+    return NextResponse.json({ error: `Failed to submit feedback: ${msg}` }, { status: 500 });
   }
 }

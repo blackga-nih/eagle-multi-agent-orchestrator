@@ -584,14 +584,16 @@ export default function SimpleChatInterface() {
       if (!feedbackText) return;
       setInput('');
       setFeedbackStatus('sending');
-      const token = await getToken();
+      let token: string | null = null;
+      try { token = await getToken(); } catch { /* expired session */ }
       try {
-        await fetch('/api/feedback', {
+        const res = await fetch('/api/feedback', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
+          signal: AbortSignal.timeout(10_000),
           body: JSON.stringify({
             session_id: currentSessionId,
             feedback_text: feedbackText,
@@ -603,7 +605,7 @@ export default function SimpleChatInterface() {
             })),
           }),
         });
-        setFeedbackStatus('done');
+        setFeedbackStatus(res.ok ? 'done' : 'error');
       } catch {
         setFeedbackStatus('error');
       }

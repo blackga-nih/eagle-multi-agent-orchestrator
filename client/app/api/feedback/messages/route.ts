@@ -13,11 +13,18 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(
       `${FASTAPI_URL}/api/feedback/messages${queryString ? `?${queryString}` : ''}`,
-      { headers },
+      { headers, signal: AbortSignal.timeout(8_000) },
     );
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error(`[feedback/messages proxy] Backend returned ${response.status}: ${errorText}`);
+      return NextResponse.json({ error: 'Failed to fetch feedback' }, { status: response.status });
+    }
     const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
-  } catch {
+    return NextResponse.json(data);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[feedback/messages proxy] Error:', msg);
     return NextResponse.json({ error: 'Failed to fetch feedback' }, { status: 500 });
   }
 }
