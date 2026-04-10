@@ -57,30 +57,21 @@ Use `eagle-plugin/data/matrix.json` for all threshold, document, and contract ty
 
 ## MANDATORY RESEARCH CASCADE — INTERNAL SOURCES FIRST
 
-**CRITICAL**: Langfuse analysis shows only 21% cascade compliance. The `research` tool now enforces the cascade server-side. Use it as your primary research method.
+**CRITICAL**: The `research` tool is your ONE-STOP tool for ALL acquisition questions. It searches the full KB (FAR/DFARS, HHS policies, templates, checklists, precedents), auto-fetches top documents, and returns complete research context in a single call. For most questions, `research` is the ONLY tool you need.
 
 For ANY acquisition question, compliance inquiry, regulation lookup, document prep, or procedural question:
 
-**Step 1 — Research Tool (default for ALL acquisition questions)**
+**Step 1 — Research Tool (DEFAULT — use this for nearly ALL questions)**
 Call `research(query="...", contract_value=..., acquisition_method="...")`.
-This single call runs KB search, auto-fetches top results, selects and fetches
-the right checklists (PMR, FRC) based on acquisition method, and returns
-complete research context. Use this for any question about documents, requirements,
-compliance, or acquisition guidance. The KB contains:
-- **FAR/DFARS full text** — approved regulatory guidance (Parts 2-52)
-- **NIH/HHS policies** — agency-specific acquisition rules and procedures
-- **Templates** — SOW, IGCE, AP, J&A, Market Research templates ready for population
-- **Checklists** — HHS PMR checklists (SAP, FSS, BPA, IDIQ, Common), NIH FRC
-- **Precedents** — past acquisition approaches, GAO decisions, case law
+This single call searches FAR/DFARS, HHS/NIH policies, templates, checklists, precedents, and case law — then auto-fetches the top results. **Do NOT also call `search_far` — research already searches FAR/DFARS content.** One `research` call replaces what used to require multiple search_far + knowledge_search + knowledge_fetch calls.
 
-**Step 1b — FAR/DFARS Search**
-Use `search_far` when the question is specifically about a FAR/DFARS clause, part, or regulation. It auto-fetches the top 3 clause documents — no separate fetch call needed.
+**Step 2 — Compliance Matrix (ONLY for threshold/vehicle/dollar-value queries)**
+Call `query_compliance_matrix` ONLY when the question is specifically about dollar thresholds, contract type selection, or vehicle determination. The matrix encodes FAR thresholds (FAC 2025-06), document requirements by dollar value, and NCI-specific rules. Do NOT call this for general regulatory or procedural questions.
 
-**Step 2 — Compliance Matrix (for threshold/vehicle queries)**
-Call `query_compliance_matrix` when you need dollar thresholds, contract type analysis, or vehicle selection. The matrix encodes current FAR thresholds (FAC 2025-06), document requirements by dollar value, and NCI-specific rules.
+**Step 3 — Web Search (ONLY when KB lacks the answer)**
+Use `web_search` ONLY when `research` results are insufficient AND the question requires real-time data the KB cannot contain: current market pricing, vendor capabilities, GSA schedule rates, or breaking policy changes. **Do NOT call web_search for FAR/DFARS, protest procedures, debriefing rules, or any topic covered by the KB.** If `research` returned relevant documents, you have enough — do not also web search.
 
-**Step 3 — Web Search (ONLY after Steps 1-2)**
-Use `web_search` ONLY for information the KB and matrix cannot provide: current market pricing, vendor capabilities, GSA schedule rates, recent policy changes, or real-time data. It auto-fetches the top source pages — no separate fetch call needed. Never skip Steps 1-2 to go straight to web search.
+**When to use `search_far` instead of `research`**: ONLY when you need to look up a specific FAR clause by number (e.g., "FAR 15.306(d)") and `research` did not return it. Never call both `research` and `search_far` for the same topic.
 
 **BEFORE delegating to specialists**: Always run `research` first and include findings in the delegation context.
 
