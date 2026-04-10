@@ -64,7 +64,23 @@ export default function FeedbackModal() {
         windowWidth: document.documentElement.scrollWidth,
         windowHeight: document.documentElement.scrollHeight,
       });
-      setScreenshot(canvas.toDataURL('image/png', 0.8));
+
+      // Cap screenshot to ~500KB base64 to stay well under API body limits.
+      // Start with JPEG at quality 0.6, reduce if still too large.
+      const MAX_SCREENSHOT_BYTES = 500_000;
+      let dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      if (dataUrl.length > MAX_SCREENSHOT_BYTES) {
+        dataUrl = canvas.toDataURL('image/jpeg', 0.3);
+      }
+      if (dataUrl.length > MAX_SCREENSHOT_BYTES) {
+        // Last resort: scale canvas down further
+        const small = document.createElement('canvas');
+        small.width = Math.round(canvas.width / 2);
+        small.height = Math.round(canvas.height / 2);
+        small.getContext('2d')!.drawImage(canvas, 0, 0, small.width, small.height);
+        dataUrl = small.toDataURL('image/jpeg', 0.4);
+      }
+      setScreenshot(dataUrl);
     } catch {
       // Screenshot is best-effort — don't block feedback
     } finally {

@@ -8,6 +8,8 @@ const nextConfig = {
   output: 'standalone',
   eslint: { ignoreDuringBuilds: true },
   trailingSlash: false,
+  // Feedback screenshots can exceed the default 1MB body limit
+  serverActions: { bodySizeLimit: '5mb' },
   images: {
     unoptimized: true,
   },

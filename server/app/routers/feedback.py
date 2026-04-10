@@ -110,9 +110,8 @@ class MessageFeedbackRequest(BaseModel):
 
 
 def _upload_screenshot_to_s3(feedback_id: str, data_url: str) -> Optional[str]:
-    """Decode a data-URL PNG and upload to S3. Returns S3 key or None."""
+    """Decode a data-URL image (PNG or JPEG) and upload to S3. Returns S3 key or None."""
     try:
-        # Strip "data:image/png;base64," prefix
         header, encoded = data_url.split(",", 1)
         image_bytes = base64.b64decode(encoded)
         if len(image_bytes) > 5 * 1024 * 1024:  # 5 MB cap
@@ -121,12 +120,18 @@ def _upload_screenshot_to_s3(feedback_id: str, data_url: str) -> Optional[str]:
         from ..db_client import get_s3
         from ..config import aws as aws_config
 
-        s3_key = f"feedback/screenshots/{feedback_id}.png"
+        # Detect content type from data-URL header
+        if "image/jpeg" in header:
+            ext, content_type = "jpg", "image/jpeg"
+        else:
+            ext, content_type = "png", "image/png"
+
+        s3_key = f"feedback/screenshots/{feedback_id}.{ext}"
         get_s3().put_object(
             Bucket=aws_config.s3_bucket,
             Key=s3_key,
             Body=image_bytes,
-            ContentType="image/png",
+            ContentType=content_type,
         )
         return s3_key
     except Exception:

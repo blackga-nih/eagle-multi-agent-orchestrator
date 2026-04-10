@@ -130,6 +130,25 @@ class TestScreenshotUpload:
         result = _upload_screenshot_to_s3("test-id", big_data)
         assert result is None
 
+    def test_uploads_jpeg_screenshot(self):
+        """JPEG data-URLs should be stored with .jpg extension and image/jpeg content type."""
+        mock_s3 = mock.MagicMock()
+        mock_aws = mock.MagicMock(s3_bucket="test-bucket")
+        jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 20  # Minimal JPEG-ish header
+        jpeg_data_url = "data:image/jpeg;base64," + base64.b64encode(jpeg_bytes).decode()
+        with (
+            mock.patch("app.db_client.get_s3", return_value=mock_s3),
+            mock.patch("app.config.aws", mock_aws),
+        ):
+            from app.routers.feedback import _upload_screenshot_to_s3
+
+            result = _upload_screenshot_to_s3("test-id", jpeg_data_url)
+
+        assert result == "feedback/screenshots/test-id.jpg"
+        call_kwargs = mock_s3.put_object.call_args[1]
+        assert call_kwargs["ContentType"] == "image/jpeg"
+        assert call_kwargs["Key"] == "feedback/screenshots/test-id.jpg"
+
     def test_returns_none_on_s3_error(self):
         mock_s3 = mock.MagicMock()
         mock_s3.put_object.side_effect = Exception("S3 down")
@@ -405,3 +424,137 @@ class TestJiraDescription:
         call_kwargs = mock_create.call_args[1]
         assert f"*User:* {EMAIL}" in call_kwargs["description"]
         assert "(free)" not in call_kwargs["description"]
+
+
+# ---------------------------------------------------------------------------
+# TestFeedbackEndpointIntegration
+# ---------------------------------------------------------------------------
+
+
+class TestFeedbackEndpointIntegration:
+    """Integration tests for POST /api/feedback including screenshot payloads.
+
+    Uses FastAPI TestClient with mocked DynamoDB and S3 so no real AWS
+    resources are needed. Validates the full chain: auth → DynamoDB write →
+    screenshot upload → response.
+    """
+
+    def _get_client(self):
+        """Build a TestClient with dev-mode auth (no Cognito needed)."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        return TestClient(app)
+
+    def _patch_deps(self):
+        """Context manager that mocks DynamoDB and S3 for feedback writes."""
+        mock_table = mock.MagicMock()
+        mock_table.put_item.return_value = {}
+        mock_s3 = mock.MagicMock()
+        mock_aws = mock.MagicMock(s3_bucket="test-bucket")
+        return mock.patch.multiple(
+            "app.feedback_store",
+            get_table=mock.MagicMock(return_value=mock_table),
+            uuid=mock.MagicMock(uuid4=mock.MagicMock(return_value=FAKE_UUID)),
+            now_iso=mock.MagicMock(return_value=FAKE_ISO),
+            ttl_timestamp=mock.MagicMock(return_value=FAKE_TTL),
+        ), mock.patch("app.db_client.get_s3", return_value=mock_s3), mock.patch(
+            "app.config.aws", mock_aws,
+        ), mock_table, mock_s3
+
+    def test_submit_feedback_text_only(self):
+        """Minimal feedback with just text returns 200."""
+        patches = self._patch_deps()
+        table_patch, s3_patch, aws_patch, mock_table, mock_s3 = patches
+        with table_patch, s3_patch, aws_patch:
+            client = self._get_client()
+            r = client.post("/api/feedback", json={
+                "feedback_text": "Great tool!",
+                "session_id": SESSION,
+            })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "ok"
+        mock_table.put_item.assert_called_once()
+
+    def test_submit_feedback_with_screenshot(self):
+        """Feedback with PNG screenshot returns 200 and triggers S3 upload."""
+        patches = self._patch_deps()
+        table_patch, s3_patch, aws_patch, mock_table, mock_s3 = patches
+        with table_patch, s3_patch, aws_patch:
+            client = self._get_client()
+            r = client.post("/api/feedback", json={
+                "feedback_text": "Bug on this page",
+                "feedback_type": "bug",
+                "feedback_area": "ui",
+                "session_id": SESSION,
+                "screenshot": TINY_PNG_DATA_URL,
+            })
+        assert r.status_code == 200
+        # DynamoDB write should happen
+        mock_table.put_item.assert_called_once()
+
+    def test_submit_feedback_with_jpeg_screenshot(self):
+        """Feedback with JPEG screenshot (compressed) returns 200."""
+        patches = self._patch_deps()
+        table_patch, s3_patch, aws_patch, mock_table, mock_s3 = patches
+        jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 20
+        jpeg_data_url = "data:image/jpeg;base64," + base64.b64encode(jpeg_bytes).decode()
+        with table_patch, s3_patch, aws_patch:
+            client = self._get_client()
+            r = client.post("/api/feedback", json={
+                "feedback_text": "Screenshot test",
+                "session_id": SESSION,
+                "screenshot": jpeg_data_url,
+            })
+        assert r.status_code == 200
+
+    def test_submit_feedback_with_conversation_snapshot(self):
+        """Feedback with conversation snapshot truncation returns 200."""
+        patches = self._patch_deps()
+        table_patch, s3_patch, aws_patch, mock_table, mock_s3 = patches
+        snapshot = [
+            {"role": "user", "content": "Hello " * 500},
+            {"role": "assistant", "content": "Hi there"},
+        ]
+        with table_patch, s3_patch, aws_patch:
+            client = self._get_client()
+            r = client.post("/api/feedback", json={
+                "feedback_text": "Snapshot test",
+                "session_id": SESSION,
+                "conversation_snapshot": snapshot,
+            })
+        assert r.status_code == 200
+
+    def test_submit_feedback_empty_text_rejected(self):
+        """Empty feedback_text returns 400."""
+        patches = self._patch_deps()
+        table_patch, s3_patch, aws_patch, _, _ = patches
+        with table_patch, s3_patch, aws_patch:
+            client = self._get_client()
+            r = client.post("/api/feedback", json={
+                "feedback_text": "",
+                "session_id": SESSION,
+            })
+        assert r.status_code == 400
+
+    def test_submit_feedback_all_fields(self):
+        """Full payload with all optional fields returns 200."""
+        patches = self._patch_deps()
+        table_patch, s3_patch, aws_patch, mock_table, _ = patches
+        with table_patch, s3_patch, aws_patch:
+            client = self._get_client()
+            r = client.post("/api/feedback", json={
+                "feedback_text": "Complete feedback",
+                "feedback_type": "inaccurate",
+                "feedback_area": "knowledge_base",
+                "session_id": SESSION,
+                "page": "/chat",
+                "last_message_id": "msg-123",
+                "conversation_snapshot": [{"role": "user", "content": "test"}],
+                "screenshot": TINY_PNG_DATA_URL,
+            })
+        assert r.status_code == 200
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert item["feedback_text"] == "Complete feedback"
+        assert item["feedback_area"] == "knowledge_base"

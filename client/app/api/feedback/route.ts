@@ -2,10 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+// Screenshots are base64-encoded PNGs that can exceed the default 1MB limit.
+// Without this, Next.js returns 403 for oversized payloads.
+export const maxDuration = 30;
+
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
+
+// Max payload size we'll accept (5MB) — matches backend S3 screenshot cap
+const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   try {
+    // Guard against oversized payloads before parsing
+    const contentLength = request.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > MAX_BODY_BYTES) {
+      return NextResponse.json(
+        { error: 'Payload too large. Try removing the screenshot.' },
+        { status: 413 },
+      );
+    }
+
     const body = await request.json();
     const authHeader = request.headers.get('authorization');
 
