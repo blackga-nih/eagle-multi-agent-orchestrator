@@ -4,6 +4,9 @@
  * GET /api/sessions/[sessionId]
  *   - Get a specific session by ID
  *
+ * PATCH /api/sessions/[sessionId]
+ *   - Update session title or metadata
+ *
  * DELETE /api/sessions/[sessionId]
  *   - Delete a specific session by ID
  */
@@ -41,6 +44,34 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     console.error('Session GET error:', error);
     return NextResponse.json({ error: 'Failed to fetch session' }, { status: 502 });
+  }
+}
+
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { sessionId } = await params;
+    const body = await request.json();
+
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    const authorization = request.headers.get('Authorization');
+    if (authorization) {
+      headers['Authorization'] = authorization;
+    }
+
+    const response = await fetch(`${FASTAPI_URL}/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+    return NextResponse.json(data, { status: response.status });
+  } catch (error) {
+    console.error('Session PATCH error:', error);
+    return NextResponse.json({ error: 'Failed to update session' }, { status: 502 });
   }
 }
 
