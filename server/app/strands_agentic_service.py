@@ -1271,20 +1271,6 @@ def _is_document_generation_request(prompt: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def _should_use_fast_document_path(prompt: str) -> tuple[bool, str | None]:
-    should_generate, doc_type = _is_document_generation_request(prompt)
-    if not should_generate or not doc_type:
-        return False, None
-
-    lowered = _normalize_prompt(prompt)
-    if "[document context]" in lowered:
-        return False, None
-    if _references_user_document(prompt):
-        return False, None
-    if any(h in lowered for h in _SLOW_PATH_HINTS):
-        return False, None
-    return True, doc_type
-
 
 def _extract_prompt_sections(prompt: str) -> dict[str, list[str]]:
     sections: dict[str, list[str]] = {}
@@ -1411,129 +1397,6 @@ def _build_scoped_session_id(
     if session_id and "#" in session_id:
         return session_id
     return f"{tenant_id}#advanced#{user_id}#{session_id or ''}"
-
-
-async def _maybe_fast_path_document_generation(
-    prompt: str,
-    tenant_id: str,
-    user_id: str,
-    session_id: str | None,
-    package_context: Any = None,
-) -> dict | None:
-    should_fast_path, doc_type = _should_use_fast_document_path(prompt)
-    if not should_fast_path or not doc_type:
-        return None
-
-    # -- Micro-purchase guardrail (FAR 13.2) --
-    if doc_type in ("sow", "acquisition_plan", "igce"):
-        import re as _re_mp_fp
-
-        _dollar_matches = _re_mp_fp.findall(r"\$\s*([\d,]+(?:\.\d+)?)", prompt)
-        _amounts = [float(m.replace(",", "")) for m in _dollar_matches]
-        _amounts_under = [a for a in _amounts if 0 < a < 15000]
-        if _amounts_under:
-            _ev = min(_amounts_under)
-            return {
-                "doc_type": doc_type,
-                "result": {
-                    "status": "guardrail",
-                    "message": (
-                        f"Micro-purchase guardrail (FAR 13.2): ${_ev:,.0f} is below the "
-                        f"$15,000 micro-purchase threshold. A formal {doc_type.upper()} is "
-                        f"not required. Micro-purchases use simplified procedures — purchase "
-                        f"card or micro-purchase order. No formal acquisition package is needed."
-                    ),
-                    "word_count": 0,
-                },
-                "guardrail": True,
-            }
-
-    # -- Document prerequisites guardrail --
-    # Skip if user has a package (intake already done)
-    _has_package = (
-        package_context is not None
-        and getattr(package_context, "is_package_mode", False)
-    )
-    if not _has_package:
-        _fp_data = _extract_context_data_from_prompt(prompt, doc_type)
-        _prereq_block = _check_document_prerequisites({
-            "doc_type": doc_type, "content": "", "data": _fp_data,
-        })
-        if _prereq_block:
-            _prereq_data = json.loads(_prereq_block)
-            _missing = _prereq_data.get("missing_fields", [])
-            _doc_label = _DOC_TYPE_LABELS.get(
-                doc_type, doc_type.replace("_", " ").title()
-            )
-            return {
-                "doc_type": doc_type,
-                "result": {
-                    "status": "guardrail",
-                    "message": (
-                        f"I'd be happy to help create a {_doc_label}, but I need some "
-                        "information first.\n\nPlease tell me:\n"
-                        + "\n".join(f"- {field}" for field in _missing)
-                        + "\n\nDescribe your acquisition in a few sentences, or say "
-                        '**"start intake"** and I\'ll walk you through it step by step.'
-                    ),
-                    "word_count": 0,
-                },
-                "guardrail": True,
-            }
-
-    from .tools.legacy_dispatch import exec_create_document
-    from .tools.knowledge_tools import exec_knowledge_search
-
-    # -- Template search (EAGLE-77) --
-    # Always search KB for the relevant template before generating.
-    _tpl_info = ""
-    try:
-        tpl_result = await asyncio.to_thread(
-            exec_knowledge_search,
-            {"query": f"{doc_type} template", "document_type": "template", "limit": 3},
-            tenant_id,
-            session_id,
-        )
-        tpl_results = tpl_result.get("results", [])
-        if tpl_results:
-            top = tpl_results[0]
-            _tpl_info = (
-                f"Using template: {top.get('title', 'Unknown')} "
-                f"({top.get('s3_key', 'path unavailable')})"
-            )
-        else:
-            _tpl_info = f"No KB template found for document type '{doc_type}'."
-    except Exception as exc:
-        logger.warning("Fast-path template search failed: %s", exc)
-        _tpl_info = f"Template search unavailable; generating {doc_type} without template reference."
-
-    doc_ctx = _extract_document_context_from_prompt(prompt)
-    params: dict[str, Any] = {
-        "doc_type": doc_type,
-        "title": doc_ctx.get("title") or _fast_path_title(prompt, doc_type),
-    }
-    contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
-    if contextual_data:
-        params["data"] = contextual_data
-    if (
-        package_context is not None
-        and getattr(package_context, "is_package_mode", False)
-        and getattr(package_context, "package_id", None)
-    ):
-        params["package_id"] = package_context.package_id
-
-    scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
-    result = await asyncio.to_thread(
-        exec_create_document,
-        params,
-        tenant_id,
-        scoped_session_id,
-    )
-    return {
-        "doc_type": doc_type,
-        "result": result,
-        "template_info": _tpl_info,
-    }
 
 
 async def _ensure_create_document_for_direct_request(
@@ -5597,49 +5460,6 @@ async def sdk_query(
         )
         return
 
-    # --- Document generation fast-path ---
-    fast_path = await _maybe_fast_path_document_generation(
-        prompt=prompt,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        session_id=session_id,
-        package_context=package_context,
-    )
-    if fast_path is not None:
-        result = fast_path["result"]
-        if fast_path.get("guardrail"):
-            yield AssistantMessage(content=[TextBlock(text=result["message"])])
-            yield ResultMessage(result=result["message"], usage={})
-            return
-        if "error" in result:
-            yield AssistantMessage(
-                content=[
-                    TextBlock(text=f"Document generation failed: {result['error']}")
-                ]
-            )
-            yield ResultMessage(
-                result=f"Document generation failed: {result['error']}", usage={}
-            )
-            return
-
-        tpl_info = fast_path.get("template_info", "")
-        tpl_line = f"\n\n**Template:** {tpl_info}" if tpl_info else ""
-        text = (
-            f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
-            f"You can open it from the document card.{tpl_line}"
-        )
-        yield AssistantMessage(
-            content=[
-                TextBlock(text=text),
-                ToolUseBlock(name="create_document"),
-            ]
-        )
-        yield ResultMessage(
-            result=text,
-            usage={"tools_called": 1, "tools": ["create_document", "knowledge_search"], "fast_path": True},
-        )
-        return
-
     # Resolve active workspace when none provided
     resolved_workspace_id = workspace_id
     if not resolved_workspace_id:
@@ -5931,55 +5751,6 @@ async def sdk_query_streaming(
             "tools_called": [],
             "usage": greeting_result.get("usage", {}),
             "fast_path": True,
-        }
-        return
-
-    # --- Document generation fast-path ---
-    fast_path = await _maybe_fast_path_document_generation(
-        prompt=prompt,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        session_id=session_id,
-        package_context=package_context,
-    )
-    if fast_path is not None:
-        result = fast_path["result"]
-        if fast_path.get("guardrail"):
-            yield {"type": "text", "data": result["message"]}
-            yield {
-                "type": "complete",
-                "text": result["message"],
-                "tools_called": [],
-                "usage": {},
-            }
-            return
-        if "error" in result:
-            yield {"type": "error", "error": result["error"]}
-            return
-        yield {"type": "tool_use", "name": "create_document"}
-        yield {"type": "tool_result", "name": "create_document", "result": result}
-        # Emit package state update for fast-path document creation
-        for state_evt in _build_state_updates(result, "create_document", tenant_id):
-            yield state_evt
-        tpl_info = fast_path.get("template_info", "")
-        tpl_line = f"\n\n**Template:** {tpl_info}" if tpl_info else ""
-        text = (
-            f"Generated a draft {fast_path['doc_type'].replace('_', ' ')} document. "
-            f"Open the document card to review or edit it.{tpl_line}"
-        )
-        yield {"type": "text", "data": text}
-        # End-of-turn state refresh for fast-path
-        for state_evt in _build_end_of_turn_state(package_context, tenant_id):
-            yield state_evt
-        yield {
-            "type": "complete",
-            "text": text,
-            "tools_called": ["create_document", "knowledge_search"],
-            "usage": {
-                "tools_called": 1,
-                "tools": ["create_document", "knowledge_search"],
-                "fast_path": True,
-            },
         }
         return
 
