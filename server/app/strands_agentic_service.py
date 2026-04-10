@@ -4854,8 +4854,10 @@ def _build_kb_service_tools(
                 )
                 for r in semantic_result.get("results", []):
                     key = r.get("s3_key", "")
-                    stem = _stem(key) if key else ""
-                    if key and key not in seen_keys and stem not in seen_stems:
+                    if not key or not _is_kb_doc(key):
+                        continue  # semantic lane: KB docs only
+                    stem = _stem(key)
+                    if key not in seen_keys and stem not in seen_stems:
                         all_results.append(r)
                         semantic_only_results.append(r)
                         seen_keys.add(key)

@@ -1303,6 +1303,18 @@ def exec_semantic_search(
                 "_semantic_distance": distance,
             }
 
+    # 3b. KB-only gate — semantic lane surfaces approved KB docs only.
+    # Defense-in-depth: even if the index contains non-KB docs (e.g.
+    # user-generated SOWs from a broad --prefix backfill), filter them
+    # out so they never consume ranking slots or displace real templates.
+    _KB_PREFIX = "eagle-knowledge-base/"
+    best_per_key = {
+        k: v for k, v in best_per_key.items()
+        if k.startswith(_KB_PREFIX)
+    }
+    if not best_per_key:
+        return {"results": [], "count": 0}
+
     # 4. Sort by score desc
     ranked = sorted(
         best_per_key.values(),

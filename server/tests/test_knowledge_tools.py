@@ -272,3 +272,105 @@ def test_exec_knowledge_search_query_matches_summary(monkeypatch):
 
     assert result["count"] == 1
     assert result["results"][0]["document_id"] == "doc1"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Semantic Search — KB-only filter tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _make_vector(s3_key: str, distance: float = 0.3) -> dict:
+    """Build a fake S3 Vectors query_vectors response vector."""
+    return {
+        "metadata": {
+            "s3_key": s3_key,
+            "document_id": s3_key,
+            "title": s3_key.rsplit("/", 1)[-1],
+            "summary": "",
+            "document_type": "",
+            "primary_topic": "",
+            "primary_agent": "",
+        },
+        "distance": distance,
+    }
+
+
+def test_semantic_search_filters_non_kb_docs(monkeypatch):
+    """exec_semantic_search must drop docs outside eagle-knowledge-base/."""
+    monkeypatch.setattr(kt, "embed_text", lambda *a, **kw: [0.1] * 1024)
+
+    sv_mock = MagicMock()
+    sv_mock.query_vectors.return_value = {
+        "vectors": [
+            _make_vector("eagle-knowledge-base/approved/template.md", distance=0.4),
+            _make_vector("eagle/dev-tenant/dev-user/documents/sow_20260403.docx", distance=0.1),
+            _make_vector("eagle-knowledge-base/approved/guide.md", distance=0.5),
+        ],
+    }
+    monkeypatch.setattr(kt, "_get_s3vectors_client", lambda: sv_mock)
+
+    result = kt.exec_semantic_search("statement of work", tenant_id="dev-tenant")
+
+    keys = [r["s3_key"] for r in result["results"]]
+    assert "eagle/dev-tenant/dev-user/documents/sow_20260403.docx" not in keys
+    assert "eagle-knowledge-base/approved/template.md" in keys
+    assert "eagle-knowledge-base/approved/guide.md" in keys
+    assert result["count"] == 2
+
+
+def test_semantic_search_non_kb_docs_dont_displace_kb_docs(monkeypatch):
+    """Non-KB docs must not consume ranking slots that KB docs need."""
+    monkeypatch.setattr(kt, "embed_text", lambda *a, **kw: [0.1] * 1024)
+
+    # 5 non-KB user docs with HIGH similarity (low distance = high confidence)
+    user_docs = [
+        _make_vector(f"eagle/dev-tenant/dev-user/documents/sow_{i}.docx", distance=0.05)
+        for i in range(5)
+    ]
+    # 12 KB docs with LOWER similarity
+    kb_docs = [
+        _make_vector(f"eagle-knowledge-base/approved/doc_{i}.md", distance=0.3 + i * 0.02)
+        for i in range(12)
+    ]
+
+    sv_mock = MagicMock()
+    sv_mock.query_vectors.return_value = {"vectors": user_docs + kb_docs}
+    monkeypatch.setattr(kt, "_get_s3vectors_client", lambda: sv_mock)
+
+    result = kt.exec_semantic_search("SOW template", tenant_id="dev-tenant", limit=10)
+
+    # All 10 slots should be KB docs — user docs must not steal any slots
+    assert result["count"] == 10
+    for r in result["results"]:
+        assert r["s3_key"].startswith("eagle-knowledge-base/"), (
+            f"Non-KB doc leaked into results: {r['s3_key']}"
+        )
+
+
+def test_semantic_search_returns_empty_when_only_non_kb_docs(monkeypatch):
+    """If the index only contains non-KB docs, return empty results."""
+    monkeypatch.setattr(kt, "embed_text", lambda *a, **kw: [0.1] * 1024)
+
+    sv_mock = MagicMock()
+    sv_mock.query_vectors.return_value = {
+        "vectors": [
+            _make_vector("eagle/dev-tenant/dev-user/documents/sow.docx", distance=0.1),
+            _make_vector("eagle/dev-tenant/packages/pkg1/doc.md", distance=0.2),
+        ],
+    }
+    monkeypatch.setattr(kt, "_get_s3vectors_client", lambda: sv_mock)
+
+    result = kt.exec_semantic_search("SOW", tenant_id="dev-tenant")
+
+    assert result["count"] == 0
+    assert result["results"] == []
+
+
+def test_semantic_search_disabled_returns_empty(monkeypatch):
+    """When SEMANTIC_LANE_ENABLED=false, return empty without querying."""
+    monkeypatch.setenv("SEMANTIC_LANE_ENABLED", "false")
+
+    result = kt.exec_semantic_search("anything", tenant_id="dev-tenant")
+
+    assert result["count"] == 0
+    assert result["results"] == []
