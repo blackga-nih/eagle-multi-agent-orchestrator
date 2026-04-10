@@ -1359,34 +1359,13 @@ def _extract_context_data_from_prompt(prompt: str, doc_type: str) -> dict[str, A
     return data
 
 
-def _fast_path_title(prompt: str, doc_type: str) -> str:
-    """Generate a descriptive title from the user prompt and doc type.
+def _fallback_document_title(doc_type: str, package_id: str | None = None) -> str:
+    """Fallback title: doc-type label + package ID or today's date."""
+    from datetime import datetime
 
-    Tries to extract the program/acquisition context that follows 'for', 'regarding',
-    or 'about' in the prompt. Falls back to the generic doc-type label.
-    """
     base = _DOC_TYPE_LABELS.get(doc_type, doc_type.replace("_", " ").title())
-    if not prompt:
-        return base
-
-    lowered = prompt.lower()
-    # Look for "for <context>" / "regarding <context>" / "about <context>"
-    for marker in ("for ", "regarding ", "about "):
-        idx = lowered.find(marker)
-        if idx == -1:
-            continue
-        tail = prompt[idx + len(marker) :].strip()
-        # Take up to the first sentence end or 60 chars
-        for stop in (".", "\n", "?", "!", ";"):
-            stop_idx = tail.find(stop)
-            if 0 < stop_idx < 80:
-                tail = tail[:stop_idx]
-                break
-        tail = tail.strip().rstrip(",").strip()
-        if tail and len(tail) > 3:
-            return f"{base} - {tail[:80]}"
-
-    return base
+    suffix = package_id if package_id else datetime.now().strftime("%Y%m%d")
+    return f"{base} - {suffix}"
 
 
 def _build_scoped_session_id(
@@ -1426,7 +1405,9 @@ async def _ensure_create_document_for_direct_request(
     doc_ctx = _extract_document_context_from_prompt(prompt)
     params: dict[str, Any] = {
         "doc_type": doc_type,
-        "title": doc_ctx.get("title") or _fast_path_title(prompt, doc_type),
+        "title": doc_ctx.get("title") or _fallback_document_title(
+            doc_type, getattr(package_context, "package_id", None),
+        ),
     }
     contextual_data = _extract_context_data_from_prompt(prompt, doc_type)
     if contextual_data:
