@@ -296,11 +296,11 @@ def build_html(results: dict, version: str, scores: dict | None = None,
                 <div class="responses-grid">
                     <div class="resp-col">
                         <div class="resp-label eagle-label">EAGLE {version_upper}</div>
-                        <div class="resp-text">{escape(r['response'][:3000])}{'...' if len(r['response']) > 3000 else ''}</div>
+                        <div class="resp-md" data-md="{escape(r['response'])}"></div>
                     </div>
                     <div class="resp-col">
                         <div class="resp-label ro-label">Research Optimizer</div>
-                        <div class="resp-text">{escape(ro_body[:3000])}{'...' if len(ro_body) > 3000 else ''}</div>
+                        <div class="resp-md" data-md="{escape(ro_body)}"></div>
                     </div>
                 </div>
             </details>
@@ -464,6 +464,21 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .resp-col {{ background: var(--gray-50); border-radius: 8px; padding: 12px; }}
 .resp-label {{ font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 6px; display: inline-block; margin-bottom: 8px; }}
 .resp-text {{ font-size: 12px; color: var(--gray-700); white-space: pre-wrap; word-wrap: break-word; max-height: 400px; overflow-y: auto; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
+.resp-md {{ font-size: 13px; color: var(--gray-700); max-height: 600px; overflow-y: auto; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
+.resp-md h1,.resp-md h2,.resp-md h3,.resp-md h4 {{ color: var(--navy); margin: 14px 0 6px; }}
+.resp-md h1 {{ font-size: 16px; }} .resp-md h2 {{ font-size: 15px; }} .resp-md h3 {{ font-size: 14px; }} .resp-md h4 {{ font-size: 13px; }}
+.resp-md p {{ margin: 6px 0; }}
+.resp-md ul,.resp-md ol {{ margin: 6px 0 6px 20px; }}
+.resp-md li {{ margin: 3px 0; }}
+.resp-md table {{ border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }}
+.resp-md th,.resp-md td {{ border: 1px solid var(--gray-300); padding: 5px 8px; text-align: left; }}
+.resp-md th {{ background: var(--gray-100); font-weight: 600; }}
+.resp-md code {{ background: var(--gray-100); padding: 1px 4px; border-radius: 3px; font-size: 12px; font-family: 'SF Mono','Fira Code',monospace; }}
+.resp-md pre {{ background: var(--gray-100); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }}
+.resp-md pre code {{ background: none; padding: 0; }}
+.resp-md blockquote {{ border-left: 3px solid var(--gray-300); padding: 4px 12px; margin: 8px 0; color: var(--gray-700); background: var(--gray-50); }}
+.resp-md hr {{ border: none; border-top: 1px solid var(--gray-300); margin: 12px 0; }}
+.resp-md strong {{ font-weight: 600; }}
 
 /* KB Coverage section */
 .coverage-card {{ background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
@@ -555,6 +570,20 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 <div class="footer">
     EAGLE Baseline Report &mdash; Generated {today} &mdash; {len(results)} questions evaluated
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {{
+    document.querySelectorAll('.resp-md[data-md]').forEach(function(el) {{
+        var raw = el.getAttribute('data-md');
+        // Decode HTML entities back to raw markdown
+        var ta = document.createElement('textarea');
+        ta.innerHTML = raw;
+        var md = ta.value;
+        el.innerHTML = marked.parse(md, {{ breaks: false, gfm: true }});
+    }});
+}});
+</script>
 
 </body>
 </html>"""
