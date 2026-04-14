@@ -58,6 +58,8 @@ ALLOWED_UPLOAD_MIME_TYPES = {
     "application/vnd.ms-excel",
     "text/plain",
     "text/markdown",
+    "image/png",
+    "image/jpeg",
 }
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 
@@ -700,7 +702,10 @@ async def api_upload_document(
     if content_type not in ALLOWED_UPLOAD_MIME_TYPES:
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported file type: {content_type}. Accepted: PDF, Word, plain text, Markdown.",
+            detail=(
+                f"Unsupported file type: {content_type}. Accepted: PDF, Word, Excel, "
+                "plain text, Markdown, PNG, JPEG."
+            ),
         )
 
     body = await file.read()
