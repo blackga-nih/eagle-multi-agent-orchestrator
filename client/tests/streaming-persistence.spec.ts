@@ -585,6 +585,64 @@ test.describe('Phase 2: Tool Call & State Change Persistence', () => {
     }
   });
 
+  test('Test 8b: selecting an older session does not rewrite its recency', async ({ page }) => {
+    const toolSSE = makeToolSSE({
+      textChunks: ['Analyzing policy. '],
+      tools: [
+        {
+          name: 'search_far',
+          input: { query: 'simplified acquisition' },
+          toolUseId: 'tu-order-1',
+          result: { clauses: ['13.003'], results_count: 1 },
+        },
+      ],
+    });
+    const plainSSE = buildStreamingSSE(['Different topic response.']);
+
+    await routeSSESequence(page, [toolSSE, plainSSE]);
+    await page.route('**/api/sessions/generate-title', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ title: 'New Session' }),
+      });
+    });
+
+    await page.goto(CHAT_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1_000);
+
+    // Session A: older thread with persisted tool state
+    await sendMessage(page, 'simplified acquisition thresholds');
+    await waitForStreamComplete(page);
+    const sessionAId = await getCurrentSessionId(page);
+
+    // Session B: newer thread that should stay on top
+    await createNewThread(page);
+    await sendMessage(page, 'different question');
+    await waitForStreamComplete(page);
+    const sessionBId = await getCurrentSessionId(page);
+
+    const beforeSelect = await getSessionData(page);
+    const sessionABefore = beforeSelect[sessionAId] as { updatedAt: string } | undefined;
+    const sessionBBefore = beforeSelect[sessionBId] as { updatedAt: string } | undefined;
+    expect(sessionABefore?.updatedAt).toBeTruthy();
+    expect(sessionBBefore?.updatedAt).toBeTruthy();
+    expect(new Date(sessionABefore!.updatedAt).getTime()).toBeLessThan(
+      new Date(sessionBBefore!.updatedAt).getTime(),
+    );
+
+    const sessionRows = page.locator('[class*="space-y-0"] > div');
+    await expect(sessionRows).toHaveCount(2);
+    await sessionRows.nth(1).click();
+    await page.waitForTimeout(1_500);
+
+    const afterSelect = await getSessionData(page);
+    const sessionAAfter = afterSelect[sessionAId] as { updatedAt: string } | undefined;
+    const sessionBAfter = afterSelect[sessionBId] as { updatedAt: string } | undefined;
+    expect(sessionAAfter?.updatedAt).toBe(sessionABefore?.updatedAt);
+    expect(sessionBAfter?.updatedAt).toBe(sessionBBefore?.updatedAt);
+  });
+
   test('Test 9: multiple messages with tool calls all persist correctly', async ({ page }) => {
     const sse1 = makeToolSSE({
       textChunks: ['First answer. '],

@@ -139,6 +139,24 @@ function buildSessionContentSignature(session: {
   });
 }
 
+function normalizeTimestamp(value: Message['timestamp'] | undefined): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value as unknown as string);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function deriveSessionUpdatedAt(
+  messages: Message[],
+  existingUpdatedAt?: string,
+  fallbackNow?: string,
+): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const normalized = normalizeTimestamp(messages[index]?.timestamp);
+    if (normalized) return normalized;
+  }
+  return existingUpdatedAt ?? fallbackNow ?? new Date().toISOString();
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -305,6 +323,7 @@ export function useLocalCache(userId: string, tenantId: string): UseLocalCacheRe
 
         const existing = allSessions[sessionId];
         const now = new Date().toISOString();
+        const updatedAt = deriveSessionUpdatedAt(messages, existing?.updatedAt, now);
 
         let strippedDocs: Record<string, DocumentInfo[]> | undefined;
         if (documents && Object.keys(documents).length > 0) {
@@ -348,7 +367,7 @@ export function useLocalCache(userId: string, tenantId: string): UseLocalCacheRe
               ? stateChangesByMsg
               : undefined,
           createdAt: existing?.createdAt ?? now,
-          updatedAt: now,
+          updatedAt,
           status: existing?.status ?? 'in_progress',
         };
 
@@ -373,19 +392,20 @@ export function useLocalCache(userId: string, tenantId: string): UseLocalCacheRe
         localStorage.setItem(STORAGE_KEY, JSON.stringify(allSessions));
 
         setSessions((prev) => {
-          const filtered = prev.filter((s) => s.id !== sessionId);
-          return [
-            {
-              id: sessionData.id,
-              title: sessionData.title,
-              summary: sessionData.summary,
-              createdAt: new Date(sessionData.createdAt),
-              updatedAt: new Date(sessionData.updatedAt),
-              status: sessionData.status,
-              messageCount: messages.length,
-            },
-            ...filtered,
-          ];
+          const nextSession: ChatSession = {
+            id: sessionData.id,
+            title: sessionData.title,
+            summary: sessionData.summary,
+            createdAt: new Date(sessionData.createdAt),
+            updatedAt: new Date(sessionData.updatedAt),
+            status: sessionData.status,
+            messageCount: messages.length,
+          };
+          const index = prev.findIndex((s) => s.id === sessionId);
+          if (index === -1) return [...prev, nextSession];
+          const next = prev.slice();
+          next[index] = nextSession;
+          return next;
         });
 
         // Also persist to IDB asynchronously — fire-and-forget
@@ -402,7 +422,7 @@ export function useLocalCache(userId: string, tenantId: string): UseLocalCacheRe
             status: sessionData.status,
             syncStatus: 'pending',
             createdAt: sessionData.createdAt,
-            updatedAt: now,
+            updatedAt,
             messageCount: messages.length,
           };
           await idbPutSession(db, idbSession);
