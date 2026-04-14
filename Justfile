@@ -121,50 +121,70 @@ dev-smoke: dev-up smoke
 # One-command local smoke with visible browser window
 dev-smoke-ui: dev-up smoke-ui
 
-# Start backend + frontend locally with hot reload (no docker) — kills stale processes first
-dev-local:
+# Kill stale EAGLE backend/frontend processes on Windows + Unix.
+# Handles uvicorn --reload zombie-child pattern that taskkill-by-PID misses.
+kill-stale:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "=== Clearing ports 8000 + 3000 ==="
+    echo "=== kill-stale: clearing ports 8000, 3000, 3001 ==="
     if command -v taskkill >/dev/null 2>&1; then
-        # Windows path
+        # Pass 1: kill by port PID
         for port in 8000 3000 3001; do
             for pid in $(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $NF}' | sort -u | grep -v '^0$'); do
-                echo "  Killing PID $pid (port $port)"
+                echo "  kill (by port $port): PID $pid"
                 taskkill /F /T /PID "$pid" 2>/dev/null || true
             done
-            # Powershell fallback — catches IPv6 listeners netstat misses
+            # IPv6 listeners netstat can miss
             for pid in $(powershell.exe -NoProfile -Command \
               "(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess" 2>/dev/null | tr -d '\r' | sort -u); do
                 [ -n "$pid" ] && [ "$pid" != "0" ] && {
-                    echo "  Killing PID $pid (port $port, ps fallback)"
+                    echo "  kill (by port $port, ps): PID $pid"
                     taskkill /F /T /PID "$pid" 2>/dev/null || true
                 }
             done
         done
-        # Kill any lingering node processes holding .next/trace
-        taskkill /F /IM node.exe 2>/dev/null || true
+        # Pass 2: kill orphaned children by command-line match via WMI.
+        # Catches zombie uvicorn workers whose parent already died.
+        powershell.exe -NoProfile -Command \
+          "Get-CimInstance Win32_Process | Where-Object { \$_.Name -match 'python' -and \$_.CommandLine -match 'uvicorn.*app\\.main' } | ForEach-Object { Write-Host ('  kill (by cmdline): PID ' + \$_.ProcessId); Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>/dev/null || true
+        powershell.exe -NoProfile -Command \
+          "Get-CimInstance Win32_Process | Where-Object { \$_.Name -eq 'node.exe' -and \$_.CommandLine -match 'next dev|\\.next' } | ForEach-Object { Write-Host ('  kill (by cmdline): PID ' + \$_.ProcessId); Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>/dev/null || true
     else
-        # macOS/Linux path
         for port in 8000 3000 3001; do
             for pid in $(lsof -ti tcp:${port} 2>/dev/null | sort -u); do
-                echo "  Killing PID $pid (port $port)"
+                echo "  kill (by port $port): PID $pid"
                 kill "$pid" 2>/dev/null || true
             done
         done
     fi
-    # Wait for ports to actually free
-    for port in 3000 8000; do
-        for i in 1 2 3 4 5 6 7 8 9 10; do
+    # Pass 3: verify ports free, up to 8 seconds
+    for port in 8000 3000; do
+        for i in 1 2 3 4 5 6 7 8; do
             if command -v taskkill >/dev/null 2>&1; then
                 netstat -ano 2>/dev/null | grep ":${port} " | grep -q LISTENING || break
             else
                 lsof -ti tcp:${port} >/dev/null 2>&1 || break
             fi
-            echo "  Waiting for port $port to free... ($i)"
             sleep 1
         done
     done
+    if command -v taskkill >/dev/null 2>&1 && netstat -ano 2>/dev/null | grep -q ':8000 .*LISTENING'; then
+        echo ""
+        echo "  WARNING: port 8000 still held after kill-stale."
+        echo "  Likely a Windows kernel-ghost LISTEN entry (PID dead, kernel won't release)."
+        echo "  Options:"
+        echo "    1) Reboot Windows"
+        echo "    2) Admin PowerShell: netsh winsock reset (requires reboot)"
+        echo "    3) Use fallback port: just dev-local-8001"
+        exit 1
+    fi
+    echo "  ports free"
+
+# Start backend + frontend locally with hot reload (no docker) — kills stale processes first
+dev-local:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just kill-stale
     # Clear Next.js cache — retry loop because file locks can linger briefly
     for attempt in 1 2 3 4 5; do
         rm -rf client/.next 2>/dev/null || true
@@ -182,7 +202,7 @@ dev-local:
     unset FASTAPI_URL
     export FASTAPI_URL=http://127.0.0.1:8000
     echo "=== Starting backend (port 8000) ==="
-    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload &
+    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app --reload-dir ../eagle-plugin &
     BACKEND_PID=$!
     sleep 5
     echo "=== Starting frontend (port 3000) ==="
@@ -214,34 +234,14 @@ dev-local-sso PROFILE="":
 dev-backend:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Clearing port 8000..."
-    if command -v taskkill >/dev/null 2>&1; then
-        for pid in $(netstat -ano 2>/dev/null | grep ':8000 ' | grep LISTENING | awk '{print $5}' | sort -u); do
-            taskkill /F /T /PID "$pid" 2>/dev/null || true
-        done
-    else
-        for pid in $(lsof -ti tcp:8000 2>/dev/null | sort -u); do
-            kill "$pid" 2>/dev/null || true
-        done
-    fi
-    sleep 1
-    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+    just kill-stale
+    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app --reload-dir ../eagle-plugin
 
 # Start Next.js frontend only with hot reload (local) — kills stale processes on port 3000 first
 dev-frontend:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Clearing port 3000..."
-    if command -v taskkill >/dev/null 2>&1; then
-        for pid in $(netstat -ano 2>/dev/null | grep ':3000 ' | grep LISTENING | awk '{print $5}' | sort -u); do
-            taskkill /F /T /PID "$pid" 2>/dev/null || true
-        done
-    else
-        for pid in $(lsof -ti tcp:3000 2>/dev/null | sort -u); do
-            kill "$pid" 2>/dev/null || true
-        done
-    fi
-    sleep 1
+    just kill-stale
     # Clear stale .next cache
     for attempt in 1 2 3; do
         rm -rf client/.next 2>/dev/null || true
@@ -250,6 +250,32 @@ dev-frontend:
     done
     unset FASTAPI_URL
     cd client && npm run dev
+
+# Fallback when port 8000 is permanently held by a kernel ghost — runs backend on 8001
+dev-local-8001:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Kill 3000 + 3001 but leave 8000 alone (it's the zombie we're working around)
+    if command -v taskkill >/dev/null 2>&1; then
+        for port in 3000 3001 8001; do
+            for pid in $(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $NF}' | sort -u | grep -v '^0$'); do
+                taskkill /F /T /PID "$pid" 2>/dev/null || true
+            done
+        done
+    fi
+    export FASTAPI_URL=http://127.0.0.1:8001
+    echo "=== Starting backend on port 8001 (8000 fallback) ==="
+    cd server && python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload --reload-dir app --reload-dir ../eagle-plugin &
+    BACKEND_PID=$!
+    sleep 5
+    echo "=== Starting frontend (port 3000) ==="
+    cd client && FASTAPI_URL=http://127.0.0.1:8001 npm run dev &
+    FRONTEND_PID=$!
+    echo ""
+    echo "Backend PID: $BACKEND_PID (http://localhost:8001)"
+    echo "Frontend PID: $FRONTEND_PID (http://localhost:3000)"
+    trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT
+    wait
 
 # ── Format ──────────────────────────────────────────────────
 
@@ -572,6 +598,74 @@ check-sso:
     aws s3 ls s3://eagle-documents-ACCOUNT-dev --region us-east-1 &>/dev/null || echo "⚠️  S3 bucket 'eagle-documents-ACCOUNT-dev' not accessible (may not exist)"
     echo ""
     echo "=== All checks passed ==="
+
+# ── Langfuse Analytics ─────────────────────────────────────
+
+# Analytical rollup of Langfuse traces — skills/tools/documents breakdown.
+# WINDOW: today (default) | 1h | 4h | 24h | 7d
+# ENV:    all (default) | local | dev | qa | prod | unknown
+# OUT:    optional markdown output path
+langfuse-report WINDOW="today" ENV="all" OUT="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ARGS=( --window="{{WINDOW}}" --env="{{ENV}}" )
+    if [ -n "{{OUT}}" ]; then ARGS+=( --out="{{OUT}}" ); fi
+    python3 .claude/skills/langfuse-analytics/scripts/langfuse_report.py "${ARGS[@]}"
+
+# Shorthand: dump today's rollup to docs/development/ with a timestamped filename
+langfuse-report-today:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TS=$(date -u +%Y%m%d-%H%M%S)
+    OUT="docs/development/${TS}-report-langfuse-analytics-today-v1.md"
+    mkdir -p docs/development
+    python3 .claude/skills/langfuse-analytics/scripts/langfuse_report.py --window=today --env=all --out="$OUT"
+    echo ""
+    echo "📊 Report written to $OUT"
+
+# Shorthand: last 7 days rollup
+langfuse-report-week:
+    python3 .claude/skills/langfuse-analytics/scripts/langfuse_report.py --window=7d --env=all
+
+# HTML dashboard: KPI cards, per-user cost table, CloudWatch section (optional)
+langfuse-report-html WINDOW="today" ENV="all":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TS=$(date -u +%Y%m%d-%H%M%S)
+    MD="docs/development/${TS}-report-langfuse-analytics-{{WINDOW}}-v1.md"
+    HTML="docs/development/${TS}-report-langfuse-analytics-{{WINDOW}}-v1.html"
+    mkdir -p docs/development
+    python3 .claude/skills/langfuse-analytics/scripts/langfuse_report.py \
+        --window="{{WINDOW}}" --env="{{ENV}}" --out="$MD" --html="$HTML" > /dev/null
+    echo ""
+    echo "📊 HTML dashboard → $HTML"
+    echo "📝 Markdown       → $MD"
+
+# Full analytics: Langfuse + CloudWatch scan → HTML dashboard (requires SSO login)
+langfuse-report-full WINDOW="24h" ENV="all" PROFILE="eagle":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TS=$(date -u +%Y%m%d-%H%M%S)
+    MD="docs/development/${TS}-report-langfuse-full-{{WINDOW}}-v1.md"
+    HTML="docs/development/${TS}-report-langfuse-full-{{WINDOW}}-v1.html"
+    JSON="docs/development/${TS}-report-langfuse-full-{{WINDOW}}-v1.json"
+    mkdir -p docs/development
+    python3 .claude/skills/langfuse-analytics/scripts/langfuse_report.py \
+        --window="{{WINDOW}}" --env="{{ENV}}" \
+        --out="$MD" --html="$HTML" --json="$JSON" \
+        --cloudwatch --profile="{{PROFILE}}" > /dev/null
+    echo ""
+    echo "📊 HTML dashboard → $HTML"
+    echo "📝 Markdown       → $MD"
+    echo "🧾 Raw JSON       → $JSON"
+
+# Build + POST a Langfuse activity Adaptive Card to Teams (uses TEAMS_WEBHOOK_URL)
+langfuse-post-teams WINDOW="24h" ENV="all":
+    python3 scripts/langfuse_post_teams.py --window="{{WINDOW}}" --env="{{ENV}}"
+
+# Preview the Teams card JSON without posting
+langfuse-post-teams-dry WINDOW="24h" ENV="all":
+    python3 scripts/langfuse_post_teams.py --window="{{WINDOW}}" --env="{{ENV}}" --dry-run
 
 # ── Validation Ladder ──────────────────────────────────────
 

@@ -63,6 +63,7 @@ from .tools.user_document_tools import (
     GET_DOCUMENT_CONTENT_TOOL,
     make_user_document_tools,
 )
+from .tools.create_document_support import _DOC_TYPE_LABELS  # single source of truth
 from .tools.web_fetch import exec_web_fetch
 from .tools.web_search import exec_web_search
 
@@ -492,11 +493,16 @@ _bedrock_client_config = Config(
 )
 
 _bedrock_models: dict[str, BedrockModel] = {}
+_SUPERVISOR_MAX_TOKENS = int(os.getenv("EAGLE_SUPERVISOR_MAX_TOKENS", "32000"))
+# Ceiling for the one-shot retry on MaxTokensReachedException — doubles the base
+# budget, capped at Sonnet 4.6's 64k standard output max.
+_SUPERVISOR_MAX_TOKENS_CEILING = int(os.getenv("EAGLE_SUPERVISOR_MAX_TOKENS_CEILING", "64000"))
 for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
     _kwargs: dict[str, Any] = dict(
         model_id=_mid,
         region_name=os.getenv("AWS_REGION", "us-east-1"),
         boto_client_config=_bedrock_client_config,
+        max_tokens=_SUPERVISOR_MAX_TOKENS,
     )
     _kwargs["cache_tools"] = "default"
     _kwargs["cache_config"] = CacheConfig(strategy="auto")
@@ -761,10 +767,60 @@ TIER_MESSAGE_LIMITS = {
 }
 
 
-def _build_conversation_manager(tier: str) -> SummarizingConversationManager:
-    """Build a SummarizingConversationManager configured for the given tier."""
+_TOOL_RESULT_TOO_LARGE_MARKER = (
+    "The tool result was too large to fit in the context window. "
+    "Retry the same tool call with narrower arguments (more specific keyword, "
+    "a single method/lane, or a smaller per-document excerpt)."
+)
+
+
+class EagleConversationManager(SummarizingConversationManager):
+    """SummarizingConversationManager with tool-result truncation as first-line reduction.
+
+    On ContextWindowOverflowException, Strands calls reduce_context() once before retrying
+    (strands/agent/agent.py:855-865). The parent SummarizingConversationManager only
+    summarizes OLDEST messages (summarizing_conversation_manager.py:159-160), which does
+    not help when a single tool_result in the LATEST message blows the window -- our
+    Turn 5 research-payload failure mode.
+
+    This subclass first replaces the newest bloated tool_result with a short error marker,
+    mirroring SlidingWindowConversationManager._truncate_tool_results
+    (sliding_window_conversation_manager.py:159-168, 217-234). The Agent then retries the
+    event loop cycle; the model sees a tool error and typically reissues the tool with
+    narrower arguments. If no truncatable tool_result exists (or the newest is already
+    the sentinel), falls through to Haiku-powered summarization.
+    """
+
+    def reduce_context(self, agent, e=None, **kwargs):
+        messages = agent.messages
+        for idx in range(len(messages) - 1, -1, -1):
+            for content in messages[idx].get("content", []):
+                if not (isinstance(content, dict) and "toolResult" in content):
+                    continue
+                tr = content["toolResult"]
+                existing_text = next(
+                    (item["text"] for item in tr.get("content", []) if "text" in item),
+                    "",
+                )
+                if tr.get("status") == "error" and existing_text == _TOOL_RESULT_TOO_LARGE_MARKER:
+                    continue
+                tr["status"] = "error"
+                tr["content"] = [{"text": _TOOL_RESULT_TOO_LARGE_MARKER}]
+                logger.warning(
+                    "EagleConversationManager: truncated oversized tool_result at message idx=%d",
+                    idx,
+                )
+                return
+        logger.info(
+            "EagleConversationManager: no tool_result to truncate, falling back to summarization"
+        )
+        super().reduce_context(agent, e=e, **kwargs)
+
+
+def _build_conversation_manager(tier: str) -> EagleConversationManager:
+    """Build an EagleConversationManager configured for the given tier."""
     cfg = _TIER_COMPACTION.get(tier, _TIER_COMPACTION["advanced"])
-    return SummarizingConversationManager(
+    return EagleConversationManager(
         summary_ratio=cfg["summary_ratio"],
         preserve_recent_messages=cfg["preserve_recent"],
         summarization_agent=_get_summarization_agent(),
@@ -856,6 +912,7 @@ async def _maybe_fast_path_greeting(prompt: str) -> dict | None:
 # Fast-path document generation for explicit "generate document" requests.
 # This avoids long multi-tool loops for straightforward document creation asks.
 _DOC_TYPE_HINTS: list[tuple[str, list[str]]] = [
+    ("pws", ["performance work statement", " pws"]),
     ("sow", ["statement of work", " sow"]),
     (
         "igce",
@@ -875,19 +932,31 @@ _DOC_TYPE_HINTS: list[tuple[str, list[str]]] = [
     ("section_508", ["section 508", "508 compliance"]),
     ("cor_certification", ["cor certification"]),
     ("contract_type_justification", ["contract type justification"]),
+    ("purchase_request", ["purchase request", "purchase card form", "pr form"]),
+    (
+        "price_reasonableness",
+        ["price reasonableness", "fair and reasonable", "price analysis"],
+    ),
+    (
+        "required_sources",
+        ["required sources", "priority sources", "far part 8 check", "sources check"],
+    ),
+    # subk_review must precede subk_plan so the longer "subcontracting plan
+    # review" phrase matches before the broader "subcontracting plan" hint.
+    (
+        "subk_review",
+        ["subcontracting plan review", "subk review", "sub k review", "subcontracting review"],
+    ),
+    (
+        "subk_plan",
+        ["subcontracting plan", "subk plan", "sub k plan", "small business subcontracting plan"],
+    ),
+    (
+        "buy_american",
+        ["buy american", "buy american act", "baa determination", "domestic end product"],
+    ),
 ]
-_DOC_TYPE_LABELS: dict[str, str] = {
-    "sow": "Statement of Work",
-    "igce": "Independent Government Cost Estimate",
-    "market_research": "Market Research",
-    "acquisition_plan": "Acquisition Plan",
-    "justification": "Justification & Approval",
-    "eval_criteria": "Evaluation Criteria",
-    "security_checklist": "Security Checklist",
-    "section_508": "Section 508 Compliance",
-    "cor_certification": "COR Certification",
-    "contract_type_justification": "Contract Type Justification",
-}
+
 _DIRECT_DOC_VERBS = ("generate", "draft", "create", "write", "produce")
 _DOC_EDIT_VERBS = (
     "edit",
@@ -898,6 +967,35 @@ _DOC_EDIT_VERBS = (
     "rewrite",
     "adjust",
     "amend",
+)
+
+# Doc-type noun vocabulary reused from _DOC_TYPE_HINTS so the imperative regex
+# stays in sync automatically when new doc types are added. Strip whitespace
+# from hints (some entries like " sow" include a leading space to force a
+# word boundary — the regex already uses \b, so we don't need the space).
+_ALL_DOC_NOUNS: tuple[str, ...] = tuple(
+    sorted(
+        {hint.strip() for _doc_type, hints in _DOC_TYPE_HINTS for hint in hints if hint.strip()},
+        key=len,
+        reverse=True,  # longest-first so "acquisition plan" matches before "plan"
+    )
+)
+
+# Imperative-form regex: match a direct-doc-verb in imperative position
+# (start of sentence, "please", "can you", "could you", "let's", "i need/want
+# you to") that is followed within ~80 chars by a doc-type noun. This replaces
+# the prior substring scan (`if any(v in lowered for v in _DIRECT_DOC_VERBS)`)
+# which misfired on long discussion turns that happened to mention the verbs
+# in incidental phrases. Turn 4 of the 20260413 demo eval is the canary: a
+# 6951-char acquisition strategy assessment containing "draft" and "generate"
+# in unrelated sentences was being flagged as a doc-generation request.
+_IMPERATIVE_DOC_RE = re.compile(
+    r"(?:^|[.!?]\s+|\bplease\s+|\bcan\s+you\s+|\bcould\s+you\s+|\blet'?s\s+"
+    r"|\bi\s+(?:need|want|would\s+like)\s+you\s+to\s+)"
+    r"(?:" + "|".join(_DIRECT_DOC_VERBS) + r")\b"
+    r"(?:\s+(?:a|an|the|me|us))?"
+    r"\s+[^.!?\n]{0,80}\b(?:" + "|".join(re.escape(n) for n in _ALL_DOC_NOUNS) + r")\b",
+    re.IGNORECASE,
 )
 _SLOW_PATH_HINTS = ("research", "far", "dfars", "policy", "compare", "analyze")
 _DOC_REQUEST_BLOCKERS = (
@@ -1250,7 +1348,10 @@ def _is_document_generation_request(prompt: str) -> tuple[bool, str | None]:
         return False, None
     if any(lowered.startswith(blocker) for blocker in _DOC_REQUEST_BLOCKERS):
         return False, None
-    if any(v in lowered for v in _DIRECT_DOC_VERBS):
+    # Direct imperative: "Generate the SOW", "Please draft a PWS", "Can you create an IGCE"
+    # Replaces the prior substring scan that misfired on long discussion turns
+    # containing the verbs in incidental phrases (Turn 4 of 20260413 demo eval).
+    if _IMPERATIVE_DOC_RE.search(prompt):
         return True, doc_type
 
     # Document-viewer prompts include explicit wrappers; treat edit verbs in
@@ -2747,9 +2848,15 @@ def _emit_package_state(
         if not package_id:
             return
 
-        from app.package_store import get_package_checklist
+        from app.package_store import get_package_checklist, get_package
+        from app.package_document_store import list_package_documents
 
-        checklist = get_package_checklist(tenant_id, package_id)
+        # Single DOCUMENT# query feeds both the checklist derivation and
+        # any future per-doc lookups in this emit.
+        pkg_docs = list_package_documents(tenant_id, package_id)
+        checklist = get_package_checklist(tenant_id, package_id, docs=pkg_docs)
+        pkg = get_package(tenant_id, package_id) or {}
+        package_title = pkg.get("title") or ""
 
         total = len(checklist.get("required", []))
         completed = len(checklist.get("completed", []))
@@ -2764,6 +2871,7 @@ def _emit_package_state(
                     "type": "state_update",
                     "state_type": "document_ready",
                     "package_id": package_id,
+                    "title": package_title,
                     "doc_type": doc_type,
                     "checklist": checklist,
                     "progress_pct": progress_pct,
@@ -2777,6 +2885,7 @@ def _emit_package_state(
                 "type": "state_update",
                 "state_type": "checklist_update",
                 "package_id": package_id,
+                "title": package_title,
                 "checklist": checklist,
                 "progress_pct": progress_pct,
             },
@@ -2817,13 +2926,15 @@ def _build_end_of_turn_state(package_context, tenant_id: str) -> list[dict]:
             return []
 
         from app.package_store import get_package_checklist, get_package
+        from app.package_document_store import list_package_documents
 
         # Re-fetch the package to pick up any mid-turn metadata changes
         pkg = get_package(tenant_id, pkg_id)
         if not pkg:
             return []
 
-        checklist = get_package_checklist(tenant_id, pkg_id)
+        pkg_docs = list_package_documents(tenant_id, pkg_id)
+        checklist = get_package_checklist(tenant_id, pkg_id, docs=pkg_docs)
         total = len(checklist.get("required", []))
         completed = len(checklist.get("completed", []))
         progress_pct = int((completed / total) * 100) if total > 0 else 0
@@ -2859,9 +2970,13 @@ def _build_state_updates(
         if not package_id:
             return []
 
-        from app.package_store import get_package_checklist
+        from app.package_store import get_package_checklist, get_package
+        from app.package_document_store import list_package_documents
 
-        checklist = get_package_checklist(tenant_id, package_id)
+        pkg_docs = list_package_documents(tenant_id, package_id)
+        checklist = get_package_checklist(tenant_id, package_id, docs=pkg_docs)
+        pkg = get_package(tenant_id, package_id) or {}
+        package_title = pkg.get("title") or ""
         total = len(checklist.get("required", []))
         completed = len(checklist.get("completed", []))
         progress_pct = int((completed / total) * 100) if total > 0 else 0
@@ -2875,6 +2990,7 @@ def _build_state_updates(
                     "type": "state_update",
                     "state_type": "document_ready",
                     "package_id": package_id,
+                    "title": package_title,
                     "doc_type": doc_type,
                     "checklist": checklist,
                     "progress_pct": progress_pct,
@@ -2886,6 +3002,7 @@ def _build_state_updates(
                 "type": "state_update",
                 "state_type": "checklist_update",
                 "package_id": package_id,
+                "title": package_title,
                 "checklist": checklist,
                 "progress_pct": progress_pct,
             }
@@ -4050,8 +4167,14 @@ def _build_all_service_tools(
                     # Also emit initial package_created event for create
                     if operation == "create":
                         from app.package_store import get_package_checklist
+                        from app.package_document_store import (
+                            list_package_documents,
+                        )
 
-                        checklist = get_package_checklist(tenant_id, pkg_id)
+                        pkg_docs = list_package_documents(tenant_id, pkg_id)
+                        checklist = get_package_checklist(
+                            tenant_id, pkg_id, docs=pkg_docs
+                        )
                         total = len(checklist.get("required", []))
                         completed = len(checklist.get("completed", []))
                         progress_pct = (
@@ -4389,17 +4512,18 @@ def _build_kb_service_tools(
                         _kb_depth["fetch_count"] += 1
                         _kb_depth["total_chars_read"] += content.get("content_length", 0)
                         _kb_depth["fetched_keys"].add(s3_key)
+                        # 8K cap (was 15K) for consistency with research tool.
                         fetched_docs.append({
                             "title": _clause.get("title", ""),
                             "s3_key": s3_key,
-                            "content": content.get("content", "")[:15000],
+                            "content": content.get("content", "")[:8000],
                         })
 
         if fetched_docs:
             result["fetched_documents"] = fetched_docs
 
         _emit("search_far", result)
-        return json.dumps(result, indent=2, default=str)
+        return json.dumps(result, default=str)
 
     @tool(name="knowledge_search")
     def knowledge_search(
@@ -4448,7 +4572,7 @@ def _build_kb_service_tools(
             _kb_depth["search_result_count"] += result.get("count", 0)
             _inject_fetch_reminder(result)
             _emit("knowledge_search", result)
-            return json.dumps(result, indent=2, default=str)
+            return json.dumps(result, default=str)
         except (TypeError, RecursionError) as e:
             logger.error("knowledge_search serialization error: %s", e)
             fallback = {"results": [], "count": 0, "error": f"Serialization error: {type(e).__name__}"}
@@ -4770,19 +4894,30 @@ def _build_kb_service_tools(
                 _kb_depth["total_chars_read"] += content.get("content_length", 0)
                 _kb_depth["fetched_keys"].add(s3_key)
                 fetched_stems.add(_stem(s3_key))
+                # Per-doc excerpt is capped at 8K chars (down from 15K). Research
+                # tool previously returned ~24 docs × 15K chars = 360K chars
+                # ≈ 90K tokens in a single tool_result block, which blew the
+                # 200K context window on Turn 5 of multi-research flows. 8K is
+                # enough for the LLM to cite and quote key passages without
+                # swallowing half the window. Average KB doc is ~12-18K chars;
+                # 8K captures the executive-summary and core sections.
                 fetched_docs.append({
                     "title": r.get("title", ""),
                     "s3_key": s3_key,
-                    "content": content.get("content", "")[:15000],
+                    "content": content.get("content", "")[:8000],
                 })
                 return True
             return False
 
-        # Fetch budgets — path budget is larger when keyword supplied (RO-style)
+        # Fetch budgets — path budget is larger when keyword supplied (RO-style).
+        # Tightened 2026-04-13: was 8/8/8 (keyword) and 8/4/4 (no keyword) — up
+        # to 24 docs × 8K chars per call. Now capped at 6/4/4 and 5/3/3 so one
+        # research call stays under ~60K chars / ~15K tokens even in the
+        # worst case. Prevents Turn 5 context-window 500s.
         _keyword_supplied = bool(keyword and keyword.strip())
-        AI_FETCH_BUDGET = 8
-        PATH_FETCH_BUDGET = 8 if _keyword_supplied else 4
-        SEMANTIC_FETCH_BUDGET = 8 if _keyword_supplied else 4
+        AI_FETCH_BUDGET = 6 if _keyword_supplied else 5
+        PATH_FETCH_BUDGET = 4 if _keyword_supplied else 3
+        SEMANTIC_FETCH_BUDGET = 4 if _keyword_supplied else 3
 
         def _fetch_capped(results_iter, budget: int) -> int:
             count = 0
@@ -4838,7 +4973,11 @@ def _build_kb_service_tools(
                             _kb_depth["fetch_count"] += 1
                             _kb_depth["total_chars_read"] += result.get("content_length", 0)
                             _kb_depth["fetched_keys"].add(s3_key)
-                            checklist_content[r.get("title", s3_key)] = result["content"][:20000]
+                            # 10K cap (was 20K) — checklists are structurally
+                            # dense (tables/bullets), so 10K captures the full
+                            # document for most PMR/FRC checklists without
+                            # inflating the research packet.
+                            checklist_content[r.get("title", s3_key)] = result["content"][:10000]
 
         # 4. Build combined packet — filter out package docs and dedup
         # .docx/.content.md siblings so the agent sees clean KB results only.
@@ -4878,7 +5017,9 @@ def _build_kb_service_tools(
             "detected_method": detected,
             "compliance_matrix_included": compliance_data is not None,
         })
-        return json.dumps(packet, indent=2, default=str)
+        # No indent — indent=2 inflated the packet by ~20% (whitespace) with
+        # zero LLM readability benefit. Compact JSON is equally parseable.
+        return json.dumps(packet, default=str)
 
     return [
         search_far,
@@ -5349,7 +5490,39 @@ def _build_supervisor_prompt_body(
         "  ALWAYS prefer FAST tools first. Only delegate to a specialist when FAST tools don't suffice.\n\n"
         "IMPORTANT: Use the available tool functions to delegate to specialists. "
         "Include relevant context in the query you pass to each specialist. "
-        "Do not try to answer specialized questions yourself -- delegate to the expert."
+        "Do not try to answer specialized questions yourself -- delegate to the expert.\n\n"
+        "================================================================\n"
+        "HARD CONSTRAINTS — READ THIS LAST, APPLY FIRST ON EVERY TURN\n"
+        "================================================================\n"
+        "These override any other instruction in this system prompt. If an\n"
+        "earlier section conflicts with this block, follow THIS block.\n\n"
+        "RULE 1 — ANTI-HALLUCINATION (non-negotiable, every turn):\n"
+        "If your response will cite ANY of the following, you MUST call the\n"
+        "`research` tool FIRST in this turn, before producing any other text:\n"
+        "  - A FAR or DFARS section number (e.g., 'FAR 7.102', '16.505(b)(2)')\n"
+        "  - An RFO number or 'Revolutionary FAR Overhaul' reference\n"
+        "  - An HHS Class Deviation number (e.g., 'HHS AA 2026-02')\n"
+        "  - A dollar threshold (micro-purchase, SAT, SPE, etc.)\n"
+        "  - A contract vehicle name (NITAAC, CIO-SP, GSA schedule, etc.)\n"
+        "  - A case citation (GAO B-, Comp. Gen., court decisions)\n"
+        "  - The definition or expansion of any acquisition acronym\n\n"
+        "This applies EVEN IF:\n"
+        "  - The question is short ('are you using RFO?', 'what's the threshold?')\n"
+        "  - Prior turns already loaded related research into context\n"
+        "  - You believe you remember the answer from training\n"
+        "  - The turn feels like a quick confirmation or clarification\n\n"
+        "The ONLY exceptions are simple acknowledgments ('thanks', 'ok', 'got it',\n"
+        "'yes', 'no', 'cancel', 'never mind'), explicit web-search requests, and\n"
+        "document-edit / package-management operations. A follow-up question is\n"
+        "NOT an acknowledgment.\n\n"
+        "Fabricated regulatory citations are the single worst failure mode of\n"
+        "this system. If you are tempted to answer from memory because prior\n"
+        "context 'looks sufficient' — THAT is the signal to call `research`.\n\n"
+        "RULE 2 — PWS != SOW (non-substitution):\n"
+        "If the user asks for a PWS, call create_document(doc_type='pws', ...).\n"
+        "If the user asks for a SOW, call create_document(doc_type='sow', ...).\n"
+        "Never substitute one for the other. They can coexist in one package.\n"
+        "================================================================"
     )
 
 
@@ -5598,14 +5771,152 @@ async def sdk_query(
             _lf_ctx = None
             _root_span = None
 
+    result = None
+    _max_tokens_retry_attempted = False
     try:
         # Synchronous call -- Strands handles the agentic loop internally
-        result = supervisor(prompt)
+        try:
+            result = supervisor(prompt)
+        except Exception as _first_exc:
+            # One-shot retry on MaxTokensReachedException with a bumped ceiling.
+            # Typical cause: user asked for a full PWS/SOW inline and the 8k
+            # default output budget was exhausted mid-write. Double it (capped)
+            # and try again with a fresh Agent — the first agent's internal
+            # state is already corrupted by the raised exception.
+            try:
+                from strands.types.exceptions import MaxTokensReachedException
+                _should_retry = isinstance(_first_exc, MaxTokensReachedException)
+            except Exception:
+                _should_retry = False
+            if not _should_retry:
+                raise
+            _bumped = min(_SUPERVISOR_MAX_TOKENS * 2, _SUPERVISOR_MAX_TOKENS_CEILING)
+            if _bumped <= _SUPERVISOR_MAX_TOKENS:
+                raise  # Already at ceiling — no headroom to retry
+            logger.warning(
+                "Supervisor hit MaxTokensReachedException (session=%s) — retrying once with max_tokens=%d",
+                session_id,
+                _bumped,
+            )
+            _max_tokens_retry_attempted = True
+            _retry_kwargs: dict[str, Any] = dict(
+                model_id=_current_model_id,
+                region_name=os.getenv("AWS_REGION", "us-east-1"),
+                boto_client_config=_bedrock_client_config,
+                max_tokens=_bumped,
+                cache_tools="default",
+                cache_config=CacheConfig(strategy="auto"),
+            )
+            _retry_model = BedrockModel(**_retry_kwargs)
+            _retry_supervisor = Agent(
+                model=_retry_model,
+                system_prompt=_cacheable_system_prompt(system_prompt),
+                tools=skill_tools + service_tools,
+                callback_handler=None,
+                messages=strands_history or None,
+                conversation_manager=conv_manager,
+                trace_attributes=_build_trace_attrs(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    tier=tier,
+                    session_id=session_id or "",
+                    username=username or "",
+                    eval_tags=tags,
+                ),
+            )
+            result = _retry_supervisor(prompt)
         result_text = _append_kb_sources(str(result), kb_depth)
 
         if _root_span is not None:
             try:
                 _root_span.update(output=result_text[:500])
+            except Exception:
+                pass
+    except Exception as _sup_exc:
+        # Graceful degradation: any Bedrock / Strands failure (context-window
+        # overflow, throttling, tool-call loop, transient 500) becomes a
+        # readable message instead of HTTP 500. The user's turn is preserved
+        # in session history so they can retry or ask a follow-up.
+        #
+        # Primary signal: strands.types.exceptions.ContextWindowOverflowException,
+        # which BedrockModel already maps "Input is too long..." errors onto
+        # (strands/models/bedrock.py:43-48, 858-860). String-matching stays as a
+        # defense-in-depth fallback if the import fails for any reason.
+        try:
+            from strands.types.exceptions import ContextWindowOverflowException
+            _is_context_overflow = isinstance(_sup_exc, ContextWindowOverflowException)
+        except Exception:
+            _is_context_overflow = False
+        try:
+            from strands.types.exceptions import MaxTokensReachedException
+            _is_max_tokens = isinstance(_sup_exc, MaxTokensReachedException)
+        except Exception:
+            _is_max_tokens = False
+        if not _is_context_overflow:
+            _exc_lower = str(_sup_exc).lower()
+            _is_context_overflow = (
+                "input is too long" in _exc_lower
+                or "context length" in _exc_lower
+                or "too many tokens" in _exc_lower
+                or "maximum context" in _exc_lower
+            )
+        if not _is_max_tokens:
+            _exc_lower = str(_sup_exc).lower()
+            _is_max_tokens = "max_tokens" in _exc_lower or "maximum token" in _exc_lower
+        _exc_msg = str(_sup_exc)
+        logger.error(
+            "Supervisor call failed (session=%s, context_overflow=%s, max_tokens=%s): %s",
+            session_id,
+            _is_context_overflow,
+            _is_max_tokens,
+            _sup_exc,
+            exc_info=True,
+        )
+        if _is_context_overflow:
+            result_text = (
+                "I ran out of working memory on that turn — the accumulated "
+                "research context exceeded what the model can process in a "
+                "single call. **Try one of:**\n\n"
+                "1. Start a **new session** to reset the context window\n"
+                "2. Break the question into **smaller follow-ups**\n"
+                "3. Ask me to focus on **one specific** document or FAR section "
+                "instead of a broad research sweep\n\n"
+                "Your session state (package, documents, prior answers) is "
+                "preserved — only this one turn was dropped."
+            )
+        elif _is_max_tokens:
+            _retry_note = (
+                " (I already retried once with a doubled output budget and still "
+                "ran out.)"
+                if _max_tokens_retry_attempted
+                else ""
+            )
+            result_text = (
+                "I hit the model's per-turn output limit before I could finish "
+                f"writing the full response.{_retry_note} This usually means the "
+                "turn asked for a very long inline document (full PWS/SOW/IGCE). "
+                "**Try one of:**\n\n"
+                "1. Ask me to **save the document** instead of printing it inline — "
+                "   e.g. 'generate the PWS as a document' so it goes through "
+                "   `create_document` and you open it from the document card.\n"
+                "2. Ask for **one section at a time** — 'draft the QASP section only'.\n"
+                "3. Retry the same question; if create_document already ran, check "
+                "   the package documents list for a saved draft.\n\n"
+                "Your session state is intact — nothing was lost."
+            )
+        else:
+            result_text = (
+                "I hit an unexpected error on that turn. The message has been "
+                "logged for investigation. **You can retry** the same question "
+                "or rephrase it — your session state is intact."
+            )
+        if _root_span is not None:
+            try:
+                _root_span.update(
+                    output=result_text[:500],
+                    level="ERROR",
+                    status_message=_exc_msg[:500],
+                )
             except Exception:
                 pass
     finally:
@@ -5663,20 +5974,51 @@ async def sdk_query(
     except Exception:
         pass
 
-    forced_doc = await _ensure_create_document_for_direct_request(
-        prompt=prompt,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        session_id=session_id,
-        package_context=package_context,
-        tools_called=tools_called,
-    )
+    # Safety net is wrapped so any internal failure (Bedrock timeout, S3 write
+    # error, checklist guardrail edge case) is non-fatal — the LLM's text
+    # response still reaches the user, and the turn is not lost to HTTP 500.
+    forced_doc = None
+    try:
+        forced_doc = await _ensure_create_document_for_direct_request(
+            prompt=prompt,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            package_context=package_context,
+            tools_called=tools_called,
+        )
+    except Exception as _fdg_exc:
+        logger.warning(
+            "Forced create_document reconciliation raised (non-fatal): %s",
+            _fdg_exc,
+            exc_info=True,
+        )
     if forced_doc is not None:
         tools_called.append("create_document")
-        result_text = (
-            f"Generated a draft {forced_doc['doc_type'].replace('_', ' ')} document. "
-            "Open the document card to review or edit it."
+        _forced_result = forced_doc.get("result") or {}
+        _forced_title = (
+            _forced_result.get("title")
+            or _DOC_TYPE_LABELS.get(forced_doc["doc_type"])
+            or forced_doc["doc_type"].replace("_", " ").title()
         )
+        _forced_version = _forced_result.get("version")
+        _version_suffix = f" v{_forced_version}" if _forced_version else ""
+        _forced_stub = (
+            f"\n\n---\n"
+            f"*Also generated a draft **{_forced_title}**{_version_suffix} — "
+            f"open the document card to review or edit it.*"
+        )
+        # Preserve LLM commentary if the model produced substantive output;
+        # otherwise fall back to a standalone stub. This fixes the Turn 4
+        # regression where the safety net wiped an 830-token strategy
+        # assessment and replaced it with a 76-char placeholder.
+        if result_text and len(result_text.strip()) > 120:
+            result_text = result_text.rstrip() + _forced_stub
+        else:
+            result_text = (
+                f"Generated a draft {_forced_title}{_version_suffix}. "
+                "Open the document card to review or edit it."
+            )
 
     # Build content blocks for AssistantMessage
     content_blocks = [TextBlock(text=result_text)]
@@ -5899,6 +6241,11 @@ async def sdk_query_streaming(
     # Bedrock cross-region inference can stall for 60-120s on cold paths.
     _TTFT_TIMEOUT = float(os.getenv("EAGLE_TTFT_TIMEOUT", "15"))
     _first_content_received = False
+    # One-shot MaxTokensReachedException retry (mirror of sync sdk_query fix).
+    # Flipped true once we've rebuilt the supervisor with a bumped ceiling so
+    # we never retry twice. Only safe to retry when no text has been yielded
+    # yet — otherwise the client would see duplicated output.
+    _max_tokens_retry_attempted = False
 
     def _drain_tool_results() -> list[dict]:
         """Drain events pushed by factory tools / subagent callbacks via result_queue."""
@@ -6017,6 +6364,72 @@ async def sdk_query_streaming(
             except StopAsyncIteration:
                 _stream_done = True
                 break
+            except Exception as _iter_exc:
+                # One-shot MaxTokensReachedException retry with bumped ceiling.
+                # Mirrors the sync sdk_query fix at line ~5783. Typical cause:
+                # supervisor was composing a create_document tool_use whose
+                # inline content field exceeded the output budget. Rebuilding
+                # the Agent with a doubled max_tokens (capped) gives the model
+                # room to finish. Only safe if we haven't yielded text yet;
+                # otherwise the client would see duplicated output.
+                try:
+                    from strands.types.exceptions import MaxTokensReachedException
+                    _is_max_tokens_iter = isinstance(_iter_exc, MaxTokensReachedException)
+                except Exception:
+                    _is_max_tokens_iter = False
+                if (
+                    _is_max_tokens_iter
+                    and not _max_tokens_retry_attempted
+                    and not full_text_parts
+                ):
+                    _bumped = min(
+                        _SUPERVISOR_MAX_TOKENS * 2, _SUPERVISOR_MAX_TOKENS_CEILING
+                    )
+                    if _bumped > _SUPERVISOR_MAX_TOKENS:
+                        _max_tokens_retry_attempted = True
+                        logger.warning(
+                            "Streaming supervisor hit MaxTokensReachedException "
+                            "(session=%s) — retrying once with max_tokens=%d",
+                            session_id,
+                            _bumped,
+                        )
+                        yield {
+                            "type": "agent_status",
+                            "status": "Hit output limit — retrying with more headroom...",
+                            "detail": "max_tokens_retry",
+                        }
+                        _retry_kwargs: dict[str, Any] = dict(
+                            model_id=_current_model_id,
+                            region_name=os.getenv("AWS_REGION", "us-east-1"),
+                            boto_client_config=_bedrock_client_config,
+                            max_tokens=_bumped,
+                            cache_tools="default",
+                            cache_config=CacheConfig(strategy="auto"),
+                        )
+                        _retry_model = BedrockModel(**_retry_kwargs)
+                        _retry_supervisor = Agent(
+                            model=_retry_model,
+                            system_prompt=_cacheable_system_prompt(system_prompt),
+                            tools=skill_tools + service_tools,
+                            callback_handler=None,
+                            messages=strands_history or None,
+                            conversation_manager=conv_manager,
+                            trace_attributes=_build_trace_attrs(
+                                tenant_id=tenant_id,
+                                user_id=user_id,
+                                tier=tier,
+                                session_id=session_id or "",
+                                username=username or "",
+                                eval_tags=tags,
+                            ),
+                        )
+                        _stream_iter = _retry_supervisor.stream_async(prompt).__aiter__()
+                        _pending_next = None
+                        # Replace supervisor reference so post-loop
+                        # trace-span lookup uses the retried agent.
+                        supervisor = _retry_supervisor
+                        continue
+                raise
             _pending_next = None
 
             # --- Capture per-cycle usage (including cache tokens) from metadata ---
@@ -6358,8 +6771,52 @@ async def sdk_query_streaming(
                 ),
             }
         else:
-            error_holder.append(exc)
-            logger.error("stream_async error: %s", exc)
+            # MaxTokensReachedException that escaped the inline retry
+            # (either retry was already used, or text had been yielded so
+            # retry was unsafe). Surface a friendly message instead of
+            # silently ending the stream.
+            try:
+                from strands.types.exceptions import MaxTokensReachedException
+                _is_max_tokens_outer = isinstance(exc, MaxTokensReachedException)
+            except Exception:
+                _is_max_tokens_outer = False
+            if _is_max_tokens_outer:
+                logger.error(
+                    "Streaming supervisor max_tokens unrecoverable "
+                    "(session=%s, retry_attempted=%s, yielded_text_chars=%d): %s",
+                    session_id,
+                    _max_tokens_retry_attempted,
+                    sum(len(p) for p in full_text_parts),
+                    exc,
+                )
+                error_holder.append(exc)
+                _retry_note = (
+                    " (I already retried once with a doubled output budget "
+                    "and still ran out.)"
+                    if _max_tokens_retry_attempted
+                    else ""
+                )
+                yield {
+                    "type": "text",
+                    "data": (
+                        "\n\n---\nI hit the model's per-turn output limit before "
+                        f"I could finish writing the full response.{_retry_note} "
+                        "This usually means the turn asked for a very long "
+                        "inline document (full PWS/SOW/IGCE). **Try one of:**\n\n"
+                        "1. Ask me to **save the document** instead of printing "
+                        "it inline — e.g. 'generate the PWS as a document' so it "
+                        "goes through `create_document` and you open it from the "
+                        "document card.\n"
+                        "2. Ask for **one section at a time** — 'draft the QASP "
+                        "section only'.\n"
+                        "3. Retry the same question; if create_document already "
+                        "ran, check the package documents list for a saved draft.\n\n"
+                        "Your session state is intact — nothing was lost."
+                    ),
+                }
+            else:
+                error_holder.append(exc)
+                logger.error("stream_async error: %s", exc)
         # Classify and tag the Langfuse trace for filtering
         from .telemetry.langfuse_client import notify_trace_error
 
@@ -6435,14 +6892,23 @@ async def sdk_query_streaming(
 
     forced_doc = None
     if not error_holder:
-        forced_doc = await _ensure_create_document_for_direct_request(
-            prompt=prompt,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            session_id=session_id,
-            package_context=package_context,
-            tools_called=tools_called,
-        )
+        # Non-fatal wrapper — see sdk_query for rationale.
+        try:
+            forced_doc = await _ensure_create_document_for_direct_request(
+                prompt=prompt,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+                package_context=package_context,
+                tools_called=tools_called,
+            )
+        except Exception as _fdg_exc:
+            logger.warning(
+                "Forced create_document (streaming) raised (non-fatal): %s",
+                _fdg_exc,
+                exc_info=True,
+            )
+            forced_doc = None
         if forced_doc is not None:
             tools_called.append("create_document")
             yield {"type": "tool_use", "name": "create_document"}
@@ -6456,13 +6922,32 @@ async def sdk_query_streaming(
                 forced_doc["result"], "create_document", tenant_id
             ):
                 yield state_evt
+            _forced_result = forced_doc.get("result") or {}
+            _forced_title = (
+                _forced_result.get("title")
+                or _DOC_TYPE_LABELS.get(forced_doc["doc_type"])
+                or forced_doc["doc_type"].replace("_", " ").title()
+            )
+            _forced_version = _forced_result.get("version")
+            _version_suffix = f" v{_forced_version}" if _forced_version else ""
             if not full_text_parts:
+                # No LLM commentary — emit standalone stub.
                 summary = (
-                    f"Generated a draft {forced_doc['doc_type'].replace('_', ' ')} document. "
+                    f"Generated a draft {_forced_title}{_version_suffix}. "
                     "Open the document card to review or edit it."
                 )
                 full_text_parts.append(summary)
                 yield {"type": "text", "data": summary}
+            else:
+                # LLM produced commentary — append a trailer so the document
+                # card is still referenced without destroying the response.
+                trailer = (
+                    f"\n\n---\n"
+                    f"*Also generated a draft **{_forced_title}**{_version_suffix} — "
+                    f"open the document card to review or edit it.*"
+                )
+                full_text_parts.append(trailer)
+                yield {"type": "text", "data": trailer}
 
     # Explicitly register sessionId (and tags) in Langfuse via REST API
     if session_id and supervisor.trace_span:

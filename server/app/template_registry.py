@@ -45,6 +45,7 @@ ACQUISITION_PHASES = {
 # Maps doc_type to category metadata
 TEMPLATE_CATEGORIES: Dict[str, Dict[str, str]] = {
     "sow": {"phase": "planning", "use_case": "competitive", "group": "requirements"},
+    "pws": {"phase": "planning", "use_case": "competitive", "group": "requirements"},
     "igce": {"phase": "planning", "use_case": "competitive", "group": "cost"},
     "market_research": {
         "phase": "planning",
@@ -190,6 +191,27 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         alternates=["SOW_Template_Standard.docx"],
         description="Statement of Work template",
         display_name="Statement of Work (SOW)",
+    ),
+    # TODO: Replace with a dedicated PWS template once available. For now we
+    # reuse the SOW docx skeleton so create_document can produce something
+    # valid — the supervisor prompt is responsible for generating
+    # performance-based (outcome + QASP) content in the placeholders.
+    "pws": TemplateMapping(
+        doc_type="pws",
+        s3_filename="statement-of-work-template-eagle-v2.docx",
+        file_type="docx",
+        placeholder_map={
+            "title": "{{PROJECT_TITLE}}",
+            "description": "{{DESCRIPTION}}",
+            "period_of_performance": "{{PERIOD_OF_PERFORMANCE}}",
+            "deliverables": "{{DELIVERABLES}}",
+            "tasks": "{{TASKS}}",
+            "place_of_performance": "{{PLACE_OF_PERFORMANCE}}",
+            "security_requirements": "{{SECURITY_REQUIREMENTS}}",
+        },
+        alternates=["SOW_Template_Standard.docx"],
+        description="Performance Work Statement template (reuses SOW skeleton)",
+        display_name="Performance Work Statement (PWS)",
     ),
     "igce": TemplateMapping(
         doc_type="igce",

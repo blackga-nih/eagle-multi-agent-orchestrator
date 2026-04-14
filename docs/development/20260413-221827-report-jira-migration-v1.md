@@ -1,0 +1,103 @@
+# JIRA → GitHub Migration Report
+
+- **Run:** 2026-04-13T22:18:27.638896+00:00
+- **Repo:** CBIIT/sm_eagle
+- **JQL:** `project = EAGLE AND labels = "auto-created"`
+- **Mode:** live
+- **Matched:** 90   **Created:** 70   **Skipped:** 20
+
+## Created
+
+- EAGLE-158 → #69 — [migrated] [Triage] Nightly Fix Plan — qa — 2026-04-10 (EAGLE-158) — 0 atts
+- EAGLE-157 → #70 — [migrated] [Triage] Nightly Fix Plan — dev — 2026-04-10 (EAGLE-157) — 0 atts
+- EAGLE-156 → #71 — [migrated] [Feedback][general] Great tool! (EAGLE-156) — 0 atts
+- EAGLE-155 → #72 — [migrated] [Feedback][general] Needs improvement (EAGLE-155) — 0 atts
+- EAGLE-154 → #73 — [migrated] [Feedback][general] test feedback (EAGLE-154) — 0 atts
+- EAGLE-153 → #74 — [migrated] [Feedback][general] test feedback (EAGLE-153) — 0 atts
+- EAGLE-152 → #75 — [migrated] [Triage] Nightly Fix Plan — dev — 2026-04-09 (EAGLE-152) — 0 atts
+- EAGLE-151 → #76 — [migrated] [Triage] Nightly Fix Plan — qa — 2026-04-09 (EAGLE-151) — 0 atts
+- EAGLE-150 → #77 — [migrated] [Feedback][general] Needs improvement (EAGLE-150) — 0 atts
+- EAGLE-149 → #78 — [migrated] [Feedback][general] Great tool! (EAGLE-149) — 0 atts
+- EAGLE-148 → #79 — [migrated] [Feedback][general] test feedback (EAGLE-148) — 0 atts
+- EAGLE-147 → #80 — [migrated] [Feedback][general] test feedback (EAGLE-147) — 0 atts
+- EAGLE-146 → #81 — [migrated] [Feedback][general] Great tool! (EAGLE-146) — 0 atts
+- EAGLE-145 → #82 — [migrated] [Feedback][general] Needs improvement (EAGLE-145) — 0 atts
+- EAGLE-144 → #83 — [migrated] [Feedback][general] test feedback (EAGLE-144) — 0 atts
+- EAGLE-143 → #84 — [migrated] [Feedback][general] test feedback (EAGLE-143) — 0 atts
+- EAGLE-141 → #85 — [migrated] [Triage] Nightly Fix Plan — dev — 2026-04-08 (EAGLE-141) — 0 atts
+- EAGLE-140 → #86 — [migrated] [Triage] Nightly Fix Plan — qa — 2026-04-08 (EAGLE-140) — 0 atts
+- EAGLE-139 → #87 — [migrated] [Feedback][general] Great tool! (EAGLE-139) — 0 atts
+- EAGLE-138 → #88 — [migrated] [Feedback][general] Needs improvement (EAGLE-138) — 0 atts
+- EAGLE-137 → #89 — [migrated] [Feedback][general] test feedback (EAGLE-137) — 0 atts
+- EAGLE-136 → #90 — [migrated] [Feedback][general] test feedback (EAGLE-136) — 0 atts
+- EAGLE-135 → #91 — [migrated] [Feedback][general] Great tool! (EAGLE-135) — 0 atts
+- EAGLE-134 → #92 — [migrated] [Feedback][general] Needs improvement (EAGLE-134) — 0 atts
+- EAGLE-133 → #93 — [migrated] [Feedback][general] test feedback (EAGLE-133) — 0 atts
+- EAGLE-132 → #94 — [migrated] [Feedback][general] test feedback (EAGLE-132) — 0 atts
+- EAGLE-131 → #95 — [migrated] [Feedback][general] Needs improvement (EAGLE-131) — 0 atts
+- EAGLE-130 → #96 — [migrated] [Feedback][general] Great tool! (EAGLE-130) — 0 atts
+- EAGLE-129 → #97 — [migrated] [Feedback][general] test feedback (EAGLE-129) — 0 atts
+- EAGLE-128 → #98 — [migrated] [Feedback][general] test feedback (EAGLE-128) — 0 atts
+- EAGLE-127 → #99 — [migrated] [Feedback][general] Great tool! (EAGLE-127) — 0 atts
+- EAGLE-126 → #100 — [migrated] [Feedback][general] Needs improvement (EAGLE-126) — 0 atts
+- EAGLE-125 → #101 — [migrated] [Feedback][general] test feedback (EAGLE-125) — 0 atts
+- EAGLE-124 → #102 — [migrated] [Feedback][general] test feedback (EAGLE-124) — 0 atts
+- EAGLE-123 → #103 — [migrated] [Feedback][general] Needs improvement (EAGLE-123) — 0 atts
+- EAGLE-122 → #104 — [migrated] [Feedback][general] Great tool! (EAGLE-122) — 0 atts
+- EAGLE-121 → #105 — [migrated] [Feedback][general] test feedback (EAGLE-121) — 0 atts
+- EAGLE-120 → #106 — [migrated] [Feedback][general] test feedback (EAGLE-120) — 0 atts
+- EAGLE-119 → #107 — [migrated] [Feedback][general] Great tool! (EAGLE-119) — 0 atts
+- EAGLE-118 → #108 — [migrated] [Feedback][general] Needs improvement (EAGLE-118) — 0 atts
+- EAGLE-117 → #109 — [migrated] [Feedback][general] test feedback (EAGLE-117) — 0 atts
+- EAGLE-116 → #110 — [migrated] [Feedback][general] test feedback (EAGLE-116) — 0 atts
+- EAGLE-115 → #111 — [migrated] [Feedback][general] Needs improvement (EAGLE-115) — 0 atts
+- EAGLE-114 → #112 — [migrated] [Feedback][general] Great tool! (EAGLE-114) — 0 atts
+- EAGLE-113 → #113 — [migrated] [Feedback][general] test feedback (EAGLE-113) — 0 atts
+- EAGLE-112 → #114 — [migrated] [Feedback][general] test feedback (EAGLE-112) — 0 atts
+- EAGLE-111 → #115 — [migrated] [Feedback][general] Test with large screenshot (EAGLE-111) — 0 atts
+- EAGLE-110 → #116 — [migrated] [Feedback][general] Test feedback through proxy (EAGLE-110) — 0 atts
+- EAGLE-109 → #117 — [migrated] [Feedback][praise] [helpful] (EAGLE-109) — 0 atts
+- EAGLE-108 → #118 — [migrated] [Feedback][general] test feedback (EAGLE-108) — 0 atts
+- EAGLE-107 → #119 — [migrated] [Feedback][general] package isn't showing up in the right side panel  — 0 atts
+- EAGLE-106 → #120 — [migrated] [Triage] Nightly Fix Plan — qa — 2026-04-07 (EAGLE-106) — 0 atts
+- EAGLE-105 → #121 — [migrated] [Triage] Nightly Fix Plan — dev — 2026-04-06 (EAGLE-105) — 0 atts
+- EAGLE-104 → #122 — [migrated] [Triage] Nightly Fix Plan — qa — 2026-04-05 (EAGLE-104) — 0 atts
+- EAGLE-103 → #123 — [migrated] [Triage] Nightly Fix Plan — dev — 2026-04-04 (EAGLE-103) — 0 atts
+- EAGLE-102 → #124 — [migrated] [Triage] Nightly Fix Plan — dev — 2026-04-03 (EAGLE-102) — 0 atts
+- EAGLE-101 → #125 — [migrated] [Feedback][general] Needs improvement (EAGLE-101) — 0 atts
+- EAGLE-100 → #126 — [migrated] [Feedback][general] Great tool! (EAGLE-100) — 0 atts
+- EAGLE-98 → #127 — [migrated] [Feedback][general] change favicon to the EAGLE logo from "E" (EAGLE- — 0 atts
+- EAGLE-97 → #128 — [migrated] [Feedback][general] Needs improvement (EAGLE-97) — 0 atts
+- EAGLE-96 → #129 — [migrated] [Feedback][general] Great tool! (EAGLE-96) — 0 atts
+- EAGLE-95 → #130 — [migrated] [Feedback][general] test feedback (EAGLE-95) — 0 atts
+- EAGLE-94 → #131 — [migrated] [Feedback][general] test feedback (EAGLE-94) — 0 atts
+- EAGLE-93 → #132 — [migrated] [Feedback][general] Needs improvement (EAGLE-93) — 0 atts
+- EAGLE-92 → #133 — [migrated] [Feedback][general] Great tool! (EAGLE-92) — 0 atts
+- EAGLE-91 → #134 — [migrated] [Feedback][general] test feedback (EAGLE-91) — 0 atts
+- EAGLE-90 → #135 — [migrated] [Feedback][general] test feedback (EAGLE-90) — 0 atts
+- EAGLE-89 → #136 — [migrated] [Feedback][general] test feedback (EAGLE-89) — 0 atts
+- EAGLE-88 → #137 — [migrated] [Feedback][general] test feedback (EAGLE-88) — 0 atts
+- EAGLE-87 → #138 — [migrated] [Feedback][suggestion] this header text should be centered underneath — 0 atts
+
+## Skipped
+
+- EAGLE-178: already migrated
+- EAGLE-177: already migrated
+- EAGLE-176: already migrated
+- EAGLE-175: already migrated
+- EAGLE-174: already migrated
+- EAGLE-173: already migrated
+- EAGLE-172: already migrated
+- EAGLE-171: already migrated
+- EAGLE-170: already migrated
+- EAGLE-169: already migrated
+- EAGLE-168: already migrated
+- EAGLE-167: already migrated
+- EAGLE-166: already migrated
+- EAGLE-165: already migrated
+- EAGLE-164: already migrated
+- EAGLE-163: already migrated
+- EAGLE-162: already migrated
+- EAGLE-161: already migrated
+- EAGLE-160: already migrated
+- EAGLE-159: already migrated

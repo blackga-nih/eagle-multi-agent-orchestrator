@@ -456,22 +456,20 @@ interface Notification {
   timestamp: string;
 }
 
-/** Document types that are part of an acquisition package vs standalone docs. */
-const PACKAGE_DOC_TYPES = new Set([
-  'sow',
-  'igce',
-  'acquisition_plan',
-  'justification',
-  'eval_criteria',
-]);
-
-function NotificationsTab({ documents }: { documents: Record<string, DocumentInfo[]> }) {
+function NotificationsTab({
+  documents,
+  checklistSlugs,
+}: {
+  documents: Record<string, DocumentInfo[]>;
+  checklistSlugs: Set<string>;
+}) {
   const notifications = useMemo(() => {
     const items: Notification[] = [];
     const allDocs = Object.values(documents).flat();
 
-    // Track package doc types seen — if multiple, it's a package update
-    const packageTypes = allDocs.filter((d) => PACKAGE_DOC_TYPES.has(d.document_type));
+    // Package-doc grouping is now driven by the live checklist (DOCUMENT#-derived).
+    // No hardcoded slug list — empty checklist means no package grouping happens.
+    const packageTypes = allDocs.filter((d) => checklistSlugs.has(d.document_type));
 
     // Package-level notification if 2+ package docs exist
     if (packageTypes.length >= 2) {
@@ -502,7 +500,7 @@ function NotificationsTab({ documents }: { documents: Record<string, DocumentInf
     // Sort newest first
     items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return items;
-  }, [documents]);
+  }, [documents, checklistSlugs]);
 
   if (notifications.length === 0) {
     return (
@@ -869,7 +867,14 @@ export default function ActivityPanel({
         {activeTab === 'sources' && stateChangesByMsg && (
           <SourcesTabContent stateChangesByMsg={stateChangesByMsg} />
         )}
-        {activeTab === 'notifications' && <NotificationsTab documents={documents} />}
+        {activeTab === 'notifications' && (
+          <NotificationsTab
+            documents={documents}
+            checklistSlugs={
+              new Set((packageState?.checklist?.items ?? []).map((i) => i.slug))
+            }
+          />
+        )}
         {activeTab === 'logs' && <AgentLogs logs={logs} />}
       </div>
 

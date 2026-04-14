@@ -397,15 +397,41 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
       // Bulk-load persisted tool calls, state changes, and documents
       // without changing session status (stays idle). Bypasses stale-request
       // guard since it has no requestId.
-      const mergedTools = { ...session.toolCallsByMsg };
+      //
+      // Must be idempotent: React StrictMode double-fires effects in dev, and
+      // the session-load effect can run more than once per mount (route
+      // transitions, auth refresh). Dedupe by natural key so repeated restores
+      // don't accumulate duplicate tool cards / state entries.
+      const mergedTools: ToolCallsByMessageId = { ...session.toolCallsByMsg };
       for (const [msgId, calls] of Object.entries(action.toolCallsByMsg)) {
-        mergedTools[msgId] = [...(mergedTools[msgId] ?? []), ...calls];
+        const existing = mergedTools[msgId] ?? [];
+        const seen = new Set<string>(existing.map((tc) => tc.toolUseId));
+        const additions: TrackedToolCall[] = [];
+        for (const tc of calls) {
+          if (seen.has(tc.toolUseId)) continue;
+          seen.add(tc.toolUseId);
+          additions.push(tc);
+        }
+        mergedTools[msgId] = additions.length ? [...existing, ...additions] : existing;
       }
-      const mergedStateChanges = { ...session.stateChangesByMsg };
+      const mergedStateChanges: Record<string, StateChangeEntry[]> = {
+        ...session.stateChangesByMsg,
+      };
       for (const [msgId, entries] of Object.entries(action.stateChangesByMsg)) {
-        mergedStateChanges[msgId] = [...(mergedStateChanges[msgId] ?? []), ...entries];
+        const existing = mergedStateChanges[msgId] ?? [];
+        const seen = new Set<string>(
+          existing.map((e) => `${e.stateType}:${e.timestamp}:${e.packageId ?? ''}`),
+        );
+        const additions: StateChangeEntry[] = [];
+        for (const e of entries) {
+          const key = `${e.stateType}:${e.timestamp}:${e.packageId ?? ''}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          additions.push(e);
+        }
+        mergedStateChanges[msgId] = additions.length ? [...existing, ...additions] : existing;
       }
-      const mergedDocs = { ...session.documentsByMsg };
+      const mergedDocs: Record<string, DocumentInfo[]> = { ...session.documentsByMsg };
       for (const [msgId, docs] of Object.entries(action.documentsByMsg)) {
         mergedDocs[msgId] = dedupeDocuments([...(mergedDocs[msgId] ?? []), ...docs]);
       }

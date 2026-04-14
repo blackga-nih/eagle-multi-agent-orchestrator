@@ -1,0 +1,57 @@
+# JIRA Attachments Backfill Report
+
+- **Run:** 2026-04-13T23:05:57.147156+00:00
+- **Repo:** CBIIT/sm_eagle
+- **SHA:** `0a6312b2b6e905fa29110b516e9f7b4372433202`
+- **Tickets w/ attachments:** 28
+- **Files committed:** 45
+- **Bytes committed:** 894,455
+- **Issues edited:** 28
+
+## Per-ticket
+
+- EAGLE-102 → #124 — `20260401-090000-plan-triage-fixes-dev-v1.md` (4,724 bytes)
+- EAGLE-102 → #124 — `20260403-090000-report-triage-dev-v1.md` (8,833 bytes)
+- EAGLE-103 → #123 — `20260325-091804-plan-triage-fixes-dev-v1.md` (4,976 bytes)
+- EAGLE-103 → #123 — `20260404-000000-report-triage-dev-v1.md` (8,589 bytes)
+- EAGLE-104 → #122 — `20260331-000000-plan-triage-fixes-qa-v1.md` (6,970 bytes)
+- EAGLE-104 → #122 — `20260405-090000-report-triage-qa-v1.md` (7,183 bytes)
+- EAGLE-105 → #121 — `20260327-091734-plan-triage-fixes-dev-v2.md` (6,517 bytes)
+- EAGLE-105 → #121 — `20260406-090000-report-triage-dev-v1.md` (7,662 bytes)
+- EAGLE-106 → #120 — `20260329-091000-plan-triage-qa-fixes-v1.md` (5,284 bytes)
+- EAGLE-106 → #120 — `20260407-090000-report-triage-qa-v1.md` (5,934 bytes)
+- EAGLE-107 → #119 — `feedback-ba36f71b.png` (90,209 bytes)
+- EAGLE-111 → #115 — `feedback-2e11c2af.png` (375,000 bytes)
+- EAGLE-140 → #86 — `20260331-000000-plan-triage-fixes-qa-v1.md` (6,970 bytes)
+- EAGLE-140 → #86 — `20260408-090000-report-triage-qa-v1.md` (8,342 bytes)
+- EAGLE-141 → #85 — `20260401-090000-plan-triage-fixes-dev-v1.md` (4,724 bytes)
+- EAGLE-141 → #85 — `20260408-090000-report-triage-dev-v1.md` (9,893 bytes)
+- EAGLE-151 → #76 — `20260329-091000-plan-triage-qa-fixes-v1.md` (5,284 bytes)
+- EAGLE-151 → #76 — `20260409-090000-report-triage-qa-v1.md` (9,185 bytes)
+- EAGLE-152 → #75 — `20260401-090000-plan-triage-fixes-dev-v1.md` (4,724 bytes)
+- EAGLE-152 → #75 — `20260409-090000-report-triage-dev-v1.md` (8,153 bytes)
+- EAGLE-157 → #70 — `20260325-091804-plan-triage-fixes-dev-v1.md` (4,976 bytes)
+- EAGLE-157 → #70 — `20260410-090000-report-triage-dev-v1.md` (7,657 bytes)
+- EAGLE-158 → #69 — `20260329-091000-plan-triage-qa-fixes-v1.md` (5,284 bytes)
+- EAGLE-158 → #69 — `20260410-090000-report-triage-qa-v1.md` (8,121 bytes)
+- EAGLE-164 → #63 — `20260401-090000-plan-triage-fixes-dev-v1.md` (4,724 bytes)
+- EAGLE-164 → #63 — `20260411-090000-report-triage-dev-v1.md` (8,191 bytes)
+- EAGLE-165 → #62 — `20260329-091000-plan-triage-qa-fixes-v1.md` (5,284 bytes)
+- EAGLE-165 → #62 — `20260411-090000-report-triage-qa-v1.md` (10,638 bytes)
+- EAGLE-166 → #61 — `20260329-091000-plan-triage-qa-fixes-v1.md` (5,284 bytes)
+- EAGLE-166 → #61 — `20260412-091800-report-triage-qa-v1.md` (7,755 bytes)
+- EAGLE-167 → #60 — `20260401-090000-plan-triage-fixes-dev-v1.md` (4,724 bytes)
+- EAGLE-167 → #60 — `20260412-090000-report-triage-dev-v1.md` (8,301 bytes)
+- EAGLE-168 → #59 — `20260329-091000-plan-triage-qa-fixes-v1.md` (5,284 bytes)
+- EAGLE-168 → #59 — `20260413-090000-report-triage-qa-v1.md` (9,362 bytes)
+- EAGLE-169 → #58 — `20260401-090000-plan-triage-fixes-dev-v1.md` (4,724 bytes)
+- EAGLE-169 → #58 — `20260413-090000-report-triage-dev-v1.md` (9,585 bytes)
+- EAGLE-170 → #57 — `feedback-62762119.png` (15,025 bytes)
+- EAGLE-171 → #56 — `feedback-679e2e1c.png` (15,025 bytes)
+- EAGLE-172 → #55 — `feedback-d0aee35b.png` (15,025 bytes)
+- EAGLE-173 → #54 — `feedback-c5682a06.png` (15,025 bytes)
+- EAGLE-174 → #53 — `feedback-cb6aa998.png` (16,170 bytes)
+- EAGLE-175 → #52 — `feedback-46d414f4.png` (16,170 bytes)
+- EAGLE-176 → #51 — `feedback-311860b0.png` (26,642 bytes)
+- EAGLE-177 → #50 — `feedback-5ff34cea.png` (38,269 bytes)
+- EAGLE-178 → #49 — `feedback-98c04656.png` (38,054 bytes)

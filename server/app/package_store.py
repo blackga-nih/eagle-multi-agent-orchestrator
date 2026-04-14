@@ -82,6 +82,7 @@ _UPDATABLE_FIELDS = {
     "status",
     "notes",
     "required_documents",
+    "required_documents_custom",
     "completed_documents",
     "far_citations",
     # Checklist provenance
@@ -131,6 +132,42 @@ def _pathway_from_value(estimated_value: Decimal) -> str:
 def _required_docs_for(pathway: str) -> list[str]:
     """Return list of required document types for the given pathway."""
     return list(_REQUIRED_DOCS.get(pathway, []))
+
+
+def allowed_doc_types() -> list[str]:
+    """Return the full union of recognised package document slugs.
+
+    Sourced from ``_REQUIRED_DOCS`` (4 pathway baselines) ∪
+    ``_COMPLIANCE_DOC_TO_SLUG.values()`` (compliance matrix mappings). This
+    is the authoritative allow-list for create_package_document_version's
+    doc-type assertion (Phase D) and the PATCH /required-docs validator
+    (Phase B'). Anything inside is fair game for agents and users; anything
+    outside is an invented slug.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for pathway_slugs in _REQUIRED_DOCS.values():
+        for slug in pathway_slugs:
+            if slug not in seen:
+                seen.add(slug)
+                out.append(slug)
+    for slug in _COMPLIANCE_DOC_TO_SLUG.values():
+        if slug not in seen:
+            seen.add(slug)
+            out.append(slug)
+    return sorted(out)
+
+
+def doc_type_label(slug: str) -> str:
+    """Friendly label for a doc-type slug, with a Title Case fallback."""
+    from .tools.create_document_support import _DOC_TYPE_LABELS
+
+    return _DOC_TYPE_LABELS.get(slug, slug.replace("_", " ").title())
+
+
+def doc_type_manifest() -> list[dict]:
+    """Return [{slug, label}] for every allowed doc-type, sorted by slug."""
+    return [{"slug": s, "label": doc_type_label(s)} for s in allowed_doc_types()]
 
 
 _ACQUISITION_METHOD_ALIASES: dict[str, str] = {
@@ -520,6 +557,20 @@ def update_package(tenant_id: str, package_id: str, updates: dict) -> Optional[d
             new_pathway = _pathway_from_value(new_value)
             allowed["acquisition_pathway"] = new_pathway
 
+        # Determine whether the user has curated their own required-doc list.
+        # When required_documents_custom is True, the auto-recompute on
+        # value/method/type changes is suppressed for required_documents so
+        # the user's edits are not clobbered. Pathway, threshold tier, and
+        # checklist provenance are still recomputed — those are policy facts,
+        # not user choices. The flag flips back to False via the
+        # PATCH /required-docs reset action.
+        is_custom = bool(
+            allowed.get(
+                "required_documents_custom",
+                existing.get("required_documents_custom", False),
+            )
+        )
+
         if "required_documents" not in updates:
             # Prefer dynamic calculation when method+type are available
             method = allowed.get("acquisition_method") or existing.get(
@@ -531,8 +582,9 @@ def update_package(tenant_id: str, package_id: str, updates: dict) -> Optional[d
                 info = compute_required_docs_with_checklist(
                     float(new_value), method, ctype, flags
                 )
-                allowed["required_documents"] = info["slugs"]
-                # Update checklist provenance
+                if not is_custom:
+                    allowed["required_documents"] = info["slugs"]
+                # Always refresh checklist provenance (policy facts)
                 if info.get("pmr_checklist"):
                     allowed["pmr_checklist_name"] = info["pmr_checklist"]
                 for ck in ("pmr_checklist_s3_key", "frc_checklist_s3_key",
@@ -540,7 +592,8 @@ def update_package(tenant_id: str, package_id: str, updates: dict) -> Optional[d
                     if info.get(ck) is not None:
                         allowed[ck] = info[ck]
             else:
-                allowed["required_documents"] = _required_docs_for(new_pathway)
+                if not is_custom:
+                    allowed["required_documents"] = _required_docs_for(new_pathway)
 
     # Regenerate descriptive title when metadata that affects it changes
     _title_triggers = {"estimated_value", "requirement_type", "contract_vehicle"}
@@ -705,15 +758,46 @@ def list_packages(
     return [_serialize(i) for i in items]
 
 
-def get_package_checklist(tenant_id: str, package_id: str) -> dict:
-    """Return a checklist showing required, completed, and missing documents.
+def get_package_checklist(
+    tenant_id: str,
+    package_id: str,
+    docs: Optional[list[dict]] = None,
+) -> dict:
+    """Return a checklist derived from DOCUMENT# (single source of truth).
+
+    The ``required`` list is sourced from ``pkg.required_documents`` — the
+    union of pathway baseline + compliance matrix slugs, snapshotted at
+    package create time and editable via the PATCH required-docs endpoint
+    (Phase B'). ``completed`` is derived from a fresh query of DOCUMENT#
+    rather than the denormalised ``pkg.completed_documents`` cache.
+
+    The ``items[]`` array is the rich shape consumed by the frontend
+    checklist hook: one entry per required slug with label, status,
+    document_id, version, updated_at. ``extra[]`` lists doc_types that
+    exist in DOCUMENT# but are NOT in the required list — agent-generated
+    off-script documents that the user can promote into the checklist.
+
+    Args:
+        tenant_id:  Tenant identifier
+        package_id: Package identifier
+        docs:       Optional pre-fetched list_package_documents result.
+                    Pass through on hot SSE paths to avoid a redundant
+                    DDB query.
 
     Returns:
         {
-            "required":  list[str],
-            "completed": list[str],
-            "missing":   list[str],
-            "complete":  bool,
+            "required":   list[str],          # ordered slugs (back-compat)
+            "completed":  list[str],          # ordered slugs (back-compat)
+            "missing":    list[str],          # ordered slugs (back-compat)
+            "complete":   bool,               # back-compat
+            "items":      list[ChecklistItem], # rich, ordered by required
+            "extra":      list[ChecklistItem], # off-script docs (NOT in required)
+            "pathway":    str | None,
+            "title":      str | None,
+            "custom":     bool,               # required_documents_custom flag
+            "pmr_checklist_name": str | None,
+            "pmr_checklist_s3_key": str | None,
+            "nih_oag_section":   str | None,
         }
 
     If the package is not found, returns an empty checklist with complete=False.
@@ -725,23 +809,188 @@ def get_package_checklist(tenant_id: str, package_id: str) -> dict:
             tenant_id,
             package_id,
         )
-        return {"required": [], "completed": [], "missing": [], "complete": False}
+        return {
+            "required": [],
+            "completed": [],
+            "missing": [],
+            "complete": False,
+            "items": [],
+            "extra": [],
+            "pathway": None,
+            "title": None,
+            "custom": False,
+        }
 
-    required: list[str] = pkg.get("required_documents") or []
-    completed: list[str] = pkg.get("completed_documents") or []
-    completed_set = set(completed)
-    missing = [doc for doc in required if doc not in completed_set]
+    # Lazy import to avoid a circular: package_document_store -> db_client -> ok,
+    # but package_store is imported very early from many places.
+    if docs is None:
+        from .package_document_store import list_package_documents
+
+        docs = list_package_documents(tenant_id, package_id)
+
+    # Index latest doc per slug for O(1) lookup
+    docs_by_type: dict[str, dict] = {}
+    for d in docs:
+        dt = d.get("doc_type")
+        if dt:
+            docs_by_type[dt] = d
+
+    required: list[str] = list(pkg.get("required_documents") or [])
+    completed: list[str] = [slug for slug in required if slug in docs_by_type]
+    missing: list[str] = [slug for slug in required if slug not in docs_by_type]
+
+    # Friendly labels — local import to keep module-level imports light.
+    from .tools.create_document_support import _DOC_TYPE_LABELS
+
+    def _label(slug: str) -> str:
+        return _DOC_TYPE_LABELS.get(slug, slug.replace("_", " ").title())
+
+    def _make_item(slug: str, doc: Optional[dict]) -> dict:
+        item = {
+            "slug": slug,
+            "label": _label(slug),
+            "status": "completed" if doc is not None else "pending",
+        }
+        if doc is not None:
+            item["document_id"] = doc.get("document_id")
+            item["version"] = doc.get("version")
+            item["updated_at"] = doc.get("created_at") or doc.get("updated_at")
+            item["doc_status"] = doc.get("status")
+        return item
+
+    items = [_make_item(slug, docs_by_type.get(slug)) for slug in required]
+
+    extra_slugs = [dt for dt in sorted(docs_by_type.keys()) if dt not in set(required)]
+    extra = [_make_item(slug, docs_by_type[slug]) for slug in extra_slugs]
 
     return {
+        # Back-compat scalar/list fields (still consumed by 5 legacy readers)
         "required": required,
         "completed": completed,
         "missing": missing,
         "complete": len(missing) == 0,
+        # Rich shape (push path + cold-load fetch)
+        "items": items,
+        "extra": extra,
+        "pathway": pkg.get("acquisition_pathway"),
+        "title": pkg.get("title"),
+        "custom": bool(pkg.get("required_documents_custom", False)),
         # Checklist provenance (None for legacy packages)
         "pmr_checklist_name": pkg.get("pmr_checklist_name"),
         "pmr_checklist_s3_key": pkg.get("pmr_checklist_s3_key"),
         "nih_oag_section": pkg.get("nih_oag_section"),
     }
+
+
+class PatchRequiredDocsError(ValueError):
+    """Raised when a PATCH /required-docs request is malformed or invalid."""
+
+
+def patch_required_docs(
+    tenant_id: str,
+    package_id: str,
+    add: Optional[list[str]] = None,
+    remove: Optional[list[str]] = None,
+    reset: bool = False,
+) -> Optional[dict]:
+    """Mutate a package's required_documents list (Phase B' Option D).
+
+    Three exclusive operations:
+      * ``reset=True``  → recompute required_documents from
+        ``compute_required_docs_with_checklist`` and clear the
+        ``required_documents_custom`` flag. The user's curated list is
+        discarded in favour of the policy baseline.
+      * ``add=[slug,...]`` → append slugs to required_documents (after
+        validation against the allow-list). Sets ``custom=True``.
+      * ``remove=[slug,...]`` → drop slugs from required_documents. Silent
+        no-op when a slug is not currently required. Sets ``custom=True``.
+
+    add and remove can be combined in one call. reset takes priority and
+    causes add/remove to be ignored.
+
+    Returns a dict with keys: ``required``, ``items``, ``extra``, ``custom``,
+    ``warnings`` (slugs being removed that still have backing DOCUMENT#
+    records — soft warning, not a block). Returns ``None`` if the package
+    does not exist.
+
+    Raises PatchRequiredDocsError on validation failure (unknown slug).
+    """
+    pkg = get_package(tenant_id, package_id)
+    if pkg is None:
+        return None
+
+    if reset:
+        method = pkg.get("acquisition_method")
+        ctype = pkg.get("contract_type")
+        new_required: list[str]
+        if method and ctype:
+            info = compute_required_docs_with_checklist(
+                float(pkg.get("estimated_value") or 0),
+                method,
+                ctype,
+                pkg.get("flags"),
+            )
+            new_required = info["slugs"]
+        else:
+            pathway = pkg.get("acquisition_pathway") or _pathway_from_value(
+                Decimal(str(pkg.get("estimated_value") or 0))
+            )
+            new_required = _required_docs_for(pathway)
+        update_package(
+            tenant_id,
+            package_id,
+            {
+                "required_documents": new_required,
+                "required_documents_custom": False,
+            },
+        )
+    else:
+        allowed = set(allowed_doc_types())
+        add_list = list(add or [])
+        remove_list = list(remove or [])
+
+        unknown = [s for s in add_list if s not in allowed]
+        if unknown:
+            raise PatchRequiredDocsError(
+                f"Unknown doc-type slug(s): {sorted(set(unknown))}"
+            )
+
+        current = list(pkg.get("required_documents") or [])
+        seen = set(current)
+        for slug in add_list:
+            if slug not in seen:
+                current.append(slug)
+                seen.add(slug)
+        if remove_list:
+            remove_set = set(remove_list)
+            current = [s for s in current if s not in remove_set]
+
+        update_package(
+            tenant_id,
+            package_id,
+            {
+                "required_documents": current,
+                "required_documents_custom": True,
+            },
+        )
+
+    # Re-derive checklist from the freshly-updated package + DOCUMENT#
+    from .package_document_store import list_package_documents
+
+    docs = list_package_documents(tenant_id, package_id)
+    checklist = get_package_checklist(tenant_id, package_id, docs=docs)
+
+    # Build soft warnings for removed slugs that still have backing docs
+    warnings: list[str] = []
+    if not reset and remove:
+        doc_types = {d.get("doc_type") for d in docs if d.get("doc_type")}
+        for slug in remove:
+            if slug in doc_types:
+                warnings.append(
+                    f"removed slug '{slug}' has an existing document — it will move to extras"
+                )
+    checklist["warnings"] = warnings
+    return checklist
 
 
 def start_finalization(tenant_id: str, package_id: str) -> Optional[dict]:

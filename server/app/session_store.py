@@ -485,94 +485,48 @@ def load_compaction_state(
 # ── Usage Tracking ───────────────────────────────────────────────────
 
 
-def record_usage(
-    session_id: str,
-    tenant_id: str = "default",
-    user_id: str = "anonymous",
-    input_tokens: int = 0,
-    output_tokens: int = 0,
-    model: str = "",
-    cost_usd: float = 0.0,
-):
-    """
-    Record token usage for a session.
-    """
-    now = datetime.utcnow()
-
-    usage = {
-        "PK": f"USAGE#{tenant_id}",
-        "SK": f"USAGE#{now.strftime('%Y-%m-%d')}#{session_id}#{int(now.timestamp() * 1000)}",
-        "tenant_id": tenant_id,
-        "user_id": user_id,
-        "session_id": session_id,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": input_tokens + output_tokens,
-        "model": model,
-        "cost_usd": Decimal(str(cost_usd)),
-        "created_at": now.isoformat(),
-        "date": now.strftime("%Y-%m-%d"),
-    }
-
-    try:
-        table = get_table()
-        table.put_item(Item=usage)
-
-        # Also update session total_tokens
-        table.update_item(
-            Key={
-                "PK": f"SESSION#{tenant_id}#{user_id}",
-                "SK": f"SESSION#{session_id}",
-            },
-            UpdateExpression="SET total_tokens = if_not_exists(total_tokens, :zero) + :tokens",
-            ExpressionAttributeValues={
-                ":zero": 0,
-                ":tokens": input_tokens + output_tokens,
-            },
-        )
-    except (ClientError, BotoCoreError) as e:
-        logger.error("Failed to record usage: %s", e)
-
-
 def get_usage_summary(tenant_id: str = "default", days: int = 30) -> Dict[str, Any]:
-    """
-    Get usage summary for a tenant.
+    """Return an N-day usage rollup for a tenant.
+
+    Reads the daily aggregate items maintained by
+    ``admin_service._update_daily_aggregate`` at
+    ``PK=AGG#{tenant_id}`` / ``SK=DAILY#{YYYY-MM-DD}`` — one item per day,
+    populated on every chat via ``record_request_cost``.
     """
     try:
         table = get_table()
 
-        # Query usage records for the past N days
-        start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        now = datetime.utcnow()
+        start = now - timedelta(days=days)
+        start_sk = f"DAILY#{start.strftime('%Y-%m-%d')}"
+        end_sk = f"DAILY#{now.strftime('%Y-%m-%d')}~"
 
         response = table.query(
-            KeyConditionExpression="PK = :pk AND SK >= :start",
+            KeyConditionExpression="PK = :pk AND SK BETWEEN :start AND :end",
             ExpressionAttributeValues={
-                ":pk": f"USAGE#{tenant_id}",
-                ":start": f"USAGE#{start_date}",
+                ":pk": f"AGG#{tenant_id}",
+                ":start": start_sk,
+                ":end": end_sk,
             },
         )
 
         items = response.get("Items", [])
 
-        total_input = sum(int(i.get("input_tokens", 0)) for i in items)
-        total_output = sum(int(i.get("output_tokens", 0)) for i in items)
-        total_cost = sum(float(i.get("cost_usd", 0)) for i in items)
+        total_input = sum(int(i.get("input_tokens", 0) or 0) for i in items)
+        total_output = sum(int(i.get("output_tokens", 0) or 0) for i in items)
+        total_cost = sum(float(i.get("total_cost", 0) or 0) for i in items)
+        total_requests = sum(int(i.get("request_count", 0) or 0) for i in items)
 
-        # Group by date
-        by_date = {}
-        for item in items:
-            date = item.get("date", "unknown")
-            if date not in by_date:
-                by_date[date] = {
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "cost_usd": 0,
-                    "requests": 0,
-                }
-            by_date[date]["input_tokens"] += int(item.get("input_tokens", 0))
-            by_date[date]["output_tokens"] += int(item.get("output_tokens", 0))
-            by_date[date]["cost_usd"] += float(item.get("cost_usd", 0))
-            by_date[date]["requests"] += 1
+        by_date = {
+            str(i.get("SK", "")).removeprefix("DAILY#"): {
+                "input_tokens": int(i.get("input_tokens", 0) or 0),
+                "output_tokens": int(i.get("output_tokens", 0) or 0),
+                "cost_usd": float(i.get("total_cost", 0) or 0),
+                "requests": int(i.get("request_count", 0) or 0),
+            }
+            for i in items
+            if i.get("SK")
+        }
 
         return {
             "tenant_id": tenant_id,
@@ -581,13 +535,101 @@ def get_usage_summary(tenant_id: str = "default", days: int = 30) -> Dict[str, A
             "total_output_tokens": total_output,
             "total_tokens": total_input + total_output,
             "total_cost_usd": round(total_cost, 4),
-            "total_requests": len(items),
+            "total_requests": total_requests,
             "by_date": dict(sorted(by_date.items(), reverse=True)),
         }
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to get usage summary: %s", e)
         return {
             "tenant_id": tenant_id,
+            "period_days": days,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_tokens": 0,
+            "total_cost_usd": 0,
+            "total_requests": 0,
+            "by_date": {},
+            "error": GENERIC_USAGE_ERROR,
+        }
+
+
+def get_user_usage_summary(
+    tenant_id: str, user_id: str, days: int = 30
+) -> Dict[str, Any]:
+    """Return an N-day usage rollup for a single user within a tenant.
+
+    Queries per-request COST# detail items written by
+    ``admin_service.record_request_cost`` and filters by the ``user_id``
+    attribute. Returns the same response shape as ``get_usage_summary`` so
+    the ``useUsageSummary`` frontend hook is unchanged. Unlike the
+    tenant-level aggregate path, we cannot use the AGG# items — they are
+    not scoped by user.
+    """
+    try:
+        table = get_table()
+
+        now = datetime.utcnow()
+        start = now - timedelta(days=days)
+        start_sk = f"COST#{start.strftime('%Y-%m-%d')}"
+        end_sk = f"COST#{now.strftime('%Y-%m-%d')}~"
+
+        items: List[Dict[str, Any]] = []
+        last_key: Optional[Dict[str, Any]] = None
+        while True:
+            query_kwargs = {
+                "KeyConditionExpression": "PK = :pk AND SK BETWEEN :start AND :end",
+                "FilterExpression": "user_id = :user",
+                "ExpressionAttributeValues": {
+                    ":pk": f"COST#{tenant_id}",
+                    ":start": start_sk,
+                    ":end": end_sk,
+                    ":user": user_id,
+                },
+            }
+            if last_key:
+                query_kwargs["ExclusiveStartKey"] = last_key
+            response = table.query(**query_kwargs)
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+
+        total_input = sum(int(i.get("input_tokens", 0) or 0) for i in items)
+        total_output = sum(int(i.get("output_tokens", 0) or 0) for i in items)
+        total_cost = sum(float(i.get("cost_usd", 0) or 0) for i in items)
+        total_requests = len(items)
+
+        by_date: Dict[str, Dict[str, Any]] = {}
+        for item in items:
+            date = str(item.get("date") or "")
+            if not date:
+                sk = str(item.get("SK", ""))
+                date = sk.removeprefix("COST#").split("#", 1)[0] if sk else "unknown"
+            bucket = by_date.setdefault(
+                date,
+                {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "requests": 0},
+            )
+            bucket["input_tokens"] += int(item.get("input_tokens", 0) or 0)
+            bucket["output_tokens"] += int(item.get("output_tokens", 0) or 0)
+            bucket["cost_usd"] += float(item.get("cost_usd", 0) or 0)
+            bucket["requests"] += 1
+
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "period_days": days,
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "total_tokens": total_input + total_output,
+            "total_cost_usd": round(total_cost, 4),
+            "total_requests": total_requests,
+            "by_date": dict(sorted(by_date.items(), reverse=True)),
+        }
+    except (ClientError, BotoCoreError) as e:
+        logger.error("Failed to get user usage summary: %s", e)
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
             "period_days": days,
             "total_input_tokens": 0,
             "total_output_tokens": 0,

@@ -646,9 +646,7 @@ export default function SimpleChatInterface() {
       dispatch,
       onLog: (entry) => setLogs((prev) => [...prev, entry]),
       onDocumentGenerated: (sid, doc) => {
-        const title =
-          messages.find((m) => m.role === 'user')?.content.slice(0, 80) || 'Untitled Package';
-        saveGeneratedDocument(doc, sid, title);
+        saveGeneratedDocument(doc, sid);
       },
       onStateUpdate: handlePackageMetadata,
     });
@@ -766,9 +764,9 @@ export default function SimpleChatInterface() {
         [msgId]: [...(prev[msgId] || []), docInfo],
       }));
 
-      // Persist to localStorage
+      // Cache to localStorage so the doc viewer paints without a backend hop
       if (currentSessionId) {
-        saveGeneratedDocument(docInfo, currentSessionId, title);
+        saveGeneratedDocument(docInfo, currentSessionId);
       }
 
       setUploadResult(null);

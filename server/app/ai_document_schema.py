@@ -33,6 +33,7 @@ class CanonicalDocType(str, Enum):
 
     # Core document types (create_document supported)
     SOW = "sow"
+    PWS = "pws"  # Performance Work Statement — distinct from SOW (outcome-based vs task-based)
     IGCE = "igce"
     MARKET_RESEARCH = "market_research"
     ACQUISITION_PLAN = "acquisition_plan"
@@ -118,8 +119,10 @@ DOC_TYPE_ALIASES: Dict[str, str] = {
     "cost_estimate": "igce",
     # SOW aliases
     "statement_of_work": "sow",
-    "pws": "sow",
-    "performance_work_statement": "sow",
+    # PWS is a DISTINCT doc_type from SOW (performance-based vs task-based).
+    # Do NOT alias pws -> sow; the supervisor prompt treats them as separate
+    # deliverables and the template_registry has its own pws entry.
+    "performance_work_statement": "pws",
     # Acquisition plan aliases
     "ap": "acquisition_plan",
     "acq_plan": "acquisition_plan",
@@ -482,6 +485,7 @@ def get_create_document_types() -> frozenset[str]:
     """
     return frozenset({
         "sow",
+        "pws",  # Performance Work Statement — performance-based counterpart to SOW
         "igce",
         "market_research",
         "justification",

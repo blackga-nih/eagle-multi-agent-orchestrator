@@ -28,7 +28,7 @@ Paired with [`README.md`](../README.md) (user-facing overview) and [`docs/codeba
 
 ---
 
-## 2. CDK stacks (6 total)
+## 2. CDK stacks (7 total)
 
 All live under [`infrastructure/cdk-eagle/lib/`](../infrastructure/cdk-eagle/lib/). Deploy order is enforced via stack dependencies.
 
@@ -40,6 +40,7 @@ All live under [`infrastructure/cdk-eagle/lib/`](../infrastructure/cdk-eagle/lib
 | **EagleCiCdStack** | [`cicd-stack.ts`](../infrastructure/cdk-eagle/lib/cicd-stack.ts) | GitHub OIDC provider, `eagle-github-actions-{env}` deploy role |
 | **EagleEvalStack** | [`eval-stack.ts`](../infrastructure/cdk-eagle/lib/eval-stack.ts) | `eagle-eval-artifacts-{env}` bucket, CloudWatch log groups + alarms + dashboard, SNS topic |
 | **EagleBackupStack** | [`backup-stack.ts`](../infrastructure/cdk-eagle/lib/backup-stack.ts) | AWS Backup plan (DynamoDB hourly, S3 daily) |
+| **EagleCostStack** | [`cost-stack.ts`](../infrastructure/cdk-eagle/lib/cost-stack.ts) | AWS Budgets daily Bedrock spend alert + SNS notification |
 
 Env config: [`infrastructure/cdk-eagle/config/environments.ts`](../infrastructure/cdk-eagle/config/environments.ts) — dev, qa, staging, prod.
 

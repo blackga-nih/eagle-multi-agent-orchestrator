@@ -18,10 +18,24 @@ import json
 import os
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+
+# Make the langfuse-analytics skill script importable so we can reuse its
+# fetch + aggregate helpers without duplicating logic.
+_LF_SCRIPT_DIR = Path(__file__).resolve().parent.parent / ".claude" / "skills" / "langfuse-analytics" / "scripts"
+if _LF_SCRIPT_DIR.exists() and str(_LF_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_LF_SCRIPT_DIR))
+
+try:
+    import langfuse_report as _lf  # type: ignore
+except Exception as _lf_err:  # noqa: BLE001
+    _lf = None
+    print(f"[Morning Report] Langfuse helper unavailable: {_lf_err}", file=sys.stderr)
 
 
 def _git(args: list[str]) -> str:
@@ -88,7 +102,84 @@ def get_commits(since: str) -> list[dict]:
     return commits
 
 
-def build_card(commits: list[dict], since: str, repo: str, branch: str) -> dict:
+def _summarize_langfuse(window: str = "24h", env: str = "all") -> dict | None:
+    """Fetch a compact Langfuse rollup for embedding in the morning card.
+
+    Returns None if the helper module is unavailable, credentials are missing,
+    or the API call fails — morning report must never fail because of telemetry.
+    """
+    if _lf is None:
+        return None
+    try:
+        agg = _lf.get_summary(window=window, env=env)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Morning Report] Langfuse summary failed: {e}", file=sys.stderr)
+        return None
+    if not agg:
+        return None
+
+    def _top(counter: Counter, n: int) -> list[tuple[str, int]]:
+        if not isinstance(counter, Counter):
+            counter = Counter(counter or {})
+        return counter.most_common(n)
+
+    return {
+        "trace_count": agg.get("trace_count", 0),
+        "obs_count": agg.get("obs_count", 0),
+        "session_count": agg.get("session_count", 0),
+        "tool_total": sum((agg.get("tool_counts") or Counter()).values()),
+        "error_total": sum((agg.get("env_error_counts") or Counter()).values()),
+        "top_tools": _top(agg.get("tool_counts") or Counter(), 5),
+        "doc_types": _top(agg.get("doc_types") or Counter(), 6),
+        "top_research": _top(agg.get("research_keywords") or Counter(), 3),
+        "envs": _top(agg.get("env_counts") or Counter(), 5),
+    }
+
+
+def _langfuse_block(summary: dict) -> list[dict]:
+    """Convert a Langfuse summary dict into Adaptive Card body items."""
+    if not summary:
+        return []
+
+    lines: list[str] = []
+    lines.append(
+        f"**Traces:** {summary['trace_count']} · "
+        f"**Sessions:** {summary['session_count']} · "
+        f"**Tool calls:** {summary['tool_total']} · "
+        f"**Errors:** {summary['error_total']}"
+    )
+    if summary["envs"]:
+        envs_str = ", ".join(f"{e}={c}" for e, c in summary["envs"])
+        lines.append(f"**Envs:** {envs_str}")
+    if summary["top_tools"]:
+        tools_str = ", ".join(f"`{n}` ({c})" for n, c in summary["top_tools"])
+        lines.append(f"**Top tools:** {tools_str}")
+    if summary["doc_types"]:
+        docs_str = ", ".join(f"{n} ({c})" for n, c in summary["doc_types"])
+        lines.append(f"**Docs generated:** {docs_str}")
+    if summary["top_research"]:
+        res_str = "; ".join(f"{kw[:50]} ({c}x)" for kw, c in summary["top_research"])
+        lines.append(f"**Top research topics:** {res_str}")
+
+    return [
+        {
+            "type": "TextBlock",
+            "text": "Langfuse Activity (24h)",
+            "weight": "Bolder",
+            "size": "Medium",
+            "spacing": "Large",
+            "separator": True,
+        },
+        {
+            "type": "TextBlock",
+            "text": "\n\n".join(lines),
+            "wrap": True,
+            "spacing": "Small",
+        },
+    ]
+
+
+def build_card(commits: list[dict], since: str, repo: str, branch: str, langfuse_summary: dict | None = None) -> dict:
     """Build the Adaptive Card payload."""
     authors = sorted(set(c["author"] for c in commits))
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -149,6 +240,8 @@ def build_card(commits: list[dict], since: str, repo: str, branch: str) -> dict:
             "wrap": True,
             "spacing": "Medium",
         })
+
+    card_body.extend(_langfuse_block(langfuse_summary or {}))
 
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -219,8 +312,18 @@ def main():
     if len(commits) > 5:
         print(f"  ...and {len(commits) - 5} more")
 
+    # Pull Langfuse activity rollup (24h, all envs). Non-fatal on failure.
+    langfuse_summary = _summarize_langfuse(window="24h", env="all")
+    if langfuse_summary:
+        print(
+            f"[Morning Report] Langfuse: {langfuse_summary['trace_count']} traces, "
+            f"{langfuse_summary['tool_total']} tool calls, {langfuse_summary['error_total']} errors"
+        )
+    else:
+        print("[Morning Report] Langfuse summary unavailable — skipping section")
+
     # Build and send card
-    card = build_card(commits, since, repo, branch)
+    card = build_card(commits, since, repo, branch, langfuse_summary=langfuse_summary)
 
     print(f"[Morning Report] Sending to Teams...")
     resp = httpx.post(webhook_url, json=card, timeout=10)

@@ -166,6 +166,10 @@ async def main():
         help="Run specific questions only. Comma-separated Q numbers (e.g., 1,3,5) "
              "or a range (e.g., 7-10). Omit to run all.",
     )
+    parser.add_argument(
+        "--parallel", type=int, default=5,
+        help="Max concurrent questions (default 5). Set to 1 for sequential.",
+    )
     args = parser.parse_args()
 
     # Default xlsx path: repo root / Use Case List.xlsx
@@ -215,7 +219,7 @@ async def main():
     # ── Preflight: check server ──
     async with httpx.AsyncClient() as client:
         try:
-            r = await client.get(f"{args.server}/api/health", timeout=5)
+            r = await client.get(f"{args.server}/api/health", timeout=30)
             health = r.json()
             print(f"Server: {health.get('service', '?')} {health.get('version', '?')} - OK")
         except Exception as e:
@@ -236,28 +240,48 @@ async def main():
     ro_count = sum(1 for v in ro_responses.values() if v)
     print(f"RO reference responses loaded: {ro_count}/{len(QUESTIONS)} from column E")
 
-    # ── Run questions sequentially ──
+    # ── Run questions in parallel (default concurrency=5, --parallel=1 for sequential) ──
     results = {}
     aborted = False
     abort_reason = ""
+    concurrency = max(1, int(args.parallel))
+    sem = asyncio.Semaphore(concurrency)
+    print(f"Concurrency: {concurrency} (use --parallel=1 for sequential)")
+
     async with httpx.AsyncClient() as client:
-        for row in sorted(QUESTIONS.keys()):
-            try:
-                result = await run_question(client, args.server, args.tenant, row, QUESTIONS[row])
-            except BackendUnreachableError as e:
-                aborted = True
-                abort_reason = str(e)
-                print(f"\n{'='*80}")
-                print(f"BACKEND UNREACHABLE — ABORTING RUN")
-                print(f"{'='*80}")
-                print(f"  {e}")
-                print(f"  Completed: Q{[r-1 for r in sorted(results.keys())]}")
-                print(f"  Skipped:   Q{[r-1 for r in sorted(QUESTIONS.keys()) if r not in results]}")
-                print(f"\nFix the backend, then re-run with --questions to resume the missing ones.")
-                break
+        async def _worker(row: int):
+            if aborted:
+                return row, None
+            async with sem:
+                if aborted:
+                    return row, None
+                try:
+                    result = await run_question(client, args.server, args.tenant, row, QUESTIONS[row])
+                except BackendUnreachableError as e:
+                    return row, e
             result["ro_response"] = ro_responses.get(row, "")
             result["question"] = QUESTIONS[row]
-            results[row] = result
+            return row, result
+
+        rows = sorted(QUESTIONS.keys())
+        worker_results = await asyncio.gather(*(_worker(r) for r in rows), return_exceptions=False)
+        for row, r in worker_results:
+            if r is None:
+                continue
+            if isinstance(r, BackendUnreachableError):
+                if not aborted:
+                    aborted = True
+                    abort_reason = str(r)
+                    print(f"\n{'='*80}")
+                    print(f"BACKEND UNREACHABLE — some questions skipped")
+                    print(f"{'='*80}")
+                    print(f"  {r}")
+                continue
+            results[row] = r
+        if aborted:
+            print(f"  Completed: Q{[r-1 for r in sorted(results.keys())]}")
+            print(f"  Skipped:   Q{[r-1 for r in sorted(QUESTIONS.keys()) if r not in results]}")
+            print(f"\nFix the backend, then re-run with --questions to resume the missing ones.")
 
     if aborted and not results:
         # Nothing completed — bail without writing anything to Excel/JSON.

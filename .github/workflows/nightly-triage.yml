@@ -165,13 +165,48 @@ jobs:
           This ensures fixes are immediately actionable against the production codebase.
           PROMPT
 
+      - name: Run Langfuse analytics rollup (${{ matrix.env }})
+        continue-on-error: true
+        run: |
+          TRIAGE_ENV="${{ matrix.env }}"
+          TRIAGE_WINDOW="${{ inputs.time_window || '24h' }}"
+          TS=$(date -u +%Y%m%d-%H%M%S)
+          OUT="docs/development/${TS}-report-langfuse-analytics-${TRIAGE_ENV}-v1.md"
+          mkdir -p docs/development
+
+          # For QA, the script auto-reads LANGFUSE_QA_* from server/.env if the
+          # triage.md flow exported them. Here we point directly at the env keys
+          # by writing over LANGFUSE_* when running against qa.
+          if [ "$TRIAGE_ENV" = "qa" ] && [ -n "${{ secrets.LANGFUSE_QA_PUBLIC_KEY }}" ]; then
+            export LANGFUSE_PUBLIC_KEY="${{ secrets.LANGFUSE_QA_PUBLIC_KEY }}"
+            export LANGFUSE_SECRET_KEY="${{ secrets.LANGFUSE_QA_SECRET_KEY }}"
+            export LANGFUSE_PROJECT_ID="${{ secrets.LANGFUSE_QA_PROJECT_ID }}"
+          fi
+
+          if [ -z "${LANGFUSE_PUBLIC_KEY}${{ secrets.LANGFUSE_PUBLIC_KEY }}" ]; then
+            echo "::notice::Langfuse keys missing — skipping analytics rollup for ${TRIAGE_ENV}"
+            exit 0
+          fi
+
+          python .claude/skills/langfuse-analytics/scripts/langfuse_report.py \
+            --window="${TRIAGE_WINDOW}" \
+            --env="${TRIAGE_ENV}" \
+            --out="${OUT}" \
+            > /dev/null
+
+          if [ -f "$OUT" ]; then
+            echo "::notice::Langfuse analytics report written to $OUT"
+            head -40 "$OUT"
+          fi
+
       - name: Commit and push triage report
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Stage any generated triage files
+          # Stage any generated triage + analytics files
           git add docs/development/*-report-triage-*.md 2>/dev/null || true
+          git add docs/development/*-report-langfuse-analytics-*.md 2>/dev/null || true
           git add .claude/specs/*-plan-triage-*.md 2>/dev/null || true
 
           if git diff --cached --quiet; then

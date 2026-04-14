@@ -84,6 +84,17 @@ _MARKDOWN_ONLY_TYPES = frozenset(
         "security_checklist",
         "section_508",
         "contract_type_justification",
+        # PWS is a distinct canonical doc_type (performance-based counterpart
+        # to SOW). It reuses the SOW docx template via template_registry.py
+        # short-term, so the template metadata _index.json does not list it
+        # separately — we add it here so normalization + validation succeed.
+        "pws",
+        # Simplified-acquisition / purchase-card flow doc types. These have
+        # no docx template in the metadata index yet — markdown-only LLM
+        # generators live in tools/create_document_support.py.
+        "purchase_request",
+        "price_reasonableness",
+        "required_sources",
     }
 )
 
@@ -100,8 +111,9 @@ _DOC_TYPE_ALIASES: dict[str, str] = {
     "cost_estimate": "igce",
     # SOW aliases
     "statement_of_work": "sow",
-    "pws": "sow",
-    "performance_work_statement": "sow",
+    # PWS is a DISTINCT doc_type from SOW (performance-based vs task-based).
+    # See ai_document_schema.py DOC_TYPE_ALIASES for the authoritative note.
+    "performance_work_statement": "pws",
     # Acquisition plan aliases
     "ap": "acquisition_plan",
     "acq_plan": "acquisition_plan",

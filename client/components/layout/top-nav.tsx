@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -45,7 +45,33 @@ export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, isAuthenticated, signOut } = useAuth();
-  const { backendConnected } = useBackendStatus();
+  const { backendConnected, gitSha, startedAt, pid, lastRestartAt } = useBackendStatus();
+
+  // Flash amber for 3 seconds after a backend restart is detected.
+  const [isFlashing, setIsFlashing] = useState(false);
+  useEffect(() => {
+    if (lastRestartAt === null) return;
+    setIsFlashing(true);
+    const t = setTimeout(() => setIsFlashing(false), 3000);
+    return () => clearTimeout(t);
+  }, [lastRestartAt]);
+
+  const backendTooltip = useMemo(() => {
+    if (backendConnected === null) return 'Connecting to backend…';
+    if (!backendConnected) return 'Backend offline';
+    const parts = ['Backend connected'];
+    if (gitSha) parts.push(`git ${gitSha}`);
+    if (startedAt) parts.push(`started ${startedAt}`);
+    if (pid !== null) parts.push(`PID ${pid}`);
+    return parts.join(' · ');
+  }, [backendConnected, gitSha, startedAt, pid]);
+
+  const backendLabel =
+    backendConnected === null
+      ? 'API…'
+      : backendConnected && gitSha
+        ? gitSha.slice(0, 7)
+        : 'API';
   const { adminMode, setAdminMode } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -124,29 +150,22 @@ export default function TopNav() {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2.5">
           {/* Backend status */}
-          <div
-            className="flex items-center gap-1"
-            title={
-              backendConnected === null
-                ? 'Connecting to backend…'
-                : backendConnected
-                  ? 'Backend connected'
-                  : 'Backend offline'
-            }
-          >
+          <div className="flex items-center gap-1" title={backendTooltip}>
             <span
               className={`inline-block w-2 h-2 rounded-full ${
-                backendConnected === null
+                backendConnected === null || isFlashing
                   ? 'bg-[#D4A843] animate-pulse'
                   : backendConnected
                     ? 'bg-[#4CAF50]'
                     : 'bg-[#E53935]'
               }`}
-              style={backendConnected ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
+              style={
+                backendConnected && !isFlashing
+                  ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' }
+                  : {}
+              }
             />
-            <span className="text-xs text-white/85">
-              {backendConnected === null ? 'API…' : backendConnected ? 'API' : 'API'}
-            </span>
+            <span className="text-xs font-mono text-white/85">{backendLabel}</span>
           </div>
           {/* Auth status */}
           <div

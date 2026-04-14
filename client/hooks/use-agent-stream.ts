@@ -693,10 +693,17 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
   };
 }
 
+export interface BackendHealth {
+  ok: boolean;
+  gitSha?: string;
+  startedAt?: string;
+  pid?: number;
+}
+
 /**
  * Check if the backend is healthy via the API route.
  */
-export async function checkBackendHealth(): Promise<boolean> {
+export async function checkBackendHealth(): Promise<BackendHealth> {
   try {
     const response = await fetch(API_URL, {
       method: 'GET',
@@ -704,10 +711,15 @@ export async function checkBackendHealth(): Promise<boolean> {
     });
     if (response.ok) {
       const data = await response.json();
-      return data.status === 'healthy';
+      return {
+        ok: data.status === 'healthy',
+        gitSha: data.git_sha,
+        startedAt: data.started_at,
+        pid: data.pid,
+      };
     }
-    return false;
+    return { ok: false };
   } catch {
-    return false;
+    return { ok: false };
   }
 }

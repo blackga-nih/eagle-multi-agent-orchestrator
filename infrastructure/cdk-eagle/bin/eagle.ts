@@ -7,6 +7,7 @@ import { EagleStorageStack } from '../lib/storage-stack';
 import { EagleCiCdStack } from '../lib/cicd-stack';
 import { EagleEvalStack } from '../lib/eval-stack';
 import { EagleBackupStack } from '../lib/backup-stack';
+import { EagleCostStack } from '../lib/cost-stack';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { DEV_CONFIG, QA_CONFIG } from '../config/environments';
 
@@ -86,6 +87,16 @@ const backup = new EagleBackupStack(app, 'EagleBackupStack', {
   description: 'EAGLE Backup — hourly DynamoDB snapshots + daily S3, 7/30-day retention',
 });
 
+// Cost stack is independent — AWS Budgets alerts for Bedrock daily spend
+const cost = new EagleCostStack(app, 'EagleCostStack', {
+  env,
+  synthesizer,
+  config: DEV_CONFIG,
+  alertEmails: ['blackga@nih.gov', 'hoquemi@nih.gov'],
+  bedrockDailyLimitUsd: 20,
+  description: 'EAGLE Cost — AWS Budgets alerts (daily Bedrock spend > $20)',
+});
+
 // ── QA Compute Stack (separate VPC, shared Cognito/IAM/Storage) ──
 // VPC lookup needs a Stack scope — use a dedicated lightweight stack
 const qaLookup = new cdk.Stack(app, 'EagleQaLookup', { env, synthesizer });
@@ -107,7 +118,7 @@ qaCompute.addDependency(core);
 qaCompute.addDependency(storage);
 
 // Tag all stacks
-for (const stack of [cicd, core, storage, compute, evalStack, backup]) {
+for (const stack of [cicd, core, storage, compute, evalStack, backup, cost]) {
   cdk.Tags.of(stack).add('Project', 'eagle');
   cdk.Tags.of(stack).add('ManagedBy', 'cdk');
   cdk.Tags.of(stack).add('Environment', DEV_CONFIG.env);

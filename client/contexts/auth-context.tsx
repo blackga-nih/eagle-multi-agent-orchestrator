@@ -77,7 +77,7 @@ const COGNITO_REGION = process.env.NEXT_PUBLIC_COGNITO_REGION ?? 'us-east-1';
  */
 const EXPLICIT_DEV_MODE = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
 
-function isDevMode(): boolean {
+export function isDevMode(): boolean {
   return EXPLICIT_DEV_MODE;
 }
 

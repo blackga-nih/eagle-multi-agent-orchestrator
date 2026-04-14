@@ -32,7 +32,6 @@ function dedupeDocuments(docs: DocumentInfo[]): DocumentInfo[] {
 
 interface UseChatCallbacksParams {
   currentSessionId: string | null;
-  messages: ChatMessage[];
   streamingMsgIdRef: React.MutableRefObject<string>;
   lastAssistantIdRef: React.MutableRefObject<string | null>;
   streamingMsgRef: React.MutableRefObject<ChatMessage | null>;
@@ -49,7 +48,6 @@ interface UseChatCallbacksParams {
 
 export function useChatCallbacks({
   currentSessionId,
-  messages,
   streamingMsgIdRef,
   lastAssistantIdRef,
   streamingMsgRef,
@@ -232,12 +230,10 @@ export function useChatCallbacks({
       });
 
       if (currentSessionId) {
-        const title =
-          messages.find((m) => m.role === 'user')?.content.slice(0, 80) || 'Untitled Package';
-        saveGeneratedDocument(doc, currentSessionId, title);
+        saveGeneratedDocument(doc, currentSessionId);
       }
     },
-    [currentSessionId, messages, lastAssistantIdRef, streamingMsgIdRef, setDocuments],
+    [currentSessionId, lastAssistantIdRef, streamingMsgIdRef, setDocuments],
   );
 
   const onToolUse = useCallback(

@@ -177,9 +177,17 @@ export async function GET() {
     });
 
     if (response.ok) {
+      const upstream = (await response.json().catch(() => ({}))) as {
+        git_sha?: string;
+        started_at?: string;
+        pid?: number;
+      };
       return NextResponse.json({
         status: 'healthy',
         backend: FASTAPI_URL,
+        git_sha: upstream.git_sha,
+        started_at: upstream.started_at,
+        pid: upstream.pid,
         timestamp: new Date().toISOString(),
       });
     }
