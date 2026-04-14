@@ -49,8 +49,10 @@ export default function PackageSelectorModal({
       setTitle(classification?.suggested_title || uploadResult.filename);
 
       // Pre-select package if in package context
-      if (uploadResult.package_context?.package_id) {
-        setSelectedPackageId(uploadResult.package_context.package_id);
+      const preselectedPackageId =
+        uploadResult.package_context?.package_id ?? uploadResult.package_id ?? null;
+      if (preselectedPackageId) {
+        setSelectedPackageId(preselectedPackageId);
       } else {
         setSelectedPackageId(null);
       }

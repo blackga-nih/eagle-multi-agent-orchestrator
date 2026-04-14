@@ -2,10 +2,16 @@
 
 import { useRef, useState, useCallback } from 'react';
 import { Paperclip, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { uploadDocument, UploadResult } from '@/lib/document-api';
+import {
+  PackageAttachment,
+  uploadDocument,
+  uploadPackageAttachment,
+  UploadResult,
+} from '@/lib/document-api';
 
 interface ChatUploadButtonProps {
   onUploadComplete: (result: UploadResult) => void;
+  onPackageAttachmentUploaded?: (attachment: PackageAttachment) => void;
   sessionId?: string;
   packageId?: string;
   disabled?: boolean;
@@ -16,6 +22,7 @@ type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 
 export default function ChatUploadButton({
   onUploadComplete,
+  onPackageAttachmentUploaded,
   sessionId,
   packageId,
   disabled = false,
@@ -37,10 +44,22 @@ export default function ChatUploadButton({
 
       try {
         const token = getToken ? await getToken() : null;
-        const result = await uploadDocument(file, sessionId, packageId, token);
-        setStatus('success');
-        setProgress(null);
-        onUploadComplete(result);
+        if (packageId && onPackageAttachmentUploaded) {
+          const attachment = await uploadPackageAttachment(
+            packageId,
+            file,
+            { sessionId },
+            token,
+          );
+          setStatus('success');
+          setProgress(null);
+          onPackageAttachmentUploaded(attachment);
+        } else {
+          const result = await uploadDocument(file, sessionId, packageId, token);
+          setStatus('success');
+          setProgress(null);
+          onUploadComplete(result);
+        }
 
         // Reset status after brief delay
         setTimeout(() => setStatus('idle'), 2000);
@@ -61,7 +80,7 @@ export default function ChatUploadButton({
         fileInputRef.current.value = '';
       }
     },
-    [onUploadComplete, sessionId, packageId, getToken],
+    [getToken, onPackageAttachmentUploaded, onUploadComplete, packageId, sessionId],
   );
 
   const handleClick = () => {
@@ -86,7 +105,7 @@ export default function ChatUploadButton({
     if (status === 'uploading') return progress;
     if (status === 'error') return error;
     if (status === 'success') return 'Upload complete';
-    return 'Upload document (max 25 MB)';
+    return 'Upload document or screenshot (max 25 MB)';
   };
 
   return (
@@ -94,7 +113,7 @@ export default function ChatUploadButton({
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.doc,.docx,.txt,.md,.xlsx,.xls"
+        accept=".pdf,.doc,.docx,.txt,.md,.xlsx,.xls,.png,.jpg,.jpeg"
         onChange={(e) => handleFileSelect(e.target.files)}
         className="hidden"
       />

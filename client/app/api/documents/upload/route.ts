@@ -9,18 +9,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
     const queryString = request.nextUrl.searchParams.toString();
-
-    // Forward multipart body directly — don't parse, just pipe
-    const formData = await request.formData();
+    const contentType = request.headers.get('content-type');
 
     const headers: Record<string, string> = {};
     if (authHeader) headers['Authorization'] = authHeader;
-    // Do NOT set Content-Type — let fetch set the multipart boundary automatically
+    if (contentType) headers['Content-Type'] = contentType;
 
     const url = queryString
       ? `${FASTAPI_URL}/api/documents/upload?${queryString}`
@@ -29,7 +29,10 @@ export async function POST(request: NextRequest) {
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: formData,
+      // Forward the raw multipart stream so large uploads and boundaries are
+      // preserved exactly as received from the browser.
+      body: request.body,
+      duplex: 'half',
     });
 
     if (!response.ok) {

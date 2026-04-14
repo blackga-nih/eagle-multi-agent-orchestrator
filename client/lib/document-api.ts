@@ -17,13 +17,15 @@ export interface PackageContext {
 }
 
 export interface UploadResult {
+  document_id?: string;
   key: string;
   upload_id: string;
   filename: string;
   size_bytes: number;
   content_type: string;
   classification: ClassificationResult;
-  package_context: PackageContext;
+  package_id?: string | null;
+  package_context?: PackageContext;
 }
 
 export interface ComplianceReadiness {
@@ -62,6 +64,42 @@ export interface AssignResult {
   error?: string;
 }
 
+export interface PackageAttachment {
+  attachment_id: string;
+  package_id: string;
+  attachment_type: 'document' | 'image' | 'screenshot';
+  doc_type?: string | null;
+  linked_doc_type?: string | null;
+  category: string;
+  usage: 'reference' | 'checklist_support' | 'official_candidate' | 'official_document';
+  include_in_zip: boolean;
+  title: string;
+  display_name?: string;
+  filename: string;
+  original_filename: string;
+  file_type: string;
+  content_type: string;
+  size_bytes: number;
+  s3_key: string;
+  classification?: ClassificationResult;
+  classification_confidence?: number;
+  classification_source?: string;
+  extracted_text?: string;
+  extracted_text_available?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UploadPackageAttachmentOptions {
+  title?: string;
+  docType?: string;
+  linkedDocType?: string;
+  category?: string;
+  usage?: 'reference' | 'checklist_support' | 'official_candidate' | 'official_document';
+  includeInZip?: boolean;
+  sessionId?: string;
+}
+
 /**
  * Upload a document to the user's S3 workspace.
  */
@@ -87,7 +125,142 @@ export async function uploadDocument(
   });
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => ({ detail: 'Upload failed' }))) as {
+    const rawBody = await response.text().catch(() => '');
+    let error: {
+      detail?: string;
+      details?: string;
+      error?: string;
+      message?: string;
+    } = {};
+
+    if (rawBody) {
+      try {
+        error = JSON.parse(rawBody) as {
+          detail?: string;
+          details?: string;
+          error?: string;
+          message?: string;
+        };
+      } catch {
+        error = { detail: rawBody.trim() || 'Upload failed' };
+      }
+    } else {
+      error = { detail: 'Upload failed' };
+    }
+
+    throw new Error(
+      error.detail ||
+        error.details ||
+        error.error ||
+        error.message ||
+        `Upload failed: ${response.status}`,
+    );
+  }
+
+  return response.json();
+}
+
+export async function uploadPackageAttachment(
+  packageId: string,
+  file: File,
+  options: UploadPackageAttachmentOptions = {},
+  token?: string | null,
+): Promise<PackageAttachment> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (options.title) formData.append('title', options.title);
+  if (options.docType) formData.append('doc_type', options.docType);
+  if (options.linkedDocType) formData.append('linked_doc_type', options.linkedDocType);
+  if (options.category) formData.append('category', options.category);
+  if (options.usage) formData.append('usage', options.usage);
+  if (typeof options.includeInZip === 'boolean') {
+    formData.append('include_in_zip', String(options.includeInZip));
+  }
+  if (options.sessionId) formData.append('session_id', options.sessionId);
+
+  const response = await fetch(`/api/packages/${encodeURIComponent(packageId)}/attachments`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const rawBody = await response.text().catch(() => '');
+    let error: {
+      detail?: string;
+      details?: string;
+      error?: string;
+      message?: string;
+    } = {};
+
+    if (rawBody) {
+      try {
+        error = JSON.parse(rawBody) as {
+          detail?: string;
+          details?: string;
+          error?: string;
+          message?: string;
+        };
+      } catch {
+        error = { detail: rawBody.trim() || 'Attachment upload failed' };
+      }
+    } else {
+      error = { detail: 'Attachment upload failed' };
+    }
+
+    throw new Error(
+      error.detail ||
+        error.details ||
+        error.error ||
+        error.message ||
+        `Attachment upload failed: ${response.status}`,
+    );
+  }
+
+  return response.json();
+}
+
+export async function listPackageAttachments(
+  packageId: string,
+  token?: string | null,
+): Promise<PackageAttachment[]> {
+  const response = await fetch(`/api/packages/${encodeURIComponent(packageId)}/attachments`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch package attachments: ${response.status}`);
+  }
+
+  const data = (await response.json()) as { attachments?: PackageAttachment[] };
+  return data.attachments || [];
+}
+
+export async function updatePackageAttachment(
+  packageId: string,
+  attachmentId: string,
+  updates: Partial<
+    Pick<
+      PackageAttachment,
+      'title' | 'doc_type' | 'linked_doc_type' | 'category' | 'usage' | 'include_in_zip'
+    >
+  >,
+  token?: string | null,
+): Promise<PackageAttachment> {
+  const response = await fetch(
+    `/api/packages/${encodeURIComponent(packageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(updates),
+    },
+  );
+
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({ detail: 'Attachment update failed' }))) as {
       detail?: string;
       details?: string;
       error?: string;
@@ -98,7 +271,78 @@ export async function uploadDocument(
         error.details ||
         error.error ||
         error.message ||
-        `Upload failed: ${response.status}`,
+        `Attachment update failed: ${response.status}`,
+    );
+  }
+
+  return response.json();
+}
+
+export async function deletePackageAttachment(
+  packageId: string,
+  attachmentId: string,
+  token?: string | null,
+): Promise<void> {
+  const response = await fetch(
+    `/api/packages/${encodeURIComponent(packageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    },
+  );
+
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({ detail: 'Attachment delete failed' }))) as {
+      detail?: string;
+      details?: string;
+      error?: string;
+      message?: string;
+    };
+    throw new Error(
+      error.detail ||
+        error.details ||
+        error.error ||
+        error.message ||
+        `Attachment delete failed: ${response.status}`,
+    );
+  }
+}
+
+export async function promotePackageAttachment(
+  packageId: string,
+  attachmentId: string,
+  payload: {
+    doc_type: string;
+    title?: string;
+    set_as_official?: boolean;
+  },
+  token?: string | null,
+): Promise<PackageDocument> {
+  const response = await fetch(
+    `/api/packages/${encodeURIComponent(packageId)}/attachments/${encodeURIComponent(attachmentId)}/promote`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({ detail: 'Attachment promotion failed' }))) as {
+      detail?: string;
+      details?: string;
+      error?: string;
+      message?: string;
+    };
+    throw new Error(
+      error.detail ||
+        error.details ||
+        error.error ||
+        error.message ||
+        `Attachment promotion failed: ${response.status}`,
     );
   }
 
