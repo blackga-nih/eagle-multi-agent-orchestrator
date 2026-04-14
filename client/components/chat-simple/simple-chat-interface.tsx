@@ -718,7 +718,7 @@ export default function SimpleChatInterface() {
     }));
 
     if (currentSessionId) {
-      saveGeneratedDocument(docInfo, currentSessionId, attachment.title);
+      saveGeneratedDocument(docInfo, currentSessionId);
     }
   };
 

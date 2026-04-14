@@ -5,6 +5,8 @@ export const dynamic = 'force-dynamic';
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 
+type NodeRequestInit = RequestInit & { duplex?: 'half' };
+
 interface RouteParams {
   params: Promise<{ packageId: string }>;
 }
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         headers,
         body: request.body,
         duplex: 'half',
-      },
+      } as NodeRequestInit,
     );
 
     const text = await response.text();

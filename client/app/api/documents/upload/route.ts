@@ -12,6 +12,8 @@ const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+type NodeRequestInit = RequestInit & { duplex?: 'half' };
+
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
@@ -33,7 +35,7 @@ export async function POST(request: NextRequest) {
       // preserved exactly as received from the browser.
       body: request.body,
       duplex: 'half',
-    });
+    } as NodeRequestInit);
 
     if (!response.ok) {
       const errorText = await response.text();
