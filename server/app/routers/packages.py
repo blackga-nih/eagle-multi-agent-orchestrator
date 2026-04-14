@@ -5,12 +5,16 @@ Handles acquisition package CRUD, documents, and approval chains.
 Extracted from main.py for better organization.
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
 import logging
+import os
+import re
 import sys
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from starlette.responses import Response
 
@@ -22,6 +26,13 @@ from ..document_service import (
     create_package_document_version,
     finalize_document as finalize_document_version,
     get_document_download_url,
+)
+from ..package_attachment_store import (
+    create_attachment,
+    delete_attachment,
+    get_attachment,
+    list_package_attachments,
+    update_attachment,
 )
 from ..package_document_store import get_document, get_document_history, list_package_documents
 from ..package_context_service import (
@@ -64,10 +75,101 @@ def _resolve_main_override(name: str, default: Any) -> Any:
     return getattr(main_module, name, default)
 
 
+_S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+_PACKAGE_ATTACHMENT_CATEGORIES = {
+    "requirements_evidence",
+    "prior_artifact",
+    "pricing_evidence",
+    "approval_evidence",
+    "technical_evidence",
+    "market_research_evidence",
+    "other",
+}
+_PACKAGE_ATTACHMENT_USAGES = {
+    "reference",
+    "checklist_support",
+    "official_candidate",
+    "official_document",
+}
+_PACKAGE_ATTACHMENT_MIME_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "text/plain",
+    "text/markdown",
+    "image/png",
+    "image/jpeg",
+}
+
+
+def _parse_form_bool(value: Optional[str], default: bool = True) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _detect_attachment_type(filename: str, content_type: str) -> str:
+    if content_type.startswith("image/"):
+        lowered = filename.lower()
+        if "screenshot" in lowered or "screen_shot" in lowered or "screen-shot" in lowered:
+            return "screenshot"
+        return "image"
+    return "document"
+
+
+def _suggest_attachment_category(
+    doc_type: Optional[str],
+    content_type: str,
+    attachment_type: str,
+) -> str:
+    if attachment_type in {"image", "screenshot"}:
+        return "technical_evidence"
+    if doc_type in {"sow", "igce", "market_research", "justification", "acquisition_plan"}:
+        return "prior_artifact"
+    if doc_type in {"son_products", "son_services", "technical_questionnaire"}:
+        return "requirements_evidence"
+    if doc_type == "market_research":
+        return "market_research_evidence"
+    if content_type in {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    }:
+        return "pricing_evidence"
+    return "other"
+
+
+def _build_attachment_export_name(
+    package_id: str,
+    category: str,
+    attachment_id: str,
+    file_type: str,
+) -> str:
+    suffix = re.sub(r"[^\w\-]", "_", attachment_id)[-8:] or "file"
+    return f"{package_id}_{category}_{suffix}.{file_type}"
+
+
 class ResolvePackageContextRequest(BaseModel):
     session_id: str
     package_id: Optional[str] = None
     action: Optional[str] = None  # "set" | "clear" | None
+
+
+class PackageAttachmentUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    doc_type: Optional[str] = None
+    linked_doc_type: Optional[str] = None
+    category: Optional[str] = None
+    usage: Optional[str] = None
+    include_in_zip: Optional[bool] = None
+
+
+class PromotePackageAttachmentRequest(BaseModel):
+    doc_type: str
+    title: Optional[str] = None
+    set_as_official: bool = True
 
 
 @router.get("")
@@ -281,6 +383,360 @@ async def clone_package_endpoint(
     return pkg
 
 
+@router.post("/{package_id}/attachments")
+async def upload_package_attachment_endpoint(
+    package_id: str,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    doc_type: Optional[str] = Form(None),
+    linked_doc_type: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    usage: Optional[str] = Form(None),
+    include_in_zip: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Upload a source attachment directly into a package."""
+    import hashlib
+    import uuid
+
+    from botocore.exceptions import ClientError
+
+    from ..db_client import get_s3
+    from ..document_classification_service import (
+        ClassificationResult,
+        classify_document,
+        extract_text_preview,
+    )
+    from ..document_markdown_service import convert_to_markdown
+    from ..doc_type_registry import normalize_doc_type
+
+    pkg = get_package(user.tenant_id, package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in _PACKAGE_ATTACHMENT_MIME_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                f"Unsupported file type: {content_type}. Accepted: PDF, Word, Excel, "
+                "plain text, Markdown, PNG, JPEG."
+            ),
+        )
+
+    body = await file.read()
+    if len(body) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 25 MB limit.")
+
+    attachment_id = str(uuid.uuid4())
+    safe_name = re.sub(r"[^A-Za-z0-9._\\-]", "_", file.filename or "attachment")
+    s3_key = (
+        f"eagle/{user.tenant_id}/packages/{package_id}/attachments/"
+        f"{attachment_id}/v1/{safe_name}"
+    )
+
+    try:
+        get_s3().put_object(
+            Bucket=_S3_BUCKET,
+            Key=s3_key,
+            Body=body,
+            ContentType=content_type,
+        )
+    except ClientError as exc:
+        logger.error("Failed to upload package attachment: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to upload attachment")
+
+    normalized_doc_type = normalize_doc_type(doc_type) if doc_type else None
+    normalized_linked_doc_type = normalize_doc_type(linked_doc_type) if linked_doc_type else None
+    preview = extract_text_preview(body, content_type)
+    if normalized_doc_type:
+        classification = ClassificationResult(
+            doc_type=normalized_doc_type,
+            confidence=1.0,
+            method="filename",
+            suggested_title=title or safe_name,
+        )
+        classification_source = "user"
+    elif content_type.startswith("image/"):
+        classification = ClassificationResult(
+            doc_type="unknown",
+            confidence=0.2,
+            method="unknown",
+            suggested_title=title or safe_name,
+        )
+        classification_source = "unknown"
+    else:
+        classification = classify_document(file.filename or safe_name, preview)
+        classification_source = classification.method
+
+    attachment_type = _detect_attachment_type(file.filename or safe_name, content_type)
+    normalized_category = category or _suggest_attachment_category(
+        classification.doc_type,
+        content_type,
+        attachment_type,
+    )
+    if normalized_category not in _PACKAGE_ATTACHMENT_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid attachment category")
+
+    normalized_usage = usage or ("checklist_support" if normalized_linked_doc_type else "reference")
+    if normalized_usage not in _PACKAGE_ATTACHMENT_USAGES:
+        raise HTTPException(status_code=400, detail="Invalid attachment usage")
+    if normalized_usage == "checklist_support" and not normalized_linked_doc_type:
+        raise HTTPException(status_code=400, detail="linked_doc_type is required for checklist support")
+
+    include_in_zip_bool = _parse_form_bool(include_in_zip, default=True)
+
+    markdown_content = None
+    if not content_type.startswith("image/"):
+        markdown_content = convert_to_markdown(body, content_type, file.filename or safe_name)
+
+    markdown_s3_key = None
+    if markdown_content:
+        markdown_s3_key = f"{s3_key}.content.md"
+        try:
+            get_s3().put_object(
+                Bucket=_S3_BUCKET,
+                Key=markdown_s3_key,
+                Body=markdown_content.encode("utf-8"),
+                ContentType="text/markdown",
+            )
+        except ClientError as exc:
+            logger.warning("Failed to upload attachment markdown sibling: %s", exc)
+            markdown_s3_key = None
+
+    attachment = create_attachment(
+        tenant_id=user.tenant_id,
+        package_id=package_id,
+        user_id=user.user_id,
+        s3_bucket=_S3_BUCKET,
+        s3_key=s3_key,
+        filename=safe_name,
+        original_filename=file.filename or safe_name,
+        content_type=content_type,
+        size_bytes=len(body),
+        title=title or classification.suggested_title or safe_name,
+        attachment_type=attachment_type,
+        doc_type=classification.doc_type if classification.doc_type != "unknown" else None,
+        linked_doc_type=normalized_linked_doc_type,
+        category=normalized_category,
+        usage=normalized_usage,
+        include_in_zip=include_in_zip_bool,
+        classification=classification.to_dict(),
+        classification_source=classification_source,
+        markdown_s3_key=markdown_s3_key,
+        extracted_text=markdown_content or preview,
+        session_id=session_id,
+        attachment_id=attachment_id,
+    )
+    attachment["content_hash"] = hashlib.sha256(body).hexdigest()
+    attachment["extracted_text_available"] = bool(markdown_content or preview)
+    return attachment
+
+
+@router.get("/{package_id}/attachments")
+async def list_package_attachments_endpoint(
+    package_id: str,
+    include_zip_only: Optional[bool] = None,
+    limit: int = 100,
+    user: UserContext = Depends(get_user_from_header),
+):
+    pkg = get_package(user.tenant_id, package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+    attachments = list_package_attachments(
+        user.tenant_id,
+        package_id,
+        include_zip_only=include_zip_only,
+        limit=limit,
+    )
+    return {"attachments": attachments, "count": len(attachments)}
+
+
+@router.patch("/{package_id}/attachments/{attachment_id}")
+async def update_package_attachment_endpoint(
+    package_id: str,
+    attachment_id: str,
+    body: PackageAttachmentUpdateRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    attachment = get_attachment(user.tenant_id, package_id, attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if attachment.get("owner_user_id") != user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    updates = body.model_dump(exclude_unset=True)
+    if "doc_type" in updates and updates["doc_type"]:
+        from ..doc_type_registry import normalize_doc_type
+
+        updates["doc_type"] = normalize_doc_type(updates["doc_type"])
+    if "linked_doc_type" in updates:
+        from ..doc_type_registry import normalize_doc_type
+
+        updates["linked_doc_type"] = (
+            normalize_doc_type(updates["linked_doc_type"])
+            if updates["linked_doc_type"]
+            else None
+        )
+    if "category" in updates and updates["category"] not in _PACKAGE_ATTACHMENT_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid attachment category")
+    if "usage" in updates and updates["usage"] not in _PACKAGE_ATTACHMENT_USAGES:
+        raise HTTPException(status_code=400, detail="Invalid attachment usage")
+    if (
+        updates.get("usage") == "checklist_support"
+        and not updates.get("linked_doc_type")
+        and not attachment.get("linked_doc_type")
+    ):
+        raise HTTPException(status_code=400, detail="linked_doc_type is required for checklist support")
+    if updates.get("usage") == "reference" and "linked_doc_type" not in updates:
+        updates["linked_doc_type"] = None
+    if "title" in updates:
+        updates["display_name"] = updates["title"]
+
+    updated = update_attachment(user.tenant_id, package_id, attachment_id, updates)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return updated
+
+
+@router.delete("/{package_id}/attachments/{attachment_id}")
+async def delete_package_attachment_endpoint(
+    package_id: str,
+    attachment_id: str,
+    user: UserContext = Depends(get_user_from_header),
+):
+    attachment = get_attachment(user.tenant_id, package_id, attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if attachment.get("owner_user_id") != user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    deleted = delete_attachment(user.tenant_id, package_id, attachment_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return {"deleted": True, "attachment_id": attachment_id}
+
+
+@router.get("/{package_id}/attachments/{attachment_id}/download-url")
+async def get_package_attachment_download_url_endpoint(
+    package_id: str,
+    attachment_id: str,
+    expires_in: int = 3600,
+    user: UserContext = Depends(get_user_from_header),
+):
+    from ..db_client import get_s3
+
+    attachment = get_attachment(user.tenant_id, package_id, attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if attachment.get("owner_user_id") != user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        url = get_s3().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": attachment["s3_bucket"], "Key": attachment["s3_key"]},
+            ExpiresIn=expires_in,
+        )
+    except Exception as exc:
+        logger.error("Failed to generate attachment download URL: %s", exc)
+        raise HTTPException(status_code=500, detail="Attachment download URL unavailable")
+    return {"download_url": url, "expires_in": expires_in}
+
+
+@router.post("/{package_id}/attachments/{attachment_id}/promote")
+async def promote_package_attachment_endpoint(
+    package_id: str,
+    attachment_id: str,
+    body: PromotePackageAttachmentRequest,
+    user: UserContext = Depends(get_user_from_header),
+):
+    from ..db_client import get_s3
+    from ..doc_type_registry import normalize_doc_type
+
+    attachment = get_attachment(user.tenant_id, package_id, attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if attachment.get("owner_user_id") != user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    normalized_doc_type = normalize_doc_type(body.doc_type)
+    if not normalized_doc_type or normalized_doc_type == "unknown":
+        raise HTTPException(status_code=400, detail="Valid doc_type is required")
+
+    try:
+        s3 = get_s3()
+        source_obj = s3.get_object(
+            Bucket=attachment["s3_bucket"],
+            Key=attachment["s3_key"],
+        )
+        content = source_obj["Body"].read()
+    except Exception as exc:
+        logger.error("Failed to load attachment %s for promotion: %s", attachment_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to load attachment content")
+
+    markdown_content = attachment.get("extracted_text")
+    markdown_s3_key = attachment.get("markdown_s3_key")
+    if markdown_s3_key:
+        try:
+            md_obj = s3.get_object(Bucket=attachment["s3_bucket"], Key=markdown_s3_key)
+            markdown_content = md_obj["Body"].read().decode("utf-8", errors="replace")
+        except Exception:
+            logger.debug("Promotion could not fetch markdown sidecar for %s", attachment_id)
+
+    promoted_title = (body.title or attachment.get("title") or attachment.get("filename") or normalized_doc_type).strip()
+    result = create_package_document_version(
+        tenant_id=user.tenant_id,
+        package_id=package_id,
+        doc_type=normalized_doc_type,
+        content=content,
+        title=promoted_title,
+        file_type=attachment.get("file_type", "md"),
+        created_by_user_id=user.user_id,
+        session_id=attachment.get("session_id"),
+        change_source="attachment_promotion",
+        markdown_content=markdown_content,
+        original_filename=attachment.get("original_filename") or attachment.get("filename"),
+        source_context_type="package_attachment_promotion",
+        source_data_summary=(
+            f"Promoted attachment {attachment.get('attachment_id')} "
+            f"({attachment.get('title') or attachment.get('filename')}) "
+            f"to canonical {normalized_doc_type}"
+        ),
+        source_data={
+            "attachment_id": attachment.get("attachment_id"),
+            "attachment_category": attachment.get("category"),
+            "attachment_usage": attachment.get("usage"),
+            "attachment_s3_key": attachment.get("s3_key"),
+        },
+    )
+    if not result.success:
+        status = 404 if result.error and "not found" in result.error.lower() else 500
+        raise HTTPException(status_code=status, detail=result.error or "Promotion failed")
+
+    if body.set_as_official:
+        update_attachment(
+            user.tenant_id,
+            package_id,
+            attachment_id,
+            {
+                "doc_type": normalized_doc_type,
+                "linked_doc_type": normalized_doc_type,
+                "usage": "official_document",
+                "title": promoted_title,
+                "display_name": promoted_title,
+            },
+        )
+
+    promoted = get_document(user.tenant_id, package_id, normalized_doc_type, result.version)
+    if promoted:
+        promoted["promoted_from_attachment_id"] = attachment_id
+        return promoted
+
+    response = result.to_dict()
+    response["promoted_from_attachment_id"] = attachment_id
+    return response
+
+
 @router.get("/{package_id}/exports")
 async def list_package_exports_endpoint(
     package_id: str,
@@ -299,8 +755,8 @@ async def export_package_zip_endpoint(
     package_id: str,
     format: str = "docx",
     save_to_workspace: bool = False,
-    doc_types: str | None = None,
-    format_map: str | None = None,
+    doc_types: Optional[str] = None,
+    format_map: Optional[str] = None,
     user: UserContext = Depends(get_user_from_header),
 ):
     """Download package documents as a ZIP archive.
@@ -331,9 +787,10 @@ async def export_package_zip_endpoint(
         raise HTTPException(status_code=404, detail="Package not found")
 
     docs = list_docs(user.tenant_id, package_id)
-    if not docs:
+    attachments = list_package_attachments(user.tenant_id, package_id, include_zip_only=True)
+    if not docs and not attachments:
         raise HTTPException(
-            status_code=404, detail="No documents found for this package"
+            status_code=404, detail="No documents or attachments found for this package"
         )
 
     s3 = get_s3()
@@ -387,8 +844,37 @@ async def export_package_zip_endpoint(
         except Exception as e:
             logger.warning("Failed to fetch S3 content for %s: %s", s3_key, e)
 
-    if not docs_with_content:
-        raise HTTPException(status_code=404, detail="No documents with content found")
+    attachment_exports = []
+    for attachment in attachments:
+        s3_key = attachment.get("s3_key")
+        s3_bucket = attachment.get("s3_bucket")
+        if not s3_key or not s3_bucket:
+            continue
+        try:
+            obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+            raw_content = obj["Body"].read()
+            file_type = attachment.get("file_type", "bin")
+            category = attachment.get("category", "other")
+            attachment_exports.append(
+                {
+                    "doc_type": attachment.get("doc_type") or "attachment",
+                    "title": attachment.get("title") or attachment.get("filename") or "attachment",
+                    "_binary": raw_content,
+                    "file_type": file_type,
+                    "filename": _build_attachment_export_name(
+                        package_id,
+                        category,
+                        attachment.get("attachment_id", "attachment"),
+                        file_type,
+                    ),
+                    "zip_folder": f"09_Attachments/{category}/",
+                }
+            )
+        except Exception as e:
+            logger.warning("Failed to fetch attachment content for %s: %s", s3_key, e)
+
+    if not docs_with_content and not attachment_exports:
+        raise HTTPException(status_code=404, detail="No documents or attachments with content found")
 
     # Selective export filter
     if doc_types:
@@ -405,7 +891,7 @@ async def export_package_zip_endpoint(
 
     result = _export_zip(
         docs_with_content, pkg.get("title", "Package"), format,
-        package_metadata=pkg, format_map=parsed_format_map,
+        package_metadata=pkg, format_map=parsed_format_map, attachments=attachment_exports,
     )
 
     # Record export (non-fatal)
@@ -420,7 +906,7 @@ async def export_package_zip_endpoint(
             doc_types_included=[
                 d.get("doc_type", "unknown")
                 for d in docs_with_content
-            ],
+            ] + [a.get("doc_type", "attachment") for a in attachment_exports],
             file_size=result["size_bytes"],
         )
     except Exception as e:

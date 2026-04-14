@@ -126,14 +126,33 @@ class TestUploadEndpoint:
         assert response.status_code == 413
         assert "25 MB" in response.json()["detail"]
 
-    def test_upload_rejects_invalid_mime_type(self, client):
-        """Files with unsupported MIME types must be rejected with HTTP 415."""
-        response = client.post(
-            "/api/documents/upload",
-            files={"file": _PNG_FILE},
-        )
-        assert response.status_code == 415
-        assert "Unsupported file type" in response.json()["detail"]
+    def test_upload_accepts_png_images(self, client):
+        """PNG uploads should be accepted for screenshot/image support."""
+        mock_classification = MagicMock()
+        mock_classification.doc_type = "unknown"
+        mock_classification.to_dict.return_value = {
+            "doc_type": "unknown",
+            "confidence": 0.2,
+            "method": "unknown",
+            "suggested_title": "photo",
+        }
+
+        mock_doc = {"document_id": "doc-png", "doc_type": "unknown"}
+
+        with (
+            patch("app.routers.documents.get_s3", return_value=MagicMock()),
+            patch("app.routers.documents.classify_document", return_value=mock_classification),
+            patch("app.routers.documents.extract_text_preview", return_value=None),
+            patch("app.user_document_store.create_document", return_value=mock_doc),
+            patch("app.document_markdown_service.convert_to_markdown", return_value=None),
+        ):
+            response = client.post(
+                "/api/documents/upload",
+                files={"file": _PNG_FILE},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["content_type"] == "image/png"
 
     def test_upload_stores_metadata_in_dynamodb(self, client):
         """create_document must be called with the correct tenant_id and user_id."""

@@ -1536,6 +1536,21 @@ async def _ensure_create_document_for_direct_request(
         and getattr(package_context, "package_id", None)
     ):
         params["package_id"] = package_context.package_id
+        try:
+            from .package_attachment_context import enrich_generation_data_from_attachments
+
+            params["data"] = enrich_generation_data_from_attachments(
+                tenant_id=tenant_id,
+                package_id=package_context.package_id,
+                target_doc_type=doc_type,
+                data=params.get("data") if isinstance(params.get("data"), dict) else {},
+            )
+        except Exception:
+            logger.debug(
+                "Direct-request attachment enrichment failed for package %s",
+                package_context.package_id,
+                exc_info=True,
+            )
 
     scoped_session_id = _build_scoped_session_id(tenant_id, user_id, session_id)
     result = await asyncio.to_thread(
@@ -3610,6 +3625,25 @@ def _build_all_service_tools(
                 except Exception:
                     pass  # No existing doc or lookup failed — create new
 
+            if _pkg_id and _dt:
+                try:
+                    from .package_attachment_context import (
+                        enrich_generation_data_from_attachments,
+                    )
+
+                    parsed["data"] = enrich_generation_data_from_attachments(
+                        tenant_id=tenant_id,
+                        package_id=_pkg_id,
+                        target_doc_type=_dt,
+                        data=parsed.get("data") if isinstance(parsed.get("data"), dict) else {},
+                    )
+                except Exception:
+                    logger.debug(
+                        "Attachment context enrichment failed for package %s",
+                        _pkg_id,
+                        exc_info=True,
+                    )
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
                 _fut = _pool.submit(
                     tool_dispatch["create_document"],
@@ -5646,8 +5680,14 @@ async def sdk_query(
         if package_context and package_context.is_package_mode
         else None
     )
+    _focus_doc_type = _infer_doc_type_from_prompt(prompt)
     _preload_task = asyncio.create_task(
-        preload_session_context(tenant_id, user_id, package_id=_pkg_id),
+        preload_session_context(
+            tenant_id,
+            user_id,
+            package_id=_pkg_id,
+            focus_doc_type=_focus_doc_type,
+        ),
     )
 
     # Create shared KB depth tracker so subagent document reads
@@ -5687,7 +5727,7 @@ async def sdk_query(
     )
 
     preloaded_ctx = await _preload_task
-    _ctx_str = format_context_for_prompt(preloaded_ctx)
+    _ctx_str = format_context_for_prompt(preloaded_ctx, focus_doc_type=_focus_doc_type)
 
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,
@@ -6118,8 +6158,14 @@ async def sdk_query_streaming(
         if package_context and package_context.is_package_mode
         else None
     )
+    _focus_doc_type = _infer_doc_type_from_prompt(prompt)
     _preload_task = asyncio.create_task(
-        preload_session_context(tenant_id, user_id, package_id=_pkg_id),
+        preload_session_context(
+            tenant_id,
+            user_id,
+            package_id=_pkg_id,
+            focus_doc_type=_focus_doc_type,
+        ),
     )
 
     # Create shared KB depth tracker so subagent document reads
@@ -6163,7 +6209,7 @@ async def sdk_query_streaming(
     )
 
     preloaded_ctx = await _preload_task
-    _ctx_str = format_context_for_prompt(preloaded_ctx)
+    _ctx_str = format_context_for_prompt(preloaded_ctx, focus_doc_type=_focus_doc_type)
 
     system_prompt = build_supervisor_prompt(
         tenant_id=tenant_id,

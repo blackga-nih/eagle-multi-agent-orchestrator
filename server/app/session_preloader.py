@@ -25,6 +25,7 @@ class PreloadedContext:
     package: Optional[dict] = None  # package metadata
     checklist: Optional[dict] = None  # required / completed / missing
     documents: list[dict] = field(default_factory=list)
+    attachments: list[dict] = field(default_factory=list)
     feature_flags: dict = field(default_factory=dict)
 
 
@@ -41,12 +42,19 @@ def _fetch_preferences(tenant_id: str, user_id: str) -> dict:
 
 def _fetch_package_and_docs(tenant_id: str, package_id: str) -> dict:
     from .package_store import get_package, get_package_checklist
+    from .package_attachment_store import list_package_attachments
     from .package_document_store import list_package_documents
 
     pkg = get_package(tenant_id, package_id)
     checklist = get_package_checklist(tenant_id, package_id)
     docs = list_package_documents(tenant_id, package_id)
-    return {"package": pkg, "checklist": checklist, "documents": docs}
+    attachments = list_package_attachments(tenant_id, package_id, limit=25)
+    return {
+        "package": pkg,
+        "checklist": checklist,
+        "documents": docs,
+        "attachments": attachments,
+    }
 
 
 def _fetch_feature_flags() -> dict:
@@ -79,6 +87,7 @@ async def preload_session_context(
     tenant_id: str,
     user_id: str,
     package_id: Optional[str] = None,
+    focus_doc_type: Optional[str] = None,
     timeout_ms: int = 2000,
 ) -> PreloadedContext:
     """Fetch preferences, package state, and feature flags in parallel.
@@ -106,6 +115,7 @@ async def preload_session_context(
         ctx.package = result["package"]
         ctx.checklist = result["checklist"]
         ctx.documents = result["documents"]
+        ctx.attachments = result.get("attachments", [])
 
     async def _warm_templates() -> None:
         """Warm template cache — separate from package fetch so it doesn't
@@ -150,7 +160,10 @@ async def preload_session_context(
 # ---------------------------------------------------------------------------
 
 
-def format_context_for_prompt(ctx: PreloadedContext) -> str:
+def format_context_for_prompt(
+    ctx: PreloadedContext,
+    focus_doc_type: Optional[str] = None,
+) -> str:
     """Render PreloadedContext as a terse block for the system prompt.
 
     Returns an empty string when there is nothing meaningful to add.
@@ -174,6 +187,8 @@ def format_context_for_prompt(ctx: PreloadedContext) -> str:
     # Active package
     pkg = ctx.package
     if pkg and ctx.checklist:
+        from .package_attachment_context import select_relevant_attachment_context
+
         title = pkg.get("title", "Untitled")
         pathway = pkg.get("acquisition_pathway", "unknown")
         value = pkg.get("estimated_value", "N/A")
@@ -203,10 +218,27 @@ def format_context_for_prompt(ctx: PreloadedContext) -> str:
         )
         missing_str = ", ".join(missing) if missing else "none"
 
+        attachment_items = select_relevant_attachment_context(
+            ctx.attachments,
+            target_doc_type=focus_doc_type,
+            limit=3,
+            excerpt_chars=350,
+        )
+        attachment_lines = ["none"]
+        if attachment_items:
+            attachment_lines = []
+            for item in attachment_items:
+                line = f"{item['title']} [{item['category']}, {item['usage']}]"
+                if item.get("excerpt"):
+                    line += f": {item['excerpt']}"
+                attachment_lines.append(line)
+        attachment_str = "\n    - ".join(attachment_lines)
+
         parts.append(
             f'Active Package: {pkg_id} "{title}" ({pathway}, ${value})\n'
             f"  Completed: {completed_str}\n"
             f"  Missing: {missing_str}\n"
+            f"  Source Attachments: {attachment_str if attachment_items else attachment_lines[0]}\n"
             f"  Status: {status}"
         )
 

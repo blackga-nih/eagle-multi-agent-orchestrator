@@ -1034,6 +1034,7 @@ def export_package_zip(
     export_format: str = "docx",
     package_metadata: Optional[Dict[str, Any]] = None,
     format_map: Optional[Dict[str, str]] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Export multiple documents as a single ZIP archive.
 
@@ -1046,6 +1047,7 @@ def export_package_zip(
             (backward-compatible).
         format_map: Per-document format overrides, e.g. ``{"sow": "pdf", "igce": "md"}``.
             Binary docs ignore this.
+        attachments: Optional raw attachment payloads to include in the ZIP.
 
     Returns:
         Dict with ``data`` (bytes), ``filename``, ``content_type``, ``size_bytes``.
@@ -1071,8 +1073,8 @@ def export_package_zip(
             safe_title = re.sub(r"[^\w\-]", "_", title)[:40]
 
             # Determine folder prefix for structured mode
-            folder = ""
-            if structured:
+            folder = doc.get("zip_folder", "")
+            if structured and not folder:
                 folder = _DOC_TYPE_FOLDER.get(doc_type, "08_Other") + "/"
 
             # Binary docs (S3-sourced templates) — include raw file directly
@@ -1100,6 +1102,20 @@ def export_package_zip(
                 logger.warning("Failed to export %s for ZIP: %s", doc_type, exc)
                 error_msg = f"Export failed for {title}: {exc}"
                 zf.writestr(f"{folder}{doc_type}_{safe_title}_ERROR.txt", error_msg)
+
+        for attachment in attachments or []:
+            binary = attachment.get("_binary")
+            if not binary:
+                continue
+            folder = attachment.get("zip_folder", "")
+            filename = attachment.get("filename")
+            if not filename:
+                doc_type = attachment.get("doc_type", "attachment")
+                title = attachment.get("title", doc_type)
+                safe_title = re.sub(r"[^\w\-]", "_", title)[:40]
+                file_type = attachment.get("file_type", "bin")
+                filename = f"{doc_type}_{safe_title}.{file_type}"
+            zf.writestr(f"{folder}{filename}", binary)
 
     zip_buffer.seek(0)
     zip_data = zip_buffer.read()

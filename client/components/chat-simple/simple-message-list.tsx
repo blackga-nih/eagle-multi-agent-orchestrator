@@ -142,6 +142,23 @@ function CodeOutput({ tc }: { tc: TrackedToolCall }) {
   );
 }
 
+function stateChangeKey(entry: import('@/contexts/chat-runtime-context').StateChangeEntry): string {
+  if (entry.stateType === 'checklist_update') {
+    return `checklist:${entry.packageId ?? ''}`;
+  }
+  if (entry.stateType === 'sources_summary') {
+    return `sources_summary:${entry.textSnapshotLength}:${entry.fetchCount ?? 0}:${
+      entry.searchCount ?? 0
+    }:${entry.totalCharsRead ?? 0}:${(entry.fetchedKeys ?? []).join('|')}`;
+  }
+  if (entry.stateType === 'sources_read') {
+    return `sources_read:${entry.textSnapshotLength}:${entry.sourceS3Key ?? ''}:${
+      entry.sourceTitle ?? ''
+    }:${entry.sourceCharsRead ?? 0}`;
+  }
+  return `${entry.stateType}:${entry.timestamp}:${entry.packageId ?? ''}:${entry.title ?? ''}`;
+}
+
 /**
  * Renders text and tool cards interleaved in stream order.
  * Uses textSnapshotLength on each TrackedToolCall to split the accumulated
@@ -236,7 +253,9 @@ function InterleavedContent({
       if (tc.toolName === 'code') codeOutputs.push(co);
     } else {
       // State change card — render alongside tool chips
-      chipGroup.push(<StateChangeCard key={`state-${item.entry.timestamp}`} entry={item.entry} />);
+      chipGroup.push(
+        <StateChangeCard key={`state-${stateChangeKey(item.entry)}`} entry={item.entry} />,
+      );
     }
   }
 

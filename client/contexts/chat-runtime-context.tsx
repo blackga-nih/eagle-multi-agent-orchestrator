@@ -179,6 +179,82 @@ function dedupeDocuments(docs: DocumentInfo[]): DocumentInfo[] {
   return unique;
 }
 
+function toolCallIdentity(call: TrackedToolCall): string {
+  if (call.toolUseId) return `id:${call.toolUseId}`;
+  return `fallback:${call.toolName}:${call.textSnapshotLength ?? -1}:${JSON.stringify(call.input ?? {})}`;
+}
+
+function toolStatusRank(status: TrackedToolCall['status']): number {
+  switch (status) {
+    case 'done':
+      return 4;
+    case 'error':
+      return 3;
+    case 'interrupted':
+      return 2;
+    case 'running':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function mergeToolCall(existing: TrackedToolCall, incoming: TrackedToolCall): TrackedToolCall {
+  const existingRank = toolStatusRank(existing.status);
+  const incomingRank = toolStatusRank(incoming.status);
+  const preferred = incomingRank > existingRank ? incoming : existing;
+  const fallback = preferred === incoming ? existing : incoming;
+
+  return {
+    ...fallback,
+    ...preferred,
+    input: Object.keys(preferred.input ?? {}).length > 0 ? preferred.input : fallback.input,
+    result: preferred.result ?? fallback.result,
+    streamingInput:
+      (preferred.streamingInput?.length ?? 0) >= (fallback.streamingInput?.length ?? 0)
+        ? preferred.streamingInput
+        : fallback.streamingInput,
+    textSnapshotLength: preferred.textSnapshotLength ?? fallback.textSnapshotLength,
+  };
+}
+
+function dedupeToolCalls(calls: TrackedToolCall[]): TrackedToolCall[] {
+  const byId = new Map<string, TrackedToolCall>();
+  for (const call of calls) {
+    const key = toolCallIdentity(call);
+    const existing = byId.get(key);
+    byId.set(key, existing ? mergeToolCall(existing, call) : call);
+  }
+  return Array.from(byId.values()).sort(
+    (a, b) => (a.textSnapshotLength ?? 0) - (b.textSnapshotLength ?? 0),
+  );
+}
+
+function stateChangeIdentity(entry: StateChangeEntry): string {
+  if (entry.stateType === 'checklist_update') {
+    return `checklist:${entry.packageId ?? ''}`;
+  }
+  if (entry.stateType === 'sources_summary') {
+    return `sources_summary:${entry.textSnapshotLength}:${entry.fetchCount ?? 0}:${
+      entry.searchCount ?? 0
+    }:${entry.totalCharsRead ?? 0}:${(entry.fetchedKeys ?? []).join('|')}`;
+  }
+  if (entry.stateType === 'sources_read') {
+    return `sources_read:${entry.textSnapshotLength}:${entry.sourceS3Key ?? ''}:${
+      entry.sourceTitle ?? ''
+    }:${entry.sourceCharsRead ?? 0}`;
+  }
+  return `${entry.stateType}:${entry.timestamp}:${entry.packageId ?? ''}:${entry.title ?? ''}`;
+}
+
+function dedupeStateChanges(entries: StateChangeEntry[]): StateChangeEntry[] {
+  const byId = new Map<string, StateChangeEntry>();
+  for (const entry of entries) {
+    byId.set(stateChangeIdentity(entry), entry);
+  }
+  return Array.from(byId.values()).sort((a, b) => a.timestamp - b.timestamp);
+}
+
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
@@ -331,7 +407,7 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
           updated = [...existing, sc];
         }
       } else {
-        updated = [...existing, sc];
+        updated = dedupeStateChanges([...existing, sc]);
       }
       return {
         ...state,
@@ -400,36 +476,21 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
       //
       // Must be idempotent: React StrictMode double-fires effects in dev, and
       // the session-load effect can run more than once per mount (route
-      // transitions, auth refresh). Dedupe by natural key so repeated restores
-      // don't accumulate duplicate tool cards / state entries.
+      // transitions, auth refresh). Use the reducer-level dedupe helpers so
+      // repeated restores do not accumulate duplicate tool cards or state
+      // entries, including fallback cases where toolUseId may be absent.
       const mergedTools: ToolCallsByMessageId = { ...session.toolCallsByMsg };
       for (const [msgId, calls] of Object.entries(action.toolCallsByMsg)) {
-        const existing = mergedTools[msgId] ?? [];
-        const seen = new Set<string>(existing.map((tc) => tc.toolUseId));
-        const additions: TrackedToolCall[] = [];
-        for (const tc of calls) {
-          if (seen.has(tc.toolUseId)) continue;
-          seen.add(tc.toolUseId);
-          additions.push(tc);
-        }
-        mergedTools[msgId] = additions.length ? [...existing, ...additions] : existing;
+        mergedTools[msgId] = dedupeToolCalls([...(mergedTools[msgId] ?? []), ...calls]);
       }
       const mergedStateChanges: Record<string, StateChangeEntry[]> = {
         ...session.stateChangesByMsg,
       };
       for (const [msgId, entries] of Object.entries(action.stateChangesByMsg)) {
-        const existing = mergedStateChanges[msgId] ?? [];
-        const seen = new Set<string>(
-          existing.map((e) => `${e.stateType}:${e.timestamp}:${e.packageId ?? ''}`),
-        );
-        const additions: StateChangeEntry[] = [];
-        for (const e of entries) {
-          const key = `${e.stateType}:${e.timestamp}:${e.packageId ?? ''}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          additions.push(e);
-        }
-        mergedStateChanges[msgId] = additions.length ? [...existing, ...additions] : existing;
+        mergedStateChanges[msgId] = dedupeStateChanges([
+          ...(mergedStateChanges[msgId] ?? []),
+          ...entries,
+        ]);
       }
       const mergedDocs: Record<string, DocumentInfo[]> = { ...session.documentsByMsg };
       for (const [msgId, docs] of Object.entries(action.documentsByMsg)) {

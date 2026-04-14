@@ -87,6 +87,30 @@ class TestExportPackageZip:
         zf = zipfile.ZipFile(io.BytesIO(result["data"]))
         assert len(zf.namelist()) == 0
 
+    def test_attachments_are_included_under_attachment_folder(self):
+        """Raw attachments should be written into the ZIP under their folder override."""
+        from app.document_export import export_package_zip
+
+        result = export_package_zip(
+            [],
+            "Attachment Package",
+            attachments=[
+                {
+                    "_binary": b"fake-image-bytes",
+                    "filename": "PKG-0001_technical_evidence_demo.png",
+                    "zip_folder": "09_Attachments/technical_evidence/",
+                }
+            ],
+        )
+
+        zf = zipfile.ZipFile(io.BytesIO(result["data"]))
+        names = zf.namelist()
+        assert names == ["09_Attachments/technical_evidence/PKG-0001_technical_evidence_demo.png"]
+        assert (
+            zf.read("09_Attachments/technical_evidence/PKG-0001_technical_evidence_demo.png")
+            == b"fake-image-bytes"
+        )
+
 
 class TestZipEndpoint:
     """Test the /api/packages/{id}/export/zip endpoint."""
@@ -156,6 +180,46 @@ class TestZipEndpoint:
                         delattr(_main_mod, "get_package")
                     if hasattr(_main_mod, "list_package_documents"):
                         delattr(_main_mod, "list_package_documents")
+                    assert response.headers["content-type"] == "application/zip"
+
+        asyncio.run(_run())
+
+    def test_supports_attachment_only_export(self):
+        """Attachment-only packages should still export as ZIPs."""
+        async def _run():
+            from httpx import AsyncClient, ASGITransport
+            from app.main import app
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                mock_s3 = MagicMock()
+                mock_body = MagicMock()
+                mock_body.read.return_value = b"fake-image-bytes"
+                mock_s3.get_object.return_value = {"Body": mock_body}
+
+                with (
+                    patch("app.package_store.get_package", return_value={"title": "Test"}),
+                    patch("app.package_document_store.list_package_documents", return_value=[]),
+                    patch(
+                        "app.routers.packages.list_package_attachments",
+                        return_value=[
+                            {
+                                "attachment_id": "att-1",
+                                "category": "technical_evidence",
+                                "title": "Screenshot",
+                                "file_type": "png",
+                                "s3_bucket": "bucket",
+                                "s3_key": "key",
+                            }
+                        ],
+                    ),
+                    patch("app.db_client.get_s3", return_value=mock_s3),
+                ):
+                    response = await client.get(
+                        "/api/packages/PKG-0001/export/zip",
+                        headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
+                    )
+                    assert response.status_code == 200
                     assert response.headers["content-type"] == "application/zip"
 
         asyncio.run(_run())

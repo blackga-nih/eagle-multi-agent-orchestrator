@@ -20,6 +20,7 @@ import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 import AgentLogs, { buildDisplayEntries } from './agent-logs';
 import { ChecklistTabContent, docLabel } from './checklist-panel';
 import DocumentViewerModal from './document-viewer-modal';
+import PackageAttachmentsPanel from './package-attachments-panel';
 import type { PackageState } from '@/hooks/use-package-state';
 import { useAllPackages } from '@/hooks/use-all-packages';
 import type { PackageInfo, PackageDocument } from '@/lib/document-api';
@@ -728,6 +729,16 @@ export default function ActivityPanel({
   const notifCount = docCount;
   const packageRequired = packageState?.checklist?.required?.length ?? 0;
   const packageCompleted = packageState?.checklist?.completed?.length ?? 0;
+  const checklistDocTypes = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(packageState?.checklist?.required ?? []),
+          ...(packageState?.checklist?.completed ?? []),
+        ]),
+      ),
+    [packageState?.checklist?.completed, packageState?.checklist?.required],
+  );
 
   // Count unique sources for badge
   const sourcesCount = useMemo(() => {
@@ -833,6 +844,15 @@ export default function ActivityPanel({
               <ChecklistTabContent
                 state={packageState}
                 onDocumentClick={setViewerDocType}
+              />
+            )}
+
+            {packageState?.packageId && (
+              <PackageAttachmentsPanel
+                packageId={packageState.packageId}
+                getToken={getToken}
+                isStreaming={isStreaming}
+                checklistDocTypes={checklistDocTypes}
               />
             )}
 

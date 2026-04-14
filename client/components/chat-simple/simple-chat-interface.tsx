@@ -27,7 +27,7 @@ import ChatUploadButton from './chat-upload-button';
 import PackageSelectorModal from './package-selector-modal';
 import ContractMatrixModal from '../contract-matrix/contract-matrix-modal';
 import type { MatrixTab } from '../contract-matrix/matrix-types';
-import { UploadResult, assignToPackage } from '@/lib/document-api';
+import { PackageAttachment, uploadPackageAttachment, UploadResult, assignToPackage } from '@/lib/document-api';
 import { usePackageState } from '@/hooks/use-package-state';
 import { useAnalytics } from '@/hooks/use-analytics';
 import { useUsageSummary } from '@/hooks/use-usage-summary';
@@ -684,6 +684,44 @@ export default function SimpleChatInterface() {
     setIsPackageSelectorOpen(true);
   };
 
+  const handlePackageAttachmentUploaded = (attachment: PackageAttachment) => {
+    const msgId = `attachment-${Date.now()}`;
+    const docInfo: DocumentInfo = {
+      document_id: attachment.attachment_id,
+      package_id: attachment.package_id,
+      document_type: attachment.doc_type || 'attachment',
+      doc_type: attachment.doc_type || 'attachment',
+      title: attachment.title,
+      s3_key: attachment.s3_key,
+      mode: 'package',
+      status: 'draft',
+      version: 1,
+      file_type: attachment.file_type,
+      content_type: attachment.content_type,
+      is_binary:
+        attachment.content_type !== 'text/plain' && attachment.content_type !== 'text/markdown',
+      generated_at: new Date().toISOString(),
+      source: 'package_attachment',
+    };
+
+    const systemMsg: ChatMessage = {
+      id: msgId,
+      role: 'assistant',
+      content: `File attached to package **${attachment.package_id}**.`,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, systemMsg]);
+    setDocuments((prev) => ({
+      ...prev,
+      [msgId]: [...(prev[msgId] || []), docInfo],
+    }));
+
+    if (currentSessionId) {
+      saveGeneratedDocument(docInfo, currentSessionId);
+    }
+  };
+
   const handlePackageAssignment = async (
     packageId: string | null,
     docType: string,
@@ -819,13 +857,15 @@ export default function SimpleChatInterface() {
       'application/vnd.ms-excel',
       'text/plain',
       'text/markdown',
+      'image/png',
+      'image/jpeg',
     ];
     if (!validTypes.includes(file.type)) {
       // Show error in chat
       const errorMsg: ChatMessage = {
         id: `upload-error-${Date.now()}`,
         role: 'assistant',
-        content: `Unsupported file type: ${file.type || 'unknown'}. Please upload PDF, Word, Excel, or text documents.`,
+        content: `Unsupported file type: ${file.type || 'unknown'}. Please upload PDF, Word, Excel, text, PNG, or JPEG files.`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -835,14 +875,19 @@ export default function SimpleChatInterface() {
     // Use the upload API
     try {
       const token = await getToken();
-      const { uploadDocument } = await import('@/lib/document-api');
-      const result = await uploadDocument(
-        file,
-        currentSessionId || undefined,
-        packageState.packageId ?? undefined,
-        token,
-      );
-      handleUploadComplete(result);
+      if (packageState.packageId) {
+        const attachment = await uploadPackageAttachment(
+          packageState.packageId,
+          file,
+          { sessionId: currentSessionId || undefined },
+          token,
+        );
+        handlePackageAttachmentUploaded(attachment);
+      } else {
+        const { uploadDocument } = await import('@/lib/document-api');
+        const result = await uploadDocument(file, currentSessionId || undefined, undefined, token);
+        handleUploadComplete(result);
+      }
     } catch (err) {
       const errorMsg: ChatMessage = {
         id: `upload-error-${Date.now()}`,
@@ -966,7 +1011,9 @@ export default function SimpleChatInterface() {
               />
               <ChatUploadButton
                 onUploadComplete={handleUploadComplete}
+                onPackageAttachmentUploaded={handlePackageAttachmentUploaded}
                 sessionId={currentSessionId || undefined}
+                packageId={packageState.packageId ?? undefined}
                 disabled={isStreaming}
                 getToken={getToken}
               />
