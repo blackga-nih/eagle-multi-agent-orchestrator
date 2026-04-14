@@ -195,6 +195,18 @@ def exec_create_document(
 
     # Augment data from session context
     data = _augment_document_data_from_context(doc_type, title, data, session_id)
+    if package_id:
+        try:
+            from ..package_attachment_context import enrich_generation_data_from_attachments
+
+            data = enrich_generation_data_from_attachments(
+                tenant_id=tenant_id,
+                package_id=package_id,
+                target_doc_type=doc_type,
+                data=data,
+            )
+        except Exception as exc:
+            logger.debug("Attachment enrichment skipped for %s: %s", package_id, exc)
 
     # Canonical schema validation and normalization (Phase 1 of schema propagation)
     canonical_payload = normalize_and_validate_document_payload(

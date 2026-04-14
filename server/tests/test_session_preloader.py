@@ -59,6 +59,21 @@ MOCK_DOCUMENTS = [
     {"doc_type": "sow", "version": 2, "status": "draft"},
 ]
 
+MOCK_ATTACHMENTS = [
+    {
+        "attachment_id": "att-1",
+        "title": "Technical Requirements",
+        "category": "requirements_evidence",
+        "usage": "reference",
+    },
+    {
+        "attachment_id": "att-2",
+        "title": "Legacy SOW",
+        "category": "prior_artifact",
+        "usage": "official_candidate",
+    },
+]
+
 MOCK_FLAGS = {"streaming_v2": True, "user_skills": False, "mcp_enabled": False}
 
 
@@ -94,6 +109,7 @@ class TestFormatContextForPrompt:
             package=MOCK_PACKAGE,
             checklist=MOCK_CHECKLIST,
             documents=MOCK_DOCUMENTS,
+            attachments=MOCK_ATTACHMENTS,
         )
         result = format_context_for_prompt(ctx)
         assert "Active Package:" in result
@@ -104,6 +120,38 @@ class TestFormatContextForPrompt:
         assert "igce (v1)" in result
         assert "market_research" in result
         assert "acquisition_plan" in result
+        assert "Source Attachments:" in result
+        assert "Technical Requirements [requirements_evidence, reference]" in result
+        assert "Legacy SOW [prior_artifact, official_candidate]" in result
+
+    def test_package_context_focuses_attachment_context_for_doc_type(self):
+        ctx = PreloadedContext(
+            package=MOCK_PACKAGE,
+            checklist=MOCK_CHECKLIST,
+            documents=MOCK_DOCUMENTS,
+            attachments=[
+                {
+                    "attachment_id": "att-1",
+                    "title": "Pricing Workbook",
+                    "category": "pricing_evidence",
+                    "usage": "reference",
+                    "doc_type": None,
+                    "extracted_text": "Loaded labor rates and CLIN pricing.",
+                },
+                {
+                    "attachment_id": "att-2",
+                    "title": "Requirements Narrative",
+                    "category": "requirements_evidence",
+                    "usage": "reference",
+                    "doc_type": None,
+                    "extracted_text": "Contractor shall provide 24x7 support and monthly reporting.",
+                },
+            ],
+        )
+
+        result = format_context_for_prompt(ctx, focus_doc_type="sow")
+        assert "Requirements Narrative [requirements_evidence, reference]" in result
+        assert "24x7 support and monthly reporting" in result
 
     def test_package_all_complete(self):
         checklist = {
@@ -129,23 +177,22 @@ class TestFormatContextForPrompt:
 class TestPreloadSessionContext:
     """Integration-style tests for the async preloader (mocked stores)."""
 
-    @pytest.mark.asyncio
-    async def test_preload_prefs_and_flags(self):
+    def test_preload_prefs_and_flags(self):
         with (
             mock.patch("app.session_preloader._fetch_preferences", return_value=MOCK_PREFS),
             mock.patch("app.session_preloader._fetch_feature_flags", return_value=MOCK_FLAGS),
         ):
-            ctx = await preload_session_context(TENANT, USER)
+            ctx = asyncio.run(preload_session_context(TENANT, USER))
             assert ctx.preferences == MOCK_PREFS
             assert ctx.feature_flags == MOCK_FLAGS
             assert ctx.package is None
 
-    @pytest.mark.asyncio
-    async def test_preload_with_package(self):
+    def test_preload_with_package(self):
         pkg_result = {
             "package": MOCK_PACKAGE,
             "checklist": MOCK_CHECKLIST,
             "documents": MOCK_DOCUMENTS,
+            "attachments": MOCK_ATTACHMENTS,
         }
         with (
             mock.patch("app.session_preloader._fetch_preferences", return_value=MOCK_PREFS),
@@ -153,28 +200,23 @@ class TestPreloadSessionContext:
             mock.patch("app.session_preloader._fetch_feature_flags", return_value=MOCK_FLAGS),
             mock.patch("app.session_preloader._warm_template_cache"),
         ):
-            ctx = await preload_session_context(TENANT, USER, package_id=PACKAGE_ID)
+            ctx = asyncio.run(preload_session_context(TENANT, USER, package_id=PACKAGE_ID))
             assert ctx.package == MOCK_PACKAGE
             assert ctx.checklist == MOCK_CHECKLIST
             assert len(ctx.documents) == 2
+            assert len(ctx.attachments) == 2
 
-    @pytest.mark.asyncio
-    async def test_preload_without_package_id(self):
+    def test_preload_without_package_id(self):
         with (
             mock.patch("app.session_preloader._fetch_preferences", return_value=MOCK_PREFS),
             mock.patch("app.session_preloader._fetch_feature_flags", return_value=MOCK_FLAGS),
         ):
-            ctx = await preload_session_context(TENANT, USER, package_id=None)
+            ctx = asyncio.run(preload_session_context(TENANT, USER, package_id=None))
             assert ctx.package is None
             assert ctx.checklist is None
 
-    @pytest.mark.asyncio
-    async def test_timeout_returns_partial(self):
+    def test_timeout_returns_partial(self):
         """When one fetch times out, we still get partial results."""
-
-        async def slow_prefs(*a, **kw):
-            await asyncio.sleep(5)
-            return MOCK_PREFS
 
         with (
             mock.patch(
@@ -185,17 +227,16 @@ class TestPreloadSessionContext:
             mock.patch("asyncio.to_thread", side_effect=lambda fn, *a, **kw: asyncio.coroutine(lambda: fn(*a, **kw))()),
         ):
             # Even though prefs throw, the timeout wrapper catches it
-            ctx = await preload_session_context(TENANT, USER, timeout_ms=100)
+            ctx = asyncio.run(preload_session_context(TENANT, USER, timeout_ms=100))
             # Should not raise — returns default empty context
             assert isinstance(ctx, PreloadedContext)
 
-    @pytest.mark.asyncio
-    async def test_error_returns_defaults(self):
+    def test_error_returns_defaults(self):
         with (
             mock.patch("app.session_preloader._fetch_preferences", side_effect=Exception("boom")),
             mock.patch("app.session_preloader._fetch_feature_flags", side_effect=Exception("boom")),
         ):
-            ctx = await preload_session_context(TENANT, USER, timeout_ms=500)
+            ctx = asyncio.run(preload_session_context(TENANT, USER, timeout_ms=500))
             assert isinstance(ctx, PreloadedContext)
 
 

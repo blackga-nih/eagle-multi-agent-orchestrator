@@ -23,7 +23,7 @@ LIST_USER_DOCUMENTS_TOOL = {
         "List documents uploaded by the current user. Use this to find documents "
         "the user has uploaded that can be used as source material for generation. "
         "Returns document metadata including title, type, and whether it's assigned "
-        "to a package."
+        "to a package. Package attachments are also included when relevant."
     ),
     "input_schema": {
         "type": "object",
@@ -50,9 +50,9 @@ LIST_USER_DOCUMENTS_TOOL = {
 GET_DOCUMENT_CONTENT_TOOL = {
     "name": "get_document_content",
     "description": (
-        "Get the text content of an uploaded document. Use this after list_user_documents "
-        "to retrieve the actual content of a document for use in generation. "
-        "Returns the markdown/text content that can be included in prompts."
+        "Get the text content of an uploaded document or package attachment. Use this "
+        "after list_user_documents to retrieve the actual content of a file for use in "
+        "generation. Returns markdown/text content that can be included in prompts."
     ),
     "input_schema": {
         "type": "object",
@@ -89,13 +89,21 @@ def list_user_documents(
     """
     from ..user_document_store import list_user_documents as store_list_user_docs
     from ..user_document_store import list_package_documents
+    from ..package_attachment_store import list_user_package_attachments
 
     try:
         if package_id:
             docs = list_package_documents(tenant_id, package_id, limit=50)
             docs = [doc for doc in docs if doc.get("owner_user_id") == user_id]
+            attachments = list_user_package_attachments(
+                tenant_id,
+                user_id,
+                package_id=package_id,
+                limit=50,
+            )
         else:
             docs = store_list_user_docs(tenant_id, user_id, scope=scope, limit=50)
+            attachments = list_user_package_attachments(tenant_id, user_id, limit=50)
 
         # Simplify for agent consumption
         simplified = []
@@ -108,7 +116,23 @@ def list_user_documents(
                 "package_id": doc.get("package_id"),
                 "is_deliverable": doc.get("is_deliverable", False),
                 "created_at": doc.get("created_at"),
+                "entity_type": "user_document",
             })
+        for attachment in attachments:
+            simplified.append({
+                "document_id": attachment.get("attachment_id"),
+                "title": attachment.get("title"),
+                "doc_type": attachment.get("doc_type") or "attachment",
+                "filename": attachment.get("original_filename") or attachment.get("filename"),
+                "package_id": attachment.get("package_id"),
+                "is_deliverable": False,
+                "created_at": attachment.get("created_at"),
+                "entity_type": "package_attachment",
+                "category": attachment.get("category"),
+                "usage": attachment.get("usage"),
+            })
+
+        simplified.sort(key=lambda item: item.get("created_at") or "", reverse=True)
 
         return {
             "success": True,
@@ -146,10 +170,15 @@ def get_document_content(
 
     from ..db_client import get_s3
     from ..document_markdown_service import convert_to_markdown
+    from ..package_attachment_store import find_attachment_by_id
     from ..user_document_store import get_document
 
     try:
         doc = get_document(tenant_id, document_id)
+        entity_type = "user_document"
+        if not doc:
+            doc = find_attachment_by_id(tenant_id, document_id, owner_user_id=user_id)
+            entity_type = "package_attachment"
         if not doc:
             return {
                 "success": False,
@@ -202,10 +231,12 @@ def get_document_content(
             "success": True,
             "document_id": document_id,
             "title": doc.get("title"),
-            "doc_type": doc.get("doc_type"),
+            "doc_type": doc.get("doc_type") or "attachment",
             "content": content,
             "truncated": truncated,
             "char_count": len(content),
+            "entity_type": entity_type,
+            "package_id": doc.get("package_id"),
         }
     except Exception as e:
         logger.error("Failed to get document content: %s", e)
