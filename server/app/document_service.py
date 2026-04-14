@@ -31,6 +31,7 @@ from .package_document_store import (
 )
 from .package_store import get_package, update_package
 from .changelog_store import write_changelog_entry
+from .tools.create_document_support import _append_provenance_metadata
 
 logger = logging.getLogger("eagle.document_service")
 
@@ -132,6 +133,37 @@ def create_package_document_version(
         return DocumentResult(
             success=False,
             error=f"Package {package_id} not found for tenant {tenant_id}",
+        )
+
+    # Reject invented doc-type slugs. Off-script docs (anything in the
+    # union but not in the package's required_documents) ARE allowed —
+    # they surface in checklist.extra[] and the user can promote them
+    # via the PATCH /required-docs endpoint. Anything outside the union
+    # is a typo or rogue caller and would render as an invisible orphan.
+    from .package_store import allowed_doc_types
+
+    if doc_type not in set(allowed_doc_types()):
+        return DocumentResult(
+            success=False,
+            error=(
+                f"Unknown doc_type '{doc_type}'. Must be one of the "
+                f"recognised package document slugs."
+            ),
+        )
+
+    # Inject provenance metadata footer for markdown content. This is the
+    # single guarantee site — every markdown document landing in DOCUMENT#
+    # gets the "## Document Metadata" footer, regardless of caller (chat
+    # agent, POST /documents route, AI edit, backfill). Binary docx/xlsx
+    # bypass: their provenance lives in the DDB record + sidecar.
+    # Must run BEFORE the content-hash computation below so that dedup
+    # fires on the final on-disk content, not the pre-provenance body.
+    if isinstance(content, str) and file_type == "md":
+        content = _append_provenance_metadata(
+            content,
+            template_provenance,
+            change_source,
+            datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         )
 
     # Calculate content hash for idempotency
@@ -243,8 +275,12 @@ def create_package_document_version(
     # Step 4: Supersede prior versions
     _supersede_prior_versions(tenant_id, package_id, doc_type, next_version)
 
-    # Step 5: Update package completed_documents if needed
-    _update_package_checklist(tenant_id, package_id, doc_type)
+    # Step 5: Sync the read-through completed_documents cache. The
+    # checklist itself is now derived from DOCUMENT# inside
+    # get_package_checklist(); this call only refreshes the denormalised
+    # field for legacy readers (validate_package_completeness,
+    # package_context_service, _backfill_completed_docs, resolve-context).
+    _sync_completed_documents_cache(tenant_id, package_id)
 
     word_count = len(content.split()) if isinstance(content, str) else None
 
@@ -589,50 +625,48 @@ def _supersede_prior_versions(
                 logger.warning("Failed to supersede version %s: %s", doc["version"], e)
 
 
-def _update_package_checklist(
+def _sync_completed_documents_cache(
     tenant_id: str,
     package_id: str,
-    doc_type: str,
 ) -> None:
-    """Update package checklist when a document is created.
+    """Refresh the denormalised pkg.completed_documents read-through cache.
 
-    If the doc_type is already required, mark it completed.
-    If the doc_type is NOT required, expand both required and completed
-    lists so the checklist dynamically grows with the package.
+    Truth lives in DOCUMENT# (queried via list_package_documents). This
+    helper just keeps pkg.completed_documents in sync so legacy readers
+    that haven't been migrated yet — validate_package_completeness,
+    package_context_service, _backfill_completed_docs, resolve-context —
+    keep returning correct data without a larger refactor.
+
+    Behaviour change vs. old _update_package_checklist:
+      * NEVER mutates pkg.required_documents. Off-script docs surface in
+        the checklist's extra[] bucket; the user promotes them via the
+        PATCH required-docs endpoint (Phase B').
+      * Computes completed = required ∩ DOCUMENT# (full recompute), not
+        a delta merge — keeps the cache aligned even if a doc was deleted
+        or superseded out of band.
     """
     pkg = get_package(tenant_id, package_id)
     if not pkg:
         return
 
-    required = pkg.get("required_documents", [])
-    completed = pkg.get("completed_documents", [])
+    from .package_document_store import list_package_documents
 
-    # Normalize: match both hyphenated and underscored variants (legacy compat)
-    normalized = doc_type.replace("-", "_")
-    match = next((r for r in required if r.replace("-", "_") == normalized), None)
+    docs = list_package_documents(tenant_id, package_id)
+    doc_types = {d.get("doc_type") for d in docs if d.get("doc_type")}
 
-    updates: dict = {}
+    required = pkg.get("required_documents") or []
+    new_completed = [slug for slug in required if slug in doc_types]
+    old_completed = pkg.get("completed_documents") or []
 
-    if match:
-        # Doc type IS in required list — mark completed if not already
-        if match not in completed and normalized not in completed:
-            completed = list(set(completed + [match]))
-            updates["completed_documents"] = completed
-    else:
-        # Doc type is NOT in required list — expand both lists
-        required = list(required) + [normalized]
-        completed = list(set(completed + [normalized]))
-        updates["required_documents"] = required
-        updates["completed_documents"] = completed
+    if sorted(new_completed) == sorted(old_completed):
+        return
 
-    if updates:
-        update_package(tenant_id, package_id, updates)
-        logger.debug(
-            "Updated package %s checklist: required=%s, completed=%s",
-            package_id,
-            updates.get("required_documents", "unchanged"),
-            updates.get("completed_documents", "unchanged"),
-        )
+    update_package(tenant_id, package_id, {"completed_documents": new_completed})
+    logger.debug(
+        "Synced completed_documents cache for package %s: %s",
+        package_id,
+        new_completed,
+    )
 
 
 def _find_by_content_hash(

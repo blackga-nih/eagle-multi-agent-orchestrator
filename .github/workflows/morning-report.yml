@@ -28,6 +28,11 @@ jobs:
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Optional — morning report gracefully skips the Langfuse section if these are unset.
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PROJECT_ID: ${{ secrets.LANGFUSE_PROJECT_ID }}
+          LANGFUSE_HOST: https://us.cloud.langfuse.com
         run: python scripts/morning_report.py
 
       - name: Sync commits to Jira

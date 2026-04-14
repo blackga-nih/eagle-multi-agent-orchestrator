@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import html2canvas from 'html2canvas';
 import { Check, Camera, X } from 'lucide-react';
 import Modal from '@/components/ui/modal';
-import { useAuth } from '@/contexts/auth-context';
+import { useAuth, isDevMode } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
 import { useFeedback } from '@/contexts/feedback-context';
 import type { FeedbackType, FeedbackArea } from '@/types/schema';
@@ -128,20 +128,33 @@ export default function FeedbackModal() {
     setError(null);
 
     try {
-      let token: string | null = null;
-      try {
-        token = await getToken();
-      } catch {
-        // explicit error path
-      }
-      if (!token) {
-        setError('Session expired. Please sign in again to submit feedback.');
-        setSubmitting(false);
-        return;
-      }
-
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      // Dev mode: backend accepts X-Dev-User-Id — skip Cognito entirely.
+      // getToken() deliberately returns '' in dev mode (see auth-context),
+      // which previously tripped the "Session expired" branch below.
+      if (!isDevMode()) {
+        let token: string | null = null;
+        try {
+          token = await getToken();
+        } catch {
+          // Cognito SDK's localStorage cache occasionally goes cold for a tick
+          // right after login while the React auth state already shows signed-in.
+          // Wait 50ms and try once more before giving up.
+          await new Promise((r) => setTimeout(r, 50));
+          try {
+            token = await getToken();
+          } catch {
+            token = null;
+          }
+        }
+        if (!token) {
+          setError('Session expired. Please sign in again to submit feedback.');
+          setSubmitting(false);
+          return;
+        }
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
       // Backend expects `feedback_text`; build from comment + type + area tags
       const feedbackText = [

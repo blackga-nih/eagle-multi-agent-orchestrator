@@ -42,13 +42,16 @@ from ..package_context_service import (
     set_active_package,
 )
 from ..package_store import (
+    PatchRequiredDocsError,
     approve_package,
     clone_package,
     create_package,
     delete_package,
+    doc_type_manifest,
     get_package,
     get_package_checklist,
     list_packages,
+    patch_required_docs,
     submit_package,
     update_package,
 )
@@ -199,6 +202,20 @@ async def create_package_endpoint(
     )
 
 
+@router.get("/doc-types")
+async def get_doc_types_manifest_endpoint(
+    user: UserContext = Depends(get_user_from_header),  # noqa: ARG001
+):
+    """Return [{slug, label}] for every recognised package doc-type.
+
+    Frontend uses this to populate the "+ Add Required" picker in the
+    checklist customization UI (Phase C'). The manifest is the union of
+    pathway baselines + compliance matrix slugs — anything that
+    create_package_document_version will accept.
+    """
+    return {"doc_types": doc_type_manifest()}
+
+
 @router.get("/{package_id}")
 async def get_package_endpoint(
     package_id: str,
@@ -231,6 +248,55 @@ async def get_package_checklist_endpoint(
 ):
     """Return the document checklist for a package (required, completed, missing)."""
     return get_package_checklist(user.tenant_id, package_id)
+
+
+@router.patch("/{package_id}/required-docs")
+async def patch_required_docs_endpoint(
+    package_id: str,
+    body: Dict[str, Any],
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Mutate a package's required_documents list (Option D, Phase B').
+
+    Body shape:
+        {"add": ["qasp"], "remove": ["sb_review"], "reset": false}
+
+    On success returns the updated rich checklist (items[], extra[],
+    custom flag, warnings[]). The frontend hook should call mutate() on
+    this response to apply the change without a refetch.
+    """
+    add = body.get("add") or []
+    remove = body.get("remove") or []
+    reset = bool(body.get("reset", False))
+
+    if not isinstance(add, list) or not isinstance(remove, list):
+        raise HTTPException(
+            status_code=400, detail="'add' and 'remove' must be lists of slugs"
+        )
+
+    try:
+        result = patch_required_docs(
+            tenant_id=user.tenant_id,
+            package_id=package_id,
+            add=add,
+            remove=remove,
+            reset=reset,
+        )
+    except PatchRequiredDocsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Package not found")
+
+    write_audit(
+        tenant_id=user.tenant_id,
+        entity_type="package",
+        entity_name=package_id,
+        event_type="required_docs.patched",
+        actor_user_id=user.user_id,
+        metadata={"add": add, "remove": remove, "reset": reset},
+    )
+    return result
 
 
 @router.post("/{package_id}/submit")
@@ -941,7 +1007,17 @@ async def create_document_endpoint(
     body: Dict[str, Any],
     user: UserContext = Depends(get_user_from_header),
 ):
-    """Save a generated document for a package using canonical document service."""
+    """Save a generated document for a package using canonical document service.
+
+    Provenance footer injection happens inside ``create_package_document_version``
+    so the bypass that used to skip the agent path is now closed — every write
+    to DOCUMENT# carries the markdown footer regardless of caller.
+
+    The response includes the fresh ``checklist`` so the calling client can
+    call ``usePackageChecklist().mutate(checklist)`` and avoid a refetch round
+    trip. Other tabs/sessions pick up the change on next cold load via
+    ``GET /api/packages/{id}/checklist``.
+    """
     result = create_package_document_version(
         tenant_id=user.tenant_id,
         package_id=package_id,
@@ -960,10 +1036,17 @@ async def create_document_endpoint(
             status_code=status, detail=result.error or "Document creation failed"
         )
 
+    checklist = None
+    try:
+        checklist = get_package_checklist(user.tenant_id, package_id)
+    except Exception:
+        logger.debug("checklist fetch failed after document create", exc_info=True)
+
     doc = get_document(user.tenant_id, package_id, body["doc_type"], result.version)
-    if doc:
-        return doc
-    return result.to_dict()
+    payload: Dict[str, Any] = doc if doc else result.to_dict()
+    if checklist is not None:
+        payload = {**payload, "checklist": checklist}
+    return payload
 
 
 @router.get("/{package_id}/documents/{doc_type}/history")

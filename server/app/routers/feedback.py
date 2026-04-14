@@ -31,6 +31,63 @@ from .dependencies import get_user_from_header
 # ── JIRA helpers ────────────────────────────────────────────────────
 
 
+def _generate_jira_title_haiku(
+    feedback_text: str,
+    feedback_type: str,
+    feedback_area: str,
+) -> Optional[str]:
+    """Generate a concise JIRA issue title with Claude Haiku.
+
+    Returns None on any error; caller falls back to truncated feedback text.
+    The model is asked for a short action-oriented title (under 80 chars, no
+    quotes, no trailing punctuation) describing the reported issue.
+    """
+    try:
+        import boto3
+        from botocore.config import Config
+
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=os.environ.get("AWS_REGION", "us-east-1"),
+            config=Config(read_timeout=15, retries={"max_attempts": 1}),
+        )
+
+        context_bits = []
+        if feedback_type and feedback_type != "general":
+            context_bits.append(f"type={feedback_type}")
+        if feedback_area:
+            context_bits.append(f"area={feedback_area}")
+        context_line = f" (context: {', '.join(context_bits)})" if context_bits else ""
+
+        prompt = (
+            "You are generating a JIRA issue title from a user's feedback comment "
+            "about EAGLE, a federal acquisition assistant.\n\n"
+            "Rules:\n"
+            "- 6 to 10 words\n"
+            "- Under 80 characters total\n"
+            "- Action-oriented and specific (describe the problem or request)\n"
+            "- No quotes, no trailing period, no leading tags like [Feedback]\n"
+            "- Plain sentence case\n"
+            "- If the feedback is vague, summarize the sentiment instead\n\n"
+            f"Feedback{context_line}:\n{feedback_text[:1500]}\n\n"
+            "Respond with ONLY the title, nothing else."
+        )
+
+        response = client.converse(
+            modelId="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": 60, "temperature": 0},
+        )
+        title = response["output"]["message"]["content"][0]["text"].strip()
+        title = title.strip('"').strip("'").rstrip(".").strip()
+        if not title or len(title) > 120:
+            return None
+        return title
+    except Exception:
+        logger.warning("feedback: Haiku title generation failed", exc_info=True)
+        return None
+
+
 def _create_jira_for_feedback(
     feedback_id: str,
     feedback_text: str,
@@ -51,9 +108,16 @@ def _create_jira_for_feedback(
 
     from ..jira_client import create_feedback_issue
 
-    summary_text = feedback_text[:80].replace("\n", " ")
+    ai_title = _generate_jira_title_haiku(feedback_text, feedback_type, feedback_area)
+    if ai_title:
+        summary_text = ai_title
+    else:
+        summary_text = feedback_text[:80].replace("\n", " ").strip() or "User feedback"
     area_tag = f"[{feedback_area}]" if feedback_area else ""
     summary = f"[Feedback][{feedback_type}]{area_tag} {summary_text}"
+    # Hard cap — Jira summaries are limited to 255 chars.
+    if len(summary) > 240:
+        summary = summary[:237] + "..."
 
     description = (
         f"h3. User Feedback\n"

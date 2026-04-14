@@ -2,12 +2,35 @@
 
 import { useState, useCallback } from 'react';
 
+/** Single rich checklist item (one per required slug). */
+export interface ChecklistItem {
+  slug: string;
+  label: string;
+  status: 'pending' | 'completed';
+  document_id?: string;
+  version?: number;
+  updated_at?: string;
+  doc_status?: string;
+}
+
 /** Checklist state pushed by the update_state tool via SSE metadata. */
 export interface PackageChecklist {
   required: string[];
   completed: string[];
   missing: string[];
   complete: boolean;
+  /** Rich items[] derived from DOCUMENT# (Phase B). */
+  items?: ChecklistItem[];
+  /** Off-script docs that exist in DOCUMENT# but are NOT in required[]. */
+  extra?: ChecklistItem[];
+  /** Acquisition pathway slug. */
+  pathway?: string | null;
+  /** Package title — comes through on every checklist update. */
+  title?: string | null;
+  /** True when the user has curated the required-doc list (Option D). */
+  custom?: boolean;
+  /** Soft warnings from a PATCH /required-docs response. */
+  warnings?: string[];
   /** Checklist provenance (null for legacy packages). */
   pmr_checklist_name?: string | null;
   pmr_checklist_s3_key?: string | null;
@@ -24,6 +47,8 @@ export interface ComplianceItem {
 export interface PackageState {
   /** Current package ID (if in package mode). */
   packageId: string | null;
+  /** Human-readable package title (falls back to packageId if null). */
+  packageTitle: string | null;
   /** Current acquisition workflow phase. */
   phase: string | null;
   /** Previous phase (set on phase_change events). */
@@ -44,6 +69,7 @@ export interface PackageState {
 
 const INITIAL_STATE: PackageState = {
   packageId: null,
+  packageTitle: null,
   phase: null,
   previousPhase: null,
   checklist: null,
@@ -72,6 +98,13 @@ export function usePackageState() {
       // Always update package ID if present
       if (metadata.package_id) {
         next.packageId = metadata.package_id as string;
+      }
+
+      // Pick up human-readable title from any state event that includes it.
+      // Backend now emits `title` on checklist_update / document_ready /
+      // end-of-turn refresh — use it everywhere, not just package_update.
+      if (typeof metadata.title === 'string' && metadata.title.trim()) {
+        next.packageTitle = metadata.title as string;
       }
 
       // Always update checklist if present in the payload

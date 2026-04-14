@@ -439,11 +439,33 @@ export interface PackageDocument {
   word_count?: number;
 }
 
+export interface ChecklistItem {
+  slug: string;
+  label: string;
+  status: 'pending' | 'completed';
+  document_id?: string;
+  version?: number;
+  updated_at?: string;
+  doc_status?: string;
+}
+
 export interface PackageChecklist {
-  package_id: string;
+  package_id?: string;
   required: string[];
   completed: string[];
   missing: string[];
+  complete?: boolean;
+  items?: ChecklistItem[];
+  extra?: ChecklistItem[];
+  pathway?: string | null;
+  title?: string | null;
+  custom?: boolean;
+  warnings?: string[];
+}
+
+export interface DocTypeManifestEntry {
+  slug: string;
+  label: string;
 }
 
 /**
@@ -480,6 +502,59 @@ export async function getPackageChecklist(
   }
 
   return response.json();
+}
+
+/**
+ * Mutate a package's required-doc list (Phase B' Option D).
+ *
+ * `add` and `remove` can be combined in one call. `reset: true` discards
+ * the user's curated list and recomputes from the pathway baseline; it
+ * takes priority over add/remove. Returns the freshly-derived rich
+ * checklist so callers can mutate() without a refetch.
+ */
+export async function patchPackageRequiredDocs(
+  packageId: string,
+  body: { add?: string[]; remove?: string[]; reset?: boolean },
+  token?: string | null,
+): Promise<PackageChecklist> {
+  const response = await fetch(
+    `/api/packages/${encodeURIComponent(packageId)}/required-docs`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    },
+  );
+
+  if (!response.ok) {
+    const err = (await response.json().catch(() => ({ detail: 'Patch failed' }))) as {
+      detail?: string;
+    };
+    throw new Error(err.detail || `Patch failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Fetch the allowed doc-type manifest used by the "+ Add Required" picker.
+ */
+export async function getDocTypesManifest(
+  token?: string | null,
+): Promise<DocTypeManifestEntry[]> {
+  const response = await fetch('/api/packages/doc-types', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch doc-types manifest: ${response.status}`);
+  }
+
+  const data = (await response.json()) as { doc_types?: DocTypeManifestEntry[] };
+  return data.doc_types || [];
 }
 
 // ── Tag API ────────────────────────────────────────────────────────

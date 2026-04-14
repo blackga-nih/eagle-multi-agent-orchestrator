@@ -50,7 +50,7 @@ interface ChecklistPanelProps {
  * Shows an empty state when no package is active.
  */
 export function ChecklistTabContent({ state, onDocumentClick }: ChecklistPanelProps) {
-  const { checklist, progressPct, phase, complianceAlerts, packageId } = state;
+  const { checklist, progressPct, phase, complianceAlerts, packageId, packageTitle } = state;
   const [downloading, setDownloading] = useState(false);
   const [showFormatMenu, setShowFormatMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -130,8 +130,15 @@ export function ChecklistTabContent({ state, onDocumentClick }: ChecklistPanelPr
     <div className="flex flex-col gap-0">
       {/* Package Header */}
       <div className="mb-3">
-        <h4 className="text-sm font-semibold text-[#003366]">Acquisition Package</h4>
-        {packageId && <p className="text-[10px] text-gray-400 mt-0.5 font-mono">{packageId}</p>}
+        <h4
+          className="text-sm font-semibold text-[#003366] truncate"
+          title={packageTitle || 'Acquisition Package'}
+        >
+          {packageTitle || 'Acquisition Package'}
+        </h4>
+        {packageId && (
+          <p className="text-[10px] text-gray-400 mt-0.5 font-mono truncate">{packageId}</p>
+        )}
         {phase && (
           <span
             className={`inline-block mt-1 px-2 py-0.5 text-[10px] rounded-full font-medium ${PHASE_STYLES[phase] || 'bg-blue-100 text-blue-800'}`}

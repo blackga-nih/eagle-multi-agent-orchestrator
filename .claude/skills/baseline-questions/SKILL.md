@@ -336,3 +336,89 @@ Output: `scripts/baseline_{version}_report.html`
 - After knowledge base content changes
 - After model upgrades (new Claude version on Bedrock)
 - Before and after major releases
+
+---
+
+## Demo Scenario Mode — `run_demo.py`
+
+Evaluate a **multi-turn demo conversation** from a `.docx` script instead of
+the single-turn baseline question set. Use this when someone says "run the demo
+script", "evaluate the demo", "demo walkthrough", or references a docx file
+with a rehearsed user↔EAGLE dialogue.
+
+**Script**: `scripts/run_demo.py` (sibling to `run_baseline.py`)
+
+### What it does
+
+1. **Parses the docx** into discrete user turns + reference EAGLE responses.
+   Detects turn boundaries via marker blocks (`Reasoning…`, `internal`,
+   `think`, `no output`) and user-intent openers (`I need`, `Please`, `Draft`,
+   `Generate`, `Can you`, etc.). Writes `demo_turns.json` for inspection.
+2. **Replays user turns** against the live backend in **one shared session**
+   (multi-turn, not fresh-per-question like baseline). Same headers as
+   `run_baseline.py` but `X-User-Id: demo-eval`.
+3. **Optionally captures Playwright screenshots** of the chat UI per turn
+   (pre-send, streaming intervals, post-response). Auth via Cognito.
+4. **Scores each turn** via Bedrock/Sonnet-4-6 on 4 dimensions (accuracy,
+   completeness, sources, actionability 0-5 each) with pre-computed doc
+   overlap hint.
+5. **Builds a self-contained HTML report** with screenshot thumbnails, tool
+   pills, doc comparison, score grid, and side-by-side responses.
+
+### Usage
+
+```bash
+# Parse only (inspect demo_turns.json before burning API calls + LLM cost)
+python .claude/skills/baseline-questions/scripts/run_demo.py \
+    --demo-script "c:/path/to/EAGLE Demo Script.docx" \
+    --server http://localhost:8000 \
+    --parse-only
+
+# Full run against DEV ALB with screenshots
+python .claude/skills/baseline-questions/scripts/run_demo.py \
+    --demo-script "c:/path/to/EAGLE Demo Script.docx" \
+    --server https://DEV-ALB-URL \
+    --screenshots
+
+# Skip Bedrock scoring (just run + screenshot + report)
+python .claude/skills/baseline-questions/scripts/run_demo.py \
+    --demo-script "c:/path/to/EAGLE Demo Script.docx" \
+    --server http://localhost:8000 \
+    --skip-scoring
+```
+
+### Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--demo-script PATH` | **Required** — the `.docx` with the rehearsed conversation |
+| `--server URL` | **Required** — backend base URL (localhost or ALB) |
+| `--tenant ID` | Tenant for API calls (default `dev-tenant`) |
+| `--output DIR` | Override output root (default `scripts/demo_eval_results/`) |
+| `--parse-only` | Parse docx and save `demo_turns.json`, then exit |
+| `--turns-json PATH` | Skip docx parsing and load hand-edited turns from this JSON file |
+| `--screenshots` | Capture Playwright screenshots of the chat UI |
+| `--auth-email EMAIL` | Cognito email (or env `EAGLE_TEST_EMAIL`) |
+| `--auth-password PWD` | Cognito password (or env `EAGLE_TEST_PASSWORD`) |
+| `--headed` | Show the browser window during screenshot capture |
+| `--skip-scoring` | Skip Bedrock scoring (report will omit score grid) |
+
+### Output layout
+
+```
+scripts/demo_eval_results/{YYYYMMDD-HHMMSS}/
+    demo_turns.json       parsed turns (inspect before running)
+    results.json          per-turn API responses + tools + usage
+    scores.json           per-turn 4-dim scores + verdicts
+    screenshots/turn{N}/  per-turn PNGs (if --screenshots)
+    demo_report.html      self-contained HTML report
+```
+
+### When to hand-edit `demo_turns.json`
+
+The docx parser is heuristic — it merges adjacent marker blocks when there's
+no user-intent opener between them, but the exact user/EAGLE split can be off
+by one paragraph. Always run `--parse-only` first, inspect the per-turn
+char counts, and hand-edit `demo_turns.json` if a turn split is wrong. The
+full run consumes the same JSON file from the same output directory, so
+edit and re-run without `--parse-only`.

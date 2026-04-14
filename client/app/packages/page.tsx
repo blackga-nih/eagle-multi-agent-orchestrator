@@ -26,26 +26,8 @@ import {
   formatCurrency,
   formatDate,
 } from '@/lib/format-helpers';
-import { getPackages, PackageData } from '@/lib/document-store';
 import { Workflow, WorkflowStatus } from '@/types/schema';
 import { useAuth } from '@/contexts/auth-context';
-
-/** Convert a localStorage PackageData into a Workflow shape for the grid. */
-function packageToWorkflow(pkg: PackageData): Workflow {
-  const completed = pkg.checklist.filter((c) => c.status === 'completed').length;
-  const total = pkg.checklist.length;
-  return {
-    id: pkg.id,
-    user_id: 'local',
-    title: pkg.title,
-    description: `${completed}/${total} documents generated`,
-    status: pkg.status,
-    created_at: pkg.created_at,
-    updated_at: pkg.updated_at,
-    metadata: { _source: 'localStorage' },
-    archived: false,
-  };
-}
 
 /** Convert a backend package response into a Workflow shape. */
 function backendToWorkflow(pkg: Record<string, unknown>): Workflow {
@@ -72,22 +54,13 @@ export default function WorkflowsPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
-  const [selectedPackage, setSelectedPackage] = useState<PackageData | null>(null);
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [editTitleValue, setEditTitleValue] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
-  const [localPackages, setLocalPackages] = useState<PackageData[]>([]);
   const [backendWorkflows, setBackendWorkflows] = useState<Workflow[]>([]);
   const [loading, setLoading] = useState(true);
   const [backendChecklist, setBackendChecklist] = useState<
     { doc_type: string; label: string; status: string; document_id?: string }[]
   >([]);
   const [checklistLoading, setChecklistLoading] = useState(false);
-
-  // Load localStorage packages on mount
-  useEffect(() => {
-    setLocalPackages(getPackages());
-  }, []);
 
   // Fetch packages from backend
   useEffect(() => {
@@ -115,10 +88,7 @@ export default function WorkflowsPage() {
     };
   }, [getToken]);
 
-  const allWorkflows = useMemo(() => {
-    const localAsWorkflows = localPackages.map(packageToWorkflow);
-    return [...localAsWorkflows, ...backendWorkflows];
-  }, [localPackages, backendWorkflows]);
+  const allWorkflows = useMemo(() => backendWorkflows, [backendWorkflows]);
 
   const statusTabs = useMemo(
     () => [
@@ -189,72 +159,8 @@ export default function WorkflowsPage() {
   );
 
   const handleWorkflowClick = (workflow: Workflow) => {
-    // If it's a localStorage package, show the document checklist modal
-    if ((workflow.metadata as Record<string, unknown>)?._source === 'localStorage') {
-      const pkg = localPackages.find((p) => p.id === workflow.id) ?? null;
-      setSelectedPackage(pkg);
-    } else {
-      setSelectedWorkflow(workflow);
-      fetchBackendChecklist(workflow.id);
-    }
-  };
-
-  const handleEditTitle = () => {
-    if (selectedPackage) {
-      setEditTitleValue(selectedPackage.title);
-      setEditingTitle(true);
-    }
-  };
-
-  const handleSaveTitle = async () => {
-    if (!selectedPackage || !editTitleValue.trim()) return;
-
-    try {
-      // Update localStorage
-      const packages = getPackages();
-      const updated = packages.map((pkg) =>
-        pkg.id === selectedPackage.id
-          ? { ...pkg, title: editTitleValue.trim(), updated_at: new Date().toISOString() }
-          : pkg,
-      );
-
-      // Persist back to localStorage
-      const packagesMap = Object.fromEntries(updated.map((pkg) => [pkg.id, pkg]));
-      try {
-        localStorage.setItem('eagle_packages', JSON.stringify(packagesMap));
-      } catch {
-        // localStorage full or unavailable
-      }
-
-      // Update local packages state
-      setLocalPackages(updated);
-      const updatedPkg = updated.find((p) => p.id === selectedPackage.id);
-      if (updatedPkg) {
-        setSelectedPackage(updatedPkg);
-      }
-
-      // Optionally sync to backend if package has a package_id
-      if (selectedPackage.package_id) {
-        const token = await getToken();
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-
-        await fetch(`/api/packages/${selectedPackage.package_id}`, {
-          method: 'PUT',
-          headers,
-          body: JSON.stringify({ title: editTitleValue.trim() }),
-        });
-      }
-
-      setEditingTitle(false);
-    } catch (error) {
-      console.error('Failed to save package title:', error);
-    }
-  };
-
-  const handleCancelEdit = () => {
-    setEditingTitle(false);
-    setEditTitleValue('');
+    setSelectedWorkflow(workflow);
+    fetchBackendChecklist(workflow.id);
   };
 
   return (
@@ -359,12 +265,6 @@ export default function WorkflowsPage() {
                       {workflow.urgency_level === 'critical' && (
                         <Badge variant="danger" size="sm">
                           Critical
-                        </Badge>
-                      )}
-                      {(workflow.metadata as Record<string, unknown>)?._source ===
-                        'localStorage' && (
-                        <Badge variant="info" size="sm">
-                          AI Generated
                         </Badge>
                       )}
                     </div>
@@ -530,135 +430,6 @@ export default function WorkflowsPage() {
                     No documents in this package yet.
                   </p>
                 )}
-              </div>
-            </div>
-          )}
-        </Modal>
-
-        {/* localStorage Package Detail Modal — Document Checklist */}
-        <Modal
-          isOpen={!!selectedPackage}
-          onClose={() => {
-            setSelectedPackage(null);
-            setEditingTitle(false);
-          }}
-          size="lg"
-          footer={
-            <div className="flex justify-end">
-              <button
-                onClick={() => setSelectedPackage(null)}
-                className="px-4 py-2 text-gray-600 hover:text-gray-800"
-              >
-                Close
-              </button>
-            </div>
-          }
-        >
-          {selectedPackage && (
-            <div className="space-y-6">
-              {/* Editable title - double-click to edit */}
-              <div className="-mt-2 -mx-6 px-6 pb-4 border-b border-gray-100">
-                {editingTitle ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={editTitleValue}
-                      onChange={(e) => setEditTitleValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveTitle();
-                        if (e.key === 'Escape') handleCancelEdit();
-                      }}
-                      onBlur={handleSaveTitle}
-                      autoFocus
-                      className="flex-1 text-lg font-bold text-gray-900 px-2 py-1 -ml-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                ) : (
-                  <h2
-                    className="text-lg font-bold text-gray-900 cursor-pointer hover:text-blue-600 transition-colors"
-                    onDoubleClick={handleEditTitle}
-                    title="Double-click to edit"
-                  >
-                    {selectedPackage.title}
-                  </h2>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-gray-500 uppercase tracking-wide">Status</label>
-                  <p className="mt-1">
-                    <span
-                      className={`inline-block text-xs font-bold uppercase px-2 py-1 rounded-full ${getWorkflowStatusColor(selectedPackage.status)}`}
-                    >
-                      {selectedPackage.status.replace('_', ' ')}
-                    </span>
-                  </p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 uppercase tracking-wide">Documents</label>
-                  <p className="mt-1 text-sm font-medium">
-                    {selectedPackage.checklist.filter((c) => c.status === 'completed').length} /{' '}
-                    {selectedPackage.checklist.length} completed
-                  </p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 uppercase tracking-wide">Created</label>
-                  <p className="mt-1 text-sm font-medium">
-                    {formatDate(selectedPackage.created_at)}
-                  </p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 uppercase tracking-wide">
-                    Last Updated
-                  </label>
-                  <p className="mt-1 text-sm font-medium">
-                    {formatDate(selectedPackage.updated_at)}
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
-                  Document Checklist
-                </label>
-                <div className="space-y-2">
-                  {selectedPackage.checklist.map((item) => (
-                    <div
-                      key={item.document_type}
-                      className={`flex items-center gap-3 p-3 rounded-lg ${
-                        item.status === 'completed' ? 'bg-green-50' : 'bg-gray-50'
-                      } ${item.document_id ? 'cursor-pointer hover:bg-green-100 transition-colors' : ''}`}
-                      onClick={() => {
-                        if (item.document_id) {
-                          router.push(`/documents/${item.document_id}`);
-                        }
-                      }}
-                    >
-                      {item.status === 'completed' ? (
-                        <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
-                      ) : (
-                        <Circle className="w-5 h-5 text-gray-300 shrink-0" />
-                      )}
-                      <div className="flex-1">
-                        <p
-                          className={`text-sm font-medium ${item.status === 'completed' ? 'text-green-900' : 'text-gray-700'}`}
-                        >
-                          {item.label}
-                        </p>
-                      </div>
-                      <span
-                        className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${
-                          item.status === 'completed'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-100 text-gray-600'
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                      {item.document_id && <FileText className="w-4 h-4 text-green-600 shrink-0" />}
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
           )}

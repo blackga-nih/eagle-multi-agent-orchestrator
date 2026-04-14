@@ -17,22 +17,29 @@ from typing import Any
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .create_document_support import (
+    _DOC_TYPE_LABELS,
     _apply_sow_clear_edits,
-    _append_provenance_metadata,
     _augment_document_data_from_context,
     _default_output_format_for_doc_type,
     _generate_acquisition_plan,
+    _generate_buy_american,
     _generate_contract_type_justification,
     _generate_cor_certification,
     _generate_eval_criteria,
     _generate_igce,
     _generate_justification,
     _generate_market_research,
+    _generate_price_reasonableness,
+    _generate_purchase_request,
+    _generate_pws,
+    _generate_required_sources,
     _generate_section_508,
     _generate_security_checklist,
     _generate_son_products,
     _generate_son_services,
     _generate_sow,
+    _generate_subk_plan,
+    _generate_subk_review,
     get_s3,
     _looks_like_unfilled_template_preview,
     _update_document_content,
@@ -44,20 +51,6 @@ from ..ai_document_schema import (
     get_create_document_types,
     normalize_doc_type,
 )
-
-# Doc-type labels mirrored from strands_agentic_service._DOC_TYPE_LABELS
-_DOC_TYPE_LABELS = {
-    "sow": "Statement of Work",
-    "igce": "Independent Government Cost Estimate",
-    "market_research": "Market Research",
-    "acquisition_plan": "Acquisition Plan",
-    "justification": "Justification & Approval",
-    "eval_criteria": "Evaluation Criteria",
-    "security_checklist": "Security Checklist",
-    "section_508": "Section 508 Compliance",
-    "cor_certification": "COR Certification",
-    "contract_type_justification": "Contract Type Justification",
-}
 
 
 _LOW_SIGNAL_TITLE_CONTEXT_RE = re.compile(
@@ -128,9 +121,15 @@ def _title_from_context(title: str, doc_type: str, data: dict) -> str:
     return f"{base_label} - {context}"
 
 
+# Polite-phrase prefix is REQUIRED — without it, legitimate titles whose
+# descriptive suffix happens to start with a "verb" word (e.g. "Statement of
+# Work - Draft for NIH Cloud Hosting") were being wrongly stripped to just
+# "Statement of Work". Requiring a polite phrase (can you / please / help me /
+# i need to / i want to / i'd like to) means only actual prompt fragments
+# match.
 _PROMPT_FRAGMENT_TITLE_RE = re.compile(
     r"^(.*?)\s*-\s*"
-    r"(?:can you |could you |please |help me |i need to |i want to |i'd like to )*"
+    r"(?:can you |could you |please |help me |i need(?: you)? to |i want to |i'd like to )"
     r"(?:help\s+(?:me\s+)?)?(?:create|generate|draft|write|produce|make|build|prepare)"
     r"\b.*$",
     re.IGNORECASE,
@@ -142,7 +141,9 @@ def _sanitize_title(title: str, doc_type: str) -> str:
 
     Catches titles like "Statement of Work - can you help me create an sow"
     and returns just "Statement of Work".  Leaves meaningful titles like
-    "Statement of Work - Cloud Hosting Services" untouched.
+    "Statement of Work - Cloud Hosting Services" or "Statement of Work -
+    Draft for NIH" untouched (the polite-phrase prefix on the regex is
+    what distinguishes prompt fragments from real descriptive suffixes).
     """
     if not title:
         return title
@@ -217,6 +218,93 @@ def exec_create_document(
     doc_type = canonical_payload.doc_type
     data = canonical_payload.data
 
+    # Code-level checklist guardrail. The supervisor prompt tells the agent to
+    # consult the PMR checklist before calling create_document, but a pure
+    # prompt-level rule is easy to ignore. Check here too so the system fails
+    # fast with a structured error if a non-required doc_type is requested,
+    # or warns if the doc is already completed (agent should use update_existing_key
+    # for revisions instead of creating a duplicate). Only runs when package_id
+    # is provided — session-mode documents (no package) are unaffected.
+    if package_id:
+        try:
+            from app.package_store import get_package_checklist
+
+            checklist = get_package_checklist(tenant_id, package_id)
+            required = set(checklist.get("required", []) or [])
+            completed_set = set(checklist.get("completed", []) or [])
+
+            # Requirements-document companion pairs: PWS and SOW serve the same
+            # checklist role (both are the "requirements document" — one
+            # performance-based, the other task-based). If the checklist lists
+            # one and the user explicitly asks for the other, treat the request
+            # as satisfying the requirement so the guardrail does not hard-block.
+            # The supervisor prompt has a separate rule telling the agent to
+            # pick whichever the user explicitly asked for.
+            _DOC_TYPE_COMPANIONS: dict[str, str] = {"pws": "sow", "sow": "pws"}
+            companion = _DOC_TYPE_COMPANIONS.get(doc_type)
+            companion_satisfies_required = bool(
+                companion and companion in required
+            )
+            companion_in_completed = bool(
+                companion and companion in completed_set
+            )
+
+            # Not on the required checklist → hard error with list to guide the agent.
+            if (
+                required
+                and doc_type not in required
+                and doc_type not in completed_set
+                and not companion_satisfies_required
+                and not companion_in_completed
+            ):
+                logger.info(
+                    "Checklist guardrail blocked %s for package %s — not in required list",
+                    doc_type,
+                    package_id,
+                )
+                return {
+                    "error": (
+                        f"doc_type '{doc_type}' is not in the required checklist "
+                        f"for package {package_id}. Call manage_package("
+                        f"operation='checklist', package_id='{package_id}') to see "
+                        "the required documents, then only generate documents "
+                        "on that list."
+                    ),
+                    "required": sorted(required),
+                    "completed": sorted(completed_set),
+                }
+
+            # Already completed → warn and point the agent at update_existing_key.
+            # Does not block — lets the agent proceed if the user explicitly
+            # asked to regenerate (agent will see the warning in its tool result
+            # and should surface it to the user before redoing the work).
+            if doc_type in completed_set:
+                existing_key: str | None = None
+                try:
+                    from app.package_document_store import get_document as _get_doc
+
+                    existing = _get_doc(tenant_id, package_id, doc_type, version=None)
+                    if existing:
+                        existing_key = existing.get("s3_key")
+                except Exception:
+                    existing_key = None
+                logger.info(
+                    "Checklist guardrail: %s already completed for package %s (existing=%s)",
+                    doc_type,
+                    package_id,
+                    existing_key,
+                )
+                data["_checklist_warning"] = (
+                    f"'{doc_type}' is already marked complete in the checklist. "
+                    "If the user wants to revise the existing document, call "
+                    "create_document again with update_existing_key set to the "
+                    "existing s3_key instead of creating a duplicate."
+                )
+                if existing_key:
+                    data["_existing_s3_key"] = existing_key
+        except Exception:
+            logger.debug("Checklist guardrail check failed (non-fatal)", exc_info=True)
+
     # Log and emit telemetry for schema normalization (Phase 6 observability)
     if canonical_payload.warnings:
         logger.warning(
@@ -286,6 +374,7 @@ def exec_create_document(
 
     markdown_generators = {
         "sow": _generate_sow,
+        "pws": _generate_pws,
         "igce": _generate_igce,
         "market_research": _generate_market_research,
         "justification": _generate_justification,
@@ -297,6 +386,12 @@ def exec_create_document(
         "contract_type_justification": _generate_contract_type_justification,
         "son_products": _generate_son_products,
         "son_services": _generate_son_services,
+        "purchase_request": _generate_purchase_request,
+        "price_reasonableness": _generate_price_reasonableness,
+        "required_sources": _generate_required_sources,
+        "subk_plan": _generate_subk_plan,
+        "subk_review": _generate_subk_review,
+        "buy_american": _generate_buy_american,
     }
 
     user_id = extract_user_id(session_id)
@@ -418,14 +513,11 @@ def exec_create_document(
         if result and hasattr(result, "template_path") and result.template_path:
             template_provenance["template_id"] = result.template_path
 
-    # Inject provenance metadata section into markdown content
-    content = _append_provenance_metadata(
-        content,
-        template_provenance,
-        source,
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-    )
-    # Update content_to_store for markdown files (DOCX/XLSX use result.content binary)
+    # Provenance footer is injected one layer down inside
+    # create_package_document_version() so every DOCUMENT# write — chat,
+    # POST route, AI edit — gets the same guarantee. Don't double-inject
+    # here; the helper has a guard but the placement also matters for
+    # content-hash idempotency.
     if not (result and result.success and file_type in ("docx", "xlsx")):
         content_to_store = content
 

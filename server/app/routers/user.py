@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends
 
 from ..cognito_auth import UserContext
-from ..session_store import get_usage_summary
+from ..session_store import get_user_usage_summary
 from ..pref_store import get_prefs, update_prefs, reset_prefs
 from .dependencies import get_user_from_header
 
@@ -49,8 +49,7 @@ async def api_user_usage(
     user: UserContext = Depends(get_user_from_header),
 ):
     """Get usage summary for current user."""
-    tenant_id = user.tenant_id
-    result = get_usage_summary(tenant_id, days)
+    result = get_user_usage_summary(user.tenant_id, user.user_id, days)
     error = _get_result_error(result)
     return _sanitize_result_error(result, GENERIC_ANALYTICS_ERROR) if error else result
 

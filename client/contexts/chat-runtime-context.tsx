@@ -470,21 +470,29 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
       };
 
     case 'generation/restore': {
-      // Bulk-load persisted tool calls, state changes, and documents.
-      // This path must be idempotent because session restore can run more
-      // than once when revisiting a chat or when auth/session context refreshes.
-      const mergedTools = { ...session.toolCallsByMsg };
+      // Bulk-load persisted tool calls, state changes, and documents
+      // without changing session status (stays idle). Bypasses stale-request
+      // guard since it has no requestId.
+      //
+      // Must be idempotent: React StrictMode double-fires effects in dev, and
+      // the session-load effect can run more than once per mount (route
+      // transitions, auth refresh). Use the reducer-level dedupe helpers so
+      // repeated restores do not accumulate duplicate tool cards or state
+      // entries, including fallback cases where toolUseId may be absent.
+      const mergedTools: ToolCallsByMessageId = { ...session.toolCallsByMsg };
       for (const [msgId, calls] of Object.entries(action.toolCallsByMsg)) {
         mergedTools[msgId] = dedupeToolCalls([...(mergedTools[msgId] ?? []), ...calls]);
       }
-      const mergedStateChanges = { ...session.stateChangesByMsg };
+      const mergedStateChanges: Record<string, StateChangeEntry[]> = {
+        ...session.stateChangesByMsg,
+      };
       for (const [msgId, entries] of Object.entries(action.stateChangesByMsg)) {
         mergedStateChanges[msgId] = dedupeStateChanges([
           ...(mergedStateChanges[msgId] ?? []),
           ...entries,
         ]);
       }
-      const mergedDocs = { ...session.documentsByMsg };
+      const mergedDocs: Record<string, DocumentInfo[]> = { ...session.documentsByMsg };
       for (const [msgId, docs] of Object.entries(action.documentsByMsg)) {
         mergedDocs[msgId] = dedupeDocuments([...(mergedDocs[msgId] ?? []), ...docs]);
       }

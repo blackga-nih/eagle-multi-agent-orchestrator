@@ -143,10 +143,15 @@ def _fire(payload: dict, category: str) -> None:
         loop = asyncio.get_running_loop()
         loop.create_task(_send(payload, category))
     except RuntimeError:
-        # No running event loop — skip silently
-        logger.debug(
-            "Teams notifier: no event loop, skipping %s notification", category
-        )
+        # Called from a sync context (e.g. daemon thread from feedback router).
+        # Run the send synchronously on a fresh loop — we're already off the
+        # request path, so blocking for the webhook timeout is acceptable.
+        try:
+            asyncio.run(_send(payload, category))
+        except Exception:
+            logger.warning(
+                "Teams notifier: sync send failed (category=%s)", category, exc_info=True
+            )
 
 
 # ── Public API ───────────────────────────────────────────────────────

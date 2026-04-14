@@ -187,6 +187,26 @@ scripts/prompt_cache_test_results.json
 scripts/eagle_tool_decision_tree.html
 server/scripts/
 
+# Demo eval run artifacts (generated per-run output)
+scripts/demo_eval_results/
+
+# Local observability dumps
+server/obs_today.json
+server/traces_today.json
+
+# Generated Langfuse / usage reports (written to docs/development by tooling)
+docs/development/*-report-langfuse-*.md
+docs/development/*-report-langfuse-*.html
+docs/development/*-report-langfuse-*.json
+docs/development/langfuse-today*.md
+docs/development/langfuse-today*.html
+docs/development/eagle_usage_dashboard.html
+docs/development/eagle_usage_data.json
+
+# Feedback / Jira test screenshots
+docs/development/feedback-test-screenshots/
+server/tests/jira_screenshots/
+
 # Claude specs (local planning)
 .claude/specs/
 

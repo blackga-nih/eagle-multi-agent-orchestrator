@@ -12,7 +12,6 @@ import { StreamEvent, parseStreamEvent, AuditLogEntry } from '@/types/stream';
 import { Message, DocumentInfo } from '@/types/chat';
 import { CLIENT_SIDE_TOOLS, executeClientTool, ClientToolResult } from '@/lib/client-tools';
 import { generateUUID } from '@/lib/uuid';
-import { saveGeneratedDocument } from '@/lib/document-store';
 import {
   saveCheckpoint,
   clearCheckpoint,
@@ -324,7 +323,16 @@ export class ChatStreamManager {
       if (event.type === 'tool_use' && event.tool_use) {
         const toolName = event.tool_use.name;
         const toolInput = (event.tool_use.input ?? {}) as Record<string, unknown>;
-        const toolUseId = event.tool_use.tool_use_id ?? `tool-${Date.now()}`;
+        // Fallback id must be unique even if two tool_use events fire within
+        // the same millisecond — otherwise the reducer would merge them into
+        // a single card even though they are logically distinct invocations.
+        // The reducer dedupes correctly on matching toolUseId (see
+        // chat-runtime-context.tsx generation/toolUse reducer); this fallback
+        // only exists for the pathological case where the backend omits
+        // tool_use_id entirely.
+        const toolUseId =
+          event.tool_use.tool_use_id ??
+          `tool-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const isClientSide = CLIENT_SIDE_TOOLS.has(toolName);
         const msgId = streamingMsgId;
         toolBoundarySeen = true;
