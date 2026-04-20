@@ -14,6 +14,8 @@ AGENT_DISPLAY_NAMES = {
     "policy-supervisor": "Policy Supervisor",
     "policy-librarian": "Policy Librarian",
     "policy-analyst": "Policy Analyst",
+    "compliance-strategist": "Compliance Strategist",
+    "financial-advisor": "Financial Advisor",
 }
 
 SKILL_DISPLAY_NAMES = {
