@@ -155,7 +155,7 @@ export class EagleStorageStack extends cdk.Stack {
     });
 
     // ── S3 Event Notifications → Lambda ─────────────────────
-    const suffixes = ['.txt', '.md', '.pdf', '.doc', '.docx'];
+    const suffixes = ['.txt', '.md', '.pdf', '.doc', '.docx', '.xlsx'];
     for (const suffix of suffixes) {
       this.documentBucket.addEventNotification(
         s3.EventType.OBJECT_CREATED,

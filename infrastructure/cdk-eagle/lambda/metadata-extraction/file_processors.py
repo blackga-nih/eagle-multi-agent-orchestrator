@@ -20,6 +20,7 @@ def extract_text(body_bytes: bytes, file_type: str) -> str:
         "pdf": _extract_pdf,
         "docx": _extract_docx,
         "doc": _extract_docx,
+        "xlsx": _extract_xlsx,
     }
 
     extractor = extractors.get(file_type)
@@ -64,4 +65,24 @@ def _extract_docx(body_bytes: bytes) -> str:
         return "\n\n".join(paragraphs)
     except Exception:
         logger.exception("Failed to extract DOCX text")
+        return ""
+
+
+def _extract_xlsx(body_bytes: bytes) -> str:
+    try:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(body_bytes), data_only=True)
+        sheets = []
+        for sheet in wb.worksheets:
+            rows = []
+            for row in sheet.iter_rows(values_only=True):
+                cells = [str(c) if c is not None else "" for c in row]
+                if any(cells):
+                    rows.append("\t".join(cells))
+            if rows:
+                sheets.append(f"## {sheet.title}\n" + "\n".join(rows))
+        return "\n\n".join(sheets)
+    except Exception:
+        logger.exception("Failed to extract XLSX text")
         return ""
