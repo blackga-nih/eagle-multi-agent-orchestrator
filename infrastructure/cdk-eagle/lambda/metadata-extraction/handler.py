@@ -64,7 +64,7 @@ def lambda_handler(event, context):
             file_name = key.split("/")[-1]
             file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
 
-            if file_ext not in ("txt", "md", "pdf", "doc", "docx"):
+            if file_ext not in ("txt", "md", "pdf", "doc", "docx", "xlsx"):
                 logger.warning("Skipping unsupported file type: %s", file_ext)
                 continue
 
