@@ -101,6 +101,45 @@ The IGCE must correspond to the offeror's pricing model. If vendors price by LCA
 
 KB references: NIH_IGCE_IDIQ_Research_2017.txt, NIH Policy 6015-1
 
+### IGCE Rate Derivation Guidance
+
+When the supervisor invokes you for IGCE rate methodology guidance, FIRST call knowledge_search to retrieve:
+- NIH_6015_1_Financial_Analysis_Proposals.txt
+- Price_Reasonableness_Determination_Examples.txt
+
+Then return structured guidance covering these three areas:
+
+**1. Rate Derivation Methodology** (select the appropriate approach based on acquisition context):
+- **GSA Schedule Comparison**: For IT/professional services where GSA SIN rates exist. Cite specific schedule (e.g., MAS IT Professional Services SIN 54151S). Reference current GSA pricing (oasis.gsa.gov, gsaelibrary.gsa.gov).
+- **BLS Wage Data + Overhead**: For labor categories without GSA equivalent. Use BLS Occupational Employment Statistics, apply standard overhead/G&A burden rates (typical ranges: fringe 30-35%, overhead 80-120%, G&A 8-15%).
+- **Historical Contract Pricing**: For recompetes or similar scope. Analyze prior contract line item pricing, adjust for escalation (2-3% annually typical).
+- **Vendor Quote Analysis**: For sole source or limited competition. Document how quotes were solicited and how they demonstrate market pricing.
+
+**2. Price Reasonableness Framework** (per FAR 15.404-1(b)):
+- **Competitive acquisitions**: Adequate competition is the primary basis for price reasonableness — multiple responsive quotes establish market.
+- **Sole source**: Requires independent validation through market comparison, historical pricing, published price lists, or independent government estimate.
+- **FFP unit-price derivation**: Document how the firm-fixed unit price was built — either bottom-up from labor hours × blended rate, or top-down from comparable contract pricing. The IGCE for FFP serves as benchmark for evaluating reasonableness of proposed fixed prices.
+
+**3. Cost Analysis Framework Selection** (per NIH Policy 6015-1):
+- **Price analysis only**: FFP contracts under TINA threshold ($2.5M) with adequate competition. Compare total price to IGCE, prior prices, market.
+- **Cost analysis required**: Over TINA threshold ($2.5M), or when price analysis alone is insufficient to determine fair and reasonable price. Requires element-by-element review.
+- **Cost realism required**: All cost-reimbursement contracts at NIH (mandatory per NIH 6015-1). Advisable for T&M when labor mix risk is high. Assess whether proposed costs reflect realistic understanding of the work.
+
+**Response Format** (for supervisor to incorporate into IGCE):
+```
+### Rate Derivation Methodology
+[Selected approach and rationale — e.g., "GSA Schedule comparison using MAS SIN 54151S rates because this is an IT professional services acquisition with established GSA pricing"]
+
+### Price Reasonableness Approach
+[Framework selection — e.g., "Sole source requires market comparison; recommend comparing vendor quote to GSA schedule rates and prior contract pricing for similar scope"]
+
+### Cost Analysis Framework
+[Analysis type — e.g., "Price analysis sufficient — FFP under $2.5M with GSA schedule rates establishing market reasonableness"]
+
+### Supporting KB References
+[List documents retrieved and key guidance cited]
+```
+
 ### Cost/Price Analysis
 
 Price analysis is always required. The question is whether cost analysis is also required.
