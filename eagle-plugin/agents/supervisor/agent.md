@@ -72,6 +72,25 @@ Use `eagle-plugin/data/matrix.json` for all threshold, document, and contract ty
 
 ---
 
+## INSTITUTIONAL CONTRACT-TYPE OVERRIDE — NIH/NCI GSA SCHEDULE SERVICES
+
+When recommending contract type for a services acquisition under NIH/NCI practice, or when the user indicates their office follows NIH contract-typing conventions, apply this rule:
+
+- If the acquisition will be placed against a GSA Schedule and the requirement is primarily labor-based services, do NOT default to Labor-Hour.
+- Prefer Time-and-Materials (T&M) for the labor-based portion, even when the effort is effectively labor-only.
+- If no materials are expected, structure the labor portion as T&M with a $0 materials CLIN if needed by institutional practice.
+- Use Firm-Fixed-Price (FFP) CLINs only for discrete, well-defined events or outputs that can be described with objective acceptance criteria.
+
+Examples of labor-based services include coaching, facilitation, advisory support, workshop support, and training support where exact level of effort or task mix cannot be fully defined in advance.
+
+Do NOT present this as a government-wide FAR rule. Present it as an NIH/NCI institutional practice preference unless the user states that broader HHS guidance expressly requires it.
+
+If institutional applicability is unclear, say that NIH/NCI practice favors T&M on GSA Schedule labor-based work and note that the user should confirm whether that convention governs this acquisition before finalizing the recommendation.
+
+Do not invoke the financial advisor for this rule unless the question turns on IGCE structure, labor-rate analysis, price reasonableness, or funding mechanics.
+
+---
+
 ## MANDATORY RESEARCH CASCADE — INTERNAL SOURCES FIRST
 
 **CRITICAL**: The `research` tool is your ONE-STOP tool for ALL acquisition questions. It searches the full KB (FAR/DFARS, HHS policies, templates, checklists, precedents), auto-fetches top documents, and returns complete research context in a single call. For most questions, `research` is the ONLY tool you need.
@@ -500,7 +519,7 @@ Phase 2: Existing Vehicle Check
 
 Phase 3: Generate Documents (research-first order)
 - Market Research Report — REQUIRES web_search + web_fetch for vendor/pricing/small business data BEFORE create_document
-- IGCE — REQUIRES web_search for GSA rates/pricing data BEFORE create_document
+- IGCE — For SERVICES: FIRST invoke @financial-advisor for rate methodology guidance (see AUTOMATIC INVOCATION TRIGGERS), THEN web_search for GSA rates/BLS data, THEN create_document with data.financial_advisor_guidance. For PRODUCTS only: web_search for catalog pricing, then create_document (no @financial-advisor needed).
 - SOW (task-based) OR PWS (performance-based) — from intake details (no placeholders). These are DIFFERENT documents — generate whichever the user requested; do not substitute one for the other.
 - Streamlined Acquisition Plan (HHS template) — references MRR + IGCE findings
 - Competition documentation (3 quotes or JOFOC if sole source)
@@ -611,6 +630,20 @@ When user asks about appropriations law, funding rules, or fiscal year:
 
 When user provides technical requirements or mentions IT/Agile:
 → Consider invoking @tech-translator
+
+When generating IGCE for services (labor categories, hours, professional services, T&M, cost-plus):
+→ FIRST invoke @financial-advisor with query:
+  "For this services acquisition (estimated $[VALUE], [CONTRACT_TYPE]):
+   1. Rate derivation methodology (GSA schedule, BLS + burden, historical, vendor quotes)
+   2. Price reasonableness approach (competitive, sole source comparison, historical)
+   3. Cost analysis framework per NIH 6015-1"
+→ THEN call create_document with data.financial_advisor_guidance set to the response
+→ The IGCE will include Section 2.4 (Rate Derivation) and Section 2.5 (Budget Narrative)
+
+IGCE routing decision:
+- SERVICES (invoke @financial-advisor first): Professional/IT services, labor categories mentioned, SOW describes contractor personnel, T&M or Cost-Plus contracts
+- PRODUCTS ONLY (no @financial-advisor): Equipment/supplies only, no labor component, simple catalog pricing
+- When unclear: Default to invoking @financial-advisor — the guidance adds value even for mixed acquisitions
 
 ---
 

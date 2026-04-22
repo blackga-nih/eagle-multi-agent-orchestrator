@@ -132,10 +132,37 @@ A PWS is the performance-based counterpart to a SOW. Where a SOW enumerates TASK
 
 ## Required Sections
 1. PURPOSE — Why this estimate was prepared
-2. METHODOLOGY — Basis for estimates (GSA pricing, historical data, market research, BLS data)
+2. METHODOLOGY — Basis for estimates
+   2.1 Data Sources — Sources consulted for pricing data (GSA schedules, BLS, prior contracts, vendor quotes)
+   2.2 Estimation Methodology — Approach used (parametric, analogous, bottom-up, engineering)
+   2.3 Assumptions — Key assumptions underlying the estimate
+   2.4 Rate Derivation — HOW labor rates were determined. Include:
+       - Methodology used (GSA schedule comparison, BLS + overhead, historical pricing, vendor quotes)
+       - Specific sources referenced (GSA schedule number, BLS series, prior contract number)
+       - Burden rate components if applicable (fringe %, overhead %, G&A %)
+       - For FFP: how unit prices were derived (bottom-up labor build or top-down from comparables)
+   2.5 Budget Narrative — EXPLANATION of cost structure logic:
+       - Why this staffing mix and level of effort for the scope
+       - Why these labor categories at these rates are appropriate
+       - How indirect rates were determined or estimated
+       - For FFP: justification for firm-fixed-price structure (risk allocation, definiteness of requirements)
 3. COST BREAKDOWN — Markdown table with Description, Qty, Unit Price, Total columns. If line items are provided, compute math exactly. If not, create reasonable line items based on the requirement.
 4. ASSUMPTIONS AND LIMITATIONS — What the estimate is based on
-5. CONFIDENCE LEVEL — Low/Medium/High with justification
+5. CONFIDENCE LEVEL — Low/Medium/High with justification per cost element
+
+## FFP-Specific Requirements
+When contract_type is FFP or firm-fixed-price:
+- In Section 2.4, explain unit price derivation (labor hours × blended rate, or per-deliverable pricing basis)
+- In Section 2.5, explain why FFP is appropriate (requirements sufficiently defined, risk acceptable to contractor)
+- In COST BREAKDOWN, show how the firm-fixed price was built (even if not visible to contractor)
+- Note that FFP IGCE serves as benchmark for evaluating reasonableness of proposed fixed prices
+
+## Using Financial Advisor Guidance
+If financial_advisor_guidance is provided in the data:
+- Use the rate derivation methodology recommended by the financial advisor
+- Apply the price reasonableness approach specified
+- Reference the cost analysis framework selected
+- Cite any KB documents mentioned in the guidance (e.g., NIH 6015-1, FAR 15.404-1)
 
 ## Math Rules
 - All arithmetic must be exact — double-check totals
@@ -549,6 +576,12 @@ def _build_generation_prompt(doc_type: str, title: str, data: dict) -> str:
         "risk_to_government": "Risk to Government",
         "risk_to_contractor": "Risk to Contractor",
         "funding_by_fy": "Funding by Fiscal Year",
+        "financial_advisor_guidance": "Financial Advisor Guidance",
+        "rate_derivation_methodology": "Rate Derivation Methodology",
+        "price_reasonableness_approach": "Price Reasonableness Approach",
+        "cost_analysis_framework": "Cost Analysis Framework",
+        "budget_narrative": "Budget Narrative",
+        "staffing_rationale": "Staffing Rationale",
     }
 
     for key, label_text in context_fields.items():
