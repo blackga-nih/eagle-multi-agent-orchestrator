@@ -709,6 +709,26 @@ def get_requirements(
         if v >= above:
             _add_hhs_doc(entry)
 
+    # --- Tier tagging: FAR-core baseline vs supplemental ---
+    # Core = FAR-mandated baseline every reader of the chat summary expects.
+    # Everything else (flag-triggered, HHS/NIH-sourced, threshold extras) is
+    # supplemental: the package records it as suggested_documents and the UI
+    # surfaces it behind an explicit "Add" affordance so the required list
+    # stays lean.
+    _CORE_DOC_NAMES: set[str] = {
+        "Purchase Request",
+        "SOW / PWS",
+        "Statement of Need (SON)",
+        "IGCE",
+        "Market Research Report",
+        "Market Research",
+        "Acquisition Plan",
+        "J&A / Justification",
+        "QASP",
+    }
+    for d in docs:
+        d["tier"] = "core" if d["name"] in _CORE_DOC_NAMES else "supplemental"
+
     # --- Thresholds ---
     triggered = [th for th in THRESHOLD_TIERS if v >= th["value"]]
     not_triggered = [th for th in THRESHOLD_TIERS if v < th["value"]]

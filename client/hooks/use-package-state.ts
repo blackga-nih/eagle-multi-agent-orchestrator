@@ -23,6 +23,12 @@ export interface PackageChecklist {
   items?: ChecklistItem[];
   /** Off-script docs that exist in DOCUMENT# but are NOT in required[]. */
   extra?: ChecklistItem[];
+  /**
+   * Supplemental docs policy flagged (threshold / flag / HHS-NIH
+   * triggered) that the user has NOT yet approved. Render behind an
+   * explicit "+ Add" affordance — never auto-mix into required[].
+   */
+  suggested?: ChecklistItem[];
   /** Acquisition pathway slug. */
   pathway?: string | null;
   /** Package title — comes through on every checklist update. */

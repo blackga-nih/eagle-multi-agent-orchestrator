@@ -83,6 +83,7 @@ _UPDATABLE_FIELDS = {
     "notes",
     "required_documents",
     "required_documents_custom",
+    "suggested_documents",
     "completed_documents",
     "far_citations",
     # Checklist provenance
@@ -208,8 +209,11 @@ def compute_required_docs_with_checklist(
 ) -> dict:
     """Compute required document slugs and checklist metadata via the compliance matrix.
 
-    Returns dict with keys: ``slugs``, ``pmr_checklist``, ``pmr_checklist_s3_key``,
-    ``frc_checklist_s3_key``, ``nih_oag_checklist_s3_key``, ``nih_oag_section``.
+    Returns dict with keys: ``slugs`` (FAR-core only — goes into
+    ``required_documents``), ``supplemental_slugs`` (flag- / threshold- /
+    HHS-NIH-triggered extras — goes into ``suggested_documents``),
+    ``pmr_checklist``, ``pmr_checklist_s3_key``, ``frc_checklist_s3_key``,
+    ``nih_oag_checklist_s3_key``, ``nih_oag_section``.
     Falls back to static pathway on error (with empty checklist metadata).
     """
     empty_checklist = {
@@ -236,20 +240,30 @@ def compute_required_docs_with_checklist(
 
         if result.get("errors"):
             pathway = _pathway_from_value(Decimal(str(estimated_value)))
-            return {"slugs": _required_docs_for(pathway), **empty_checklist}
+            return {
+                "slugs": _required_docs_for(pathway),
+                "supplemental_slugs": [],
+                **empty_checklist,
+            }
 
-        slugs: list[str] = []
+        core_slugs: list[str] = []
+        supplemental_slugs: list[str] = []
         seen: set[str] = set()
         for doc in result.get("documents_required", []):
             if not doc.get("required"):
                 continue
             slug = _COMPLIANCE_DOC_TO_SLUG.get(doc["name"])
-            if slug and slug not in seen:
-                slugs.append(slug)
-                seen.add(slug)
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            if doc.get("tier") == "supplemental":
+                supplemental_slugs.append(slug)
+            else:
+                core_slugs.append(slug)
 
         return {
-            "slugs": slugs,
+            "slugs": core_slugs,
+            "supplemental_slugs": supplemental_slugs,
             "pmr_checklist": result.get("pmr_checklist"),
             "pmr_checklist_s3_key": result.get("pmr_checklist_s3_key"),
             "frc_checklist_s3_key": result.get("frc_checklist_s3_key"),
@@ -259,7 +273,11 @@ def compute_required_docs_with_checklist(
     except Exception:
         logger.exception("compute_required_docs_with_checklist failed, falling back to static")
         pathway = _pathway_from_value(Decimal(str(estimated_value)))
-        return {"slugs": _required_docs_for(pathway), **empty_checklist}
+        return {
+            "slugs": _required_docs_for(pathway),
+            "supplemental_slugs": [],
+            **empty_checklist,
+        }
 
 
 def compute_required_docs(
@@ -410,11 +428,13 @@ def create_package(
 
     # Dynamic docs via compliance matrix when method+type available
     checklist_meta: dict = {}
+    suggested_docs: list[str] = []
     if acquisition_method and contract_type:
         info = compute_required_docs_with_checklist(
             float(estimated_value), acquisition_method, contract_type, flags
         )
         required_docs = info["slugs"]
+        suggested_docs = info.get("supplemental_slugs", [])
         checklist_meta = {
             "pmr_checklist_name": info.get("pmr_checklist"),
             "pmr_checklist_s3_key": info.get("pmr_checklist_s3_key"),
@@ -450,6 +470,7 @@ def create_package(
         "acquisition_pathway": pathway,
         "status": "intake",
         "required_documents": required_docs,
+        "suggested_documents": suggested_docs,
         "completed_documents": [],
         "far_citations": [],
         "notes": notes,
@@ -584,6 +605,9 @@ def update_package(tenant_id: str, package_id: str, updates: dict) -> Optional[d
                 )
                 if not is_custom:
                     allowed["required_documents"] = info["slugs"]
+                    allowed["suggested_documents"] = info.get(
+                        "supplemental_slugs", []
+                    )
                 # Always refresh checklist provenance (policy facts)
                 if info.get("pmr_checklist"):
                     allowed["pmr_checklist_name"] = info["pmr_checklist"]
@@ -816,6 +840,7 @@ def get_package_checklist(
             "complete": False,
             "items": [],
             "extra": [],
+            "suggested": [],
             "pathway": None,
             "title": None,
             "custom": False,
@@ -838,6 +863,16 @@ def get_package_checklist(
     required: list[str] = list(pkg.get("required_documents") or [])
     completed: list[str] = [slug for slug in required if slug in docs_by_type]
     missing: list[str] = [slug for slug in required if slug not in docs_by_type]
+
+    # Suggested = policy-identified supplemental docs that have NOT been
+    # promoted into required yet. Filter out anything already required (can
+    # happen after a PATCH /required-docs add) or already completed.
+    required_set = set(required)
+    suggested_slugs: list[str] = [
+        slug
+        for slug in (pkg.get("suggested_documents") or [])
+        if slug not in required_set and slug not in docs_by_type
+    ]
 
     # Friendly labels — local import to keep module-level imports light.
     from .tools.create_document_support import _DOC_TYPE_LABELS
@@ -863,6 +898,8 @@ def get_package_checklist(
     extra_slugs = [dt for dt in sorted(docs_by_type.keys()) if dt not in set(required)]
     extra = [_make_item(slug, docs_by_type[slug]) for slug in extra_slugs]
 
+    suggested = [_make_item(slug, None) for slug in suggested_slugs]
+
     return {
         # Back-compat scalar/list fields (still consumed by 5 legacy readers)
         "required": required,
@@ -872,6 +909,9 @@ def get_package_checklist(
         # Rich shape (push path + cold-load fetch)
         "items": items,
         "extra": extra,
+        # Supplemental docs awaiting user approval — render behind an "Add"
+        # affordance rather than auto-mixing into required[].
+        "suggested": suggested,
         "pathway": pkg.get("acquisition_pathway"),
         "title": pkg.get("title"),
         "custom": bool(pkg.get("required_documents_custom", False)),
@@ -923,6 +963,7 @@ def patch_required_docs(
         method = pkg.get("acquisition_method")
         ctype = pkg.get("contract_type")
         new_required: list[str]
+        new_suggested: list[str] = []
         if method and ctype:
             info = compute_required_docs_with_checklist(
                 float(pkg.get("estimated_value") or 0),
@@ -931,6 +972,7 @@ def patch_required_docs(
                 pkg.get("flags"),
             )
             new_required = info["slugs"]
+            new_suggested = info.get("supplemental_slugs", [])
         else:
             pathway = pkg.get("acquisition_pathway") or _pathway_from_value(
                 Decimal(str(pkg.get("estimated_value") or 0))
@@ -941,6 +983,7 @@ def patch_required_docs(
             package_id,
             {
                 "required_documents": new_required,
+                "suggested_documents": new_suggested,
                 "required_documents_custom": False,
             },
         )
@@ -965,11 +1008,20 @@ def patch_required_docs(
             remove_set = set(remove_list)
             current = [s for s in current if s not in remove_set]
 
+        # Promote-from-suggested: once a suggested doc has been added to
+        # required, drop it from suggested_documents so the UI doesn't
+        # keep offering it.
+        current_suggested = list(pkg.get("suggested_documents") or [])
+        if add_list:
+            add_set = set(add_list)
+            current_suggested = [s for s in current_suggested if s not in add_set]
+
         update_package(
             tenant_id,
             package_id,
             {
                 "required_documents": current,
+                "suggested_documents": current_suggested,
                 "required_documents_custom": True,
             },
         )
