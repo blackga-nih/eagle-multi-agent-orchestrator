@@ -28,20 +28,25 @@ _has_aws_creds = bool(
     or os.environ.get("AWS_SESSION_TOKEN")
 )
 
+# In CI the deploy role lacks bedrock:InvokeModel on Nova inference profiles.
+# Skip Nova models under CI; they're still covered on local/devbox runs.
+_IN_CI = os.getenv("CI", "").lower() == "true" or os.getenv("GITHUB_ACTIONS", "").lower() == "true"
+
 # All Claude and Nova models to test.
 # Keys are human-friendly IDs used in test parametrization.
-MODELS = {
-    # Claude family
+_CLAUDE_MODELS = {
     "sonnet_46": "us.anthropic.claude-sonnet-4-6",
     "sonnet_45": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "sonnet_40": "us.anthropic.claude-sonnet-4-20250514-v1:0",
     "haiku_45": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    # Nova family
+}
+_NOVA_MODELS = {
     "nova_pro": "us.amazon.nova-pro-v1:0",
     "nova_lite": "us.amazon.nova-lite-v1:0",
     "nova_micro": "us.amazon.nova-micro-v1:0",
     "nova_2_lite": "us.amazon.nova-2-lite-v1:0",
 }
+MODELS = {**_CLAUDE_MODELS} if _IN_CI else {**_CLAUDE_MODELS, **_NOVA_MODELS}
 
 _client_config = Config(
     connect_timeout=5,

@@ -232,6 +232,7 @@ jobs:
         EAGLE_BEDROCK_MODEL_ID: us.anthropic.claude-haiku-4-5-20251001-v1:0
         EAGLE_CB_STARTUP_PROBE: "false"
       run: |
+        set -o pipefail
         cd server
         python -m pytest tests/ -v \
           --ignore=tests/test_strands_eval.py \
