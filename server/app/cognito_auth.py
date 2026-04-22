@@ -70,25 +70,13 @@ def validate_token(token: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional
     """
     Validate a Cognito JWT token.
 
+    Honest validator: never lies about validity, even under DEV_MODE.
+    The DEV_MODE fallback lives in extract_user_context and only applies
+    when no real token was supplied.
+
     Returns:
         Tuple of (is_valid, claims, error_message)
     """
-    # Dev mode bypass
-    if DEV_MODE:
-        logger.debug("Dev mode: bypassing token validation")
-        return (
-            True,
-            {
-                "sub": DEV_USER_ID,
-                "cognito:username": DEV_USER_ID,
-                "custom:tenant_id": DEV_TENANT_ID,
-                "email": f"{DEV_USER_ID}@example.com",
-                "iss": "dev-mode",
-                "exp": int(time.time()) + 3600,
-            },
-            None,
-        )
-
     if not COGNITO_USER_POOL_ID or not COGNITO_CLIENT_ID:
         return False, None, "Cognito not configured"
 
@@ -147,20 +135,11 @@ def validate_token_simple(
     """
     Simple JWT validation without full Cognito verification.
     For use when Cognito is not configured but basic JWT structure is needed.
-    """
-    # Dev mode bypass
-    if DEV_MODE:
-        return (
-            True,
-            {
-                "sub": DEV_USER_ID,
-                "cognito:username": DEV_USER_ID,
-                "custom:tenant_id": DEV_TENANT_ID,
-                "email": f"{DEV_USER_ID}@example.com",
-            },
-            None,
-        )
 
+    Honest validator: never lies about validity, even under DEV_MODE.
+    The DEV_MODE fallback lives in extract_user_context and only applies
+    when no real token was supplied.
+    """
     try:
         import jwt
 
@@ -254,31 +233,44 @@ def extract_user_context(
     """
     Extract user context from JWT token.
 
+    A real token — when supplied — always wins, even under DEV_MODE.
+    DEV_MODE only supplies a fallback identity for callers that send no
+    token at all (local curl, smoke scripts), so each authenticated user
+    keeps their unique Cognito `sub`/`custom:tenant_id` and sessions stay
+    isolated per workspace.
+
     Returns:
         Tuple of (UserContext, error_message)
     """
-    # Dev mode
-    if DEV_MODE:
-        return UserContext.dev_user(), None
-
-    # No token provided
-    if not token:
-        return UserContext.anonymous(), "No token provided"
-
-    # Remove "Bearer " prefix if present
-    if token.startswith("Bearer "):
+    # Normalize the Bearer prefix up front so every branch below sees
+    # the raw JWT (or None/empty).
+    if token and token.startswith("Bearer "):
         token = token[7:]
 
-    # Validate token
-    if validate and COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID:
-        is_valid, claims, error = validate_token(token)
-    else:
-        is_valid, claims, error = validate_token_simple(token)
+    # A real token is present — validate and use its claims. This path
+    # runs in BOTH DEV_MODE and prod: in dev the JWT may be an HS256
+    # test token, in prod it's a Cognito-signed RS256.
+    if token:
+        if validate and COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID:
+            is_valid, claims, error = validate_token(token)
+        else:
+            is_valid, claims, error = validate_token_simple(token)
 
-    if not is_valid or not claims:
+        if is_valid and claims:
+            return UserContext.from_claims(claims), None
+
+        # Token present but unparseable. Under DEV_MODE, preserve the
+        # legacy "fake token on dev still works" behavior by falling
+        # back to the dev identity; in prod, return anonymous so
+        # REQUIRE_AUTH can reject it.
+        if DEV_MODE:
+            return UserContext.dev_user(), None
         return UserContext.anonymous(), error
 
-    return UserContext.from_claims(claims), None
+    # No token at all.
+    if DEV_MODE:
+        return UserContext.dev_user(), None
+    return UserContext.anonymous(), "No token provided"
 
 
 # ── FastAPI Middleware ───────────────────────────────────────────────

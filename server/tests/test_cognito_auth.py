@@ -148,13 +148,16 @@ class TestUserContext:
 class TestDevModeToggle:
     """Verify that DEV_MODE=true vs false changes auth behavior."""
 
-    def test_dev_mode_true_bypasses_validation(self, monkeypatch):
+    def test_dev_mode_true_does_not_lie_about_validity(self, monkeypatch):
+        """validate_token is an honest validator — even under DEV_MODE it
+        must reject garbage. The dev fallback lives in
+        extract_user_context, not in the low-level validators."""
         mod = _patch_cognito_auth(monkeypatch, DEV_MODE="true")
         assert mod.DEV_MODE is True
         is_valid, claims, err = mod.validate_token("any-garbage-token")
-        assert is_valid is True
-        assert claims["sub"] == "dev-user"
-        assert err is None
+        assert is_valid is False
+        assert claims is None
+        assert err is not None
 
     def test_dev_mode_false_rejects_garbage_token(self, monkeypatch):
         mod = _patch_cognito_auth(monkeypatch, DEV_MODE="false")
@@ -164,11 +167,14 @@ class TestDevModeToggle:
         assert claims is None
         assert err is not None
 
-    def test_dev_mode_simple_validation_bypass(self, monkeypatch):
+    def test_dev_mode_simple_validation_honest_on_garbage(self, monkeypatch):
+        """validate_token_simple must also stay honest: garbage in,
+        is_valid=False out — regardless of DEV_MODE."""
         mod = _patch_cognito_auth(monkeypatch, DEV_MODE="true")
         is_valid, claims, err = mod.validate_token_simple("garbage")
-        assert is_valid is True
-        assert claims["sub"] == "dev-user"
+        assert is_valid is False
+        assert claims is None
+        assert err is not None
 
 
 # ── extract_user_context tests ───────────────────────────────────────
