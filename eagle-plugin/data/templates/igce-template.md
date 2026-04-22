@@ -33,6 +33,38 @@ This estimate was developed using the following sources and methods:
 ### 2.3 Assumptions
 {{ASSUMPTIONS}}
 
+### 2.4 Rate Derivation
+{{RATE_DERIVATION}}
+
+#### 2.4.1 Methodology
+{{RATE_DERIVATION_METHODOLOGY}}
+
+#### 2.4.2 Sources Referenced
+| Source | Date Accessed | Data Used |
+|--------|---------------|-----------|
+| {{RATE_SOURCE_1}} | {{RATE_DATE_1}} | {{RATE_DATA_1}} |
+| {{RATE_SOURCE_2}} | {{RATE_DATE_2}} | {{RATE_DATA_2}} |
+| {{RATE_SOURCE_3}} | {{RATE_DATE_3}} | {{RATE_DATA_3}} |
+
+#### 2.4.3 Burden Rate Components (if applicable)
+| Component | Rate | Basis |
+|-----------|------|-------|
+| Fringe Benefits | {{FRINGE_RATE}}% | {{FRINGE_BASIS}} |
+| Overhead | {{OVERHEAD_RATE}}% | {{OVERHEAD_BASIS}} |
+| G&A | {{GA_RATE}}% | {{GA_BASIS}} |
+
+### 2.5 Budget Narrative
+{{BUDGET_NARRATIVE}}
+
+#### 2.5.1 Staffing Rationale
+{{STAFFING_RATIONALE}}
+
+#### 2.5.2 Cost Structure Logic
+{{COST_STRUCTURE_LOGIC}}
+
+#### 2.5.3 Contract Type Justification
+{{CONTRACT_TYPE_JUSTIFICATION}}
+
 ---
 
 ## 3. COST BREAKDOWN

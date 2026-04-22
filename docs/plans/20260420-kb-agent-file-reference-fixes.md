@@ -2,94 +2,64 @@
 
 **Date**: 2026-04-20  
 **Branch**: `feat/missing-agents`  
-**Scope**: Fix all broken document/folder references in `rh-eagle-2/agents/`  
-**Approach**: Edit each agent file to remove missing references and fix folder paths
+**Scope**: Fix broken document references in `rh-eagle-2/agents/`  
+**Approach**: Option B — Keep folder paths as-is (they're conceptual hints), only remove missing document names
 
 ---
 
-## Summary of Required Edits
+## Summary of Required Edits (Option B)
 
-| Agent File | Issues | Action Required |
-|------------|--------|-----------------|
-| `00-supervisor.txt` | 0 | No changes needed - all refs valid |
-| `01-policy-supervisor.txt` | 0 | No changes needed - refs to agent files only |
-| `02-legal.txt` | 2 | Remove 1 missing doc, fix 1 folder path |
-| `03-tech.txt` | 6 | Remove 3 missing docs, remove 3 missing folders |
-| `04-market.txt` | 6 | Remove 5 missing docs, remove 1 missing folder |
-| `05-public.txt` | 0 | No changes needed - no explicit KB refs |
-| `06-policy-librarian.txt` | 0 | No changes needed - refs to folders that exist |
-| `07-policy-analyst.txt` | 0 | No changes needed - refs to folders that exist |
-| `08-COMPLIANCE.txt` | 7 | Remove 7 missing docs from KB references |
-| `09-FINANCIAL.txt` | 1 | Remove 1 missing doc from KB references |
+Folder paths are kept as-is (conceptual hints for agents). Only missing document references are removed.
 
-**Total edits needed**: 6 agent files, 22 issues to fix
+| Agent File | Missing Docs | Action Required |
+|------------|--------------|-----------------|
+| `00-supervisor.txt` | 0 | No changes needed |
+| `01-policy-supervisor.txt` | 0 | No changes needed |
+| `02-legal.txt` | 1 | Remove 1 missing doc |
+| `03-tech.txt` | 3 | Remove 3 missing docs |
+| `04-market.txt` | 5 | Remove 5 missing docs |
+| `05-public.txt` | 0 | No changes needed |
+| `06-policy-librarian.txt` | 0 | No changes needed |
+| `07-policy-analyst.txt` | 0 | No changes needed |
+| `08-COMPLIANCE.txt` | 7 | Remove 7 missing docs |
+| `09-FINANCIAL.txt` | 1 | Remove 1 missing doc |
+
+**Total edits needed**: 5 agent files, 17 missing document references to remove
 
 ---
 
-## Detailed Edits Per Agent
+## Detailed Edits Per Agent (Option B - Documents Only)
 
 ### `02-legal.txt` (Legal Counselor)
 
-**Location**: Lines 193-194, 230-231
+**Remove this missing document reference**:
+- `NIH_Source_Selection_Guidance_2018.txt` — does not exist
 
-**Issue 1 - Missing document**:
-```
-CURRENT:  KB references: NIH_Source_Selection_Guidance_2018.txt,
-CHANGE TO: KB references: NIH_LISTSERV_Formal_Source_Selection_Common_Error_2018.txt,
-```
-(Alternative file exists at `compliance-strategist/NIH-policies/`)
-
-**Issue 2 - Wrong folder path**:
-```
-CURRENT:  legal-counselor/GAO-decisions/
-CHANGE TO: legal-counselor/case-law/
-```
-(GAO decisions are in subfolders: `case-law/evaluation/`, `case-law/scope/`, `case-law/consolidation/`, `case-law/past-performance/`)
+(Folder paths like `legal-counselor/GAO-decisions/` are kept as conceptual hints)
 
 ---
 
 ### `03-tech.txt` (Technical Translator)
 
-**Location**: Lines 210-212, 278-280
-
 **Remove these missing document references**:
-- `NIH_SOW_Best_Practices_Guide.txt` - does not exist
-- `Technical_Evaluation_Criteria_Template_NICHD_Example.txt` - does not exist
-- `HHS_Technical_Evaluation_Best_Value_Guide.txt` - does not exist
+- `NIH_SOW_Best_Practices_Guide.txt` — does not exist
+- `Technical_Evaluation_Criteria_Template_NICHD_Example.txt` — does not exist
+- `HHS_Technical_Evaluation_Best_Value_Guide.txt` — does not exist
 
-**Remove these missing folder references**:
-- `technical-translator/SOW-examples/` - folder does not exist
-- `technical-translator/PWS-examples/` - folder does not exist
-- `technical-translator/evaluation-criteria/` - folder does not exist
-
-**Replacement options** (folders that DO exist):
-- `technical-translator/agile-contracting/`
-- `technical-translator/technical-standards/`
-- `shared/TechFAR_Hub_Agile_Acquisition_Guide.txt`
+(Folder paths like `technical-translator/SOW-examples/` are kept as conceptual hints)
 
 ---
 
 ### `04-market.txt` (Market Intelligence)
 
-**Location**: Lines 234-236, 257-258, 291-294, 318-320
-
 **Remove these missing document references**:
-- `HHS_Market_Research_Report_Template.txt` - does not exist
-- `HHS_Market_Research_Framework_Template_2025.txt` - does not exist
-- `NCI_BPA_Portfolio_GSA_Summary.txt` - does not exist
-- `OCIO_Master_Contractor_Roster.txt` - does not exist
-- `GSA_Schedules_vs_Open_Market_Guide.txt` - does not exist
+- `HHS_Market_Research_Report_Template.txt` — does not exist
+- `HHS_Market_Research_Framework_Template_2025.txt` — does not exist
+- `NCI_BPA_Portfolio_GSA_Summary.txt` — does not exist
+- `OCIO_Master_Contractor_Roster.txt` — does not exist
+- `GSA_Schedules_vs_Open_Market_Guide.txt` — does not exist
 
-**Remove this missing folder reference**:
-- `market-intelligence/pricing-data/` - folder does not exist
-
-**Replacement options** (files/folders that DO exist):
-- `market-intelligence/market-research-guides/NCI_Market_Research_Guide_for_Project_Officers.txt`
-- `market-intelligence/market-research-guides/FC_10_Market_Research_Guidance.txt`
-- `market-intelligence/vehicle-information/NIH_Acquisition_Vehicles_Catalog.txt`
-- `market-intelligence/vehicle-information/NIH_BPA_Commodity_List_September_2025.txt`
-- `supervisor-core/essential-templates/Attachment 1 - HHS Market Research Template.docx`
-- `supervisor-core/essential-templates/HHS_Streamlined_MR_Template_FY26.txt`
+(Folder paths like `market-intelligence/pricing-data/` are kept as conceptual hints)
 
 ---
 
@@ -139,27 +109,21 @@ CHANGE TO: legal-counselor/case-law/
 
 ---
 
-## Implementation Plan
+## Implementation Plan (Option B)
 
-### Step 1: Fix folder path mismatches
-Edit `02-legal.txt`:
-- Change `legal-counselor/GAO-decisions/` → `legal-counselor/case-law/`
+### Step 1: Remove missing document references from KB references lines
 
-### Step 2: Remove missing document references
-Edit KB references lines in:
-- `02-legal.txt` (1 doc)
-- `03-tech.txt` (3 docs)
-- `04-market.txt` (5 docs)
-- `08-COMPLIANCE.txt` (7 docs)
-- `09-FINANCIAL.txt` (1 doc)
+Edit these 5 agent files:
+- `02-legal.txt` — remove 1 doc
+- `03-tech.txt` — remove 3 docs  
+- `04-market.txt` — remove 5 docs
+- `08-COMPLIANCE.txt` — remove 7 docs
+- `09-FINANCIAL.txt` — remove 1 doc
 
-### Step 3: Remove missing folder references
-Edit folder references in:
-- `03-tech.txt` (3 folders)
-- `04-market.txt` (1 folder)
-
-### Step 4: (Optional) Add replacement references
+### Step 2: (Optional) Add replacement references
 Replace removed references with existing files that cover similar content.
+
+**Note**: Folder paths are NOT changed — they serve as conceptual hints for agents and don't affect S3 retrieval.
 
 ---
 
@@ -188,6 +152,85 @@ These agents are clean - all their references are valid:
 | `05-public.txt` | No explicit KB file refs |
 | `06-policy-librarian.txt` | Refs folders that exist |
 | `07-policy-analyst.txt` | Refs folders that exist |
+
+---
+
+## How Retrieval Works (Why This Matters for S3)
+
+The agent prompts don't use direct S3 paths. Here's the flow:
+
+1. **Agent prompt says**: `KB references: HHS_Acquisition_Plan_Template_2024.txt`
+2. **Agent calls**: `knowledge_search(query="HHS Acquisition Plan Template")`
+3. **System searches**: DynamoDB metadata table + S3 key path matching
+4. **S3 key format**: `eagle-knowledge-base/approved/{folder}/{filename}`
+
+**If a referenced document doesn't exist**:
+- It won't be in DynamoDB metadata
+- Semantic search will return no match or wrong match
+- Agent will either fail silently or use incorrect guidance
+
+---
+
+## S3 Validation Steps
+
+### Pre-Deployment Check
+After uploading KB to S3, verify each referenced document exists:
+
+```bash
+# List all files in S3 bucket
+aws s3 ls s3://eagle-documents-695681773636-dev/eagle-knowledge-base/approved/ --recursive > s3_files.txt
+
+# Check for specific referenced docs
+grep -i "acquisition_plan" s3_files.txt
+grep -i "source_selection" s3_files.txt
+grep -i "market_research" s3_files.txt
+```
+
+### Post-Deployment Test
+Run a search for each critical document reference:
+
+```python
+# Test that knowledge_search can find documents agents reference
+test_queries = [
+    "OAMS Security Checklist Template",  # should find HHSAR_CD_2024_01_OAMS...
+    "PHS Policy Laboratory Animal",      # should find PHS_Policy_Laboratory_Animal_Welfare_2015.txt
+    "ECP Evaluation Master Guide",       # should find ECP_Evaluation_Master_Guide.txt
+    "NIH 6015 Financial Analysis",       # should find NIH_6015_1_*.txt
+]
+
+for query in test_queries:
+    results = exec_knowledge_search({"query": query, "limit": 3}, tenant_id="test")
+    print(f"{query}: {len(results['results'])} results")
+    if results['results']:
+        print(f"  Top match: {results['results'][0]['title']}")
+```
+
+### DynamoDB Metadata Check
+Verify metadata entries exist:
+
+```bash
+# Query DynamoDB for expected documents
+aws dynamodb scan \
+  --table-name eagle-document-metadata-dev \
+  --filter-expression "contains(s3_key, :key)" \
+  --expression-attribute-values '{":key":{"S":"OAMS_Security"}}' \
+  --query "Items[].{title: title.S, s3_key: s3_key.S}"
+```
+
+---
+
+## Summary: What the Agent Prompt References Actually Mean
+
+| Reference Type | Example | What Agent Does | What Must Exist |
+|----------------|---------|-----------------|-----------------|
+| Document name | `HHS_Acquisition_Plan_Template_2024.txt` | Searches for "HHS Acquisition Plan Template" | File in S3 + DynamoDB metadata |
+| Folder path | `legal-counselor/GAO-decisions/` | Searches for docs with that path segment | Files in that S3 prefix |
+| Policy number | `NIH Policy 6315-1` | Searches for "NIH 6315" or "6315-1" | Files containing that number |
+
+**Bottom line**: Every document referenced in agent prompts must be:
+1. Present in the KB folder that gets uploaded
+2. Indexed in DynamoDB metadata
+3. Discoverable via semantic search
 
 ---
 
