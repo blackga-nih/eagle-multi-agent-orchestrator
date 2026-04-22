@@ -717,3 +717,150 @@ class TestConfidenceSignals:
         """8(a) items should have lower confidence than standard rules."""
         from app.compliance_matrix import _CONFIDENCE
         assert _CONFIDENCE["8a_ceiling"] < _CONFIDENCE["document_requirement"]
+
+
+# ---------------------------------------------------------------------------
+# 12. Intake-gate + budget-semantics (added 2026-04-22)
+# ---------------------------------------------------------------------------
+
+class TestIntakeRequiredFacts:
+    """matrix.intake_required_facts schema + get_intake_required_facts() helper."""
+
+    _EXPECTED_DOC_TYPES = {
+        "pws", "sow", "igce", "market_research",
+        "acquisition_plan", "ja", "justification",
+    }
+
+    def test_matrix_has_intake_required_facts_key(self):
+        from app.compliance_matrix import _MATRIX_DATA
+        assert "intake_required_facts" in _MATRIX_DATA
+
+    def test_matrix_version_bumped(self):
+        """Version must have been bumped past the pre-intake-gate baseline."""
+        from app.compliance_matrix import _MATRIX_DATA
+        assert _MATRIX_DATA["version"] > "2026-02-25"
+
+    def test_all_expected_doc_types_present(self):
+        from app.compliance_matrix import get_intake_required_facts
+        full = get_intake_required_facts()["intake_required_facts"]
+        missing = self._EXPECTED_DOC_TYPES - set(full.keys())
+        assert not missing, f"intake_required_facts missing doc types: {missing}"
+
+    def test_pws_requires_event_cadence(self):
+        """Meeting issue #1 — PWS generated before cadence was confirmed."""
+        from app.compliance_matrix import get_intake_required_facts
+        entry = get_intake_required_facts("pws")
+        assert "event_cadence" in entry["required"]
+        assert entry["blocker"] is True
+
+    def test_igce_requires_budget_ceiling(self):
+        from app.compliance_matrix import get_intake_required_facts
+        entry = get_intake_required_facts("igce")
+        assert "budget_ceiling" in entry["required"]
+
+    def test_market_research_requires_value_range(self):
+        from app.compliance_matrix import get_intake_required_facts
+        entry = get_intake_required_facts("market_research")
+        assert "estimated_value_range" in entry["required"]
+
+    def test_every_blocker_entry_has_required_list(self):
+        from app.compliance_matrix import get_intake_required_facts
+        full = get_intake_required_facts()["intake_required_facts"]
+        for doc_type, spec in full.items():
+            assert "required" in spec, f"{doc_type} missing 'required'"
+            assert isinstance(spec["required"], list), f"{doc_type}.required not a list"
+            assert len(spec["required"]) > 0, f"{doc_type}.required is empty"
+            assert "blocker" in spec, f"{doc_type} missing 'blocker'"
+
+    def test_case_insensitive_lookup(self):
+        from app.compliance_matrix import get_intake_required_facts
+        assert get_intake_required_facts("PWS") == get_intake_required_facts("pws")
+
+    def test_unknown_doc_type_returns_unknown_marker(self):
+        from app.compliance_matrix import get_intake_required_facts
+        entry = get_intake_required_facts("bogus_doc_type")
+        assert entry["unknown"] is True
+        assert entry["required"] == []
+        assert entry["blocker"] is False
+
+    def test_whitespace_doc_type_tolerated(self):
+        from app.compliance_matrix import get_intake_required_facts
+        assert get_intake_required_facts("  pws  ") == get_intake_required_facts("pws")
+
+    def test_note_field_stripped_from_output(self):
+        """The `_note` metadata key must not leak into the dispatcher output."""
+        from app.compliance_matrix import get_intake_required_facts
+        full = get_intake_required_facts()["intake_required_facts"]
+        assert not any(k.startswith("_") for k in full)
+
+
+class TestBudgetSemantics:
+    """matrix.budget_semantics schema + get_budget_semantics() helper."""
+
+    def test_matrix_has_budget_semantics_key(self):
+        from app.compliance_matrix import _MATRIX_DATA
+        assert "budget_semantics" in _MATRIX_DATA
+
+    def test_budget_is_ceiling_true(self):
+        """Meeting issue #3 — budget must be treated as a ceiling, not a target."""
+        from app.compliance_matrix import get_budget_semantics
+        assert get_budget_semantics()["budget_is_ceiling"] is True
+
+    def test_igce_is_estimated_value_true(self):
+        from app.compliance_matrix import get_budget_semantics
+        assert get_budget_semantics()["igce_is_estimated_value"] is True
+
+    def test_forbidden_behaviors_includes_reconcile_question(self):
+        """Meeting issue #2 — 'reconcile IGCE vs budget' must be explicitly forbidden."""
+        from app.compliance_matrix import get_budget_semantics
+        forbidden = get_budget_semantics()["forbidden_behaviors"]
+        assert any("reconcile" in b.lower() for b in forbidden)
+
+    def test_forbidden_behaviors_includes_ceiling_exceedance(self):
+        from app.compliance_matrix import get_budget_semantics
+        forbidden = get_budget_semantics()["forbidden_behaviors"]
+        assert any("exceeds budget_ceiling" in b for b in forbidden)
+
+    def test_budget_ceiling_is_locked_after_intake(self):
+        from app.compliance_matrix import get_budget_semantics
+        assert "budget_ceiling" in get_budget_semantics()["locked_after_intake"]
+
+    def test_note_field_stripped_from_output(self):
+        from app.compliance_matrix import get_budget_semantics
+        assert not any(k.startswith("_") for k in get_budget_semantics())
+
+
+class TestExecuteOperationIntakeAndBudget:
+    """execute_operation() routes the two new operations."""
+
+    def test_intake_required_facts_with_doc_type(self):
+        result = execute_operation({
+            "operation": "intake_required_facts",
+            "doc_type": "pws",
+        })
+        assert result["doc_type"] == "pws"
+        assert "event_cadence" in result["required"]
+        assert result["blocker"] is True
+
+    def test_intake_required_facts_without_doc_type_returns_full_map(self):
+        result = execute_operation({"operation": "intake_required_facts"})
+        assert "intake_required_facts" in result
+        assert "pws" in result["intake_required_facts"]
+
+    def test_intake_required_facts_unknown_doc_type(self):
+        result = execute_operation({
+            "operation": "intake_required_facts",
+            "doc_type": "bogus",
+        })
+        assert result["unknown"] is True
+
+    def test_budget_semantics_op(self):
+        result = execute_operation({"operation": "budget_semantics"})
+        assert result["budget_is_ceiling"] is True
+        assert "forbidden_behaviors" in result
+
+    def test_unknown_op_error_lists_new_operations(self):
+        """Unknown-op error message should now reference the two new operations."""
+        result = execute_operation({"operation": "nonexistent"})
+        assert "intake_required_facts" in result["error"]
+        assert "budget_semantics" in result["error"]
