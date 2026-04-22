@@ -24,13 +24,18 @@ Generate professional acquisition documents based on intake context and user inp
 
 ## Research Prerequisites
 
-| Document | Required Research | Tool Sequence |
-|----------|-------------------|---------------|
-| MRR | Vendor search, pricing, small business | web_search (3-5 searches) → web_fetch top 5 URLs per search |
-| IGCE | GSA rates, BLS labor data, market pricing | web_search (2-3 searches) → web_fetch top 5 URLs per search |
-| J&A | Market research + contractor verification | MRR must exist + web_search |
-| AP | Market research + cost data | References MRR + IGCE findings |
-| SOW | User requirements from intake | Intake discussion (minimal web research) |
+| Document | Required Research | Tool Sequence | Intake Facts Required |
+|----------|-------------------|---------------|-----------------------|
+| MRR | Vendor search, pricing, small business | web_search (3-5 searches) → web_fetch top 5 URLs per search | `query_compliance_matrix(operation="intake_required_facts", doc_type="market_research")` |
+| IGCE | GSA rates, BLS labor data, market pricing | web_search (2-3 searches) → web_fetch top 5 URLs per search | `query_compliance_matrix(operation="intake_required_facts", doc_type="igce")` |
+| J&A | Market research + contractor verification | MRR must exist + web_search | `query_compliance_matrix(operation="intake_required_facts", doc_type="ja")` |
+| AP | Market research + cost data | References MRR + IGCE findings | `query_compliance_matrix(operation="intake_required_facts", doc_type="acquisition_plan")` |
+| SOW | User requirements from intake | Intake discussion (minimal web research) | `query_compliance_matrix(operation="intake_required_facts", doc_type="sow")` |
+| PWS | User requirements from intake + event-cadence confirmation | Intake discussion (ask for cadence, deliverable format) | `query_compliance_matrix(operation="intake_required_facts", doc_type="pws")` |
+
+**Intake Facts Required** names the specific matrix query — call it BEFORE `create_document` for the relevant doc type and confirm every `required` fact has been captured (prior turns, package state, or explicit user answer). The backend `create_document` chokepoint enforces this and will reject the call if facts are missing. Ask any gaps in ONE batched question — never drip-feed.
+
+**Budget semantics (NON-NEGOTIABLE):** every dollar figure in any generated document must respect `matrix.budget_semantics`. Read via `query_compliance_matrix(operation="budget_semantics")`. Key invariants: budget is a not-to-exceed ceiling, IGCE is the estimated value (not a floor), NEVER ask the user to reconcile IGCE vs budget, NEVER inflate an IGCE to consume remaining budget, NEVER propose a contract value exceeding `budget_ceiling`.
 
 ## CRITICAL — Document Generation Pattern
 
