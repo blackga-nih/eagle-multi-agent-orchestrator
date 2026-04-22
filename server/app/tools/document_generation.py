@@ -18,6 +18,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from .create_document_support import (
     _DOC_TYPE_LABELS,
+    _append_provenance_metadata,
     _apply_sow_clear_edits,
     _augment_document_data_from_context,
     _default_output_format_for_doc_type,
@@ -514,10 +515,16 @@ def exec_create_document(
             template_provenance["template_id"] = result.template_path
 
     # Provenance footer is injected one layer down inside
-    # create_package_document_version() so every DOCUMENT# write — chat,
-    # POST route, AI edit — gets the same guarantee. Don't double-inject
-    # here; the helper has a guard but the placement also matters for
-    # content-hash idempotency.
+    # create_package_document_version() for package documents. For
+    # session-mode (no package_id) and for the markdown `content` returned
+    # to callers, inject the metadata section here. The helper is
+    # idempotent (guards on "## Document Metadata" already present).
+    _generated_at_iso = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    if isinstance(content, str) and content.strip():
+        content = _append_provenance_metadata(
+            content, template_provenance, source, _generated_at_iso
+        )
+
     if not (result and result.success and file_type in ("docx", "xlsx")):
         content_to_store = content
 
