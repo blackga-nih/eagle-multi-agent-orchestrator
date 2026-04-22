@@ -207,6 +207,9 @@ docs/development/eagle_usage_data.json
 docs/development/feedback-test-screenshots/
 server/tests/jira_screenshots/
 
+# Local scratch artifacts (screenshots, transcripts, one-off scripts)
+.artifacts/
+
 # Claude specs (local planning)
 .claude/specs/
 
