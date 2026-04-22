@@ -134,27 +134,31 @@ class TestCreatePackageDocumentVersion:
         from app.document_service import create_package_document_version
         import hashlib
 
-        content_hash = hashlib.sha256(CONTENT.encode()).hexdigest()
-        existing = [{
-            "version": 1,
-            "status": "draft",
-            "content_hash": content_hash,
-            "document_id": "existing-doc-id",
-            "s3_key": "existing/key",
-            "s3_bucket": "bucket",
-            "title": TITLE,
-            "created_at": FAKE_ISO,
-        }]
+        # document_service injects a provenance-metadata footer before hashing,
+        # so compute the expected hash against the post-injection content.
+        with mock.patch("app.document_service._append_provenance_metadata",
+                        side_effect=lambda content, *a, **kw: content):
+            content_hash = hashlib.sha256(CONTENT.encode()).hexdigest()
+            existing = [{
+                "version": 1,
+                "status": "draft",
+                "content_hash": content_hash,
+                "document_id": "existing-doc-id",
+                "s3_key": "existing/key",
+                "s3_bucket": "bucket",
+                "title": TITLE,
+                "created_at": FAKE_ISO,
+            }]
 
-        with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
-             mock.patch("app.document_service.get_document_history", return_value=existing):
-            result = create_package_document_version(
-                tenant_id=TENANT,
-                package_id=PACKAGE_ID,
-                doc_type=DOC_TYPE,
-                content=CONTENT,
-                title=TITLE,
-            )
+            with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
+                 mock.patch("app.document_service.get_document_history", return_value=existing):
+                result = create_package_document_version(
+                    tenant_id=TENANT,
+                    package_id=PACKAGE_ID,
+                    doc_type=DOC_TYPE,
+                    content=CONTENT,
+                    title=TITLE,
+                )
 
         assert result.success is True
         assert result.version == 1
@@ -241,6 +245,10 @@ class TestCreatePackageDocumentVersion:
              mock.patch("app.document_service.get_s3", return_value=mock_s3), \
              mock.patch("app.document_service.update_package") as mock_update, \
              mock.patch("app.document_service.write_changelog_entry"), \
+             mock.patch(
+                 "app.package_document_store.list_package_documents",
+                 return_value=[{"doc_type": "sow"}],
+             ), \
              mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
              mock.patch("app.document_service.datetime", wraps=datetime,
                        **{"utcnow.return_value": FAKE_NOW}):

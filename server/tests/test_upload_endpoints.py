@@ -261,17 +261,16 @@ class TestAssignToPackage:
         upload_meta = self._mock_upload_meta()
         mock_pkg = {"package_id": "pkg-1", "tenant_id": "test-tenant", "title": "Test Package"}
 
+        mock_s3 = MagicMock()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"pdf content")}
+
         with (
             patch("app.routers.documents._get_upload", return_value=upload_meta),
             patch("app.routers.documents.get_package", return_value=mock_pkg),
             patch("app.routers.documents.create_package_document_version", return_value=self._mock_result()),
             patch("app.routers.documents._delete_upload"),
-            patch("boto3.client") as mock_boto3_client,
+            patch("app.routers.documents.get_s3", return_value=mock_s3),
         ):
-            mock_s3 = MagicMock()
-            mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"pdf content")}
-            mock_boto3_client.return_value = mock_s3
-
             response = client.post(
                 "/api/documents/fake-upload-id/assign-to-package",
                 json={"package_id": "pkg-1"},
@@ -351,17 +350,16 @@ class TestAssignToPackage:
             captured_call.update(kwargs)
             return self._mock_result()
 
+        mock_s3 = MagicMock()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"content")}
+
         with (
             patch("app.routers.documents._get_upload", return_value=upload_meta),
             patch("app.routers.documents.get_package", return_value=mock_pkg),
             patch("app.routers.documents.create_package_document_version", side_effect=fake_create),
             patch("app.routers.documents._delete_upload"),
-            patch("boto3.client") as mock_boto3_client,
+            patch("app.routers.documents.get_s3", return_value=mock_s3),
         ):
-            mock_s3 = MagicMock()
-            mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"content")}
-            mock_boto3_client.return_value = mock_s3
-
             response = client.post(
                 "/api/documents/fake-id/assign-to-package",
                 # No doc_type in body — should fall back to "igce" from classification

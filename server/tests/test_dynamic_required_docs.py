@@ -12,8 +12,8 @@ class TestComputeRequiredDocs:
     """Test compliance-matrix-driven dynamic document requirements."""
 
     def test_negotiated_ffp_500k_returns_expected_slugs(self):
-        """Negotiated FFP at $500K should include SOW, IGCE, market research, AP, SSP, etc."""
-        from app.package_store import compute_required_docs
+        """Negotiated FFP at $500K should include SOW, IGCE, market research, AP (core) and SSP (supplemental)."""
+        from app.package_store import compute_required_docs, compute_required_docs_with_checklist
 
         slugs = compute_required_docs(
             estimated_value=500_000,
@@ -25,7 +25,15 @@ class TestComputeRequiredDocs:
         assert "igce" in slugs
         assert "market_research" in slugs
         assert "acquisition_plan" in slugs
-        assert "source_selection_plan" in slugs
+
+        info = compute_required_docs_with_checklist(
+            estimated_value=500_000,
+            acquisition_method="negotiated",
+            contract_type="ffp",
+            flags={"is_services": True},
+        )
+        all_slugs = set(info["slugs"]) | set(info["supplemental_slugs"])
+        assert "source_selection_plan" in all_slugs
 
     def test_micro_purchase_returns_minimal_list(self):
         """Micro-purchase ($5K) should only require purchase_request and sb_review at most."""
@@ -53,17 +61,18 @@ class TestComputeRequiredDocs:
         assert "justification" in slugs
 
     def test_it_flags_include_security_and_508(self):
-        """IT acquisitions should include security checklist and Section 508."""
-        from app.package_store import compute_required_docs
+        """IT acquisitions should include security checklist and Section 508 (supplemental tier)."""
+        from app.package_store import compute_required_docs_with_checklist
 
-        slugs = compute_required_docs(
+        info = compute_required_docs_with_checklist(
             estimated_value=500_000,
             acquisition_method="negotiated",
             contract_type="ffp",
             flags={"is_it": True, "is_services": True},
         )
-        assert "security_checklist" in slugs
-        assert "section_508" in slugs
+        all_slugs = set(info["slugs"]) | set(info["supplemental_slugs"])
+        assert "security_checklist" in all_slugs
+        assert "section_508" in all_slugs
 
     def test_fallback_to_static_on_compliance_error(self):
         """When compliance matrix raises, should fall back to static docs."""
@@ -82,12 +91,18 @@ class TestComputeRequiredDocs:
 
     def test_uppercase_contract_type_normalizes_to_lowercase(self):
         """CPFF (uppercase) should return same docs as cpff (lowercase)."""
-        from app.package_store import compute_required_docs
+        from app.package_store import compute_required_docs, compute_required_docs_with_checklist
 
         upper = compute_required_docs(3_500_000, "negotiated", "CPFF")
         lower = compute_required_docs(3_500_000, "negotiated", "cpff")
         assert upper == lower
-        assert len(upper) == 16  # $3.5M CPFF negotiated → 11 required docs
+
+        upper_info = compute_required_docs_with_checklist(3_500_000, "negotiated", "CPFF")
+        lower_info = compute_required_docs_with_checklist(3_500_000, "negotiated", "cpff")
+        assert upper_info["slugs"] == lower_info["slugs"]
+        assert upper_info["supplemental_slugs"] == lower_info["supplemental_slugs"]
+        combined = len(upper_info["slugs"]) + len(upper_info["supplemental_slugs"])
+        assert combined == 16  # $3.5M CPFF negotiated → 16 total docs (core + supplemental)
 
     def test_uppercase_acquisition_method_normalizes_to_lowercase(self):
         """NEGOTIATED (uppercase) should return same docs as negotiated."""
@@ -100,13 +115,16 @@ class TestComputeRequiredDocs:
 
     def test_mixed_case_inputs_return_correct_docs(self):
         """Mixed case like 'Cpff' and 'Negotiated' should work."""
-        from app.package_store import compute_required_docs
+        from app.package_store import compute_required_docs, compute_required_docs_with_checklist
 
         slugs = compute_required_docs(3_500_000, "Negotiated", "Cpff")
-        assert len(slugs) == 16
         assert "sow" in slugs
         assert "igce" in slugs
         assert "acquisition_plan" in slugs
+
+        info = compute_required_docs_with_checklist(3_500_000, "Negotiated", "Cpff")
+        combined = len(info["slugs"]) + len(info["supplemental_slugs"])
+        assert combined == 16
 
     def test_all_compliance_doc_names_have_slug_mapping(self):
         """Every document name returned by get_requirements should have a slug mapping."""

@@ -94,7 +94,8 @@ def test_exec_web_search_handles_bedrock_error(mock_get_client):
     result = exec_web_search("test query")
 
     assert "error" in result
-    assert "AccessDeniedException" in result["error"]
+    assert result["error"] == "bedrock_api_error"
+    assert result.get("error_code") == "AccessDeniedException"
     assert result["query"] == "test query"
 
 
@@ -109,7 +110,8 @@ def test_exec_web_search_handles_timeout(mock_get_client):
     result = exec_web_search("slow query")
 
     assert "error" in result
-    assert "timed out" in result["error"]
+    assert result["error"] == "timeout"
+    assert "timeout" in result.get("detail", "").lower()
     assert result["query"] == "slow query"
 
 

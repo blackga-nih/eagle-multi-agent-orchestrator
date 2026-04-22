@@ -23,6 +23,15 @@ def _mock_config(base_url="https://jira.example.com", api_token="test-token"):
     return cfg
 
 
+@pytest.fixture(autouse=True)
+def _configured_jira(monkeypatch):
+    """Ensure JIRA config is populated so config guard (base_url+api_token)
+    does not short-circuit. Individual tests can override with patch() if
+    they need to exercise the unconfigured path."""
+    import app.config as _config_mod
+    monkeypatch.setattr(_config_mod, "jira", _mock_config(), raising=False)
+
+
 def _mock_response(status_code, json_data=None, text=""):
     resp = MagicMock()
     resp.status_code = status_code

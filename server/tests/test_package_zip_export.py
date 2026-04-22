@@ -164,23 +164,32 @@ class TestZipEndpoint:
                     {"doc_type": "sow", "title": "SOW", "content": "# SOW\nContent"}
                 ]
                 try:
-                    with patch("app.document_export.export_package_zip", return_value={
-                             "data": b"PK\x03\x04fake",
-                             "filename": "test.zip",
-                             "content_type": "application/zip",
-                             "size_bytes": 10,
-                         }):
+                    with (
+                        patch(
+                            "app.routers.packages.list_package_attachments",
+                            return_value=[],
+                        ),
+                        patch(
+                            "app.document_export.export_package_zip",
+                            return_value={
+                                "data": b"PK\x03\x04fake",
+                                "filename": "test.zip",
+                                "content_type": "application/zip",
+                                "size_bytes": 10,
+                            },
+                        ),
+                    ):
                         response = await client.get(
                             "/api/packages/PKG-0001/export/zip",
                             headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
                         )
                         assert response.status_code == 200
+                        assert response.headers["content-type"] == "application/zip"
                 finally:
                     if hasattr(_main_mod, "get_package"):
                         delattr(_main_mod, "get_package")
                     if hasattr(_main_mod, "list_package_documents"):
                         delattr(_main_mod, "list_package_documents")
-                    assert response.headers["content-type"] == "application/zip"
 
         asyncio.run(_run())
 
@@ -197,29 +206,44 @@ class TestZipEndpoint:
                 mock_body.read.return_value = b"fake-image-bytes"
                 mock_s3.get_object.return_value = {"Body": mock_body}
 
-                with (
-                    patch("app.package_store.get_package", return_value={"title": "Test"}),
-                    patch("app.package_document_store.list_package_documents", return_value=[]),
-                    patch(
-                        "app.routers.packages.list_package_attachments",
-                        return_value=[
-                            {
-                                "attachment_id": "att-1",
-                                "category": "technical_evidence",
-                                "title": "Screenshot",
-                                "file_type": "png",
-                                "s3_bucket": "bucket",
-                                "s3_key": "key",
-                            }
-                        ],
-                    ),
-                    patch("app.db_client.get_s3", return_value=mock_s3),
-                ):
-                    response = await client.get(
-                        "/api/packages/PKG-0001/export/zip",
-                        headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
-                    )
-                    assert response.status_code == 200
-                    assert response.headers["content-type"] == "application/zip"
+                # _resolve_main_override looks up get_package/list_package_documents
+                # on app.main first — attach them there so the router picks them up.
+                import app.main as _main_mod
+                _main_mod.get_package = lambda *a, **kw: {"title": "Test"}
+                _main_mod.list_package_documents = lambda *a, **kw: []
+                try:
+                    with (
+                        patch(
+                            "app.routers.packages.list_package_attachments",
+                            return_value=[
+                                {
+                                    "attachment_id": "att-1",
+                                    "category": "technical_evidence",
+                                    "title": "Screenshot",
+                                    "file_type": "png",
+                                    "s3_bucket": "bucket",
+                                    "s3_key": "key",
+                                }
+                            ],
+                        ),
+                        patch("app.db_client.get_s3", return_value=mock_s3),
+                        patch("app.document_export.export_package_zip", return_value={
+                            "data": b"PK\x03\x04fake",
+                            "filename": "test.zip",
+                            "content_type": "application/zip",
+                            "size_bytes": 10,
+                        }),
+                    ):
+                        response = await client.get(
+                            "/api/packages/PKG-0001/export/zip",
+                            headers={"X-Tenant-Id": "test", "X-User-Id": "user1"},
+                        )
+                        assert response.status_code == 200
+                        assert response.headers["content-type"] == "application/zip"
+                finally:
+                    if hasattr(_main_mod, "get_package"):
+                        delattr(_main_mod, "get_package")
+                    if hasattr(_main_mod, "list_package_documents"):
+                        delattr(_main_mod, "list_package_documents")
 
         asyncio.run(_run())

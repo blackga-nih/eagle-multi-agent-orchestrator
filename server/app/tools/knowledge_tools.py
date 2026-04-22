@@ -1185,7 +1185,7 @@ _embed_client = None
 _s3vectors_client = None
 
 
-def _get_bedrock_runtime():
+def _get_bedrock_embed_client():
     """Lazy singleton for the Bedrock runtime client (embeddings)."""
     global _embed_client
     if _embed_client is None:
@@ -1210,7 +1210,7 @@ def embed_text(text: str, dimensions: int = EMBED_DIM) -> list[float] | None:
     if not text:
         return None
     try:
-        runtime = _get_bedrock_runtime()
+        runtime = _get_bedrock_embed_client()
         body = json.dumps({
             "inputText": text[:8000],  # Titan v2 max ~8k tokens
             "dimensions": dimensions,

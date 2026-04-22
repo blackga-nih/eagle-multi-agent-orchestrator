@@ -171,20 +171,19 @@ class TestAssignDocTypeNormalization:
             "version": 1,
         }
 
+        mock_s3 = MagicMock()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"content")}
+
         with (
             patch("app.routers.documents._get_upload", return_value=upload_meta),
             patch("app.routers.documents.get_package", return_value={"package_id": "pkg-1"}),
-            patch("boto3.client") as mock_boto3,
+            patch("app.routers.documents.get_s3", return_value=mock_s3),
             patch("app.routers.documents.create_package_document_version", return_value=mock_result) as mock_create,
             patch("app.routers.documents._delete_upload"),
             patch("app.tag_computation.compute_document_tags", return_value=["phase:planning"]),
             patch("app.tag_computation.compute_far_tags_from_template", return_value=["FAR 7.105"]),
             patch("app.tag_computation.compute_completeness_pct", return_value=0.0),
         ):
-            mock_s3 = MagicMock()
-            mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"content")}
-            mock_boto3.return_value = mock_s3
-
             response = client.post(
                 "/api/documents/upload-123/assign-to-package",
                 json={"package_id": "pkg-1", "doc_type": "acquisition-plan"},
@@ -226,20 +225,19 @@ class TestAssignAutoTags:
         expected_sys_tags = ["phase:planning", "doc_type:sow"]
         expected_far_tags = ["FAR 37.6"]
 
+        mock_s3 = MagicMock()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"# SOW content")}
+
         with (
             patch("app.routers.documents._get_upload", return_value=upload_meta),
             patch("app.routers.documents.get_package", return_value={"package_id": "pkg-1"}),
-            patch("boto3.client") as mock_boto3,
+            patch("app.routers.documents.get_s3", return_value=mock_s3),
             patch("app.routers.documents.create_package_document_version", return_value=mock_result) as mock_create,
             patch("app.routers.documents._delete_upload"),
             patch("app.tag_computation.compute_document_tags", return_value=expected_sys_tags),
             patch("app.tag_computation.compute_far_tags_from_template", return_value=expected_far_tags),
             patch("app.tag_computation.compute_completeness_pct", return_value=42.5),
         ):
-            mock_s3 = MagicMock()
-            mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"# SOW content")}
-            mock_boto3.return_value = mock_s3
-
             response = client.post(
                 "/api/documents/upload-456/assign-to-package",
                 json={"package_id": "pkg-1"},
