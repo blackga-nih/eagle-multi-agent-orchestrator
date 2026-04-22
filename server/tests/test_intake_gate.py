@@ -222,22 +222,24 @@ class TestCheckIntakeRequiredFacts:
 
 
 class TestChokepointExecCreateDocument:
-    """Verify the chokepoint in tools/document_generation.exec_create_document
-    enforces the intake-facts guardrail for ANY caller (supervisor, subagent,
-    or forced-call path), not just the subagent fast-path."""
+    """Verify the chokepoint in tools/legacy_dispatch.exec_create_document
+    enforces the intake-facts guardrail for every agent-path caller (supervisor
+    tool-dispatch, subagent tool, or _ensure_create_document_for_direct_request).
+
+    Note: the gate deliberately does NOT fire when tests import the deep
+    executor (tools.document_generation.exec_create_document) directly. The
+    thin forwarder in legacy_dispatch is the single agent-visible entry
+    point — that is where the gate lives.
+    """
 
     def test_exec_create_document_rejects_missing_facts(self):
-        """Call exec_create_document directly with an incomplete PWS payload.
+        """Call the legacy_dispatch forwarder with an incomplete PWS payload.
 
-        Must return a guardrail dict BEFORE any S3/template work happens —
-        this is the universal backstop that catches misses the subagent
-        fast-path doesn't.
+        Must return a guardrail dict BEFORE delegating to the deep executor.
+        This is the universal backstop that fires for every agent caller.
         """
-        from app.tools.document_generation import exec_create_document
+        from app.tools.legacy_dispatch import exec_create_document
 
-        # Missing event_cadence (and most other required PWS facts). Has a
-        # title and a minimal content body so earlier prerequisite checks
-        # can't short-circuit before the intake gate.
         params = {
             "doc_type": "pws",
             "title": "PWS - Training Program",
@@ -254,7 +256,7 @@ class TestChokepointExecCreateDocument:
 
     def test_exec_create_document_guardrail_is_json_serializable(self):
         """Downstream consumers JSON-serialize the result — must round-trip."""
-        from app.tools.document_generation import exec_create_document
+        from app.tools.legacy_dispatch import exec_create_document
 
         result = exec_create_document(
             {"doc_type": "igce", "title": "IGCE", "content": "", "data": {}},
@@ -263,3 +265,26 @@ class TestChokepointExecCreateDocument:
         )
         json.dumps(result)  # must not raise
         assert result["status"] == "guardrail"
+
+    def test_deep_executor_bypasses_gate(self):
+        """Direct calls to document_generation.exec_create_document must NOT
+        invoke the gate — tests of low-level mechanics (provenance metadata,
+        template shape, etc.) rely on this to pass minimal payloads."""
+        from app.tools import document_generation
+
+        # Minimal SOW input — missing scope, pop, place_of_performance, task_breakdown.
+        # Gate would normally block this; the deep executor must not.
+        try:
+            result = document_generation.exec_create_document(
+                {"doc_type": "sow", "title": "Test SOW"},
+                tenant_id="test-tenant",
+                session_id="ses-test",
+            )
+        except Exception:
+            # Downstream machinery may fail on minimal input (S3, templates,
+            # etc.) — but it must NOT be blocked by our intake guardrail.
+            return
+        if isinstance(result, dict) and result.get("guardrail") == "intake_required_facts":
+            raise AssertionError(
+                "document_generation.exec_create_document must not invoke intake gate"
+            )
