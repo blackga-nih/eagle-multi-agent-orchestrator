@@ -62,7 +62,10 @@ class TestNormalizeDocType:
 
         # SOW aliases
         assert normalize_doc_type("statement_of_work") == "sow"
-        assert normalize_doc_type("pws") == "sow"
+        # PWS is a distinct doc_type from SOW (performance-based vs task-based) —
+        # see doc_type_registry._DOC_TYPE_ALIASES for the authoritative note.
+        assert normalize_doc_type("pws") == "pws"
+        assert normalize_doc_type("performance_work_statement") == "pws"
 
         # J&A aliases
         assert normalize_doc_type("j&a") == "justification"

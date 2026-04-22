@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import socket
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -235,6 +236,20 @@ async def _langfuse_set_session(
         logger.debug("[EAGLE] Langfuse trace patch failed: %s", exc)
 
 
+def _resolve_trace_env(tenant_id: str, user_id: str) -> str:
+    """Resolve Langfuse trace env label: local | dev | qa | staging | prod | eval.
+
+    Source of truth: EAGLE_ENV (set by CDK per ECS task); falls back to
+    DEV_MODE for local runs. Eval runs take precedence.
+    """
+    if tenant_id == "test-tenant" or user_id == "test-user":
+        return "eval"
+    env = os.getenv("EAGLE_ENV", "")
+    if env:
+        return env
+    return "local" if os.getenv("DEV_MODE", "").lower() == "true" else "live"
+
+
 def _build_trace_attrs(
     *,
     tenant_id: str,
@@ -252,19 +267,9 @@ def _build_trace_attrs(
     Tags every trace with sm-eagle source, local-vs-live environment,
     and hostname for source tracing.
     """
-    import socket
-
     hostname = socket.gethostname()
-    # EAGLE_ENV: local (dev machine), dev (ECS dev), staging, prod
-    # Falls back to DEV_MODE for backward compatibility
-    eagle_env = os.getenv("EAGLE_ENV", "")
-    if not eagle_env:
-        dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
-        eagle_env = "local" if dev_mode else "live"
-
-    # Tag eval runs: detect test-tenant/test-user from eval suite
-    is_eval = tenant_id == "test-tenant" or user_id == "test-user"
-    trace_env = "eval" if is_eval else eagle_env
+    trace_env = _resolve_trace_env(tenant_id, user_id)
+    is_eval = trace_env == "eval"
 
     attrs = {
         "eagle.source": "sm-eagle",
@@ -967,6 +972,14 @@ _DOC_EDIT_VERBS = (
     "rewrite",
     "adjust",
     "amend",
+    "make",
+    "clear",
+    "complete",
+    "add",
+    "remove",
+    "replace",
+    "expand",
+    "shorten",
 )
 
 # Doc-type noun vocabulary reused from _DOC_TYPE_HINTS so the imperative regex
@@ -991,6 +1004,7 @@ _ALL_DOC_NOUNS: tuple[str, ...] = tuple(
 # in unrelated sentences was being flagged as a doc-generation request.
 _IMPERATIVE_DOC_RE = re.compile(
     r"(?:^|[.!?]\s+|\bplease\s+|\bcan\s+you\s+|\bcould\s+you\s+|\blet'?s\s+"
+    r"|\band\s+then\s+|\bthen\s+|\band\s+"
     r"|\bi\s+(?:need|want|would\s+like)\s+you\s+to\s+)"
     r"(?:" + "|".join(_DIRECT_DOC_VERBS) + r")\b"
     r"(?:\s+(?:a|an|the|me|us))?"
@@ -5786,7 +5800,14 @@ async def sdk_query(
     # issue (strands-agents/sdk-python#1316).
     _lf_ctx = None
     _root_span = None
-    trace_env = os.getenv("LANGFUSE_TRACE_ENV", "dev")
+    trace_env = _resolve_trace_env(tenant_id, user_id)
+    _hostname = socket.gethostname()
+    _trace_tags = [
+        f"env:{trace_env}",
+        f"host:{_hostname}",
+        f"tier:{tier}",
+        f"user:{username or user_id}",
+    ]
     if _langfuse_client is not None and session_id:
         try:
             _lf_ctx = _langfuse_client.start_as_current_observation(
@@ -5799,12 +5820,14 @@ async def sdk_query(
                     "tenant_id": tenant_id,
                     "tier": tier,
                     "session_id": session_id,
+                    "hostname": _hostname,
+                    "environment": trace_env,
                 },
             )
             _langfuse_client.propagate_attributes(
                 session_id=session_id,
                 user_id=username or user_id,
-                tags=[f"env:{trace_env}", f"tier:{tier}"],
+                tags=_trace_tags,
             )
         except Exception as lf_exc:
             logger.debug("Langfuse parent span setup failed (non-fatal): %s", lf_exc)
@@ -5996,11 +6019,12 @@ async def sdk_query(
 
             span_ctx = supervisor.trace_span.get_span_context()
             if span_ctx and span_ctx.is_valid:
+                _merged_tags = list(_trace_tags) + list(tags or [])
                 await _langfuse_set_session(
                     format_trace_id(span_ctx.trace_id),
                     session_id,
-                    user_id=user_id,
-                    tags=tags,
+                    user_id=username or user_id,
+                    tags=_merged_tags,
                 )
         except Exception:
             pass
@@ -6314,7 +6338,14 @@ async def sdk_query_streaming(
     # ContextVar detach issue (strands-agents/sdk-python#1316).
     _lf_ctx = None
     _root_span = None
-    trace_env = os.getenv("LANGFUSE_TRACE_ENV", "dev")
+    trace_env = _resolve_trace_env(tenant_id, user_id)
+    _hostname = socket.gethostname()
+    _trace_tags = [
+        f"env:{trace_env}",
+        f"host:{_hostname}",
+        f"tier:{tier}",
+        f"user:{username or user_id}",
+    ]
     if _langfuse_client is not None and session_id:
         try:
             _lf_ctx = _langfuse_client.start_as_current_observation(
@@ -6327,12 +6358,14 @@ async def sdk_query_streaming(
                     "tenant_id": tenant_id,
                     "tier": tier,
                     "session_id": session_id,
+                    "hostname": _hostname,
+                    "environment": trace_env,
                 },
             )
             _langfuse_client.propagate_attributes(
                 session_id=session_id,
                 user_id=username or user_id,
-                tags=[f"env:{trace_env}", f"tier:{tier}"],
+                tags=_trace_tags,
             )
         except Exception as lf_exc:
             logger.debug("Langfuse parent span setup failed (non-fatal): %s", lf_exc)
@@ -7002,12 +7035,13 @@ async def sdk_query_streaming(
 
             span_ctx = supervisor.trace_span.get_span_context()
             if span_ctx and span_ctx.is_valid:
+                _merged_tags = list(_trace_tags) + list(tags or [])
                 asyncio.ensure_future(
                     _langfuse_set_session(
                         format_trace_id(span_ctx.trace_id),
                         session_id,
-                        user_id=user_id,
-                        tags=tags,
+                        user_id=username or user_id,
+                        tags=_merged_tags,
                     )
                 )
         except Exception:

@@ -124,7 +124,30 @@ export function ChecklistTabContent({ state, onDocumentClick }: ChecklistPanelPr
 
   const required = checklist?.required || [];
   const completed = new Set(checklist?.completed || []);
+  const suggested = checklist?.suggested || [];
   const alertCount = complianceAlerts.filter((a) => a.severity !== 'info').length;
+
+  const handleAddSuggested = useCallback(
+    async (slug: string) => {
+      if (!packageId) return;
+      try {
+        const res = await fetch(
+          `/api/packages/${encodeURIComponent(packageId)}/required-docs`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ add: [slug] }),
+          },
+        );
+        if (!res.ok) throw new Error(`Add failed: ${res.status}`);
+        // The backend broadcasts a fresh checklist_update over SSE, so the
+        // panel re-renders on its own — no local state mutation needed.
+      } catch (err) {
+        console.error('Add suggested doc failed:', err);
+      }
+    },
+    [packageId],
+  );
 
   return (
     <div className="flex flex-col gap-0">
@@ -347,6 +370,38 @@ export function ChecklistTabContent({ state, onDocumentClick }: ChecklistPanelPr
                 </li>
               );
             })}
+          </ul>
+        </div>
+      )}
+
+      {/* Suggested Documents — supplemental, opt-in only */}
+      {suggested.length > 0 && (
+        <div className="mb-3 border-t border-dashed border-[#D8DEE6] pt-3">
+          <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-2">
+            Suggested — Review & Confirm ({suggested.length})
+          </p>
+          <ul className="space-y-1.5">
+            {suggested.map((item) => (
+              <li
+                key={item.slug}
+                className="flex items-center gap-2 rounded px-1 -mx-1 hover:bg-amber-50 transition-colors"
+              >
+                <span className="flex-shrink-0 w-4 h-4 rounded border border-dashed border-amber-400 bg-amber-50" />
+                <span
+                  className="text-xs leading-tight flex-1 text-gray-600"
+                  title={`Policy-flagged. Click "+ Add" to move into the required checklist.`}
+                >
+                  {item.label}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleAddSuggested(item.slug)}
+                  className="flex-shrink-0 text-[10px] font-medium px-2 py-0.5 rounded border border-amber-400 text-amber-800 hover:bg-amber-100 transition-colors"
+                >
+                  + Add
+                </button>
+              </li>
+            ))}
           </ul>
         </div>
       )}
