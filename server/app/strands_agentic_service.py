@@ -1308,6 +1308,257 @@ def _check_document_prerequisites(parsed: dict) -> str | None:
     )
 
 
+# ── Intake-fact detectors (added 2026-04-22) ────────────────────────
+# Pattern-based detection for each required fact listed in
+# matrix.intake_required_facts. Each detector returns True if the fact can
+# be found in parsed data/content/session_ctx. See handoff 20260422 for
+# the rationale; pairs with the supervisor PRE-GENERATION INTAKE GATE
+# prompt block as the backend correctness guarantee.
+
+import re as _re_intake  # noqa: E402
+
+_FACT_LABELS = {
+    "scope": "scope (what is being acquired — a concrete description)",
+    "pop": "period of performance (duration or start/end dates)",
+    "place_of_performance": "place of performance (location: on-site, remote, or specific site)",
+    "event_cadence": "event cadence (frequency: number of events, weekly/monthly/quarterly, etc.)",
+    "deliverable_format": "deliverable format (reports, briefings, data, software, training events, etc.)",
+    "task_breakdown": "task breakdown (enumerated list of tasks the contractor will perform)",
+    "labor_categories_or_line_items": "labor categories or line items",
+    "budget_ceiling": "budget ceiling (not-to-exceed dollar amount)",
+    "naics_or_category": "NAICS code or product/service category",
+    "estimated_value_range": "estimated value range (dollar amount or low/high range)",
+    "igce_value": "IGCE dollar value",
+    "contract_type": "contract type (FFP, T&M, CR, IDIQ, etc.)",
+    "competition_approach": "competition approach (full and open, set-aside, sole source, etc.)",
+    "proposed_contractor": "proposed contractor / vendor name",
+    "authority_far_6_302_x": "J&A authority (specific FAR 6.302 subsection)",
+    "sole_source_rationale": "sole source rationale (why this vendor, why no competition)",
+}
+
+
+def _fact_present(fact: str, data: dict, content: str, session_ctx: dict) -> bool:
+    """Return True if `fact` can be found in data dict, content prose, or session context."""
+    # Flatten session_ctx into data-equivalent lookups — any top-level key
+    # (e.g. package state) counts as structured data for detection.
+    merged_data = {}
+    for src in (session_ctx or {}, data or {}):
+        if isinstance(src, dict):
+            merged_data.update(src)
+
+    # Direct field lookups — an exact key match is the strongest signal.
+    direct_keys = {
+        "scope": ("scope", "requirement_description"),
+        "pop": ("pop", "period_of_performance"),
+        "place_of_performance": ("place_of_performance",),
+        "event_cadence": ("event_cadence", "cadence", "frequency"),
+        "deliverable_format": ("deliverable_format", "deliverables"),
+        "task_breakdown": ("task_breakdown", "tasks"),
+        "labor_categories_or_line_items": ("labor_categories", "line_items"),
+        "budget_ceiling": ("budget_ceiling", "budget", "estimated_value"),
+        "naics_or_category": ("naics_code", "naics", "category"),
+        "estimated_value_range": (
+            "estimated_value_range",
+            "estimated_value",
+            "budget_ceiling",
+        ),
+        "igce_value": ("igce_value", "estimated_value"),
+        "contract_type": ("contract_type",),
+        "competition_approach": ("competition_approach", "competition"),
+        "proposed_contractor": ("proposed_contractor", "vendor"),
+        "authority_far_6_302_x": ("authority_far_6_302_x", "authority"),
+        "sole_source_rationale": ("sole_source_rationale", "rationale"),
+    }
+    for key in direct_keys.get(fact, ()):
+        val = merged_data.get(key)
+        if val in (None, "", 0):
+            continue
+        if isinstance(val, str) and val.strip().lower() in ("", "none", "n/a", "unknown", "tbd"):
+            continue
+        return True
+
+    text = content or ""
+    if not text:
+        return False
+
+    # Content-prose fallbacks — best-effort regex hints. Intentionally
+    # stricter than _check_document_prerequisites because the intake gate
+    # exists to prevent "content > 200 chars looks substantive" false
+    # positives that let cadence-missing PWSes slip through.
+    if fact == "scope":
+        # Explicit scope markers OR substantive content
+        if _re_intake.search(
+            r"(?:^|\n)\s*(?:scope|requirement|statement\s*of\s*(?:work|need))\s*[:\-]",
+            text,
+            _re_intake.IGNORECASE,
+        ):
+            return True
+        return len(text) > 300
+    if fact == "pop":
+        return bool(_re_intake.search(
+            r"(?:\bPoP\b|period of performance|\d+\s*(?:month|year|week|day)s?|base\s*year|option\s*year)",
+            text,
+            _re_intake.IGNORECASE,
+        ))
+    if fact == "place_of_performance":
+        return bool(_re_intake.search(
+            r"(?:place of performance|on[-\s]?site|remote|telework|contractor\s*facility|government\s*facility|Bethesda|Rockville|Frederick|[A-Z][a-z]+,\s*[A-Z]{2})",
+            text,
+        ))
+    if fact == "event_cadence":
+        # Must pair a frequency word with an event-shaped noun nearby (within ~60
+        # chars). "Monthly report" (deliverable) alone does NOT qualify — the
+        # 4/16 output review specifically flagged that PWSes were being emitted
+        # without confirmed training-event cadence.
+        cadence_re = r"(?:weekly|monthly|quarterly|annual(?:ly)?|semi[-\s]?annual|bi[-\s]?weekly|daily)"
+        event_re = r"(?:events?|sessions?|meetings?|trainings?|briefings?|workshops?|classes?|cohorts?|conferences?|inspections?|reviews?|audits?|milestones?)"
+        # "N X per Y" with up to 2 adjectives between N and the event noun
+        num_re = r"\b\d+\s+(?:\w+\s+){0,2}" + event_re + r"\s+(?:per|/|each)\s+(?:year|month|quarter|week)"
+        proximity_patterns = [
+            event_re + r"[^.\n]{0,60}" + cadence_re,
+            cadence_re + r"[^.\n]{0,60}" + event_re,
+            num_re,
+            r"every\s+\d+\s*(?:weeks?|months?|days?)\s+" + event_re,
+        ]
+        for pat in proximity_patterns:
+            if _re_intake.search(pat, text, _re_intake.IGNORECASE):
+                return True
+        return False
+    if fact == "deliverable_format":
+        return bool(_re_intake.search(
+            r"(?:deliverable|report|briefing|training\s*event|software|data\s*set|documentation|presentation)",
+            text,
+            _re_intake.IGNORECASE,
+        ))
+    if fact == "task_breakdown":
+        # Look for enumerated tasks (numbered list) or "Task 1"/"Task 2"-style markers.
+        return bool(
+            _re_intake.search(r"(?:^|\n)\s*(?:\d+[\.\)]|Task\s*\d+|•|-)\s+\w", text)
+        )
+    if fact == "labor_categories_or_line_items":
+        return bool(_re_intake.search(
+            r"(?:labor\s*categor|line\s*items?|\bCLIN\b|engineer|analyst|developer|specialist|program\s*manager)",
+            text,
+            _re_intake.IGNORECASE,
+        ))
+    if fact == "budget_ceiling":
+        return bool(_re_intake.search(r"\$\s*[\d,]+(?:\.\d+)?|\bNTE\b|not[-\s]?to[-\s]?exceed|ceiling", text, _re_intake.IGNORECASE))
+    if fact == "naics_or_category":
+        return bool(_re_intake.search(r"\bNAICS\b|\b\d{5,6}\b", text, _re_intake.IGNORECASE))
+    if fact == "estimated_value_range":
+        return bool(_re_intake.search(r"\$\s*[\d,]+(?:\.\d+)?", text))
+    if fact == "igce_value":
+        return bool(_re_intake.search(r"\$\s*[\d,]+(?:\.\d+)?|\bIGCE\b", text, _re_intake.IGNORECASE))
+    if fact == "contract_type":
+        return bool(_re_intake.search(
+            r"(?:firm[-\s]?fixed|FFP|time[-\s]?and[-\s]?material|T&M|cost[-\s]?reimburs|IDIQ|BPA|CPFF|CPAF|CPIF|labor[-\s]?hour)",
+            text,
+            _re_intake.IGNORECASE,
+        ))
+    if fact == "competition_approach":
+        return bool(_re_intake.search(
+            r"(?:full\s*and\s*open|set[-\s]?aside|sole\s*source|8\(a\)|HUBZone|competitive|simplified\s*acquisition)",
+            text,
+            _re_intake.IGNORECASE,
+        ))
+    if fact == "proposed_contractor":
+        # Need a specific vendor name — can't regex universally. Accept when
+        # content is substantial (>400 chars) AND names something capitalized.
+        return len(text) > 400 and bool(
+            _re_intake.search(r"(?:[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+|Inc\.|LLC|Corp)", text)
+        )
+    if fact == "authority_far_6_302_x":
+        return bool(_re_intake.search(
+            r"FAR\s*6\.302(?:-\d+)?|6\.302-[1-7]|unusual\s*and\s*compelling|only\s*one\s*responsible\s*source",
+            text,
+            _re_intake.IGNORECASE,
+        ))
+    if fact == "sole_source_rationale":
+        return len(text) > 300 and bool(_re_intake.search(
+            r"(?:sole\s*source|only\s*source|unique\s*capability|proprietary|limited\s*source)",
+            text,
+            _re_intake.IGNORECASE,
+        ))
+
+    # Unknown fact — don't block creation; the intake gate matrix is the
+    # authoritative list, so unknown fact names indicate config drift and
+    # should be surfaced rather than silently blocking.
+    logger.warning(
+        "intake_required_facts: no detector for fact '%s' — treating as present to avoid spurious block",
+        fact,
+    )
+    return True
+
+
+def _check_intake_required_facts(
+    parsed: dict, session_ctx: dict | None = None
+) -> str | None:
+    """Return a guardrail JSON string if any matrix-required intake facts are missing.
+
+    Reads matrix.intake_required_facts[doc_type] via compliance_matrix.
+    Each required fact is checked against (1) parsed['data'] dict, (2)
+    parsed['content'] prose via regex, and (3) session_ctx (package/intake
+    state passed by the caller). If any fact is missing AND the entry has
+    blocker=true, returns a structured guardrail JSON blocking the call.
+
+    This is the backend chokepoint for the PRE-GENERATION INTAKE GATE
+    described in supervisor/agent.md and market-intelligence/agent.md.
+    It fires regardless of which agent initiated create_document.
+
+    Returns None when all required facts are present (proceed normally).
+    """
+    from .compliance_matrix import get_intake_required_facts
+
+    dt = str(parsed.get("doc_type", "")).strip().lower()
+    if not dt:
+        return None
+
+    spec = get_intake_required_facts(dt)
+    if spec.get("unknown") or not spec.get("blocker"):
+        return None
+
+    required = spec.get("required") or []
+    if not required:
+        return None
+
+    data_raw = parsed.get("data") or {}
+    if isinstance(data_raw, str):
+        try:
+            data_raw = json.loads(data_raw)
+        except Exception:
+            data_raw = {}
+
+    content = str(parsed.get("content", "") or "")
+    session_ctx = session_ctx or {}
+
+    missing = [
+        fact for fact in required
+        if not _fact_present(fact, data_raw, content, session_ctx)
+    ]
+
+    if not missing:
+        return None
+
+    labeled = [_FACT_LABELS.get(f, f) for f in missing]
+    doc_label = dt.replace("_", " ").upper()
+    return json.dumps(
+        {
+            "status": "guardrail",
+            "guardrail": "intake_required_facts",
+            "doc_type": dt,
+            "message": (
+                f"Cannot generate {doc_label} — required intake facts are missing.\n\n"
+                + "\n".join(f"• {lbl}" for lbl in labeled)
+                + "\n\nAsk the user to confirm ALL missing facts in ONE batched "
+                "question, then re-call create_document. Do not drip-feed and "
+                "do not attempt to infer these from prior unrelated context."
+            ),
+            "missing_facts": missing,
+            "word_count": 0,
+        }
+    )
+
+
 def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
     """Extract document viewer context blocks from wrapped prompts."""
     if not prompt:
@@ -2574,6 +2825,11 @@ def _build_subagent_doc_tools(
             _mp_block = _check_micropurchase_guardrail(parsed)
             if _mp_block:
                 return _mp_block
+
+            # -- Intake-required-facts guardrail (matrix.intake_required_facts) --
+            _intake_block = _check_intake_required_facts(parsed)
+            if _intake_block:
+                return _intake_block
 
             # -- Document prerequisites guardrail --
             _prereq_block = _check_document_prerequisites(parsed)

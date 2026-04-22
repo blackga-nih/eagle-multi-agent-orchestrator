@@ -210,6 +210,32 @@ def exec_create_document(
         except Exception as exc:
             logger.debug("Attachment enrichment skipped for %s: %s", package_id, exc)
 
+    # -- Intake-required-facts chokepoint (matrix.intake_required_facts) --
+    # Universal enforcement: fires for BOTH the supervisor dispatch path
+    # (via tool_dispatch["create_document"]) and any subagent that calls
+    # create_document directly via _build_subagent_doc_tools. The subagent
+    # path also runs an earlier copy of this check, so most misses are
+    # caught cheaply upstream — this is the correctness backstop.
+    try:
+        from app.strands_agentic_service import _check_intake_required_facts
+
+        _intake_block_json = _check_intake_required_facts(
+            {
+                "doc_type": doc_type,
+                "title": title,
+                "content": ai_content or "",
+                "data": data,
+            },
+        )
+        if _intake_block_json:
+            return json.loads(_intake_block_json)
+    except Exception as exc:  # pragma: no cover — defense-in-depth
+        logger.warning(
+            "intake_required_facts check failed (skipping enforcement): %s",
+            exc,
+            exc_info=True,
+        )
+
     # Canonical schema validation and normalization (Phase 1 of schema propagation)
     canonical_payload = normalize_and_validate_document_payload(
         raw_doc_type=doc_type,
