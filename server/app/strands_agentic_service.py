@@ -5157,7 +5157,12 @@ def build_skill_tools(
     _doc_tools = _build_subagent_doc_tools(
         tenant_id, user_id, session_id, result_queue, loop
     )
-    # Subagents that get document creation/editing capabilities
+    # Subagents that get document creation/editing capabilities.
+    # IMPORTANT: Any agent added here must also receive the PRE-GENERATION
+    # INTAKE GATE and BUDGET SEMANTICS RULE prompt blocks in its agent.md —
+    # see 20260422-handoff-intake-gate-budget-semantics-v1.md §B. The backend
+    # chokepoint (_check_intake_required_facts in exec_create_document) will
+    # catch violations universally, but prompt-level fast-path is per-agent.
     _DOC_TOOL_AGENTS = {"market-intelligence"}
 
     for name, meta in SKILL_AGENT_REGISTRY.items():
