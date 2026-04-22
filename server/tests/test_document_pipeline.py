@@ -391,18 +391,6 @@ class TestCreateDocumentTool:
 class TestExecuteToolDispatch:
     """Tests for execute_tool() routing to create_document."""
 
-    # Minimal SOW data that satisfies matrix.intake_required_facts.sow so the
-    # intake-gate chokepoint in legacy_dispatch.exec_create_document does not
-    # fire. These dispatch tests verify plumbing (session_id passthrough, JSON
-    # round-trip), not document content — the intake gate is exercised
-    # separately in tests/test_intake_gate.py.
-    _SOW_INTAKE_DATA = {
-        "scope": "IT services migration",
-        "pop": "12 months",
-        "place_of_performance": "Bethesda, MD",
-        "task_breakdown": "Task 1: discovery; Task 2: migration; Task 3: cutover",
-    }
-
     def test_create_document_dispatch(self, mock_s3_client):
         """execute_tool('create_document', ...) returns valid JSON with document_type."""
         with patch.dict(os.environ, ENV_PATCH, clear=False):
@@ -410,7 +398,7 @@ class TestExecuteToolDispatch:
                 from app.tools.legacy_dispatch import execute_tool
                 raw = execute_tool(
                     "create_document",
-                    {"doc_type": "sow", "title": "Dispatch Test", "data": self._SOW_INTAKE_DATA},
+                    {"doc_type": "sow", "title": "Dispatch Test"},
                     session_id="ses-005",
                 )
         result = json.loads(raw)
@@ -424,7 +412,7 @@ class TestExecuteToolDispatch:
                 from app.tools.legacy_dispatch import execute_tool
                 raw = execute_tool(
                     "create_document",
-                    {"doc_type": "sow", "title": "Session Test", "data": self._SOW_INTAKE_DATA},
+                    {"doc_type": "sow", "title": "Session Test"},
                     session_id="ws-1-user123",
                 )
         result = json.loads(raw)

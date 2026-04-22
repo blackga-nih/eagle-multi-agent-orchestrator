@@ -50,27 +50,6 @@ TOOLS_NEEDING_SESSION = {
 def exec_create_document(
     params: dict, tenant_id: str, session_id: str | None = None
 ) -> dict:
-    # -- Intake-required-facts chokepoint (matrix.intake_required_facts) --
-    # Universal enforcement for every agent path: tool_dispatch via the
-    # supervisor, the subagent create_document_tool (which also runs its
-    # own early copy of this check as a fast-path), and the forced-call
-    # path at strands_agentic_service._ensure_create_document_for_direct_request.
-    # Lives here (the thin forwarder) rather than in document_generation.py
-    # so low-level mechanics tests that import the executor directly are
-    # not spurious-blocked. See handoff 20260422-handoff-intake-gate-budget-semantics-v1.md.
-    try:
-        from ..strands_agentic_service import _check_intake_required_facts
-
-        _intake_block_json = _check_intake_required_facts(params)
-        if _intake_block_json:
-            return json.loads(_intake_block_json)
-    except Exception as exc:  # pragma: no cover — defense-in-depth
-        logger.warning(
-            "intake_required_facts check failed (skipping enforcement): %s",
-            exc,
-            exc_info=True,
-        )
-
     from .document_generation import exec_create_document as _exec_create_document
 
     return _exec_create_document(params, tenant_id, session_id)

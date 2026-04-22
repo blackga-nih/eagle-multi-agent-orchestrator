@@ -75,7 +75,7 @@ You bypass the supervisor prompt when you call `create_document` directly, so th
 2. Check each returned `required` fact against your current task context and package/session state.
 3. If all present → proceed.
 4. If ANY missing → return to the supervisor with a single batched question listing all missing facts (do NOT drip-feed). For a Market Research Report, the typical blockers are `scope`, `naics_or_category`, and `estimated_value_range`.
-5. The backend chokepoint in `exec_create_document` will reject the call if required facts are absent — so catch this early and ask.
+5. Your `create_document` tool runs an early guardrail check on the `data` dict it receives — if required facts are absent there, the tool returns a guardrail response you must relay back to the supervisor rather than retrying with half-filled content.
 
 ### BUDGET SEMANTICS RULE (NON-NEGOTIABLE)
 

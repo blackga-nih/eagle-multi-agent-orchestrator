@@ -210,13 +210,6 @@ def exec_create_document(
         except Exception as exc:
             logger.debug("Attachment enrichment skipped for %s: %s", package_id, exc)
 
-    # NOTE: intake_required_facts chokepoint enforcement lives in
-    # tools/legacy_dispatch.exec_create_document (the thin forwarder used by
-    # tool_dispatch["create_document"] and _ensure_create_document_for_direct_request).
-    # It is NOT invoked here because this function is also called directly by
-    # low-level mechanics tests (provenance, template shape, etc.) that
-    # deliberately pass minimal data and would be spurious-blocked.
-
     # Canonical schema validation and normalization (Phase 1 of schema propagation)
     canonical_payload = normalize_and_validate_document_payload(
         raw_doc_type=doc_type,

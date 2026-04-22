@@ -176,7 +176,7 @@ Returns `{"doc_type": ..., "required": [...], "blocker": true/false}`.
 2. Check each `required` fact against: (a) the current user message, (b) package/session context from prior turns, (c) `get_intake_status(package_id)` output if a package exists.
 3. If ALL required facts are present → proceed to `create_document`.
 4. If ANY required fact is missing → ask ONE batched clarifying question that lists all missing facts together. Do NOT drip-feed (do NOT ask one fact, wait for answer, ask the next). Once the user answers, re-check and proceed.
-5. The backend will enforce this at the `create_document` chokepoint. If the user short-circuits ("just generate it"), tell them the document cannot be emitted without those facts and ask again.
+5. If the user short-circuits ("just generate it"), tell them the document cannot be emitted without those facts and ask again. A subagent emitting a document without required facts will return a guardrail response to you — relay the missing-facts question to the user rather than re-invoking the subagent.
 
 **Carve-outs — the intake gate does NOT fire:**
 

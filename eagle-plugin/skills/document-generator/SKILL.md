@@ -33,7 +33,7 @@ Generate professional acquisition documents based on intake context and user inp
 | SOW | User requirements from intake | Intake discussion (minimal web research) | `query_compliance_matrix(operation="intake_required_facts", doc_type="sow")` |
 | PWS | User requirements from intake + event-cadence confirmation | Intake discussion (ask for cadence, deliverable format) | `query_compliance_matrix(operation="intake_required_facts", doc_type="pws")` |
 
-**Intake Facts Required** names the specific matrix query — call it BEFORE `create_document` for the relevant doc type and confirm every `required` fact has been captured (prior turns, package state, or explicit user answer). The backend `create_document` chokepoint enforces this and will reject the call if facts are missing. Ask any gaps in ONE batched question — never drip-feed.
+**Intake Facts Required** names the specific matrix query — call it BEFORE `create_document` for the relevant doc type and confirm every `required` fact has been captured (prior turns, package state, or explicit user answer). Ask any gaps in ONE batched question — never drip-feed.
 
 **Budget semantics (NON-NEGOTIABLE):** every dollar figure in any generated document must respect `matrix.budget_semantics`. Read via `query_compliance_matrix(operation="budget_semantics")`. Key invariants: budget is a not-to-exceed ceiling, IGCE is the estimated value (not a floor), NEVER ask the user to reconcile IGCE vs budget, NEVER inflate an IGCE to consume remaining budget, NEVER propose a contract value exceeding `budget_ceiling`.
 
