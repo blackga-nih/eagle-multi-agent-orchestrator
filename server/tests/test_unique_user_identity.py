@@ -30,7 +30,6 @@ Run: pytest server/tests/test_unique_user_identity.py -v
 
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 from typing import AsyncGenerator
@@ -307,29 +306,30 @@ def chat_app(monkeypatch):
         "EAGLE_APP_ROUTERS": "chat,streaming",
     }
     with patch.dict(os.environ, env_patch, clear=False):
-        # Reload in dependency order so every module picks up DEV_MODE=true
-        # from the patched env AND the fresh extract_user_context function
-        # reference (config is a frozen singleton, and app.routers.chat
-        # caches `from ..cognito_auth import extract_user_context` at
-        # import time).
-        import app.config as config_module
+        # Force fresh imports in dependency order so every module picks up
+        # DEV_MODE=true from the patched env AND gets a fresh
+        # extract_user_context function reference. We use sys.modules.pop()
+        # + plain import rather than importlib.reload() because in CI the
+        # full suite runs 1500+ other tests first, and any of them may
+        # leave these modules in a state where reload()'s identity check
+        # (sys.modules[name] is module) fails. Pop + fresh import is
+        # bulletproof against that.
+        for mod_name in (
+            "app.main",
+            "app.streaming_routes",
+            "app.routers.chat",
+            "app.routers.dependencies",
+            "app.cognito_auth",
+            "app.config",
+        ):
+            sys.modules.pop(mod_name, None)
 
-        importlib.reload(config_module)
+        import app.config as config_module  # noqa: F401
         import app.cognito_auth as cognito_auth
-
-        importlib.reload(cognito_auth)
-        import app.routers.dependencies as deps_module
-
-        importlib.reload(deps_module)
-        import app.routers.chat as chat_module
-
-        importlib.reload(chat_module)
-        import app.streaming_routes as streaming_module
-
-        importlib.reload(streaming_module)
+        import app.routers.dependencies as deps_module  # noqa: F401
+        import app.routers.chat as chat_module  # noqa: F401
+        import app.streaming_routes as streaming_module  # noqa: F401
         import app.main as main_module
-
-        importlib.reload(main_module)
 
         app = main_module.create_app(["chat", "streaming"])
 
