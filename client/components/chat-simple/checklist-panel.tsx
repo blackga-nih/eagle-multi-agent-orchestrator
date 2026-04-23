@@ -95,6 +95,28 @@ export function ChecklistTabContent({ state, onDocumentClick }: ChecklistPanelPr
     [packageId],
   );
 
+  const handleAddSuggested = useCallback(
+    async (slug: string) => {
+      if (!packageId) return;
+      try {
+        const res = await fetch(
+          `/api/packages/${encodeURIComponent(packageId)}/required-docs`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ add: [slug] }),
+          },
+        );
+        if (!res.ok) throw new Error(`Add failed: ${res.status}`);
+        // The backend broadcasts a fresh checklist_update over SSE, so the
+        // panel re-renders on its own — no local state mutation needed.
+      } catch (err) {
+        console.error('Add suggested doc failed:', err);
+      }
+    },
+    [packageId],
+  );
+
   // Empty state — no package context yet
   if (!checklist && !packageId) {
     return (
@@ -126,28 +148,6 @@ export function ChecklistTabContent({ state, onDocumentClick }: ChecklistPanelPr
   const completed = new Set(checklist?.completed || []);
   const suggested = checklist?.suggested || [];
   const alertCount = complianceAlerts.filter((a) => a.severity !== 'info').length;
-
-  const handleAddSuggested = useCallback(
-    async (slug: string) => {
-      if (!packageId) return;
-      try {
-        const res = await fetch(
-          `/api/packages/${encodeURIComponent(packageId)}/required-docs`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ add: [slug] }),
-          },
-        );
-        if (!res.ok) throw new Error(`Add failed: ${res.status}`);
-        // The backend broadcasts a fresh checklist_update over SSE, so the
-        // panel re-renders on its own — no local state mutation needed.
-      } catch (err) {
-        console.error('Add suggested doc failed:', err);
-      }
-    },
-    [packageId],
-  );
 
   return (
     <div className="flex flex-col gap-0">
