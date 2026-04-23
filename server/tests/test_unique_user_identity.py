@@ -314,14 +314,28 @@ def chat_app(monkeypatch):
         # leave these modules in a state where reload()'s identity check
         # (sys.modules[name] is module) fails. Pop + fresh import is
         # bulletproof against that.
-        for mod_name in (
+        #
+        # IMPORTANT: we must also pop EVERY app.routers.* module, not just
+        # the ones this fixture re-imports. Each router module does
+        # ``from .dependencies import get_user_from_header`` at load time
+        # and caches that function object. If app.routers.dependencies is
+        # re-imported here (new function object) but a downstream router
+        # (e.g. app.routers.documents) is left cached, the router's routes
+        # still reference the OLD function. Later tests that set
+        # dependency_overrides via the NEW function as key then see their
+        # overrides ignored, and real auth runs (returning the DEV_MODE
+        # default tenant instead of the mock). Popping them here lets the
+        # next test re-import them cleanly against the current dependencies
+        # module.
+        _base_pops = [
             "app.main",
             "app.streaming_routes",
-            "app.routers.chat",
             "app.routers.dependencies",
             "app.cognito_auth",
             "app.config",
-        ):
+        ]
+        _router_pops = [m for m in list(sys.modules) if m.startswith("app.routers.")]
+        for mod_name in _base_pops + _router_pops:
             sys.modules.pop(mod_name, None)
 
         import app.config as config_module  # noqa: F401
