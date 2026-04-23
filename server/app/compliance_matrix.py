@@ -1209,6 +1209,61 @@ def suggest_vehicle(flags: dict | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Intake-gate + budget-semantics helpers (added 2026-04-22)
+# ---------------------------------------------------------------------------
+
+
+def get_intake_required_facts(doc_type: str | None = None) -> dict:
+    """Return required-intake-facts spec for a doc_type, or the full map if doc_type is None/empty.
+
+    Reads matrix.intake_required_facts. Consumed by both the supervisor prompt
+    fast-path (via query_compliance_matrix) and the backend validator in
+    exec_create_document (correctness chokepoint).
+
+    Args:
+        doc_type: Document type key (e.g. "pws", "sow", "igce"). Case-insensitive.
+                  If falsy, returns the full map.
+
+    Returns:
+        For a known doc_type: {"doc_type", "required": [...], "blocker": bool}.
+        For an unknown doc_type: {"doc_type", "required": [], "blocker": false, "unknown": true}.
+        For empty/None: {"intake_required_facts": <full map without _note>}.
+    """
+    raw = _MATRIX_DATA.get("intake_required_facts", {}) or {}
+    full_map = {k: v for k, v in raw.items() if not k.startswith("_")}
+
+    if not doc_type:
+        return {"intake_required_facts": full_map}
+
+    key = str(doc_type).strip().lower()
+    entry = full_map.get(key)
+    if entry is None:
+        return {
+            "doc_type": key,
+            "required": [],
+            "blocker": False,
+            "unknown": True,
+        }
+
+    return {
+        "doc_type": key,
+        "required": list(entry.get("required", [])),
+        "blocker": bool(entry.get("blocker", False)),
+    }
+
+
+def get_budget_semantics() -> dict:
+    """Return the budget_semantics block from the matrix.
+
+    Prompt-enforced rule set: budget is the not-to-exceed ceiling, IGCE is the
+    estimated value that propagates to downstream docs, forbidden behaviors
+    include asking the user to reconcile IGCE vs budget.
+    """
+    raw = _MATRIX_DATA.get("budget_semantics", {}) or {}
+    return {k: v for k, v in raw.items() if not k.startswith("_")}
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher: execute_operation()
 # ---------------------------------------------------------------------------
 
@@ -1273,6 +1328,12 @@ def execute_operation(params: dict) -> dict:
             }
         )
 
+    if op == "intake_required_facts":
+        return get_intake_required_facts(params.get("doc_type"))
+
+    if op == "budget_semantics":
+        return get_budget_semantics()
+
     return {
-        "error": f"Unknown operation: {op}. Valid: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle"
+        "error": f"Unknown operation: {op}. Valid: query, list_methods, list_types, list_thresholds, search_far, suggest_vehicle, intake_required_facts, budget_semantics"
     }

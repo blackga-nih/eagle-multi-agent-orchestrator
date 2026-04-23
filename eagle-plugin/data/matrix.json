@@ -1,6 +1,31 @@
 {
-  "version": "2026-02-25",
+  "version": "2026-04-22",
   "rfo_notes": "FAC 2025-06 / HHS Class Deviation 2026-01 eff. Nov 21 2025: MPT raised $10K→$15K, SAT raised $250K→$350K, VETS 4212 threshold $150K added. Use this file as authoritative source; do not rely on memorized values.",
+
+  "intake_required_facts": {
+    "_note": "Required facts the supervisor must collect BEFORE calling create_document for each doc_type. Used by both supervisor prompt (fast-path) and the backend validator in exec_create_document (correctness guarantee). See handoff 20260422-handoff-intake-gate-budget-semantics-v1.md for rationale.",
+    "pws":              { "required": ["scope", "pop", "place_of_performance", "event_cadence", "deliverable_format"], "blocker": true },
+    "sow":              { "required": ["scope", "pop", "place_of_performance", "task_breakdown"], "blocker": true },
+    "igce":             { "required": ["scope", "pop", "labor_categories_or_line_items", "budget_ceiling"], "blocker": true },
+    "market_research":  { "required": ["scope", "naics_or_category", "estimated_value_range"], "blocker": true },
+    "acquisition_plan": { "required": ["scope", "igce_value", "contract_type", "competition_approach"], "blocker": true },
+    "ja":               { "required": ["scope", "proposed_contractor", "authority_far_6_302_x", "sole_source_rationale"], "blocker": true },
+    "justification":    { "required": ["scope", "proposed_contractor", "authority_far_6_302_x", "sole_source_rationale"], "blocker": true }
+  },
+
+  "budget_semantics": {
+    "_note": "Rules governing how budget and IGCE interact. The supervisor and every subagent with create_document access MUST respect these. Prompt-enforced (no backend validator — the validator for intake_required_facts already forces matrix-read discipline). See handoff 20260422 for rationale.",
+    "budget_is_ceiling": true,
+    "igce_is_estimated_value": true,
+    "propagation": "IGCE auto-propagates as estimated_value to AP, J&A, SSP, and downstream docs",
+    "locked_after_intake": ["budget_ceiling"],
+    "forbidden_behaviors": [
+      "asking user to reconcile IGCE vs budget",
+      "suggesting scope expansion to consume remaining budget",
+      "inflating quantities/rates to reach a budget target",
+      "recommending a contract value that exceeds budget_ceiling"
+    ]
+  },
 
   "thresholds": [
     { "value": 15000,     "label": "$15K MPT",      "short": "$15K",   "triggers": ["micro_purchase_threshold", "competition_not_required"] },

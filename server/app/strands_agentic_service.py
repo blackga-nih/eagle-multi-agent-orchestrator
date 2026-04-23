@@ -1308,6 +1308,136 @@ def _check_document_prerequisites(parsed: dict) -> str | None:
     )
 
 
+# ── Intake-fact fast-path (added 2026-04-22) ────────────────────────
+# Reads matrix.intake_required_facts[doc_type] and checks the parsed
+# data dict / session context for each required fact. Used by the
+# subagent create_document_tool as a fast-path that returns a guardrail
+# message when the supervisor handed the subagent incomplete data — the
+# subagent then reports back and the supervisor batches a question to
+# the user. This is NOT a universal correctness backstop; agent-level
+# enforcement lives in supervisor/agent.md + market-intelligence/agent.md
+# (see PRE-GENERATION INTAKE GATE sections).
+
+_FACT_LABELS = {
+    "scope": "scope (what is being acquired — a concrete description)",
+    "pop": "period of performance (duration or start/end dates)",
+    "place_of_performance": "place of performance (on-site, remote, or specific site)",
+    "event_cadence": "event cadence (frequency of events, sessions, or deliverables)",
+    "deliverable_format": "deliverable format (reports, briefings, training events, etc.)",
+    "task_breakdown": "task breakdown (enumerated list of tasks)",
+    "labor_categories_or_line_items": "labor categories or line items",
+    "budget_ceiling": "budget ceiling (not-to-exceed dollar amount)",
+    "naics_or_category": "NAICS code or product/service category",
+    "estimated_value_range": "estimated value range (dollar amount or low/high range)",
+    "igce_value": "IGCE dollar value",
+    "contract_type": "contract type (FFP, T&M, CR, IDIQ, etc.)",
+    "competition_approach": "competition approach (full and open, set-aside, sole source, etc.)",
+    "proposed_contractor": "proposed contractor / vendor name",
+    "authority_far_6_302_x": "J&A authority (specific FAR 6.302 subsection)",
+    "sole_source_rationale": "sole source rationale (why this vendor, why no competition)",
+}
+
+# Common data-dict aliases per fact. Kept lightweight — the subagent is
+# given structured data by the supervisor, so a missing alias here means
+# the supervisor didn't collect the fact.
+_FACT_ALIASES = {
+    "scope": ("scope", "requirement_description"),
+    "pop": ("pop", "period_of_performance"),
+    "place_of_performance": ("place_of_performance",),
+    "event_cadence": ("event_cadence", "cadence", "frequency"),
+    "deliverable_format": ("deliverable_format", "deliverables"),
+    "task_breakdown": ("task_breakdown", "tasks"),
+    "labor_categories_or_line_items": ("labor_categories_or_line_items", "labor_categories", "line_items"),
+    "budget_ceiling": ("budget_ceiling", "budget", "estimated_value"),
+    "naics_or_category": ("naics_or_category", "naics_code", "naics", "category"),
+    "estimated_value_range": ("estimated_value_range", "estimated_value", "budget_ceiling"),
+    "igce_value": ("igce_value", "estimated_value"),
+    "contract_type": ("contract_type",),
+    "competition_approach": ("competition_approach", "competition"),
+    "proposed_contractor": ("proposed_contractor", "vendor"),
+    "authority_far_6_302_x": ("authority_far_6_302_x", "authority"),
+    "sole_source_rationale": ("sole_source_rationale", "rationale"),
+}
+
+
+def _intake_value_present(val) -> bool:
+    if val is None or val == 0 or val == []:
+        return False
+    if isinstance(val, str):
+        return val.strip().lower() not in ("", "none", "n/a", "unknown", "tbd")
+    return True
+
+
+def _check_intake_required_facts(
+    parsed: dict, session_ctx: dict | None = None
+) -> str | None:
+    """Return a guardrail JSON string if required intake facts are missing from parsed['data'] or session_ctx.
+
+    Called by the subagent create_document_tool as a fast-path. If the
+    supervisor handed the subagent a data dict missing required facts,
+    the subagent returns the guardrail JSON to the supervisor, which is
+    expected to batch-ask the user per its PRE-GENERATION INTAKE GATE
+    prompt block.
+
+    Data-dict semantics only — no prose parsing. Facts must be present as
+    structured keys in parsed['data'] or session_ctx. If the supervisor
+    wants the fast-path to pass, it must hand structured data.
+
+    Returns None when all required facts are present (proceed normally).
+    """
+    from .compliance_matrix import get_intake_required_facts
+
+    dt = str(parsed.get("doc_type", "")).strip().lower()
+    if not dt:
+        return None
+
+    spec = get_intake_required_facts(dt)
+    if spec.get("unknown") or not spec.get("blocker"):
+        return None
+
+    required = spec.get("required") or []
+    if not required:
+        return None
+
+    data_raw = parsed.get("data") or {}
+    if isinstance(data_raw, str):
+        try:
+            data_raw = json.loads(data_raw)
+        except Exception:
+            data_raw = {}
+
+    merged = {}
+    for src in (session_ctx or {}, data_raw):
+        if isinstance(src, dict):
+            merged.update(src)
+
+    missing = [
+        fact for fact in required
+        if not any(_intake_value_present(merged.get(a)) for a in _FACT_ALIASES.get(fact, (fact,)))
+    ]
+
+    if not missing:
+        return None
+
+    labeled = [_FACT_LABELS.get(f, f) for f in missing]
+    doc_label = dt.replace("_", " ").upper()
+    return json.dumps(
+        {
+            "status": "guardrail",
+            "guardrail": "intake_required_facts",
+            "doc_type": dt,
+            "message": (
+                f"Cannot generate {doc_label} — required intake facts are missing.\n\n"
+                + "\n".join(f"• {lbl}" for lbl in labeled)
+                + "\n\nReport back to the supervisor so these can be collected in ONE batched "
+                "question before re-calling create_document."
+            ),
+            "missing_facts": missing,
+            "word_count": 0,
+        }
+    )
+
+
 def _extract_document_context_from_prompt(prompt: str) -> dict[str, str]:
     """Extract document viewer context blocks from wrapped prompts."""
     if not prompt:
@@ -2574,6 +2704,11 @@ def _build_subagent_doc_tools(
             _mp_block = _check_micropurchase_guardrail(parsed)
             if _mp_block:
                 return _mp_block
+
+            # -- Intake-required-facts guardrail (matrix.intake_required_facts) --
+            _intake_block = _check_intake_required_facts(parsed)
+            if _intake_block:
+                return _intake_block
 
             # -- Document prerequisites guardrail --
             _prereq_block = _check_document_prerequisites(parsed)
@@ -5157,7 +5292,12 @@ def build_skill_tools(
     _doc_tools = _build_subagent_doc_tools(
         tenant_id, user_id, session_id, result_queue, loop
     )
-    # Subagents that get document creation/editing capabilities
+    # Subagents that get document creation/editing capabilities.
+    # IMPORTANT: Any agent added here must also receive the PRE-GENERATION
+    # INTAKE GATE and BUDGET SEMANTICS RULE prompt blocks in its agent.md —
+    # see 20260422-handoff-intake-gate-budget-semantics-v1.md §B. The backend
+    # chokepoint (_check_intake_required_facts in exec_create_document) will
+    # catch violations universally, but prompt-level fast-path is per-agent.
     _DOC_TOOL_AGENTS = {"market-intelligence"}
 
     for name, meta in SKILL_AGENT_REGISTRY.items():
