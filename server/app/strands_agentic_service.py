@@ -22,6 +22,7 @@ import os
 import re
 import socket
 import sys
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Literal
@@ -4587,6 +4588,130 @@ def _build_all_service_tools(
     ]
 
 
+# ─── Agent-routing layer ───────────────────────────────────────────────────
+# Every `research` call pulls 1–2 specialist prompt files from the
+# approved/agents/ folder and surfaces an "agent_route" card per fetch,
+# so the user can see each query visibly routes through a specialist
+# framework. Keyword table picks the best matches; supervisor is the
+# fallback when nothing matches.
+
+_AGENTS_FOLDER_PREFIX = "eagle-knowledge-base/approved/agents/"
+
+_AGENT_PROMPT_META: dict[str, dict] = {
+    f"{_AGENTS_FOLDER_PREFIX}00-supervisor.txt": {
+        "agent_key": "supervisor",
+        "label": "Supervisor Routing",
+        "icon": "🧭",
+        "keywords": [],  # fallback only
+    },
+    f"{_AGENTS_FOLDER_PREFIX}01-policy-supervisor.txt": {
+        "agent_key": "policy_supervisor",
+        "label": "Policy Supervisor",
+        "icon": "📋",
+        "keywords": ["policy", "hhsar", "institutional", "nci practice"],
+    },
+    f"{_AGENTS_FOLDER_PREFIX}02-legal.txt": {
+        "agent_key": "legal_counsel",
+        "label": "Legal Counsel",
+        "icon": "⚖️",
+        "keywords": [
+            "gao", "protest", "case law", "precedent", "legal", "ada",
+            "bona fide", "appropriation", "j&a", "jofoc", "ratification",
+            "unauthorized commitment", "debarment",
+        ],
+    },
+    f"{_AGENTS_FOLDER_PREFIX}03-tech.txt": {
+        "agent_key": "tech_translator",
+        "label": "Technical Translator",
+        "icon": "🔧",
+        "keywords": [
+            "technical", "sow", "pws", "agile", "software", "hardware",
+            "fisma", "section 508", "specification", "system", "cloud",
+            "saas", "iaas", "cybersecurity",
+        ],
+    },
+    f"{_AGENTS_FOLDER_PREFIX}04-market.txt": {
+        "agent_key": "market_intelligence",
+        "label": "Market Intelligence",
+        "icon": "📊",
+        "keywords": [
+            "market", "vendor", "gsa", "schedule", "vehicle", "capability",
+            "rfi", "industry", "cio-sp", "sewp", "oasis", "small business",
+            "8(a)", "hubzone", "sdvosb", "wosb",
+        ],
+    },
+    f"{_AGENTS_FOLDER_PREFIX}05-public.txt": {
+        "agent_key": "public_interest",
+        "label": "Public Interest",
+        "icon": "🏛️",
+        "keywords": [
+            "ethics", "fairness", "transparent", "transparency", "privacy",
+            "conflict of interest", "coi", "oci", "public interest",
+            "responsibility", "integrity", "equity",
+        ],
+    },
+    f"{_AGENTS_FOLDER_PREFIX}06-policy-librarian.txt": {
+        "agent_key": "policy_librarian",
+        "label": "Policy Librarian",
+        "icon": "📚",
+        "keywords": [
+            "hhs", "class deviation", "rfo", "policy memo", "handbook",
+            "hhsar ", "aag ", "oag",
+        ],
+    },
+    f"{_AGENTS_FOLDER_PREFIX}07-policy-analyst.txt": {
+        "agent_key": "policy_analyst",
+        "label": "Policy Analyst",
+        "icon": "📜",
+        "keywords": [
+            "analysis", "compare", "interpretation", "deviation", "exception",
+            "waiver", "historical",
+        ],
+    },
+    f"{_AGENTS_FOLDER_PREFIX}08-COMPLIANCE.txt": {
+        "agent_key": "compliance_strategist",
+        "label": "Compliance Strategist",
+        "icon": "✅",
+        "keywords": [
+            "compliance", "far", "dfars", "nih policy", "checklist", "pmr",
+            "frc", "audit", "required document",
+        ],
+    },
+    f"{_AGENTS_FOLDER_PREFIX}09-FINANCIAL.txt": {
+        "agent_key": "financial_advisor",
+        "label": "Financial Advisor",
+        "icon": "💰",
+        "keywords": [
+            "cost", "price", "funding", "fiscal", "igce", "budget",
+            "obligation", "color of money", "o&m", "r&d", "expired funds",
+            "severable", "bona fide need",
+        ],
+    },
+}
+
+
+def _select_agent_prompts(query: str, max_n: int = 2) -> list[str]:
+    """Pick up to max_n agent-prompt S3 keys whose keywords best match the query.
+
+    Always returns at least 1 key — falls back to the supervisor prompt when
+    nothing matches, so every research call produces a visible agent_route card.
+    """
+    q = (query or "").lower()
+    scored: list[tuple[int, str]] = []
+    for key, meta in _AGENT_PROMPT_META.items():
+        kw = meta.get("keywords") or []
+        if not kw:
+            continue
+        score = sum(1 for w in kw if w in q)
+        if score > 0:
+            scored.append((score, key))
+    scored.sort(reverse=True, key=lambda kv: kv[0])
+    picks = [k for _, k in scored[:max_n]]
+    if not picks:
+        picks = [f"{_AGENTS_FOLDER_PREFIX}00-supervisor.txt"]
+    return picks
+
+
 def _build_kb_service_tools(
     tenant_id: str,
     user_id: str,
@@ -4668,6 +4793,48 @@ def _build_kb_service_tools(
             loop.call_soon_threadsafe(
                 result_queue.put_nowait,
                 {"type": "tool_result", "name": name, "result": truncated_result},
+            )
+
+    def _emit_agent_route_start(s3_key: str) -> str:
+        """Push a synthetic tool_use event announcing that we're routing
+        through a specialist agent prompt. Returns tool_use_id so the
+        caller can emit a matching tool_result.
+        """
+        meta = _AGENT_PROMPT_META.get(s3_key, {})
+        tool_use_id = f"agent_route_{uuid.uuid4().hex[:12]}"
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {
+                    "type": "tool_use",
+                    "name": "agent_route",
+                    "tool_use_id": tool_use_id,
+                    "input": {
+                        "agent_key": meta.get("agent_key", "unknown"),
+                        "label": meta.get("label", s3_key.rsplit("/", 1)[-1]),
+                        "icon": meta.get("icon", "🧭"),
+                        "s3_key": s3_key,
+                    },
+                },
+            )
+        return tool_use_id
+
+    def _emit_agent_route_done(tool_use_id: str, s3_key: str, chars: int) -> None:
+        meta = _AGENT_PROMPT_META.get(s3_key, {})
+        if result_queue and loop:
+            loop.call_soon_threadsafe(
+                result_queue.put_nowait,
+                {
+                    "type": "tool_result",
+                    "name": "agent_route",
+                    "tool_use_id": tool_use_id,
+                    "result": {
+                        "agent_key": meta.get("agent_key", "unknown"),
+                        "label": meta.get("label", ""),
+                        "s3_key": s3_key,
+                        "chars_read": chars,
+                    },
+                },
             )
 
     def _inject_fetch_reminder(result: dict) -> None:
@@ -5289,6 +5456,43 @@ def _build_kb_service_tools(
         }
         if compliance_data:
             packet["compliance_matrix"] = compliance_data
+
+        # Agent routing layer — fetch 1–2 relevant specialist prompts from
+        # approved/agents/ so every research call visibly routes through
+        # a specialist framework. Surfaces an "agent_route" tool_use card
+        # per fetch. Content is attached to the packet as `agent_guidance`
+        # so the supervisor reads the specialist framework on every turn.
+        agent_keys = _select_agent_prompts(query, max_n=2)
+        agent_guidance: list[dict] = []
+        for _akey in agent_keys:
+            _tu_id = _emit_agent_route_start(_akey)
+            try:
+                if _akey in _kb_depth["fetched_keys"]:
+                    _emit_agent_route_done(_tu_id, _akey, 0)
+                    continue
+                _ag_result = exec_knowledge_fetch(
+                    {"s3_key": _akey}, tenant_id, session_id,
+                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                )
+                if "content" in _ag_result:
+                    _kb_depth["fetched_keys"].add(_akey)
+                    _chars = _ag_result.get("content_length", 0)
+                    _meta = _AGENT_PROMPT_META.get(_akey, {})
+                    agent_guidance.append({
+                        "agent": _meta.get("agent_key", "unknown"),
+                        "label": _meta.get("label", ""),
+                        "s3_key": _akey,
+                        "content": _ag_result["content"][:8000],
+                    })
+                    _emit_agent_route_done(_tu_id, _akey, _chars)
+                else:
+                    _emit_agent_route_done(_tu_id, _akey, 0)
+            except Exception as _ag_ex:
+                logger.warning("agent_route fetch failed for %s: %s", _akey, _ag_ex)
+                _emit_agent_route_done(_tu_id, _akey, 0)
+        if agent_guidance:
+            packet["agent_guidance"] = agent_guidance
+
         _research_elapsed = _time.monotonic() - _research_t0
         _emit("research", {
             "kb_results_count": len(packet["kb_results"]),
@@ -5298,6 +5502,7 @@ def _build_kb_service_tools(
             "checklists_loaded": list(checklist_content.keys()),
             "detected_method": detected,
             "compliance_matrix_included": compliance_data is not None,
+            "agents_routed": [g.get("agent") for g in agent_guidance],
             "duration_seconds": round(_research_elapsed, 2),
         })
         # Soft SLO — surface slow research calls so CloudWatch/Langfuse
