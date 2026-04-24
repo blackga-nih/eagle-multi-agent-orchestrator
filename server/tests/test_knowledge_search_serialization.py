@@ -273,7 +273,13 @@ def test_service_tools_returns_expected_tools():
 
 
 def test_service_tools_research_normal_path():
-    """Service-tools research tool returns results normally."""
+    """Service-tools research tool returns results normally.
+
+    Post-EAGLE-254: a KB doc that is fetched is removed from `kb_results` to
+    avoid the LLM seeing it twice (once as a summary hit, once as full content
+    under `fetched_documents`). With a single mocked search hit that also gets
+    fetched, we expect it in `fetched_documents` — not in `kb_results`.
+    """
     from app.strands_agentic_service import _build_kb_service_tools
 
     mock_result = {"results": [{"title": "Test Doc", "s3_key": "eagle-knowledge-base/test.md"}], "count": 1}
@@ -297,5 +303,10 @@ def test_service_tools_research_normal_path():
         result_str = research._tool_func(query="test query", include_checklist=False)
 
     result = json.loads(result_str)
-    assert len(result["kb_results"]) >= 1
-    assert result["kb_results"][0]["title"] == "Test Doc"
+    assert len(result["fetched_documents"]) >= 1
+    assert result["fetched_documents"][0]["title"] == "Test Doc"
+    # Fetched doc must not also appear in kb_results (dedup contract).
+    assert not any(
+        r.get("s3_key") == "eagle-knowledge-base/test.md"
+        for r in result.get("kb_results", [])
+    )
