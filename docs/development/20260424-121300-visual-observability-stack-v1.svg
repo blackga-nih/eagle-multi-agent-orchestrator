@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820" font-family="Play, ui-sans-serif, system-ui, sans-serif" aria-label="observability stack">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#080c17"/><stop offset="100%" stop-color="#121829"/>
+    </linearGradient>
+    <linearGradient id="b1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4a8fe0"/><stop offset="100%" stop-color="#6fa5e8"/>
+    </linearGradient>
+    <linearGradient id="b2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#34d399"/><stop offset="100%" stop-color="#6ee7b7"/>
+    </linearGradient>
+    <style>
+      text { pointer-events:none; }
+      .t { fill:#f4f6fc; font-size:28px; font-weight:700; }
+      .s { fill:#7b8599; font-size:13px; }
+      .n { fill:#f4f6fc; font-size:15px; font-weight:700; }
+      .d { fill:#9fb0cc; font-size:12px; }
+      .hit { fill:#000; fill-opacity:0; }
+    </style>
+  </defs>
+  <rect width="1400" height="820" fill="url(#bg)"/>
+  <text x="36" y="50" class="t">Observability stack for AI troubleshooting</text>
+  <text x="36" y="72" class="s">Trace collection, error classification, cloud telemetry, and human-friendly dashboards</text>
+
+  <g transform="translate(70,150)">
+    <rect width="240" height="96" rx="12" fill="#121829" stroke="#e86b3a"/>
+    <rect width="240" height="96" rx="12" class="hit"><title>{"node":"runtime","file":"server/app/strands_agentic_service.py","emits":["tool events","agent events","errors"]}</title></rect>
+    <text x="16" y="36" class="n">Runtime events</text>
+    <text x="16" y="58" class="d">SSE + tools + agent timing</text>
+  </g>
+
+  <g transform="translate(400,140)">
+    <rect width="280" height="116" rx="12" fill="#121829" stroke="#4a8fe0"/>
+    <rect width="280" height="116" rx="12" class="hit"><title>{"node":"langfuse_client","file":"server/app/telemetry/langfuse_client.py","functions":["list_traces","list_observations","tag_trace_error"]}</title></rect>
+    <text x="16" y="36" class="n">Langfuse telemetry client</text>
+    <text x="16" y="58" class="d">Trace fetch + error tagging</text>
+    <text x="16" y="80" class="d">severity:* and error:* labels</text>
+  </g>
+
+  <g transform="translate(760,140)">
+    <rect width="280" height="116" rx="12" fill="#121829" stroke="#34d399"/>
+    <rect width="280" height="116" rx="12" class="hit"><title>{"node":"cloudwatch_emitter","file":"server/app/telemetry/cloudwatch_emitter.py","events":["trace.started","trace.completed","tool.completed","error.occurred"]}</title></rect>
+    <text x="16" y="36" class="n">CloudWatch emitter</text>
+    <text x="16" y="58" class="d">Structured JSON events</text>
+    <text x="16" y="80" class="d">Insights-queryable telemetry</text>
+  </g>
+
+  <g transform="translate(1120,150)">
+    <rect width="220" height="96" rx="12" fill="#121829" stroke="#f2a66b"/>
+    <rect width="220" height="96" rx="12" class="hit"><title>{"node":"dashboards","files":["docs/development/langfuse-trace-aggregation-guide.md","docs/development/cloudwatch-error-report.md"]}</title></rect>
+    <text x="16" y="36" class="n">Dashboards</text>
+    <text x="16" y="58" class="d">Ops + QA visibility</text>
+  </g>
+
+  <g transform="translate(220,430)">
+    <rect width="310" height="126" rx="12" fill="#121829" stroke="url(#b1)"/>
+    <rect width="310" height="126" rx="12" class="hit"><title>{"node":"morning_report","file":"scripts/morning_report.py","includes":["git commits","langfuse rollup"],"workflow":".github/workflows/morning-report.yml"}</title></rect>
+    <text x="18" y="38" class="n">Morning report pipeline</text>
+    <text x="18" y="62" class="d">Commits + Langfuse summary</text>
+    <text x="18" y="84" class="d">Sent to Teams as adaptive card</text>
+  </g>
+
+  <g transform="translate(620,430)">
+    <rect width="310" height="126" rx="12" fill="#121829" stroke="url(#b2)"/>
+    <rect width="310" height="126" rx="12" class="hit"><title>{"node":"nightly_triage","workflow":".github/workflows/nightly-triage.yml","outputs":["docs/development/*-report-triage-*.md",".claude/specs/*-plan-triage-*.md"]}</title></rect>
+    <text x="18" y="38" class="n">Nightly triage loop</text>
+    <text x="18" y="62" class="d">CloudWatch + DynamoDB + Langfuse</text>
+    <text x="18" y="84" class="d">Auto-generated plans and reports</text>
+  </g>
+
+  <g transform="translate(1020,430)">
+    <rect width="310" height="126" rx="12" fill="#121829" stroke="#7c9dff"/>
+    <rect width="310" height="126" rx="12" class="hit"><title>{"node":"triage_actions","file":"server/app/routers/triage_actions.py","actions":["approve","deny","delay"],"integrations":["jira labels","github dispatch"]}</title></rect>
+    <text x="18" y="38" class="n">Actionable outcomes</text>
+    <text x="18" y="62" class="d">Approve / deny / delay routes</text>
+    <text x="18" y="84" class="d">Jira + GitHub dispatch hooks</text>
+  </g>
+
+  <!-- connectors -->
+  <g fill="none" stroke="#2a3657" stroke-width="2" stroke-dasharray="6 6">
+    <path d="M310 198 C360 198,360 198,400 198"/>
+    <path d="M680 198 C720 198,720 198,760 198"/>
+    <path d="M1040 198 C1080 198,1080 198,1120 198"/>
+    <path d="M540 493 C560 493,590 493,620 493"/>
+    <path d="M930 493 C960 493,990 493,1020 493"/>
+    <path d="M680 256 C680 340,360 340,360 430"/>
+    <path d="M900 256 C900 340,775 340,775 430"/>
+  </g>
+
+  <g>
+    <circle r="6" fill="#6fa5e8"><animateMotion dur="3.0s" repeatCount="indefinite" path="M310 198 C360 198,360 198,400 198"/></circle>
+    <circle r="6" fill="#6ee7b7"><animateMotion dur="3.0s" repeatCount="indefinite" begin="0.6s" path="M680 198 C720 198,720 198,760 198"/></circle>
+    <circle r="6" fill="#6fa5e8"><animateMotion dur="3.2s" repeatCount="indefinite" begin="1.2s" path="M680 256 C680 340,360 340,360 430"/></circle>
+    <circle r="6" fill="#6ee7b7"><animateMotion dur="3.2s" repeatCount="indefinite" begin="1.8s" path="M900 256 C900 340,775 340,775 430"/></circle>
+  </g>
+
+  <text x="36" y="792" class="s">References: telemetry clients, morning-report, nightly-triage, triage actions</text>
+</svg>

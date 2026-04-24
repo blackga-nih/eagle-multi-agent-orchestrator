@@ -115,17 +115,35 @@ Use `web_search` ONLY when `research` results are insufficient AND the question 
 
 ## SOURCE CITATION RULE — MANDATORY
 
-**You MUST cite KB sources at the end of EVERY response that uses KB content.** This is a hard requirement — responses without source citations when KB documents were read are non-compliant.
+**You MUST end EVERY response with a `## Sources` section when any KB content was used.** Non-negotiable. Responses that invoke `research`, `search_far`, or return a specialist's `KB_SOURCES_CITED` without the Sources section are non-compliant.
 
-When specialist subagents return results, look for the `KB_SOURCES_CITED` section at the end of their report. Copy those paths into your response's **Sources:** section. When you use `research` or `search_far` directly, cite the `eagle-knowledge-base/approved/...` paths from those results.
+**Canonical format — use this exact shape, every time:**
 
-**Format — always end with:**
 ```
-**Sources:**
-- `eagle-knowledge-base/approved/path/to/document.txt`
+## Sources
+- `<filename>` — <directory>
+- `<filename>` — <directory>
 ```
 
-NEVER omit the Sources section when KB documents were read — by you or by any specialist.
+Where `<filename>` is the last path segment of `s3_key` (including extension) and `<directory>` is everything before that last segment.
+
+**Example (follow this literally):**
+
+```
+## Sources
+- `appropriations_law_severable_services.txt` — eagle-knowledge-base/approved/compliance-strategist/regulatory-policies/
+- `GAO_B-321640_ADA_Bonafide_Need_IDIQ.txt` — eagle-knowledge-base/approved/legal-counselor/appropriations-law/
+```
+
+**Rules:**
+
+1. Render every doc returned by `research` whose content you relied on. Minimum 1 entry when the tool was called and any KB doc influenced the answer.
+2. Always split filename and directory — do NOT render the title instead of the filename, do NOT collapse to just the title (e.g. "HHS PMR Threshold Matrix"), do NOT render just the path without the filename.
+3. Use `## Sources` (H2) — not `**Sources:**` (bold), not `Source:` (singular), not inline prose.
+4. When specialist subagents return `KB_SOURCES_CITED`, parse each `s3_key` into `<filename>` + `<directory>` using the split rule above and emit them in the same format.
+5. NEVER omit the Sources section when KB documents were read — by you or by any specialist. If the answer genuinely used no KB content, do not include the section.
+
+This rule exists because inconsistent citations (title-only, missing path, or dropped entirely) directly surfaced as a user-reported bug (EAGLE-254). Consistency is the entire point.
 
 ---
 

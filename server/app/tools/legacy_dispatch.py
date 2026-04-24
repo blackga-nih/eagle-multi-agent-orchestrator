@@ -88,26 +88,83 @@ def get_tool_dispatch() -> dict[str, ToolHandler]:
     }
 
 
+def _forward_tool_error_to_debug_channel(
+    tool_name: str, tool_input: dict, result: dict, tenant_id: str
+) -> None:
+    """Fire a debug-channel event when a tool handler returns an error dict.
+
+    These silent-failure results (HTTP 200 but {"error": ...} inside) never
+    reach FastAPI's exception handler and therefore never reach the primary
+    error webhook. The debug channel catches them so ops see the pattern.
+
+    Narrow guard: fires only when the result is a dict with a NON-EMPTY
+    `error` key. Successful results that happen to contain the substring
+    "error" elsewhere are NOT triggered.
+    """
+    if not isinstance(result, dict):
+        return
+    err_val = result.get("error")
+    if not err_val:
+        return
+    try:
+        from ..error_webhook import notify_debug_event
+
+        # Redact oversized or binary-ish input fields before attaching.
+        safe_input = {}
+        for k, v in (tool_input or {}).items():
+            if isinstance(v, str) and len(v) > 500:
+                safe_input[k] = v[:500] + "…[truncated]"
+            elif isinstance(v, (str, int, float, bool)) or v is None:
+                safe_input[k] = v
+            else:
+                safe_input[k] = f"<{type(v).__name__}>"
+
+        notify_debug_event(
+            source="tool_dispatch",
+            error_type=str(result.get("status") or "ToolError"),
+            message=str(err_val)[:2000],
+            context={
+                "tool": tool_name,
+                "tenant_id": tenant_id,
+                "input": safe_input,
+            },
+        )
+    except Exception:
+        # Telemetry must never break tool dispatch.
+        pass
+
+
 def execute_tool(
     tool_name: str, tool_input: dict, session_id: str | None = None
 ) -> str:
     tenant_id = extract_tenant_id(session_id)
     handler = get_tool_dispatch().get(tool_name)
     if handler is None:
-        return json.dumps({"error": f"Unknown tool: {tool_name}"})
+        unknown_result = {"error": f"Unknown tool: {tool_name}"}
+        _forward_tool_error_to_debug_channel(
+            tool_name, tool_input, unknown_result, tenant_id
+        )
+        return json.dumps(unknown_result)
 
     try:
         if tool_name in TOOLS_NEEDING_SESSION:
             result = handler(tool_input, tenant_id, session_id)
         else:
             result = handler(tool_input, tenant_id)
+        # Post-dispatch error detection — catches the HTTP-200-with-error-dict
+        # silent-failure class that the exception handler below can't see.
+        _forward_tool_error_to_debug_channel(
+            tool_name, tool_input, result if isinstance(result, dict) else {}, tenant_id
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as exc:  # noqa: BLE001
         logger.error("Tool execution error (%s): %s", tool_name, exc, exc_info=True)
-        return json.dumps(
-            {
-                "error": f"Tool execution failed: {exc}",
-                "tool": tool_name,
-                "suggestion": "Try again or use a different approach.",
-            }
+        err_result = {
+            "error": f"Tool execution failed: {exc}",
+            "tool": tool_name,
+            "suggestion": "Try again or use a different approach.",
+        }
+        _forward_tool_error_to_debug_channel(
+            tool_name, tool_input, err_result, tenant_id
         )
+        return json.dumps(err_result)

@@ -143,13 +143,31 @@ def create_package_document_version(
     from .package_store import allowed_doc_types
 
     if doc_type not in set(allowed_doc_types()):
-        return DocumentResult(
-            success=False,
-            error=(
-                f"Unknown doc_type '{doc_type}'. Must be one of the "
-                f"recognised package document slugs."
-            ),
+        allowed = allowed_doc_types()
+        err = (
+            f"Unknown doc_type '{doc_type}'. Allowed slugs (use one of these "
+            f"EXACTLY — do NOT pass a title or filename): {', '.join(allowed)}. "
+            f"The document TITLE goes in the `title` parameter; `doc_type` "
+            f"must be one canonical slug."
         )
+        # Silent-failure class: the agent typically confused title and slug.
+        # Surface to the debug channel so ops see the pattern.
+        try:
+            from .error_webhook import notify_debug_event
+
+            notify_debug_event(
+                source="document_service",
+                error_type="UnknownDocType",
+                message=err,
+                context={
+                    "doc_type": str(doc_type),
+                    "package_id": package_id,
+                    "tenant_id": tenant_id,
+                },
+            )
+        except Exception:
+            pass  # telemetry never breaks primary flow
+        return DocumentResult(success=False, error=err)
 
     # Inject provenance metadata footer for markdown content. This is the
     # single guarantee site — every markdown document landing in DOCUMENT#

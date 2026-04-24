@@ -55,6 +55,7 @@ from .routers.chat import (
     set_telemetry_ref as set_chat_telemetry_ref,
 )
 from .routers.commands import router as commands_router
+from .routers.errors import router as errors_router
 from .routers.documents import (
     router as documents_router,
     set_sessions_ref as set_documents_sessions_ref,
@@ -82,7 +83,7 @@ from .routers.workspaces import router as workspaces_router
 from .routers.dependencies import get_user_from_header, get_session_context
 from .cognito_auth import UserContext
 
-from .error_webhook import notify_error, close_webhook_client
+from .error_webhook import notify_error, notify_debug_event, close_webhook_client
 from .teams_notifier import (
     close_notifier_client,
     notify_startup,
@@ -192,6 +193,28 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 tenant_id=_tenant_id.get(""),
                 user_id=_user_id.get(""),
             )
+    # Forward 4xx to the debug channel (DEBUG_MIN_STATUS=400 by default).
+    # 5xx already dual-sends via notify_error → send_error_webhook, so we
+    # only need to explicitly raise 4xx here. Noisy paths should be added
+    # to ERROR_WEBHOOK_EXCLUDE_PATHS — notify_debug_event honors the same
+    # min-status threshold (400) but NOT the exclude list yet; keep an eye
+    # on volume when the URL is first plugged in.
+    if 400 <= exc.status_code < 500 and request.url.path != "/api/errors/report":
+        try:
+            notify_debug_event(
+                source="http_4xx",
+                error_type=type(exc).__name__,
+                message=str(exc.detail or ""),
+                context={
+                    "path": request.url.path,
+                    "method": request.method,
+                },
+                status_code=exc.status_code,
+                path=request.url.path,
+                method=request.method,
+            )
+        except Exception:
+            pass
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
@@ -418,6 +441,7 @@ app.include_router(analytics_router)
 app.include_router(chat_router)
 app.include_router(commands_router)
 app.include_router(documents_router)
+app.include_router(errors_router)
 app.include_router(feedback_router)
 app.include_router(feedback_actions_router)
 app.include_router(triage_actions_router)

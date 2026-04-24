@@ -301,3 +301,126 @@ class TestFrontendPanelContract:
         raw = json.dumps(output, indent=2, default=str)
         parsed = json.loads(raw)
         assert isinstance(parsed, dict)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Debug-channel forwarding — tool handlers that return {"error": ...}
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestToolDispatchDebugForwarding:
+    """Silent-failure events (HTTP 200 with {"error": ...}) must reach the
+    debug Teams channel. Successful results must NOT trigger a webhook,
+    even if they happen to contain the substring 'error' in their body.
+    """
+
+    def test_tool_error_dict_fires_debug_webhook(self, monkeypatch):
+        import app.tools.legacy_dispatch as ld
+        import app.error_webhook as ew
+
+        calls = []
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: calls.append(kw))
+
+        def broken_handler(params, tenant_id):
+            return {"error": "something failed", "status": "guardrail"}
+
+        monkeypatch.setattr(
+            ld,
+            "get_tool_dispatch",
+            lambda: {"broken_tool": broken_handler},
+        )
+
+        raw = ld.execute_tool("broken_tool", {"input_arg": "x"})
+        assert json.loads(raw) == {
+            "error": "something failed",
+            "status": "guardrail",
+        }
+        assert len(calls) == 1
+        assert calls[0]["source"] == "tool_dispatch"
+        assert "something failed" in calls[0]["message"]
+        assert calls[0]["context"]["tool"] == "broken_tool"
+
+    def test_tool_success_does_not_fire_debug_webhook(self, monkeypatch):
+        import app.tools.legacy_dispatch as ld
+        import app.error_webhook as ew
+
+        calls = []
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: calls.append(kw))
+
+        def ok_handler(params, tenant_id):
+            return {"result": "fine", "count": 3}
+
+        monkeypatch.setattr(
+            ld, "get_tool_dispatch", lambda: {"ok_tool": ok_handler}
+        )
+        ld.execute_tool("ok_tool", {})
+        assert calls == []
+
+    def test_tool_success_with_error_substring_does_not_fire(self, monkeypatch):
+        """Narrow guard — fires only on the explicit `error` KEY, not on
+        arbitrary substrings in the value of unrelated keys."""
+        import app.tools.legacy_dispatch as ld
+        import app.error_webhook as ew
+
+        calls = []
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: calls.append(kw))
+
+        def ok_handler(params, tenant_id):
+            return {"result": "the error was handled gracefully"}
+
+        monkeypatch.setattr(
+            ld, "get_tool_dispatch", lambda: {"ok2_tool": ok_handler}
+        )
+        ld.execute_tool("ok2_tool", {})
+        assert calls == []
+
+    def test_tool_error_empty_string_does_not_fire(self, monkeypatch):
+        """An empty error value is not a real error — skip."""
+        import app.tools.legacy_dispatch as ld
+        import app.error_webhook as ew
+
+        calls = []
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: calls.append(kw))
+
+        def edge_handler(params, tenant_id):
+            return {"error": "", "result": "ok"}
+
+        monkeypatch.setattr(
+            ld, "get_tool_dispatch", lambda: {"edge_tool": edge_handler}
+        )
+        ld.execute_tool("edge_tool", {})
+        assert calls == []
+
+    def test_unknown_tool_fires_debug_webhook(self, monkeypatch):
+        """Dispatch miss is itself a silent-failure class worth surfacing."""
+        import app.tools.legacy_dispatch as ld
+        import app.error_webhook as ew
+
+        calls = []
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: calls.append(kw))
+        monkeypatch.setattr(ld, "get_tool_dispatch", lambda: {})
+        raw = ld.execute_tool("nonexistent_tool", {})
+        assert "Unknown tool" in json.loads(raw)["error"]
+        assert len(calls) == 1
+        assert calls[0]["context"]["tool"] == "nonexistent_tool"
+
+    def test_long_input_fields_truncated_in_context(self, monkeypatch):
+        """Large input values should be truncated before being sent to
+        the debug channel — guards against blowing the payload cap."""
+        import app.tools.legacy_dispatch as ld
+        import app.error_webhook as ew
+
+        calls = []
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: calls.append(kw))
+
+        def broken_handler(params, tenant_id):
+            return {"error": "boom"}
+
+        monkeypatch.setattr(
+            ld, "get_tool_dispatch", lambda: {"big_tool": broken_handler}
+        )
+        huge_string = "x" * 5_000
+        ld.execute_tool("big_tool", {"large_field": huge_string, "short": "y"})
+        input_ctx = calls[0]["context"]["input"]
+        assert len(input_ctx["large_field"]) <= 600  # 500 + truncation marker
+        assert input_ctx["short"] == "y"

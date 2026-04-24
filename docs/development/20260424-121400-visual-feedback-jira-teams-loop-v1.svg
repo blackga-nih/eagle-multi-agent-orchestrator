@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820" font-family="Play, ui-sans-serif, system-ui, sans-serif" aria-label="feedback jira teams loop">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#080c17"/><stop offset="100%" stop-color="#121829"/>
+    </linearGradient>
+    <style>
+      text { pointer-events:none; }
+      .t { fill:#f4f6fc; font-size:28px; font-weight:700; }
+      .s { fill:#7b8599; font-size:13px; }
+      .n { fill:#f4f6fc; font-size:15px; font-weight:700; }
+      .d { fill:#9fb0cc; font-size:12px; }
+      .hit { fill:#000; fill-opacity:0; }
+    </style>
+  </defs>
+  <rect width="1400" height="820" fill="url(#bg)"/>
+  <text x="36" y="50" class="t">Feedback -> Jira -> Teams -> Actions loop</text>
+  <text x="36" y="72" class="s">User feedback is captured, enriched, ticketed, broadcast, and actioned</text>
+
+  <g transform="translate(90,250)">
+    <rect width="220" height="92" rx="12" fill="#121829" stroke="#e86b3a"/>
+    <rect width="220" height="92" rx="12" class="hit"><title>{"node":"feedback_submit","endpoint":"POST /api/feedback","file":"server/app/routers/feedback.py"}</title></rect>
+    <text x="16" y="38" class="n">User feedback</text>
+    <text x="16" y="60" class="d">Ctrl+J or message feedback</text>
+  </g>
+
+  <g transform="translate(390,230)">
+    <rect width="270" height="132" rx="12" fill="#121829" stroke="#4a8fe0"/>
+    <rect width="270" height="132" rx="12" class="hit"><title>{"node":"feedback_router","file":"server/app/routers/feedback.py","side_effects":["cloudwatch fetch","jira create","teams notify","screenshot s3 upload"]}</title></rect>
+    <text x="16" y="38" class="n">Feedback router</text>
+    <text x="16" y="60" class="d">Stores snapshot + session context</text>
+    <text x="16" y="82" class="d">Spawns non-blocking side effects</text>
+    <text x="16" y="104" class="d">Never blocks request path</text>
+  </g>
+
+  <g transform="translate(760,150)">
+    <rect width="260" height="92" rx="12" fill="#121829" stroke="#6fa5e8"/>
+    <rect width="260" height="92" rx="12" class="hit"><title>{"node":"jira_client","file":"server/app/jira_client.py","ops":["create_issue","comment","attachment","labels"]}</title></rect>
+    <text x="16" y="38" class="n">Jira issue created</text>
+    <text x="16" y="60" class="d">Key returned (EAGLE-###)</text>
+  </g>
+
+  <g transform="translate(760,280)">
+    <rect width="260" height="92" rx="12" fill="#121829" stroke="#34d399"/>
+    <rect width="260" height="92" rx="12" class="hit"><title>{"node":"teams_notifier","file":"server/app/teams_notifier.py","card":"feedback_card","includes":["jira_key","screenshot_url"]}</title></rect>
+    <text x="16" y="38" class="n">Teams notification</text>
+    <text x="16" y="60" class="d">Adaptive card with context</text>
+  </g>
+
+  <g transform="translate(1080,210)">
+    <rect width="250" height="132" rx="12" fill="#121829" stroke="#7c9dff"/>
+    <rect width="250" height="132" rx="12" class="hit"><title>{"node":"approvals","files":["server/app/routers/triage_actions.py","scripts/triage_notify.py"],"actions":["approve","deny","delay"]}</title></rect>
+    <text x="16" y="38" class="n">Human action layer</text>
+    <text x="16" y="60" class="d">Approve / deny / delay</text>
+    <text x="16" y="82" class="d">Jira labels updated</text>
+    <text x="16" y="104" class="d">GitHub dispatch optional</text>
+  </g>
+
+  <g transform="translate(390,450)">
+    <rect width="270" height="120" rx="12" fill="#121829" stroke="#f2a66b"/>
+    <rect width="270" height="120" rx="12" class="hit"><title>{"node":"artifacts","paths":["docs/development/*-report-triage-*.md",".claude/specs/*-plan-triage-*.md"]}</title></rect>
+    <text x="16" y="38" class="n">Validation artifacts</text>
+    <text x="16" y="60" class="d">Reports + plans committed</text>
+    <text x="16" y="82" class="d">Traceable to ticket and feedback</text>
+  </g>
+
+  <!-- arrows -->
+  <g fill="none" stroke="#2a3657" stroke-width="2" stroke-dasharray="6 6">
+    <path d="M310 296 C340 296,360 296,390 296"/>
+    <path d="M660 260 C700 230,725 210,760 196"/>
+    <path d="M660 296 C700 312,725 322,760 326"/>
+    <path d="M1020 196 C1050 214,1060 228,1080 252"/>
+    <path d="M1020 326 C1055 310,1065 292,1080 276"/>
+    <path d="M525 362 C525 400,525 420,525 450"/>
+    <path d="M1080 300 C860 420,720 500,660 510"/>
+  </g>
+
+  <g>
+    <circle r="6" fill="#6fa5e8"><animateMotion dur="3.0s" repeatCount="indefinite" path="M310 296 C340 296,360 296,390 296"/></circle>
+    <circle r="6" fill="#6fa5e8"><animateMotion dur="3.0s" repeatCount="indefinite" begin="0.6s" path="M660 260 C700 230,725 210,760 196"/></circle>
+    <circle r="6" fill="#6ee7b7"><animateMotion dur="3.0s" repeatCount="indefinite" begin="1.2s" path="M660 296 C700 312,725 322,760 326"/></circle>
+    <circle r="6" fill="#7c9dff"><animateMotion dur="3.2s" repeatCount="indefinite" begin="1.8s" path="M1020 196 C1050 214,1060 228,1080 252"/></circle>
+  </g>
+
+  <text x="36" y="792" class="s">References: feedback router, jira client, teams notifier, triage action callbacks</text>
+</svg>

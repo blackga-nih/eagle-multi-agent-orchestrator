@@ -500,3 +500,108 @@ class TestDocumentServiceTimeouts:
 
         assert result.success is False
         assert result.error is not None
+
+
+# ---------------------------------------------------------------------------
+# TestUnknownDocTypeError — enriched message + debug webhook forwarding
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownDocTypeError:
+    """Agent sometimes passes a kebab-case TITLE where a slug is expected.
+
+    The validator now (a) enumerates allowed slugs so the agent can
+    self-correct and (b) fires notify_debug_event so ops see the class.
+    """
+
+    def test_unknown_doc_type_error_includes_allowed_list(self, monkeypatch):
+        """Error message must list actual slugs so the agent can recover."""
+        from app.document_service import create_package_document_version
+
+        # Prevent the debug webhook from trying to hit the network or loop.
+        import app.error_webhook as ew
+
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: None)
+
+        mock_table = mock.MagicMock()
+        mock_s3 = mock.MagicMock()
+
+        with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
+             mock.patch("app.document_service.get_document_history", return_value=[]), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3):
+            result = create_package_document_version(
+                tenant_id=TENANT,
+                package_id=PACKAGE_ID,
+                doc_type="Price-Reasonableness-Determination---IT-Help-Desk",
+                content=CONTENT,
+                title=TITLE,
+            )
+
+        assert result.success is False
+        assert "Unknown doc_type" in result.error
+        # The agent needs the allowed list inline so it can self-correct
+        # without a second roundtrip.
+        assert "sow" in result.error
+        assert "igce" in result.error
+        # The message must explicitly tell the agent to separate TITLE and
+        # doc_type — that's the specific confusion we're trying to fix.
+        assert "title" in result.error.lower()
+
+    def test_unknown_doc_type_fires_debug_webhook(self, monkeypatch):
+        """Silent-failure class must reach the debug channel."""
+        from app.document_service import create_package_document_version
+        import app.error_webhook as ew
+
+        calls = []
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: calls.append(kw))
+
+        mock_table = mock.MagicMock()
+        mock_s3 = mock.MagicMock()
+
+        with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
+             mock.patch("app.document_service.get_document_history", return_value=[]), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3):
+            create_package_document_version(
+                tenant_id=TENANT,
+                package_id=PACKAGE_ID,
+                doc_type="bogus_slug",
+                content=CONTENT,
+                title=TITLE,
+            )
+
+        assert len(calls) == 1
+        assert calls[0]["source"] == "document_service"
+        assert calls[0]["error_type"] == "UnknownDocType"
+        assert calls[0]["context"]["doc_type"] == "bogus_slug"
+        assert calls[0]["context"]["package_id"] == PACKAGE_ID
+
+    def test_valid_doc_type_does_not_fire_debug_webhook(self, monkeypatch):
+        """Happy path must not trigger the debug channel."""
+        from app.document_service import create_package_document_version
+        import app.error_webhook as ew
+
+        calls = []
+        monkeypatch.setattr(ew, "notify_debug_event", lambda **kw: calls.append(kw))
+
+        mock_table = mock.MagicMock()
+        mock_s3 = mock.MagicMock()
+
+        with mock.patch("app.document_service.get_package", return_value=MOCK_PACKAGE), \
+             mock.patch("app.document_service.get_document_history", return_value=[]), \
+             mock.patch("app.document_service.get_table", return_value=mock_table), \
+             mock.patch("app.document_service.get_s3", return_value=mock_s3), \
+             mock.patch("app.document_service.write_changelog_entry"), \
+             mock.patch("uuid.uuid4", return_value=FAKE_UUID), \
+             mock.patch("app.document_service.datetime", wraps=datetime,
+                       **{"utcnow.return_value": FAKE_NOW}):
+            create_package_document_version(
+                tenant_id=TENANT,
+                package_id=PACKAGE_ID,
+                doc_type="sow",  # valid slug
+                content=CONTENT,
+                title=TITLE,
+            )
+
+        assert calls == []

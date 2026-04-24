@@ -1,7 +1,8 @@
 'use client';
 
-import { Component, ReactNode } from 'react';
+import { Component, ReactNode, ErrorInfo } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { reportClientError } from '@/lib/report-client-error';
 
 interface Props {
   children: ReactNode;
@@ -21,6 +22,17 @@ export class ErrorBoundary extends Component<Props, State> {
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    // Forward to the debug Teams channel. Fire-and-forget; never throws.
+    reportClientError({
+      source: 'react_error_boundary',
+      error_type: error.name || 'Error',
+      message: error.message || String(error),
+      stack: error.stack,
+      component_stack: info.componentStack ?? undefined,
+    });
   }
 
   render() {

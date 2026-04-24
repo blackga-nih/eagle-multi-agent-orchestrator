@@ -94,6 +94,41 @@ def _card(
 # ── Public card builders ─────────────────────────────────────────────
 
 
+def _format_et_time(iso_utc: str) -> str:
+    """Convert an ISO-8601 UTC timestamp into US-Eastern display format.
+
+    Returns '' on any parse failure so the caller can fall back to the
+    raw timestamp string. Handles DST automatically via zoneinfo.
+    """
+    if not iso_utc:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+
+        raw = iso_utc.replace("Z", "+00:00") if iso_utc.endswith("Z") else iso_utc
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        et = dt.astimezone(ZoneInfo("America/New_York"))
+        # e.g. "Apr 23 2026 1:23 PM EDT"
+        return et.strftime("%b %d %Y %-I:%M %p %Z") if hasattr(et, "strftime") else iso_utc
+    except Exception:
+        # Windows strftime lacks %-I; fall back to %I with leading zero trimmed manually
+        try:
+            from datetime import datetime, timezone
+            from zoneinfo import ZoneInfo
+
+            raw = iso_utc.replace("Z", "+00:00") if iso_utc.endswith("Z") else iso_utc
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            et = dt.astimezone(ZoneInfo("America/New_York"))
+            return et.strftime("%b %d %Y %I:%M %p %Z").replace(" 0", " ", 1)
+        except Exception:
+            return ""
+
+
 def error_card(
     environment: str,
     status_code: int,
@@ -119,14 +154,25 @@ def error_card(
         facts.append({"title": "User", "value": user_id})
     if session_id:
         facts.append({"title": "Session", "value": session_id[:36]})
+
+    # Surface ET time in the header AND as a fact row. ET is the primary
+    # display (US East operating hours) with UTC kept as ground truth.
+    et_display = _format_et_time(timestamp)
     if timestamp:
-        facts.append({"title": "Time", "value": timestamp})
+        time_fact = et_display or timestamp
+        if et_display and timestamp != et_display:
+            time_fact = f"{et_display}  ·  {timestamp} UTC"
+        facts.append({"title": "Time", "value": time_fact})
 
     # Truncate long error messages
     msg = error_message[:500] + ("..." if len(error_message) > 500 else "")
 
+    title = f"EAGLE {environment} | {status_code} Error"
+    if et_display:
+        title = f"{title}  ·  {et_display}"
+
     return _card(
-        title=f"EAGLE {environment} | {status_code} Error",
+        title=title,
         facts=facts,
         body_text=msg,
         style="attention",

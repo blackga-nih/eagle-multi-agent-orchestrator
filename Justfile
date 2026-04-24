@@ -580,6 +580,22 @@ urls:
 check-aws:
     python3 scripts/check_aws.py
 
+# ── Debug webhook channel toggle ───────────────────────────
+# Flip DEBUG_WEBHOOK_ENABLED in server/.env. Backend restart required
+# for the change to take effect (value is read at module import time).
+
+# Turn ON the debug Teams channel (requires DEBUG_WEBHOOK_URL to be set)
+debug-on:
+    @bash scripts/toggle_debug_webhook.sh on
+
+# Turn OFF the debug Teams channel
+debug-off:
+    @bash scripts/toggle_debug_webhook.sh off
+
+# Print current debug-channel state (ENABLED flag + URL status)
+debug-status:
+    @bash scripts/toggle_debug_webhook.sh status
+
 # Verify AWS SSO credentials are valid and can access Bedrock
 check-sso:
     #!/usr/bin/env bash

@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820" font-family="Play, ui-sans-serif, system-ui, sans-serif" aria-label="ai native workflow loop">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#080c17"/><stop offset="100%" stop-color="#121829"/>
+    </linearGradient>
+    <linearGradient id="warm" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e86b3a"/><stop offset="100%" stop-color="#f2a66b"/>
+    </linearGradient>
+    <linearGradient id="cool" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4a8fe0"/><stop offset="100%" stop-color="#6fa5e8"/>
+    </linearGradient>
+    <linearGradient id="ok" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#34d399"/><stop offset="100%" stop-color="#6ee7b7"/>
+    </linearGradient>
+    <style>
+      text { pointer-events: none; }
+      .t { fill:#f4f6fc; font-size:28px; font-weight:700; }
+      .s { fill:#7b8599; font-size:13px; }
+      .n { fill:#f4f6fc; font-size:15px; font-weight:700; }
+      .d { fill:#9fb0cc; font-size:12px; }
+      .hit { fill:#000; fill-opacity:0; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="820" fill="url(#bg)"/>
+  <text x="36" y="50" class="t">AI-native delivery loop</text>
+  <text x="36" y="72" class="s">Meeting transcripts -> plans -> implementation -> telemetry -> triage -> backlog</text>
+
+  <!-- Ring nodes -->
+  <g transform="translate(700,410)">
+    <g transform="translate(-95,-320)">
+      <rect x="-140" y="-48" width="280" height="96" rx="14" fill="#121829" stroke="#e86b3a"/>
+      <rect x="-140" y="-48" width="280" height="96" rx="14" class="hit"><title>{"node":"transcripts","source":"docs/development/meeting-transcripts","output":"structured handoff inputs"}</title></rect>
+      <text x="-102" y="-8" class="n">1) Meeting transcripts</text>
+      <text x="-102" y="16" class="d">Capture intent + unresolved decisions</text>
+    </g>
+
+    <g transform="translate(250,-180)">
+      <rect x="-140" y="-48" width="280" height="96" rx="14" fill="#121829" stroke="#4a8fe0"/>
+      <rect x="-140" y="-48" width="280" height="96" rx="14" class="hit"><title>{"node":"plans","source":"docs/plans","output":"atomic tasks + validations"}</title></rect>
+      <text x="-112" y="-8" class="n">2) Structured plans</text>
+      <text x="-112" y="16" class="d">Turn broad topics into chunks</text>
+    </g>
+
+    <g transform="translate(250,180)">
+      <rect x="-140" y="-48" width="280" height="96" rx="14" fill="#121829" stroke="#7c9dff"/>
+      <rect x="-140" y="-48" width="280" height="96" rx="14" class="hit"><title>{"node":"implementation","source":"repo code","output":"small reviewable commits"}</title></rect>
+      <text x="-103" y="-8" class="n">3) Implementation</text>
+      <text x="-103" y="16" class="d">Guardrails + tests + versioning</text>
+    </g>
+
+    <g transform="translate(-95,320)">
+      <rect x="-140" y="-48" width="280" height="96" rx="14" fill="#121829" stroke="#34d399"/>
+      <rect x="-140" y="-48" width="280" height="96" rx="14" class="hit"><title>{"node":"reports","source":"docs/development","output":"user friendly validation artifacts"}</title></rect>
+      <text x="-102" y="-8" class="n">4) Reports + validation</text>
+      <text x="-102" y="16" class="d">Readable evidence for review</text>
+    </g>
+
+    <g transform="translate(-440,180)">
+      <rect x="-140" y="-48" width="280" height="96" rx="14" fill="#121829" stroke="#6fa5e8"/>
+      <rect x="-140" y="-48" width="280" height="96" rx="14" class="hit"><title>{"node":"observability","source":"langfuse+cloudwatch","output":"debuggable traces and errors"}</title></rect>
+      <text x="-117" y="-8" class="n">5) Observability</text>
+      <text x="-117" y="16" class="d">Trace, classify, and diagnose</text>
+    </g>
+
+    <g transform="translate(-440,-180)">
+      <rect x="-140" y="-48" width="280" height="96" rx="14" fill="#121829" stroke="#f2a66b"/>
+      <rect x="-140" y="-48" width="280" height="96" rx="14" class="hit"><title>{"node":"triage","source":"nightly-triage workflow","output":"fix plans + jira + teams actions"}</title></rect>
+      <text x="-117" y="-8" class="n">6) Triage + backlog</text>
+      <text x="-117" y="16" class="d">Close loop on failures fast</text>
+    </g>
+
+    <!-- center -->
+    <circle r="96" fill="#0f172a" stroke="url(#ok)" stroke-width="3"/>
+    <text x="-70" y="-6" class="n">Automate</text>
+    <text x="-56" y="20" class="n">and QA</text>
+  </g>
+
+  <!-- loop arrows -->
+  <g fill="none" stroke="#2a3657" stroke-width="2" stroke-dasharray="6 6">
+    <path id="a1" d="M700 138 C 840 150, 920 220, 950 300"/>
+    <path id="a2" d="M1050 360 C 1110 460, 1060 560, 950 620"/>
+    <path id="a3" d="M820 725 C 700 760, 580 745, 470 690"/>
+    <path id="a4" d="M340 620 C 230 560, 195 460, 250 360"/>
+    <path id="a5" d="M250 300 C 300 220, 380 155, 500 138"/>
+    <path id="a6" d="M500 138 C 575 125, 630 125, 700 138"/>
+  </g>
+
+  <g>
+    <circle r="6" fill="url(#warm)"><animateMotion dur="3.4s" repeatCount="indefinite" path="M700 138 C 840 150, 920 220, 950 300"/></circle>
+    <circle r="6" fill="url(#cool)"><animateMotion dur="3.4s" repeatCount="indefinite" begin="0.6s" path="M1050 360 C 1110 460, 1060 560, 950 620"/></circle>
+    <circle r="6" fill="url(#ok)"><animateMotion dur="3.4s" repeatCount="indefinite" begin="1.2s" path="M820 725 C 700 760, 580 745, 470 690"/></circle>
+    <circle r="6" fill="url(#cool)"><animateMotion dur="3.4s" repeatCount="indefinite" begin="1.8s" path="M340 620 C 230 560, 195 460, 250 360"/></circle>
+    <circle r="6" fill="url(#warm)"><animateMotion dur="3.4s" repeatCount="indefinite" begin="2.4s" path="M250 300 C 300 220, 380 155, 500 138"/></circle>
+  </g>
+
+  <text x="36" y="792" class="s">Sources: meeting-transcripts, docs/plans, nightly triage workflows, telemetry stack</text>
+</svg>

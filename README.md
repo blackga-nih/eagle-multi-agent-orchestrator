@@ -13,6 +13,26 @@ A multi-tenant AI acquisition assistant for the **NCI Office of Acquisitions**. 
 
 ---
 
+## Enhanced Visual Deck
+
+For the expanded presentation narrative, see [`README-enhanced.md`](README-enhanced.md).
+
+Interactive SVGs (embedded below):
+
+- [Supervisor flow (updated policy path)](docs/development/meeting-transcripts/20260416-eagle-output-review/20260423-114500-visual-supervisor-flow-slide10-v1.svg)
+- [Handoff flow (current vs proposed)](docs/development/meeting-transcripts/20260416-eagle-output-review/20260423-113000-visual-handoff-flow-v1.svg)
+- [Document schema explorer flow](docs/development/20260423-100000-diagram-document-schema-motion-v1.svg)
+- [AI-native workflow loop](docs/development/20260424-121200-visual-ai-native-workflow-loop-v1.svg)
+- [Observability stack](docs/development/20260424-121300-visual-observability-stack-v1.svg)
+- [Feedback -> Jira -> Teams loop](docs/development/20260424-121400-visual-feedback-jira-teams-loop-v1.svg)
+
+![Supervisor Flow](docs/development/meeting-transcripts/20260416-eagle-output-review/20260423-114500-visual-supervisor-flow-slide10-v1.svg)
+![AI-Native Workflow Loop](docs/development/20260424-121200-visual-ai-native-workflow-loop-v1.svg)
+![Observability Stack](docs/development/20260424-121300-visual-observability-stack-v1.svg)
+![Feedback Jira Teams Loop](docs/development/20260424-121400-visual-feedback-jira-teams-loop-v1.svg)
+
+---
+
 ## Table of Contents
 
 - [What EAGLE is](#what-eagle-is)

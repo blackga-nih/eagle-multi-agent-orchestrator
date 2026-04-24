@@ -146,7 +146,7 @@ class WebhookConfig:
     teams_daily_summary_enabled: bool = _bool("TEAMS_DAILY_SUMMARY_ENABLED", "true")
     teams_daily_summary_hour: int = _int("TEAMS_DAILY_SUMMARY_HOUR", 13)
 
-    # Error notifications
+    # Error notifications (primary — 5xx only, high-severity channel)
     error_url: str = os.getenv("ERROR_WEBHOOK_URL", "")
     error_enabled: bool = _bool("ERROR_WEBHOOK_ENABLED", "true")
     error_timeout: float = _float("ERROR_WEBHOOK_TIMEOUT", 5.0)
@@ -154,6 +154,17 @@ class WebhookConfig:
     error_include_traceback: bool = _bool("ERROR_WEBHOOK_INCLUDE_TRACEBACK", "true")
     error_min_status: int = _int("ERROR_WEBHOOK_MIN_STATUS", 500)
     error_exclude_paths: list = None  # Initialized in __post_init__
+
+    # Debug notifications (broad catch-all — 4xx + tool-dispatch + frontend).
+    # Sends to a SEPARATE Teams channel with the same Adaptive Card format.
+    # Safe to leave DEBUG_WEBHOOK_URL unset; every call site silently no-ops.
+    debug_url: str = os.getenv("DEBUG_WEBHOOK_URL", "")
+    debug_enabled: bool = _bool("DEBUG_WEBHOOK_ENABLED", "true")
+    debug_timeout: float = _float("DEBUG_WEBHOOK_TIMEOUT", 5.0)
+    debug_rate_limit: int = _int("DEBUG_WEBHOOK_RATE_LIMIT", 30)
+    debug_include_traceback: bool = _bool("DEBUG_WEBHOOK_INCLUDE_TRACEBACK", "true")
+    debug_min_status: int = _int("DEBUG_WEBHOOK_MIN_STATUS", 400)
+    debug_max_payload_bytes: int = _int("DEBUG_WEBHOOK_MAX_PAYLOAD_BYTES", 50_000)
 
     def __post_init__(self):
         # Handle mutable default for exclude_paths

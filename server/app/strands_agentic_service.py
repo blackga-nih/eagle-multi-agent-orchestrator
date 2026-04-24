@@ -27,10 +27,22 @@ from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Literal
 
 from botocore.config import Config
+from opentelemetry import trace as _otel_trace
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models import BedrockModel
 from strands.models.bedrock import CacheConfig
+
+# Dedicated tracer for research-tool sub-spans. When Langfuse/OTEL is wired up
+# via _ensure_langfuse_exporter(), these nest under the `research` TOOL span
+# automatically. When no provider is registered, get_tracer() returns a
+# no-op — safe in tests and CLI runs.
+_research_tracer = _otel_trace.get_tracer("eagle.research_tool")
+
+# WARN threshold for a single research-tool call. Any call exceeding this
+# emits a WARN log so CloudWatch/Langfuse filtering surfaces the outliers
+# even before child-span SLOs are defined. See EAGLE-254.
+_RESEARCH_SLOW_SECONDS = float(os.environ.get("EAGLE_RESEARCH_SLOW_SECONDS", "60"))
 
 # Add server/ to path for eagle_skill_constants
 _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -534,34 +546,73 @@ def _cacheable_system_prompt(text: str) -> list[dict[str, Any]]:
     return [{"text": text}, {"cachePoint": {"type": "default"}}]
 
 
-def _append_kb_sources(
-    text: str, kb_depth: dict
-) -> str:
-    """Append a Sources section if KB docs were read but not cited."""
+_SOURCES_HEADER_RE = re.compile(r"^\s*#{1,6}\s+Sources\s*$", re.IGNORECASE | re.MULTILINE)
+_BOLD_SOURCES_RE = re.compile(r"^\s*\*\*Sources?:?\*\*\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _split_s3_key(s3_key: str) -> tuple[str, str]:
+    """Split an s3_key into (filename, directory).
+
+    ``eagle-knowledge-base/approved/foo/bar/baz.txt`` →
+    ("baz.txt", "eagle-knowledge-base/approved/foo/bar/")
+    """
+    if "/" not in s3_key:
+        return s3_key, ""
+    idx = s3_key.rfind("/")
+    return s3_key[idx + 1:], s3_key[: idx + 1]
+
+
+def _format_source_line(s3_key: str) -> str:
+    """Canonical EAGLE-254 citation line: `` `<filename>` — <directory> ``."""
+    filename, directory = _split_s3_key(s3_key)
+    if directory:
+        return f"- `{filename}` — {directory}"
+    return f"- `{filename}`"
+
+
+def _append_kb_sources(text: str, kb_depth: dict) -> str:
+    """Deterministically emit a canonical ``## Sources`` section when KB docs
+    were fetched, replacing any legacy/variant formats the LLM may have
+    produced (EAGLE-254 fix for inconsistent citations).
+
+    Behavior:
+    1. If no KB docs were fetched → return text unchanged.
+    2. Strip any existing ``## Sources`` (any heading level) or
+       ``**Sources:**`` block the LLM emitted — we always rebuild it so the
+       format is guaranteed.
+    3. Append a canonical ``## Sources`` block listing every fetched doc in
+       ``- `<filename>` — <directory>`` form.
+    """
     fetched = kb_depth.get("fetched_keys", set())
     if not fetched:
         return text
-    # Check if the model already cited KB paths
-    cited = sum(
-        1 for k in fetched
-        if k in text or k.rsplit("/", 1)[-1] in text
-    )
-    if cited >= len(fetched):
-        return text  # All sources already cited
-    # Append missing sources
-    uncited = sorted(
-        k for k in fetched
-        if k not in text
-        and k.rsplit("/", 1)[-1] not in text
-    )
-    if not uncited:
-        return text
-    lines = [f"- `{k}`" for k in uncited]
-    extra = "\n".join(lines)
-    # Merge into existing Sources section if present
-    if "**Sources:**" in text:
-        return text.rstrip() + "\n" + extra + "\n"
-    return text.rstrip() + "\n\n**Sources:**\n" + extra + "\n"
+
+    cleaned = text.rstrip()
+
+    # Strip any existing Sources block the LLM emitted — we rebuild it.
+    # A block = the Sources header line + everything below it until EOF or
+    # the next top-level heading. This captures both `## Sources` and
+    # `**Sources:**` variants plus whatever bullets follow.
+    def _strip_sources_block(raw: str, header_re: re.Pattern) -> str:
+        m = header_re.search(raw)
+        if not m:
+            return raw
+        # Keep everything before the header; drop header + trailing bullets.
+        head = raw[: m.start()].rstrip()
+        # Find next top-level heading after the Sources header, if any.
+        tail = raw[m.end():]
+        next_heading = re.search(r"^\s*#{1,6}\s+\S", tail, re.MULTILINE)
+        if next_heading:
+            # Re-attach content after the next heading.
+            head = head + "\n\n" + tail[next_heading.start():].lstrip()
+        return head.rstrip()
+
+    cleaned = _strip_sources_block(cleaned, _SOURCES_HEADER_RE)
+    cleaned = _strip_sources_block(cleaned, _BOLD_SOURCES_RE)
+
+    ordered = sorted(fetched)
+    lines = [_format_source_line(k) for k in ordered]
+    return cleaned + "\n\n## Sources\n" + "\n".join(lines) + "\n"
 
 
 def _get_active_model() -> tuple[str, BedrockModel]:
@@ -4907,6 +4958,8 @@ def _build_kb_service_tools(
                 are promoted to front of the fetch queue (RO-style retrieval).
                 Example: "sole source justification proprietary software maintenance"
         """
+        import time as _time
+        _research_t0 = _time.monotonic()
         _emit_input("research", {
             "query": query, "contract_value": contract_value,
             "acquisition_method": acquisition_method,
@@ -4923,10 +4976,14 @@ def _build_kb_service_tools(
                 "document_type": document_type, "limit": 15,
             }.items() if v
         }
-        search_result = exec_knowledge_search(
-            search_params, tenant_id, session_id,
-            user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-        )
+        with _research_tracer.start_as_current_span("kb_search_primary") as _span:
+            _span.set_attribute("eagle.query", (query or "")[:200])
+            _span.set_attribute("eagle.limit", search_params.get("limit", 15))
+            search_result = exec_knowledge_search(
+                search_params, tenant_id, session_id,
+                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+            )
+            _span.set_attribute("eagle.result_count", search_result.get("count", 0))
         _kb_depth["search_count"] += 1
         _kb_depth["search_result_count"] += search_result.get("count", 0)
         all_results = list(search_result.get("results", []))
@@ -4958,10 +5015,14 @@ def _build_kb_service_tools(
             if document_type:
                 secondary_params["document_type"] = document_type
             # Don't pass topic filter — lets it find docs in adjacent topics
-            secondary_result = exec_knowledge_search(
-                secondary_params, tenant_id, session_id,
-                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-            )
+            with _research_tracer.start_as_current_span("kb_search_secondary") as _span:
+                _span.set_attribute("eagle.query", (query or "")[:200])
+                _span.set_attribute("eagle.limit", 10)
+                secondary_result = exec_knowledge_search(
+                    secondary_params, tenant_id, session_id,
+                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                )
+                _span.set_attribute("eagle.result_count", secondary_result.get("count", 0))
             _kb_depth["search_count"] += 1
             _kb_depth["search_result_count"] += secondary_result.get("count", 0)
             # Merge deduplicated results (stem-dedup catches .docx/.content.md siblings)
@@ -4982,10 +5043,14 @@ def _build_kb_service_tools(
         path_only_results: list[dict] = []
         path_search_input = keyword.strip() if keyword and keyword.strip() else query
         if path_search_input:
-            path_result = exec_path_search(
-                path_search_input, tenant_id, limit=15,
-                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-            )
+            with _research_tracer.start_as_current_span("kb_search_path") as _span:
+                _span.set_attribute("eagle.input", (path_search_input or "")[:200])
+                _span.set_attribute("eagle.limit", 15)
+                path_result = exec_path_search(
+                    path_search_input, tenant_id, limit=15,
+                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                )
+                _span.set_attribute("eagle.result_count", len(path_result.get("results", [])))
             for r in path_result.get("results", []):
                 key = r.get("s3_key", "")
                 stem = _stem(key) if key else ""
@@ -5004,10 +5069,14 @@ def _build_kb_service_tools(
         semantic_only_results: list[dict] = []
         if os.environ.get("SEMANTIC_LANE_ENABLED", "true").lower() != "false":
             try:
-                semantic_result = exec_semantic_search(
-                    query, tenant_id, limit=15,
-                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-                )
+                with _research_tracer.start_as_current_span("kb_search_semantic") as _span:
+                    _span.set_attribute("eagle.query", (query or "")[:200])
+                    _span.set_attribute("eagle.limit", 15)
+                    semantic_result = exec_semantic_search(
+                        query, tenant_id, limit=15,
+                        user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                    )
+                    _span.set_attribute("eagle.result_count", len(semantic_result.get("results", [])))
                 for r in semantic_result.get("results", []):
                     key = r.get("s3_key", "")
                     if not key or not _is_kb_doc(key):
@@ -5077,30 +5146,30 @@ def _build_kb_service_tools(
                 _kb_depth["total_chars_read"] += content.get("content_length", 0)
                 _kb_depth["fetched_keys"].add(s3_key)
                 fetched_stems.add(_stem(s3_key))
-                # Per-doc excerpt is capped at 8K chars (down from 15K). Research
-                # tool previously returned ~24 docs × 15K chars = 360K chars
-                # ≈ 90K tokens in a single tool_result block, which blew the
-                # 200K context window on Turn 5 of multi-research flows. 8K is
-                # enough for the LLM to cite and quote key passages without
-                # swallowing half the window. Average KB doc is ~12-18K chars;
-                # 8K captures the executive-summary and core sections.
+                # Per-doc excerpt cap — 2500 chars (15K→8K→4K→2500).
+                # EAGLE-254 tuning: v2 cut was 4K; live measurement showed
+                # Gen #2 still 46s on 25K input tokens. 2500 chars ≈ 625
+                # tokens per doc; with 3-5 docs that's 2-3K tokens of body
+                # content — still enough for the LLM to cite titles + key
+                # passages, not enough to reason over whole documents (which
+                # is what the LLM was doing at 4K).
                 fetched_docs.append({
                     "title": r.get("title", ""),
                     "s3_key": s3_key,
-                    "content": content.get("content", "")[:8000],
+                    "content": content.get("content", "")[:2500],
                 })
                 return True
             return False
 
         # Fetch budgets — path budget is larger when keyword supplied (RO-style).
-        # Tightened 2026-04-13: was 8/8/8 (keyword) and 8/4/4 (no keyword) — up
-        # to 24 docs × 8K chars per call. Now capped at 6/4/4 and 5/3/3 so one
-        # research call stays under ~60K chars / ~15K tokens even in the
-        # worst case. Prevents Turn 5 context-window 500s.
+        # History: 8/8/8 (keyword) and 8/4/4 (no keyword) blew the window on
+        # Turn 5; then 6/4/4 and 5/3/3 kept it safe but Gen #2 latency stayed
+        # high (38K input tokens → 61s Sonnet). EAGLE-254 cuts to 4/3/3 and
+        # 3/2/2 so the total fetched-docs payload stays under ~10K tokens.
         _keyword_supplied = bool(keyword and keyword.strip())
-        AI_FETCH_BUDGET = 6 if _keyword_supplied else 5
-        PATH_FETCH_BUDGET = 4 if _keyword_supplied else 3
-        SEMANTIC_FETCH_BUDGET = 4 if _keyword_supplied else 3
+        AI_FETCH_BUDGET = 4 if _keyword_supplied else 3
+        PATH_FETCH_BUDGET = 3 if _keyword_supplied else 2
+        SEMANTIC_FETCH_BUDGET = 3 if _keyword_supplied else 2
 
         def _fetch_capped(results_iter, budget: int) -> int:
             count = 0
@@ -5118,16 +5187,26 @@ def _build_kb_service_tools(
         # When keyword is supplied, trust the LLM-extracted concept phrase
         # and fetch path hits FIRST. Otherwise fall back to AI-ranked first.
         # Semantic slots in between — gets credit for unique docs it surfaces.
-        if _keyword_supplied:
-            _fetch_capped(path_only_results, PATH_FETCH_BUDGET)
-            _fetched_before_semantic = len(fetched_docs)
-            _fetch_capped(semantic_only_results, SEMANTIC_FETCH_BUDGET)
-            _fetch_capped(all_results, AI_FETCH_BUDGET)
-        else:
-            _fetch_capped(all_results, AI_FETCH_BUDGET)
-            _fetched_before_semantic = len(fetched_docs)
-            _fetch_capped(semantic_only_results, SEMANTIC_FETCH_BUDGET)
-            _fetch_capped(path_only_results, PATH_FETCH_BUDGET)
+        with _research_tracer.start_as_current_span("s3_fetch_docs") as _span:
+            _span.set_attribute("eagle.keyword_supplied", _keyword_supplied)
+            _span.set_attribute("eagle.ai_budget", AI_FETCH_BUDGET)
+            _span.set_attribute("eagle.path_budget", PATH_FETCH_BUDGET)
+            _span.set_attribute("eagle.semantic_budget", SEMANTIC_FETCH_BUDGET)
+            if _keyword_supplied:
+                _fetch_capped(path_only_results, PATH_FETCH_BUDGET)
+                _fetched_before_semantic = len(fetched_docs)
+                _fetch_capped(semantic_only_results, SEMANTIC_FETCH_BUDGET)
+                _fetch_capped(all_results, AI_FETCH_BUDGET)
+            else:
+                _fetch_capped(all_results, AI_FETCH_BUDGET)
+                _fetched_before_semantic = len(fetched_docs)
+                _fetch_capped(semantic_only_results, SEMANTIC_FETCH_BUDGET)
+                _fetch_capped(path_only_results, PATH_FETCH_BUDGET)
+            _span.set_attribute("eagle.fetched_count", len(fetched_docs))
+            _span.set_attribute(
+                "eagle.total_chars_read",
+                _kb_depth.get("total_chars_read", 0),
+            )
         _semantic_fetched_count = len(fetched_docs) - _fetched_before_semantic
 
         # 3. Dynamic checklist search (isolated query — separate from general KB search)
@@ -5138,11 +5217,15 @@ def _build_kb_service_tools(
                 cl_query = _CHECKLIST_QUERIES.get(method, "PMR common requirements checklist")
                 cl_query += " file reviewer FRC"
 
-                cl_result = exec_knowledge_search(
-                    {"document_type": "checklist", "query": cl_query, "limit": 5},
-                    tenant_id, session_id,
-                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-                )
+                with _research_tracer.start_as_current_span("kb_search_checklist") as _span:
+                    _span.set_attribute("eagle.method", method)
+                    _span.set_attribute("eagle.query", cl_query[:200])
+                    cl_result = exec_knowledge_search(
+                        {"document_type": "checklist", "query": cl_query, "limit": 5},
+                        tenant_id, session_id,
+                        user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                    )
+                    _span.set_attribute("eagle.result_count", cl_result.get("count", 0))
                 _kb_depth["search_count"] += 1
 
                 for r in cl_result.get("results", [])[:4]:
@@ -5156,25 +5239,46 @@ def _build_kb_service_tools(
                             _kb_depth["fetch_count"] += 1
                             _kb_depth["total_chars_read"] += result.get("content_length", 0)
                             _kb_depth["fetched_keys"].add(s3_key)
-                            # 10K cap (was 20K) — checklists are structurally
-                            # dense (tables/bullets), so 10K captures the full
-                            # document for most PMR/FRC checklists without
-                            # inflating the research packet.
-                            checklist_content[r.get("title", s3_key)] = result["content"][:10000]
+                            # 5K cap (was 10K was 20K) — checklists are
+                            # structurally dense (tables/bullets); 5K still
+                            # captures the section headings + first-level
+                            # items for most PMR/FRC checklists. The LLM uses
+                            # these to name requirements, not to quote them
+                            # wholesale. EAGLE-254 latency tuning.
+                            checklist_content[r.get("title", s3_key)] = result["content"][:5000]
 
-        # 4. Build combined packet — filter out package docs and dedup
-        # .docx/.content.md siblings so the agent sees clean KB results only.
+        # 4. Build combined packet — filter out package docs, dedup
+        # .docx/.content.md siblings, and slim per-result metadata.
+        # EAGLE-254 tuning (v3):
+        # - Drop any kb_result whose s3_key is already in fetched_documents:
+        #   the LLM was seeing each fetched doc twice (once as a search
+        #   result, once as full content). Dedup saves ~150 tokens per fetch.
+        # - Cap the result list at 8 unfetched "related" docs. The LLM
+        #   rarely cites beyond the top 5-8 suggestions; 15 was wasteful.
+        # - Drop `document_type` and `primary_topic` — the LLM picks
+        #   citations by title, not by these ranking hints.
+        _KB_RESULTS_CAP = 8
+        _fetched_key_set = {d.get("s3_key") for d in fetched_docs}
         _seen_stems: set[str] = set()
         kb_only_results: list[dict] = []
         for r in all_results:
             key = r.get("s3_key", "")
             if not _is_kb_doc(key):
                 continue
+            if key in _fetched_key_set:
+                continue  # already shown in fetched_documents with full content
             stem = _stem(key)
             if stem in _seen_stems:
                 continue
             _seen_stems.add(stem)
-            kb_only_results.append(r)
+            kb_only_results.append({
+                "title": r.get("title", ""),
+                "s3_key": key,
+                "summary": (r.get("summary", "") or "")[:300],
+                "confidence_score": r.get("confidence_score", 0),
+            })
+            if len(kb_only_results) >= _KB_RESULTS_CAP:
+                break
 
         detected = _detect_method(acquisition_method, query, contract_value)
         packet: dict[str, Any] = {
@@ -5182,15 +5286,10 @@ def _build_kb_service_tools(
             "fetched_documents": fetched_docs,
             "checklists": checklist_content,
             "detected_method": detected,
-            "_guidance": (
-                "Use checklists to cross-reference document requirements. "
-                "The PMR checklist is HHS/NIH-specific — items there supplement FAR requirements. "
-                "The FRC (File Reviewer's Checklist) is NIH's internal review standard. "
-                "Cite KB documents and checklist references in your response."
-            ),
         }
         if compliance_data:
             packet["compliance_matrix"] = compliance_data
+        _research_elapsed = _time.monotonic() - _research_t0
         _emit("research", {
             "kb_results_count": len(packet["kb_results"]),
             "fetched_count": len(fetched_docs),
@@ -5199,7 +5298,18 @@ def _build_kb_service_tools(
             "checklists_loaded": list(checklist_content.keys()),
             "detected_method": detected,
             "compliance_matrix_included": compliance_data is not None,
+            "duration_seconds": round(_research_elapsed, 2),
         })
+        # Soft SLO — surface slow research calls so CloudWatch/Langfuse
+        # filtering catches outliers without re-running. See EAGLE-254.
+        if _research_elapsed > _RESEARCH_SLOW_SECONDS:
+            logger.warning(
+                "research_tool.slow: duration=%.2fs threshold=%.1fs "
+                "fetched=%d kb_results=%d query=%r",
+                _research_elapsed, _RESEARCH_SLOW_SECONDS,
+                len(fetched_docs), len(packet["kb_results"]),
+                (query or "")[:200],
+            )
         # No indent — indent=2 inflated the packet by ~20% (whitespace) with
         # zero LLM readability benefit. Compact JSON is equally parseable.
         return json.dumps(packet, default=str)

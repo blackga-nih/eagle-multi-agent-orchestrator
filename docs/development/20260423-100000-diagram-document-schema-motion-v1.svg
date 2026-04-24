@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-labelledby="title desc">
+  <title id="title">EAGLE Document Schema Motion Diagram</title>
+  <desc id="desc">Animated system view of doc type selection flowing through schema layers into prompt generation.</desc>
+
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#111a24"/>
+    </linearGradient>
+    <linearGradient id="panelGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#151b24"/>
+      <stop offset="100%" stop-color="#131923"/>
+    </linearGradient>
+    <linearGradient id="flowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#79c0ff"/>
+      <stop offset="100%" stop-color="#7ee787"/>
+    </linearGradient>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+    <style>
+      .label { font: 600 14px 'Segoe UI', Arial, sans-serif; fill: #e6edf3; letter-spacing: .2px; }
+      .muted { font: 500 12px 'Segoe UI', Arial, sans-serif; fill: #8b949e; }
+      .tiny { font: 500 11px 'Segoe UI', Arial, sans-serif; fill: #8b949e; }
+      .mono { font: 600 12px Consolas, 'SF Mono', monospace; fill: #d2a8ff; }
+      .pill { font: 600 11px 'Segoe UI', Arial, sans-serif; fill: #0d1117; }
+      text { pointer-events: none; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="820" fill="url(#bgGrad)"/>
+
+  <!-- Main App Frame -->
+  <rect x="40" y="40" width="1320" height="740" rx="14" fill="#0b1118" stroke="#2a3341" stroke-width="2" filter="url(#shadow)"/>
+
+  <!-- Sidebar -->
+  <rect x="60" y="60" width="340" height="700" rx="10" fill="url(#panelGrad)" stroke="#2a3341"/>
+  <title>{"panel":"sidebar","payload":{"controls":["preset","doc_type","display_toggles"],"default_doc_type":"sow"}}</title>
+  <text x="84" y="95" class="label">EAGLE Document Schema</text>
+  <text x="84" y="117" class="muted">Four schema layers per doc type</text>
+
+  <text x="84" y="158" class="tiny">PRESET</text>
+  <rect x="84" y="172" width="118" height="28" rx="14" fill="#79c0ff"/>
+  <text x="108" y="191" class="pill">SOW</text>
+  <rect x="210" y="172" width="88" height="28" rx="14" fill="#1c2330" stroke="#2a3341"/>
+  <text x="238" y="191" class="muted">IGCE</text>
+
+  <text x="84" y="238" class="tiny">DOC TYPE</text>
+  <rect x="84" y="252" width="86" height="26" rx="5" fill="#79c0ff"/>
+  <text x="113" y="269" class="pill">sow</text>
+  <rect x="178" y="252" width="90" height="26" rx="5" fill="#1c2330" stroke="#2a3341"/>
+  <text x="205" y="269" class="muted">pws</text>
+  <rect x="276" y="252" width="88" height="26" rx="5" fill="#1c2330" stroke="#2a3341"/>
+  <text x="304" y="269" class="muted">igce</text>
+
+  <rect x="84" y="306" width="280" height="1" fill="#2a3341"/>
+  <text x="84" y="333" class="tiny">DISPLAY TOGGLES</text>
+  <circle cx="96" cy="355" r="5" fill="#7ee787"/>
+  <text x="112" y="360" class="muted">Show shared base fields</text>
+  <circle cx="96" cy="381" r="5" fill="#7ee787"/>
+  <text x="112" y="386" class="muted">Show aliases</text>
+  <circle cx="96" cy="407" r="5" fill="#8b949e"/>
+  <text x="112" y="412" class="muted">Show doc_type aliases</text>
+
+  <rect x="84" y="448" width="280" height="120" rx="8" fill="#1c2330" stroke="#2a3341"/>
+  <text x="96" y="472" class="tiny">LEGEND</text>
+  <text x="96" y="495" class="muted">[T] Has template</text>
+  <text x="96" y="518" class="muted">[*] Has typed model</text>
+  <text x="96" y="541" class="muted">Others: BaseDocumentData</text>
+
+  <!-- Main Preview -->
+  <rect x="430" y="60" width="900" height="700" rx="10" fill="#101722" stroke="#2a3341"/>
+  <title>{"panel":"preview","payload":{"doc_type":"sow","layers":["pydantic_model","template_placeholder_map","field_aliases","prompt_output"]}}</title>
+  <text x="462" y="98" class="label">sow - Statement of Work</text>
+
+  <!-- Layer cards -->
+  <g id="layers">
+    <title>{"node":"schema_layers","payload":{"1":"typed_optional_fields","2":"template_placeholder_mapping","3":"alias_normalization","4":"prompt_generation_context"}}</title>
+    <rect x="462" y="124" width="836" height="122" rx="8" fill="#151b24" stroke="#2a3341"/>
+    <rect x="462" y="255" width="836" height="122" rx="8" fill="#151b24" stroke="#2a3341"/>
+    <rect x="462" y="386" width="836" height="122" rx="8" fill="#151b24" stroke="#2a3341"/>
+    <rect x="462" y="517" width="836" height="146" rx="8" fill="#151b24" stroke="#2a3341"/>
+
+    <text x="486" y="156" class="label">1. Pydantic model</text>
+    <rect x="650" y="138" width="90" height="22" rx="11" fill="#3fb950"/>
+    <text x="679" y="153" class="pill">typed</text>
+    <text x="486" y="182" class="mono">title, description, estimated_value, deliverables, tasks...</text>
+    <text x="486" y="205" class="muted">Optional fields validated by model + base schema.</text>
+
+    <text x="486" y="287" class="label">2. Template placeholder map</text>
+    <rect x="720" y="269" width="96" height="22" rx="11" fill="#d2a8ff"/>
+    <text x="748" y="284" class="pill">docx</text>
+    <text x="486" y="313" class="mono">title -> {{PROJECT_TITLE}}   tasks -> {{TASKS}}</text>
+    <text x="486" y="336" class="muted">Field values bind to template placeholders.</text>
+
+    <text x="486" y="418" class="label">3. Field aliases</text>
+    <rect x="612" y="400" width="112" height="22" rx="11" fill="#ffa657"/>
+    <text x="646" y="415" class="pill">normalize</text>
+    <text x="486" y="444" class="mono">requirement -> description   pop -> period_of_performance</text>
+    <text x="486" y="467" class="muted">User/AI variants collapse to canonical field names.</text>
+
+    <text x="486" y="549" class="label">4. Prompt output</text>
+    <rect x="602" y="531" width="120" height="22" rx="11" fill="#79c0ff"/>
+    <text x="640" y="546" class="pill">copy prompt</text>
+    <text x="486" y="575" class="muted">Build valid create_document payload for "sow" with:</text>
+    <text x="486" y="597" class="mono">- minimal example   - full example   - required vs optional</text>
+    <text x="486" y="621" class="muted">References: ai_document_schema.py, template_registry.py, template_schema.py</text>
+  </g>
+
+  <!-- Flow paths -->
+  <path id="flow1" d="M 366 265 C 420 265, 430 186, 462 186" fill="none" stroke="url(#flowGrad)" stroke-width="2" stroke-dasharray="6 6" opacity="0.8"/>
+  <title>{"flow":"doc_type_selection_to_layer1","payload":{"from":"doc_type_chip","to":"pydantic_model_layer"}}</title>
+  <path id="flow2" d="M 462 186 C 430 186, 430 316, 462 316" fill="none" stroke="url(#flowGrad)" stroke-width="2" stroke-dasharray="6 6" opacity="0.7"/>
+  <path id="flow3" d="M 462 316 C 430 316, 430 447, 462 447" fill="none" stroke="url(#flowGrad)" stroke-width="2" stroke-dasharray="6 6" opacity="0.7"/>
+  <path id="flow4" d="M 462 447 C 430 447, 430 577, 462 577" fill="none" stroke="url(#flowGrad)" stroke-width="2" stroke-dasharray="6 6" opacity="0.7"/>
+
+  <!-- Moving packets -->
+  <circle r="6" fill="#79c0ff" filter="url(#softGlow)">
+    <animateMotion dur="3.2s" repeatCount="indefinite" rotate="auto">
+      <mpath href="#flow1" xlink:href="#flow1"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0.35;1;0.35" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+  <circle r="5" fill="#7ee787" filter="url(#softGlow)">
+    <animateMotion dur="3.8s" repeatCount="indefinite" rotate="auto" begin="0.8s">
+      <mpath href="#flow2" xlink:href="#flow2"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0.2;0.9;0.2" dur="1.7s" repeatCount="indefinite"/>
+  </circle>
+  <circle r="5" fill="#d2a8ff" filter="url(#softGlow)">
+    <animateMotion dur="4.1s" repeatCount="indefinite" rotate="auto" begin="1.2s">
+      <mpath href="#flow3" xlink:href="#flow3"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0.2;1;0.2" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+  <circle r="5" fill="#ffa657" filter="url(#softGlow)">
+    <animateMotion dur="4.5s" repeatCount="indefinite" rotate="auto" begin="1.7s">
+      <mpath href="#flow4" xlink:href="#flow4"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0.2;1;0.2" dur="1.9s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Pulsing layer highlights -->
+  <rect x="462" y="124" width="836" height="122" rx="8" fill="none" stroke="#79c0ff" stroke-width="2" opacity="0.35">
+    <animate attributeName="opacity" values="0.15;0.65;0.15" dur="2.8s" repeatCount="indefinite"/>
+  </rect>
+  <rect x="462" y="255" width="836" height="122" rx="8" fill="none" stroke="#7ee787" stroke-width="2" opacity="0.2">
+    <animate attributeName="opacity" values="0.1;0.55;0.1" dur="3.1s" repeatCount="indefinite" begin="0.4s"/>
+  </rect>
+  <rect x="462" y="386" width="836" height="122" rx="8" fill="none" stroke="#d2a8ff" stroke-width="2" opacity="0.2">
+    <animate attributeName="opacity" values="0.1;0.5;0.1" dur="3.4s" repeatCount="indefinite" begin="0.8s"/>
+  </rect>
+  <rect x="462" y="517" width="836" height="146" rx="8" fill="none" stroke="#ffa657" stroke-width="2" opacity="0.2">
+    <animate attributeName="opacity" values="0.1;0.45;0.1" dur="3.7s" repeatCount="indefinite" begin="1.2s"/>
+  </rect>
+
+  <!-- Header shimmer -->
+  <rect x="430" y="60" width="900" height="40" rx="10" fill="#1a2330" opacity="0.35">
+    <animate attributeName="opacity" values="0.2;0.45;0.2" dur="2.2s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Footer -->
+  <text x="48" y="802" class="tiny">Generated motion SVG for playground schema flow - SMIL animation</text>
+</svg>

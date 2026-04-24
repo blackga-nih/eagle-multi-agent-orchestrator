@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">EAGLE Handoff Flow Visualization</title>
+  <desc id="desc">Current to proposed compliance matrix flow with intake gate and budget semantics highlighted.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0f17" />
+      <stop offset="100%" stop-color="#111a27" />
+    </linearGradient>
+    <linearGradient id="split" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f87171" stop-opacity="0.17" />
+      <stop offset="50%" stop-color="#fbbf24" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#34d399" stop-opacity="0.17" />
+    </linearGradient>
+    <marker id="arrBlue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#60a5fa"/>
+    </marker>
+    <marker id="arrViolet" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#a78bfa"/>
+    </marker>
+    <marker id="arrGreen" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#34d399"/>
+    </marker>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <style>
+      .title { font: 700 28px 'Segoe UI', Arial, sans-serif; fill: #e6edf3; }
+      .sub { font: 500 14px 'Segoe UI', Arial, sans-serif; fill: #8b98a9; }
+      .hdr { font: 700 13px 'Segoe UI', Arial, sans-serif; fill: #e6edf3; text-transform: uppercase; letter-spacing: .08em; }
+      .lbl { font: 600 13px 'Segoe UI', Arial, sans-serif; fill: #0b0f17; }
+      .tiny { font: 500 11px 'Segoe UI', Arial, sans-serif; fill: #314157; }
+      .mono { font: 600 12px Consolas, monospace; fill: #dbeafe; }
+      .callout { font: 600 12px 'Segoe UI', Arial, sans-serif; fill: #f8fafc; }
+      .badge { font: 700 11px 'Segoe UI', Arial, sans-serif; fill: #0b0f17; }
+      text { pointer-events: none; }
+      .hover-hit { fill: #000; fill-opacity: 0; stroke: none; pointer-events: all; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="900" fill="url(#bg)"/>
+  <rect x="30" y="30" width="1540" height="840" rx="16" fill="#0f1622" stroke="#223046" stroke-width="2"/>
+  <rect x="40" y="90" width="1520" height="760" rx="14" fill="url(#split)" stroke="#1e2a3d" />
+
+  <text x="60" y="67" class="title">Compliance Matrix Flow: Current vs Proposed</text>
+  <text x="920" y="67" class="sub">Derived from handoff + compliance-matrix-flow visualization</text>
+
+  <!-- Left side: current -->
+  <text x="95" y="125" class="hdr">Current State (Issues)</text>
+  <rect x="80" y="150" width="260" height="84" rx="8" fill="#fef3c7"/>
+  <rect x="80" y="150" width="260" height="84" rx="8" class="hover-hit"><title>{"node":"current_user_request","payload":{"state":"current","entry":"chat_request"}}</title></rect>
+  <text x="100" y="182" class="lbl">User Request</text>
+  <text x="100" y="202" class="tiny">"Generate a PWS..."</text>
+
+  <rect x="80" y="280" width="260" height="98" rx="8" fill="#dcfce7"/>
+  <rect x="80" y="280" width="260" height="98" rx="8" class="hover-hit"><title>{"node":"current_supervisor","payload":{"weakness":"no_hard_intake_chokepoint","risk":"under_asking"}}</title></rect>
+  <text x="100" y="314" class="lbl">Supervisor Agent</text>
+  <text x="100" y="334" class="tiny">Prompt rules only</text>
+  <text x="100" y="352" class="tiny">No hard intake chokepoint</text>
+
+  <rect x="80" y="430" width="260" height="86" rx="8" fill="#dbeafe"/>
+  <text x="100" y="462" class="lbl">create_document</text>
+  <text x="100" y="482" class="tiny">No pre-dispatch required-facts check</text>
+
+  <rect x="80" y="560" width="260" height="86" rx="8" fill="#fed7aa"/>
+  <text x="100" y="592" class="lbl">Document Output</text>
+  <text x="100" y="612" class="tiny">Can be emitted too early</text>
+
+  <path id="leftFlow1" d="M210 234 L210 280" stroke="#60a5fa" stroke-width="2.4" marker-end="url(#arrBlue)" fill="none"/>
+  <path id="leftFlow2" d="M210 378 L210 430" stroke="#60a5fa" stroke-width="2.4" marker-end="url(#arrBlue)" fill="none"/>
+  <path id="leftFlow3" d="M210 516 L210 560" stroke="#f59e0b" stroke-width="2.4" marker-end="url(#arrBlue)" fill="none"/>
+
+  <rect x="360" y="300" width="305" height="80" rx="10" fill="#3b1212" stroke="#f87171"/>
+  <rect x="360" y="300" width="305" height="80" rx="10" class="hover-hit"><title>{"issue":"under_asking","example":"pws_before_event_cadence","fix_key":"intake_required_facts.pws.event_cadence"}</title></rect>
+  <text x="382" y="331" class="callout">Issue #1: Under-asking</text>
+  <text x="382" y="352" class="sub">PWS before event cadence confirmed</text>
+
+  <rect x="360" y="430" width="305" height="80" rx="10" fill="#3b1212" stroke="#f87171"/>
+  <text x="382" y="461" class="callout">Issue #2/#3: Budget semantics</text>
+  <text x="382" y="482" class="sub">Reconcile question + ceiling ballooning</text>
+
+  <!-- Right side: proposed -->
+  <text x="900" y="125" class="hdr">Proposed Path (Handoff)</text>
+  <rect x="885" y="150" width="260" height="84" rx="8" fill="#fef3c7"/>
+  <text x="905" y="182" class="lbl">User Request</text>
+  <text x="905" y="202" class="tiny">Same input surface</text>
+
+  <rect x="885" y="268" width="260" height="94" rx="8" fill="#dcfce7"/>
+  <text x="905" y="300" class="lbl">Supervisor + Skills</text>
+  <text x="905" y="320" class="tiny">Reads matrix-backed policy</text>
+  <text x="905" y="340" class="tiny">Batches missing fact questions</text>
+
+  <rect x="1220" y="250" width="300" height="128" rx="10" fill="#f5d0fe" stroke="#a78bfa" stroke-dasharray="7 5" stroke-width="2">
+    <title>{"node":"matrix_new_keys","payload":{"intake_required_facts":true,"budget_semantics":true,"forbidden_behaviors":true}}</title>
+    <animate attributeName="stroke-opacity" values="0.35;1;0.35" dur="2.6s" repeatCount="indefinite"/>
+  </rect>
+  <text x="1240" y="285" class="lbl">matrix.json (new keys)</text>
+  <text x="1240" y="310" class="tiny">intake_required_facts</text>
+  <text x="1240" y="332" class="tiny">budget_semantics</text>
+  <text x="1240" y="356" class="tiny">forbidden_behaviors[]</text>
+
+  <rect x="885" y="410" width="260" height="94" rx="8" fill="#dbeafe"/>
+  <rect x="885" y="410" width="260" height="94" rx="8" class="hover-hit"><title>{"node":"proposed_intake_gate","payload":{"required_source":"matrix.intake_required_facts","error":"missing_facts"}}</title></rect>
+  <text x="905" y="442" class="lbl">pre-generation intake gate</text>
+  <text x="905" y="462" class="tiny">Reads required facts by doc_type</text>
+  <text x="905" y="482" class="tiny">returns missing_facts if absent</text>
+
+  <rect x="885" y="548" width="260" height="94" rx="8" fill="#dbeafe"/>
+  <rect x="885" y="548" width="260" height="94" rx="8" class="hover-hit"><title>{"node":"proposed_create_document","payload":{"guard":"gate_before_generation","budget_rule":"budget_is_ceiling"}}</title></rect>
+  <text x="905" y="580" class="lbl">create_document</text>
+  <text x="905" y="600" class="tiny">Only after gate passes</text>
+  <text x="905" y="620" class="tiny">Budget treated as ceiling</text>
+
+  <rect x="885" y="686" width="260" height="94" rx="8" fill="#fed7aa"/>
+  <text x="905" y="718" class="lbl">Safer Document Output</text>
+  <text x="905" y="738" class="tiny">No reconcile prompt, no inflation</text>
+  <text x="905" y="758" class="tiny">Traceable to matrix policy keys</text>
+
+  <path id="rightFlow1" d="M1015 234 L1015 268" stroke="#34d399" stroke-width="2.4" marker-end="url(#arrGreen)" fill="none"/>
+  <path id="rightFlow2" d="M1015 362 L1015 410" stroke="#34d399" stroke-width="2.4" marker-end="url(#arrGreen)" fill="none"/>
+  <path id="rightFlow3" d="M1015 504 L1015 548" stroke="#34d399" stroke-width="2.4" marker-end="url(#arrGreen)" fill="none"/>
+  <path id="rightFlow4" d="M1015 642 L1015 686" stroke="#34d399" stroke-width="2.4" marker-end="url(#arrGreen)" fill="none"/>
+
+  <path id="policyRead1" d="M1220 314 C1160 314,1128 314,1145 314" stroke="#a78bfa" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#arrViolet)" fill="none"/>
+  <path id="policyRead2" d="M1220 340 C1160 380,1120 430,1145 456" stroke="#a78bfa" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#arrViolet)" fill="none"/>
+
+  <!-- Motion tokens -->
+  <circle r="6" fill="#60a5fa" filter="url(#glow)">
+    <animateMotion dur="2.6s" repeatCount="indefinite">
+      <mpath href="#leftFlow1" xlink:href="#leftFlow1"/>
+    </animateMotion>
+  </circle>
+  <circle r="6" fill="#f87171" filter="url(#glow)">
+    <animateMotion dur="3.2s" repeatCount="indefinite" begin="0.7s">
+      <mpath href="#leftFlow2" xlink:href="#leftFlow2"/>
+    </animateMotion>
+  </circle>
+  <circle r="6" fill="#34d399" filter="url(#glow)">
+    <animateMotion dur="2.4s" repeatCount="indefinite">
+      <mpath href="#rightFlow2" xlink:href="#rightFlow2"/>
+    </animateMotion>
+  </circle>
+  <circle r="5" fill="#a78bfa" filter="url(#glow)">
+    <animateMotion dur="3.4s" repeatCount="indefinite" begin="0.3s">
+      <mpath href="#policyRead2" xlink:href="#policyRead2"/>
+    </animateMotion>
+  </circle>
+
+  <!-- Outcome badges -->
+  <rect x="1290" y="540" width="220" height="34" rx="17" fill="#34d399"/>
+  <text x="1350" y="562" class="badge">Fix #1 Intake Gate</text>
+  <rect x="1290" y="586" width="220" height="34" rx="17" fill="#34d399"/>
+  <text x="1331" y="608" class="badge">Fix #2/#3 Budget Rules</text>
+
+  <!-- Footer -->
+  <text x="60" y="845" class="mono">Sources: 20260422-compliance-matrix-flow-v1.html + 20260422-handoff-intake-gate-budget-semantics-v1.md</text>
+</svg>
