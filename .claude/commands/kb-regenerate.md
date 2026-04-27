@@ -124,10 +124,10 @@ s3 = session.client('s3')
 BUCKET = 'eagle-documents-695681773636-dev'
 
 CHECKLISTS = [
-    {'id': 'checklist-acquisition-package', 'title': 'Acquisition Package Checklist', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt'},
+    {'id': 'checklist-acquisition-package', 'title': 'Acquisition Package Checklist', 's3_key': 'eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_Common_Requirements.txt'},
     {'id': 'checklist-frc', 'title': 'NIH File Reviewers Checklist (FRC)', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/checklists/File_Reviewers_Checklist_FRC.txt'},
     {'id': 'checklist-nih-acq-files', 'title': 'NIH Acquisition File Checklists (OAG-FY25-01)', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/checklists/OAG_FY25_01_NIH_Acquisition_File_Checklists_MERGED_CORRECTED.txt'},
-    {'id': 'checklist-pmr-common', 'title': 'HHS PMR Common Requirements', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt'},
+    {'id': 'checklist-pmr-common', 'title': 'HHS PMR Common Requirements', 's3_key': 'eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_Common_Requirements.txt'},
     {'id': 'checklist-pmr-sap', 'title': 'HHS PMR SAP Checklist', 's3_key': 'eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_SAP_Checklist.txt'},
     {'id': 'checklist-pmr-fss', 'title': 'HHS PMR FSS Checklist', 's3_key': 'eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_FSS_Checklist.txt'},
     {'id': 'checklist-pmr-bpa', 'title': 'HHS PMR BPA Checklist', 's3_key': 'eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt'},
@@ -138,7 +138,7 @@ CHECKLISTS = [
 TEMPLATES = [
     {'id': 'tmpl-sow', 'title': 'SOW Template', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/statement-of-work-template-eagle-v2.docx'},
     {'id': 'tmpl-igce', 'title': 'IGCE Template', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/01.D_IGCE_for_Commercial_Organizations.xlsx'},
-    {'id': 'tmpl-market-research', 'title': 'Market Research Template', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/HHS_Streamlined_Market_Research_Template_FY26.docx'},
+    {'id': 'tmpl-market-research', 'title': 'Market Research Template', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/Attachment 5-HHS Template-Market Research Report.docx'},
     {'id': 'tmpl-justification', 'title': 'J&A Template (>350K)', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/Justification_and_Approval_Over_350K_Template.docx'},
     {'id': 'tmpl-acquisition-plan', 'title': 'Acquisition Plan Template', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/HHS Streamlined Acquisition Plan Template.docx'},
     {'id': 'tmpl-cor-certification', 'title': 'COR Appointment Memo', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/NIH COR Appointment Memorandum.docx'},
@@ -146,7 +146,7 @@ TEMPLATES = [
     {'id': 'tmpl-son-services', 'title': 'SON Services', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/3.b. SON - Services based on Catalog Pricing.docx'},
     {'id': 'tmpl-buy-american', 'title': 'Buy American Form', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/DF_Buy_American_Non_Availability_Template.docx'},
     {'id': 'tmpl-subk-plan', 'title': 'SubK Plan Template', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/HHS SubK Plan Template - updated March 2022.doc'},
-    {'id': 'tmpl-j-and-a-under-sat', 'title': 'J&A Template (<350K)', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/Justification_and_Approval_Under_350K_Template.docx'},
+    {'id': 'tmpl-j-and-a-under-sat', 'title': 'J&A Template (<350K)', 's3_key': 'eagle-knowledge-base/approved/supervisor-core/essential-templates/6.a. Single Source J&A - up to SAT.docx'},
 ]
 
 results = {'checklists': [], 'templates': []}

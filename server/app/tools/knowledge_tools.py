@@ -169,7 +169,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
             "set-aside",
             "competition",
         ],
-        "s3_key": f"{_TEMPLATE_PREFIX}/HHS_Streamlined_Market_Research_Template_FY26.docx",
+        "s3_key": f"{_TEMPLATE_PREFIX}/Attachment 5-HHS Template-Market Research Report.docx",
         "confidence_score": 0.95,
     },
     {
@@ -331,7 +331,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
             "under SAT",
             "under $350K",
         ],
-        "s3_key": f"{_TEMPLATE_PREFIX}/Justification_and_Approval_Under_350K_Template.docx",
+        "s3_key": f"{_TEMPLATE_PREFIX}/6.a. Single Source J&A - up to SAT.docx",
         "confidence_score": 0.90,
     },
     {
@@ -350,7 +350,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
             "review",
             "compliance",
         ],
-        "s3_key": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "s3_key": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_Common_Requirements.txt",
         "confidence_score": 0.90,
     },
     # --- PMR & FRC Checklists (method-specific) ---
@@ -412,7 +412,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
             "closeout",
             "checklist",
         ],
-        "s3_key": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "s3_key": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_Common_Requirements.txt",
         "confidence_score": 0.95,
     },
     {

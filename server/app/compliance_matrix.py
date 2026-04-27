@@ -898,13 +898,13 @@ def get_requirements(
     # --- PMR Checklist ---
     _PMR_S3_KEYS: dict[str, str | None] = {
         "sap": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_SAP_Checklist.txt",
-        "negotiated": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "negotiated": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_Common_Requirements.txt",
         "fss": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_FSS_Checklist.txt",
         "bpa-est": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
         "bpa-call": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_BPA_Checklist.txt",
         "idiq": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
         "idiq-order": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
-        "sole": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "sole": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_Common_Requirements.txt",
         "micro": None,
     }
     _FRC_S3_KEY = "eagle-knowledge-base/approved/supervisor-core/checklists/File_Reviewers_Checklist_FRC.txt"
