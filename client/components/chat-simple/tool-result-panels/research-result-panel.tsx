@@ -108,14 +108,21 @@ export default function ResearchResultPanel({ text }: { text: string }) {
           </div>
           <div className="space-y-1 max-h-40 overflow-y-auto">
             {fetchedDocs.map((doc, idx) => {
-              const filename = doc.s3_key?.split('/').pop() ?? '';
+              const sourceKey = doc.s3_key ?? '';
               const charCount = doc.content?.length ?? 0;
               return (
-                <div key={idx} className="flex items-center gap-2 py-0.5">
+                <div key={idx} className="flex items-start gap-2 py-1">
                   <span className="text-gray-300 text-[10px]">📄</span>
-                  <span className="text-xs text-gray-800 truncate flex-1">
-                    {doc.title || filename || `Document ${idx + 1}`}
-                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-gray-800 truncate">
+                      {doc.title || sourceKey || `Document ${idx + 1}`}
+                    </div>
+                    {sourceKey && (
+                      <div className="font-mono text-[10px] text-gray-400 break-all">
+                        {sourceKey}
+                      </div>
+                    )}
+                  </div>
                   {charCount > 0 && (
                     <span className="text-[9px] text-gray-400 shrink-0">
                       {charCount >= 1000 ? `${Math.round(charCount / 1000)}K` : charCount} chars
