@@ -121,6 +121,27 @@ dev-smoke: dev-up smoke
 # One-command local smoke with visible browser window
 dev-smoke-ui: dev-up smoke-ui
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-deploy smoke (devbox → deployed ALB)
+# ─────────────────────────────────────────────────────────────────────────────
+# Validate a deployed dev/qa environment end-to-end via the EC2 devbox inside
+# the VPC. POSTs a research-tool query, walks the chat UI with Playwright,
+# captures screenshots at key moments, uploads everything to the eval bucket,
+# and prints PASS/FAIL with the s3:// artifact prefix.
+#
+# This is the canonical post-deploy validation pattern — see
+# CLAUDE.md > Post-Deploy Smoke. Use it after every meaningful deploy.
+#
+# Usage:
+#   just dev-smoke-deployed                                    # default scenario
+#   just dev-smoke-deployed research_source_transparency       # explicit
+#   just qa-smoke-deployed research_source_transparency        # qa env
+dev-smoke-deployed SCENARIO="research_source_transparency":
+    python scripts/_remote_post_deploy_smoke.py --env dev --scenario {{SCENARIO}}
+
+qa-smoke-deployed SCENARIO="research_source_transparency":
+    python scripts/_remote_post_deploy_smoke.py --env qa --scenario {{SCENARIO}} --auth
+
 # Kill stale EAGLE backend/frontend processes on Windows + Unix.
 # Handles uvicorn --reload zombie-child pattern that taskkill-by-PID misses.
 kill-stale:

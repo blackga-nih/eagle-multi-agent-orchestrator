@@ -101,7 +101,64 @@ npx cdk synth --quiet    # Level 4 — Infra compile
 | Backend logic | 1 + 2 |
 | Frontend UI | 1 + 3 |
 | CDK change | 1 + 4 |
-| Production deploy | 1–4 + docker compose |
+| Production deploy | 1–4 + post-deploy smoke (see below) |
+
+---
+
+## Post-Deploy Smoke
+
+After any deploy that touches the SSE/research/chat path, validate the
+*deployed* environment with the devbox-driven smoke harness. Local pytest
+proves the code; the smoke proves the deployed container behaves and the
+frontend renders the wire shape.
+
+**Run it:**
+
+```bash
+just dev-smoke-deployed                                    # default scenario
+just dev-smoke-deployed research_source_transparency       # explicit
+just qa-smoke-deployed research_source_transparency        # qa (with --auth)
+```
+
+**What it does:**
+
+1. SSMs into the EC2 devbox (`eagle-ec2-dev`) — VPC-internal so the
+   internal ALB DNS resolves.
+2. POSTs a scenario query to `<backend ALB>/api/chat`, validates the
+   response wire shape (lane/score/score_pct/rationale/read fields on
+   research entries; `_meta.lane_breakdown`; cap-bump assertion).
+3. Drives the chat UI on `<frontend ALB>` with Playwright, taking 4–5
+   screenshots: `01-empty`, `02-typed`, `03-streaming`, `04-complete`,
+   `05-sources-table`.
+4. Uploads PNGs + structured `result.json` to
+   `s3://eagle-eval-artifacts-{account}-{env}/smoke/{scenario}/{ts}/`.
+5. Exits 0 on PASS, 1 on FAIL.
+
+**Files:**
+
+| File | Purpose |
+|------|---------|
+| `server/tests/post_deploy_smoke.py` | Devbox-side orchestrator (POST + Playwright + S3 upload). Add new scenarios to its `SCENARIOS` registry. |
+| `scripts/_remote_post_deploy_smoke.py` | Laptop-side SSM driver — confirm devbox up, sync repo, stage orchestrator, run via SSM, pull JSON back. |
+| `Justfile` recipes | `dev-smoke-deployed [SCENARIO]`, `qa-smoke-deployed [SCENARIO]`. |
+
+**Adding a new scenario** — append to `SCENARIOS` in `post_deploy_smoke.py`:
+
+```python
+SCENARIOS["my_new_feature"] = {
+    "label": "Short human title",
+    "query": "the chat message that exercises the feature",
+    "expects": {
+        "research_packet_fields": ["lane", "score", ...],   # if it touches research
+        "meta_fields": ["lane_breakdown", ...],
+        "min_total_surfaced": 4,
+    },
+}
+```
+
+The `eagle-eval-artifacts-{account}-{env}` bucket (provisioned by
+`EagleEvalStack`) is the canonical screenshots + smoke artifacts store.
+365-day lifecycle, S3-managed encryption.
 
 ---
 
