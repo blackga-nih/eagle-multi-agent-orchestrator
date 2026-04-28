@@ -5370,6 +5370,29 @@ def _build_kb_service_tools(
         if compliance_data:
             packet["compliance_matrix"] = compliance_data
         _research_elapsed = _time.monotonic() - _research_t0
+
+        # Slim per-entry array for the frontend Sources table.
+        # The full kb_results / fetched_documents arrays carry rich metadata
+        # the LLM uses (summary, content excerpt, raw scores) — too heavy to
+        # ship over SSE on every chat turn. The UI table only needs the
+        # display fields: title + lane chip + score bar + rationale tooltip
+        # + read indicator. ~150 bytes per entry × 16 = ~2.5 KB, trivial.
+        def _slim_for_sse(entry: dict, *, read: bool) -> dict:
+            return {
+                "title": entry.get("title", ""),
+                "s3_key": entry.get("s3_key", ""),
+                "lane": entry.get("lane", "metadata"),
+                "score": entry.get("score", 0),
+                "score_pct": entry.get("score_pct", 0),
+                "rationale": (entry.get("rationale") or "")[:200],
+                "read": read,
+            }
+
+        _sources_for_ui = (
+            [_slim_for_sse(d, read=True) for d in fetched_docs]
+            + [_slim_for_sse(r, read=False) for r in kb_only_results]
+        )
+
         _emit("research", {
             "kb_results_count": len(packet["kb_results"]),
             "fetched_count": len(fetched_docs),
@@ -5377,6 +5400,10 @@ def _build_kb_service_tools(
             "semantic_fetched_count": _semantic_fetched_count,
             "lane_breakdown": _lane_breakdown,
             "total_surfaced": len(fetched_docs) + len(kb_only_results),
+            # New (2026-04-28): per-entry array so the SSE Sources table
+            # renders the full row list — title + lane + score + rationale +
+            # read flag. Was previously LLM-only via the full packet return.
+            "sources": _sources_for_ui,
             "checklists_loaded": list(checklist_content.keys()),
             "detected_method": detected,
             "compliance_matrix_included": compliance_data is not None,

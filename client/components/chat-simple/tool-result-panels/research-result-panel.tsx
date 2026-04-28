@@ -37,7 +37,13 @@ interface ResearchData {
   checklists_loaded?: string[];
   detected_method?: string;
   compliance_matrix_included?: boolean;
-  // Full packet
+  // SSE-emit slim per-entry array — preferred source for the table.
+  // Each entry already carries title, s3_key, lane, score, score_pct, rationale, read.
+  sources?: SourceRow[];
+  lane_breakdown?: Record<string, number>;
+  total_surfaced?: number;
+  // Full packet (LLM payload) — fallback shape, used when the panel is rendered
+  // from a non-SSE source (e.g. a stored tool_result body).
   kb_results?: SourceRow[];
   fetched_documents?: SourceRow[];
   checklists?: Record<string, string>;
@@ -85,11 +91,18 @@ function pct(row: SourceRow): number {
   return 0;
 }
 
-// Combine fetched (read=true) + kb_results (read=false), sort: read first then score desc.
+// Build the row list. Preferred source is `data.sources` (the SSE emit slim
+// array). Fall back to combining fetched_documents + kb_results from the full
+// packet shape so older messages and any non-SSE paths still render.
 function buildSourceList(data: ResearchData): SourceRow[] {
-  const fetched = (data.fetched_documents ?? []).map((d) => ({ ...d, read: d.read ?? true }));
-  const surfaced = (data.kb_results ?? []).map((d) => ({ ...d, read: d.read ?? false }));
-  const combined = [...fetched, ...surfaced];
+  let combined: SourceRow[];
+  if (Array.isArray(data.sources) && data.sources.length > 0) {
+    combined = data.sources.map((d) => ({ ...d }));
+  } else {
+    const fetched = (data.fetched_documents ?? []).map((d) => ({ ...d, read: d.read ?? true }));
+    const surfaced = (data.kb_results ?? []).map((d) => ({ ...d, read: d.read ?? false }));
+    combined = [...fetched, ...surfaced];
+  }
   combined.sort((a, b) => {
     if (a.read !== b.read) return a.read ? -1 : 1;
     return pct(b) - pct(a);
@@ -130,7 +143,8 @@ export default function ResearchResultPanel({ text }: { text: string }) {
   const checklists = data.checklists_loaded ?? (data.checklists ? Object.keys(data.checklists) : []);
   const method = data.detected_method ?? '';
   const hasMatrix = data.compliance_matrix_included ?? !!data.compliance_matrix;
-  const laneBreakdown = data._meta?.lane_breakdown;
+  // Lane breakdown — SSE emit puts it at top level; full-packet path nests it under _meta.
+  const laneBreakdown = data.lane_breakdown ?? data._meta?.lane_breakdown;
 
   // Split for collapsed/expanded view
   const visibleSources = showMore ? sources : sources.slice(0, READ_VISIBLE_LIMIT);
