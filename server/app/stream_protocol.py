@@ -189,10 +189,16 @@ class MultiAgentStreamWriter:
         )
         await queue.put(event.to_sse())
 
-    async def write_complete(self, queue, metadata: Optional[Dict[str, Any]] = None):
+    async def write_complete(
+        self,
+        queue,
+        metadata: Optional[Dict[str, Any]] = None,
+        content: Optional[str] = None,
+    ):
         """Emit a COMPLETE event indicating the agent has finished."""
         event = self._create_event(
             StreamEventType.COMPLETE,
+            content=content,
             metadata=metadata if metadata else None,
         )
         await queue.put(event.to_sse())

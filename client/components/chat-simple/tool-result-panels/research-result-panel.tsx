@@ -236,32 +236,39 @@ export default function ResearchResultPanel({ text }: { text: string }) {
 
 function SourceRowView({ row }: { row: SourceRow }) {
   const meta = laneMeta(row.lane);
-  const filename = row.s3_key?.split('/').pop() ?? '';
-  const display = row.title || filename || row.s3_key || '(untitled)';
+  const sourceKey = row.s3_key ?? '';
+  const display = row.title || sourceKey || '(untitled)';
   const score = pct(row);
   const isRead = !!row.read;
   const tooltip = row.s3_key ? `${row.s3_key}${row.rationale ? `\n\n${row.rationale}` : ''}` : row.rationale || '';
 
   return (
-    <div className="flex items-center gap-2 py-0.5" title={tooltip}>
+    <div className="flex items-start gap-2 py-1" title={tooltip}>
       {/* Read indicator */}
       <span
-        className={`text-[10px] shrink-0 ${isRead ? 'text-emerald-600' : 'text-gray-300'}`}
+        className={`text-[10px] shrink-0 pt-0.5 ${isRead ? 'text-emerald-600' : 'text-gray-300'}`}
         aria-label={isRead ? 'read' : 'surfaced only'}
       >
         {isRead ? '✅' : '☐'}
       </span>
 
       {/* Title */}
-      <span
-        className={`text-xs truncate flex-1 min-w-0 ${isRead ? 'text-gray-900 font-medium' : 'text-gray-600'}`}
-      >
-        {display}
-      </span>
+      <div className="flex-1 min-w-0">
+        <div
+          className={`text-xs truncate ${isRead ? 'text-gray-900 font-medium' : 'text-gray-600'}`}
+        >
+          {display}
+        </div>
+        {sourceKey && (
+          <div className="font-mono text-[10px] text-gray-400 break-all">
+            {sourceKey}
+          </div>
+        )}
+      </div>
 
       {/* Lane chip */}
       <span
-        className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 inline-flex items-center gap-1 ${meta.classes}`}
+        className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 inline-flex items-center gap-1 mt-0.5 ${meta.classes}`}
       >
         <span>{meta.icon}</span>
         <span>{meta.label}</span>

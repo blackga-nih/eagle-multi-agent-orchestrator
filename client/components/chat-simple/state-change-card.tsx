@@ -158,7 +158,7 @@ export default function StateChangeCard({ entry }: StateChangeCardProps) {
                     <>
                       <span className="text-gray-500">File</span>
                       <span className="font-mono text-gray-600 text-[11px] break-all">
-                        {entry.sourceS3Key.includes('/') ? entry.sourceS3Key.split('/').pop() : entry.sourceS3Key}
+                        {entry.sourceS3Key}
                       </span>
                     </>
                   )}
@@ -198,8 +198,8 @@ export default function StateChangeCard({ entry }: StateChangeCardProps) {
                       {entry.fetchedKeys.map((key) => (
                         <li key={key} className="flex items-center gap-2 text-xs">
                           <span className="text-gray-400">📖</span>
-                          <span className="font-mono text-gray-600 text-[11px] truncate">
-                            {key.includes('/') ? key.split('/').pop() : key}
+                          <span className="font-mono text-gray-600 text-[11px] break-all">
+                            {key}
                           </span>
                         </li>
                       ))}

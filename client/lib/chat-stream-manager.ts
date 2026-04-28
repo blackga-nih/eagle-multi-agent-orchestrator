@@ -517,6 +517,20 @@ export class ChatStreamManager {
 
       // --- Complete ---
       if (event.type === 'complete') {
+        if (event.content && event.content !== accumulatedText) {
+          accumulatedText = event.content;
+          const message: Message = {
+            id: streamingMsgId,
+            role: 'assistant',
+            content: accumulatedText,
+            timestamp: new Date(event.timestamp),
+            reasoning: event.reasoning,
+            agent_id: event.agent_id,
+            agent_name: event.agent_name,
+          };
+          dispatch({ type: 'generation/message', sessionId, requestId, message });
+        }
+
         // Clear checkpoint — normal save path takes over
         clearCheckpoint(sessionId);
 

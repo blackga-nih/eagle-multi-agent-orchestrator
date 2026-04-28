@@ -683,8 +683,11 @@ function SourcesTabContent({ stateChangesByMsg }: SourcesTabContentProps) {
                   <div className="flex-1 min-w-0">
                     <p className="text-gray-700 font-medium truncate">{src.sourceTitle || 'Untitled'}</p>
                     {src.sourceS3Key && (
-                      <p className="font-mono text-[10px] text-gray-400 truncate">
-                        {src.sourceS3Key.includes('/') ? src.sourceS3Key.split('/').pop() : src.sourceS3Key}
+                      <p
+                        className="font-mono text-[10px] text-gray-400 break-all"
+                        title={src.sourceS3Key}
+                      >
+                        {src.sourceS3Key}
                       </p>
                     )}
                   </div>

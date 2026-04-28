@@ -417,15 +417,22 @@ async def stream_generator(
                     await writer.write_text(sse_queue, fallback)
                     yield await sse_queue.get()
 
+                final_response_text = complete_text or "".join(full_response_parts)
+                if complete_text:
+                    # complete_text includes backend post-processing such as
+                    # deterministic KB source normalization. The live text
+                    # chunks are pre-finalization, so persist and send the
+                    # finalized form on the complete event.
+                    full_response_parts = [complete_text]
+
                 # Persist assistant response to DynamoDB
                 if session_id and full_response_parts:
                     try:
-                        full_text = "".join(full_response_parts)
                         await asyncio.to_thread(
                             add_message,
                             session_id,
                             "assistant",
-                            full_text,
+                            final_response_text,
                             tenant_id,
                             user_id,
                         )
@@ -438,6 +445,7 @@ async def stream_generator(
                 await writer.write_complete(
                     sse_queue,
                     metadata=complete_metadata if complete_metadata else None,
+                    content=final_response_text,
                 )
                 yield await sse_queue.get()
                 # Emit tool timing telemetry to CloudWatch
