@@ -365,3 +365,94 @@ def test_knowledge_search_no_query_no_ai_ranking(monkeypatch):
     )
 
     assert result["count"] == len(acq_docs)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Source transparency: lane attribution + per-query scores (2026-04-28)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def test_deterministic_match_attaches_score_fields():
+    """_deterministic_match must surface raw + normalized scores per item.
+
+    Pre-transparency: the score was computed, used to sort, then thrown away.
+    Post-transparency: research_tool needs to read the score so the frontend
+    can render a per-query relevance bar.
+    """
+    docs = [
+        _doc("title-match", "GSA Schedule Guide", summary="Unrelated", keywords=[]),
+        _doc("kw-match", "Other Doc", summary="Other text", keywords=["GSA"]),
+    ]
+
+    results = kt._deterministic_match("GSA Schedule", [], docs)
+
+    assert len(results) == 2
+    # Both items must carry the raw + normalized score the ranker computed
+    assert all("_det_score" in r for r in results), (
+        "_deterministic_match must attach _det_score to every returned item"
+    )
+    assert all("_det_score_norm" in r for r in results), (
+        "_deterministic_match must attach _det_score_norm to every returned item"
+    )
+    # Top result normalizes to 1.0; lower results normalize <= 1.0
+    assert results[0]["_det_score_norm"] == 1.0
+    assert all(0.0 <= r["_det_score_norm"] <= 1.0 for r in results)
+    # Original ranker behavior preserved — title match still ranks first
+    assert results[0]["document_id"] == "title-match"
+
+
+def test_exec_knowledge_search_tags_results_with_lane(monkeypatch):
+    """Every result from exec_knowledge_search carries `_lane`.
+
+    Default lane is 'metadata'; callers (research_tool secondary search)
+    can override via _lane_tag='metadata-broad'.
+    """
+    _mock_scan_with_docs(monkeypatch, ACQUISITION_DOCS[:2])
+
+    # Skip AI ranking so we exercise the deterministic path
+    with patch.object(kt, "_ai_rank_documents", return_value=[]):
+        result = kt.exec_knowledge_search(
+            {"query": "GSA Schedule"},
+            tenant_id="test-tenant",
+        )
+
+    assert result["count"] > 0
+    assert all(r["_lane"] == "metadata" for r in result["results"]), (
+        "Default lane tag should be 'metadata' on all results"
+    )
+
+    # Caller-provided override flows through
+    with patch.object(kt, "_ai_rank_documents", return_value=[]):
+        result_broad = kt.exec_knowledge_search(
+            {"query": "GSA Schedule"},
+            tenant_id="test-tenant",
+            _lane_tag="metadata-broad",
+        )
+    assert all(r["_lane"] == "metadata-broad" for r in result_broad["results"])
+
+
+def test_path_search_attaches_path_score(monkeypatch):
+    """exec_path_search results carry `_lane='path'`, `_path_score`, and rationale."""
+    docs = [
+        {
+            "document_id": "sole-source-justification",
+            "title": "Sole Source J&A Template",
+            "summary": "Template for sole source J&A docs",
+            "document_type": "template",
+            "primary_topic": "compliance",
+            "primary_agent": "supervisor-core",
+            "s3_key": "eagle-knowledge-base/approved/templates/sole-source-justification.docx",
+            "confidence_score": 0.95,
+        },
+    ]
+    _mock_scan_with_docs(monkeypatch, docs)
+
+    result = kt.exec_path_search("sole source justification", tenant_id="test-tenant")
+
+    assert result["count"] == 1
+    row = result["results"][0]
+    assert row["_lane"] == "path"
+    assert isinstance(row["_path_score"], float)
+    assert 0.0 <= row["_path_score"] <= 1.0
+    # Rationale must mention which terms hit
+    assert "match" in row["_path_rationale"].lower() or row["_path_rationale"] != ""

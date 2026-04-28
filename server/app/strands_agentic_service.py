@@ -5021,6 +5021,7 @@ def _build_kb_service_tools(
                 secondary_result = exec_knowledge_search(
                     secondary_params, tenant_id, session_id,
                     user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                    _lane_tag="metadata-broad",
                 )
                 _span.set_attribute("eagle.result_count", secondary_result.get("count", 0))
             _kb_depth["search_count"] += 1
@@ -5134,6 +5135,53 @@ def _build_kb_service_tools(
                 return False
             return True
 
+        def _score_packet(r: dict) -> dict:
+            """Derive lane attribution + per-query score + rationale for a result.
+
+            Per-lane scales — operators read these alongside the lane chip, so we
+            do NOT normalize across lanes (semantic 0.7 ≠ path 0.7). The chip
+            tells the user which scale applies.
+
+            - metadata + AI rank → score = 1.0 - (rank_position / cap), rationale = LLM reason
+            - metadata-broad     → same shape; chip distinguishes
+            - metadata + dete.   → score = _det_score_norm; no rationale
+            - path               → score = _path_score; rationale synthesized from matched terms
+            - semantic           → score = _semantic_score (cosine); rationale left blank (chip + score is enough)
+            """
+            lane = r.get("_lane", "metadata") or "metadata"
+            score: float = 0.0
+            rationale: str = ""
+
+            if "_ai_rank_position" in r:
+                # Position 0 → ~1.0; position 14 → ~0.07. Cap at 16 since we
+                # display up to 16 sources; beyond that the score floors to 0.
+                pos = int(r.get("_ai_rank_position") or 0)
+                score = max(0.0, 1.0 - (pos / 16.0))
+                rationale = str(r.get("_ai_rationale") or "")
+            elif "_path_score" in r:
+                score = float(r.get("_path_score") or 0.0)
+                rationale = str(r.get("_path_rationale") or "")
+            elif "_semantic_score" in r:
+                score = float(r.get("_semantic_score") or 0.0)
+                # Intentionally blank — semantic chip + score % tells the story
+                rationale = ""
+            elif "_det_score_norm" in r:
+                score = float(r.get("_det_score_norm") or 0.0)
+                rationale = ""
+            else:
+                # No lane signal — fall back to static metadata confidence so
+                # the row still renders something rather than 0%.
+                score = float(r.get("confidence_score") or 0.0)
+                rationale = ""
+
+            score = max(0.0, min(1.0, score))
+            return {
+                "lane": lane,
+                "score": round(score, 3),
+                "score_pct": int(round(score * 100)),
+                "rationale": rationale,
+            }
+
         def _do_fetch(r: dict) -> bool:
             """Fetch a doc and append to fetched_docs. Returns True on success."""
             s3_key = r.get("s3_key", "")
@@ -5153,10 +5201,16 @@ def _build_kb_service_tools(
                 # content — still enough for the LLM to cite titles + key
                 # passages, not enough to reason over whole documents (which
                 # is what the LLM was doing at 4K).
+                pkt = _score_packet(r)
                 fetched_docs.append({
                     "title": r.get("title", ""),
                     "s3_key": s3_key,
                     "content": content.get("content", "")[:2500],
+                    "lane": pkt["lane"],
+                    "score": pkt["score"],
+                    "score_pct": pkt["score_pct"],
+                    "rationale": pkt["rationale"],
+                    "read": True,
                 })
                 return True
             return False
@@ -5253,11 +5307,17 @@ def _build_kb_service_tools(
         # - Drop any kb_result whose s3_key is already in fetched_documents:
         #   the LLM was seeing each fetched doc twice (once as a search
         #   result, once as full content). Dedup saves ~150 tokens per fetch.
-        # - Cap the result list at 8 unfetched "related" docs. The LLM
-        #   rarely cites beyond the top 5-8 suggestions; 15 was wasteful.
         # - Drop `document_type` and `primary_topic` — the LLM picks
         #   citations by title, not by these ranking hints.
-        _KB_RESULTS_CAP = 8
+        # Source transparency (2026-04-28):
+        # - Bump cap from 8 → 16 (env-tunable via KB_RESULTS_CAP) so operators
+        #   see runner-ups that *almost* made the fetch line. ~1.2 KB extra
+        #   on the wire per research turn — negligible.
+        # - Tag each result with lane/score/score_pct/rationale/read so the
+        #   frontend can render a transparent Sources table without
+        #   re-deriving any of it. `read=False` for kb_results (surfaced but
+        #   not fetched) and `read=True` on fetched_documents.
+        _KB_RESULTS_CAP = int(os.environ.get("KB_RESULTS_CAP", "16"))
         _fetched_key_set = {d.get("s3_key") for d in fetched_docs}
         _seen_stems: set[str] = set()
         kb_only_results: list[dict] = []
@@ -5271,14 +5331,27 @@ def _build_kb_service_tools(
             if stem in _seen_stems:
                 continue
             _seen_stems.add(stem)
+            pkt = _score_packet(r)
             kb_only_results.append({
                 "title": r.get("title", ""),
                 "s3_key": key,
                 "summary": (r.get("summary", "") or "")[:300],
                 "confidence_score": r.get("confidence_score", 0),
+                "lane": pkt["lane"],
+                "score": pkt["score"],
+                "score_pct": pkt["score_pct"],
+                "rationale": pkt["rationale"],
+                "read": False,
             })
             if len(kb_only_results) >= _KB_RESULTS_CAP:
                 break
+
+        # Lane breakdown across the surfaced set (read + unread). Used by
+        # Langfuse triage and the frontend stat strip.
+        _lane_breakdown: dict[str, int] = {}
+        for entry in fetched_docs + kb_only_results:
+            lane = entry.get("lane", "metadata")
+            _lane_breakdown[lane] = _lane_breakdown.get(lane, 0) + 1
 
         detected = _detect_method(acquisition_method, query, contract_value)
         packet: dict[str, Any] = {
@@ -5286,6 +5359,13 @@ def _build_kb_service_tools(
             "fetched_documents": fetched_docs,
             "checklists": checklist_content,
             "detected_method": detected,
+            # _meta is purely informational — frontend reads it; LLM ignores it
+            "_meta": {
+                "lane_breakdown": _lane_breakdown,
+                "total_surfaced": len(fetched_docs) + len(kb_only_results),
+                "fetched_count": len(fetched_docs),
+                "kb_results_cap": _KB_RESULTS_CAP,
+            },
         }
         if compliance_data:
             packet["compliance_matrix"] = compliance_data
@@ -5295,6 +5375,8 @@ def _build_kb_service_tools(
             "fetched_count": len(fetched_docs),
             "semantic_hit_count": len(semantic_only_results),
             "semantic_fetched_count": _semantic_fetched_count,
+            "lane_breakdown": _lane_breakdown,
+            "total_surfaced": len(fetched_docs) + len(kb_only_results),
             "checklists_loaded": list(checklist_content.keys()),
             "detected_method": detected,
             "compliance_matrix_included": compliance_data is not None,
