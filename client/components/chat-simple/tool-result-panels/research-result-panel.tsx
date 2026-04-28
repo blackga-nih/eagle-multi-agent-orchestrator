@@ -201,8 +201,18 @@ export default function ResearchResultPanel({ text }: { text: string }) {
             <div className="text-[9px] font-bold uppercase text-gray-400 tracking-wider">
               Sources ({sources.length})
             </div>
-            <div className="text-[9px] text-gray-400">
-              ✅ read · ☐ surfaced only
+            <div className="text-[9px] text-gray-400 inline-flex items-center gap-2">
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded-full bg-emerald-500 border border-emerald-600 inline-flex items-center justify-center text-white text-[8px] font-bold leading-none">
+                  ✓
+                </span>
+                read
+              </span>
+              <span className="text-gray-300">·</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded-full bg-white border border-gray-300 inline-block" />
+                surfaced only
+              </span>
             </div>
           </div>
           <div className="space-y-1">
@@ -257,19 +267,29 @@ function SourceRowView({ row }: { row: SourceRow }) {
   const tooltip = row.s3_key ? `${row.s3_key}${row.rationale ? `\n\n${row.rationale}` : ''}` : row.rationale || '';
 
   return (
-    <div className="flex items-start gap-2 py-1" title={tooltip}>
-      {/* Read indicator */}
+    <div
+      className={`flex items-start gap-2 py-1 ${isRead ? '' : 'opacity-70'}`}
+      title={tooltip}
+    >
+      {/* Read indicator — solid colored circle (emoji renders unreliably in
+          headless Chromium and was nearly invisible at text-[10px]).
+          Filled emerald when read; outlined slate when surfaced-only. */}
       <span
-        className={`text-[10px] shrink-0 pt-0.5 ${isRead ? 'text-emerald-600' : 'text-gray-300'}`}
+        className={`shrink-0 mt-1 inline-flex items-center justify-center w-4 h-4 rounded-full border text-[9px] font-bold leading-none ${
+          isRead
+            ? 'bg-emerald-500 border-emerald-600 text-white'
+            : 'bg-white border-gray-300 text-gray-300'
+        }`}
         aria-label={isRead ? 'read' : 'surfaced only'}
+        title={isRead ? 'Read by agent' : 'Surfaced but not read'}
       >
-        {isRead ? '✅' : '☐'}
+        {isRead ? '✓' : ''}
       </span>
 
       {/* Title */}
       <div className="flex-1 min-w-0">
         <div
-          className={`text-xs truncate ${isRead ? 'text-gray-900 font-medium' : 'text-gray-600'}`}
+          className={`text-xs truncate ${isRead ? 'text-gray-900 font-medium' : 'text-gray-500'}`}
         >
           {display}
         </div>
