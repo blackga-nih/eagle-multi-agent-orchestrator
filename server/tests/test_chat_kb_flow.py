@@ -108,3 +108,45 @@ def test_streaming_emits_text_when_complete_event_has_only_final_text(monkeypatc
 
     assert any("Final answer from complete event only." in e.get("content", "") for e in text_events)
     assert complete_events
+
+
+def test_streaming_complete_event_carries_finalized_text(monkeypatch):
+    """Regression: canonical sources are appended at complete-time, after text
+    chunks may already have streamed. The complete event must carry that final
+    text so clients can replace the pre-finalized accumulated response.
+    """
+
+    async def _mock_sdk_query_streaming(**kwargs):
+        yield {"type": "text", "text": "Answer body."}
+        yield {
+            "type": "complete",
+            "text": "Answer body.\n\n## Sources\n- `doc.txt` - eagle-knowledge-base/path/\n",
+            "tools_called": ["research"],
+            "usage": {},
+        }
+
+    monkeypatch.setattr("app.streaming_routes.sdk_query_streaming", _mock_sdk_query_streaming)
+
+    async def _collect():
+        events = []
+        async for raw in stream_generator(
+            message="test",
+            tenant_id="dev-tenant",
+            user_id="dev-user",
+            tier="advanced",
+            subscription_service=None,
+            session_id=None,
+            messages=None,
+        ):
+            if raw.startswith("data: "):
+                events.append(json.loads(raw[6:]))
+        return events
+
+    events = asyncio.run(_collect())
+    text_events = [e for e in events if e.get("type") == "text"]
+    complete_events = [e for e in events if e.get("type") == "complete"]
+
+    assert text_events
+    assert text_events[-1].get("content") == "Answer body."
+    assert complete_events
+    assert "## Sources" in complete_events[-1].get("content", "")

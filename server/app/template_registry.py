@@ -234,7 +234,7 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
     ),
     "market_research": TemplateMapping(
         doc_type="market_research",
-        s3_filename="HHS_Streamlined_Market_Research_Template_FY26.docx",
+        s3_filename="Attachment 5-HHS Template-Market Research Report.docx",
         file_type="docx",
         placeholder_map={
             "title": "{{PROJECT_TITLE}}",
@@ -265,9 +265,8 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
             "efforts_to_compete": "{{EFFORTS_TO_COMPETE}}",
         },
         alternates=[
-            "Justification_and_Approval_Under_350K_Template.docx",
-            "Limited_Sources_J_and_A_Template.docx",
             "6.a. Single Source J&A - up to SAT.docx",
+            "Limited_Sources_J_and_A_Template.docx",
         ],
         description="Justification & Approval (J&A) for sole source",
         display_name="Justification & Approval (J&A) — Over $350K",
@@ -627,7 +626,6 @@ ALTERNATE_DISPLAY_NAMES: Dict[str, str] = {
     "Attachment 1 - HHS Market Research Template.docx": "HHS Market Research Template",
     "FY26 Streamlined Market Research Report.docx": "Market Research Report (FY26)",
     # J&A
-    "Justification_and_Approval_Under_350K_Template.docx": "J&A — Under $350K",
     "Limited_Sources_J_and_A_Template.docx": "J&A — Limited Sources",
     "6.a. Single Source J&A - up to SAT.docx": "J&A — Single Source (Under SAT)",
     # Acquisition Plan

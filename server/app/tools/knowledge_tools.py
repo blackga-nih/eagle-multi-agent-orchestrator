@@ -169,7 +169,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
             "set-aside",
             "competition",
         ],
-        "s3_key": f"{_TEMPLATE_PREFIX}/HHS_Streamlined_Market_Research_Template_FY26.docx",
+        "s3_key": f"{_TEMPLATE_PREFIX}/Attachment 5-HHS Template-Market Research Report.docx",
         "confidence_score": 0.95,
     },
     {
@@ -331,7 +331,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
             "under SAT",
             "under $350K",
         ],
-        "s3_key": f"{_TEMPLATE_PREFIX}/Justification_and_Approval_Under_350K_Template.docx",
+        "s3_key": f"{_TEMPLATE_PREFIX}/6.a. Single Source J&A - up to SAT.docx",
         "confidence_score": 0.90,
     },
     {
@@ -350,7 +350,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
             "review",
             "compliance",
         ],
-        "s3_key": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "s3_key": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_Common_Requirements.txt",
         "confidence_score": 0.90,
     },
     # --- PMR & FRC Checklists (method-specific) ---
@@ -412,7 +412,7 @@ BUILTIN_KB_ENTRIES: list[dict[str, Any]] = [
             "closeout",
             "checklist",
         ],
-        "s3_key": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Common_Requirements.txt",
+        "s3_key": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_Common_Requirements.txt",
         "confidence_score": 0.95,
     },
     {
@@ -775,8 +775,8 @@ def _ai_rank_documents(
 
     prompt = (
         "You are a document relevance matcher for a federal acquisition knowledge base.\n"
-        "Given the search query and document catalog, return the indices of the most "
-        f"relevant documents, ranked by relevance. Return up to {limit} results.\n\n"
+        "Given the search query and document catalog, return the most relevant documents "
+        f"with a one-sentence rationale each. Return up to {limit} results, most relevant first.\n\n"
         "MATCHING RULES:\n"
         "1. CONCEPT ASSOCIATIONS — related concepts must match each other:\n"
         "   - 'fiscal year' + 'appropriation' <-> 'bona fide needs'\n"
@@ -800,9 +800,12 @@ def _ai_rank_documents(
         f"Search query: {query}{keywords_ctx}{checklist_boost}\n\n"
         "Document catalog (index|document_id|title|keywords|summary):\n"
         f"{catalog}\n\n"
-        f"Return ONLY a JSON array of index numbers for the top {limit} most relevant "
-        "documents, most relevant first. If no documents are relevant, return [].\n"
-        "Example: [5, 12, 3]"
+        f"Return ONLY a JSON array of objects shaped {{\"i\": <index>, \"r\": \"<reason>\"}}, "
+        f"most relevant first, up to {limit} entries. The reason must be one short sentence "
+        "(<= 18 words) explaining why this doc matched the query — cite the concept, keyword, "
+        "or association that fired. If no documents are relevant, return [].\n"
+        "Example: [{\"i\":5,\"r\":\"Title matches 'sole source J&A' and FAR 6.302-1 keyword.\"}, "
+        "{\"i\":12,\"r\":\"PMR checklist covers required justification artifacts.\"}]"
     )
 
     try:
@@ -810,7 +813,8 @@ def _ai_rank_documents(
         response = bedrock.converse(
             modelId=SEARCH_MODEL_ID,
             messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 256, "temperature": 0},
+            # Bumped 256 -> 1024 to accommodate per-doc rationales (~30 tokens × 16 docs).
+            inferenceConfig={"maxTokens": 1024, "temperature": 0},
         )
 
         result_text = response["output"]["message"]["content"][0]["text"].strip()
@@ -821,21 +825,42 @@ def _ai_rank_documents(
                 result_text = result_text[4:]
             result_text = result_text.strip()
 
-        indices = json.loads(result_text)
-        if not isinstance(indices, list):
+        parsed = json.loads(result_text)
+        if not isinstance(parsed, list):
             logger.warning(
-                "knowledge_search AI: unexpected response type: %s", type(indices)
+                "knowledge_search AI: unexpected response type: %s", type(parsed)
             )
             return []
 
-        ranked = [
-            items[i] for i in indices if isinstance(i, int) and 0 <= i < len(items)
-        ]
+        # Accept both legacy bare-int format ([5, 12, 3]) and new object format
+        # ([{"i":5,"r":"..."}]). Order in the response IS the rank — we attach
+        # _ai_rank_position so callers can compute a normalized score.
+        ranked: list[dict[str, Any]] = []
+        for position, entry in enumerate(parsed):
+            if isinstance(entry, int):
+                idx, rationale = entry, ""
+            elif isinstance(entry, dict):
+                idx_raw = entry.get("i")
+                if not isinstance(idx_raw, int):
+                    continue
+                idx = idx_raw
+                rationale = str(entry.get("r", "") or "")[:200]
+            else:
+                continue
+            if 0 <= idx < len(items):
+                # Shallow-copy so we don't mutate the caller's items in place.
+                item = dict(items[idx])
+                item["_ai_rank_position"] = position
+                if rationale:
+                    item["_ai_rationale"] = rationale
+                ranked.append(item)
+
         logger.info(
-            "knowledge_search AI: query='%s' matched %d/%d docs",
+            "knowledge_search AI: query='%s' matched %d/%d docs (rationales=%d)",
             query,
             len(ranked),
             len(items),
+            sum(1 for r in ranked if r.get("_ai_rationale")),
         )
         return ranked
 
@@ -910,7 +935,20 @@ def _deterministic_match(
 
     # Sort by score descending
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [item for _, item in scored]
+
+    # Attach raw + normalized score so callers (knowledge_search, research_tool)
+    # can surface a per-query relevance number instead of relying on the static
+    # metadata `confidence_score`. Normalize against the top score in this batch
+    # so the best result lands at 1.0; ratio is meaningful within a single
+    # search but not comparable across lanes.
+    max_score = scored[0][0] if scored and scored[0][0] > 0 else 0.0
+    out: list[dict[str, Any]] = []
+    for raw, item in scored:
+        copy = dict(item)
+        copy["_det_score"] = raw
+        copy["_det_score_norm"] = (raw / max_score) if max_score > 0 else 0.0
+        out.append(copy)
+    return out
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -924,6 +962,7 @@ def exec_knowledge_search(
     session_id: str | None = None,
     user_id: str | None = None,
     _allowed_package_ids: set[str] | None = None,
+    _lane_tag: str = "metadata",
 ) -> dict[str, Any]:
     """Search knowledge base metadata in DynamoDB with AI-powered ranking.
 
@@ -934,6 +973,12 @@ def exec_knowledge_search(
     3. If query or keywords provided, use LLM to semantically rank results
        with boost preference for requested topic/agent/authority_level
     4. Fall back to deterministic matching if LLM call fails
+
+    Each result is tagged with `_lane` (default "metadata"; callers may pass
+    "metadata-broad" for the secondary broadened search). When the AI ranker
+    runs, results carry `_ai_rank_position` (0-indexed) and optionally
+    `_ai_rationale` (one-sentence reason). When the deterministic fallback
+    runs, results carry `_det_score` and `_det_score_norm` (0–1).
     """
     table = get_dynamodb().Table(METADATA_TABLE)
 
@@ -1053,25 +1098,31 @@ def exec_knowledge_search(
 
     top_items = items[:limit]
 
-    # Format results
+    # Format results — preserve any per-query scoring/rationale fields the
+    # ranker attached so downstream consumers (research_tool, frontend) can
+    # render lane attribution + match scores.
     results = []
     for item in top_items:
-        results.append(
-            {
-                "document_id": item.get("document_id", ""),
-                "title": item.get("title", ""),
-                "summary": item.get("summary", ""),
-                "document_type": item.get("document_type", ""),
-                "primary_topic": item.get("primary_topic", ""),
-                "primary_agent": item.get("primary_agent", ""),
-                "authority_level": item.get("authority_level", ""),
-                "complexity_level": item.get("complexity_level", ""),
-                "key_requirements": item.get("key_requirements", []),
-                "keywords": item.get("keywords", [])[:10],
-                "s3_key": item.get("s3_key", ""),
-                "confidence_score": float(item.get("confidence_score", 0)),
-            }
-        )
+        out = {
+            "document_id": item.get("document_id", ""),
+            "title": item.get("title", ""),
+            "summary": item.get("summary", ""),
+            "document_type": item.get("document_type", ""),
+            "primary_topic": item.get("primary_topic", ""),
+            "primary_agent": item.get("primary_agent", ""),
+            "authority_level": item.get("authority_level", ""),
+            "complexity_level": item.get("complexity_level", ""),
+            "key_requirements": item.get("key_requirements", []),
+            "keywords": item.get("keywords", [])[:10],
+            "s3_key": item.get("s3_key", ""),
+            "confidence_score": float(item.get("confidence_score", 0)),
+            "_lane": _lane_tag,
+        }
+        # Preserve scoring fields when present (additive — none by default)
+        for k in ("_ai_rank_position", "_ai_rationale", "_det_score", "_det_score_norm"):
+            if k in item:
+                out[k] = item[k]
+        results.append(out)
 
     logger.info("knowledge_search: returning %d results", len(results))
     return {"results": results, "count": len(results)}
@@ -1149,10 +1200,25 @@ def exec_path_search(
             scored.append((score, item))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    top_items = [item for _, item in scored[:limit]]
+    top_pairs = scored[:limit]
+
+    # Synthesize a one-line rationale from the matched terms — path lane has
+    # no LLM rationale, but operators still want to see *why* a doc surfaced.
+    def _path_rationale(item: dict[str, Any], match_score: float) -> str:
+        s3_key = item.get("s3_key") or item.get("document_id", "")
+        title = item.get("title", "")
+        combined = normalize(f"{s3_key} {title}")
+        hit_terms = [t for t in terms if t in combined]
+        if not hit_terms:
+            return ""
+        shown = ", ".join(hit_terms[:4])
+        return (
+            f"Path/title token match: {shown} "
+            f"({len(hit_terms)}/{len(terms)} terms)"
+        )
 
     results = []
-    for item in top_items:
+    for path_score, item in top_pairs:
         results.append({
             "document_id": item.get("document_id", ""),
             "title": item.get("title", ""),
@@ -1162,6 +1228,9 @@ def exec_path_search(
             "primary_agent": item.get("primary_agent", ""),
             "s3_key": item.get("s3_key", ""),
             "confidence_score": float(item.get("confidence_score", 0)),
+            "_lane": "path",
+            "_path_score": float(path_score),
+            "_path_rationale": _path_rationale(item, path_score),
         })
 
     logger.info("exec_path_search: %d results for query=%s agent=%s", len(results), query, agent_folder)
@@ -1300,6 +1369,12 @@ def exec_semantic_search(
                 "primary_agent": metadata.get("primary_agent", ""),
                 "s3_key": s3_key,
                 "confidence_score": confidence,
+                # Canonical lane attribution — `_semantic_score` mirrors the
+                # confidence field but is named so research_tool / frontend
+                # can pluck it without confusing it with the static metadata
+                # `confidence_score` used by other lanes.
+                "_lane": "semantic",
+                "_semantic_score": confidence,
                 "_semantic_distance": distance,
             }
 

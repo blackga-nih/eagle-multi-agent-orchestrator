@@ -310,3 +310,134 @@ def test_service_tools_research_normal_path():
         r.get("s3_key") == "eagle-knowledge-base/test.md"
         for r in result.get("kb_results", [])
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Source transparency: lane attribution + read flag + cap (2026-04-28)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _build_research_with_lane(query: str, *, monkeypatch=None, kb_results=None, kb_extra=None):
+    """Run the service-tools research tool with mocked KB calls.
+
+    `kb_results` is the primary search return; `kb_extra` is an optional
+    list returned by the secondary broadened search so we can exercise
+    runner-up rendering.
+    """
+    from app.strands_agentic_service import _build_kb_service_tools
+
+    primary = {
+        "results": kb_results or [],
+        "count": len(kb_results or []),
+    }
+    secondary = {
+        "results": kb_extra or [],
+        "count": len(kb_extra or []),
+    }
+    fetch_calls: dict[str, dict] = {}
+
+    def fake_search(params, tenant_id, session_id=None, user_id=None,
+                    _allowed_package_ids=None, _lane_tag="metadata"):
+        # Honor the lane tag the caller passes — secondary broadens.
+        out = secondary if _lane_tag == "metadata-broad" else primary
+        return {
+            "results": [
+                {**r, "_lane": _lane_tag} for r in out["results"]
+            ],
+            "count": out["count"],
+        }
+
+    def fake_fetch(params, tenant_id, session_id=None, user_id=None,
+                   _allowed_package_ids=None):
+        key = params.get("s3_key", "")
+        fetch_calls[key] = {"content": f"body-of-{key}", "content_length": 12}
+        return {"content": f"body-of-{key}", "content_length": 12}
+
+    with patch("app.tools.knowledge_tools.exec_knowledge_search", side_effect=fake_search), \
+         patch("app.tools.knowledge_tools.exec_knowledge_fetch", side_effect=fake_fetch), \
+         patch("app.tools.knowledge_tools.exec_path_search", return_value={"results": []}), \
+         patch("app.tools.knowledge_tools.exec_semantic_search", return_value={"results": []}):
+        tools, _ = _build_kb_service_tools(
+            tenant_id="test-tenant",
+            user_id="test-user",
+            session_id="test-session",
+        )
+        research = next(t for t in tools if t.tool_name == "research")
+        return json.loads(research._tool_func(query=query, include_checklist=False))
+
+
+def test_research_packet_tags_lane_score_and_read_flag():
+    """Each fetched_document and kb_result must carry lane/score/score_pct/rationale/read.
+
+    This is the wire contract the frontend Sources table reads. If any field
+    goes missing the table loses transparency — score bars disappear, lane
+    chips revert to default, the read indicator gets stuck.
+    """
+    docs = [
+        {
+            "title": "Sole Source J&A Template",
+            "s3_key": "eagle-knowledge-base/approved/templates/sole-source-ja.md",
+            "summary": "Template for FAR 6.302-1 justifications",
+            "_ai_rank_position": 0,
+            "_ai_rationale": "Title matches 'sole source J&A'.",
+        },
+        {
+            "title": "PMR SAP Checklist",
+            "s3_key": "eagle-knowledge-base/approved/checklists/pmr-sap.md",
+            "summary": "PMR checklist for SAP procurements",
+            "_ai_rank_position": 1,
+            "_ai_rationale": "Adjacent: SAP checklist required for J&A.",
+        },
+    ]
+    packet = _build_research_with_lane("sole source FAR 6.302-1", kb_results=docs)
+
+    assert packet.get("fetched_documents"), "expected at least one fetched doc"
+    fetched = packet["fetched_documents"][0]
+    for field in ("lane", "score", "score_pct", "rationale", "read"):
+        assert field in fetched, f"fetched_documents entry missing '{field}'"
+    assert fetched["read"] is True
+    assert fetched["lane"] == "metadata"
+    assert 0 <= fetched["score_pct"] <= 100
+    # AI rank position 0 → ~100% via _score_packet
+    assert fetched["score_pct"] == 100
+    assert fetched["rationale"]  # non-empty AI rationale flowed through
+
+    # _meta block must surface lane breakdown + total counts for the frontend
+    meta = packet.get("_meta", {})
+    assert "lane_breakdown" in meta
+    assert meta.get("kb_results_cap") == 16
+    assert meta.get("total_surfaced") == len(packet["fetched_documents"]) + len(packet.get("kb_results", []))
+
+
+def test_research_kb_results_cap_is_16_by_default():
+    """KB_RESULTS_CAP defaults to 16 so users see runner-ups, not just the top 8.
+
+    Was 8 (hard-coded). Bumped + made env-tunable so operators see what
+    *almost* made the fetch line.
+    """
+    # Build 25 results — only the AI-rank fetch budget reads a few; the rest
+    # should land in kb_results up to the cap.
+    docs = [
+        {
+            "title": f"Doc {i}",
+            "s3_key": f"eagle-knowledge-base/approved/doc-{i}.md",
+            "summary": f"Summary for doc {i}",
+            "_ai_rank_position": i,
+        }
+        for i in range(25)
+    ]
+    packet = _build_research_with_lane("broad acquisition query", kb_results=docs)
+
+    fetched = packet.get("fetched_documents", [])
+    surfaced = packet.get("kb_results", [])
+    # Sum of fetched + surfaced should hit the 16 cap (cap excludes fetched)
+    assert len(surfaced) <= 16
+    # Bump check — pre-transparency cap was 8; post-transparency surfaces > 8
+    # when the candidate pool is big enough.
+    assert len(surfaced) > 8, (
+        "kb_results should expose runner-ups beyond the legacy 8 cap"
+    )
+    # All surfaced rows must declare read=False
+    assert all(r.get("read") is False for r in surfaced)
+    # And all fetched rows must declare read=True
+    assert all(r.get("read") is True for r in fetched)

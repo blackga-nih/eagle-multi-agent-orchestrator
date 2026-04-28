@@ -538,6 +538,20 @@ export function useAgentStream(options: UseAgentStreamOptions = {}): UseAgentStr
         // text-based parsing to avoid duplicate document cards.
         if (event.type === 'complete') {
           completeMetadata = event.metadata;
+          if (event.content && event.content !== accumulatedText) {
+            accumulatedText = event.content;
+            const message: Message = {
+              id: streamingMsgId,
+              role: 'assistant',
+              content: accumulatedText,
+              timestamp: new Date(event.timestamp),
+              reasoning: event.reasoning,
+              agent_id: event.agent_id,
+              agent_name: event.agent_name,
+            };
+            setLastMessage(message);
+            options.onMessage?.(message);
+          }
           const toolsCalled = event.metadata?.tools_called;
           if (Array.isArray(toolsCalled) && toolsCalled.includes('create_document')) {
             const expectedCount = toolsCalled.filter((t: string) => t === 'create_document').length;
