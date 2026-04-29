@@ -134,6 +134,30 @@ class TestGetRequirements:
         ja = [d for d in result["documents_required"] if "J&A" in d["name"]][0]
         assert ja["variant"] == "full"
 
+    def test_ja_approval_20m_to_90m_lists_competition_advocate(self):
+        """$20M-$90M sole source must name HCA + Competition Advocate + additional reviews
+        — not HCA alone (Q4 review 2026-04-29)."""
+        result = get_requirements(50_000_000, "sole", "ffp")
+        ja_approvals = [a for a in result["approvals_required"] if a.get("type") == "J&A"]
+        assert len(ja_approvals) == 1
+        authority = ja_approvals[0]["authority"]
+        assert "HCA" in authority, f"HCA must be named: {authority}"
+        assert "Competition Advocate" in authority, (
+            f"Competition Advocate MUST be named at $20M-$90M tier — Q4 review failure mode "
+            f"was naming HCA alone. Got: {authority}"
+        )
+        assert "additional" in authority.lower(), (
+            f"Tier should reference additional designated reviews. Got: {authority}"
+        )
+
+    def test_ja_approval_above_90m_uses_spe(self):
+        """Above $90M sole source must use SPE through HHS/OAP."""
+        result = get_requirements(100_000_000, "sole", "ffp")
+        ja_approvals = [a for a in result["approvals_required"] if a.get("type") == "J&A"]
+        assert len(ja_approvals) == 1
+        assert "SPE" in ja_approvals[0]["authority"]
+        assert "HHS/OAP" in ja_approvals[0]["authority"]
+
     def test_micro_purchase_exceeds_mpt_error(self):
         """Micro-purchase above $15K produces an error."""
         result = get_requirements(20_000, "micro", "ffp")
