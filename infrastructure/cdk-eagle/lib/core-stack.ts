@@ -175,6 +175,21 @@ export class EagleCoreStack extends cdk.Stack {
       ],
     }));
 
+    // Titan Embed Text v2 — Semantic search lane embeddings.
+    // knowledge_tools.embed_text() invokes this on every research call to turn
+    // the user's query into a 1024-dim vector for the S3 Vectors lookup.
+    // Without this permission, exec_semantic_search fails with
+    // AccessDeniedException, the lane silently returns 0 hits (try/except
+    // swallows the error), and retrieval degrades to metadata + path lanes
+    // only — visible in CloudWatch as "embed_text failed: AccessDeniedException".
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'KnowledgeBaseEmbedModel',
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0',
+      ],
+    }));
+
     // Nova Web Grounding: web search via nova_grounding systemTool
     // Requires both InvokeModel (for the Nova model) and InvokeTool (for the system tool)
     // See: https://docs.aws.amazon.com/nova/latest/nova2-userguide/web-grounding.html
@@ -220,6 +235,59 @@ export class EagleCoreStack extends cdk.Stack {
         'cognito-idp:ListUsers',
       ],
       resources: [this.userPool.userPoolArn],
+    }));
+
+    // ── Knowledge Base — S3 Vectors store (READ-ONLY) ────────
+    // The semantic search lane (knowledge_tools.py:_get_s3vectors_client) issues
+    // QueryVectors against the per-env vectors bucket. Agents must NEVER write
+    // or delete vectors — re-indexing is an offline operation owned by a
+    // separate ingestion role.
+    //
+    // Bucket name + index name come from config (per-env). The bucket and
+    // index themselves are created out-of-band via AWS CLI — S3 Vectors lacks
+    // CDK L2 constructs as of CDK 2.x — but CDK owns IAM grants on them.
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'KnowledgeBaseVectorsBucketRead',
+      actions: [
+        's3:GetObject',
+        's3:ListBucket',
+        's3:GetBucketLocation',
+      ],
+      resources: [
+        `arn:aws:s3:::${config.vectorsBucketName}`,
+        `arn:aws:s3:::${config.vectorsBucketName}/*`,
+      ],
+    }));
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'KnowledgeBaseVectorsApiRead',
+      actions: [
+        's3vectors:GetIndex',
+        's3vectors:ListIndexes',
+        's3vectors:DescribeIndex',
+        's3vectors:GetVectors',
+        's3vectors:QueryVectors',
+        's3vectors:ListVectors',
+      ],
+      resources: [
+        `arn:aws:s3vectors:${this.region}:${this.account}:bucket/${config.vectorsBucketName}`,
+        `arn:aws:s3vectors:${this.region}:${this.account}:bucket/${config.vectorsBucketName}/index/${config.vectorsIndexName}`,
+      ],
+    }));
+
+    // ── Eval / Smoke artifacts bucket ────────────────────────
+    // post-deploy smoke writes screenshots + result.json under
+    // s3://eagle-eval-artifacts-{account}-{env}/smoke/{scenario}/{ts}/.
+    // Required for the smoke harness to upload PASS/FAIL artifacts.
+    const evalBucketArn = `arn:aws:s3:::${config.evalBucketName}`;
+    this.appRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'EvalArtifactsBucketReadWrite',
+      actions: [
+        's3:GetObject',
+        's3:PutObject',
+        's3:ListBucket',
+        's3:GetBucketLocation',
+      ],
+      resources: [evalBucketArn, `${evalBucketArn}/*`],
     }));
 
     // ── Outputs ──────────────────────────────────────────────
