@@ -551,6 +551,29 @@ _SOURCES_HEADER_RE = re.compile(r"^\s*#{1,6}\s+Sources\s*$", re.IGNORECASE | re.
 _BOLD_SOURCES_RE = re.compile(r"^\s*\*\*Sources?:?\*\*\s*$", re.IGNORECASE | re.MULTILINE)
 
 
+def _record_source_row(kb_depth: dict, row: dict) -> None:
+    """Add or upgrade a per-doc row in kb_depth["sources_rows"], keyed by s3_key.
+
+    A row already in the list is replaced when the new one has read=True and
+    the existing entry is read=False — direct fetches always win over surfaced-
+    only hits. Also bumps kb_depth["lane_breakdown"][lane] so the modal can
+    show the lane chip strip without recomputing from the row list.
+    """
+    rows = kb_depth.setdefault("sources_rows", [])
+    breakdown = kb_depth.setdefault("lane_breakdown", {})
+    s3_key = row.get("s3_key") or ""
+    lane = row.get("lane") or "metadata"
+    new_read = bool(row.get("read"))
+    if s3_key:
+        for i, existing in enumerate(rows):
+            if existing.get("s3_key") == s3_key:
+                if new_read and not existing.get("read"):
+                    rows[i] = {**existing, **row}
+                return
+    rows.append(row)
+    breakdown[lane] = breakdown.get(lane, 0) + 1
+
+
 def _split_s3_key(s3_key: str) -> tuple[str, str]:
     """Split an s3_key into (filename, directory).
 
@@ -2452,6 +2475,11 @@ def _build_subagent_kb_tools(
         "search_result_count": 0,
         "fetched_keys": set(),
         "reminder_count": 0,
+        # Per-doc rows for the sources_summary modal — populated by research_tool
+        # (full lane/score/rationale) and direct knowledge_fetch (manual-fetch
+        # lane). Aggregated end-of-turn into the SSE state_update.
+        "sources_rows": [],
+        "lane_breakdown": {},
     }
 
     def _emit_input(name: str, tool_input: dict) -> None:
@@ -2588,13 +2616,23 @@ def _build_subagent_kb_tools(
             _kb_depth["total_chars_read"] += result.get("content_length", 0)
             _kb_depth["fetched_keys"].add(s3_key)
             _fallback_title = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+            _kb_title = result.get("title", _fallback_title)
             _emit_source(
-                title=result.get("title", _fallback_title),
+                title=_kb_title,
                 s3_key=s3_key,
                 doc_type=result.get("document_type", "document"),
                 source_tool="knowledge_fetch",
                 chars_read=result.get("content_length", 0),
             )
+            _record_source_row(_kb_depth, {
+                "title": _kb_title,
+                "s3_key": s3_key,
+                "lane": "manual-fetch",
+                "score": None,
+                "score_pct": 0,
+                "rationale": "Direct fetch by s3_key",
+                "read": True,
+            })
         return json.dumps(result, indent=2, default=str)
 
     @tool(name="search_far")
@@ -2969,6 +3007,11 @@ def _make_subagent_tool(
             parent_kb_depth["fetched_keys"].update(
                 _sd.get("fetched_keys", set())
             )
+            # Merge per-doc rows so the supervisor's sources_summary covers
+            # docs read inside subagents too. _record_source_row dedups by
+            # s3_key + upgrades read=False → read=True if needed.
+            for _sub_row in _sd.get("sources_rows", []):
+                _record_source_row(parent_kb_depth, _sub_row)
 
         # --- Append structured document manifest to subagent response ---
         _sub_fetched = _sub_kb_depth.get("fetched_keys", set())
@@ -4754,7 +4797,13 @@ def _build_kb_service_tools(
         "search_result_count": 0,
         "fetched_keys": set(),
         "reminder_count": 0,
+        "sources_rows": [],
+        "lane_breakdown": {},
     }
+    # Reused trackers may pre-date sources_rows — backfill so subagent
+    # rows always have somewhere to land.
+    _kb_depth.setdefault("sources_rows", [])
+    _kb_depth.setdefault("lane_breakdown", {})
 
     def _emit_input(name: str, tool_input: dict) -> None:
         """Push tool input so the stream loop can update the card."""
@@ -4913,6 +4962,18 @@ def _build_kb_service_tools(
                         _kb_depth["fetch_count"] += 1
                         _kb_depth["total_chars_read"] += content.get("content_length", 0)
                         _kb_depth["fetched_keys"].add(s3_key)
+                        _record_source_row(_kb_depth, {
+                            "title": _clause.get("title", "") or s3_key.rsplit("/", 1)[-1],
+                            "s3_key": s3_key,
+                            "lane": "far-fetch",
+                            "score": None,
+                            "score_pct": 0,
+                            "rationale": (
+                                f"FAR auto-fetch: {_clause.get('clause_number', '')}".strip(": ")
+                                or "FAR auto-fetch"
+                            ),
+                            "read": True,
+                        })
                         # 8K cap (was 15K) for consistency with research tool.
                         fetched_docs.append({
                             "title": _clause.get("title", ""),
@@ -4998,13 +5059,23 @@ def _build_kb_service_tools(
             _kb_depth["total_chars_read"] += result.get("content_length", 0)
             _kb_depth["fetched_keys"].add(s3_key)
             _fallback_title = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
+            _kb_title = result.get("title", _fallback_title)
             _emit_source(
-                title=result.get("title", _fallback_title),
+                title=_kb_title,
                 s3_key=s3_key,
                 doc_type=result.get("document_type", "document"),
                 source_tool="knowledge_fetch",
                 chars_read=result.get("content_length", 0),
             )
+            _record_source_row(_kb_depth, {
+                "title": _kb_title,
+                "s3_key": s3_key,
+                "lane": "manual-fetch",
+                "score": None,
+                "score_pct": 0,
+                "rationale": "Direct fetch by s3_key",
+                "read": True,
+            })
         _emit("knowledge_fetch", result)
         return json.dumps(result, indent=2, default=str)
 
@@ -5596,6 +5667,12 @@ def _build_kb_service_tools(
             [_slim_for_sse(d, read=True) for d in fetched_docs]
             + [_slim_for_sse(r, read=False) for r in kb_only_results]
         )
+
+        # Mirror per-entry rows into _kb_depth so the end-of-turn
+        # sources_summary state_update carries the same lane/score/read
+        # detail. Helper handles dedup-by-s3_key + read-True-wins upgrade.
+        for _row in _sources_for_ui:
+            _record_source_row(_kb_depth, _row)
 
         _emit("research", {
             "kb_results_count": len(packet["kb_results"]),
@@ -7694,7 +7771,9 @@ async def sdk_query_streaming(
         for state_evt in _build_end_of_turn_state(package_context, tenant_id):
             yield state_evt
 
-    # Emit sources_summary so the frontend can show aggregate research stats
+    # Emit sources_summary so the frontend can show aggregate research stats.
+    # sources_rows + lane_breakdown carry the per-doc breakdown the modal
+    # renders; older clients that ignore them still see the aggregate counts.
     if kb_depth.get("fetch_count", 0) > 0:
         yield {
             "type": "state_update",
@@ -7703,6 +7782,8 @@ async def sdk_query_streaming(
             "fetch_count": kb_depth["fetch_count"],
             "total_chars_read": kb_depth["total_chars_read"],
             "fetched_keys": list(kb_depth.get("fetched_keys", set())),
+            "sources_rows": list(kb_depth.get("sources_rows", [])),
+            "lane_breakdown": dict(kb_depth.get("lane_breakdown", {})),
         }
 
     if error_holder:
