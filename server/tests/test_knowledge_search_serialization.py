@@ -441,3 +441,164 @@ def test_research_kb_results_cap_is_16_by_default():
     assert all(r.get("read") is False for r in surfaced)
     # And all fetched rows must declare read=True
     assert all(r.get("read") is True for r in fetched)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sources Summary modal: per-doc rows + lane breakdown in _kb_depth (2026-04-29)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _build_tools_and_run_research(query: str, kb_results: list[dict]) -> tuple[list, dict]:
+    """Run research_tool with mocked KB calls, return (tools_list, kb_depth).
+
+    Mirrors _build_research_with_lane but returns the _kb_depth dict so we
+    can assert the sources_summary aggregation that flows into the modal.
+    """
+    from app.strands_agentic_service import _build_kb_service_tools
+
+    primary = {"results": kb_results, "count": len(kb_results)}
+
+    def fake_search(params, tenant_id, session_id=None, user_id=None,
+                    _allowed_package_ids=None, _lane_tag="metadata"):
+        return {
+            "results": [{**r, "_lane": _lane_tag} for r in primary["results"]],
+            "count": primary["count"],
+        }
+
+    def fake_fetch(params, tenant_id, session_id=None, user_id=None,
+                   _allowed_package_ids=None):
+        key = params.get("s3_key", "")
+        return {
+            "content": f"body-of-{key}",
+            "content_length": 12,
+            "title": f"Title for {key.rsplit('/', 1)[-1]}",
+            "document_type": "guidance",
+        }
+
+    with patch("app.tools.knowledge_tools.exec_knowledge_search", side_effect=fake_search), \
+         patch("app.tools.knowledge_tools.exec_knowledge_fetch", side_effect=fake_fetch), \
+         patch("app.tools.knowledge_tools.exec_path_search", return_value={"results": []}), \
+         patch("app.tools.knowledge_tools.exec_semantic_search", return_value={"results": []}):
+        tools, kb_depth = _build_kb_service_tools(
+            tenant_id="test-tenant",
+            user_id="test-user",
+            session_id="test-session",
+        )
+        research = next(t for t in tools if t.tool_name == "research")
+        research._tool_func(query=query, include_checklist=False)
+    return tools, kb_depth
+
+
+def test_kb_depth_aggregates_sources_rows_after_research():
+    """research_tool must populate _kb_depth['sources_rows'] + ['lane_breakdown']
+    so the end-of-turn sources_summary SSE event carries the per-doc breakdown.
+
+    The Sources Summary modal renders these rows directly — without them the
+    modal regresses to the flat fetched_keys list.
+    """
+    docs = [
+        {
+            "title": f"Doc {i}",
+            "s3_key": f"eagle-knowledge-base/approved/doc-{i}.md",
+            "summary": f"Summary for doc {i}",
+            "_ai_rank_position": i,
+        }
+        for i in range(5)
+    ]
+    _, kb_depth = _build_tools_and_run_research("test query", docs)
+
+    rows = kb_depth.get("sources_rows", [])
+    assert rows, "research_tool should populate _kb_depth['sources_rows']"
+    # Every row carries the wire contract fields the modal renders
+    for row in rows:
+        for field in ("title", "s3_key", "lane", "score_pct", "read"):
+            assert field in row, f"sources_rows entry missing '{field}'"
+
+    # Lane breakdown is non-empty and matches the rows we recorded
+    breakdown = kb_depth.get("lane_breakdown", {})
+    assert breakdown, "research_tool should populate _kb_depth['lane_breakdown']"
+    assert sum(breakdown.values()) == len(rows)
+
+    # Mix of read/surfaced rows expected when there are more candidates than
+    # the AI fetch budget.
+    read_rows = [r for r in rows if r.get("read")]
+    assert read_rows, "expected at least one read=True row in sources_rows"
+
+
+def test_kb_depth_records_manual_fetch_for_direct_knowledge_fetch():
+    """A direct knowledge_fetch (no prior research_tool) records a row with
+    lane='manual-fetch' so the modal can still show what the agent read.
+    """
+    from app.strands_agentic_service import _build_subagent_kb_tools
+
+    fake_doc = {
+        "content": "body",
+        "content_length": 4,
+        "title": "Fetched Doc",
+        "document_type": "guidance",
+    }
+    with patch("app.tools.knowledge_tools.exec_knowledge_fetch", return_value=fake_doc):
+        # _build_subagent_kb_tools returns (tools, _kb_depth) despite its
+        # `-> list:` annotation — pre-existing typing inconsistency.
+        tools, depth = _build_subagent_kb_tools(
+            tenant_id="test-tenant",
+            session_id="test-session",
+            result_queue=None,
+            loop=None,
+            user_id="test-user",
+        )
+        kb_fetch = next(t for t in tools if t.tool_name == "knowledge_fetch")
+        kb_fetch._tool_func(s3_key="eagle-knowledge-base/approved/foo.md")
+
+    rows = depth.get("sources_rows", [])
+    assert len(rows) == 1, f"expected 1 manual-fetch row, got {len(rows)}"
+    row = rows[0]
+    assert row["lane"] == "manual-fetch"
+    assert row["read"] is True
+    assert row["s3_key"] == "eagle-knowledge-base/approved/foo.md"
+    assert row["title"] == "Fetched Doc"
+    assert depth["lane_breakdown"]["manual-fetch"] == 1
+
+
+def test_record_source_row_dedups_and_upgrades_read():
+    """_record_source_row replaces a surfaced-only row when a read=True row
+    arrives later for the same s3_key — the modal should never show the same
+    doc twice with conflicting read state.
+    """
+    from app.strands_agentic_service import _record_source_row
+
+    depth = {"sources_rows": [], "lane_breakdown": {}}
+    _record_source_row(depth, {
+        "title": "Doc A",
+        "s3_key": "eagle-knowledge-base/a.md",
+        "lane": "metadata",
+        "score_pct": 80,
+        "read": False,
+    })
+    assert len(depth["sources_rows"]) == 1
+    assert depth["sources_rows"][0]["read"] is False
+
+    # Same s3_key, but now read=True — should replace, not append
+    _record_source_row(depth, {
+        "title": "Doc A",
+        "s3_key": "eagle-knowledge-base/a.md",
+        "lane": "manual-fetch",
+        "score_pct": 0,
+        "read": True,
+    })
+    assert len(depth["sources_rows"]) == 1, "duplicate s3_key must dedupe"
+    assert depth["sources_rows"][0]["read"] is True
+    # Lane breakdown should not double-count the same doc
+    assert depth["lane_breakdown"]["metadata"] == 1
+    assert "manual-fetch" not in depth["lane_breakdown"]
+
+    # A different s3_key appends a new row + bumps its lane
+    _record_source_row(depth, {
+        "title": "Doc B",
+        "s3_key": "eagle-knowledge-base/b.md",
+        "lane": "manual-fetch",
+        "score_pct": 0,
+        "read": True,
+    })
+    assert len(depth["sources_rows"]) == 2
+    assert depth["lane_breakdown"]["manual-fetch"] == 1

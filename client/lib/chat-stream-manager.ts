@@ -503,6 +503,13 @@ export class ChatStreamManager {
           fetchCount: event.metadata.fetch_count as number | undefined,
           totalCharsRead: event.metadata.total_chars_read as number | undefined,
           fetchedKeys: event.metadata.fetched_keys as string[] | undefined,
+          // sources_summary per-doc breakdown (added 2026-04-29)
+          sourcesRows: event.metadata.sources_rows as
+            | StateChangeEntry['sourcesRows']
+            | undefined,
+          laneBreakdown: event.metadata.lane_breakdown as
+            | Record<string, number>
+            | undefined,
         };
         dispatch({
           type: 'generation/stateChange',
