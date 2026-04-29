@@ -86,6 +86,12 @@ export class EagleComputeStack extends cdk.Stack {
         COGNITO_CLIENT_ID: props.userPoolClientId,
         DOCUMENT_BUCKET: props.documentBucketName,
         METADATA_TABLE: props.metadataTableName,
+        // S3 Vectors — semantic retrieval lane (knowledge_tools.py:1247-1248).
+        // Sourced from per-env CDK config so dev/qa/prod each query their own
+        // index. Without these env vars the agent falls back to the legacy
+        // `rh-eagle` bucket default in code, which is being decommissioned.
+        S3_VECTORS_BUCKET: config.vectorsBucketName,
+        S3_VECTORS_INDEX: config.vectorsIndexName,
         APP_HOST: '0.0.0.0',
         APP_PORT: '8000',
         LANGFUSE_PUBLIC_KEY: config.langfusePublicKey,

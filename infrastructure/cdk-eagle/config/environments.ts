@@ -71,9 +71,15 @@ export const DEV_CONFIG: EagleConfig = {
   eagleTableName: 'eagle',
   evalBucketName: `eagle-eval-artifacts-${ACCOUNT}-dev`,
 
-  // Vectors bucket + index are shared across envs (single KB), provisioned
-  // out-of-band via S3 Vectors API. Override per-env if isolation is needed.
-  vectorsBucketName: process.env.S3_VECTORS_BUCKET || 'rh-eagle',
+  // Per-env S3 Vectors bucket. Each env points to its own bucket + index;
+  // re-indexing is performed out-of-band by an offline embed job. The legacy
+  // `rh-eagle` bucket (Ryan Hash's original index) is being decommissioned —
+  // do NOT default back to it. Bucket itself is provisioned via:
+  //   aws s3vectors create-vector-bucket --vector-bucket-name <name>
+  //   aws s3vectors create-index --vector-bucket-name <name> \
+  //     --index-name eagle-kb-approved --data-type float32 \
+  //     --dimension 1024 --distance-metric cosine
+  vectorsBucketName: process.env.S3_VECTORS_BUCKET || `eagle-kb-vectors-${ACCOUNT}-dev`,
   vectorsIndexName: process.env.S3_VECTORS_INDEX || 'eagle-kb-approved',
 
   documentBucketName: `eagle-documents-${ACCOUNT}-dev`,
@@ -113,6 +119,7 @@ export const STAGING_CONFIG: EagleConfig = {
   evalBucketName: 'eagle-eval-artifacts-staging',
   documentBucketName: 'eagle-documents-staging',
   documentMetadataTableName: 'eagle-document-metadata-staging',
+  vectorsBucketName: 'eagle-kb-vectors-staging',
   natGateways: 2,
   desiredCount: 2,
   maxCount: 6,
@@ -124,6 +131,7 @@ export const QA_CONFIG: EagleConfig = {
   vpcId: 'vpc-0a3010977e2bca965',
   externalAlbSecurityGroupId: 'sg-02970d6bd45fe8bd4',
   privateSubnetIds: ['subnet-00efa33c26f620963', 'subnet-0c37ceaa073beb491'],
+  vectorsBucketName: `eagle-kb-vectors-${ACCOUNT}-qa`,
   desiredCount: 1,
   maxCount: 2,
 };
@@ -134,6 +142,7 @@ export const PROD_CONFIG: EagleConfig = {
   evalBucketName: 'eagle-eval-artifacts-prod',
   documentBucketName: 'eagle-documents-prod',
   documentMetadataTableName: 'eagle-document-metadata-prod',
+  vectorsBucketName: 'eagle-kb-vectors-prod',
   metadataLambdaMemory: 1024,
   vpcMaxAzs: 3,
   natGateways: 3,
