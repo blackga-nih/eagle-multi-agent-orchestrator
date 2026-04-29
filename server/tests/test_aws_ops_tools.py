@@ -708,3 +708,132 @@ class TestCloudWatchLogs:
             {"operation": "recent"}, TENANT
         )
         assert len(result["events"][0]["message"]) == 500
+
+
+# ===========================================================================
+# KB Inventory
+# ===========================================================================
+
+
+class TestKbInventory:
+    """exec_kb_inventory: read-only KB inventory diagnostic."""
+
+    def _page(self, contents):
+        """Build a paginator-style page from a list of S3 object dicts."""
+        return [{"Contents": contents}]
+
+    def _make_paginator(self, mock_s3, contents):
+        paginator = MagicMock()
+        paginator.paginate.return_value = self._page(contents)
+        mock_s3.get_paginator.return_value = paginator
+        return paginator
+
+    def test_folder_rollup_groups_by_first_path_segment(self, mock_s3):
+        now = datetime(2026, 4, 29, 12, 0, 0)
+        self._make_paginator(
+            mock_s3,
+            [
+                {
+                    "Key": "eagle-knowledge-base/approved/compliance-strategist/foo.txt",
+                    "Size": 100,
+                    "LastModified": now,
+                },
+                {
+                    "Key": "eagle-knowledge-base/approved/compliance-strategist/bar.txt",
+                    "Size": 200,
+                    "LastModified": now,
+                },
+                {
+                    "Key": "eagle-knowledge-base/approved/legal-counselor/baz.txt",
+                    "Size": 50,
+                    "LastModified": now,
+                },
+            ],
+        )
+        result = aot.exec_kb_inventory({}, TENANT)
+        _assert_keys(result, "total_files", "folders", "freshness")
+        assert result["total_files"] == 3
+        assert result["total_bytes"] == 350
+        folder_names = {f["folder"] for f in result["folders"]}
+        assert folder_names == {"compliance-strategist", "legal-counselor"}
+        # Sorted by file_count desc — compliance-strategist (2) before legal-counselor (1)
+        assert result["folders"][0]["folder"] == "compliance-strategist"
+        assert result["folders"][0]["file_count"] == 2
+        assert result["folders"][0]["total_bytes"] == 300
+
+    def test_freshness_stale_warning_fires_above_60_days(self, mock_s3):
+        old = datetime(2025, 1, 1)  # >60 days before any plausible test run
+        self._make_paginator(
+            mock_s3,
+            [
+                {
+                    "Key": "eagle-knowledge-base/approved/compliance-strategist/old.txt",
+                    "Size": 100,
+                    "LastModified": old,
+                },
+            ],
+        )
+        result = aot.exec_kb_inventory({}, TENANT)
+        assert result["freshness"]["oldest_object_days"] is not None
+        assert result["freshness"]["oldest_object_days"] > 60
+        assert result["freshness"]["stale_warning"], (
+            "stale_warning should fire when oldest object > 60 days"
+        )
+
+    def test_detailed_returns_per_file_list(self, mock_s3):
+        self._make_paginator(
+            mock_s3,
+            [
+                {
+                    "Key": f"eagle-knowledge-base/approved/foo/file{i}.txt",
+                    "Size": 10,
+                    "LastModified": datetime(2026, 4, 29),
+                }
+                for i in range(3)
+            ],
+        )
+        result = aot.exec_kb_inventory({"detailed": True}, TENANT)
+        assert "files" in result
+        assert len(result["files"]) == 3
+        assert all("size_bytes" in f and "last_modified" in f for f in result["files"])
+
+    def test_detailed_caps_at_500(self, mock_s3):
+        many = [
+            {
+                "Key": f"eagle-knowledge-base/approved/x/f{i}.txt",
+                "Size": 1,
+                "LastModified": datetime(2026, 4, 29),
+            }
+            for i in range(750)
+        ]
+        self._make_paginator(mock_s3, many)
+        result = aot.exec_kb_inventory({"detailed": True}, TENANT)
+        assert len(result["files"]) == 500
+        assert result["files_truncated_at"] == 500
+        assert result["total_files"] == 750  # rollup still counts all
+
+    def test_no_such_bucket_returns_helpful_suggestion(self, mock_s3):
+        """Catches the 'agent passed prefix as bucket name' failure mode."""
+        paginator = MagicMock()
+        paginator.paginate.side_effect = _client_error("NoSuchBucket", "no such bucket")
+        mock_s3.get_paginator.return_value = paginator
+        result = aot.exec_kb_inventory({"bucket": "eagle-knowledge-base"}, TENANT)
+        assert "error" in result
+        # Suggestion explains the prefix-vs-bucket distinction.
+        assert "INSIDE" in result["suggestion"]
+        assert "prefix" in result["suggestion"].lower()
+
+    def test_access_denied_returns_iam_hint(self, mock_s3):
+        paginator = MagicMock()
+        paginator.paginate.side_effect = _client_error("AccessDenied", "denied")
+        mock_s3.get_paginator.return_value = paginator
+        result = aot.exec_kb_inventory({}, TENANT)
+        assert "permission denied" in result["error"].lower()
+        assert "core-stack.ts" in result["suggestion"]
+
+    def test_default_prefix_is_kb_approved(self, mock_s3):
+        paginator = self._make_paginator(mock_s3, [])
+        aot.exec_kb_inventory({}, TENANT)
+        # Verify we called paginate with the default prefix
+        kwargs = paginator.paginate.call_args.kwargs
+        assert kwargs["Prefix"] == "eagle-knowledge-base/approved/"
