@@ -4659,8 +4659,15 @@ _AGENT_PROMPT_META: dict[str, dict] = {
         "icon": "⚖️",
         "keywords": [
             "gao", "protest", "case law", "precedent", "legal", "ada",
-            "bona fide", "appropriation", "j&a", "jofoc", "ratification",
+            "bona fide", "appropriation", "j&a", "jofoc", "jefo", "ratification",
             "unauthorized commitment", "debarment",
+            # SBIR / R&D — protest timeliness rule is GAO 10-day, NOT Part-15 debriefing-related
+            "sbir", "sttr", "phase i", "phase ii", "phase iii",
+            # IDIQ task-order JEFO is the Part-16 flavor of J&A
+            "idiq", "idiq order", "task order", "fair opportunity",
+            "16.505", "16.507", "limited source",
+            # Debriefing patterns — must co-route with compliance for method classification
+            "debriefing", "debrief", "preaward", "post-award debrief",
         ],
     },
     f"{_AGENTS_FOLDER_PREFIX}03-tech.txt": {
@@ -4681,6 +4688,10 @@ _AGENT_PROMPT_META: dict[str, dict] = {
             "market", "vendor", "gsa", "schedule", "vehicle", "capability",
             "rfi", "industry", "cio-sp", "sewp", "oasis", "small business",
             "8(a)", "hubzone", "sdvosb", "wosb",
+            # Micro-purchase + lab-equipment shopping — UC2.1 root cause
+            "micro-purchase", "micro purchase", "purchase request", "purchase order",
+            "microscope", "instrument", "lab equipment", "lab supplies",
+            "bpa", "bpa call", "bpa order", "fss", "schedule order",
         ],
     },
     f"{_AGENTS_FOLDER_PREFIX}05-public.txt": {
@@ -4718,6 +4729,17 @@ _AGENT_PROMPT_META: dict[str, dict] = {
         "keywords": [
             "compliance", "far", "dfars", "nih policy", "checklist", "pmr",
             "frc", "audit", "required document",
+            # JEFO + IDIQ task-order Part 16 vocabulary — Q4 root cause
+            "jefo", "fair opportunity", "fair opportunity exception",
+            "idiq", "idiq order", "task order", "16.505", "16.507",
+            "limited source", "limited source justification",
+            # Sole-source / set-aside / J&A — was hallucinating "set-aside requires J&A"
+            "sole source", "set-aside", "set aside", "justification", "approval authority",
+            # SBIR — Q5 misroute fix; SBIR is FAR 6.102(d), NOT Part 15
+            "sbir", "sttr", "phase i", "phase ii", "phase iii",
+            "broad agency announcement", "baa",
+            # Micro-purchase
+            "micro-purchase", "micro purchase", "mpt", "far 13.2", "13.2",
         ],
     },
     f"{_AGENTS_FOLDER_PREFIX}09-FINANCIAL.txt": {
@@ -4733,13 +4755,79 @@ _AGENT_PROMPT_META: dict[str, dict] = {
 }
 
 
+# Forced co-routing rules — PR-Q5 fix.
+# When the query contains the LEFT trigger pattern, the agents on the RIGHT
+# MUST load regardless of keyword scoring. This is the safeguard against
+# vocabulary-driven misrouting (e.g. SBIR debriefing/protest questions
+# anchoring on Part 15 instead of FAR 6.102(d)).
+_FORCED_AGENT_ROUTES: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
+    # SBIR / R&D — protest timeliness is GAO 10-day, not Part 15
+    (
+        ("sbir", "sttr", "phase i", "phase ii", "phase iii"),
+        (
+            f"{_AGENTS_FOLDER_PREFIX}08-COMPLIANCE.txt",
+            f"{_AGENTS_FOLDER_PREFIX}02-legal.txt",
+        ),
+    ),
+    # JEFO / IDIQ task order — Part 16 flavor of J&A, NOT Part 6 J&A
+    (
+        ("jefo", "fair opportunity", "16.505", "16.507", "idiq order", "idiq task"),
+        (
+            f"{_AGENTS_FOLDER_PREFIX}08-COMPLIANCE.txt",
+            f"{_AGENTS_FOLDER_PREFIX}02-legal.txt",
+        ),
+    ),
+    # JOFOC / J&A / sole source — compliance-strategist owns the rule, legal owns case law
+    (
+        ("jofoc", "j&a", "sole source", "set-aside", "set aside"),
+        (
+            f"{_AGENTS_FOLDER_PREFIX}08-COMPLIANCE.txt",
+            f"{_AGENTS_FOLDER_PREFIX}02-legal.txt",
+        ),
+    ),
+    # Micro-purchase — market-intelligence finds vendor, compliance owns FAR 13.2
+    (
+        ("micro-purchase", "micro purchase", "mpt", "purchase request", "purchase order"),
+        (
+            f"{_AGENTS_FOLDER_PREFIX}04-market.txt",
+            f"{_AGENTS_FOLDER_PREFIX}08-COMPLIANCE.txt",
+        ),
+    ),
+    # BAA — FAR 35.016, not Part 15
+    (
+        ("baa", "broad agency announcement"),
+        (
+            f"{_AGENTS_FOLDER_PREFIX}08-COMPLIANCE.txt",
+            f"{_AGENTS_FOLDER_PREFIX}02-legal.txt",
+        ),
+    ),
+]
+
+
 def _select_agent_prompts(query: str, max_n: int = 2) -> list[str]:
     """Pick up to max_n agent-prompt S3 keys whose keywords best match the query.
 
     Always returns at least 1 key — falls back to the supervisor prompt when
     nothing matches, so every research call produces a visible agent_route card.
+
+    Forced-route rules (_FORCED_AGENT_ROUTES) override keyword scoring when the
+    query contains certain trigger patterns. This prevents Part-15-shaped
+    vocabulary (debriefing/protest/etc.) from anchoring SBIR or IDIQ questions
+    on the wrong specialist. See PR-Q5 in
+    .claude/specs/20260429-102357-plan-q4-uc21-coworker-feedback-triage-v1.md.
     """
     q = (query or "").lower()
+
+    # Apply forced co-routes FIRST — these are method-classification overrides
+    # that defeat semantically-shaped vocabulary biases.
+    forced: list[str] = []
+    for triggers, agents in _FORCED_AGENT_ROUTES:
+        if any(t in q for t in triggers):
+            for a in agents:
+                if a not in forced:
+                    forced.append(a)
+
+    # Standard keyword scoring (used when no forced match, or to fill remaining slots)
     scored: list[tuple[int, str]] = []
     for key, meta in _AGENT_PROMPT_META.items():
         kw = meta.get("keywords") or []
@@ -4749,7 +4837,14 @@ def _select_agent_prompts(query: str, max_n: int = 2) -> list[str]:
         if score > 0:
             scored.append((score, key))
     scored.sort(reverse=True, key=lambda kv: kv[0])
-    picks = [k for _, k in scored[:max_n]]
+
+    # Forced routes take precedence; fill remaining max_n slots from keyword scoring.
+    picks = list(forced[:max_n])
+    for _, k in scored:
+        if len(picks) >= max_n:
+            break
+        if k not in picks:
+            picks.append(k)
     if not picks:
         picks = [f"{_AGENTS_FOLDER_PREFIX}00-supervisor.txt"]
     return picks
@@ -5615,6 +5710,7 @@ def _build_kb_service_tools(
         # so the supervisor reads the specialist framework on every turn.
         agent_keys = _select_agent_prompts(query, max_n=2)
         agent_guidance: list[dict] = []
+        agent_fetch_failures: list[dict] = []
         for _akey in agent_keys:
             _tu_id = _emit_agent_route_start(_akey)
             try:
@@ -5637,12 +5733,37 @@ def _build_kb_service_tools(
                     })
                     _emit_agent_route_done(_tu_id, _akey, _chars)
                 else:
+                    # Specialist prompt fetch returned no content — fail loud,
+                    # not silent. Without this, the supervisor answers without
+                    # specialist guidance and we discover it only via Langfuse
+                    # post-mortems (Q4 / Q5 root-cause pattern).
+                    _err_detail = _ag_result.get("error", "no content returned")
+                    logger.error(
+                        "agent_guidance fetch returned empty for %s: %s "
+                        "(supervisor will answer WITHOUT specialist framework)",
+                        _akey, _err_detail,
+                    )
+                    agent_fetch_failures.append({
+                        "s3_key": _akey,
+                        "reason": _err_detail,
+                    })
                     _emit_agent_route_done(_tu_id, _akey, 0)
             except Exception as _ag_ex:
-                logger.warning("agent_route fetch failed for %s: %s", _akey, _ag_ex)
+                logger.error(
+                    "agent_guidance fetch FAILED for %s: %s "
+                    "(supervisor will answer WITHOUT specialist framework)",
+                    _akey, _ag_ex,
+                )
+                agent_fetch_failures.append({
+                    "s3_key": _akey,
+                    "reason": str(_ag_ex),
+                })
                 _emit_agent_route_done(_tu_id, _akey, 0)
         if agent_guidance:
             packet["agent_guidance"] = agent_guidance
+        # Always include the failures key (even if empty) so QA dashboards
+        # can detect routing-without-guidance regressions deterministically.
+        packet["agent_guidance_failures"] = agent_fetch_failures
 
         _research_elapsed = _time.monotonic() - _research_t0
 
