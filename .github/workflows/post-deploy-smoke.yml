@@ -71,16 +71,26 @@ jobs:
           SCENARIO: ${{ github.event.inputs.scenario || 'all' }}
           TARGET_ENV: ${{ github.event.inputs.env || 'dev' }}
         run: |
-          set -euo pipefail
-          # The triage suite runs all 5 scenarios; otherwise run the single one.
+          set -uo pipefail   # NOT -e: track per-scenario exit, don't short-circuit
+          fails=0
+          run_one() {
+            local s="$1"
+            echo "::group::scenario: $s"
+            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario "$s"
+            local rc=$?
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error title=Scenario failed::$s exited $rc"
+              fails=$((fails + 1))
+            fi
+          }
           if [ "$SCENARIO" = "all" ]; then
-            python scripts/_remote_post_deploy_smoke.py \
-              --env "$TARGET_ENV" \
-              --scenario research_source_transparency
-            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario jefo_q4
-            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario sbir_q5
-            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario uc21_microscope
-            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario kb_inventory_diagnostic
+            for s in research_source_transparency jefo_q4 sbir_q5 uc21_microscope kb_inventory_diagnostic; do
+              run_one "$s"
+            done
           else
-            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario "$SCENARIO"
+            run_one "$SCENARIO"
           fi
+          echo ""
+          echo "=== smoke summary: $fails scenario(s) failed ==="
+          [ "$fails" -eq 0 ]
