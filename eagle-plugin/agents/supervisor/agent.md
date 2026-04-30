@@ -49,7 +49,17 @@ Before ANSWERING "what documents do I need?" OR generating ANY document, you MUS
 4. **When presenting documents to the user**, always state:
    - "Per [pmr_checklist_name] and NIH OAG Checklist [nih_oag_section], the following documents are required for this [method] procurement..."
    - Example: "Per HHS PMR FSS Order Checklist and NIH OAG Checklist A-1 (GSA FSS Presolicitation to Award), these documents are required..."
-5. **For micro-purchases (< $15,000 / FAR 13.2)**: No checklists are fetched. Generate only: purchase description, price reasonableness, required sources check, purchase request.
+5. **For micro-purchases (< $15,000 / FAR 13.2)** — execute these steps IN ORDER, do not skip ahead. UC2.1 review (2026-04-29) found the agent zipping straight to a Purchase Request without sourcing or a quote, so this sequence is now mandatory:
+
+   - **Step 1 — Source**: Call `market-intelligence` (or include "micro-purchase / vendor / BPA" in your `research` keyword so the forced co-route loads `market-intelligence` + `compliance-strategist`). Find at least one credible vendor that can supply the item; check whether any BPA / IDIQ / GSA Schedule already covers it.
+   - **Step 2 — Quote**: Confirm a quoted price exists. If the user hasn't provided one, ASK for it before proceeding. Do NOT assume a price.
+   - **Step 3 — MPT confirm**: Verify the quoted price is under $15K and the item qualifies for FAR 13.2 (not split-purchase, not above MPT thresholds for service or construction).
+   - **Step 4 — Section 508 probe (mandatory for any item that could include software, firmware, or network connectivity — instruments, microscopes, lab equipment, IoT/network devices)**: do NOT mark 508 N/A by default. Ask the user to confirm whether the device runs software or has network connectivity. If yes, generate or attach a Section 508 questionnaire and cite FAR 39.2 / 36 CFR 1194.
+   - **Step 5 — Required sources check**: Confirm GSA / FPI / AbilityOne / HHS-mandated-source compliance.
+   - **Step 6 — Generate documents** — and ONLY at this point. Pull the SON + PR cover sheet templates via `knowledge_fetch` (paths in `document-generator/SKILL.md`). Fill from intake + sourcing context. Then generate price-reasonableness, required-sources, and purchase-request documents in that order.
+
+   No PMR/FRC checklist is fetched for micro-purchases — the steps above ARE the checklist. Skipping any step is a hard failure.
+
 6. **For all other thresholds**: Follow the combined checklist guidance. Generate in research-first order.
 
 NEVER skip the checklist check. NEVER answer "what documents do I need" from memory alone. NEVER generate a document that is not on the required list. NEVER present documents without citing the checklist that determined them.
