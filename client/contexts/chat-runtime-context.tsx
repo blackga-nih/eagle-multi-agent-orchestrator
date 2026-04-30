@@ -6,6 +6,7 @@ import {
   TrackedToolCall,
   ToolCallsByMessageId,
 } from '@/components/chat-simple/simple-chat-interface';
+import { SourceRow } from '@/components/chat-simple/sources-breakdown';
 
 // ---------------------------------------------------------------------------
 // State change entries (package state updates rendered inline in chat)
@@ -34,6 +35,10 @@ export interface StateChangeEntry {
   fetchCount?: number;
   totalCharsRead?: number;
   fetchedKeys?: string[];
+  // sources_summary breakdown fields (per-doc rows + lane counts).
+  // Populated from the backend SSE state_update; older sessions may omit.
+  sourcesRows?: SourceRow[];
+  laneBreakdown?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +242,9 @@ function stateChangeIdentity(entry: StateChangeEntry): string {
   if (entry.stateType === 'sources_summary') {
     return `sources_summary:${entry.textSnapshotLength}:${entry.fetchCount ?? 0}:${
       entry.searchCount ?? 0
-    }:${entry.totalCharsRead ?? 0}:${(entry.fetchedKeys ?? []).join('|')}`;
+    }:${entry.totalCharsRead ?? 0}:${(entry.fetchedKeys ?? []).join('|')}:${
+      entry.sourcesRows?.length ?? 0
+    }`;
   }
   if (entry.stateType === 'sources_read') {
     return `sources_read:${entry.textSnapshotLength}:${entry.sourceS3Key ?? ''}:${

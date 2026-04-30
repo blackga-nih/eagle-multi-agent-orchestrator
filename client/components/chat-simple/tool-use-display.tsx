@@ -22,6 +22,11 @@ interface ToolUseDisplayProps {
 // ── Tool metadata: icon + human-friendly label ──────────────────────
 
 export const TOOL_META: Record<string, { icon: string; label: string }> = {
+  // Agent routing — synthetic card emitted whenever research pulls a
+  // specialist prompt from approved/agents/. The actual agent label is
+  // carried in input.label; the fallback here is used only when the
+  // server didn't include one.
+  agent_route: { icon: '🧭', label: 'Routing through Specialist' },
   // Specialist subagents
   oa_intake: { icon: '📋', label: 'Intake Assessment' },
   legal_counsel: { icon: '⚖️', label: 'Legal Analysis' },
@@ -71,7 +76,18 @@ export const TOOL_META: Record<string, { icon: string; label: string }> = {
   editor: { icon: '✏️', label: 'Editing' },
 };
 
-function getToolMeta(toolName: string) {
+function getToolMeta(toolName: string, input?: Record<string, unknown>) {
+  // agent_route carries the specific agent label/icon in its input payload
+  // so a single tool name renders as "⚖️ Legal Counsel", "📊 Market
+  // Intelligence", etc. Falls back to the generic entry when missing.
+  if (toolName === 'agent_route' && input) {
+    const label = typeof input.label === 'string' && input.label ? input.label : null;
+    const icon = typeof input.icon === 'string' && input.icon ? input.icon : null;
+    if (label || icon) {
+      const base = TOOL_META.agent_route ?? { icon: '🧭', label: 'Routing through Specialist' };
+      return { icon: icon ?? base.icon, label: label ?? base.label };
+    }
+  }
   return TOOL_META[toolName] ?? { icon: '⚙️', label: toolName.replace(/_/g, ' ') };
 }
 
@@ -81,6 +97,11 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
   if (!input || Object.keys(input).length === 0) return '';
 
   switch (toolName) {
+    case 'agent_route': {
+      const key = String(input.s3_key ?? '');
+      const file = key ? key.split('/').pop() : '';
+      return file || String(input.agent_key ?? '');
+    }
     case 'think': {
       const thought = String(input.thought ?? '');
       return thought.length > 60 ? thought.slice(0, 60) + '…' : thought;
@@ -527,7 +548,7 @@ export default function ToolUseDisplay({
   streamingInput,
 }: ToolUseDisplayProps) {
   const [modalOpen, setModalOpen] = useState(false);
-  const meta = getToolMeta(toolName);
+  const meta = getToolMeta(toolName, input);
   const summary = summarizeInput(toolName, input);
 
   const hasResult = result !== undefined && result !== null;

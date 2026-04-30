@@ -3,6 +3,10 @@
 import { useState } from 'react';
 import { StateChangeEntry } from '@/contexts/chat-runtime-context';
 import Modal from '@/components/ui/modal';
+import {
+  LaneBreakdownStrip,
+  SourcesTable,
+} from './sources-breakdown';
 
 // ── Human-friendly labels ────────────────────────────────────────────
 
@@ -126,6 +130,7 @@ export default function StateChangeCard({ entry }: StateChangeCardProps) {
           isOpen={showDetail}
           onClose={() => setShowDetail(false)}
           title={isSourceEvent ? 'Source Document' : isSourceSummary ? 'Sources Summary' : 'Package State Update'}
+          size={isSourceSummary ? 'lg' : 'md'}
         >
           <div data-testid="state-change-detail" className="space-y-3 text-sm">
             {/* Header row */}
@@ -189,22 +194,38 @@ export default function StateChangeCard({ entry }: StateChangeCardProps) {
                   <span className="text-gray-500">Total Characters</span>
                   <span className="text-gray-700">{(entry.totalCharsRead ?? 0).toLocaleString()}</span>
                 </div>
-                {entry.fetchedKeys && entry.fetchedKeys.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1.5">
-                      Documents Fetched
-                    </p>
-                    <ul className="space-y-1">
-                      {entry.fetchedKeys.map((key) => (
-                        <li key={key} className="flex items-center gap-2 text-xs">
-                          <span className="text-gray-400">📖</span>
-                          <span className="font-mono text-gray-600 text-[11px] break-all">
-                            {key}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+
+                {/* Lane breakdown (per-lane source counts) */}
+                {entry.laneBreakdown && Object.keys(entry.laneBreakdown).length > 0 && (
+                  <div className="border border-gray-100 rounded">
+                    <LaneBreakdownStrip
+                      breakdown={entry.laneBreakdown}
+                      className="px-3 py-1.5 flex items-center gap-3 text-[10px] text-gray-500 flex-wrap"
+                    />
                   </div>
+                )}
+
+                {/* Per-doc breakdown table — preferred when sourcesRows is present */}
+                {entry.sourcesRows && entry.sourcesRows.length > 0 ? (
+                  <SourcesTable sources={entry.sourcesRows} />
+                ) : (
+                  entry.fetchedKeys && entry.fetchedKeys.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1.5">
+                        Documents Fetched
+                      </p>
+                      <ul className="space-y-1">
+                        {entry.fetchedKeys.map((key) => (
+                          <li key={key} className="flex items-center gap-2 text-xs">
+                            <span className="text-gray-400">📖</span>
+                            <span className="font-mono text-gray-600 text-[11px] break-all">
+                              {key}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )
                 )}
               </div>
             )}

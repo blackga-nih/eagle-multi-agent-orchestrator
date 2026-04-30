@@ -28,6 +28,11 @@ export interface EagleConfig {
   // Eval
   evalBucketName: string;
 
+  // Knowledge Base — S3 Vectors store (semantic search lane).
+  // Created out-of-band via AWS CLI; CDK only owns IAM grants.
+  vectorsBucketName: string;
+  vectorsIndexName: string;
+
   // Storage stack
   documentBucketName: string;
   documentMetadataTableName: string;
@@ -65,6 +70,11 @@ export const DEV_CONFIG: EagleConfig = {
 
   eagleTableName: 'eagle',
   evalBucketName: `eagle-eval-artifacts-${ACCOUNT}-dev`,
+
+  // Vectors bucket + index are shared across envs (single KB), provisioned
+  // out-of-band via S3 Vectors API. Override per-env if isolation is needed.
+  vectorsBucketName: process.env.S3_VECTORS_BUCKET || 'rh-eagle',
+  vectorsIndexName: process.env.S3_VECTORS_INDEX || 'eagle-kb-approved',
 
   documentBucketName: `eagle-documents-${ACCOUNT}-dev`,
   documentMetadataTableName: 'eagle-document-metadata-dev',
