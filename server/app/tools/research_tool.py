@@ -65,6 +65,56 @@ def _detect_method(acquisition_method: str, query: str, contract_value: float) -
     return "sap"
 
 
+_MICRO_PURCHASE_DROP_PREFIXES: tuple[str, ...] = (
+    # Protest guidance is irrelevant for FAR 13.2 micro-purchases — there's no
+    # competitive selection to protest. UC2.1 review (2026-04-29) flagged that
+    # EAGLE was pulling these into a microscope purchase request.
+    "eagle-knowledge-base/approved/legal-counselor/protest-guidance/",
+    # J&A justifications are FAR Part 6 / FAR 8.4 territory; no J&A is required
+    # for micro-purchases per FAR 13.106-2(a) (single quote acceptable).
+    "eagle-knowledge-base/approved/compliance-strategist/justifications/",
+    "eagle-knowledge-base/approved/legal-counselor/appropriations-law/",
+)
+
+# Topic patterns that re-enable the dropped folders even under micro-purchase.
+# If the user explicitly asks about protest, J&A, or appropriations,
+# the filter is bypassed — we only drop when the topic is unrelated.
+_MICRO_PURCHASE_DROP_BYPASS: tuple[str, ...] = (
+    "protest", "j&a", "jofoc", "jefo", "appropriation", "bona fide",
+    "limited source", "sole source", "justification",
+)
+
+
+def _filter_results_by_method(
+    results: list[dict], method: str, query: str
+) -> tuple[list[dict], list[dict]]:
+    """Drop method-irrelevant docs from search results.
+
+    Returns (kept, dropped) so callers can log what was filtered. Dropped
+    entries are NOT returned to the model — keeping them out of the auto-fetch
+    pool prevents the agent from over-fetching irrelevant content (UC2.1 root
+    cause).
+    """
+    if method != "micro":
+        return list(results or []), []
+
+    # Bypass: if the user explicitly asked about protest/J&A/appropriations,
+    # those docs ARE relevant even on a micro-purchase.
+    q_lower = (query or "").lower()
+    if any(b in q_lower for b in _MICRO_PURCHASE_DROP_BYPASS):
+        return list(results or []), []
+
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for r in results or []:
+        key = (r.get("s3_key") or "").lower()
+        if any(key.startswith(p) for p in _MICRO_PURCHASE_DROP_PREFIXES):
+            dropped.append(r)
+        else:
+            kept.append(r)
+    return kept, dropped
+
+
 def exec_research(
     params: dict, tenant_id: str, session_id: str | None = None,
     user_id: str | None = None,
@@ -86,10 +136,19 @@ def exec_research(
     }
     search_result = exec_knowledge_search(search_params, tenant_id, session_id, user_id=user_id)
 
-    # 2. Auto-fetch top 4
+    # 1b. Method-aware filtering — drop docs whose prefix is irrelevant to the
+    # detected acquisition method (PR2 from the 2026-04-29 triage spec). Done
+    # BEFORE auto-fetch so we don't waste Bedrock calls on docs we'll drop.
+    method = _detect_method(acquisition_method, query, contract_value)
+    raw_results = search_result.get("results", [])
+    kept_results, dropped_results = _filter_results_by_method(
+        raw_results, method, query
+    )
+
+    # 2. Auto-fetch top 4 (from filtered results)
     fetched_docs = []
     fetched_keys: set[str] = set()
-    for r in search_result.get("results", [])[:4]:
+    for r in kept_results[:4]:
         s3_key = r.get("s3_key")
         if s3_key and s3_key not in fetched_keys:
             content = exec_knowledge_fetch({"s3_key": s3_key}, tenant_id, session_id, user_id=user_id)
@@ -103,7 +162,6 @@ def exec_research(
 
     # 3. Dynamic checklist search (isolated query — separate from general KB search)
     checklist_content: dict[str, str] = {}
-    method = _detect_method(acquisition_method, query, contract_value)
 
     if include_checklist and method != "micro":
         cl_query = _CHECKLIST_QUERIES.get(method, "PMR common requirements checklist")
@@ -123,10 +181,16 @@ def exec_research(
                     checklist_content[r.get("title", s3_key)] = result["content"][:20000]
 
     return {
-        "kb_results": search_result.get("results", []),
+        # kb_results is the filtered list — irrelevant docs (e.g. protest
+        # guidance for micro-purchases) are dropped before reaching the model.
+        "kb_results": kept_results,
         "fetched_documents": fetched_docs,
         "checklists": checklist_content,
         "detected_method": method,
+        "_filtered_out": [
+            {"s3_key": r.get("s3_key"), "title": r.get("title")}
+            for r in dropped_results
+        ],
         "_guidance": (
             "Use checklists to cross-reference document requirements. "
             "The PMR checklist is HHS/NIH-specific — items there supplement FAR requirements. "
