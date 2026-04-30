@@ -25,7 +25,7 @@ logger = logging.getLogger("eagle.plugin_store")
 
 # Version string representing the bundled plugin files.
 # Increment this whenever eagle-plugin/ content changes to force a re-seed.
-BUNDLED_PLUGIN_VERSION = "1"
+BUNDLED_PLUGIN_VERSION = "2"
 
 # ── In-Process Cache (60-second TTL per entity_type) ─────────────────
 # Keys: entity_type str → {"ts": float, "items": list[dict]}

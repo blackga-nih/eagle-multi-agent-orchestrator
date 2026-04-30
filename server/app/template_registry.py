@@ -332,6 +332,15 @@ TEMPLATE_REGISTRY: Dict[str, TemplateMapping] = {
         description="Statement of Need — Services based on Catalog Pricing",
         display_name="Statement of Need — Services",
     ),
+    "purchase_request": TemplateMapping(
+        doc_type="purchase_request",
+        s3_filename="Quotation Abstract.docx",
+        file_type="docx",
+        placeholder_map={},
+        alternates=[],
+        description="Purchase request / quotation abstract form",
+        display_name="Purchase Request / Quotation Abstract",
+    ),
     "buy_american": TemplateMapping(
         doc_type="buy_american",
         s3_filename="DF_Buy_American_Non_Availability_Template.docx",
