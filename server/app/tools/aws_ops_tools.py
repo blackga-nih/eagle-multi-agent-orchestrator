@@ -608,3 +608,135 @@ def _serialize_ddb_item(item: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+def exec_kb_inventory(params: dict, tenant_id: str) -> dict:
+    """Read-only inventory of the knowledge base.
+
+    Lists everything under `eagle-knowledge-base/approved/` (the live KB
+    prefix inside the documents bucket). Groups by specialist folder so
+    QA can spot empty / stale areas. Returns counts, last-modified
+    timestamps, and a freshness indicator (oldest object age).
+
+    This is a diagnostic tool — does NOT mutate anything. Useful for
+    Jitong's "ask the prompt what's in the KB" check.
+
+    Params:
+      bucket   — defaults to S3_BUCKET env (eagle-documents-{acct}-{env})
+      prefix   — defaults to eagle-knowledge-base/approved/
+      detailed — when True, returns per-file list (capped at 500). Default
+                 False — returns folder-level rollup only.
+    """
+    bucket = params.get("bucket") or os.getenv(
+        "S3_BUCKET", "eagle-documents-695681773636-dev"
+    )
+    prefix = params.get("prefix") or "eagle-knowledge-base/approved/"
+    detailed = bool(params.get("detailed", False))
+
+    s3 = get_s3()
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        folders: dict[str, dict] = {}
+        all_files: list[dict] = []
+        total_bytes = 0
+        oldest_ts: float | None = None
+        newest_ts: float | None = None
+
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []) or []:
+                key = obj["Key"]
+                size = obj["Size"]
+                last_modified = obj["LastModified"]
+                ts = last_modified.timestamp()
+
+                # Folder = first path segment after prefix.
+                # e.g. eagle-knowledge-base/approved/compliance-strategist/.../foo.txt
+                # → "compliance-strategist"
+                rel = key[len(prefix):].split("/", 1)
+                folder = rel[0] if rel and rel[0] else "(root)"
+
+                bucket_stat = folders.setdefault(
+                    folder,
+                    {
+                        "folder": folder,
+                        "file_count": 0,
+                        "total_bytes": 0,
+                        "last_modified": last_modified.isoformat(),
+                    },
+                )
+                bucket_stat["file_count"] += 1
+                bucket_stat["total_bytes"] += size
+                if last_modified.isoformat() > bucket_stat["last_modified"]:
+                    bucket_stat["last_modified"] = last_modified.isoformat()
+
+                total_bytes += size
+                if oldest_ts is None or ts < oldest_ts:
+                    oldest_ts = ts
+                if newest_ts is None or ts > newest_ts:
+                    newest_ts = ts
+
+                if detailed and len(all_files) < 500:
+                    all_files.append(
+                        {
+                            "key": key,
+                            "size_bytes": size,
+                            "last_modified": last_modified.isoformat(),
+                        }
+                    )
+
+        total_files = sum(f["file_count"] for f in folders.values())
+        oldest_age_days = None
+        newest_age_days = None
+        if oldest_ts is not None:
+            oldest_age_days = round((time.time() - oldest_ts) / 86400, 1)
+        if newest_ts is not None:
+            newest_age_days = round((time.time() - newest_ts) / 86400, 1)
+
+        result = {
+            "operation": "kb_inventory",
+            "bucket": bucket,
+            "prefix": prefix,
+            "total_files": total_files,
+            "total_bytes": total_bytes,
+            "folder_count": len(folders),
+            "folders": sorted(folders.values(), key=lambda f: -f["file_count"]),
+            "freshness": {
+                "oldest_object_days": oldest_age_days,
+                "newest_object_days": newest_age_days,
+                "stale_warning": (
+                    oldest_age_days is not None
+                    and oldest_age_days > 60
+                    and "Some objects are >60 days old — KB sync may be lagging."
+                ) or None,
+            },
+        }
+        if detailed:
+            result["files"] = all_files
+            result["files_truncated_at"] = 500 if len(all_files) >= 500 else None
+        return result
+
+    except ClientError as exc:
+        error_code = exc.response["Error"]["Code"]
+        error_msg = exc.response["Error"]["Message"]
+        if error_code in ("AccessDenied", "AccessDeniedException"):
+            return {
+                "error": "AWS permission denied for KB inventory",
+                "detail": error_msg,
+                "suggestion": (
+                    f"The ECS task role lacks s3:ListBucket on {bucket}. "
+                    "Check core-stack.ts / storage-stack.ts IAM grants."
+                ),
+            }
+        if error_code == "NoSuchBucket":
+            return {
+                "error": f"Bucket '{bucket}' does not exist",
+                "detail": error_msg,
+                "suggestion": (
+                    "The agent may be calling kb_inventory with a prefix as if it "
+                    "were a bucket name. The KB prefix lives INSIDE the documents "
+                    f"bucket — try omitting `bucket` to use the default ({bucket})."
+                ),
+            }
+        return {"error": f"S3 error ({error_code}): {error_msg}"}
+    except BotoCoreError as exc:
+        return {"error": f"AWS connection error: {str(exc)}"}

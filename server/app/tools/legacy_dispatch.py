@@ -21,6 +21,7 @@ from .admin_tools import (
 from .aws_ops_tools import (
     exec_cloudwatch_logs,
     exec_dynamodb_intake,
+    exec_kb_inventory,
     exec_s3_document_ops,
 )
 from .docx_edit_tool import exec_edit_docx_document
@@ -69,6 +70,7 @@ def get_tool_dispatch() -> dict[str, ToolHandler]:
         "s3_document_ops": exec_s3_document_ops,
         "dynamodb_intake": exec_dynamodb_intake,
         "cloudwatch_logs": exec_cloudwatch_logs,
+        "kb_inventory": exec_kb_inventory,
         "search_far": exec_search_far,
         "create_document": exec_create_document,
         "edit_docx_document": exec_edit_docx_document,

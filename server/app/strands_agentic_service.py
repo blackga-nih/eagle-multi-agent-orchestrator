@@ -1907,6 +1907,48 @@ EAGLE_TOOLS = [
         },
     },
     {
+        "name": "kb_inventory",
+        "description": (
+            "Read-only inventory of the curated knowledge base. Lists everything "
+            "under eagle-knowledge-base/approved/ with per-folder rollups, "
+            "object counts, total bytes, last-modified timestamps, and a "
+            "freshness indicator (oldest object age in days, with a stale-warning "
+            "flag if > 60 days). Use this to answer 'what's in the KB?' / "
+            "'when was X last updated?' / 'is the KB sync current?' diagnostic "
+            "questions. Pure read — does not mutate anything."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bucket": {
+                    "type": "string",
+                    "description": (
+                        "S3 bucket name. Defaults to S3_BUCKET env "
+                        "(eagle-documents-{acct}-{env}). The KB lives as a PREFIX "
+                        "inside this bucket — DO NOT pass 'eagle-knowledge-base' "
+                        "as a bucket name; it is a prefix, not a bucket."
+                    ),
+                },
+                "prefix": {
+                    "type": "string",
+                    "description": (
+                        "S3 prefix to inventory. Default: "
+                        "'eagle-knowledge-base/approved/'. Pass a sub-prefix "
+                        "(e.g. 'eagle-knowledge-base/approved/compliance-strategist/') "
+                        "to scope the inventory."
+                    ),
+                },
+                "detailed": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, include the full per-file list (capped at 500). "
+                        "Default false — folder-level rollup only."
+                    ),
+                },
+            },
+        },
+    },
+    {
         "name": "langfuse_traces",
         "description": (
             "Query Langfuse traces for system diagnostics and observability. "

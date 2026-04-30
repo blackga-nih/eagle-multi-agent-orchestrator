@@ -39,6 +39,7 @@ class TestDispatchRouting:
         "s3_document_ops",
         "dynamodb_intake",
         "cloudwatch_logs",
+        "kb_inventory",
         "search_far",
         "create_document",
         "edit_docx_document",
@@ -57,9 +58,9 @@ class TestDispatchRouting:
         "research",
     }
 
-    def test_get_tool_dispatch_returns_all_19_tools(self):
+    def test_get_tool_dispatch_returns_all_20_tools(self):
         dispatch = get_tool_dispatch()
-        assert len(dispatch) == 19
+        assert len(dispatch) == 20
         assert set(dispatch.keys()) == self.EXPECTED_TOOLS
 
     def test_execute_tool_unknown_tool_returns_error_json(self):
