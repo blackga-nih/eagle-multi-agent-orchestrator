@@ -142,6 +142,43 @@ dev-smoke-deployed SCENARIO="research_source_transparency":
 qa-smoke-deployed SCENARIO="research_source_transparency":
     python scripts/_remote_post_deploy_smoke.py --env qa --scenario {{SCENARIO}} --auth
 
+# Run the full triage-validation smoke suite (Q4/Q5/UC2.1 + diagnostics).
+# Use after the 8-PR triage stack ships (PRs #169-#177) to confirm:
+#   - PR #169 routing: agent_guidance loads + Part-15 misroute fixed
+#   - PR #171 UC2.1: workflow asks about quote/508 before generating PR
+#   - PR #172 JEFO: response cites all 10 FAR 16.507-6(d)(2) elements
+#   - PR #174 matrix: $20M-$90M tier names HCA + Competition Advocate
+#   - PR #175 kb_inventory: agent calls the new diagnostic tool
+#   - PR #177 filter: protest/J&A docs dropped from micro-purchase results
+#
+# Stops at first failing scenario by default — pass CONTINUE=1 to run all.
+dev-smoke-triage CONTINUE="0":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    fail_count=0
+    for sc in research_source_transparency jefo_q4 sbir_q5 uc21_microscope kb_inventory_diagnostic; do
+        echo ""
+        echo "=========================================="
+        echo "SCENARIO: $sc"
+        echo "=========================================="
+        if ! python scripts/_remote_post_deploy_smoke.py --env dev --scenario "$sc"; then
+            fail_count=$((fail_count + 1))
+            echo "[FAIL] $sc"
+            if [ "{{CONTINUE}}" != "1" ]; then
+                echo "Stopping at first failure. Pass CONTINUE=1 to run all."
+                exit 1
+            fi
+        fi
+    done
+    if [ $fail_count -eq 0 ]; then
+        echo ""
+        echo "[ALL PASS] 5/5 triage scenarios passed."
+    else
+        echo ""
+        echo "[FAIL] $fail_count scenario(s) failed."
+        exit 1
+    fi
+
 # Kill stale EAGLE backend/frontend processes on Windows + Unix.
 # Handles uvicorn --reload zombie-child pattern that taskkill-by-PID misses.
 kill-stale:

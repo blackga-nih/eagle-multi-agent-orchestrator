@@ -1,0 +1,86 @@
+name: Post-Deploy Smoke (Q4/Q5/UC2.1)
+
+# Triage-validation smoke suite. Runs against the deployed dev environment
+# via the EC2 devbox (VPC-internal, can resolve internal ALB DNS).
+#
+# Triggers:
+#   - manually via workflow_dispatch (default)
+#   - automatically after a successful "Deploy EAGLE Platform" run
+#
+# Each scenario hits POST /api/chat/stream on the deployed backend, walks the
+# SSE event stream, and asserts the wire shape per scenario expects.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Scenario name (or "all" for the full triage suite)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - research_source_transparency
+          - jefo_q4
+          - sbir_q5
+          - uc21_microscope
+          - kb_inventory_diagnostic
+      env:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - qa
+  workflow_run:
+    workflows: ['Deploy EAGLE Platform']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  smoke:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: '3.11'
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Install boto3
+        run: pip install boto3
+
+      - name: Run smoke scenario(s) via SSM-on-devbox
+        env:
+          SCENARIO: ${{ github.event.inputs.scenario || 'all' }}
+          TARGET_ENV: ${{ github.event.inputs.env || 'dev' }}
+        run: |
+          set -euo pipefail
+          # The triage suite runs all 5 scenarios; otherwise run the single one.
+          if [ "$SCENARIO" = "all" ]; then
+            python scripts/_remote_post_deploy_smoke.py \
+              --env "$TARGET_ENV" \
+              --scenario research_source_transparency
+            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario jefo_q4
+            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario sbir_q5
+            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario uc21_microscope
+            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario kb_inventory_diagnostic
+          else
+            python scripts/_remote_post_deploy_smoke.py --env "$TARGET_ENV" --scenario "$SCENARIO"
+          fi
