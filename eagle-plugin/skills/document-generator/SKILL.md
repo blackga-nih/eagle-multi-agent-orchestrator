@@ -16,11 +16,28 @@ Generate professional acquisition documents based on intake context and user inp
 
 | Document | Abbreviation | When Required |
 |----------|--------------|---------------|
+| Statement of Need | SON | Micro-purchase product/service requests (FAR 13.2) — replaces SOW for ≤ $15K |
+| Price Reasonableness Determination | PRD | Micro-purchase, simplified, and above |
+| Required Sources Check | RSC | Micro-purchase, simplified, and above |
+| Purchase Request Cover Sheet & Cert of Funds | PR | Micro-purchase, simplified, and above |
 | Statement of Work | SOW | All acquisitions above micro-purchase |
 | Independent Government Cost Estimate | IGCE | All acquisitions above micro-purchase |
 | Acquisition Plan | AP | Acquisitions > $7M (or complex) |
 | Justification & Approval | J&A | Sole source or limited competition |
 | Market Research Report | MRR | All acquisitions above micro-purchase |
+
+**Micro-purchase template fetch** — for SON / PRD / RSC / PR, you MUST fetch the
+template from S3 BEFORE generating. The agent does NOT synthesize templates from
+memory for micro-purchase docs (UC2.1 root cause: agent over-engineered a SON
+without ever pulling the template):
+
+```
+knowledge_fetch(s3_key="eagle-knowledge-base/approved/templates/SON_Products.txt")
+knowledge_fetch(s3_key="eagle-knowledge-base/approved/templates/PR_CoverSheet.txt")
+```
+
+If the fetch returns no content, FAIL LOUD — tell the user the template is
+missing and ingest is needed. Do NOT generate from scratch.
 
 ## Research Prerequisites
 

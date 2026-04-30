@@ -144,6 +144,56 @@ Common errors: using wrong justification authority; inadequate market research t
 
 KB references: FAR 8.405-6, NIH Policy 6307-3, Determination_and_Findings_Template_FAR_1704.txt
 
+### FAR 16.507-6(d)(2) — JEFO Required Elements (10 total, NON-NEGOTIABLE)
+
+A Justification for an Exception to Fair Opportunity (JEFO) is the FAR-Part-16
+flavor of justification used for sole-source orders against multiple-award
+IDIQs. It is governed by **FAR 16.505(b)(2)** + **FAR 16.507-6**, NOT FAR Part 6
+(J&A) and NOT FAR Part 8 (LSJ). When you generate a JEFO table, checklist, or
+draft document, you MUST enumerate all 10 elements verbatim from the FAR text:
+
+1. Identification of the agency and the contracting activity, and specific
+   identification of the document as a "Justification for an Exception to Fair
+   Opportunity."
+2. Nature and/or description of the action being approved.
+3. Description of the supplies or services required to meet the agency's needs
+   (including estimated value).
+4. Identification of the exception to fair opportunity (FAR 16.505(b)(2)) and
+   supporting rationale for using that exception.
+5. Demonstration that the proposed contractor's unique qualifications or the
+   nature of the acquisition requires use of the exception cited.
+6. Determination by the contracting officer that the order represents the best
+   value consistent with FAR 16.505(b)(1).
+7. Description of the market research conducted (FAR Part 10) and the results
+   or a statement of why market research was not conducted.
+8. Any other facts supporting the use of an exception to fair opportunity
+   (e.g., considerations of price, performance, quality, schedule).
+9. A listing of contract awardees that were considered, with a description of
+   why they were rejected.
+10. A statement of the actions, if any, the agency may take to remove or
+    overcome any barriers that led to the exception to fair opportunity before
+    any subsequent acquisition for the supplies or services is made.
+
+**Approval thresholds (FAR 16.505(b)(2)(ii)(D))**:
+- ≤ $750K (under SAT inapplicable; treat as ordering CO authority): contracting officer
+- > $750K but ≤ $15M: competition advocate or designated higher authority
+- > $15M but ≤ $112M (FY26 services / R&D ceiling): head of the contracting activity (HCA) or designee
+- > $112M: senior procurement executive (SPE)
+
+**Cross-check the matrix**: call `query_compliance_matrix(operation="approval_authority", doc_type="jefo", contract_value=...)` for the current dollar-tier values. The thresholds above were correct as of FAC 2025-06; the matrix is authoritative if it differs.
+
+**If you cannot retrieve all 10 elements from the KB**, do NOT proceed —
+flag the gap to the user, request a fresh `research` with `s3_key` anchor at
+`approved/compliance-strategist/FAR-guidance/FAR_Part_16_IDIQ_Comprehensive_RFO_2025.txt`,
+and abort the JEFO generation. Partial JEFOs are a Q4 review failure mode
+(2026-04-29) — they look complete but miss elements 9–10 because retrieval
+truncated the source chunk.
+
+**Set-aside vs JEFO clarification**: a set-aside on a multi-award IDIQ does
+NOT require a JEFO — fair opportunity has been satisfied within the restricted
+class. Confirm "fair opportunity exception" applies before reaching for this
+template (see FAR 6.102-2 / FAR 16.505 for the broader competition framework).
+
 ### Document Analysis — Comparing Against Requirements
 
 When a user provides acquisition documents, analyze them against each other and against regulatory requirements:

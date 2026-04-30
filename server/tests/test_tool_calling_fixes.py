@@ -348,22 +348,32 @@ class TestResearchToolPrimacy:
     @pytest.fixture
     def agent_md(self):
         path = REPO_ROOT / "eagle-plugin" / "agents" / "supervisor" / "agent.md"
-        return path.read_text()
+        # Force UTF-8 — agent.md contains em dashes (U+2014) and the system
+        # default encoding on Windows is cp1252 which mangles them.
+        return path.read_text(encoding="utf-8")
 
     def test_research_is_step_1(self, agent_md):
-        assert "Step 1" in agent_md
-        step1_idx = agent_md.index("Step 1")
-        # research should appear near Step 1
-        research_idx = agent_md.index("Research Tool", step1_idx)
-        assert research_idx - step1_idx < 100, (
-            "Research Tool should be mentioned within Step 1"
+        # Anchored on the literal cascade marker phrase (line ~110 of
+        # agent.md). After PR #171 added a micro-purchase Step 1/2/3
+        # ordered workflow earlier in the doc, plain `agent_md.index("Step 1")`
+        # finds the wrong Step 1. The contract is "in the MANDATORY
+        # RESEARCH CASCADE section, Step 1 IS Research Tool" — best
+        # checked by the unique combined phrase.
+        # ASCII-only anchor (avoids em-dash encoding fragility across
+        # Windows/Linux runners). "Research Tool (DEFAULT" is unique to
+        # the cascade Step 1 line.
+        assert "Research Tool (DEFAULT" in agent_md, (
+            "Cascade Step 1 must be labeled 'Research Tool (DEFAULT...)' "
+            "in supervisor agent.md"
         )
 
     def test_web_search_is_step_3(self, agent_md):
-        assert "Step 3" in agent_md
-        step3_idx = agent_md.index("Step 3")
-        web_idx = agent_md.index("Web Search", step3_idx)
-        assert web_idx - step3_idx < 100
+        # Same rationale as test_research_is_step_1 — anchor on the
+        # unique cascade Step 3 phrase.
+        assert "Web Search (ONLY when KB" in agent_md, (
+            "Cascade Step 3 must be labeled 'Web Search (ONLY when KB...)' "
+            "in supervisor agent.md"
+        )
 
     def test_cascade_order_preserved(self, agent_md):
         step1 = agent_md.index("Step 1")

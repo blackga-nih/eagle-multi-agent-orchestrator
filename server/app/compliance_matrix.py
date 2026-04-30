@@ -341,12 +341,20 @@ def _ja_approval(v: float, is_simplified_sole: bool = False) -> str:
             "No Competition Advocate or HCA approval required."
         )
     if v > _SPE_JA:
-        return f"SPE through HHS/OAP (> ${_SPE_JA:,}) - FAR 6.304(a)(4)"
+        return f"SPE through HHS/OAP and HHS Competition Advocate (> ${_SPE_JA:,}) - FAR 6.304(a)(4)"
     if v > _AP_OA:
-        return f"HCA + additional reviews (${_AP_OA:,}-${_SPE_JA:,}) - FAR 6.304(a)(3)"
+        # Q4 review (2026-04-29): EAGLE was naming only HCA at this tier.
+        # Per HCA_SPE_Approval_Thresholds_Updated.txt, the $20M-$90M tier
+        # requires HCA AND NIH Competition Advocate AND additional designated
+        # reviews — naming any single role alone is wrong.
+        return (
+            f"HCA + NIH Competition Advocate + additional designated reviews "
+            f"(${_AP_OA:,}-${_SPE_JA:,}) - FAR 6.304(a)(3). "
+            f"All three touch-points are required; HCA alone is insufficient."
+        )
     if v > _JA_HCA:
         return f"HCA + NIH Competition Advocate (${_JA_HCA:,}-${_AP_OA:,}) - FAR 6.304(a)(2)"
-    return f"CO approval (<= ${_JA_HCA:,}) - FAR 6.304(a)(1)"
+    return f"CO or other approval established by OA (<= ${_JA_HCA:,}) - FAR 6.304(a)(1)"
 
 
 # ---------------------------------------------------------------------------
