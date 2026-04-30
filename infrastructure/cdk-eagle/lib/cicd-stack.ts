@@ -194,6 +194,24 @@ export class EagleCiCdStack extends cdk.Stack {
       ],
     }));
 
+    // Post-deploy smoke harness: drive the eagle-ec2-dev devbox via SSM RunCommand.
+    // _remote_post_deploy_smoke.py needs: ec2:DescribeInstances/StartInstances to
+    // wake the box, ssm:SendCommand + GetCommandInvocation to stage repo + run
+    // the orchestrator, and cloudformation:DescribeStacks to resolve ALB DNS
+    // outputs.
+    this.deployRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'SmokeHarnessDevbox',
+      actions: [
+        'ec2:DescribeInstances',
+        'ec2:StartInstances',
+        'ssm:SendCommand',
+        'ssm:GetCommandInvocation',
+        'ssm:DescribeInstanceInformation',
+        'ssm:ListCommandInvocations',
+      ],
+      resources: ['*'],
+    }));
+
     // ── Outputs ──────────────────────────────────────────────
     new cdk.CfnOutput(this, 'DeployRoleArn', {
       value: this.deployRole.roleArn,
