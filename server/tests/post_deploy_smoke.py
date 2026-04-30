@@ -400,6 +400,18 @@ def probe_backend(result: SmokeResult, backend_url: str, scenario: dict, *, toke
             if isinstance(body, dict):
                 if isinstance(body.get("kb_results"), list):
                     kb_results_all.extend(body["kb_results"])
+                # The research tool's SSE tool_result body is the *summary*
+                # dict from _emit("research", ...), which carries `agents_routed:
+                # [names]` — NOT the full `agent_guidance` array (that's
+                # too heavy to put on the SSE wire and goes back to the LLM
+                # via the tool's return value instead). Read agents_routed
+                # for the on-wire routing signal.
+                if isinstance(body.get("agents_routed"), list):
+                    for a in body["agents_routed"]:
+                        if a:
+                            agent_guidance_seen.append(str(a))
+                # Older shape — kept for backwards compat with any tool that
+                # does emit the full guidance array on-wire.
                 if isinstance(body.get("agent_guidance"), list):
                     for ag in body["agent_guidance"]:
                         if isinstance(ag, dict) and ag.get("agent"):

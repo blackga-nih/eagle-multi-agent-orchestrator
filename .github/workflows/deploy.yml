@@ -483,7 +483,13 @@ jobs:
     - name: CDK Deploy
       run: |
         cd ${{ env.CDK_DIR }}
-        STACKS="EagleCoreStack EagleCiCdStack EagleStorageStack EagleEvalStack EagleBackupStack"
+        # EagleComputeStack carries the dev ECS task definition (env vars,
+        # CDK-managed image, IAM linkage). Excluding it means env-var changes
+        # added in CDK never reach the running task — discovered 2026-04-30
+        # when S3_VECTORS_BUCKET / S3_VECTORS_INDEX added in ff8654f never
+        # deployed, leaving vectors search pointing at the decommissioned
+        # rh-eagle bucket and silently AccessDenied'ing.
+        STACKS="EagleCoreStack EagleCiCdStack EagleStorageStack EagleComputeStack EagleEvalStack EagleBackupStack"
         if [ "${{ needs.setup.outputs.env_name }}" = "qa" ]; then
           STACKS="$STACKS EagleComputeStackQA"
         fi
