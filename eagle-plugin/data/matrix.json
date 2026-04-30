@@ -185,16 +185,32 @@
   },
 
   "approval_chains": {
+    "_source": "HCA_SPE_Approval_Thresholds_Updated.txt (April 2026, HHSAM Note 2026-03 + FAC 2025-06).",
+    "_designee_note": "Per FAR 1.602-1 / HHSAR 1.604, named authorities (HCA, SPE, OA Director) may delegate downstream UNLESS explicitly marked non-delegable. Always include 'or designee' and add the Competition Advocate, OSDBU, and AOD touch-points where the regulation requires them — naming only one role is a Q4 review failure mode.",
     "ja": [
-      { "ceiling": 900000,    "authority": "Contracting Officer (CO)",                "note": "CO signs J&A for sole source ≤$900K" },
-      { "ceiling": 50000000,  "authority": "Head of Contracting Activity (HCA)",       "note": "HCA approval required $900K–$50M" },
-      { "ceiling": 90000000,  "authority": "Senior Procurement Executive (SPE)",       "note": "SPE approval required $50M–$90M" },
-      { "ceiling": null,      "authority": "SPE + Agency Head notification",           "note": "Above $90M — SPE signs, Agency Head notified" }
+      { "ceiling": 900000,    "authority": "Contracting Officer (CO) or other approval established by OA",  "note": "FAR 6.304(a)(1). At/below $900K J&A ceiling per FAC 2025-06." },
+      { "ceiling": 20000000,  "authority": "HCA + NIH Competition Advocate",                                "note": "FAR 6.304(a)(2)/(a)(3). $900,001–$20M tier requires BOTH HCA and Competition Advocate review. Either alone is insufficient." },
+      { "ceiling": 90000000,  "authority": "HCA + NIH Competition Advocate + additional reviews",           "note": "FAR 6.304(a)(3). $20M–$90M tier requires HCA AND Competition Advocate AND additional designated reviews — HCA alone (or any single role) is NOT sufficient. Q4 review (2026-04-29) flagged that EAGLE was naming only HPA/HCA at this tier; correct chain is multi-role." },
+      { "ceiling": null,      "authority": "SPE through HHS/OAP and HHS Competition Advocate",              "note": "FAR 6.304(a)(4). Above $90M — SPE signs through HHS/OAP." }
+    ],
+    "fss_ssj": [
+      { "ceiling": 350000,    "authority": "CO documents in requisition / contract file",                   "note": "At/below SAT — no formal SSJ required (GSAM/R 538.7104-3, justification in requisition paragraph)." },
+      { "ceiling": 900000,    "authority": "CO certification serves as approval",                           "note": "HHSAM 308.401(b)(2) — >SAT to $900K." },
+      { "ceiling": 20000000,  "authority": "Division-level Advocate for Competition (NOT delegable)",       "note": "HHSAM 308.401(b)(2) — $900K to $20M. Non-delegable per HHSAM." },
+      { "ceiling": 90000000,  "authority": "HCA approval required",                                          "note": "HHSAM 308.401(b)(2) — >$20M FSS SSJ." },
+      { "ceiling": null,      "authority": "HCA approval + AOD submission within 5 business days",          "note": "HHSAM 308.401(b)(2) — >$90M FSS SSJ. Email Acquisition_Oversight@hhs.gov." }
     ],
     "ap": [
-      { "ceiling": 20000000,  "authority": "Contracting Officer",                      "note": "Simplified or no written AP required below $20M" },
-      { "ceiling": 50000000,  "authority": "HCA or designee",                          "note": "Written AP reviewed by HCA $20M–$50M" },
-      { "ceiling": null,      "authority": "Senior Procurement Executive (SPE)",       "note": "SPE review required above $50M" }
+      { "ceiling": 20000000,  "authority": "One level above Contracting Officer",                            "note": "HHS internal — SAT to $20M tier reviewed one level above CO." },
+      { "ceiling": 50000000,  "authority": "OA Director or designee approved by HCA",                        "note": "HHS internal — $20M–$50M tier. OA Director may designate; HCA must approve." },
+      { "ceiling": 150000000, "authority": "HCA-NIH",                                                         "note": "HHS internal — $50M–$150M tier." },
+      { "ceiling": null,      "authority": "HHS/OAP + OSDBU pre-submission approval",                        "note": "Above $150M — HHSAM 310.001-72(f) (April 2026) requires OSDBU approval BEFORE OAP submission." }
+    ],
+    "as": [
+      { "ceiling": 50000000,   "authority": "OA Director or designee approved by HCA",                       "note": "Acquisition Strategy — under $50M lifecycle." },
+      { "ceiling": 100000000,  "authority": "HCA-NIH",                                                        "note": "$50M–$100M lifecycle." },
+      { "ceiling": 150000000,  "authority": "Deputy Director for Management, NIH",                            "note": "$100M–$150M lifecycle." },
+      { "ceiling": null,       "authority": "HHS/Office of Acquisition Policy (OAP)",                         "note": ">=$150M lifecycle." }
     ]
   },
 
