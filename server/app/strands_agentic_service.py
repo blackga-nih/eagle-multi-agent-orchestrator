@@ -2802,12 +2802,12 @@ def _build_subagent_doc_tools(
         2. State in your response which template you found, its title, and its S3 path
         3. If no template exists in KB, say so explicitly before proceeding
 
-        CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
+        CRITICAL: Always provide the `content` parameter with the FULL document markdown using the official KB template/checklist structure when one exists. Do NOT call this tool with empty content — it produces placeholder-only stubs. Do NOT invent a custom layout for an official document after a template/checklist has been found. If no template exists, state that explicitly and use markdown fallback only for markdown-only/ad hoc documents.
 
         Args:
             doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification, son_products, son_services, purchase_request, price_reasonableness, required_sources). For micro-purchases use son_products, purchase_request, price_reasonableness, required_sources.
             title: Descriptive document title that includes the program or acquisition name
-            content: REQUIRED — Full document content in markdown with all sections filled using real data
+            content: REQUIRED — Full document content in markdown, following the official template/checklist structure when one exists, with all supported sections filled using real data
             data: Supplementary structured metadata (estimated_value, period_of_performance, naics_code, etc.)
             package_id: Acquisition package ID to associate document with
             output_format: Output format override
@@ -3674,12 +3674,12 @@ def _build_all_service_tools(
         2. State in your response which template you found, its title, and its S3 path
         3. If no template exists in KB, say so explicitly before proceeding
 
-        CRITICAL: Always provide the `content` parameter with the FULL document markdown you have written using conversation context, intake data, and web research results. Do NOT call this tool with empty content — it produces placeholder-only stubs. YOU are the document author; this tool saves your work.
+        CRITICAL: Always provide the `content` parameter with the FULL document markdown using the official KB template/checklist structure when one exists. Do NOT call this tool with empty content — it produces placeholder-only stubs. Do NOT invent a custom layout for an official document after a template/checklist has been found. If no template exists, state that explicitly and use markdown fallback only for markdown-only/ad hoc documents.
 
         Args:
             doc_type: Document type (sow, igce, market_research, justification, acquisition_plan, eval_criteria, security_checklist, section_508, cor_certification, contract_type_justification, son_products, son_services, purchase_request, price_reasonableness, required_sources). For micro-purchases use son_products, purchase_request, price_reasonableness, required_sources.
             title: Descriptive document title that includes the program or acquisition name — e.g. "SOW - Cloud Computing Services for NCI Research Portal" or "IGCE - IT Support Services FY2026". Never use a generic label like "Statement of Work" alone.
-            content: REQUIRED — Full document content in markdown with all sections filled using real data from conversation context, intake answers, and web research results. This is the primary document body.
+            content: REQUIRED — Full document content in markdown following the official template/checklist structure when one exists, with all supported sections filled using real data from conversation context, intake answers, and web research results. This is the primary document body.
             data: Supplementary structured metadata (estimated_value, period_of_performance, naics_code, etc.) for template population. Not a substitute for content.
             package_id: Acquisition package ID to associate document with
             output_format: Output format override

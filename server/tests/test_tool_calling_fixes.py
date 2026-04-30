@@ -117,6 +117,29 @@ class TestAboveMptRoleRouting:
         assert "FAR 8.405-6 item-peculiar-to-one-manufacturer rationale" in agent_md
 
 
+class TestTemplateBoundDocumentGeneration:
+    """Verify document generation is bound to official templates/checklists."""
+
+    @pytest.fixture
+    def agent_md(self):
+        path = REPO_ROOT / "eagle-plugin" / "agents" / "supervisor" / "agent.md"
+        return path.read_text()
+
+    def test_official_templates_must_be_used(self, agent_md):
+        assert "TEMPLATE-BOUND DOCUMENT GENERATION RULE" in agent_md
+        assert "Do NOT create your own version of an official document template" in agent_md
+        assert "Use the template's section headings, required fields, signature blocks" in agent_md
+        assert "Markdown fallback is allowed ONLY when no official template/checklist exists" in agent_md
+
+    def test_gsa_order_has_required_sources_brand_and_pricing_gates(self, agent_md):
+        assert "Required-Sources / Priority-Sources Check" in agent_md
+        assert "before AP, price reasonableness, IGCE/IGE, or justification documents" in agent_md
+        assert "ask why that brand/model is required" in agent_md
+        assert "GSA/MAS pricing is the preferred price basis for Schedule orders" in agent_md
+        assert "A single refurbished/used listing is NOT enough for price reasonableness" in agent_md
+        assert "do not assume a unit price" in agent_md
+
+
 # ===========================================================================
 # 3. s3_document_ops guards against KB path misuse
 # ===========================================================================
