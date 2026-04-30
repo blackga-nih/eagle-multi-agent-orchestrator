@@ -70,6 +70,93 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             "min_total_surfaced": 4,
         },
     },
+    "jefo_q4": {
+        "label": "Q4 — JEFO $25M IDIQ sole-source (PR #169 routing + #172 elements)",
+        "query": (
+            "i'm placing a $25m sole-source order on a multi-award idiq and "
+            "need to prepare a jefo. what's the approval authority and what "
+            "elements does the JEFO need?"
+        ),
+        "expects": {
+            # PR #169 adds agent_guidance + agent_guidance_failures to the
+            # research packet. SBIR/JEFO/IDIQ trigger forces compliance +
+            # legal co-routes.
+            "agent_guidance_must_include": ["compliance_strategist", "legal_counsel"],
+            # PR #172: response must enumerate all 10 FAR 16.507-6(d)(2)
+            # required elements (verbatim phrases from the rule).
+            "response_must_contain_any": [
+                "16.507-6",
+                "10 required elements",
+                "fair opportunity",
+            ],
+            # PR #174 + #169: $20M-$90M tier authority must name BOTH
+            # HCA and Competition Advocate (NOT HCA alone).
+            "response_must_contain_all": ["HCA", "Competition Advocate"],
+            # Anti-regression: the wrong rule from B2.
+            "response_must_not_contain": ["set-aside JOFOC requires a J&A"],
+            "min_total_surfaced": 4,
+        },
+    },
+    "sbir_q5": {
+        "label": "Q5 — SBIR debriefing/protest (PR #169 Part-15 misroute fix)",
+        "query": (
+            "An SBIR offeror gets eliminated, then on Day 8 asks for a "
+            "debriefing and files a protest before the debrief happens. "
+            "What's the right sequence of events here?"
+        ),
+        "expects": {
+            "agent_guidance_must_include": ["compliance_strategist", "legal_counsel"],
+            # Q5 was anchoring on Part 15. Post-fix should cite SBIR/Part 6.
+            "response_must_contain_any": ["6.102(d)", "GAO 10-day", "B-414514"],
+            # If the response is dominated by Part 15, the misroute is back.
+            "response_must_not_over_rely_on": ["FAR 15.505", "FAR 15.506"],
+            "min_total_surfaced": 4,
+        },
+    },
+    "uc21_microscope": {
+        "label": "UC2.1 — Microscope micro-purchase (PR #171 workflow + #177 filter)",
+        "query": (
+            "i need to buy a microscope for the lab. it's under $15k. "
+            "help me submit a purchase request."
+        ),
+        "expects": {
+            # PR #169 + #171: forced co-route to market-intelligence
+            "agent_guidance_must_include": ["market_intelligence", "compliance_strategist"],
+            # PR #171 workflow gates: must ask about quote, vendor, 508
+            # BEFORE generating a purchase request.
+            "response_must_ask_about_any": [
+                "quote",
+                "vendor",
+                "section 508",
+                "embedded software",
+                "supplier",
+            ],
+            # PR #177 filter: protest / J&A docs MUST be dropped from
+            # kb_results for micro-purchases.
+            "kb_results_must_not_contain_prefix_any": [
+                "approved/legal-counselor/protest-guidance/",
+                "approved/compliance-strategist/justifications/",
+            ],
+            # PR #177 exposes _filtered_out so we can verify the filter ran.
+            "filtered_out_field_present": True,
+            "min_total_surfaced": 4,
+        },
+    },
+    "kb_inventory_diagnostic": {
+        "label": "KB inventory diagnostic (PR #175)",
+        "query": "what's currently in the knowledge base? show me a folder rollup.",
+        "expects": {
+            # PR #175 added kb_inventory tool. The agent should call it for
+            # this query (not knowledge_search).
+            "tool_call_must_include": ["kb_inventory"],
+            # The response should mention specialist folders.
+            "response_must_contain_any": [
+                "compliance-strategist",
+                "legal-counselor",
+                "market-intelligence",
+            ],
+        },
+    },
 }
 
 
@@ -279,6 +366,138 @@ def probe_backend(result: SmokeResult, backend_url: str, scenario: dict, *, toke
         f"{len(rows_with_all)}/{len(sources)} rows carry {required_row_fields}",
     )
 
+    # ── PR #169 / #171 / #172 / #174 / #175 / #177 expects ────────────────
+    # These checks support the Q4/Q5/UC2.1 scenarios. They run when their
+    # corresponding `expects` keys are present on the scenario.
+
+    # Walk events to assemble: full assistant response text, kb_results array,
+    # agent_guidance contents, filtered_out array, tools_called list.
+    full_response_text = ""
+    kb_results_all: list[dict] = []
+    agent_guidance_seen: list[str] = []
+    filtered_out_seen: list[dict] | None = None
+    tools_called: list[str] = []
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        et = e.get("type") or e.get("event")
+        if et == "text" and isinstance(e.get("text"), str):
+            full_response_text += e["text"]
+        elif et == "complete" and isinstance(e.get("text"), str):
+            full_response_text += e["text"]
+        elif et == "tool_use":
+            n = e.get("name") or (e.get("tool_use") or {}).get("name")
+            if n:
+                tools_called.append(n)
+        elif et == "tool_result":
+            tr = e.get("tool_result") or {}
+            body = tr.get("result")
+            if isinstance(body, str):
+                try:
+                    body = json.loads(body)
+                except (ValueError, TypeError):
+                    body = None
+            if isinstance(body, dict):
+                if isinstance(body.get("kb_results"), list):
+                    kb_results_all.extend(body["kb_results"])
+                if isinstance(body.get("agent_guidance"), list):
+                    for ag in body["agent_guidance"]:
+                        if isinstance(ag, dict) and ag.get("agent"):
+                            agent_guidance_seen.append(str(ag["agent"]))
+                if isinstance(body.get("_filtered_out"), list):
+                    filtered_out_seen = body["_filtered_out"]
+
+    response_lower = full_response_text.lower()
+
+    if "agent_guidance_must_include" in expects:
+        required = list(expects["agent_guidance_must_include"])
+        missing = [a for a in required if a not in agent_guidance_seen]
+        result.add_check(
+            "agent_guidance_must_include",
+            not missing,
+            f"present={agent_guidance_seen}, missing={missing}",
+        )
+
+    if "response_must_contain_any" in expects:
+        needles = expects["response_must_contain_any"]
+        hits = [n for n in needles if n.lower() in response_lower]
+        result.add_check(
+            "response_must_contain_any",
+            len(hits) > 0,
+            f"matched {len(hits)}/{len(needles)} of {needles[:3]}…",
+        )
+
+    if "response_must_contain_all" in expects:
+        needles = expects["response_must_contain_all"]
+        missing = [n for n in needles if n.lower() not in response_lower]
+        result.add_check(
+            "response_must_contain_all",
+            not missing,
+            f"missing={missing}",
+        )
+
+    if "response_must_not_contain" in expects:
+        bad = [n for n in expects["response_must_not_contain"] if n.lower() in response_lower]
+        result.add_check(
+            "response_must_not_contain",
+            not bad,
+            f"found forbidden={bad}",
+        )
+
+    if "response_must_ask_about_any" in expects:
+        needles = expects["response_must_ask_about_any"]
+        hits = [n for n in needles if n.lower() in response_lower]
+        result.add_check(
+            "response_must_ask_about_any",
+            len(hits) > 0,
+            f"asked about {hits} (need any of {needles[:3]}…)",
+        )
+
+    if "response_must_not_over_rely_on" in expects:
+        # Fail if more than 3 mentions of any single bad anchor — that's
+        # the symptom of vocabulary-driven misroute (Q5).
+        offenders = []
+        for needle in expects["response_must_not_over_rely_on"]:
+            cnt = response_lower.count(needle.lower())
+            if cnt > 3:
+                offenders.append(f"{needle}×{cnt}")
+        result.add_check(
+            "response_must_not_over_rely_on",
+            not offenders,
+            f"over-relied on {offenders}" if offenders else "ok",
+        )
+
+    if "kb_results_must_not_contain_prefix_any" in expects:
+        bad_prefixes = expects["kb_results_must_not_contain_prefix_any"]
+        leaks = []
+        for r in kb_results_all:
+            key = (r.get("s3_key") or "").lower()
+            for p in bad_prefixes:
+                if p.lower() in key:
+                    leaks.append(r.get("s3_key"))
+                    break
+        result.add_check(
+            "kb_results_must_not_contain_prefix_any",
+            not leaks,
+            f"leaked={leaks[:3]}" if leaks else "filter active",
+        )
+
+    if expects.get("filtered_out_field_present"):
+        result.add_check(
+            "filtered_out_field_present",
+            filtered_out_seen is not None,
+            f"_filtered_out={'present' if filtered_out_seen is not None else 'missing'}",
+        )
+
+    if "tool_call_must_include" in expects:
+        required = expects["tool_call_must_include"]
+        missing = [t for t in required if t not in tools_called]
+        result.add_check(
+            "tool_call_must_include",
+            not missing,
+            f"called={tools_called}, missing={missing}",
+        )
+
     # Summary captured on the result for the JSON artifact
     result.research_packet_summary = {
         "fetched_count": research_summary.get("fetched_count"),
@@ -286,6 +505,9 @@ def probe_backend(result: SmokeResult, backend_url: str, scenario: dict, *, toke
         "lane_breakdown": lane_breakdown,
         "total_surfaced": total_surfaced,
         "sources_len": len(sources),
+        "agent_guidance_seen": agent_guidance_seen,
+        "tools_called": tools_called,
+        "filtered_out_count": (len(filtered_out_seen) if filtered_out_seen is not None else None),
         "first_3_sources": [
             {
                 "title": (r.get("title") or "")[:80],
