@@ -70,8 +70,11 @@ jobs:
         env:
           SCENARIO: ${{ github.event.inputs.scenario || 'all' }}
           TARGET_ENV: ${{ github.event.inputs.env || 'dev' }}
+        # GitHub default `bash -e` short-circuits the loop on first scenario
+        # failure; explicit shell directive disables errexit so all scenarios
+        # run, then we exit non-zero based on the fail count summary.
+        shell: bash --noprofile --norc -uo pipefail {0}
         run: |
-          set -uo pipefail   # NOT -e: track per-scenario exit, don't short-circuit
           fails=0
           run_one() {
             local s="$1"
