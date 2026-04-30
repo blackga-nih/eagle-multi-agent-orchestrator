@@ -9,7 +9,8 @@
     "document-generator",
     "compliance",
     "knowledge-retrieval",
-    "tech-review"
+    "tech-review",
+    "s3-knowledge-base-sync"
   ],
   "commands": [
     "intake",

@@ -22,7 +22,8 @@
     "tech-review",
     "ingest-document",
     "admin-manager",
-    "admin-diagnostics"
+    "admin-diagnostics",
+    "s3-knowledge-base-sync"
   ],
   "commands": "command-registry.json",
   "data": {

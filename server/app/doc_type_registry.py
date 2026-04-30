@@ -89,9 +89,9 @@ _MARKDOWN_ONLY_TYPES = frozenset(
         # short-term, so the template metadata _index.json does not list it
         # separately — we add it here so normalization + validation succeed.
         "pws",
-        # Simplified-acquisition / purchase-card flow doc types. These have
-        # no docx template in the metadata index yet — markdown-only LLM
-        # generators live in tools/create_document_support.py.
+        # Simplified-acquisition / purchase-card flow doc types. The metadata
+        # index may not list these yet, so keep them valid for create_document;
+        # template_registry.py decides whether a given type uses S3 or markdown.
         "purchase_request",
         "price_reasonableness",
         "required_sources",

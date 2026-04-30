@@ -84,6 +84,40 @@ class TestPackageCreationGating:
 
 
 # ===========================================================================
+# 2b. Above-MPT role routing guardrails
+# ===========================================================================
+
+
+class TestAboveMptRoleRouting:
+    """Verify $15K+ acquisitions do not fall back to micro-purchase role flow."""
+
+    @pytest.fixture
+    def agent_md(self):
+        path = REPO_ROOT / "eagle-plugin" / "agents" / "supervisor" / "agent.md"
+        return path.read_text()
+
+    def test_micro_purchase_question_scoped_to_under_15k(self, agent_md):
+        assert "MICRO-PURCHASE WORKFLOW ($0-$15K ONLY)" in agent_md
+        assert "Role Detection (MICRO-PURCHASE ONLY" in agent_md
+        assert "Do NOT ask this question for acquisitions above $15K" in agent_md
+
+    def test_above_mpt_uses_cor_requestor_or_co_cs_question(self, agent_md):
+        question = (
+            "Who's completing this package — are you the COR/requestor, "
+            "or are you the CO/CS generating the full acquisition package?"
+        )
+        assert question in agent_md
+        assert "Above-MPT Routing ($15,000+)" in agent_md
+        assert "NEVER call an acquisition above $15,000 a micro-purchase" in agent_md
+
+    def test_gsa_schedule_above_mpt_not_micro_purchase(self, agent_md):
+        assert "GSA SCHEDULE / BPA WORKFLOW - FAR 8.4" in agent_md
+        assert "Do NOT reroute this to micro-purchase" in agent_md
+        assert "Check NIH/HHS priority sources and NIH BPAs before direct GSA Schedule ordering" in agent_md
+        assert "FAR 8.405-6 item-peculiar-to-one-manufacturer rationale" in agent_md
+
+
+# ===========================================================================
 # 3. s3_document_ops guards against KB path misuse
 # ===========================================================================
 

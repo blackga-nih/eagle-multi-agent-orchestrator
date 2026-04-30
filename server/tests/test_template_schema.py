@@ -1221,8 +1221,16 @@ class TestDocGenNewTypes:
         """All new doc types should be accepted by _exec_create_document."""
         from app.template_registry import TEMPLATE_REGISTRY
         # Verify new types are registered
-        for dt in ["son_products", "son_services", "buy_american", "subk_plan", "conference_request"]:
+        for dt in ["son_products", "son_services", "purchase_request", "buy_american", "subk_plan", "conference_request"]:
             assert dt in TEMPLATE_REGISTRY, f"{dt} not in TEMPLATE_REGISTRY"
+
+    def test_purchase_request_uses_quotation_abstract_template(self):
+        """Purchase request should use the official quotation abstract form."""
+        from app.template_registry import TEMPLATE_REGISTRY
+
+        mapping = TEMPLATE_REGISTRY["purchase_request"]
+        assert mapping.s3_filename == "Quotation Abstract.docx"
+        assert mapping.file_type == "docx"
 
     def test_registry_alternates_populated(self):
         """Existing doc types should have their S3 alternates expanded."""
