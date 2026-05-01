@@ -5637,25 +5637,6 @@ def _build_kb_service_tools(
         if str(document_type).strip().lower() == "template":
             _tpl_flag["done"] = True
 
-        # 1. Run primary knowledge_search (wider net — 15 results)
-        search_params = {
-            k: v for k, v in {
-                "query": query, "topic": topic,
-                "document_type": document_type, "limit": 15,
-            }.items() if v
-        }
-        with _research_tracer.start_as_current_span("kb_search_primary") as _span:
-            _span.set_attribute("eagle.query", (query or "")[:200])
-            _span.set_attribute("eagle.limit", search_params.get("limit", 15))
-            search_result = exec_knowledge_search(
-                search_params, tenant_id, session_id,
-                user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-            )
-            _span.set_attribute("eagle.result_count", search_result.get("count", 0))
-        _kb_depth["search_count"] += 1
-        _kb_depth["search_result_count"] += search_result.get("count", 0)
-        all_results = list(search_result.get("results", []))
-
         # Helpers for KB-only filtering and .docx/.content.md dedup
         def _is_kb_doc(key: str) -> bool:
             return key.startswith("eagle-knowledge-base/")
@@ -5672,29 +5653,139 @@ def _build_kb_service_tools(
                 key = key[: -len(".docx")]
             return key
 
-        # 1b. Secondary broadened search — different angle to catch more docs.
-        # Extract key terms and search without topic filter for broader coverage.
-        # Use stem-based dedup so .docx and .content.md siblings don't waste slots.
-        seen_keys = {r.get("s3_key") for r in all_results if r.get("s3_key")}
-        seen_stems = {_stem(k) for k in seen_keys}
+        # 1. Build per-lane params and run all 4 KB lanes in parallel.
+        #
+        # Previously each lane (primary, secondary, path, semantic) ran
+        # sequentially in the calling thread, so total research latency was
+        # the SUM of all four lanes (~130s for the slow Bedrock-bound lanes).
+        # The lanes are fully independent — they hit different backends
+        # (DynamoDB scan + Haiku rerank, S3 prefix scan, S3 Vectors) and
+        # only meet at the dedup-merge step. Parallelizing caps the floor
+        # at the slowest single lane (~65s).
+        #
+        # We use a ThreadPoolExecutor (sync exec_*_search funcs are blocking
+        # boto3 calls) and propagate the OTEL parent context into worker
+        # threads so per-lane spans still nest under the research tool span.
+        from opentelemetry import context as _otel_context
+
+        search_params = {
+            k: v for k, v in {
+                "query": query, "topic": topic,
+                "document_type": document_type, "limit": 15,
+            }.items() if v
+        }
+        secondary_params: dict[str, Any] | None = None
         if query and len(query) > 20:
-            # Build a shorter keyword-focused query for the secondary search
-            secondary_params: dict[str, Any] = {"query": query, "limit": 10}
+            secondary_params = {"query": query, "limit": 10}
             if document_type:
                 secondary_params["document_type"] = document_type
-            # Don't pass topic filter — lets it find docs in adjacent topics
-            with _research_tracer.start_as_current_span("kb_search_secondary") as _span:
-                _span.set_attribute("eagle.query", (query or "")[:200])
-                _span.set_attribute("eagle.limit", 10)
-                secondary_result = exec_knowledge_search(
-                    secondary_params, tenant_id, session_id,
-                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-                    _lane_tag="metadata-broad",
-                )
-                _span.set_attribute("eagle.result_count", secondary_result.get("count", 0))
+        path_search_input = keyword.strip() if keyword and keyword.strip() else query
+        semantic_enabled = (
+            os.environ.get("SEMANTIC_LANE_ENABLED", "true").lower() != "false"
+        )
+
+        _parent_ctx = _otel_context.get_current()
+
+        def _lane_primary() -> dict[str, Any]:
+            token = _otel_context.attach(_parent_ctx)
+            try:
+                with _research_tracer.start_as_current_span("kb_search_primary") as _span:
+                    _span.set_attribute("eagle.query", (query or "")[:200])
+                    _span.set_attribute("eagle.limit", search_params.get("limit", 15))
+                    res = exec_knowledge_search(
+                        search_params, tenant_id, session_id,
+                        user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                    )
+                    _span.set_attribute("eagle.result_count", res.get("count", 0))
+                    return res
+            finally:
+                _otel_context.detach(token)
+
+        def _lane_secondary() -> dict[str, Any] | None:
+            if secondary_params is None:
+                return None
+            token = _otel_context.attach(_parent_ctx)
+            try:
+                with _research_tracer.start_as_current_span("kb_search_secondary") as _span:
+                    _span.set_attribute("eagle.query", (query or "")[:200])
+                    _span.set_attribute("eagle.limit", 10)
+                    res = exec_knowledge_search(
+                        secondary_params, tenant_id, session_id,
+                        user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                        _lane_tag="metadata-broad",
+                    )
+                    _span.set_attribute("eagle.result_count", res.get("count", 0))
+                    return res
+            finally:
+                _otel_context.detach(token)
+
+        def _lane_path() -> dict[str, Any] | None:
+            if not path_search_input:
+                return None
+            token = _otel_context.attach(_parent_ctx)
+            try:
+                with _research_tracer.start_as_current_span("kb_search_path") as _span:
+                    _span.set_attribute("eagle.input", (path_search_input or "")[:200])
+                    _span.set_attribute("eagle.limit", 15)
+                    res = exec_path_search(
+                        path_search_input, tenant_id, limit=15,
+                        user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                    )
+                    _span.set_attribute("eagle.result_count", len(res.get("results", [])))
+                    return res
+            finally:
+                _otel_context.detach(token)
+
+        def _lane_semantic() -> dict[str, Any] | None:
+            if not semantic_enabled:
+                return None
+            token = _otel_context.attach(_parent_ctx)
+            try:
+                with _research_tracer.start_as_current_span("kb_search_semantic") as _span:
+                    _span.set_attribute("eagle.query", (query or "")[:200])
+                    _span.set_attribute("eagle.limit", 15)
+                    try:
+                        res = exec_semantic_search(
+                            query, tenant_id, limit=15,
+                            user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                        )
+                        _span.set_attribute("eagle.result_count", len(res.get("results", [])))
+                        return res
+                    except Exception as _sem_exc:
+                        logger.warning(
+                            "research: semantic lane failed, continuing: %s", _sem_exc
+                        )
+                        return None
+            finally:
+                _otel_context.detach(token)
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="kb_lane"
+        ) as _ex:
+            f_primary = _ex.submit(_lane_primary)
+            f_secondary = _ex.submit(_lane_secondary)
+            f_path = _ex.submit(_lane_path)
+            f_semantic = _ex.submit(_lane_semantic)
+            search_result = f_primary.result()
+            secondary_result = f_secondary.result()
+            path_result = f_path.result()
+            semantic_result = f_semantic.result()
+
+        # Merge in priority order: primary > secondary > path > semantic.
+        # Dedup against the running seen_keys/seen_stems set so each lane
+        # only contributes net-new docs. This preserves the same merge
+        # semantics as the previous sequential implementation.
+        _kb_depth["search_count"] += 1
+        _kb_depth["search_result_count"] += search_result.get("count", 0)
+        all_results = list(search_result.get("results", []))
+        seen_keys = {r.get("s3_key") for r in all_results if r.get("s3_key")}
+        seen_stems = {_stem(k) for k in seen_keys}
+
+        # 1b. Secondary broadened search — different angle to catch more docs.
+        # Use stem-based dedup so .docx and .content.md siblings don't waste slots.
+        if secondary_result is not None:
             _kb_depth["search_count"] += 1
             _kb_depth["search_result_count"] += secondary_result.get("count", 0)
-            # Merge deduplicated results (stem-dedup catches .docx/.content.md siblings)
             for r in secondary_result.get("results", []):
                 key = r.get("s3_key", "")
                 stem = _stem(key) if key else ""
@@ -5706,20 +5797,9 @@ def _build_kb_service_tools(
         # 1c. Path-based search (RO strategy) — matches query terms against
         # S3 key paths/filenames. Catches docs that metadata AI ranking misses
         # because their file names contain the search terms directly.
-        # Use LLM-extracted `keyword` when supplied (RO-style concept phrase);
-        # fall back to raw query otherwise.
         # Keep path results separate so we can guarantee the top slots get fetched.
         path_only_results: list[dict] = []
-        path_search_input = keyword.strip() if keyword and keyword.strip() else query
-        if path_search_input:
-            with _research_tracer.start_as_current_span("kb_search_path") as _span:
-                _span.set_attribute("eagle.input", (path_search_input or "")[:200])
-                _span.set_attribute("eagle.limit", 15)
-                path_result = exec_path_search(
-                    path_search_input, tenant_id, limit=15,
-                    user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-                )
-                _span.set_attribute("eagle.result_count", len(path_result.get("results", [])))
+        if path_result is not None:
             for r in path_result.get("results", []):
                 key = r.get("s3_key", "")
                 stem = _stem(key) if key else ""
@@ -5729,35 +5809,23 @@ def _build_kb_service_tools(
                     seen_keys.add(key)
                     seen_stems.add(stem)
 
-        # 1e. Semantic search (NEW lane — S3 Vectors + Titan Embed v2)
-        # Additive benchmark lane. Embeds query, queries S3 Vectors index
-        # for top-K nearest chunks, collapses to doc-level hits. Dedups
-        # against the existing seen_keys/seen_stems sets so semantic hits
-        # never double-count. Gated by SEMANTIC_LANE_ENABLED env var; fails
-        # silently if Bedrock or S3 Vectors errors — never blocks research.
+        # 1e. Semantic search (S3 Vectors + Titan Embed v2). Dedups against the
+        # existing seen_keys/seen_stems sets so semantic hits never
+        # double-count. KB-only gate filters non-KB index leakage. Already
+        # wrapped in its own try/except inside the lane fn — None if disabled
+        # or failed.
         semantic_only_results: list[dict] = []
-        if os.environ.get("SEMANTIC_LANE_ENABLED", "true").lower() != "false":
-            try:
-                with _research_tracer.start_as_current_span("kb_search_semantic") as _span:
-                    _span.set_attribute("eagle.query", (query or "")[:200])
-                    _span.set_attribute("eagle.limit", 15)
-                    semantic_result = exec_semantic_search(
-                        query, tenant_id, limit=15,
-                        user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-                    )
-                    _span.set_attribute("eagle.result_count", len(semantic_result.get("results", [])))
-                for r in semantic_result.get("results", []):
-                    key = r.get("s3_key", "")
-                    if not key or not _is_kb_doc(key):
-                        continue  # semantic lane: KB docs only
-                    stem = _stem(key)
-                    if key not in seen_keys and stem not in seen_stems:
-                        all_results.append(r)
-                        semantic_only_results.append(r)
-                        seen_keys.add(key)
-                        seen_stems.add(stem)
-            except Exception as _sem_exc:
-                logger.warning("research: semantic lane failed, continuing: %s", _sem_exc)
+        if semantic_result is not None:
+            for r in semantic_result.get("results", []):
+                key = r.get("s3_key", "")
+                if not key or not _is_kb_doc(key):
+                    continue  # semantic lane: KB docs only
+                stem = _stem(key)
+                if key not in seen_keys and stem not in seen_stems:
+                    all_results.append(r)
+                    semantic_only_results.append(r)
+                    seen_keys.add(key)
+                    seen_stems.add(stem)
 
         # 1d. Compliance matrix query — adds threshold context, required docs,
         # approval levels. Runs on most research calls (skipped only for design/
