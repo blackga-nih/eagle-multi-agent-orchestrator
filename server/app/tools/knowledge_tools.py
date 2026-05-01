@@ -680,7 +680,12 @@ KNOWLEDGE_FETCH_TOOL = {
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-_AI_RANK_MAX_CANDIDATES = 350  # max items to send to LLM for ranking
+_AI_RANK_MAX_CANDIDATES = 100  # max items to send to LLM for ranking
+# 350 -> 100 (perf): Haiku rerank prompt was ~175KB at 350 candidates, costing
+# 30-60s per call. Deterministic pre-filter (_deterministic_match) reliably
+# narrows to the top-relevant candidates by keyword/title match before AI
+# rerank, so dropping the cap mainly trims tail noise that the AI ranker
+# would deprioritize anyway. Cuts primary-lane latency by ~30s.
 
 
 def _ai_rank_documents(
@@ -813,8 +818,11 @@ def _ai_rank_documents(
         response = bedrock.converse(
             modelId=SEARCH_MODEL_ID,
             messages=[{"role": "user", "content": [{"text": prompt}]}],
-            # Bumped 256 -> 1024 to accommodate per-doc rationales (~30 tokens × 16 docs).
-            inferenceConfig={"maxTokens": 1024, "temperature": 0},
+            # 1024 -> 512 (perf): per-doc rationales cap at ~30 tokens × limit
+            # (default 15) = ~450 tokens of output. 512 gives ~60 token headroom
+            # without risking truncation. Smaller maxTokens reduces Bedrock
+            # response time on the cold-start lane by 5-10s.
+            inferenceConfig={"maxTokens": 512, "temperature": 0},
         )
 
         result_text = response["output"]["message"]["content"][0]["text"].strip()
