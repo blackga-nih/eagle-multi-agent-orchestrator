@@ -193,15 +193,15 @@
     "preview": "/ingest <document description>\nExample: /ingest vendor quote PDF for sequencer"
   },
   {
-    "id": "admin",
-    "command": "/admin",
-    "description": "Ask the system — diagnose errors, check health, query logs",
-    "category": "Admin",
+    "id": "diagnose",
+    "command": "/diagnose",
+    "description": "Diagnose errors, check system health, query traces and logs",
+    "category": "Diagnostics",
     "icon": "Activity",
     "color": "rose",
     "routesTo": "admin-diagnostics",
     "tier": "advanced",
-    "preview": "/admin <query>\nExample: /admin check system health and recent errors"
+    "preview": "/diagnose <query>\nExample: /diagnose check system health and recent errors"
   },
   {
     "id": "admin:skills",

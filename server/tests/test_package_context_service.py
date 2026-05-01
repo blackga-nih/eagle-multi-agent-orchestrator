@@ -328,7 +328,11 @@ class TestDetectPackageFromSession:
         """Returns None when messages have no package_id references."""
         from app.package_context_service import detect_package_from_session
 
-        with mock.patch("app.package_context_service.get_messages", return_value=MESSAGES_WITHOUT_PACKAGE):
+        # Tier A finds nothing; Tier B/C run and also find nothing because
+        # the tenant has no packages and the chat has no PKG-id mentions.
+        with mock.patch("app.package_context_service.get_messages", return_value=MESSAGES_WITHOUT_PACKAGE), \
+             mock.patch("app.package_context_service.list_packages", return_value=[]), \
+             mock.patch("app.package_context_service.list_package_documents", return_value=[]):
             ctx = detect_package_from_session(TENANT, USER, SESSION)
 
         assert ctx is None
@@ -352,6 +356,169 @@ class TestDetectPackageFromSession:
              mock.patch("app.package_context_service.get_package", return_value=MOCK_PACKAGE), \
              mock.patch("app.package_context_service.get_session", return_value=copy.deepcopy(MOCK_SESSION)), \
              mock.patch("app.package_context_service.update_session"):
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is not None
+        assert ctx.package_id == PACKAGE_ID
+
+
+# ---------------------------------------------------------------------------
+# TestDetectPackageRegexFallback — Tier B (PKG-id) and Tier C (titles)
+# ---------------------------------------------------------------------------
+
+
+SECOND_PACKAGE_ID = "PKG-2026-0042"
+SECOND_PACKAGE = {
+    "package_id": SECOND_PACKAGE_ID,
+    "title": "FY26 GenAI Bench Acquisition",
+    "acquisition_pathway": "competitive",
+    "required_documents": ["sow", "igce", "acquisition_plan"],
+    "completed_documents": [],
+    "status": "drafting",
+}
+
+
+class TestDetectPackageRegexFallback:
+    """Detection should fall back to regex over chat text when there are no
+    structured tool blocks. This covers the on-demand 'Detect Package from
+    Chat' button path on the activity panel."""
+
+    def _setup(self, messages, packages, docs_by_pkg, get_pkg_lookup):
+        """Common patches — only get_package needs a per-id side effect."""
+        return [
+            mock.patch("app.package_context_service.get_messages", return_value=messages),
+            mock.patch("app.package_context_service.list_packages", return_value=packages),
+            mock.patch(
+                "app.package_context_service.list_package_documents",
+                side_effect=lambda _t, pid: docs_by_pkg.get(pid, []),
+            ),
+            mock.patch(
+                "app.package_context_service.get_package",
+                side_effect=get_pkg_lookup,
+            ),
+            mock.patch(
+                "app.package_context_service.get_session",
+                return_value=copy.deepcopy(MOCK_SESSION),
+            ),
+            mock.patch("app.package_context_service.update_session"),
+        ]
+
+    def test_detects_package_id_in_plain_user_text(self):
+        """Tier B: assistant's plain-text reply mentions PKG-2026-0042."""
+        from app.package_context_service import detect_package_from_session
+
+        messages = [
+            {"role": "user", "content": "What's the status of my package?"},
+            {
+                "role": "assistant",
+                "content": "Looking at PKG-2026-0042 — it's still in drafting.",
+            },
+        ]
+
+        def get_pkg(_tenant, pid):
+            return SECOND_PACKAGE if pid == SECOND_PACKAGE_ID else None
+
+        patches = self._setup(messages, [SECOND_PACKAGE], {}, get_pkg)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is not None
+        assert ctx.package_id == SECOND_PACKAGE_ID
+
+    def test_ignores_package_id_that_does_not_exist(self):
+        """Tier B should not lock onto a PKG-id that isn't in the store."""
+        from app.package_context_service import detect_package_from_session
+
+        messages = [
+            {"role": "assistant", "content": "Reference: PKG-2099-9999 (typo)"},
+        ]
+
+        patches = self._setup(messages, [], {}, lambda *_: None)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is None
+
+    def test_detects_package_via_document_title(self):
+        """Tier C: assistant references a previously-generated document
+        title without ever mentioning the PKG-id explicitly."""
+        from app.package_context_service import detect_package_from_session
+
+        messages = [
+            {"role": "user", "content": "Update the SOW."},
+            {
+                "role": "assistant",
+                "content": (
+                    "I just regenerated the FY26 GenAI Bench Statement of Work "
+                    "with the new scope language."
+                ),
+            },
+        ]
+        docs = {
+            SECOND_PACKAGE_ID: [
+                {"doc_type": "sow", "title": "FY26 GenAI Bench Statement of Work", "version": 3},
+            ],
+        }
+
+        def get_pkg(_tenant, pid):
+            return SECOND_PACKAGE if pid == SECOND_PACKAGE_ID else None
+
+        patches = self._setup(messages, [SECOND_PACKAGE], docs, get_pkg)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is not None
+        assert ctx.package_id == SECOND_PACKAGE_ID
+
+    def test_most_recent_message_wins_when_two_packages_referenced(self):
+        """If the chat mentions two packages, the latest reference wins so
+        the right-hand panel reflects what the user is currently working on."""
+        from app.package_context_service import detect_package_from_session
+
+        # Older message references PACKAGE_ID, newer references SECOND_PACKAGE_ID.
+        messages = [
+            {"role": "assistant", "content": f"Earlier we worked on {PACKAGE_ID}."},
+            {"role": "user", "content": f"Now show me {SECOND_PACKAGE_ID}."},
+        ]
+
+        def get_pkg(_tenant, pid):
+            return {PACKAGE_ID: MOCK_PACKAGE, SECOND_PACKAGE_ID: SECOND_PACKAGE}.get(pid)
+
+        patches = self._setup(
+            messages, [MOCK_PACKAGE, SECOND_PACKAGE], {}, get_pkg
+        )
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            ctx = detect_package_from_session(TENANT, USER, SESSION)
+
+        assert ctx is not None
+        assert ctx.package_id == SECOND_PACKAGE_ID
+
+    def test_tier_a_still_wins_over_text_match(self):
+        """When a structured tool_use block carries a package_id, it should
+        be preferred over a plain-text mention of a different package."""
+        from app.package_context_service import detect_package_from_session
+
+        messages = [
+            # Tool block points at PACKAGE_ID — highest confidence.
+            {
+                "role": "assistant",
+                "content": json.dumps([
+                    {"type": "tool_use", "id": "tu_1", "name": "generate_document",
+                     "input": {"doc_type": "sow", "package_id": PACKAGE_ID}},
+                ]),
+                "content_type": "list",
+            },
+            # Plain-text mention of a different package — should be ignored.
+            {"role": "assistant", "content": f"Also see {SECOND_PACKAGE_ID}."},
+        ]
+
+        def get_pkg(_tenant, pid):
+            return {PACKAGE_ID: MOCK_PACKAGE, SECOND_PACKAGE_ID: SECOND_PACKAGE}.get(pid)
+
+        patches = self._setup(
+            messages, [MOCK_PACKAGE, SECOND_PACKAGE], {}, get_pkg
+        )
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             ctx = detect_package_from_session(TENANT, USER, SESSION)
 
         assert ctx is not None

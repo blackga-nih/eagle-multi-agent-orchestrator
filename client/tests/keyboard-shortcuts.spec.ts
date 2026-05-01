@@ -81,7 +81,7 @@ test.describe('Keyboard Shortcuts', () => {
       await page.keyboard.press('Control+j');
 
       // Modal title "Send Feedback" should appear
-      await expect(page.getByText('Send Feedback')).toBeVisible({ timeout: 3000 });
+      await expect(page.getByText('What can Eagle improve on?')).toBeVisible({ timeout: 3000 });
     });
 
     test('feedback modal shows type option pills', async ({ page }) => {
@@ -106,21 +106,21 @@ test.describe('Keyboard Shortcuts', () => {
     test('Escape closes the feedback modal', async ({ page }) => {
       await page.goto('/chat/');
       await page.keyboard.press('Control+j');
-      await expect(page.getByText('Send Feedback')).toBeVisible();
+      await expect(page.getByText('What can Eagle improve on?')).toBeVisible();
 
       await page.keyboard.press('Escape');
 
-      await expect(page.getByText('Send Feedback')).not.toBeVisible();
+      await expect(page.getByText('What can Eagle improve on?')).not.toBeVisible();
     });
 
     test('Cancel button closes the feedback modal', async ({ page }) => {
       await page.goto('/chat/');
       await page.keyboard.press('Control+j');
-      await expect(page.getByText('Send Feedback')).toBeVisible();
+      await expect(page.getByText('What can Eagle improve on?')).toBeVisible();
 
       await page.getByRole('button', { name: 'Cancel' }).click();
 
-      await expect(page.getByText('Send Feedback')).not.toBeVisible();
+      await expect(page.getByText('What can Eagle improve on?')).not.toBeVisible();
     });
 
     test('Ctrl+J toggles the feedback modal closed', async ({ page }) => {
@@ -128,11 +128,11 @@ test.describe('Keyboard Shortcuts', () => {
 
       // Open
       await page.keyboard.press('Control+j');
-      await expect(page.getByText('Send Feedback')).toBeVisible();
+      await expect(page.getByText('What can Eagle improve on?')).toBeVisible();
 
       // Close via same shortcut
       await page.keyboard.press('Control+j');
-      await expect(page.getByText('Send Feedback')).not.toBeVisible();
+      await expect(page.getByText('What can Eagle improve on?')).not.toBeVisible();
     });
 
     test('feedback type pills toggle selection', async ({ page }) => {

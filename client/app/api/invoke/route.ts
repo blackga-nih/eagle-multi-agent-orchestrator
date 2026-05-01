@@ -36,8 +36,8 @@ const COMMAND_PROMPTS: Record<string, string> = {
   '/tech-review:specs': 'Review the technical specifications for',
   '/tech-review:508': 'Check Section 508 accessibility compliance for',
   '/ingest': 'Upload and process this document',
-  // Admin
-  '/admin':
+  // Diagnostics
+  '/diagnose':
     '[SYSTEM DIAGNOSTIC MODE] The user is asking about EAGLE system behavior, errors, or performance. ' +
     'For quick questions (capabilities, configuration, how things work), answer directly. ' +
     'For diagnostic questions (errors, slowness, failures, specific sessions), use the langfuse_traces tool ' +

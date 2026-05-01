@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
-import html2canvas from 'html2canvas';
-import { Check, Camera, X } from 'lucide-react';
+import { Check } from 'lucide-react';
 import Modal from '@/components/ui/modal';
 import { useAuth, isDevMode } from '@/contexts/auth-context';
 import { useSession } from '@/contexts/session-context';
@@ -17,15 +16,20 @@ const FEEDBACK_TYPES: { value: FeedbackType; label: string }[] = [
   { value: 'too_verbose', label: 'Too verbose' },
 ];
 
+// Area labels are tuned to recent product surfaces an admin/CO would actually
+// recognise on the screen — chat output, generated docs, package checklist,
+// the KB-backed sources panel, compliance/templates, agent routing, UI, perf.
+// Screenshot capture was removed (firewall blocks html2canvas), so feedback
+// has to lean harder on the right categorisation.
 const FEEDBACK_AREAS: { value: FeedbackArea; label: string }[] = [
-  { value: 'network', label: 'Network' },
-  { value: 'documents', label: 'Documents' },
-  { value: 'knowledge_base', label: 'Knowledge Base' },
-  { value: 'auth', label: 'Auth' },
-  { value: 'streaming', label: 'Streaming' },
-  { value: 'ui', label: 'UI/Display' },
+  { value: 'chat', label: 'Chat & Responses' },
+  { value: 'documents', label: 'Documents (SOW / IGCE / AP)' },
+  { value: 'packages', label: 'Packages & Checklists' },
+  { value: 'knowledge_base', label: 'Knowledge Base & Sources' },
+  { value: 'compliance', label: 'Compliance & Templates' },
+  { value: 'routing', label: 'Agent Routing' },
+  { value: 'ui', label: 'UI / Display' },
   { value: 'performance', label: 'Performance' },
-  { value: 'tools', label: 'Tools' },
 ];
 
 export default function FeedbackModal() {
@@ -36,8 +40,6 @@ export default function FeedbackModal() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [screenshot, setScreenshot] = useState<string | null>(null);
-  const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const pathname = usePathname();
@@ -51,41 +53,6 @@ export default function FeedbackModal() {
     setComment('');
     setError(null);
     setSuccess(false);
-    setScreenshot(null);
-  }, []);
-
-  const captureScreenshot = useCallback(async () => {
-    setCapturingScreenshot(true);
-    try {
-      const canvas = await html2canvas(document.body, {
-        scale: 0.5,
-        logging: false,
-        useCORS: true,
-        windowWidth: document.documentElement.scrollWidth,
-        windowHeight: document.documentElement.scrollHeight,
-      });
-
-      // Cap screenshot to ~500KB base64 to stay well under API body limits.
-      // Start with JPEG at quality 0.6, reduce if still too large.
-      const MAX_SCREENSHOT_BYTES = 500_000;
-      let dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-      if (dataUrl.length > MAX_SCREENSHOT_BYTES) {
-        dataUrl = canvas.toDataURL('image/jpeg', 0.3);
-      }
-      if (dataUrl.length > MAX_SCREENSHOT_BYTES) {
-        // Last resort: scale canvas down further
-        const small = document.createElement('canvas');
-        small.width = Math.round(canvas.width / 2);
-        small.height = Math.round(canvas.height / 2);
-        small.getContext('2d')!.drawImage(canvas, 0, 0, small.width, small.height);
-        dataUrl = small.toDataURL('image/jpeg', 0.4);
-      }
-      setScreenshot(dataUrl);
-    } catch {
-      // Screenshot is best-effort — don't block feedback
-    } finally {
-      setCapturingScreenshot(false);
-    }
   }, []);
 
   // Ctrl+J toggle
@@ -94,24 +61,20 @@ export default function FeedbackModal() {
       if (e.ctrlKey && e.key === 'j') {
         e.preventDefault();
         setIsOpen((prev) => {
-          if (prev) {
-            resetForm();
-          } else {
-            // Capture screenshot before modal renders over the page
-            captureScreenshot();
-          }
+          if (prev) resetForm();
           return !prev;
         });
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [resetForm, captureScreenshot]);
+  }, [resetForm]);
 
-  // Auto-focus textarea when modal opens
+  // Auto-focus textarea so the user is cursor-ready to type the moment the
+  // modal opens. The 50ms tick lets the modal finish its enter animation
+  // before we steal focus.
   useEffect(() => {
     if (isOpen && !success) {
-      // Short delay to let the modal animate in
       const t = setTimeout(() => textareaRef.current?.focus(), 50);
       return () => clearTimeout(t);
     }
@@ -190,7 +153,6 @@ export default function FeedbackModal() {
           page: pathname,
           last_message_id: lastMessageId || undefined,
           conversation_snapshot: trimmedMessages,
-          screenshot: screenshot || undefined,
         }),
       });
 
@@ -230,7 +192,7 @@ export default function FeedbackModal() {
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Send Feedback"
+      title="What can Eagle improve on?"
       size="md"
       footer={
         success ? null : (
@@ -246,7 +208,7 @@ export default function FeedbackModal() {
               disabled={(!comment.trim() && !feedbackType && !feedbackArea) || submitting}
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {submitting ? 'Submitting...' : 'Submit'}
+              {submitting ? 'Sending...' : 'Send feedback'}
             </button>
           </div>
         )
@@ -257,15 +219,16 @@ export default function FeedbackModal() {
           <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
             <Check className="w-6 h-6 text-emerald-600" />
           </div>
-          <p className="text-lg font-semibold text-gray-900">Thanks!</p>
+          <p className="text-lg font-semibold text-gray-900">Thanks — we&apos;re on it.</p>
         </div>
       ) : (
         <div className="space-y-5">
-          {/* Comment */}
+          {/* Comment — auto-focused on open */}
           <div>
             <textarea
               ref={textareaRef}
-              rows={3}
+              autoFocus
+              rows={4}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               onKeyDown={(e) => {
@@ -274,14 +237,16 @@ export default function FeedbackModal() {
                   handleSubmit();
                 }
               }}
-              placeholder="Tell us more... (Ctrl+Enter to submit)"
+              placeholder="What worked well, what felt off, what's missing? (Ctrl+Enter to send)"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             />
           </div>
 
           {/* Type pills */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              How was the response?
+            </label>
             <div className="flex flex-wrap gap-2">
               {FEEDBACK_TYPES.map(({ value, label }) => (
                 <button
@@ -302,7 +267,9 @@ export default function FeedbackModal() {
 
           {/* Area pills */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Area</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Which part of Eagle?
+            </label>
             <div className="flex flex-wrap gap-2">
               {FEEDBACK_AREAS.map(({ value, label }) => (
                 <button
@@ -319,41 +286,6 @@ export default function FeedbackModal() {
                 </button>
               ))}
             </div>
-          </div>
-
-          {/* Screenshot preview */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Screenshot</label>
-            {capturingScreenshot ? (
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Camera className="w-4 h-4 animate-pulse" />
-                <span>Capturing...</span>
-              </div>
-            ) : screenshot ? (
-              <div className="relative inline-block">
-                <img
-                  src={screenshot}
-                  alt="Screenshot preview"
-                  className="max-h-32 rounded border border-gray-200 shadow-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => setScreenshot(null)}
-                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={captureScreenshot}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors"
-              >
-                <Camera className="w-4 h-4" />
-                Capture
-              </button>
-            )}
           </div>
 
           {/* Page badge */}

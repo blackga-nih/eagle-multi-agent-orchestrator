@@ -86,14 +86,14 @@ export type GroupRoleType = 'member' | 'lead' | 'admin';
 export type FeedbackType = 'helpful' | 'inaccurate' | 'incomplete' | 'too_verbose';
 
 export type FeedbackArea =
-  | 'network'
+  | 'chat'
   | 'documents'
+  | 'packages'
   | 'knowledge_base'
-  | 'auth'
-  | 'streaming'
+  | 'compliance'
+  | 'routing'
   | 'ui'
-  | 'performance'
-  | 'tools';
+  | 'performance';
 
 // =============================================================================
 // DOCUMENT TYPE MAPS (shared across components)

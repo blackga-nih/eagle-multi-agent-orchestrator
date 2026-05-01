@@ -11,13 +11,20 @@ Context resolution order:
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Optional
 
 from .session_store import get_messages, get_session, update_session
-from .package_store import get_package
+from .package_store import get_package, list_packages
+from .package_document_store import list_package_documents
 
 logger = logging.getLogger("eagle.package_context")
+
+# Canonical package IDs are PKG-{YYYY}-{NNNN} (see package_store._next_package_id).
+_PACKAGE_ID_PATTERN = re.compile(r"\bPKG-\d{4}-\d{4}\b")
+# Titles shorter than this are too generic to match safely (e.g. "SOW", "v1").
+_MIN_TITLE_MATCH_LEN = 6
 
 
 @dataclass
@@ -206,16 +213,26 @@ def detect_package_from_session(
     user_id: str,
     session_id: str,
 ) -> Optional[PackageContext]:
-    """Scan session messages for tool_result content containing a package_id.
+    """Detect the active package for a chat session by scanning history.
 
-    Finds the most recent package reference in the chat history and sets it
-    as the active package for the session.
+    Detection ladder (most-recent reference wins at each tier):
 
-    Returns:
-        PackageContext if a package was detected and set, None otherwise.
+    A. Structured tool blocks — tool_use/tool_result content blocks whose
+       JSON input/output carries a literal ``package_id`` field. Highest
+       confidence; covers the canonical Anthropic tool-call shape.
+
+    B. Package-ID regex — ``PKG-YYYY-NNNN`` strings appearing anywhere in
+       the flattened chat text. Catches plain-text mentions ("see package
+       PKG-2026-0007") that never went through a structured tool call.
+
+    C. Title regex — package titles and previously-generated document
+       titles (across the tenant's recent packages) appearing in chat
+       text. Catches assistant turns that reference a doc by its title
+       only ("I just generated the *FY26 GenAI Bench SOW*").
+
+    Returns the resolved ``PackageContext`` (and persists it as the
+    session's active package) or ``None`` if nothing matched.
     """
-    import json as _json
-
     messages = get_messages(session_id, tenant_id, user_id, limit=200)
     if not messages:
         logger.debug(
@@ -223,13 +240,35 @@ def detect_package_from_session(
         )
         return None
 
-    # Walk messages in reverse (newest first) looking for package_id references
+    # Tier A: structured tool blocks (existing high-confidence path).
+    pkg_id = _scan_tool_blocks_for_package_id(tenant_id, messages)
+    if pkg_id:
+        return _set_and_return(tenant_id, user_id, session_id, pkg_id)
+
+    # Tiers B + C run over flattened chat text, newest message first so the
+    # *latest* reference wins.
+    pkg_id = _scan_text_for_package(tenant_id, messages)
+    if pkg_id:
+        return _set_and_return(tenant_id, user_id, session_id, pkg_id)
+
+    logger.debug(
+        "detect_package_from_session: no package_id found in session %s", session_id
+    )
+    return None
+
+
+def _scan_tool_blocks_for_package_id(
+    tenant_id: str, messages: list
+) -> Optional[str]:
+    """Tier A: walk messages newest-first looking for tool_use/tool_result
+    blocks that carry a literal ``package_id`` field."""
+    import json as _json
+
     for msg in reversed(messages):
         content = msg.get("content")
         if not content:
             continue
 
-        # Content may be a pre-parsed list or a JSON string
         blocks = content
         if isinstance(content, str):
             try:
@@ -244,30 +283,144 @@ def detect_package_from_session(
         if not isinstance(blocks, list):
             continue
 
-        # Scan content blocks for tool_result with package_id
         for block in blocks:
             if not isinstance(block, dict):
                 continue
 
-            # Check tool_result blocks (Anthropic format)
             if block.get("type") == "tool_result":
                 pkg_id = _extract_package_id(block)
                 if pkg_id:
-                    return _set_and_return(tenant_id, user_id, session_id, pkg_id)
+                    return pkg_id
 
-            # Check tool_use blocks where input contains package_id
             if block.get("type") == "tool_use":
                 inp = block.get("input", {})
                 if isinstance(inp, dict) and inp.get("package_id"):
                     pkg_id = inp["package_id"]
-                    pkg = get_package(tenant_id, pkg_id)
-                    if pkg:
-                        return _set_and_return(tenant_id, user_id, session_id, pkg_id)
+                    if get_package(tenant_id, pkg_id):
+                        return pkg_id
 
-    logger.debug(
-        "detect_package_from_session: no package_id found in session %s", session_id
-    )
     return None
+
+
+def _scan_text_for_package(tenant_id: str, messages: list) -> Optional[str]:
+    """Tiers B + C: regex package-id and title matches over flattened chat
+    text. Walks messages newest-first; first hit wins."""
+    # Build the title → package_id index once (one DDB scan for the tenant's
+    # packages plus one DOCUMENT# query per package). Bounded by the active
+    # tenant's package count, which is small in practice.
+    title_index = _build_title_index(tenant_id)
+
+    for msg in reversed(messages):
+        text = _flatten_message_text(msg)
+        if not text:
+            continue
+
+        # Tier B: explicit package-id mention.
+        match = _PACKAGE_ID_PATTERN.search(text)
+        if match:
+            candidate = match.group(0)
+            if get_package(tenant_id, candidate):
+                return candidate
+
+        # Tier C: package title or document title mention.
+        haystack = text.lower()
+        for needle, pkg_id in title_index:
+            if needle in haystack:
+                return pkg_id
+
+    return None
+
+
+def _build_title_index(tenant_id: str) -> list[tuple[str, str]]:
+    """Return [(lowercase_title, package_id)] for the tenant's packages and
+    their generated documents. Sorted by descending title length so the
+    most specific match wins (substring-style search)."""
+    try:
+        packages = list_packages(tenant_id)
+    except Exception:  # pragma: no cover — defensive against store outages
+        logger.exception("detect_package: list_packages failed for %s", tenant_id)
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    for pkg in packages:
+        pkg_id = pkg.get("package_id")
+        if not pkg_id:
+            continue
+
+        pkg_title = pkg.get("title") or ""
+        if len(pkg_title) >= _MIN_TITLE_MATCH_LEN:
+            pairs.append((pkg_title.lower(), pkg_id))
+
+        try:
+            docs = list_package_documents(tenant_id, pkg_id)
+        except Exception:
+            logger.debug(
+                "detect_package: list_package_documents failed for %s",
+                pkg_id,
+                exc_info=True,
+            )
+            docs = []
+
+        for doc in docs:
+            doc_title = doc.get("title") or ""
+            if len(doc_title) >= _MIN_TITLE_MATCH_LEN:
+                pairs.append((doc_title.lower(), pkg_id))
+
+    # Most specific (longest) needles first — avoids "Package" matching before
+    # "FY26 GenAI Bench SOW v3".
+    pairs.sort(key=lambda p: len(p[0]), reverse=True)
+    return pairs
+
+
+def _flatten_message_text(msg: dict) -> str:
+    """Best-effort extract of human-readable text from a stored message,
+    whether the content is a plain string or an Anthropic content-block list
+    (possibly stored as a JSON string)."""
+    import json as _json
+
+    content = msg.get("content")
+    if not content:
+        return ""
+
+    if isinstance(content, str):
+        # The store may serialise list content as a JSON string. Parse if we
+        # can; otherwise treat it as the user's plain-text message.
+        stripped = content.lstrip()
+        if stripped.startswith("[") or stripped.startswith("{"):
+            try:
+                content = _json.loads(content)
+            except (ValueError, TypeError):
+                return content
+        else:
+            return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+                continue
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "text":
+                parts.append(str(block.get("text", "")))
+            elif block_type == "tool_result":
+                inner = block.get("content")
+                if isinstance(inner, str):
+                    parts.append(inner)
+                elif isinstance(inner, list):
+                    for part in inner:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            parts.append(str(part.get("text", "")))
+        return "\n".join(p for p in parts if p)
+
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+
+    return ""
 
 
 def _extract_package_id(block: dict) -> Optional[str]:
