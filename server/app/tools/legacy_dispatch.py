@@ -24,6 +24,10 @@ from .aws_ops_tools import (
     exec_kb_inventory,
     exec_s3_document_ops,
 )
+from .batch_doc_gen_tools import (
+    exec_batch_generate_documents,
+    exec_get_doc_jobs,
+)
 from .docx_edit_tool import exec_edit_docx_document
 from .far_search import exec_search_far
 from .intake_approval_tools import (
@@ -51,6 +55,8 @@ TOOLS_NEEDING_SESSION = {
     "research",
     "submit_intake_for_approval",
     "confirm_intake_approval",
+    "batch_generate_documents",
+    "get_doc_jobs",
 }
 
 
@@ -95,6 +101,8 @@ def get_tool_dispatch() -> dict[str, ToolHandler]:
         "research": exec_research,
         "submit_intake_for_approval": exec_submit_intake_for_approval,
         "confirm_intake_approval": exec_confirm_intake_approval,
+        "batch_generate_documents": exec_batch_generate_documents,
+        "get_doc_jobs": exec_get_doc_jobs,
     }
 
 

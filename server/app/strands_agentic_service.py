@@ -4705,6 +4705,127 @@ def _build_all_service_tools(
             except Exception:
                 pass
 
+    # ---- 18. batch_generate_documents (PR2.2 — async-shaped batch) ----
+    @tool(name="batch_generate_documents")
+    def batch_generate_documents_tool(
+        package_id: str,
+        doc_types: list[str],
+        title_overrides: dict | None = None,
+        data: dict | None = None,
+    ) -> str:
+        """Generate multiple acquisition documents under one package in a single tool call.
+
+        Prefer this over per-doc create_document calls when you have ≥2
+        missing documents to draft. The tool records each generation as a
+        DOCJOB# (queued → running → done|failed) so progress is observable
+        on every turn via get_doc_jobs(package_id). Today the work runs
+        synchronously inside this call; the API contract is stable for the
+        upcoming SQS+worker swap.
+
+        Args:
+            package_id: Target package (must already be intake-approved).
+            doc_types: List of doc-type slugs to generate, e.g. ["sow", "igce", "acquisition_plan"]. Hard cap at 25 per call.
+            title_overrides: Optional per-doc-type title override.
+            data: Optional shared data dict passed through to each generation call.
+        """
+        set_log_context(**_log_ctx)
+        import time as _time_mod
+
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
+        try:
+            result = tool_dispatch["batch_generate_documents"](
+                {
+                    "package_id": package_id,
+                    "doc_types": doc_types,
+                    "title_overrides": title_overrides or {},
+                    "data": data or {},
+                    "actor_user_id": user_id,
+                },
+                tenant_id,
+                scoped_session_id,
+            )
+            _emit("batch_generate_documents", result)
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            _tool_success = False
+            logger.error(
+                "Service tool batch_generate_documents failed: %s", exc, exc_info=True
+            )
+            return json.dumps({"error": str(exc), "tool": "batch_generate_documents"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "batch_generate_documents",
+                    _tool_dur,
+                    _tool_success,
+                )
+            except Exception:
+                pass
+
+    # ---- 19. get_doc_jobs (PR2.2 — read-back) ----
+    @tool(name="get_doc_jobs")
+    def get_doc_jobs_tool(
+        package_id: str,
+        since_iso: str = "",
+        include_pending: bool = True,
+    ) -> str:
+        """List document-generation jobs for a package.
+
+        Call at the start of a turn to surface freshly-completed work. With
+        since_iso set, returns only jobs that completed at or after that
+        timestamp; otherwise returns all jobs for the package. Pending
+        (queued + running) jobs are returned in a separate list when
+        include_pending=true (default).
+
+        Args:
+            package_id: Target package.
+            since_iso: Optional ISO-8601 timestamp. When set, restricts the recently_completed list to jobs done at or after this time.
+            include_pending: When true (default), also returns queued+running jobs.
+        """
+        set_log_context(**_log_ctx)
+        import time as _time_mod
+
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
+        try:
+            result = tool_dispatch["get_doc_jobs"](
+                {
+                    "package_id": package_id,
+                    "since_iso": since_iso or None,
+                    "include_pending": include_pending,
+                },
+                tenant_id,
+                scoped_session_id,
+            )
+            _emit("get_doc_jobs", result)
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            _tool_success = False
+            logger.error("Service tool get_doc_jobs failed: %s", exc, exc_info=True)
+            return json.dumps({"error": str(exc), "tool": "get_doc_jobs"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "get_doc_jobs",
+                    _tool_dur,
+                    _tool_success,
+                )
+            except Exception:
+                pass
+
     # ---- N. generate_html_playground ----
     @tool(name="generate_html_playground")
     def generate_html_playground_tool(
@@ -4838,6 +4959,8 @@ def _build_all_service_tools(
         manage_package_tool,
         submit_intake_for_approval_tool,
         confirm_intake_approval_tool,
+        batch_generate_documents_tool,
+        get_doc_jobs_tool,
         generate_html_playground_tool,
         *user_doc_tools,
     ]
