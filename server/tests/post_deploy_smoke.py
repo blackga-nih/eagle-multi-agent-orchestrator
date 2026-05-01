@@ -157,6 +157,60 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             ],
         },
     },
+    # ── Intake-approval gate (PR #187 / jolly-snacking-narwhal PR1) ──────
+    # Both scenarios are MEANINGFUL only when EAGLE_INTAKE_GATE_ENABLED=1
+    # is set on the deployed backend. With the flag off, the gate is a
+    # no-op and these scenarios pass via the legacy single-turn path.
+    #
+    # TODO(jolly-snacking-narwhal PR3.2): the harness today reads
+    # scenario["query"] as a single message. The full two-turn flow
+    # (initial ask → "approve" reply → drafting transition) needs a
+    # multi-turn driver. Until then, intake_proposal_emitted asserts the
+    # gate fires on the first turn — which is the load-bearing check.
+    "intake_proposal_emitted": {
+        "label": "Intake gate emits proposal on first turn (PR #187)",
+        "query": (
+            "i need to buy a microscope for the lab. it's around $5,000. "
+            "help me set up the acquisition."
+        ),
+        "expects": {
+            # First turn must fire submit_intake_for_approval and emit the
+            # intake_proposal state_update. It must NOT call create_document
+            # — that's the whole point of the gate.
+            "tool_call_must_include": ["submit_intake_for_approval"],
+            "tool_call_must_not_include": ["create_document"],
+            "state_update_must_include": ["intake_proposal"],
+            # The proposal payload must carry the package_id and a non-
+            # empty summary dict.
+            "intake_proposal_payload_keys": ["package_id", "summary"],
+        },
+    },
+    "slash_bypass": {
+        "label": "Slash-command bypass auto-approves intake (PR #187)",
+        # The /document:* slash auto-creates + auto-approves the package
+        # in a single turn, then runs intake_required_facts gate. If
+        # facts are missing the agent asks; here we provide the title +
+        # value so it can proceed in one turn.
+        "query": '/document:SOW "Genomic sequencer maintenance services, $200K"',
+        "expects": {
+            # Frontend appends [SLASH_BYPASS_INTAKE_APPROVAL] marker; the
+            # supervisor recognises it and runs the bypass path.
+            "user_message_must_contain": ["[SLASH_BYPASS_INTAKE_APPROVAL]"],
+            # The bypass path creates a package + marks intake approved
+            # in a single turn — both via the tool dispatch.
+            "tool_call_must_include": [
+                "manage_package",
+                "confirm_intake_approval",
+            ],
+            # source=slash_bypass should land in the intake_approval_source
+            # field on the resulting package.
+            "intake_approval_source": "slash_bypass",
+            # Eventually create_document fires (assuming required facts
+            # are satisfied or asked-and-answered in the same turn).
+            # Allow either outcome — the gate behavior is the assertion.
+            "package_intake_approved_at_present": True,
+        },
+    },
 }
 
 
