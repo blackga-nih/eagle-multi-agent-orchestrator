@@ -124,9 +124,18 @@ class MultiAgentStreamWriter:
         event = self._create_event(StreamEventType.TEXT, content=content)
         await queue.put(event.to_sse())
 
-    async def write_reasoning(self, queue, reasoning: str):
-        """Emit a REASONING event exposing the agent's chain-of-thought."""
-        event = self._create_event(StreamEventType.REASONING, reasoning=reasoning)
+    async def write_reasoning(self, queue, reasoning: str, block_id: str = ""):
+        """Emit a REASONING event exposing the agent's chain-of-thought.
+
+        ``block_id`` corresponds to Bedrock's ``contentBlockIndex`` for the
+        reasoning block. Frontend uses it to group consecutive deltas into
+        a single thinking-block chip — every distinct ``block_id`` becomes
+        its own chip.
+        """
+        kwargs: Dict[str, Any] = {"reasoning": reasoning}
+        if block_id:
+            kwargs["metadata"] = {"block_id": block_id}
+        event = self._create_event(StreamEventType.REASONING, **kwargs)
         await queue.put(event.to_sse())
 
     async def write_tool_use(

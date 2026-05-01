@@ -9,8 +9,10 @@ import ToolUseDisplay from './tool-use-display';
 import StateChangeCard from './state-change-card';
 import CodeSandboxRenderer from './code-sandbox-renderer';
 import MessageFeedback from './message-feedback';
+import ThinkingChip from './thinking-chip';
 import { ToolCallsByMessageId, TrackedToolCall } from './simple-chat-interface';
 import { CodeResult } from '@/lib/client-tools';
+import { ThinkingBlock } from '@/types/stream';
 
 /** Shared markdown components — defined once, reused across all messages. */
 const mdComponents = {
@@ -113,10 +115,14 @@ interface SimpleMessageListProps {
   toolCallsByMsg?: ToolCallsByMessageId;
   /** State change entries keyed by message ID — populated from SSE metadata events. */
   stateChangesByMsg?: Record<string, import('@/contexts/chat-runtime-context').StateChangeEntry[]>;
+  /** Extended-thinking blocks keyed by message ID — populated from SSE reasoning events. */
+  thinkingBlocksByMsg?: Record<string, ThinkingBlock[]>;
   /** Agent status text shown during model thinking / tool execution. */
   agentStatus?: string | null;
   /** Tool calls for the in-flight streaming message (shown during waiting phase). */
   pendingToolCalls?: TrackedToolCall[];
+  /** Thinking blocks for the in-flight streaming message (shown during waiting phase). */
+  pendingThinkingBlocks?: ThinkingBlock[];
 }
 
 /** Render code sandbox output below a code tool call card, if output exists. */
@@ -168,23 +174,27 @@ function InterleavedContent({
   content,
   toolCalls,
   stateChanges = [],
+  thinkingBlocks = [],
   isStreaming,
   sessionId,
 }: {
   content: string;
   toolCalls: TrackedToolCall[];
   stateChanges?: import('@/contexts/chat-runtime-context').StateChangeEntry[];
+  thinkingBlocks?: ThinkingBlock[];
   isStreaming: boolean;
   sessionId?: string;
 }) {
-  // Merge tool calls and state changes into a single sorted stream by textSnapshotLength
+  // Merge tool calls, state changes, and thinking blocks into a single
+  // sorted stream by textSnapshotLength so all three render in stream order.
   type StreamItem =
     | { kind: 'tool'; tc: TrackedToolCall; snapLen: number }
     | {
         kind: 'state';
         entry: import('@/contexts/chat-runtime-context').StateChangeEntry;
         snapLen: number;
-      };
+      }
+    | { kind: 'thinking'; block: ThinkingBlock; snapLen: number };
 
   const items: StreamItem[] = [
     ...toolCalls.map((tc) => ({ kind: 'tool' as const, tc, snapLen: tc.textSnapshotLength ?? 0 })),
@@ -192,6 +202,11 @@ function InterleavedContent({
       kind: 'state' as const,
       entry,
       snapLen: entry.textSnapshotLength ?? 0,
+    })),
+    ...thinkingBlocks.map((block) => ({
+      kind: 'thinking' as const,
+      block,
+      snapLen: block.textSnapshotLength ?? 0,
     })),
   ].sort((a, b) => a.snapLen - b.snapLen);
 
@@ -251,6 +266,8 @@ function InterleavedContent({
       // CodeOutput renders as a block below the chip group
       const co = <CodeOutput key={`code-${tc.toolUseId}`} tc={tc} />;
       if (tc.toolName === 'code') codeOutputs.push(co);
+    } else if (item.kind === 'thinking') {
+      chipGroup.push(<ThinkingChip key={`think-${item.block.blockId}`} block={item.block} />);
     } else {
       // State change card — render alongside tool chips
       chipGroup.push(
@@ -355,8 +372,10 @@ export default function SimpleMessageList({
   sessionId,
   toolCallsByMsg = {},
   stateChangesByMsg = {},
+  thinkingBlocksByMsg = {},
   agentStatus,
   pendingToolCalls = [],
+  pendingThinkingBlocks = [],
 }: SimpleMessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -414,16 +433,18 @@ export default function SimpleMessageList({
             );
           }
 
-          // Retrieve tool calls and state changes associated with this assistant message
+          // Retrieve tool calls, state changes, and thinking blocks associated with this assistant message
           const toolCalls = toolCallsByMsg[message.id] ?? [];
           const stateChanges = stateChangesByMsg[message.id] ?? [];
+          const thinkingBlocks = thinkingBlocksByMsg[message.id] ?? [];
 
-          // Build interleaved content: text segments and tool/state cards in stream order.
-          // Each tool records textSnapshotLength — how much text existed when
-          // the tool was invoked, letting us split text around tool calls.
+          // Build interleaved content: text segments + tool/state/thinking cards in stream order.
+          // Each tool/state/thinking entry records textSnapshotLength — how much
+          // text existed when it was emitted — letting us split text around them.
           const hasSnapshots =
             (toolCalls.length > 0 && toolCalls.some((tc) => tc.textSnapshotLength != null)) ||
-            stateChanges.length > 0;
+            stateChanges.length > 0 ||
+            thinkingBlocks.length > 0;
 
           return (
             <div key={message.id} className="msg-contain group flex flex-col gap-1.5">
@@ -432,11 +453,12 @@ export default function SimpleMessageList({
               </span>
 
               {hasSnapshots ? (
-                // Interleaved rendering: text → tool → text → tool → text
+                // Interleaved rendering: text → tool/thinking → text → ... in stream order
                 <InterleavedContent
                   content={message.content}
                   toolCalls={toolCalls}
                   stateChanges={stateChanges}
+                  thinkingBlocks={thinkingBlocks}
                   isStreaming={isStreamingThis}
                   sessionId={sessionId}
                 />
@@ -510,10 +532,13 @@ export default function SimpleMessageList({
               Eagle
             </span>
 
-            {/* Pending tool chips — rendered as they arrive from SSE */}
-            {pendingToolCalls.length > 0 && (
+            {/* Pending tool + thinking chips — rendered as they arrive from SSE */}
+            {(pendingToolCalls.length > 0 || pendingThinkingBlocks.length > 0) && (
               <>
                 <div className="flex flex-wrap gap-1.5 mb-2">
+                  {pendingThinkingBlocks.map((block) => (
+                    <ThinkingChip key={`pending-think-${block.blockId}`} block={block} />
+                  ))}
                   {pendingToolCalls.map((tc) => (
                     <ToolUseDisplay
                       key={tc.toolUseId}
@@ -538,7 +563,9 @@ export default function SimpleMessageList({
             {/* Phase-aware status indicator */}
             <WaitingIndicator
               agentStatus={agentStatus}
-              hasToolCalls={pendingToolCalls.length > 0}
+              hasToolCalls={
+                pendingToolCalls.length > 0 || pendingThinkingBlocks.length > 0
+              }
               isActive={isWaitingForFirstToken}
             />
           </div>

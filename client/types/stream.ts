@@ -65,6 +65,26 @@ export interface HandoffInfo {
 }
 
 /**
+ * One discrete extended-thinking block from the model.
+ *
+ * Each block corresponds to a Bedrock `contentBlockIndex` carrying
+ * `reasoningContent`. The frontend aggregates SSE `reasoning` deltas keyed
+ * by `blockId`; new block IDs start a new chip. Subagent block IDs are
+ * prefixed `sub:{parent_name}:` to avoid collision with the supervisor.
+ */
+export interface ThinkingBlock {
+  blockId: string;
+  content: string;
+  status: 'streaming' | 'done';
+  startedAt: number;
+  endedAt?: number;
+  /** Accumulated assistant-text length at block start — used to interleave
+   *  the chip in stream order alongside tool chips. */
+  textSnapshotLength?: number;
+  agentName?: string;
+}
+
+/**
  * A single event in the multi-agent stream.
  *
  * The `agent_id` field is critical for the frontend to:

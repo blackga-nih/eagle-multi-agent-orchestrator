@@ -207,3 +207,35 @@ class TestMultiAgentStreamWriter:
         payload = json.loads(sse[6:].strip())
         assert payload["type"] == "error"
         assert payload["content"] == "something broke"
+
+    @async_test
+    async def test_write_reasoning_no_block_id(self, writer):
+        import asyncio
+        q = asyncio.Queue()
+        await writer.write_reasoning(q, "thinking step 1")
+        sse = await q.get()
+        payload = json.loads(sse[6:].strip())
+        assert payload["type"] == "reasoning"
+        assert payload["reasoning"] == "thinking step 1"
+        # No block_id supplied — metadata should be omitted entirely.
+        assert "metadata" not in payload
+
+    @async_test
+    async def test_write_reasoning_with_block_id(self, writer):
+        import asyncio
+        q = asyncio.Queue()
+        await writer.write_reasoning(q, "second step", block_id="2")
+        sse = await q.get()
+        payload = json.loads(sse[6:].strip())
+        assert payload["type"] == "reasoning"
+        assert payload["reasoning"] == "second step"
+        assert payload["metadata"] == {"block_id": "2"}
+
+    @async_test
+    async def test_write_reasoning_with_subagent_block_id(self, writer):
+        import asyncio
+        q = asyncio.Queue()
+        await writer.write_reasoning(q, "subagent thought", block_id="sub:legal_counsel:0")
+        sse = await q.get()
+        payload = json.loads(sse[6:].strip())
+        assert payload["metadata"]["block_id"] == "sub:legal_counsel:0"

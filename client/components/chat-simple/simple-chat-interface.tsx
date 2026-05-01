@@ -116,6 +116,7 @@ export default function SimpleChatInterface() {
   const streamingMsg = runtime.streamingMessage;
   const toolCallsByMsg = runtime.toolCallsByMsg;
   const stateChangesByMsg = runtime.stateChangesByMsg;
+  const thinkingBlocksByMsg = runtime.thinkingBlocksByMsg;
   const agentStatus = runtime.agentStatus;
   const isStreaming = runtime.isStreaming;
 
@@ -938,9 +939,15 @@ export default function SimpleChatInterface() {
             sessionId={currentSessionId}
             toolCallsByMsg={toolCallsByMsg}
             stateChangesByMsg={stateChangesByMsg}
+            thinkingBlocksByMsg={thinkingBlocksByMsg}
             agentStatus={agentStatus}
             pendingToolCalls={
               runtime.streamingMessageId ? (toolCallsByMsg[runtime.streamingMessageId] ?? []) : []
+            }
+            pendingThinkingBlocks={
+              runtime.streamingMessageId
+                ? (thinkingBlocksByMsg[runtime.streamingMessageId] ?? [])
+                : []
             }
           />
         )}

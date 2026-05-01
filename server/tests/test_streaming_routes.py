@@ -252,3 +252,66 @@ class TestToolUsePassthrough:
         tool_uses = [e for e in events if e.get("type") == "tool_use"]
         assert len(tool_uses) == 1
         assert tool_uses[0]["tool_use"]["tool_use_id"] == "tu-abc-123"
+
+
+class TestReasoningPassthrough:
+    """The reasoning chunk → SSE pipeline must thread block_id so the
+    frontend can group consecutive deltas into one ThinkingChip per block."""
+
+    @async_test
+    async def test_reasoning_block_id_passed_through(self):
+        from app.streaming_routes import stream_generator
+
+        async def fake_sdk(**kwargs):
+            yield {"type": "reasoning", "data": "step 1...", "block_id": "0"}
+            yield {"type": "reasoning", "data": " continued", "block_id": "0"}
+            yield {"type": "reasoning", "data": "new thought", "block_id": "2"}
+            yield {"type": "text", "data": "done"}
+            yield {"type": "complete", "text": "done", "tools_called": [], "usage": {}}
+
+        with patch("app.streaming_routes.sdk_query_streaming", fake_sdk), \
+             patch("app.streaming_routes.add_message"):
+            lines = await _collect_stream(stream_generator(
+                message="q",
+                tenant_id="t",
+                user_id="u",
+                tier="advanced",
+                subscription_service=None,
+                session_id="s",
+            ))
+
+        events = _parse_sse_events(lines)
+        reasoning_events = [e for e in events if e.get("type") == "reasoning"]
+        assert len(reasoning_events) == 3
+        assert [e["metadata"]["block_id"] for e in reasoning_events] == ["0", "0", "2"]
+        assert reasoning_events[0]["reasoning"] == "step 1..."
+
+    @async_test
+    async def test_reasoning_without_block_id_omits_metadata(self):
+        """Legacy chunks without block_id should still flow through
+        (back-compat for subagent paths and older event sources)."""
+        from app.streaming_routes import stream_generator
+
+        async def fake_sdk(**kwargs):
+            yield {"type": "reasoning", "data": "untagged thought"}
+            yield {"type": "complete", "text": "", "tools_called": [], "usage": {}}
+
+        with patch("app.streaming_routes.sdk_query_streaming", fake_sdk), \
+             patch("app.streaming_routes.add_message"):
+            lines = await _collect_stream(stream_generator(
+                message="q",
+                tenant_id="t",
+                user_id="u",
+                tier="advanced",
+                subscription_service=None,
+                session_id="s",
+            ))
+
+        events = _parse_sse_events(lines)
+        reasoning_events = [e for e in events if e.get("type") == "reasoning"]
+        assert len(reasoning_events) == 1
+        # metadata block_id is omitted when not supplied — frontend treats
+        # this as a single rolling block.
+        assert "metadata" not in reasoning_events[0] or "block_id" not in (
+            reasoning_events[0].get("metadata") or {}
+        )

@@ -515,6 +515,8 @@ _SUPERVISOR_MAX_TOKENS = int(os.getenv("EAGLE_SUPERVISOR_MAX_TOKENS", "32000"))
 # Ceiling for the one-shot retry on MaxTokensReachedException — doubles the base
 # budget, capped at Sonnet 4.6's 64k standard output max.
 _SUPERVISOR_MAX_TOKENS_CEILING = int(os.getenv("EAGLE_SUPERVISOR_MAX_TOKENS_CEILING", "64000"))
+_THINKING_ENABLED = os.getenv("EAGLE_THINKING_ENABLED", "false").lower() == "true"
+_THINKING_BUDGET_TOKENS = int(os.getenv("EAGLE_THINKING_BUDGET_TOKENS", "4000"))
 for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
     _kwargs: dict[str, Any] = dict(
         model_id=_mid,
@@ -524,6 +526,15 @@ for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
     )
     _kwargs["cache_tools"] = "default"
     _kwargs["cache_config"] = CacheConfig(strategy="auto")
+    if _THINKING_ENABLED:
+        # Bedrock Converse extended thinking — yields reasoningContent deltas
+        # that flow through the existing reasoning SSE pipeline. Strands
+        # forwards this dict as additionalModelRequestFields. When tool_choice
+        # forces a tool, Strands strips the "thinking" key automatically
+        # (see BedrockModel._get_additional_request_fields).
+        _kwargs["additional_request_fields"] = {
+            "thinking": {"type": "enabled", "budget_tokens": _THINKING_BUDGET_TOKENS}
+        }
     _bedrock_models[_mid] = BedrockModel(**_kwargs)
 
 # Backward-compat alias
@@ -2961,7 +2972,23 @@ class _SubagentEventForwarder:
         # --- Reasoning / extended thinking ---
         reasoning = kwargs.get("reasoningText")
         if reasoning and isinstance(reasoning, str):
-            self._push({"type": "reasoning", "data": reasoning})
+            # Pull contentBlockIndex from the raw event when present, and
+            # namespace by parent so subagent block IDs never collide with
+            # the supervisor's. Frontend uses block_id to group consecutive
+            # deltas into a single thinking chip.
+            _block_idx = None
+            if isinstance(event, dict):
+                _block_idx = event.get("contentBlockDelta", {}).get(
+                    "contentBlockIndex"
+                )
+            block_id = (
+                f"sub:{self.parent_name}:{_block_idx}"
+                if _block_idx is not None
+                else ""
+            )
+            self._push(
+                {"type": "reasoning", "data": reasoning, "block_id": block_id}
+            )
 
 
 def _make_subagent_tool(
@@ -7688,11 +7715,20 @@ async def sdk_query_streaming(
 
             # --- Reasoning / extended thinking + tool input deltas ---
             if isinstance(raw_event, dict):
-                delta = raw_event.get("contentBlockDelta", {}).get("delta", {})
+                _cbd = raw_event.get("contentBlockDelta", {})
+                delta = _cbd.get("delta", {})
                 reasoning_text = delta.get("reasoningContent", {}).get("text", "")
                 if reasoning_text:
                     _first_content_received = True
-                    yield {"type": "reasoning", "data": reasoning_text}
+                    # contentBlockIndex groups consecutive deltas — frontend
+                    # uses block_id to render one chip per Bedrock thinking
+                    # block (multiple chips when interleaved with tool use).
+                    _block_idx = _cbd.get("contentBlockIndex")
+                    yield {
+                        "type": "reasoning",
+                        "data": reasoning_text,
+                        "block_id": str(_block_idx) if _block_idx is not None else "",
+                    }
                     continue
                 # Tool input delta — model composing tool parameters
                 tool_input_text = delta.get("toolUse", {}).get("input", "")
@@ -7966,9 +8002,15 @@ async def sdk_query_streaming(
                             continue
                         fb_raw = fb_event.get("event", {})
                         if isinstance(fb_raw, dict):
-                            fb_reasoning = fb_raw.get("contentBlockDelta", {}).get("delta", {}).get("reasoningContent", {}).get("text", "")
+                            fb_cbd = fb_raw.get("contentBlockDelta", {})
+                            fb_reasoning = fb_cbd.get("delta", {}).get("reasoningContent", {}).get("text", "")
                             if fb_reasoning:
-                                yield {"type": "reasoning", "data": fb_reasoning}
+                                fb_block_idx = fb_cbd.get("contentBlockIndex")
+                                yield {
+                                    "type": "reasoning",
+                                    "data": fb_reasoning,
+                                    "block_id": str(fb_block_idx) if fb_block_idx is not None else "",
+                                }
                                 continue
                         fb_tool = fb_event.get("current_tool_use")
                         if fb_tool and isinstance(fb_tool, dict):

@@ -350,8 +350,11 @@ async def stream_generator(
 
             elif chunk_type == "reasoning":
                 reasoning_data = chunk.get("data", "")
+                block_id = chunk.get("block_id", "")
                 if reasoning_data:
-                    await writer.write_reasoning(sse_queue, reasoning_data)
+                    await writer.write_reasoning(
+                        sse_queue, reasoning_data, block_id=block_id
+                    )
                     yield await sse_queue.get()
 
             elif chunk_type == "tool_input_delta":

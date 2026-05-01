@@ -463,7 +463,22 @@ export class ChatStreamManager {
         });
       }
       if (event.type === 'reasoning') {
-        dispatch({ type: 'generation/status', sessionId, requestId, status: 'Reasoning...' });
+        // Aggregate consecutive reasoning deltas keyed by block_id from the
+        // backend. Each unique block_id renders as its own ThinkingChip
+        // (one per Bedrock contentBlockIndex). Empty block_id (legacy
+        // sessions or paths without index threading) falls back to a single
+        // rolling block per message.
+        const blockId = (event.metadata?.block_id as string | undefined) || 'block:default';
+        dispatch({
+          type: 'generation/thinkingDelta',
+          sessionId,
+          requestId,
+          msgId: streamingMsgId,
+          blockId,
+          delta: event.reasoning ?? '',
+          textSnapshotLength: accumulatedText.length,
+          agentName: event.agent_name,
+        });
       }
       if (event.type === 'handoff' && event.metadata) {
         const target = String(event.metadata.target_agent ?? 'specialist');

@@ -12,6 +12,7 @@ const IDLE_STATE: SessionGenerationState = {
   toolCallsByMsg: {},
   documentsByMsg: {},
   stateChangesByMsg: {},
+  thinkingBlocksByMsg: {},
   agentStatus: null,
   error: null,
   completedMessage: null,

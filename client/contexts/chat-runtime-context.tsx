@@ -7,6 +7,9 @@ import {
   ToolCallsByMessageId,
 } from '@/components/chat-simple/simple-chat-interface';
 import { SourceRow } from '@/components/chat-simple/sources-breakdown';
+import { ThinkingBlock } from '@/types/stream';
+
+export type ThinkingBlocksByMessageId = Record<string, ThinkingBlock[]>;
 
 // ---------------------------------------------------------------------------
 // State change entries (package state updates rendered inline in chat)
@@ -54,6 +57,7 @@ export interface SessionGenerationState {
   toolCallsByMsg: ToolCallsByMessageId;
   documentsByMsg: Record<string, DocumentInfo[]>;
   stateChangesByMsg: Record<string, StateChangeEntry[]>;
+  thinkingBlocksByMsg: ThinkingBlocksByMessageId;
   agentStatus: string | null;
   error: string | null;
   /** Set once on generation/complete — the final committed message.
@@ -71,6 +75,7 @@ const IDLE_SESSION: Omit<SessionGenerationState, 'sessionId'> = {
   toolCallsByMsg: {},
   documentsByMsg: {},
   stateChangesByMsg: {},
+  thinkingBlocksByMsg: {},
   agentStatus: null,
   error: null,
   completedMessage: null,
@@ -128,6 +133,16 @@ export type ChatRuntimeAction =
       stateChange: StateChangeEntry;
     }
   | {
+      type: 'generation/thinkingDelta';
+      sessionId: string;
+      requestId: string;
+      msgId: string;
+      blockId: string;
+      delta: string;
+      textSnapshotLength: number;
+      agentName?: string;
+    }
+  | {
       type: 'generation/complete';
       sessionId: string;
       requestId: string;
@@ -142,6 +157,7 @@ export type ChatRuntimeAction =
       toolCallsByMsg: ToolCallsByMessageId;
       stateChangesByMsg: Record<string, StateChangeEntry[]>;
       documentsByMsg: Record<string, DocumentInfo[]>;
+      thinkingBlocksByMsg?: ThinkingBlocksByMessageId;
     };
 
 // ---------------------------------------------------------------------------
@@ -150,6 +166,26 @@ export type ChatRuntimeAction =
 
 /** Force any non-terminal tool call to the given terminal status.
  *  Prevents "Writing..." indicators from persisting after stream ends. */
+function sweepStreamingThinking(
+  thinkingBlocksByMsg: ThinkingBlocksByMessageId,
+): ThinkingBlocksByMessageId {
+  let changed = false;
+  const swept: ThinkingBlocksByMessageId = {};
+  const now = Date.now();
+  for (const [msgId, blocks] of Object.entries(thinkingBlocksByMsg)) {
+    const hasStreaming = blocks.some((b) => b.status === 'streaming');
+    if (hasStreaming) {
+      changed = true;
+      swept[msgId] = blocks.map((b) =>
+        b.status === 'streaming' ? { ...b, status: 'done' as const, endedAt: now } : b,
+      );
+    } else {
+      swept[msgId] = blocks;
+    }
+  }
+  return changed ? swept : thinkingBlocksByMsg;
+}
+
 function sweepStuckTools(
   toolCallsByMsg: ToolCallsByMessageId,
   terminalStatus: 'done' | 'error',
@@ -286,6 +322,7 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
           toolCallsByMsg: session.toolCallsByMsg,
           documentsByMsg: session.documentsByMsg,
           stateChangesByMsg: session.stateChangesByMsg,
+          thinkingBlocksByMsg: session.thinkingBlocksByMsg,
           activeRequestId: action.requestId,
           status: 'streaming',
           streamingMessageId: action.streamingMsgId,
@@ -428,10 +465,52 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
       };
     }
 
+    case 'generation/thinkingDelta': {
+      const blocks = session.thinkingBlocksByMsg[action.msgId] ?? [];
+      const idx = blocks.findIndex((b) => b.blockId === action.blockId);
+      const now = Date.now();
+      let updated: ThinkingBlock[];
+      if (idx === -1) {
+        // New block — mark any prior streaming blocks for this msg as done.
+        const closedPrior = blocks.map((b) =>
+          b.status === 'streaming' ? { ...b, status: 'done' as const, endedAt: now } : b,
+        );
+        updated = [
+          ...closedPrior,
+          {
+            blockId: action.blockId,
+            content: action.delta,
+            status: 'streaming',
+            startedAt: now,
+            textSnapshotLength: action.textSnapshotLength,
+            agentName: action.agentName,
+          },
+        ];
+      } else {
+        updated = blocks.slice();
+        updated[idx] = {
+          ...updated[idx],
+          content: updated[idx].content + action.delta,
+        };
+      }
+      return {
+        ...state,
+        [sessionId]: {
+          ...session,
+          thinkingBlocksByMsg: {
+            ...session.thinkingBlocksByMsg,
+            [action.msgId]: updated,
+          },
+        },
+      };
+    }
+
     case 'generation/complete': {
       // Sweep stuck tools: force any tool not in a terminal state to 'done'
       // so "Writing..." indicators don't persist after the stream ends.
       const completedTools = sweepStuckTools(session.toolCallsByMsg, 'done');
+      // Mark any still-streaming thinking blocks as done.
+      const completedThinking = sweepStreamingThinking(session.thinkingBlocksByMsg);
       return {
         ...state,
         [sessionId]: {
@@ -442,12 +521,14 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
           agentStatus: null,
           completedMessage: action.finalMessage ?? session.streamingMessage ?? null,
           toolCallsByMsg: completedTools,
+          thinkingBlocksByMsg: completedThinking,
         },
       };
     }
 
     case 'generation/error': {
       const errorTools = sweepStuckTools(session.toolCallsByMsg, 'error');
+      const finishedThinking = sweepStreamingThinking(session.thinkingBlocksByMsg);
       return {
         ...state,
         [sessionId]: {
@@ -457,6 +538,7 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
           streamingMessage: null,
           agentStatus: null,
           toolCallsByMsg: errorTools,
+          thinkingBlocksByMsg: finishedThinking,
         },
       };
     }
@@ -503,6 +585,18 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
       for (const [msgId, docs] of Object.entries(action.documentsByMsg)) {
         mergedDocs[msgId] = dedupeDocuments([...(mergedDocs[msgId] ?? []), ...docs]);
       }
+      const mergedThinking: ThinkingBlocksByMessageId = { ...session.thinkingBlocksByMsg };
+      if (action.thinkingBlocksByMsg) {
+        for (const [msgId, blocks] of Object.entries(action.thinkingBlocksByMsg)) {
+          // Dedupe by blockId — restored blocks override in-memory ones with same ID.
+          const byId = new Map<string, ThinkingBlock>();
+          for (const b of mergedThinking[msgId] ?? []) byId.set(b.blockId, b);
+          for (const b of blocks) byId.set(b.blockId, b);
+          mergedThinking[msgId] = Array.from(byId.values()).sort(
+            (a, b) => (a.textSnapshotLength ?? 0) - (b.textSnapshotLength ?? 0),
+          );
+        }
+      }
       return {
         ...state,
         [sessionId]: {
@@ -510,6 +604,7 @@ function chatRuntimeReducer(state: ChatRuntimeState, action: ChatRuntimeAction):
           toolCallsByMsg: mergedTools,
           stateChangesByMsg: mergedStateChanges,
           documentsByMsg: mergedDocs,
+          thinkingBlocksByMsg: mergedThinking,
         },
       };
     }
