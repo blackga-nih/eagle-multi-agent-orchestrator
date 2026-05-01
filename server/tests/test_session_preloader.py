@@ -168,6 +168,43 @@ class TestFormatContextForPrompt:
         result = format_context_for_prompt(ctx)
         assert "Missing: none" in result
 
+    # ── Phase banner (intake-approval gate, PR1.5) ────────────────────────
+
+    def test_phase_banner_intake_closed_when_status_intake_no_approval(self):
+        """status=intake + no intake_approved_at → banner says gate CLOSED."""
+        pkg = {**MOCK_PACKAGE, "status": "intake", "intake_approved_at": None}
+        ctx = PreloadedContext(package=pkg, checklist=MOCK_CHECKLIST)
+        result = format_context_for_prompt(ctx)
+        assert "PHASE: INTAKE" in result
+        assert "gate is CLOSED" in result
+        assert "submit_intake_for_approval" in result
+        assert "confirm_intake_approval" in result
+
+    def test_phase_banner_drafting_open_when_intake_approved(self):
+        pkg = {
+            **MOCK_PACKAGE,
+            "status": "drafting",
+            "intake_approved_at": "2026-05-01T15:00:00+00:00",
+            "intake_approval_source": "user_confirmation",
+        }
+        ctx = PreloadedContext(package=pkg, checklist=MOCK_CHECKLIST)
+        result = format_context_for_prompt(ctx)
+        assert "PHASE: DRAFTING" in result
+        assert "gate is OPEN" in result
+        assert "user_confirmation" in result
+
+    def test_phase_banner_legacy_backfill_marks_open_with_source(self):
+        pkg = {
+            **MOCK_PACKAGE,
+            "status": "drafting",
+            "intake_approved_at": "2026-03-15T09:30:00+00:00",
+            "intake_approval_source": "legacy_backfill",
+        }
+        ctx = PreloadedContext(package=pkg, checklist=MOCK_CHECKLIST)
+        result = format_context_for_prompt(ctx)
+        assert "gate is OPEN" in result
+        assert "legacy_backfill" in result
+
 
 # ---------------------------------------------------------------------------
 # preload_session_context

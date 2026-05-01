@@ -4537,6 +4537,174 @@ def _build_all_service_tools(
             except Exception:
                 pass
 
+    # ---- 16. submit_intake_for_approval (intake gate, PR1.2) ----
+    @tool(name="submit_intake_for_approval")
+    def submit_intake_for_approval_tool(
+        package_id: str,
+        summary: dict | None = None,
+    ) -> str:
+        """Snapshot the proposed package scaffolding for user confirmation.
+
+        Call this when intake feels complete and you have enough information
+        to propose the package definition. Pass `summary` as a dict with the
+        scaffolding the user should approve: requirement_description,
+        requirement_type, estimated_value, contract_vehicle, acquisition_method,
+        contract_type, required_documents, key_facts.
+
+        After this call returns, present the proposed summary to the user
+        in your chat reply and ask them to approve or revise. Then on the
+        NEXT user turn, call confirm_intake_approval(package_id, user_response)
+        with whatever they replied.
+
+        Args:
+            package_id: Package ID (must already exist; create via manage_package first)
+            summary: Proposed scaffolding dict the user is about to approve
+        """
+        set_log_context(**_log_ctx)
+        import time as _time_mod
+
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
+        try:
+            result = tool_dispatch["submit_intake_for_approval"](
+                {"package_id": package_id, "summary": summary or {}},
+                tenant_id,
+                scoped_session_id,
+            )
+            _emit("submit_intake_for_approval", result)
+
+            # Emit SSE state_update so the frontend can render the
+            # intake_proposal card showing the user what they're about
+            # to approve. Only fires on the success path.
+            if (
+                result_queue
+                and loop
+                and isinstance(result, dict)
+                and result.get("status") == "intake_proposed"
+            ):
+                loop.call_soon_threadsafe(
+                    result_queue.put_nowait,
+                    {
+                        "type": "state_update",
+                        "state_type": "intake_proposal",
+                        "package_id": result.get("package_id"),
+                        "summary": result.get("intake_proposed_summary") or {},
+                    },
+                )
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            _tool_success = False
+            logger.error(
+                "Service tool submit_intake_for_approval failed: %s", exc, exc_info=True
+            )
+            return json.dumps({"error": str(exc), "tool": "submit_intake_for_approval"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "submit_intake_for_approval",
+                    _tool_dur,
+                    _tool_success,
+                )
+            except Exception:
+                pass
+
+    # ---- 17. confirm_intake_approval (intake gate, PR1.2) ----
+    @tool(name="confirm_intake_approval")
+    def confirm_intake_approval_tool(
+        package_id: str,
+        user_response: str,
+        source: str = "user_confirmation",
+    ) -> str:
+        """Classify the user's reply and stamp the intake-approval gate.
+
+        Call this on the turn AFTER you presented the proposed scaffolding
+        via submit_intake_for_approval. Pass the user's free-form reply as
+        `user_response`; this tool classifies it as approve, revise, decline,
+        or unclear and acts accordingly.
+
+        On approve: stamps intake_approved_at, transitions intake → drafting.
+        After this returns decision="approve", you may call create_document.
+
+        On revise: returns the existing proposed summary plus the user's
+        revision text. Apply the user's changes and call
+        submit_intake_for_approval again with the updated summary.
+
+        On decline / unclear: do NOT generate any document. Ask the user
+        explicitly what they want to do next.
+
+        Args:
+            package_id: Package being approved
+            user_response: The user's most recent free-form reply
+            source: "user_confirmation" (default) or "slash_bypass" for
+                    /document:* auto-approval flows
+        """
+        set_log_context(**_log_ctx)
+        import time as _time_mod
+
+        _tool_t0 = _time_mod.perf_counter()
+        _tool_success = True
+        try:
+            result = tool_dispatch["confirm_intake_approval"](
+                {
+                    "package_id": package_id,
+                    "user_response": user_response,
+                    "source": source,
+                    "actor_user_id": user_id,
+                },
+                tenant_id,
+                scoped_session_id,
+            )
+            _emit("confirm_intake_approval", result)
+
+            # Emit SSE state_update on approve so the frontend can clear
+            # the intake_proposal card and surface "intake approved →
+            # drafting" feedback to the user.
+            if (
+                result_queue
+                and loop
+                and isinstance(result, dict)
+                and result.get("decision") == "approve"
+            ):
+                loop.call_soon_threadsafe(
+                    result_queue.put_nowait,
+                    {
+                        "type": "state_update",
+                        "state_type": "intake_approved",
+                        "package_id": result.get("package_id"),
+                        "intake_approved_at": result.get("intake_approved_at"),
+                        "status": result.get("status"),
+                        "source": source,
+                    },
+                )
+            return json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            _tool_success = False
+            logger.error(
+                "Service tool confirm_intake_approval failed: %s", exc, exc_info=True
+            )
+            return json.dumps({"error": str(exc), "tool": "confirm_intake_approval"})
+        finally:
+            _tool_dur = int((_time_mod.perf_counter() - _tool_t0) * 1000)
+            try:
+                from .telemetry.cloudwatch_emitter import emit_tool_completed
+
+                emit_tool_completed(
+                    tenant_id,
+                    user_id,
+                    session_id or "",
+                    "confirm_intake_approval",
+                    _tool_dur,
+                    _tool_success,
+                )
+            except Exception:
+                pass
+
     # ---- N. generate_html_playground ----
     @tool(name="generate_html_playground")
     def generate_html_playground_tool(
@@ -4668,6 +4836,8 @@ def _build_all_service_tools(
         langfuse_traces_tool,
         query_compliance_matrix_tool,
         manage_package_tool,
+        submit_intake_for_approval_tool,
+        confirm_intake_approval_tool,
         generate_html_playground_tool,
         *user_doc_tools,
     ]

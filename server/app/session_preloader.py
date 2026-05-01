@@ -234,12 +234,39 @@ def format_context_for_prompt(
                 attachment_lines.append(line)
         attachment_str = "\n    - ".join(attachment_lines)
 
+        # Intake-approval gate banner — surfaces the load-bearing state
+        # from package_store so the supervisor can pick the right phase
+        # behavior without re-deriving from status alone.
+        intake_approved_at = pkg.get("intake_approved_at")
+        intake_approval_source = pkg.get("intake_approval_source") or "—"
+        if status == "intake" and not intake_approved_at:
+            phase_banner = (
+                "  PHASE: INTAKE — gate is CLOSED. DO NOT call create_document. "
+                "Collect intake info, then call submit_intake_for_approval, "
+                "present the proposed summary in chat, and wait for the user's "
+                "approve/revise reply to call confirm_intake_approval."
+            )
+        elif intake_approved_at:
+            phase_banner = (
+                f"  PHASE: DRAFTING — gate is OPEN "
+                f"(approved_at={intake_approved_at}, source={intake_approval_source}). "
+                "create_document is unlocked; default to action."
+            )
+        else:
+            # status drafting+ but no approval — should be impossible after
+            # _serialize backfill, but keep a safe fallback message.
+            phase_banner = (
+                f"  PHASE: {status.upper()} — intake_approved_at missing. "
+                "Treat as gate-open per the legacy_backfill rule, but flag this in logs."
+            )
+
         parts.append(
             f'Active Package: {pkg_id} "{title}" ({pathway}, ${value})\n'
             f"  Completed: {completed_str}\n"
             f"  Missing: {missing_str}\n"
             f"  Source Attachments: {attachment_str if attachment_items else attachment_lines[0]}\n"
-            f"  Status: {status}"
+            f"  Status: {status}\n"
+            f"{phase_banner}"
         )
 
     if not parts:

@@ -945,6 +945,38 @@ export default function SimpleChatInterface() {
           />
         )}
 
+        {/* Intake-approval proposal card — surfaces when supervisor calls
+            submit_intake_for_approval. The user replies in chat to approve
+            or revise; clears automatically once confirm_intake_approval
+            fires with decision=approve. */}
+        {packageState.intakeProposal && (
+          <div className="bg-amber-50 border-t border-b border-amber-200 px-6 py-3 shrink-0">
+            <div className="max-w-4xl mx-auto">
+              <div className="flex items-start gap-2 mb-2">
+                <span className="text-amber-700 font-medium text-sm">
+                  ⏸ Approval needed before drafting
+                </span>
+                <span className="ml-auto text-xs text-amber-600 font-mono">
+                  {packageState.intakeProposal.packageId}
+                </span>
+              </div>
+              <p className="text-xs text-gray-700 mb-2">
+                EAGLE has prepared an intake summary for your acquisition. Review the
+                proposed scaffolding below and reply <strong>approve</strong>,{' '}
+                <strong>revise</strong> (with changes), or <strong>cancel</strong>.
+              </p>
+              <details className="text-xs">
+                <summary className="cursor-pointer text-amber-800 hover:text-amber-900 select-none">
+                  View proposed package definition
+                </summary>
+                <pre className="mt-2 p-2 bg-white border border-amber-100 rounded overflow-x-auto text-[11px] leading-relaxed">
+                  {JSON.stringify(packageState.intakeProposal.summary, null, 2)}
+                </pre>
+              </details>
+            </div>
+          </div>
+        )}
+
         {/* Input footer */}
         <footer className="bg-white border-t border-[#D8DEE6] px-6 py-3 shrink-0">
           <div className="max-w-4xl mx-auto">

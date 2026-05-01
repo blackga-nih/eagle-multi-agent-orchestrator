@@ -71,6 +71,17 @@ def _is_low_signal_title_context(text: str) -> bool:
     return bool(_LOW_SIGNAL_TITLE_CONTEXT_RE.search(cleaned))
 
 
+def _intake_gate_enabled() -> bool:
+    """Feature flag for the intake-approval gate (PR1 of the gate plan).
+
+    Off by default while the approval-side primitives ship incrementally;
+    flip on once submit/confirm tools and supervisor prompt sections are
+    in place. Read on every call so tests can flip the env var with
+    ``monkeypatch.setenv`` without re-importing the module.
+    """
+    return os.getenv("EAGLE_INTAKE_GATE_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _title_from_context(title: str, doc_type: str, data: dict) -> str:
     """Enrich a fallback title using session context from enriched data.
 
@@ -194,6 +205,44 @@ def exec_create_document(
         doc_type
     )
     timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+    # ── Intake-approval gate (PR1.3 of jolly-snacking-narwhal plan) ──
+    # When EAGLE_INTAKE_GATE_ENABLED=1, refuse any package-scoped doc
+    # generation until the package's intake has been approved (either by
+    # the user via mark_intake_approved, or via slash-bypass auto-approve,
+    # or via the legacy_backfill read-time synthesis for in-flight pkgs).
+    # The flag defaults OFF so this commit is behavior-neutral until the
+    # approval tools (PR1.2) and supervisor wiring (PR1.5) are also in.
+    if package_id and _intake_gate_enabled():
+        from app.package_store import get_package as _get_package
+
+        _pkg_for_gate = _get_package(tenant_id, package_id)
+        if _pkg_for_gate is None:
+            return {
+                "error": "package_not_found",
+                "tool": "create_document",
+                "package_id": package_id,
+                "message": (
+                    f"Package {package_id} does not exist. Create it via "
+                    "manage_package(operation='create', ...) first."
+                ),
+            }
+        if not _pkg_for_gate.get("intake_approved_at"):
+            return {
+                "error": "intake_not_approved",
+                "tool": "create_document",
+                "package_id": package_id,
+                "package_status": _pkg_for_gate.get("status"),
+                "message": (
+                    "Intake has not been approved for this package. Call "
+                    "submit_intake_for_approval(package_id, summary) to "
+                    "present the proposed scaffolding to the user, then "
+                    "wait for their reply. After they confirm, call "
+                    "confirm_intake_approval(package_id, user_response) "
+                    "to stamp the gate. Do NOT generate any document "
+                    "until intake_approved_at is populated."
+                ),
+            }
 
     # Augment data from session context
     data = _augment_document_data_from_context(doc_type, title, data, session_id)

@@ -49,6 +49,14 @@ export interface ComplianceItem {
   note: string;
 }
 
+/** Pending intake-approval proposal — supervisor surfaces this for the
+ *  user to approve in chat. Cleared once the user approves. */
+export interface IntakeProposal {
+  packageId: string;
+  summary: Record<string, unknown>;
+  proposedAt: Date;
+}
+
 /** All state types that can be pushed from the backend. */
 export interface PackageState {
   /** Current package ID (if in package mode). */
@@ -71,6 +79,10 @@ export interface PackageState {
     items: ComplianceItem[];
     timestamp: Date;
   }>;
+  /** Pending intake-approval proposal (renders as a chat card). */
+  intakeProposal: IntakeProposal | null;
+  /** Set when intake_approved fires; clears after one render. */
+  intakeApprovedAt: string | null;
 }
 
 const INITIAL_STATE: PackageState = {
@@ -82,6 +94,8 @@ const INITIAL_STATE: PackageState = {
   progressPct: 0,
   lastDocumentType: null,
   complianceAlerts: [],
+  intakeProposal: null,
+  intakeApprovedAt: null,
 };
 
 /**
@@ -155,6 +169,27 @@ export function usePackageState() {
         case 'package_update':
           // Session restore path — /api/sessions/{id}/context sends this
           if (metadata.phase) next.phase = metadata.phase as string;
+          break;
+
+        case 'intake_proposal':
+          // Supervisor called submit_intake_for_approval — surface the
+          // proposed scaffolding as a chat card so the user can see what
+          // they're being asked to approve.
+          if (metadata.package_id && metadata.summary) {
+            next.intakeProposal = {
+              packageId: metadata.package_id as string,
+              summary: metadata.summary as Record<string, unknown>,
+              proposedAt: new Date(),
+            };
+          }
+          break;
+
+        case 'intake_approved':
+          // confirm_intake_approval fired with decision=approve. Clear the
+          // pending proposal card and stamp the approval time.
+          next.intakeProposal = null;
+          next.intakeApprovedAt = (metadata.intake_approved_at as string) || null;
+          if (metadata.status) next.phase = metadata.status as string;
           break;
       }
 

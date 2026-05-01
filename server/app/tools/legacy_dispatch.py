@@ -26,6 +26,10 @@ from .aws_ops_tools import (
 )
 from .docx_edit_tool import exec_edit_docx_document
 from .far_search import exec_search_far
+from .intake_approval_tools import (
+    exec_confirm_intake_approval,
+    exec_submit_intake_for_approval,
+)
 from .intake_tools import exec_get_intake_status, exec_intake_workflow
 from .package_document_tools import (
     exec_document_changelog_search,
@@ -45,6 +49,8 @@ TOOLS_NEEDING_SESSION = {
     "get_intake_status",
     "manage_package",
     "research",
+    "submit_intake_for_approval",
+    "confirm_intake_approval",
 }
 
 
@@ -87,6 +93,8 @@ def get_tool_dispatch() -> dict[str, ToolHandler]:
         "finalize_package": exec_finalize_package,
         "manage_package": exec_manage_package,
         "research": exec_research,
+        "submit_intake_for_approval": exec_submit_intake_for_approval,
+        "confirm_intake_approval": exec_confirm_intake_approval,
     }
 
 

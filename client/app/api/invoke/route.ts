@@ -62,6 +62,13 @@ const COMMAND_PROMPTS: Record<string, string> = {
     'Start a new acquisition package and ask me for the minimum required intake details',
 };
 
+// Marker the supervisor recognizes (eagle-plugin/agents/supervisor/agent.md)
+// to auto-create + auto-approve a package and skip the chat-confirmation
+// round-trip when the user explicitly invoked a /document:* slash command.
+// The intake_required_facts gate still fires — the supervisor will ask
+// for any missing facts before generating.
+const SLASH_BYPASS_INTAKE_APPROVAL_MARKER = '[SLASH_BYPASS_INTAKE_APPROVAL]';
+
 function normalizeSlashCommand(input: string): string {
   const message = input.trim();
   if (!message.startsWith('/')) return message;
@@ -71,12 +78,18 @@ function normalizeSlashCommand(input: string): string {
   const rest = restParts.join(' ').trim();
 
   const prompt = COMMAND_PROMPTS[command];
+  const bypassMarker = command.startsWith('/document:') || command === '/document'
+    ? `${SLASH_BYPASS_INTAKE_APPROVAL_MARKER} `
+    : '';
+
   if (prompt) {
-    return rest ? `${prompt}: ${rest}` : `${prompt}.`;
+    return rest
+      ? `${bypassMarker}${prompt}: ${rest}`
+      : `${bypassMarker}${prompt}.`;
   }
 
   // Unknown slash command — strip "/" and pass through
-  return rest || message.replace(/^\//, '');
+  return rest ? `${bypassMarker}${rest}` : message.replace(/^\//, '');
 }
 
 export async function POST(request: NextRequest) {

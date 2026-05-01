@@ -99,6 +99,12 @@ _UPDATABLE_FIELDS = {
     "compliance_readiness",
     "threshold_tier",
     "approval_level",
+    # Intake-approval gate (intake → drafting transition)
+    "intake_approved_at",
+    "intake_approved_by",
+    "intake_summary",
+    "intake_approval_source",
+    "intake_proposed_summary",
 }
 
 # -- Generic titles that should be replaced, not incorporated ---------------
@@ -386,7 +392,15 @@ def _next_package_id(tenant_id: str) -> str:
 
 
 def _serialize(item: dict) -> dict:
-    """Return a plain dict safe for JSON serialisation (Decimal -> str)."""
+    """Return a plain dict safe for JSON serialisation (Decimal -> str).
+
+    Read-time backfill: any package whose status has already advanced past
+    intake but is missing ``intake_approved_at`` is synthesised as if the
+    legacy state were the approved state, so the new gate doesn't reject
+    in-flight packages created before this field existed. The synthesis is
+    not persisted — it is recomputed on every read until the package is
+    eventually re-saved through the normal write paths.
+    """
     out: dict = {}
     for k, v in item.items():
         if isinstance(v, Decimal):
@@ -395,6 +409,19 @@ def _serialize(item: dict) -> dict:
             out[k] = v
         else:
             out[k] = v
+
+    if (
+        out.get("status") in {"drafting", "finalizing", "review", "approved"}
+        and not out.get("intake_approved_at")
+    ):
+        out["intake_approved_at"] = out.get("created_at")
+        out["intake_approval_source"] = "legacy_backfill"
+        logger.debug(
+            "package_store: legacy backfill of intake_approved_at for pkg=%s status=%s",
+            out.get("package_id"),
+            out.get("status"),
+        )
+
     return out
 
 
@@ -1093,6 +1120,69 @@ def submit_package(tenant_id: str, package_id: str) -> Optional[dict]:
         return None
 
     return update_package(tenant_id, package_id, {"status": "review"})
+
+
+def mark_intake_approved(
+    tenant_id: str,
+    package_id: str,
+    user_id: str,
+    summary: dict,
+    source: str = "user_confirmation",
+) -> Optional[dict]:
+    """Stamp the intake-approval gate fields and transition intake → drafting.
+
+    This is the load-bearing transition that unlocks ``create_document``.
+    Idempotent: a second call on an already-approved package is a no-op
+    that returns the existing record, so chat-confirmation tools that
+    fire twice (e.g. retried turns) don't clobber the original approval.
+
+    ``source`` is one of ``user_confirmation`` (the user replied "approve"
+    in chat), ``slash_bypass`` (a /document:* command auto-approved a
+    fresh package), or ``legacy_backfill`` (synthesised at read time for
+    packages that pre-date this field).
+    """
+    pkg = get_package(tenant_id, package_id)
+    if pkg is None:
+        logger.warning(
+            "mark_intake_approved: not found (tenant=%s, pkg=%s)",
+            tenant_id,
+            package_id,
+        )
+        return None
+
+    if pkg.get("intake_approved_at") and pkg.get("intake_approval_source") != "legacy_backfill":
+        logger.debug(
+            "mark_intake_approved: already approved (pkg=%s); returning existing",
+            package_id,
+        )
+        return pkg
+
+    updates = {
+        "intake_approved_at": now_iso(),
+        "intake_approved_by": user_id,
+        "intake_summary": summary,
+        "intake_approval_source": source,
+    }
+    if pkg.get("status") == "intake":
+        updates["status"] = "drafting"
+
+    updated = update_package(tenant_id, package_id, updates)
+
+    try:
+        from .audit_store import write_audit
+
+        write_audit(
+            tenant_id=tenant_id,
+            entity_type="package",
+            entity_name=package_id,
+            event_type="intake_approved",
+            actor_user_id=user_id,
+            metadata={"source": source, "summary_keys": sorted(summary.keys())},
+        )
+    except Exception:
+        logger.exception("mark_intake_approved: audit write failed (pkg=%s)", package_id)
+
+    return updated
 
 
 def approve_package(tenant_id: str, package_id: str) -> Optional[dict]:
