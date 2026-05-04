@@ -35,32 +35,37 @@ def _assert_keys(result: dict, *keys: str) -> None:
 class TestDispatchRouting:
     """Verify execute_tool() mechanics — routing, session handling, errors."""
 
+    # Keep alphabetical to make additions/removals easy to read in diffs.
     EXPECTED_TOOLS = {
-        "s3_document_ops",
-        "dynamodb_intake",
+        "batch_generate_documents",      # PR #189
         "cloudwatch_logs",
-        "kb_inventory",
-        "search_far",
+        "confirm_intake_approval",       # PR #187
         "create_document",
-        "edit_docx_document",
-        "get_intake_status",
-        "intake_workflow",
-        "query_compliance_matrix",
-        "knowledge_search",
-        "knowledge_fetch",
-        "manage_skills",
-        "manage_prompts",
-        "manage_templates",
         "document_changelog_search",
-        "get_latest_document",
+        "dynamodb_intake",
+        "edit_docx_document",
         "finalize_package",
+        "get_doc_jobs",                  # PR #189
+        "get_intake_status",
+        "get_latest_document",
+        "intake_workflow",
+        "kb_inventory",
+        "knowledge_fetch",
+        "knowledge_search",
         "manage_package",
+        "manage_prompts",
+        "manage_skills",
+        "manage_templates",
+        "query_compliance_matrix",
         "research",
+        "s3_document_ops",
+        "search_far",
+        "submit_intake_for_approval",    # PR #187
     }
 
-    def test_get_tool_dispatch_returns_all_20_tools(self):
+    def test_get_tool_dispatch_returns_all_24_tools(self):
         dispatch = get_tool_dispatch()
-        assert len(dispatch) == 20
+        assert len(dispatch) == 24
         assert set(dispatch.keys()) == self.EXPECTED_TOOLS
 
     def test_execute_tool_unknown_tool_returns_error_json(self):
@@ -151,13 +156,18 @@ class TestDispatchRouting:
             assert tenant_id == "demo-tenant"
 
     def test_tools_needing_session_set(self):
+        # Alphabetical so additions/removals show up cleanly in diffs.
         assert TOOLS_NEEDING_SESSION == {
-            "s3_document_ops",
+            "batch_generate_documents",      # PR #189
+            "confirm_intake_approval",       # PR #187
             "create_document",
             "edit_docx_document",
+            "get_doc_jobs",                  # PR #189
             "get_intake_status",
             "manage_package",
             "research",
+            "s3_document_ops",
+            "submit_intake_for_approval",    # PR #187
         }
 
 
