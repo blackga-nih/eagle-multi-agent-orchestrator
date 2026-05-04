@@ -196,19 +196,34 @@ function InterleavedContent({
       }
     | { kind: 'thinking'; block: ThinkingBlock; snapLen: number };
 
+  const isSummaryItem = (it: StreamItem): boolean =>
+    it.kind === 'state' && it.entry.stateType === 'sources_summary';
+
   const items: StreamItem[] = [
     ...toolCalls.map((tc) => ({ kind: 'tool' as const, tc, snapLen: tc.textSnapshotLength ?? 0 })),
     ...stateChanges.map((entry) => ({
       kind: 'state' as const,
       entry,
-      snapLen: entry.textSnapshotLength ?? 0,
+      // Force sources_summary to land after all text — it's the closing
+      // aggregate chip and must render as the final event, not interleaved
+      // with sources_read chips or trailing prose.
+      snapLen:
+        entry.stateType === 'sources_summary' ? content.length : entry.textSnapshotLength ?? 0,
     })),
     ...thinkingBlocks.map((block) => ({
       kind: 'thinking' as const,
       block,
       snapLen: block.textSnapshotLength ?? 0,
     })),
-  ].sort((a, b) => a.snapLen - b.snapLen);
+  ].sort((a, b) => {
+    if (a.snapLen !== b.snapLen) return a.snapLen - b.snapLen;
+    // Tie-break: summary always sorts last so prior chips at the same
+    // snapshot land in their own group before the summary triggers a flush.
+    const aSum = isSummaryItem(a);
+    const bSum = isSummaryItem(b);
+    if (aSum !== bSum) return aSum ? 1 : -1;
+    return 0;
+  });
 
   // Build segments: text blocks and groups of consecutive chips/cards
   const segments: React.ReactNode[] = [];
@@ -233,6 +248,7 @@ function InterleavedContent({
 
   for (const item of items) {
     const snapLen = item.snapLen;
+    const isSummary = isSummaryItem(item);
 
     // Text segment before this item — flush any pending chips first
     if (snapLen > cursor) {
@@ -246,6 +262,11 @@ function InterleavedContent({
         );
       }
       cursor = snapLen;
+    } else if (isSummary) {
+      // No text gap, but the sources summary must always start its own
+      // chip row so it isn't crammed in with sources_read chips that share
+      // the same snapshot length.
+      flushChips();
     }
 
     if (item.kind === 'tool') {
