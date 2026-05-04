@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -99,27 +100,39 @@ export default function SimpleHeader() {
 
   return (
     <header
-      className="bg-[#003366] text-white shrink-0 z-10"
-      style={{ boxShadow: '0 2px 8px rgba(0,51,102,0.3)' }}
+      className="bg-white text-gray-900 shrink-0 z-10 border-b border-gray-200"
+      style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
     >
-      {/* Row 1: Branding centered, status + settings on the right */}
-      <div className="grid grid-cols-3 items-center px-6" style={{ height: 56 }}>
-        <div /> {/* empty left column */}
-        <div className="flex items-center justify-center gap-3">
-          <span
-            className="text-[28px] leading-none"
-            style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}
-          >
-            🦅
-          </span>
-          <div>
-            <h1 className="text-lg font-bold tracking-wider">EAGLE</h1>
-            <p className="text-[11px] text-white/70 tracking-wide">
-              Enhanced Acquisition Guidance and Learning Engine
-            </p>
-          </div>
+      {/* Single grid spanning both rows so left/right cells vertically center
+          against the FULL banner height, not just Row 1. Order matters:
+          left (row-span-2) → branding (col 2 row 1) → right (row-span-2) → nav
+          (auto-placed into the only remaining cell, col 2 row 2). */}
+      <div
+        className="grid grid-cols-3 items-center px-6 pt-2 pb-1.5"
+        style={{ gridTemplateRows: 'auto auto', rowGap: '4px' }}
+      >
+        {/* Left: NCI logo, vertically centered against full banner */}
+        <div className="row-span-2 flex items-center">
+          <Image
+            src="/nci-logo.svg"
+            alt="National Cancer Institute"
+            width={360}
+            height={38}
+            priority
+          />
         </div>
-        <div className="flex items-center justify-end gap-3">
+
+        {/* Center Row 1: branding */}
+        <div className="flex items-center justify-center gap-2">
+          <span className="text-[26px] leading-none">🦅</span>
+          <h1 className="text-lg font-bold tracking-wider text-nci-blue">EAGLE</h1>
+          <p className="text-[11px] text-gray-500 tracking-wide">
+            Enhanced Acquisition Guidance and Learning Engine
+          </p>
+        </div>
+
+        {/* Right: pills + settings, vertically centered against full banner */}
+        <div className="row-span-2 flex items-center justify-end gap-3">
           {/* Backend status */}
           <div className="flex items-center gap-1" title={backendTooltip}>
             <span
@@ -136,7 +149,7 @@ export default function SimpleHeader() {
                   : {}
               }
             />
-            <span className="text-xs font-mono text-white/85">{backendLabel}</span>
+            <span className="text-xs font-mono text-gray-700">{backendLabel}</span>
           </div>
           {/* Auth status */}
           <div
@@ -149,13 +162,13 @@ export default function SimpleHeader() {
               }`}
               style={isAuthenticated ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
             />
-            <span className="text-xs text-white/85">Auth</span>
+            <span className="text-xs text-gray-700">Auth</span>
           </div>
           {/* Settings gear */}
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setSettingsOpen((p) => !p)}
-              className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
               title="Settings"
             >
               <Settings className="w-4 h-4" />
@@ -175,25 +188,25 @@ export default function SimpleHeader() {
             )}
           </div>
         </div>
-      </div>
 
-      {/* Row 2: Nav tabs centered */}
-      <nav className="flex items-center justify-center gap-1 px-6 pb-2">
-        {navLinks.map((link) => (
-          <Link
-            key={link.href}
-            href={link.href}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive(link.href)
-                ? 'bg-white/20 text-white'
-                : 'text-white/70 hover:bg-white/10 hover:text-white'
-            }`}
-          >
-            {link.icon}
-            {link.label}
-          </Link>
-        ))}
-      </nav>
+        {/* Center Row 2: nav tabs, auto-placed into col 2 row 2 */}
+        <nav className="flex items-center justify-center gap-1">
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`flex items-center gap-2 px-4 py-1 rounded-lg text-sm font-medium transition-colors ${
+                isActive(link.href)
+                  ? 'bg-nci-blue/10 text-nci-blue'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              }`}
+            >
+              {link.icon}
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
     </header>
   );
 }

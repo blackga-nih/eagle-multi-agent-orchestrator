@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -109,23 +110,18 @@ export default function TopNav() {
 
   return (
     <header
-      className="bg-[#003366] text-white px-6 flex items-center justify-between shrink-0 z-10"
-      style={{ height: 56, boxShadow: '0 2px 8px rgba(0,51,102,0.3)' }}
+      className="bg-white text-gray-900 px-6 flex items-center justify-between shrink-0 z-10 border-b border-gray-200"
+      style={{ height: 56, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
     >
       {/* Left: branding */}
-      <div className="flex items-center gap-3">
-        <span
-          className="text-[28px] leading-none"
-          style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}
-        >
-          🦅
-        </span>
-        <div>
-          <h1 className="text-lg font-bold tracking-wider">EAGLE</h1>
-          <p className="text-[11px] text-white/70 tracking-wide">
-            Enhanced Acquisition Guidance and Learning Engine
-          </p>
-        </div>
+      <div className="flex items-center">
+        <Image
+          src="/nci-logo.svg"
+          alt="National Cancer Institute — EAGLE"
+          width={280}
+          height={36}
+          priority
+        />
       </div>
 
       {/* Center: nav links */}
@@ -136,8 +132,8 @@ export default function TopNav() {
             href={link.href}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               isActive(link.href)
-                ? 'bg-white/20 text-white'
-                : 'text-white/70 hover:bg-white/10 hover:text-white'
+                ? 'bg-nci-blue/10 text-nci-blue'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
             }`}
           >
             {link.icon}
@@ -165,7 +161,7 @@ export default function TopNav() {
                   : {}
               }
             />
-            <span className="text-xs font-mono text-white/85">{backendLabel}</span>
+            <span className="text-xs font-mono text-gray-700">{backendLabel}</span>
           </div>
           {/* Auth status */}
           <div
@@ -178,17 +174,17 @@ export default function TopNav() {
               }`}
               style={isAuthenticated ? { boxShadow: '0 0 6px rgba(76,175,80,0.6)' } : {}}
             />
-            <span className="text-xs text-white/85">Auth</span>
+            <span className="text-xs text-gray-700">Auth</span>
           </div>
         </div>
 
-        <span className="text-sm text-white/85">{displayName}</span>
+        <span className="text-sm text-gray-700">{displayName}</span>
 
         {/* Settings gear */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setSettingsOpen((p) => !p)}
-            className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
             title="Settings"
           >
             <Settings className="w-4 h-4" />
@@ -210,7 +206,7 @@ export default function TopNav() {
 
         <button
           onClick={handleSignOut}
-          className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
           title="Sign out"
         >
           <LogOut className="w-4 h-4" />
