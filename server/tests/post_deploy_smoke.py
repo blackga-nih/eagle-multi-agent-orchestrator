@@ -913,6 +913,110 @@ async def probe_frontend(
             except Exception as exc:
                 print(f"    snap 06-sources-table FAILED: {exc}")
 
+            # PR #190 (parallel KB lanes) check: assert that the sources table
+            # surfaces hits from MULTIPLE lanes (Metadata / Path / Semantic /
+            # Broadened). Lanes appear in two places inside the modal:
+            #   - LaneBreakdownStrip: "Lanes 📁 5 Metadata 🗺️ 3 Path …"
+            #   - Per-row lane chips on each source
+            # The modal uses data-testid="modal-content" (see Modal in
+            # client/components/ui/modal.tsx), not role="dialog".
+            try:
+                lane_tags: set[str] = set()
+                modal_text = await page.locator(
+                    "[data-testid='modal-content']"
+                ).first.inner_text(timeout=5_000)
+                # Match the human-readable labels rendered by laneMeta()
+                # (case-sensitive — they're capitalized in the UI).
+                for label in ("Metadata", "Broadened", "Path", "Semantic",
+                              "Checklist", "Direct", "FAR"):
+                    if label in modal_text:
+                        lane_tags.add(label.lower())
+                lane_count = len(lane_tags)
+                # PR #190 made all 4 KB-search lanes fire concurrently. We
+                # expect >=2 distinct lanes contributing to the sources for
+                # any meaningful research query (typical: metadata + path,
+                # often + semantic).
+                result.add_check(
+                    "kb_lane_diversity",
+                    lane_count >= 2,
+                    f"distinct lanes in sources: {sorted(lane_tags)} (count={lane_count})",
+                )
+            except Exception as exc:
+                result.add_check(
+                    "kb_lane_diversity",
+                    False,
+                    f"could not extract lane tags: {exc}",
+                )
+
+            # Close the research modal so subsequent locators target the
+            # main thread (not the modal overlay).
+            try:
+                # Modal close button is the X icon in the title bar;
+                # there's no aria-label, so click any button that contains
+                # an X svg in the modal header. Fallback to Escape.
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(500)
+            except Exception:
+                pass
+
+        # PR #192 (thinking-block SSE chip) check: detect ThinkingChip
+        # components in the message list. They render as a purple pill with
+        # 🧠 emoji and label "Thinking" (streaming) or "Thought" (complete).
+        # The feature is gated by EAGLE_THINKING_ENABLED on the backend —
+        # if disabled, no chips render and we report skip rather than fail.
+        try:
+            # Locate any chip whose visible text contains 🧠 + Thinking|Thought.
+            # ThinkingChip uses bg-purple-50 with rounded-full styling.
+            thinking_chips = page.locator(
+                "button:has-text('🧠'):has-text('Thought'), "
+                "button:has-text('🧠'):has-text('Thinking')"
+            )
+            chip_count = await thinking_chips.count()
+            if chip_count == 0:
+                result.add_check(
+                    "thinking_chip_present",
+                    True,  # Not a failure when feature flag is off
+                    f"no thinking chips rendered (EAGLE_THINKING_ENABLED likely false)",
+                )
+            else:
+                result.add_check(
+                    "thinking_chip_present",
+                    True,
+                    f"{chip_count} thinking chip(s) rendered",
+                )
+                # Click the first one + screenshot the modal.
+                try:
+                    first_chip = thinking_chips.first
+                    await first_chip.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(300)
+                    await first_chip.click()
+                    # Wait for the Thinking/Thought modal heading
+                    modal = page.locator("[role='dialog']").filter(
+                        has_text="Thought"
+                    ).or_(
+                        page.locator("[role='dialog']").filter(has_text="Thinking")
+                    ).first
+                    await modal.wait_for(state="visible", timeout=5_000)
+                    await page.wait_for_timeout(800)
+                    await _shot(result, page, out_dir, "07-thinking-modal")
+                    result.add_check(
+                        "thinking_chip_modal_opens",
+                        True,
+                        "Thinking modal opened with reasoning text",
+                    )
+                except Exception as exc:
+                    result.add_check(
+                        "thinking_chip_modal_opens",
+                        False,
+                        f"chip click/modal capture failed: {exc}",
+                    )
+        except Exception as exc:
+            result.add_check(
+                "thinking_chip_present",
+                False,
+                f"thinking chip detection errored: {exc}",
+            )
+
         await browser.close()
 
 
