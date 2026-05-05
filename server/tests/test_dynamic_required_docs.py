@@ -102,7 +102,7 @@ class TestComputeRequiredDocs:
         assert upper_info["slugs"] == lower_info["slugs"]
         assert upper_info["supplemental_slugs"] == lower_info["supplemental_slugs"]
         combined = len(upper_info["slugs"]) + len(upper_info["supplemental_slugs"])
-        assert combined == 16  # $3.5M CPFF negotiated → 16 total docs (core + supplemental)
+        assert combined == 15  # $3.5M CPFF negotiated → 15 total docs (Purchase Request only required for micro-purchase per PR #197)
 
     def test_uppercase_acquisition_method_normalizes_to_lowercase(self):
         """NEGOTIATED (uppercase) should return same docs as negotiated."""
@@ -124,7 +124,7 @@ class TestComputeRequiredDocs:
 
         info = compute_required_docs_with_checklist(3_500_000, "Negotiated", "Cpff")
         combined = len(info["slugs"]) + len(info["supplemental_slugs"])
-        assert combined == 16
+        assert combined == 15
 
     def test_all_compliance_doc_names_have_slug_mapping(self):
         """Every document name returned by get_requirements should have a slug mapping."""
