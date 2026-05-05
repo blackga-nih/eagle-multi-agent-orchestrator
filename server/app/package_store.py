@@ -35,7 +35,7 @@ _REQUIRED_DOCS: dict[str, list[str]] = {
         "required_sources",
         "purchase_request",
     ],
-    "simplified": ["igce"],
+    "simplified": ["sow", "igce", "market_research", "acquisition_plan"],
     "full_competition": ["sow", "igce", "market_research", "acquisition_plan"],
     "sole_source": ["sow", "igce", "justification"],
 }
@@ -43,7 +43,7 @@ _REQUIRED_DOCS: dict[str, list[str]] = {
 # -- Compliance matrix document name → package slug -------------------------
 _COMPLIANCE_DOC_TO_SLUG: dict[str, str] = {
     "SOW / PWS": "sow",
-    "Statement of Need (SON)": "sow",
+    "Statement of Need (SON)": "son_products",
     "IGCE": "igce",
     "Market Research Report": "market_research",
     "Market Research": "market_research",

@@ -19,10 +19,10 @@ Generate professional acquisition documents based on intake context and user inp
 | Statement of Need | SON | Micro-purchase product/service requests (FAR 13.2) — replaces SOW for ≤ $15K |
 | Price Reasonableness Determination | PRD | Micro-purchase, simplified, and above |
 | Required Sources Check | RSC | Micro-purchase, simplified, and above |
-| Purchase Request Cover Sheet & Cert of Funds | PR | Micro-purchase, simplified, and above |
+| Purchase Request Cover Sheet & Cert of Funds | PR | Micro-purchase only (≤$15K) |
 | Statement of Work | SOW | All acquisitions above micro-purchase |
 | Independent Government Cost Estimate | IGCE | All acquisitions above micro-purchase |
-| Acquisition Plan | AP | Acquisitions > $7M (or complex) |
+| Acquisition Plan | AP | Acquisitions > $15K; use "AP Under SAT" for $15K–$350K, "AP Above SAT" for >$350K |
 | Justification & Approval | J&A | Sole source or limited competition |
 | Market Research Report | MRR | All acquisitions above micro-purchase |
 

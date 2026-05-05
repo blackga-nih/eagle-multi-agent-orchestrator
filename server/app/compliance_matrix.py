@@ -463,30 +463,30 @@ def get_requirements(
     # --- Documents Required ---
     docs: list[dict] = []
 
-    # Purchase Request — always
-    docs.append(
-        {"name": "Purchase Request", "required": True, "note": "FAR 4.803(a)(1)"}
-    )
+    # Purchase Request — micro-purchase only
+    docs.append({
+        "name": "Purchase Request",
+        "required": m == "micro",
+        "note": "FAR 4.803(a)(1) — required for micro-purchase"
+        if m == "micro"
+        else "Not required above MPT — use Acquisition Plan",
+    })
 
-    # SOW/PWS
-    if m != "micro":
-        docs.append(
-            {
-                "name": "SOW / PWS" if is_services else "Statement of Need (SON)",
-                "required": True,
-                "note": "Performance-based with QASP (FAR 37.6)"
-                if is_services
-                else "Product specifications",
-            }
-        )
+    # SOW/PWS (above micro) or SON (micro-purchase)
+    if m == "micro":
+        docs.append({
+            "name": "Statement of Need (SON)",
+            "required": True,
+            "note": "Required for micro-purchase (FAR 13.2)",
+        })
     else:
-        docs.append(
-            {
-                "name": "SOW / PWS",
-                "required": False,
-                "note": "Not required for micro-purchase",
-            }
-        )
+        docs.append({
+            "name": "SOW / PWS" if is_services else "Statement of Need (SON)",
+            "required": True,
+            "note": "Performance-based with QASP (FAR 37.6)"
+            if is_services
+            else "Product specifications",
+        })
 
     # IGCE
     docs.append(
@@ -525,19 +525,21 @@ def get_requirements(
             }
         )
 
-    # Acquisition Plan
-    if v > _SAT:
-        docs.append(
-            {"name": "Acquisition Plan", "required": True, "note": _ap_approval(v)}
-        )
+    # Acquisition Plan — required above MPT ($15K)
+    if v > _MPT:
+        template_hint = "1.b AP Above SAT.docx" if v > _SAT else "1.a. AP Under SAT.docx"
+        docs.append({
+            "name": "Acquisition Plan",
+            "required": True,
+            "note": _ap_approval(v) if v > _SAT else "Streamlined AP (FAR 7.1)",
+            "template_hint": template_hint,
+        })
     else:
-        docs.append(
-            {
-                "name": "Acquisition Plan",
-                "required": False,
-                "note": f"Not required below SAT (${_SAT:,})",
-            }
-        )
+        docs.append({
+            "name": "Acquisition Plan",
+            "required": False,
+            "note": f"Not required for micro-purchase (≤${_MPT:,})",
+        })
 
     # J&A
     is_simplified_sole = m == "sole" and v <= _SAT
