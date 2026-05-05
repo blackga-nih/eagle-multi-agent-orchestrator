@@ -85,20 +85,22 @@ Shows status of specific intake package.
 
 Percentage based on required documents for acquisition type:
 
-### Micro-Purchase (<$10K)
-- Purchase Request only
+### Micro-Purchase (≤$15K)
+- Statement of Need (SON)
+- Purchase Request
 
-### Simplified ($10K-$250K)
+### Simplified ($15K–$350K)
 - SOW
 - IGCE
 - Market Research
+- Acquisition Plan (AP Under SAT)
 - (J&A if sole source)
 
-### Negotiated (>$250K)
+### Negotiated (>$350K)
 - SOW
 - IGCE
 - Market Research
-- Acquisition Plan
+- Acquisition Plan (AP Above SAT)
 - D&F
 - Tech Eval Plan
 - (J&A if sole source)

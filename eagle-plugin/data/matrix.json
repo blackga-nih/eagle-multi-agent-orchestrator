@@ -58,19 +58,20 @@
   ],
 
   "doc_rules": {
-    "always": [
-      "Purchase Request"
-    ],
+    "always": [],
     "above_threshold": [
       {
         "above": 0,
-        "docs": ["Purchase Request"]
+        "max": 15000,
+        "label": "Micro-purchase (≤$15K)",
+        "far": "Part 13.2",
+        "docs": ["Statement of Need (SON)", "Purchase Request"]
       },
       {
         "above": 15000,
         "label": "Simplified Acquisition ($15K–$350K)",
         "far": "Part 13",
-        "docs": ["Statement of Work (SOW)", "Independent Government Cost Estimate (IGCE)", "Market Research Report"]
+        "docs": ["Statement of Work (SOW)", "Independent Government Cost Estimate (IGCE)", "Market Research Report", "Acquisition Plan"]
       },
       {
         "above": 25000,
