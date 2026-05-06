@@ -183,7 +183,7 @@ Size standards vary by NAICS code. Common examples:
 
 ### Subcontracting Plans (FAR 19.7)
 
-**Required for:** Contracts > $750,000 ($1.5M for construction) with large business primes
+**Required for:** Contracts > $900,000 ($2M for construction) with large business primes (FAC 2025-06)
 
 **Must include:**
 - Small business subcontracting goals

@@ -38,9 +38,9 @@
       "description": "Competitive 8(a) required above these thresholds"
     },
     "subcontracting_plan": {
-      "required": 750000,
-      "construction": 1500000,
-      "description": "Small business subcontracting plan required for large business primes"
+      "required": 900000,
+      "construction": 2000000,
+      "description": "Small business subcontracting plan required for large business primes (FAC 2025-06)"
     },
     "j_a_approval": {
       "contracting_officer": 750000,

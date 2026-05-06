@@ -376,7 +376,7 @@ Would you like me to help generate any of these documents?
 | **Publicize Requirement** | $25,000 | Synopsis on SAM.gov required |
 | **VETS 4212 Affirmative Action** | $150,000 | Veteran hiring affirmative action plan |
 | **Simplified (SAT)** | $350,000 | Full competition required above (raised from $250K) |
-| **Subcontracting Plan** | $750,000 | Large business must submit subK plan |
+| **Subcontracting Plan** | $900,000 | Large business must submit subK plan (FAC 2025-06) |
 | **J&A CO Authority** | $900,000 | Above this, HCA must approve sole source J&A |
 | **Cost/Pricing Data (TINA)** | $2,000,000 | Certified data required |
 | **Sole Source 8(a) Services** | $4,500,000 | Competition required above |

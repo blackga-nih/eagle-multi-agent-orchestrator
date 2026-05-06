@@ -613,12 +613,13 @@ def get_requirements(
 
     # Subcontracting Plan
     needs_subk = v > _SUBK and not is_sb
-    if needs_subk:
-        subk_note = f"Required for non-SB > ${_SUBK:,} (FAR 19.705)"
-    elif is_sb:
-        subk_note = "Exempt - small business awardee"
+    if v > _SUBK:
+        if is_sb:
+            subk_note = f"Not required if awarded to small business (SB primes exempt). If awarded to large business, subcontracting plan IS required — ${v:,} exceeds ${_SUBK:,} threshold."
+        else:
+            subk_note = f"Required — ${v:,} exceeds ${_SUBK:,} threshold for non-small business award (FAR 19.702)"
     else:
-        subk_note = f"Below ${_SUBK:,} threshold"
+        subk_note = f"Not required — ${v:,} is below ${_SUBK:,} threshold"
     docs.append(
         {"name": "Subcontracting Plan", "required": needs_subk, "note": subk_note}
     )

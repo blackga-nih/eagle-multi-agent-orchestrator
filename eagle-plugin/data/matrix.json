@@ -32,7 +32,7 @@
     { "value": 25000,     "label": "$25K Synopsis",  "short": "$25K",   "triggers": ["sam_gov_synopsis_required"] },
     { "value": 150000,    "label": "$150K VETS 4212","short": "$150K",  "triggers": ["vets_4212_affirmative_action_plan"] },
     { "value": 350000,    "label": "$350K SAT",      "short": "$350K",  "triggers": ["simplified_acquisition_threshold", "full_competition_required_above"] },
-    { "value": 750000,    "label": "$750K SubK",     "short": "$750K",  "triggers": ["subcontracting_plan_required"] },
+    { "value": 900000,    "label": "$900K SubK",     "short": "$900K",  "triggers": ["subcontracting_plan_required"] },
     { "value": 900000,    "label": "$900K J&A",      "short": "$900K",  "triggers": ["ja_hca_approval_required"] },
     { "value": 2000000,   "label": "$2M TINA",       "short": "$2M",    "triggers": ["certified_cost_pricing_data_required"] },
     { "value": 4500000,   "label": "$4.5M 8a SS",    "short": "$4.5M",  "triggers": ["8a_sole_source_services_ceiling"] },
