@@ -212,16 +212,17 @@ Validates technical requirements:
 - Training/support needs
 - Section 508 accessibility
 
-## Key Thresholds
+## Key Thresholds (FAC 2025-06)
 
 | Threshold | Amount | Significance |
 |-----------|--------|--------------|
-| Micro-Purchase (MPT) | $10,000 | Minimal documentation, purchase card |
-| Simplified (SAT) | $250,000 | FAR Part 13 procedures |
+| Micro-Purchase (MPT) | $15,000 | Minimal documentation, purchase card |
+| Simplified (SAT) | $350,000 | FAR Part 13 procedures |
+| Subcontracting Plan | $900,000 | Large business must submit subK plan |
 | Sole Source 8(a) Services | $4,500,000 | Competition required above |
 | Sole Source 8(a) Manufacturing | $7,000,000 | Competition required above |
-| Cost/Pricing Data (TINA) | $2,000,000 | Certified data required |
-| Major Acquisition Plan | $7,000,000 | Written AP required |
+| Cost/Pricing Data (TINA) | $2,500,000 | Certified data required |
+| Major Acquisition Plan | $20,000,000 | Written AP required (FAR 7.105) |
 
 ## Integration
 

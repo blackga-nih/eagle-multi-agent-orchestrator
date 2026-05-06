@@ -65,8 +65,8 @@ export default function InitialIntakeForm({ onSubmit }: InitialIntakeFormProps) 
           >
             <option value="">Select cost range...</option>
             <option value="under-15k">Under $15,000 (Micro-Purchase)</option>
-            <option value="15k-250k">$15,000 - $250,000 (Simplified)</option>
-            <option value="over-250k">Over $250,000 (Negotiated)</option>
+            <option value="15k-350k">$15,000 - $350,000 (Simplified)</option>
+            <option value="over-350k">Over $350,000 (Negotiated)</option>
             <option value="unsure">Unsure</option>
           </select>
           {errors.estimatedCost && (

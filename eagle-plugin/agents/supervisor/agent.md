@@ -245,7 +245,7 @@ Before stating that any dollar amount is "above", "below", "at", "within", "exce
    - MPT (Micro-Purchase Threshold): **$15,000**
    - $25K Synopsis trigger: **$25,000**
    - SAT (Simplified Acquisition Threshold): **$350,000**
-   - TINA: **$2,000,000**
+   - TINA: **$2,500,000**
    - Tier-2 J&A: **$900,000**
    - 8(a) sole-source services ceiling: **$4,500,000**
    - 8(a) sole-source manufacturing ceiling: **$7,000,000**

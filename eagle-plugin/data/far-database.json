@@ -479,10 +479,10 @@
   {
     "part": "HHSAR",
     "section": "352.270-5",
-    "title": "HHS-Specific Acquisition Requirements",
-    "summary": "Health and Human Services Acquisition Regulation supplements. Includes special clauses for research contracts, patient care, use of human subjects, animal welfare, and conflict of interest requirements specific to HHS/NIH.",
-    "applicability": "HHS/NIH acquisitions",
-    "keywords": ["hhs", "nih", "hhsar", "health", "research", "medical", "human subjects"],
+    "title": "[RESERVED] - See 352.235-70/71 (Human Subjects) and 352.235-74/75 (Animal Welfare)",
+    "summary": "RESERVED per HHSAR CD 2026-02. For human subjects use 352.235-70 (solicitation) and 352.235-71 (contract). For animal welfare use 352.235-74 (solicitation) and 352.235-75 (contract). Do NOT use 352.270-4a, 352.270-4b, 352.270-5a, 352.270-5b, or 352.270-6.",
+    "applicability": "RESERVED - do not use",
+    "keywords": ["reserved", "hhsar", "human subjects", "animal welfare", "deprecated"],
     "s3_keys": []
   },
   {

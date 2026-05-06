@@ -101,6 +101,7 @@ TYPES = [
     {"id": "ffp", "label": "Firm-Fixed-Price (FFP)", "risk": 95, "category": "fp"},
     {"id": "fp-epa", "label": "FP w/ Economic Price Adj", "risk": 80, "category": "fp"},
     {"id": "fpi", "label": "Fixed-Price Incentive (FPI)", "risk": 65, "category": "fp"},
+    {"id": "fp-af", "label": "FP w/ Award Fee (FP/AF)", "risk": 60, "category": "fp"},
     {"id": "cpff", "label": "Cost-Plus-Fixed-Fee (CPFF)", "risk": 25, "category": "cr"},
     {
         "id": "cpif",
@@ -111,6 +112,7 @@ TYPES = [
     {"id": "cpaf", "label": "Cost-Plus-Award-Fee (CPAF)", "risk": 20, "category": "cr"},
     {"id": "tm", "label": "Time & Materials (T&M)", "risk": 15, "category": "loe"},
     {"id": "lh", "label": "Labor-Hour (LH)", "risk": 15, "category": "loe"},
+    {"id": "letter", "label": "Letter Contract (Emergency)", "risk": 5, "category": "letter"},
 ]
 
 # Thresholds sourced from matrix.json (single source of truth).

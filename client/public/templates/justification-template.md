@@ -177,15 +177,14 @@ I certify that:
 
 ## 10. APPROVALS
 
-**Per FAR 6.304, approval authority based on estimated value:**
+**Per FAR 6.304 (FAC 2025-06), approval authority based on estimated value:**
 
 | Threshold | Authority |
 |-----------|-----------|
-| ≤ $750,000 | Contracting Officer |
-| > $750,000 ≤ $15,000,000 | Competition Advocate |
-| > $15,000,000 ≤ $75,000,000 | Head of Procuring Activity |
-| > $75,000,000 ≤ $100,000,000 | Senior Procurement Executive |
-| > $100,000,000 | Agency Head (non-delegable) |
+| ≤ $900,000 | Contracting Officer |
+| > $900,000 ≤ $20,000,000 | Competition Advocate |
+| > $20,000,000 ≤ $90,000,000 | Head of Procuring Activity |
+| > $90,000,000 | Senior Procurement Executive |
 
 **Required Approval Level for this Action:** {{APPROVAL_LEVEL}}
 

@@ -306,8 +306,8 @@ Suitable for small business?
 | Past Performance Eval | - | - | ✓ |
 | Price/Cost Analysis | - | - | ✓ |
 | VETS 4212 Cert | - | If > $150K | ✓ |
-| Subcontracting Plan | - | - | If > $750K |
-| Certified Cost Data (TINA) | - | - | If > $2M |
+| Subcontracting Plan | - | - | If > $900K |
+| Certified Cost Data (TINA) | - | - | If > $2.5M |
 
 ### Document Generation Priority
 
@@ -378,7 +378,7 @@ Would you like me to help generate any of these documents?
 | **Simplified (SAT)** | $350,000 | Full competition required above (raised from $250K) |
 | **Subcontracting Plan** | $900,000 | Large business must submit subK plan (FAC 2025-06) |
 | **J&A CO Authority** | $900,000 | Above this, HCA must approve sole source J&A |
-| **Cost/Pricing Data (TINA)** | $2,000,000 | Certified data required |
+| **Cost/Pricing Data (TINA)** | $2,500,000 | Certified data required (FAC 2025-06) |
 | **Sole Source 8(a) Services** | $4,500,000 | Competition required above |
 | **Sole Source 8(a) Manufacturing** | $7,000,000 | Competition required above |
 | **Written Acquisition Plan** | $20,000,000 | FAR 7.105 written AP required |

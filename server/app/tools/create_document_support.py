@@ -465,9 +465,9 @@ SECTION 4: APPROVALS — Signature table
 12. CERTIFICATION — Signature block with authorized corporate official
 
 ## Rules
-- Subcontracting plans are required for contracts expected to exceed $750,000 ($1.5M for construction) that offer subcontracting opportunities per FAR 19.702
+- Subcontracting plans are required for contracts expected to exceed $900,000 ($2M for construction) that offer subcontracting opportunities per FAR 19.702 (FAC 2025-06)
 - Commercial items acquired under FAR Part 12 may allow a Commercial Plan in lieu of an individual plan
-- If the estimated value is below the $750K threshold, note that a formal plan is not required and recommend good-faith efforts instead
+- If the estimated value is below the $900K threshold, note that a formal plan is not required and recommend good-faith efforts instead
 - If information is missing, write "[Contractor to complete: <what's needed>]"
 - Do NOT paste raw user messages into the document
 - Include "DRAFT — Generated {date}" in header metadata where {date} is today's date

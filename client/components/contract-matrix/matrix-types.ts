@@ -11,7 +11,7 @@ export interface ContractType {
   id: string;
   label: string;
   risk: number;
-  category: 'fp' | 'cr' | 'loe';
+  category: 'fp' | 'cr' | 'loe' | 'letter';
 }
 
 export interface DollarThreshold {
@@ -110,8 +110,8 @@ export interface FactorOption {
   id: string;
   label: string;
   description?: string;
-  /** Scoring weights: positive favors, negative penalizes */
-  weights: { fp: number; cr: number; loe: number };
+  /** Scoring weights: positive favors, negative penalizes (letter always 0 - emergency only) */
+  weights: { fp: number; cr: number; loe: number; letter: number };
 }
 
 export interface ContractTypeFactor {

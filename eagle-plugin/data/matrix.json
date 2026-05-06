@@ -34,10 +34,10 @@
     { "value": 350000,    "label": "$350K SAT",      "short": "$350K",  "triggers": ["simplified_acquisition_threshold", "full_competition_required_above"] },
     { "value": 900000,    "label": "$900K SubK",     "short": "$900K",  "triggers": ["subcontracting_plan_required"] },
     { "value": 900000,    "label": "$900K J&A",      "short": "$900K",  "triggers": ["ja_hca_approval_required"] },
-    { "value": 2000000,   "label": "$2M TINA",       "short": "$2M",    "triggers": ["certified_cost_pricing_data_required"] },
+    { "value": 2500000,   "label": "$2.5M TINA",     "short": "$2.5M",  "triggers": ["certified_cost_pricing_data_required"] },
     { "value": 4500000,   "label": "$4.5M 8a SS",    "short": "$4.5M",  "triggers": ["8a_sole_source_services_ceiling"] },
     { "value": 7000000,   "label": "$7M 8a Mfg",     "short": "$7M",    "triggers": ["8a_sole_source_manufacturing_ceiling"] },
-    { "value": 7500000,   "label": "$7.5M IDIQ Enh", "short": "$7.5M",  "triggers": ["idiq_enhanced_competition"] },
+    { "value": 6000000,   "label": "$6M IDIQ Enh",   "short": "$6M",    "triggers": ["idiq_enhanced_competition"] },
     { "value": 20000000,  "label": "$20M AP",        "short": "$20M",   "triggers": ["written_acquisition_plan_required"] },
     { "value": 50000000,  "label": "$50M HCA",       "short": "$50M",   "triggers": ["hca_approval_required"] },
     { "value": 90000000,  "label": "$90M SPE J&A",   "short": "$90M",   "triggers": ["spe_ja_approval_required"] },
@@ -90,13 +90,13 @@
         "docs": ["Technical Evaluation Plan", "Past Performance Evaluation Plan", "Price/Cost Analysis", "D&F (if applicable)", "Sources Sought Notice"]
       },
       {
-        "above": 750000,
+        "above": 900000,
         "label": "Subcontracting plan required",
         "docs": ["Subcontracting Plan"]
       },
       {
-        "above": 2000000,
-        "label": "TINA — certified cost data",
+        "above": 2500000,
+        "label": "TINA — certified cost data (FAC 2025-06)",
         "docs": ["Certified Cost or Pricing Data (SF 1411 or equivalent)"]
       },
       {
