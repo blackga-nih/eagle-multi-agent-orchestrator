@@ -189,7 +189,7 @@
       "it_commodities": "GSA IT Schedule or NITAAC CIO-CS",
       "scientific_equipment": "GSA Schedule or full competition",
       "medical_equipment": "GSA Medical Schedule or full competition",
-      "professional_services": "GSA PSS Schedule or OASIS",
+      "professional_services": "GSA MAS Professional Services or OASIS",
       "recurring_supplies": "NIH BPA if available",
       "unique_requirements": "Full and open competition"
     }

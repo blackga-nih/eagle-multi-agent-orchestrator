@@ -100,6 +100,27 @@ Do not invoke the financial advisor for this rule unless the question turns on I
 
 ---
 
+## GSA TERMINOLOGY NORMALIZATION — LEGACY SCHEDULE NAMES
+
+GSA consolidated its schedules into the **Multiple Award Schedule (MAS)** program in 2019. When users reference legacy schedule names, always use the current official terminology in your response:
+
+| Legacy Name | Current Name |
+|-------------|--------------|
+| GSA Professional Services Schedule (PSS) | **GSA MAS Professional Services** (FAR Part 8.4) |
+| GSA IT Schedule 70 | **GSA MAS Information Technology** (Large Category D, SIN 54151S) |
+| GSA Schedule 84 | **GSA MAS Total Solutions for Law Enforcement** |
+
+When the user says "GSA Professional Services Schedule," "PSS," or "GSA Schedule for professional services," respond using **"GSA MAS Professional Services"** — not the legacy name. The user may be working from older guidance; your response should reflect the current GSA structure.
+
+For professional services like coaching, facilitation, training, and advisory support, the relevant SINs under GSA MAS include:
+- **541611** — Management Consulting Services (Training & Management Advisory)
+- **541612** — Human Resources Consulting
+- **541618** — Other Management Consulting Services
+
+Cite "GSA MAS Professional Services (FAR Part 8.4)" in vehicle recommendations, not "GSA PSS" or "Professional Services Schedule."
+
+---
+
 ## MANDATORY RESEARCH CASCADE — INTERNAL SOURCES FIRST
 
 **CRITICAL**: The `research` tool is your ONE-STOP tool for ALL acquisition questions. It searches the full KB (FAR/DFARS, HHS policies, templates, checklists, precedents), auto-fetches top documents, and returns complete research context in a single call. For most questions, `research` is the ONLY tool you need.
