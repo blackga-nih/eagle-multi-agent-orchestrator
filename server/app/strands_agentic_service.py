@@ -45,6 +45,12 @@ _research_tracer = _otel_trace.get_tracer("eagle.research_tool")
 # even before child-span SLOs are defined. See EAGLE-254.
 _RESEARCH_SLOW_SECONDS = float(os.environ.get("EAGLE_RESEARCH_SLOW_SECONDS", "60"))
 
+# Hard timeout for the semantic KB lane. Without this, research wall =
+# max(lanes), and a slow Titan-embed or S3-Vectors call gates every
+# request. On timeout the lane is dropped and the other 3 lanes (which
+# already contain the bulk of approved-KB hits) carry the merge.
+_SEMANTIC_LANE_TIMEOUT_S = float(os.environ.get("EAGLE_SEMANTIC_LANE_TIMEOUT_S", "12"))
+
 # Add server/ to path for eagle_skill_constants
 _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 if _server_dir not in sys.path:
@@ -5786,9 +5792,15 @@ def _build_kb_service_tools(
             finally:
                 _otel_context.detach(token)
 
-        with concurrent.futures.ThreadPoolExecutor(
+        # Manual lifecycle (not `with`) so a timed-out semantic lane doesn't
+        # gate the whole block at __exit__. On timeout we shutdown(wait=False,
+        # cancel_futures=True) — the orphaned semantic thread keeps running
+        # in the background until boto3 returns, but the user request is
+        # released immediately with semantic_result=None.
+        _ex = concurrent.futures.ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="kb_lane"
-        ) as _ex:
+        )
+        try:
             f_primary = _ex.submit(_lane_primary)
             f_secondary = _ex.submit(_lane_secondary)
             f_path = _ex.submit(_lane_path)
@@ -5796,7 +5808,18 @@ def _build_kb_service_tools(
             search_result = f_primary.result()
             secondary_result = f_secondary.result()
             path_result = f_path.result()
-            semantic_result = f_semantic.result()
+            try:
+                semantic_result = f_semantic.result(
+                    timeout=_SEMANTIC_LANE_TIMEOUT_S
+                )
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    "research: semantic lane exceeded %.1fs timeout, dropping",
+                    _SEMANTIC_LANE_TIMEOUT_S,
+                )
+                semantic_result = None
+        finally:
+            _ex.shutdown(wait=False, cancel_futures=True)
 
         # Merge in priority order: primary > secondary > path > semantic.
         # Dedup against the running seen_keys/seen_stems set so each lane

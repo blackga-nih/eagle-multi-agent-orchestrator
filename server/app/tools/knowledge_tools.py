@@ -21,9 +21,12 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import threading
 
+from opentelemetry import trace as _otel_trace
+
 from ..db_client import get_dynamodb, get_s3, AWS_REGION
 
 logger = logging.getLogger("eagle.knowledge_tools")
+_tracer = _otel_trace.get_tracer("eagle.knowledge_tools")
 
 # Configuration (separate from main EAGLE table)
 METADATA_TABLE = os.environ.get("METADATA_TABLE", "eagle-document-metadata-dev")
@@ -1261,6 +1264,15 @@ _embed_client_lock = threading.Lock()
 _embed_client = None
 _s3vectors_client = None
 
+# Embedding cache — bounded FIFO. Identical query+dim pairs repeat across users
+# (same canned questions) and within a session (re-research turns), so caching
+# avoids re-paying Titan-Embed latency. Bounded to keep memory predictable;
+# 256 * ~8KB key + 4KB value ≈ 3MB worst case. Failures are not cached so
+# transient Bedrock errors don't sticky-poison entries.
+_EMBED_CACHE_MAXSIZE = int(os.environ.get("EAGLE_EMBED_CACHE_MAXSIZE", "256"))
+_embed_cache: dict[tuple[str, int], tuple[float, ...]] = {}
+_embed_cache_lock = threading.Lock()
+
 
 def _get_bedrock_embed_client():
     """Lazy singleton for the Bedrock runtime client (embeddings)."""
@@ -1283,13 +1295,24 @@ def _get_s3vectors_client():
 
 
 def embed_text(text: str, dimensions: int = EMBED_DIM) -> list[float] | None:
-    """Embed a single string via Titan Embed Text v2. Returns None on failure."""
+    """Embed a single string via Titan Embed Text v2. Returns None on failure.
+
+    Successful embeddings are cached in a bounded FIFO map keyed by the
+    truncated input text + dimensions, so identical queries skip Titan.
+    Failures are *not* cached.
+    """
     if not text:
         return None
+    truncated = text[:8000]  # Titan v2 max ~8k tokens
+    cache_key = (truncated, dimensions)
+    with _embed_cache_lock:
+        cached = _embed_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
     try:
         runtime = _get_bedrock_embed_client()
         body = json.dumps({
-            "inputText": text[:8000],  # Titan v2 max ~8k tokens
+            "inputText": truncated,
             "dimensions": dimensions,
             "normalize": True,
         })
@@ -1300,7 +1323,14 @@ def embed_text(text: str, dimensions: int = EMBED_DIM) -> list[float] | None:
             accept="application/json",
         )
         payload = json.loads(resp["body"].read())
-        return payload.get("embedding")
+        embedding = payload.get("embedding")
+        if embedding is not None:
+            with _embed_cache_lock:
+                if len(_embed_cache) >= _EMBED_CACHE_MAXSIZE:
+                    # FIFO eviction (Python dicts preserve insertion order)
+                    _embed_cache.pop(next(iter(_embed_cache)))
+                _embed_cache[cache_key] = tuple(embedding)
+        return embedding
     except (BotoCoreError, ClientError, Exception) as e:
         logger.warning("embed_text failed: %s", e)
         return None
@@ -1331,26 +1361,33 @@ def exec_semantic_search(
         return {"results": [], "count": 0}
 
     # 1. Embed the query
-    embedding = embed_text(query)
+    with _tracer.start_as_current_span("semantic_embed") as _embed_span:
+        _embed_span.set_attribute("eagle.query_chars", len(query))
+        embedding = embed_text(query)
+        _embed_span.set_attribute("eagle.embedding_ok", embedding is not None)
     if embedding is None:
         logger.warning("exec_semantic_search: embedding failed, skipping")
         return {"results": [], "count": 0}
 
     # 2. Query S3 Vectors — over-fetch chunks so we can collapse to doc-level
     over_fetch = max(limit * 4, 40)
-    try:
-        sv = _get_s3vectors_client()
-        resp = sv.query_vectors(
-            vectorBucketName=S3_VECTORS_BUCKET,
-            indexName=S3_VECTORS_INDEX,
-            queryVector={"float32": embedding},
-            topK=over_fetch,
-            returnMetadata=True,
-            returnDistance=True,
-        )
-    except (BotoCoreError, ClientError) as e:
-        logger.warning("exec_semantic_search: S3 Vectors query failed: %s", e)
-        return {"results": [], "count": 0}
+    with _tracer.start_as_current_span("semantic_vectorquery") as _vq_span:
+        _vq_span.set_attribute("eagle.topk", over_fetch)
+        try:
+            sv = _get_s3vectors_client()
+            resp = sv.query_vectors(
+                vectorBucketName=S3_VECTORS_BUCKET,
+                indexName=S3_VECTORS_INDEX,
+                queryVector={"float32": embedding},
+                topK=over_fetch,
+                returnMetadata=True,
+                returnDistance=True,
+            )
+            _vq_span.set_attribute("eagle.vector_count", len(resp.get("vectors", [])))
+        except (BotoCoreError, ClientError) as e:
+            logger.warning("exec_semantic_search: S3 Vectors query failed: %s", e)
+            _vq_span.set_attribute("eagle.error", str(e)[:200])
+            return {"results": [], "count": 0}
 
     vectors = resp.get("vectors", [])
     if not vectors:
