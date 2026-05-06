@@ -530,6 +530,60 @@ _SUPERVISOR_MAX_TOKENS = int(os.getenv("EAGLE_SUPERVISOR_MAX_TOKENS", "32000"))
 _SUPERVISOR_MAX_TOKENS_CEILING = int(os.getenv("EAGLE_SUPERVISOR_MAX_TOKENS_CEILING", "64000"))
 _THINKING_ENABLED = os.getenv("EAGLE_THINKING_ENABLED", "false").lower() == "true"
 _THINKING_BUDGET_TOKENS = int(os.getenv("EAGLE_THINKING_BUDGET_TOKENS", "4000"))
+
+# Bedrock prompt-cache TTL. Default "1h" (vs Bedrock default 5m) because
+# Langfuse traces show EAGLE intake sessions routinely pause >5m between
+# turns, so the 5m cache misses on follow-ups and re-pays the 19k token
+# system+tools prefix at full input rate. 1h cache writes cost 2× input
+# vs 1.25× for 5m, but reads are 0.1× either way — break-even at ~2 reads
+# per write, which we hit easily on multi-turn sessions. Set to "5m" to
+# revert, or empty string to disable the override (use Strands default).
+_CACHE_TTL = os.environ.get("EAGLE_CACHE_TTL", "1h")
+
+
+def _add_cache_ttl_handler(params: dict[str, Any], **_kwargs: Any) -> None:
+    """boto3 event handler — rewrite every `cachePoint` block in a Converse
+    request to include the configured TTL (1h by default).
+
+    Strands' BedrockModel hard-codes `{"cachePoint": {"type": "default"}}`
+    with no TTL, which Bedrock then defaults to 5m. We attach this hook to
+    the boto3 client's `before-parameter-build.bedrock-runtime.Converse[Stream]`
+    event so we can upgrade the TTL after Strands builds the request but
+    before botocore serializes it. Idempotent — won't overwrite an existing
+    TTL if Strands or upstream code already set one.
+    """
+    if not _CACHE_TTL:
+        return
+
+    def _patch_blocks(blocks: list[Any] | None) -> None:
+        for blk in blocks or []:
+            if isinstance(blk, dict) and "cachePoint" in blk:
+                cp = blk["cachePoint"]
+                if isinstance(cp, dict) and "ttl" not in cp:
+                    cp["ttl"] = _CACHE_TTL
+
+    _patch_blocks(params.get("system"))
+    tool_config = params.get("toolConfig") or {}
+    _patch_blocks(tool_config.get("tools"))
+    for msg in params.get("messages") or []:
+        _patch_blocks(msg.get("content"))
+
+
+def _enable_long_cache_ttl(model: BedrockModel) -> None:
+    """Register the cache-TTL upgrade handler on a BedrockModel's boto3 client."""
+    if not _CACHE_TTL:
+        return
+    events = model.client.meta.events
+    events.register(
+        "before-parameter-build.bedrock-runtime.Converse",
+        _add_cache_ttl_handler,
+    )
+    events.register(
+        "before-parameter-build.bedrock-runtime.ConverseStream",
+        _add_cache_ttl_handler,
+    )
+
+
 for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
     _kwargs: dict[str, Any] = dict(
         model_id=_mid,
@@ -549,6 +603,7 @@ for _mid in dict.fromkeys(_MODEL_CHAIN_IDS):  # deduplicate, preserve order
             "thinking": {"type": "enabled", "budget_tokens": _THINKING_BUDGET_TOKENS}
         }
     _bedrock_models[_mid] = BedrockModel(**_kwargs)
+    _enable_long_cache_ttl(_bedrock_models[_mid])
 
 # Backward-compat alias
 _model = _bedrock_models[MODEL]
@@ -7134,6 +7189,7 @@ async def sdk_query(
                 cache_config=CacheConfig(strategy="auto"),
             )
             _retry_model = BedrockModel(**_retry_kwargs)
+            _enable_long_cache_ttl(_retry_model)
             _retry_supervisor = Agent(
                 model=_retry_model,
                 system_prompt=_cacheable_system_prompt(system_prompt),
@@ -7749,6 +7805,7 @@ async def sdk_query_streaming(
                             cache_config=CacheConfig(strategy="auto"),
                         )
                         _retry_model = BedrockModel(**_retry_kwargs)
+                        _enable_long_cache_ttl(_retry_model)
                         _retry_supervisor = Agent(
                             model=_retry_model,
                             system_prompt=_cacheable_system_prompt(system_prompt),
