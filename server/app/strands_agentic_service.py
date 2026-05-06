@@ -51,6 +51,13 @@ _RESEARCH_SLOW_SECONDS = float(os.environ.get("EAGLE_RESEARCH_SLOW_SECONDS", "60
 # already contain the bulk of approved-KB hits) carry the merge.
 _SEMANTIC_LANE_TIMEOUT_S = float(os.environ.get("EAGLE_SEMANTIC_LANE_TIMEOUT_S", "12"))
 
+# Hard timeout for the checklist lane. Same rationale as semantic — caps
+# Bedrock/Haiku rerank variance (observed 2.5s ↔ 63s in Langfuse traces)
+# so the lane can't gate the wall. The checklist enriches answers with
+# PMR/FRC requirements but is non-fatal — the supervisor produces a
+# valid answer without it.
+_CHECKLIST_LANE_TIMEOUT_S = float(os.environ.get("EAGLE_CHECKLIST_LANE_TIMEOUT_S", "12"))
+
 # Add server/ to path for eagle_skill_constants
 _server_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 if _server_dir not in sys.path:
@@ -5792,19 +5799,55 @@ def _build_kb_service_tools(
             finally:
                 _otel_context.detach(token)
 
-        # Manual lifecycle (not `with`) so a timed-out semantic lane doesn't
-        # gate the whole block at __exit__. On timeout we shutdown(wait=False,
-        # cancel_futures=True) — the orphaned semantic thread keeps running
-        # in the background until boto3 returns, but the user request is
-        # released immediately with semantic_result=None.
+        def _lane_checklist() -> dict[str, Any] | None:
+            """Pre-fetch the PMR/FRC checklist alongside the 4 KB lanes so its
+            AI rerank doesn't sit on the critical path. Returns None if
+            checklist is disabled or method=micro (no checklist needed).
+            Returns the search-result dict (caller iterates results to fetch)
+            otherwise.
+            """
+            if not include_checklist:
+                return None
+            method = _detect_method(acquisition_method, query, contract_value)
+            if method == "micro":
+                return None
+            cl_query = _CHECKLIST_QUERIES.get(method, "PMR common requirements checklist")
+            cl_query += " file reviewer FRC"
+            token = _otel_context.attach(_parent_ctx)
+            try:
+                with _research_tracer.start_as_current_span("kb_search_checklist") as _span:
+                    _span.set_attribute("eagle.method", method)
+                    _span.set_attribute("eagle.query", cl_query[:200])
+                    try:
+                        res = exec_knowledge_search(
+                            {"document_type": "checklist", "query": cl_query, "limit": 5},
+                            tenant_id, session_id,
+                            user_id=user_id, _allowed_package_ids=_user_pkg_ids,
+                        )
+                        _span.set_attribute("eagle.result_count", res.get("count", 0))
+                        return res
+                    except Exception as _cl_exc:
+                        logger.warning(
+                            "research: checklist lane failed, continuing: %s", _cl_exc
+                        )
+                        return None
+            finally:
+                _otel_context.detach(token)
+
+        # Manual lifecycle (not `with`) so a timed-out lane doesn't gate the
+        # whole block at __exit__. On timeout we shutdown(wait=False,
+        # cancel_futures=True) — the orphaned thread keeps running in the
+        # background until boto3 returns, but the user request is released
+        # immediately with the lane's result set to None.
         _ex = concurrent.futures.ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="kb_lane"
+            max_workers=5, thread_name_prefix="kb_lane"
         )
         try:
             f_primary = _ex.submit(_lane_primary)
             f_secondary = _ex.submit(_lane_secondary)
             f_path = _ex.submit(_lane_path)
             f_semantic = _ex.submit(_lane_semantic)
+            f_checklist = _ex.submit(_lane_checklist)
             search_result = f_primary.result()
             secondary_result = f_secondary.result()
             path_result = f_path.result()
@@ -5818,6 +5861,16 @@ def _build_kb_service_tools(
                     _SEMANTIC_LANE_TIMEOUT_S,
                 )
                 semantic_result = None
+            try:
+                checklist_search_result = f_checklist.result(
+                    timeout=_CHECKLIST_LANE_TIMEOUT_S
+                )
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    "research: checklist lane exceeded %.1fs timeout, dropping",
+                    _CHECKLIST_LANE_TIMEOUT_S,
+                )
+                checklist_search_result = None
         finally:
             _ex.shutdown(wait=False, cancel_futures=True)
 
@@ -6049,43 +6102,36 @@ def _build_kb_service_tools(
             )
         _semantic_fetched_count = len(fetched_docs) - _fetched_before_semantic
 
-        # 3. Dynamic checklist search (isolated query — separate from general KB search)
+        # 3. Dynamic checklist search — fetch content from the pre-resolved
+        # search result. The search itself ran as the 5th parallel lane in
+        # the ThreadPool above (see _lane_checklist), so its AI rerank no
+        # longer sits on the critical path. checklist_search_result is
+        # None if the lane was disabled, micro-purchase (no checklist
+        # needed), failed, or timed out — in any of those cases skip the
+        # fetches and let the supervisor synthesize without checklist
+        # content (still produces a valid answer).
         checklist_content: dict[str, str] = {}
-        if include_checklist:
-            method = _detect_method(acquisition_method, query, contract_value)
-            if method != "micro":
-                cl_query = _CHECKLIST_QUERIES.get(method, "PMR common requirements checklist")
-                cl_query += " file reviewer FRC"
+        if checklist_search_result is not None:
+            _kb_depth["search_count"] += 1
 
-                with _research_tracer.start_as_current_span("kb_search_checklist") as _span:
-                    _span.set_attribute("eagle.method", method)
-                    _span.set_attribute("eagle.query", cl_query[:200])
-                    cl_result = exec_knowledge_search(
-                        {"document_type": "checklist", "query": cl_query, "limit": 5},
-                        tenant_id, session_id,
+            for r in checklist_search_result.get("results", [])[:4]:
+                s3_key = r.get("s3_key")
+                if s3_key and s3_key not in _kb_depth["fetched_keys"]:
+                    result = exec_knowledge_fetch(
+                        {"s3_key": s3_key}, tenant_id, session_id,
                         user_id=user_id, _allowed_package_ids=_user_pkg_ids,
                     )
-                    _span.set_attribute("eagle.result_count", cl_result.get("count", 0))
-                _kb_depth["search_count"] += 1
-
-                for r in cl_result.get("results", [])[:4]:
-                    s3_key = r.get("s3_key")
-                    if s3_key and s3_key not in _kb_depth["fetched_keys"]:
-                        result = exec_knowledge_fetch(
-                            {"s3_key": s3_key}, tenant_id, session_id,
-                            user_id=user_id, _allowed_package_ids=_user_pkg_ids,
-                        )
-                        if "content" in result:
-                            _kb_depth["fetch_count"] += 1
-                            _kb_depth["total_chars_read"] += result.get("content_length", 0)
-                            _kb_depth["fetched_keys"].add(s3_key)
-                            # 5K cap (was 10K was 20K) — checklists are
-                            # structurally dense (tables/bullets); 5K still
-                            # captures the section headings + first-level
-                            # items for most PMR/FRC checklists. The LLM uses
-                            # these to name requirements, not to quote them
-                            # wholesale. EAGLE-254 latency tuning.
-                            checklist_content[r.get("title", s3_key)] = result["content"][:5000]
+                    if "content" in result:
+                        _kb_depth["fetch_count"] += 1
+                        _kb_depth["total_chars_read"] += result.get("content_length", 0)
+                        _kb_depth["fetched_keys"].add(s3_key)
+                        # 5K cap (was 10K was 20K) — checklists are
+                        # structurally dense (tables/bullets); 5K still
+                        # captures the section headings + first-level
+                        # items for most PMR/FRC checklists. The LLM uses
+                        # these to name requirements, not to quote them
+                        # wholesale. EAGLE-254 latency tuning.
+                        checklist_content[r.get("title", s3_key)] = result["content"][:5000]
 
         # 4. Build combined packet — filter out package docs, dedup
         # .docx/.content.md siblings, and slim per-result metadata.
