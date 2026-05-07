@@ -172,8 +172,8 @@ GSA consolidated its schedules into the **Multiple Award Schedule (MAS)** progra
 When the user says "GSA Professional Services Schedule," "PSS," or "GSA Schedule for professional services," respond using **"GSA MAS Professional Services"** — not the legacy name. The user may be working from older guidance; your response should reflect the current GSA structure.
 
 For professional services like coaching, facilitation, training, and advisory support, the relevant SINs under GSA MAS include:
-- **541611** — Management Consulting Services (Training & Management Advisory)
-- **541612** — Human Resources Consulting
+- **541611** — Management Consulting (coaching, facilitation, training, advisory) — **default for professional services**
+- **541612** — HR Consulting (compensation, benefits, recruiting, HR policy only)
 - **541618** — Other Management Consulting Services
 
 Cite "GSA MAS Professional Services (FAR Part 8.4)" in vehicle recommendations, not "GSA PSS" or "Professional Services Schedule."

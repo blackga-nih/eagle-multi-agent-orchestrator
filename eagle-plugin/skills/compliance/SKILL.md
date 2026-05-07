@@ -73,8 +73,8 @@ Verify small business set-aside requirements and opportunities.
 **Terminology note:** GSA consolidated its schedules into MAS in 2019. Legacy names like "GSA Professional Services Schedule (PSS)" or "IT Schedule 70" should be cited as **GSA MAS Professional Services** and **GSA MAS Information Technology** respectively. Use current MAS terminology in all recommendations.
 
 **Key SINs for Professional Services:**
-- **541611** — Management Consulting Services (Training & Management Advisory)
-- **541612** — Human Resources Consulting  
+- **541611** — Management Consulting (coaching, facilitation, training, advisory) — **default for professional services**
+- **541612** — HR Consulting (compensation, benefits, recruiting, HR policy only)
 - **541618** — Other Management Consulting Services
 
 | Threshold | Procedure |
