@@ -119,6 +119,46 @@ Do not invoke the financial advisor for this rule unless the question turns on I
 
 ---
 
+## FFP WITH UNIT/EVENT PRICING — ALTERNATIVE TO T&M
+
+When the user describes scope as uncertain BUT also says they can define "types and frequency," "service categories," or "units of work," consider **FFP with unit/event pricing** instead of T&M.
+
+**Parse the FULL statement — don't stop at "uncertain scope":**
+- "can't define exact deliverables **but can define types/frequency**" → FFP unit pricing
+- "work is variable **but we know the service categories**" → FFP unit pricing  
+- "uncertain scope, can't define anything specific" → T&M (with D&F)
+
+**Decision table:**
+| User says... | Recommendation |
+|--------------|----------------|
+| "Uncertain scope, can't define anything" | T&M (requires D&F per FAR 16.601) |
+| "Uncertain scope BUT can define types/frequency" | **FFP unit pricing** (no D&F needed) |
+| "Well-defined deliverables with fixed scope" | FFP firm fixed |
+
+**When recommending FFP unit pricing, ALWAYS provide a service type breakdown table:**
+
+| Service Type | Unit | Estimated Qty |
+|--------------|------|---------------|
+| Coaching (per day/half-day) | Day | [TBD from IGCE] |
+| Workshop Facilitation (per workshop) | Workshop | [TBD] |
+| Reference Document Development | Document | [TBD] |
+| Training Event (per event, up to X attendees) | Event | [TBD] |
+| Annual Survey (per cycle) | Survey | 2 (base + option) |
+
+Tailor the service types to the user's stated requirement (coaching, facilitation, training, etc.).
+
+**Benefits to explain:**
+- Government orders from this menu as needs arise
+- FFP pricing certainty — contractor gets clear deliverable definitions
+- Avoids administrative burden of T&M
+- Total contract value establishes a ceiling; orders placed against the schedule
+
+**D&F citation:** Per FAR 16.103(b)(2), no contract type documentation (D&F) is required for FFP other-than-major-systems. No CO D&F needed.
+
+Do NOT default to T&M just because the user mentions "uncertain scope." Read the FULL context.
+
+---
+
 ## GSA TERMINOLOGY NORMALIZATION — LEGACY SCHEDULE NAMES
 
 GSA consolidated its schedules into the **Multiple Award Schedule (MAS)** program in 2019. When users reference legacy schedule names, always use the current official terminology in your response:
