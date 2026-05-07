@@ -38,17 +38,17 @@
       "description": "Competitive 8(a) required above these thresholds"
     },
     "subcontracting_plan": {
-      "required": 750000,
-      "construction": 1500000,
-      "description": "Small business subcontracting plan required for large business primes"
+      "required": 900000,
+      "construction": 2000000,
+      "description": "Small business subcontracting plan required for large business primes (FAC 2025-06)"
     },
     "j_a_approval": {
-      "contracting_officer": 750000,
-      "competition_advocate": 15000000,
-      "head_procuring_activity": 75000000,
+      "contracting_officer": 900000,
+      "competition_advocate": 20000000,
+      "head_procuring_activity": 90000000,
       "senior_procurement_executive": 100000000,
       "agency_head": "above_100M",
-      "description": "Approval thresholds for other than full and open competition (FAR 6.304)"
+      "description": "Approval thresholds for other than full and open competition (FAR 6.304, FAC 2025-06)"
     }
   },
   "wage_requirements": {

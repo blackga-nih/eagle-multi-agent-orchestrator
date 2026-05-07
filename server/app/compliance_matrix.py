@@ -101,6 +101,7 @@ TYPES = [
     {"id": "ffp", "label": "Firm-Fixed-Price (FFP)", "risk": 95, "category": "fp"},
     {"id": "fp-epa", "label": "FP w/ Economic Price Adj", "risk": 80, "category": "fp"},
     {"id": "fpi", "label": "Fixed-Price Incentive (FPI)", "risk": 65, "category": "fp"},
+    {"id": "fp-af", "label": "FP w/ Award Fee (FP/AF)", "risk": 60, "category": "fp"},
     {"id": "cpff", "label": "Cost-Plus-Fixed-Fee (CPFF)", "risk": 25, "category": "cr"},
     {
         "id": "cpif",
@@ -111,6 +112,7 @@ TYPES = [
     {"id": "cpaf", "label": "Cost-Plus-Award-Fee (CPAF)", "risk": 20, "category": "cr"},
     {"id": "tm", "label": "Time & Materials (T&M)", "risk": 15, "category": "loe"},
     {"id": "lh", "label": "Labor-Hour (LH)", "risk": 15, "category": "loe"},
+    {"id": "letter", "label": "Letter Contract (Emergency)", "risk": 5, "category": "letter"},
 ]
 
 # Thresholds sourced from matrix.json (single source of truth).
@@ -613,12 +615,13 @@ def get_requirements(
 
     # Subcontracting Plan
     needs_subk = v > _SUBK and not is_sb
-    if needs_subk:
-        subk_note = f"Required for non-SB > ${_SUBK:,} (FAR 19.705)"
-    elif is_sb:
-        subk_note = "Exempt - small business awardee"
+    if v > _SUBK:
+        if is_sb:
+            subk_note = f"Not required if awarded to small business (SB primes exempt). If awarded to large business, subcontracting plan IS required — ${v:,} exceeds ${_SUBK:,} threshold."
+        else:
+            subk_note = f"Required — ${v:,} exceeds ${_SUBK:,} threshold for non-small business award (FAR 19.702)"
     else:
-        subk_note = f"Below ${_SUBK:,} threshold"
+        subk_note = f"Not required — ${v:,} is below ${_SUBK:,} threshold"
     docs.append(
         {"name": "Subcontracting Plan", "required": needs_subk, "note": subk_note}
     )

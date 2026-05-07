@@ -67,6 +67,55 @@ _DOC_TYPE_LABELS = {
     "buy_american": "Buy American Act Determination",
 }
 
+
+# ── Template hint computation ────────────────────────────────────────
+
+
+def _get_template_hint(doc_type: str, estimated_value: float | int | str | None) -> str | None:
+    """Compute the appropriate template_hint based on doc_type and estimated value.
+
+    Mirrors the logic in compliance_matrix.get_requirements() but runs
+    at document generation time when the compliance matrix hasn't been
+    called or the hint wasn't propagated.
+
+    Args:
+        doc_type: Document type (e.g., "acquisition_plan", "justification")
+        estimated_value: Estimated contract value in dollars
+
+    Returns:
+        S3 filename of the appropriate template, or None to use default.
+    """
+    if estimated_value is None:
+        return None
+
+    try:
+        v = float(str(estimated_value).replace(",", "").replace("$", ""))
+    except (TypeError, ValueError):
+        return None
+
+    # Import thresholds from compliance matrix (single source of truth)
+    try:
+        from app.compliance_matrix import _SAT, _MPT
+    except ImportError:
+        # Fallback values if compliance_matrix unavailable
+        _MPT = 15_000
+        _SAT = 350_000
+
+    if doc_type == "acquisition_plan":
+        # AP only required above MPT; use value-appropriate template
+        if v > _MPT:
+            return "1.b AP Above SAT.docx" if v > _SAT else "1.a. AP Under SAT.docx"
+
+    elif doc_type == "justification":
+        # Simplified J&A template for under SAT
+        if v <= _SAT:
+            return "6.a. Single Source J&A - up to SAT.docx"
+        # >SAT uses the full J&A template (primary in registry)
+
+    # Other doc types use the primary template from registry
+    return None
+
+
 # ── System prompts for each doc type ─────────────────────────────────
 
 _DOC_TYPE_SYSTEM_PROMPTS: dict[str, str] = {
@@ -465,9 +514,9 @@ SECTION 4: APPROVALS — Signature table
 12. CERTIFICATION — Signature block with authorized corporate official
 
 ## Rules
-- Subcontracting plans are required for contracts expected to exceed $750,000 ($1.5M for construction) that offer subcontracting opportunities per FAR 19.702
+- Subcontracting plans are required for contracts expected to exceed $900,000 ($2M for construction) that offer subcontracting opportunities per FAR 19.702 (FAC 2025-06)
 - Commercial items acquired under FAR Part 12 may allow a Commercial Plan in lieu of an individual plan
-- If the estimated value is below the $750K threshold, note that a formal plan is not required and recommend good-faith efforts instead
+- If the estimated value is below the $900K threshold, note that a formal plan is not required and recommend good-faith efforts instead
 - If information is missing, write "[Contractor to complete: <what's needed>]"
 - Do NOT paste raw user messages into the document
 - Include "DRAFT — Generated {date}" in header metadata where {date} is today's date
@@ -834,6 +883,15 @@ def _augment_document_data_from_context(
         merged.setdefault("estimated_value", money)
         merged.setdefault("budget", money)
         merged.setdefault("total_estimate", money)
+
+        # Inject template_hint based on estimated value and doc_type
+        # This ensures value-appropriate templates are used (e.g., AP Above SAT
+        # for >$350K acquisitions) even when the compliance matrix wasn't called.
+        if "template_hint" not in merged:
+            hint = _get_template_hint(doc_type, money)
+            if hint:
+                merged["template_hint"] = hint
+
     if period:
         merged.setdefault("period_of_performance", period)
         merged.setdefault("timeline", period)

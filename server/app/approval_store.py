@@ -1,10 +1,10 @@
 """Approval Store -- DynamoDB-backed APPROVAL# multi-step review chain.
 
 Phase 3 Step 16. Implements FAR-driven approval chains for acquisition packages.
-Threshold logic:
-    < $250,000   : [contracting_officer]
-    < $750,000   : [contracting_officer, competition_advocate]
-    >= $750,000  : [contracting_officer, competition_advocate, head_procuring_activity]
+Threshold logic (FAC 2025-06):
+    < $350,000   : [contracting_officer]
+    < $900,000   : [contracting_officer, competition_advocate]
+    >= $900,000  : [contracting_officer, competition_advocate, head_procuring_activity]
 
 Entity format:
     PK:  APPROVAL#{tenant_id}
@@ -39,8 +39,8 @@ _FAR_CHAIN_LARGE = [
     {"step": 3, "role": "head_procuring_activity"},
 ]
 
-THRESHOLD_MID = Decimal("250000")
-THRESHOLD_LARGE = Decimal("750000")
+THRESHOLD_MID = Decimal("350000")   # SAT per FAC 2025-06
+THRESHOLD_LARGE = Decimal("900000")  # SubK/J&A per FAC 2025-06
 
 # -- Helpers ---------------------------------------------------------------
 

@@ -93,6 +93,22 @@ FORBIDDEN BEHAVIORS:
 
 If market research genuinely suggests the work cannot be done under the ceiling, say so explicitly in the MRR and flag the gap — do not silently recommend a higher value.
 
+## NAICS Code Selection — Professional Services
+
+When determining NAICS for professional services, apply this decision logic:
+
+| Service Type | NAICS | Use When... |
+|--------------|-------|-------------|
+| **541611** — Management Consulting | Coaching, facilitation, training development/delivery, advisory support, innovation consulting, organizational improvement, acquisition support |
+| **541612** — HR Consulting | HR-specific: compensation/benefits design, recruiting strategy, HR policy, executive search |
+| **611430** — Professional Development Training | Classroom training delivery as the primary service (not training development) |
+
+**Default to 541611** for professional services involving coaching, facilitation, workshops, or advisory support — even if workforce-related. The fact that "people" are involved doesn't make it HR consulting.
+
+**Be consistent:** The NAICS you recommend in analysis MUST match what goes into the AP and Market Research Report. Don't hedge with multiple codes in analysis then pick a different one for documents.
+
+---
+
 ## Output Format for Document Integration
 When research will be used to generate a document, structure response with:
 - **Vendors Identified** (table: Vendor, Size, NAICS, Vehicles, Capability)

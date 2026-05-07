@@ -44,26 +44,29 @@ export const TYPES: ContractType[] = [
   { id: 'ffp', label: 'Firm-Fixed-Price (FFP)', risk: 95, category: 'fp' },
   { id: 'fp-epa', label: 'FP w/ Economic Price Adj', risk: 80, category: 'fp' },
   { id: 'fpi', label: 'Fixed-Price Incentive (FPI)', risk: 65, category: 'fp' },
+  { id: 'fp-af', label: 'FP w/ Award Fee (FP/AF)', risk: 60, category: 'fp' },
   { id: 'cpff', label: 'Cost-Plus-Fixed-Fee (CPFF)', risk: 25, category: 'cr' },
   { id: 'cpif', label: 'Cost-Plus-Incentive-Fee (CPIF)', risk: 35, category: 'cr' },
   { id: 'cpaf', label: 'Cost-Plus-Award-Fee (CPAF)', risk: 20, category: 'cr' },
   { id: 'tm', label: 'Time & Materials (T&M)', risk: 15, category: 'loe' },
   { id: 'lh', label: 'Labor-Hour (LH)', risk: 15, category: 'loe' },
+  { id: 'letter', label: 'Letter Contract (Emergency)', risk: 5, category: 'letter' },
 ];
 
 export const THRESHOLDS: DollarThreshold[] = [
   { value: 15000, label: '$15K MPT', short: '$15K' },
   { value: 25000, label: '$25K Synopsis', short: '$25K' },
+  { value: 150000, label: '$150K VETS 4212', short: '$150K' },
   { value: 350000, label: '$350K SAT', short: '$350K' },
-  { value: 750000, label: '$750K SubK', short: '$750K' },
+  { value: 900000, label: '$900K SubK', short: '$900K' },
   { value: 900000, label: '$900K J&A', short: '$900K' },
   { value: 2500000, label: '$2.5M TINA', short: '$2.5M' },
-  { value: 4500000, label: '$4.5M Congress', short: '$4.5M' },
+  { value: 4500000, label: '$4.5M 8a SS', short: '$4.5M' },
   { value: 6000000, label: '$6M IDIQ Enh', short: '$6M' },
+  { value: 7000000, label: '$7M 8a Mfg', short: '$7M' },
   { value: 20000000, label: '$20M AP', short: '$20M' },
   { value: 50000000, label: '$50M HCA', short: '$50M' },
   { value: 90000000, label: '$90M SPE J&A', short: '$90M' },
-  { value: 100000000, label: '$100M SPE', short: '$100M' },
   { value: 150000000, label: '$150M OAP', short: '$150M' },
 ];
 
@@ -330,15 +333,15 @@ export function getRequirements(s: MatrixState): Requirements {
     note: needsSSP ? 'Evaluation factors with relative importance' : 'N/A for this method',
   });
 
-  const needsSubK = v > 750000 && !s.isSB;
+  const needsSubK = v > 900000 && !s.isSB;
   docs.push({
     name: 'Subcontracting Plan',
     required: needsSubK,
     note: needsSubK
-      ? 'Required for non-SB > $750K (FAR 19.705)'
+      ? 'Required for non-SB > $900K (FAR 19.705, FAC 2025-06)'
       : s.isSB
         ? 'Exempt \u2014 small business awardee'
-        : 'Below $750K threshold',
+        : 'Below $900K threshold',
   });
 
   const needsQASP = s.isServices && m !== 'micro';
@@ -672,12 +675,12 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Commerciality',
     farRef: 'FAR 12.207',
     options: [
-      { id: 'commercial', label: 'Commercial item', weights: { fp: 10, cr: -8, loe: -2 } },
-      { id: 'semi-commercial', label: 'Modified commercial', weights: { fp: 5, cr: -2, loe: 2 } },
+      { id: 'commercial', label: 'Commercial item', weights: { fp: 10, cr: -8, loe: -2, letter: 0 } },
+      { id: 'semi-commercial', label: 'Modified commercial', weights: { fp: 5, cr: -2, loe: 2, letter: 0 } },
       {
         id: 'non-commercial',
         label: 'Non-commercial / custom',
-        weights: { fp: -2, cr: 5, loe: 3 },
+        weights: { fp: -2, cr: 5, loe: 3, letter: 0 },
       },
     ],
   },
@@ -686,12 +689,12 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Price Competition',
     farRef: 'FAR 15.403-1',
     options: [
-      { id: 'adequate', label: 'Adequate competition', weights: { fp: 8, cr: -3, loe: 0 } },
-      { id: 'limited', label: 'Limited competition', weights: { fp: 2, cr: 3, loe: 2 } },
+      { id: 'adequate', label: 'Adequate competition', weights: { fp: 8, cr: -3, loe: 0, letter: 0 } },
+      { id: 'limited', label: 'Limited competition', weights: { fp: 2, cr: 3, loe: 2, letter: 0 } },
       {
         id: 'sole-source',
         label: 'Sole source / no competition',
-        weights: { fp: -3, cr: 5, loe: 4 },
+        weights: { fp: -3, cr: 5, loe: 4, letter: 0 },
       },
     ],
   },
@@ -703,14 +706,14 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
       {
         id: 'strong',
         label: 'Catalog / market prices available',
-        weights: { fp: 8, cr: -5, loe: -2 },
+        weights: { fp: 8, cr: -5, loe: -2, letter: 0 },
       },
       {
         id: 'moderate',
         label: 'Some comparable pricing exists',
-        weights: { fp: 3, cr: 1, loe: 1 },
+        weights: { fp: 3, cr: 1, loe: 1, letter: 0 },
       },
-      { id: 'weak', label: 'No comparable pricing available', weights: { fp: -3, cr: 5, loe: 3 } },
+      { id: 'weak', label: 'No comparable pricing available', weights: { fp: -3, cr: 5, loe: 3, letter: 0 } },
     ],
   },
   {
@@ -721,10 +724,10 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
       {
         id: 'yes',
         label: 'Certified cost/pricing data available',
-        weights: { fp: 2, cr: 6, loe: 0 },
+        weights: { fp: 2, cr: 6, loe: 0, letter: 0 },
       },
-      { id: 'partial', label: 'Some cost data, not certified', weights: { fp: 3, cr: 2, loe: 2 } },
-      { id: 'no', label: 'No cost data available', weights: { fp: 5, cr: -8, loe: 3 } },
+      { id: 'partial', label: 'Some cost data, not certified', weights: { fp: 3, cr: 2, loe: 2, letter: 0 } },
+      { id: 'no', label: 'No cost data available', weights: { fp: 5, cr: -8, loe: 3, letter: 0 } },
     ],
   },
   {
@@ -732,9 +735,9 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Type & Complexity',
     farRef: 'FAR 16.104(a)',
     options: [
-      { id: 'well-defined', label: 'Well-defined / routine', weights: { fp: 8, cr: -3, loe: 0 } },
-      { id: 'moderate', label: 'Moderately complex', weights: { fp: 2, cr: 3, loe: 3 } },
-      { id: 'high', label: 'High complexity / R&D', weights: { fp: -5, cr: 8, loe: 4 } },
+      { id: 'well-defined', label: 'Well-defined / routine', weights: { fp: 8, cr: -3, loe: 0, letter: 0 } },
+      { id: 'moderate', label: 'Moderately complex', weights: { fp: 2, cr: 3, loe: 3, letter: 0 } },
+      { id: 'high', label: 'High complexity / R&D', weights: { fp: -5, cr: 8, loe: 4, letter: 0 } },
     ],
   },
   {
@@ -742,8 +745,8 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Combining Contract Types',
     farRef: 'FAR 16.104(b)',
     options: [
-      { id: 'single', label: 'Single type appropriate', weights: { fp: 2, cr: 2, loe: 2 } },
-      { id: 'hybrid', label: 'Hybrid type needed', weights: { fp: 0, cr: 0, loe: 5 } },
+      { id: 'single', label: 'Single type appropriate', weights: { fp: 2, cr: 2, loe: 2, letter: 0 } },
+      { id: 'hybrid', label: 'Hybrid type needed', weights: { fp: 0, cr: 0, loe: 5, letter: 0 } },
     ],
   },
   {
@@ -751,9 +754,9 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Urgency',
     farRef: 'FAR 16.104(c)',
     options: [
-      { id: 'normal', label: 'Normal timeline', weights: { fp: 3, cr: 2, loe: 0 } },
-      { id: 'urgent', label: 'Urgent requirement', weights: { fp: 5, cr: -2, loe: 6 } },
-      { id: 'crisis', label: 'Emergency / crisis', weights: { fp: 8, cr: -5, loe: 8 } },
+      { id: 'normal', label: 'Normal timeline', weights: { fp: 3, cr: 2, loe: 0, letter: 0 } },
+      { id: 'urgent', label: 'Urgent requirement', weights: { fp: 5, cr: -2, loe: 6, letter: 0 } },
+      { id: 'crisis', label: 'Emergency / crisis', weights: { fp: 8, cr: -5, loe: 8, letter: 0 } },
     ],
   },
   {
@@ -761,9 +764,9 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Period of Performance',
     farRef: 'FAR 16.104(d)',
     options: [
-      { id: 'short', label: 'Short (\u22641 year)', weights: { fp: 6, cr: -2, loe: 3 } },
-      { id: 'medium', label: 'Medium (1\u20133 years)', weights: { fp: 2, cr: 3, loe: 2 } },
-      { id: 'long', label: 'Long (3+ years)', weights: { fp: -3, cr: 6, loe: 0 } },
+      { id: 'short', label: 'Short (\u22641 year)', weights: { fp: 6, cr: -2, loe: 3, letter: 0 } },
+      { id: 'medium', label: 'Medium (1\u20133 years)', weights: { fp: 2, cr: 3, loe: 2, letter: 0 } },
+      { id: 'long', label: 'Long (3+ years)', weights: { fp: -3, cr: 6, loe: 0, letter: 0 } },
     ],
   },
   {
@@ -771,9 +774,9 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Contractor Capability',
     farRef: 'FAR 16.104(e)',
     options: [
-      { id: 'proven', label: 'Proven / established', weights: { fp: 5, cr: 2, loe: 0 } },
-      { id: 'moderate', label: 'Moderate experience', weights: { fp: 2, cr: 3, loe: 2 } },
-      { id: 'new', label: 'New / unproven', weights: { fp: -3, cr: 5, loe: 4 } },
+      { id: 'proven', label: 'Proven / established', weights: { fp: 5, cr: 2, loe: 0, letter: 0 } },
+      { id: 'moderate', label: 'Moderate experience', weights: { fp: 2, cr: 3, loe: 2, letter: 0 } },
+      { id: 'new', label: 'New / unproven', weights: { fp: -3, cr: 5, loe: 4, letter: 0 } },
     ],
   },
   {
@@ -781,12 +784,12 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Accounting System Adequacy',
     farRef: 'FAR 16.104(f)',
     options: [
-      { id: 'adequate', label: 'Adequate system', weights: { fp: 2, cr: 6, loe: 2 } },
-      { id: 'partial', label: 'Partially adequate', weights: { fp: 3, cr: -2, loe: 3 } },
+      { id: 'adequate', label: 'Adequate system', weights: { fp: 2, cr: 6, loe: 2, letter: 0 } },
+      { id: 'partial', label: 'Partially adequate', weights: { fp: 3, cr: -2, loe: 3, letter: 0 } },
       {
         id: 'inadequate',
         label: 'Inadequate / not evaluated',
-        weights: { fp: 6, cr: -10, loe: 5 },
+        weights: { fp: 6, cr: -10, loe: 5, letter: 0 },
       },
     ],
   },
@@ -795,9 +798,9 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Concurrent Contracts',
     farRef: 'FAR 16.104(g)',
     options: [
-      { id: 'none', label: 'No concurrent contracts', weights: { fp: 2, cr: 2, loe: 2 } },
-      { id: 'some', label: 'Some concurrent contracts', weights: { fp: 0, cr: 3, loe: 3 } },
-      { id: 'many', label: 'Extensive concurrent work', weights: { fp: -2, cr: 4, loe: 4 } },
+      { id: 'none', label: 'No concurrent contracts', weights: { fp: 2, cr: 2, loe: 2, letter: 0 } },
+      { id: 'some', label: 'Some concurrent contracts', weights: { fp: 0, cr: 3, loe: 3, letter: 0 } },
+      { id: 'many', label: 'Extensive concurrent work', weights: { fp: -2, cr: 4, loe: 4, letter: 0 } },
     ],
   },
   {
@@ -805,9 +808,9 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Subcontracting Extent',
     farRef: 'FAR 16.104(h)',
     options: [
-      { id: 'minimal', label: 'Minimal subcontracting', weights: { fp: 4, cr: 0, loe: 2 } },
-      { id: 'moderate', label: 'Moderate subcontracting', weights: { fp: 1, cr: 3, loe: 2 } },
-      { id: 'extensive', label: 'Extensive subcontracting', weights: { fp: -2, cr: 5, loe: 3 } },
+      { id: 'minimal', label: 'Minimal subcontracting', weights: { fp: 4, cr: 0, loe: 2, letter: 0 } },
+      { id: 'moderate', label: 'Moderate subcontracting', weights: { fp: 1, cr: 3, loe: 2, letter: 0 } },
+      { id: 'extensive', label: 'Extensive subcontracting', weights: { fp: -2, cr: 5, loe: 3, letter: 0 } },
     ],
   },
   {
@@ -815,10 +818,10 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
     name: 'Acquisition History',
     farRef: 'FAR 16.104(i)',
     options: [
-      { id: 'first-time', label: 'First-time buy', weights: { fp: -3, cr: 5, loe: 4 } },
-      { id: 'prior-fp', label: 'Prior buy was fixed-price', weights: { fp: 8, cr: -3, loe: 0 } },
-      { id: 'prior-cr', label: 'Prior buy was cost-reimb', weights: { fp: -2, cr: 6, loe: 2 } },
-      { id: 'prior-tm', label: 'Prior buy was T&M/LH', weights: { fp: 0, cr: 2, loe: 7 } },
+      { id: 'first-time', label: 'First-time buy', weights: { fp: -3, cr: 5, loe: 4, letter: 0 } },
+      { id: 'prior-fp', label: 'Prior buy was fixed-price', weights: { fp: 8, cr: -3, loe: 0, letter: 0 } },
+      { id: 'prior-cr', label: 'Prior buy was cost-reimb', weights: { fp: -2, cr: 6, loe: 2, letter: 0 } },
+      { id: 'prior-tm', label: 'Prior buy was T&M/LH', weights: { fp: 0, cr: 2, loe: 7, letter: 0 } },
     ],
   },
 ];
@@ -828,15 +831,15 @@ export const CONTRACT_TYPE_FACTORS: ContractTypeFactor[] = [
 // ============================================================
 
 /** Map each TYPES entry to a category for scoring */
-const TYPE_CATEGORY_MAP: Record<string, 'fp' | 'cr' | 'loe'> = {};
+const TYPE_CATEGORY_MAP: Record<string, 'fp' | 'cr' | 'loe' | 'letter'> = {};
 for (const t of TYPES) {
   TYPE_CATEGORY_MAP[t.id] = t.category;
 }
 
 export function recommendContractType(answers: FactorAnswer[]): RankedRecommendation[] {
-  // Accumulate raw scores per category
-  const catScores = { fp: 0, cr: 0, loe: 0 };
-  const catMax = { fp: 0, cr: 0, loe: 0 };
+  // Accumulate raw scores per category (letter contracts are emergency-only, not scored)
+  const catScores = { fp: 0, cr: 0, loe: 0, letter: 0 };
+  const catMax = { fp: 0, cr: 0, loe: 0, letter: 0 };
   const reasoning: Record<string, string[]> = {};
   let crBlocked = false;
 

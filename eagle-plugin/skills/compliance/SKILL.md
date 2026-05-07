@@ -53,15 +53,14 @@ Verify small business set-aside requirements and opportunities.
 | National Security | 6.302-6 | Classified requirements |
 | Public Interest | 6.302-7 | Agency head only (rare) |
 
-### J&A Approval Thresholds (FAR 6.304)
+### J&A Approval Thresholds (FAR 6.304, FAC 2025-06)
 
 | Estimated Value | Approval Authority |
 |-----------------|-------------------|
-| ≤ $750,000 | Contracting Officer |
-| ≤ $15,000,000 | Competition Advocate |
-| ≤ $75,000,000 | Head of Procuring Activity (HPA) |
-| ≤ $100,000,000 | Senior Procurement Executive |
-| > $100,000,000 | Agency Head (non-delegable) |
+| ≤ $900,000 | Contracting Officer |
+| ≤ $20,000,000 | Competition Advocate |
+| ≤ $90,000,000 | Head of Procuring Activity (HPA) |
+| > $90,000,000 | Senior Procurement Executive |
 
 ---
 
@@ -71,11 +70,18 @@ Verify small business set-aside requirements and opportunities.
 
 **Best for:** Commercial products/services, broad competition, fast procurement
 
+**Terminology note:** GSA consolidated its schedules into MAS in 2019. Legacy names like "GSA Professional Services Schedule (PSS)" or "IT Schedule 70" should be cited as **GSA MAS Professional Services** and **GSA MAS Information Technology** respectively. Use current MAS terminology in all recommendations.
+
+**Key SINs for Professional Services:**
+- **541611** — Management Consulting (coaching, facilitation, training, advisory) — **default for professional services**
+- **541612** — HR Consulting (compensation, benefits, recruiting, HR policy only)
+- **541618** — Other Management Consulting Services
+
 | Threshold | Procedure |
 |-----------|-----------|
 | ≤ $10,000 | Order from one source |
-| $10,001 - $250,000 | Seek quotes from 3+ schedule contractors |
-| > $250,000 | Seek quotes from reasonable number; consider ordering procedures |
+| $10,001 - $350,000 | Seek quotes from 3+ schedule contractors |
+| > $350,000 | Seek quotes from reasonable number; consider ordering procedures (SAT per FAC 2025-06) |
 
 **Pros:**
 - Pre-negotiated pricing
@@ -146,7 +152,7 @@ Verify small business set-aside requirements and opportunities.
 
 **Required for:** All acquisitions above micro-purchase threshold ($10,000)
 
-**Automatic Set-Aside:** Acquisitions between $10,000 and SAT ($250,000) if:
+**Automatic Set-Aside:** Acquisitions between $10,000 and SAT ($350,000 per FAC 2025-06) if:
 - Reasonable expectation of 2+ responsible small business offers
 - Award will be at fair market price
 
@@ -176,7 +182,7 @@ Size standards vary by NAICS code. Common examples:
 
 ### Subcontracting Plans (FAR 19.7)
 
-**Required for:** Contracts > $750,000 ($1.5M for construction) with large business primes
+**Required for:** Contracts > $900,000 ($2M for construction) with large business primes (FAC 2025-06)
 
 **Must include:**
 - Small business subcontracting goals
@@ -231,10 +237,10 @@ Size standards vary by NAICS code. Common examples:
 - FAR 52.222-36 Equal Opportunity for Workers with Disabilities
 - FAR 52.222-37 Employment Reports on Veterans
 
-#### > $750,000
+#### > $900,000 (FAC 2025-06)
 - FAR 52.219-9 Small Business Subcontracting Plan (for large businesses)
 
-#### > $2,000,000
+#### > $2,500,000 (FAC 2025-06)
 - FAR 52.215-10/11 Price Reduction for Defective Certified Cost Data
 - FAR 52.215-12/13 Subcontractor Certified Cost Data
 
