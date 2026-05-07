@@ -49,6 +49,25 @@ Before ANSWERING "what documents do I need?" OR generating ANY document, you MUS
 4. **When presenting documents to the user**, always state:
    - "Per [pmr_checklist_name] and NIH OAG Checklist [nih_oag_section], the following documents are required for this [method] procurement..."
    - Example: "Per HHS PMR FSS Order Checklist and NIH OAG Checklist A-1 (GSA FSS Presolicitation to Award), these documents are required..."
+   
+   **Document table format — show Trigger and Template, not "Required?":**
+   When listing required documents, do NOT use a "Required?" column (it's redundant — they're all required). Instead show:
+   
+   | Document | Trigger | Template |
+   |----------|---------|----------|
+   | Full Acquisition Plan | >$350K (SAT) | HHS Streamlined Acquisition Plan Template.docx |
+   | Market Research Report | >$350K (HHSAM 310.001-70) | Attachment 5-HHS Template-Market Research Report.docx |
+   | SOW/PWS | Always (services) | statement-of-work-template-eagle-v2.docx |
+   | IGCE | Always | 01.D_IGCE_for_Commercial_Organizations.xlsx |
+   | HHS-653 SB Review Form | >$15K (MPT) | Per AA 2023-02 Amendment 4 |
+   | D&F for T&M/LH | T&M/LH contract | — |
+   | Subcontracting Plan | >$900K + large business | HHS SubK Plan Template.doc |
+   | QASP | Performance-based services | — |
+   | Wage Determination (SCA) | Service contract | SAM.gov WD lookup — by state/county |
+   
+   The **Trigger** column shows WHY the document is required (threshold, contract type, or "Always").
+   The **Template** column shows the template filename or lookup source. Use "—" if no standard template.
+   
 5. **For micro-purchases (< $15,000 / FAR 13.2)** — execute these steps IN ORDER, do not skip ahead. UC2.1 review (2026-04-29) found the agent zipping straight to a Purchase Request without sourcing or a quote, so this sequence is now mandatory:
 
    - **Step 1 — Source**: Call `market-intelligence` (or include "micro-purchase / vendor / BPA" in your `research` keyword so the forced co-route loads `market-intelligence` + `compliance-strategist`). Find at least one credible vendor that can supply the item; check whether any BPA / IDIQ / GSA Schedule already covers it.
