@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -36,6 +37,36 @@ logger = logging.getLogger("eagle.template_service")
 CACHE_TTL_SECONDS = 60
 S3_TIMEOUT_SECONDS = 10
 DOCUMENTS_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-695681773636-dev")
+
+
+# ── FAR Hyperlink Injection ──────────────────────────────────────────
+# Regex to match FAR/DFARS/HHSAR citations in document text
+_FAR_CITATION_RE = re.compile(
+    r"\b(FAR|DFARS|HHSAR)\s+"
+    r"(\d+(?:\.\d+)?(?:-\d+)?(?:\([a-z]\)(?:\(\d+\))?)?)",
+    re.IGNORECASE,
+)
+
+
+def _build_far_url(citation_type: str, section: str) -> str:
+    """Build acquisition.gov URL for a FAR/DFARS/HHSAR citation.
+
+    Examples:
+        FAR 7.105 → https://www.acquisition.gov/far/7.105
+        FAR 7.105(a)(4) → https://www.acquisition.gov/far/7.105
+        DFARS 252.204-7012 → https://www.acquisition.gov/dfars/252.204-7012
+        HHSAR 352.239-73 → https://www.acquisition.gov/hhsar/352.239-73
+
+    Args:
+        citation_type: "FAR", "DFARS", or "HHSAR"
+        section: The section number (e.g., "7.105", "52.219-9")
+
+    Returns:
+        URL string pointing to acquisition.gov
+    """
+    base_section = section.split("(")[0]  # Strip subsection references like (a)(4)
+    reg_type = citation_type.lower()
+    return f"https://www.acquisition.gov/{reg_type}/{base_section}"
 
 
 # ── Template Cache (60s TTL) ──────────────────────────────────────────
@@ -163,6 +194,14 @@ class DOCXPopulator:
                     for para in footer.paragraphs:
                         DOCXPopulator._replace_in_paragraph(para, replacements)
 
+        # Inject FAR/DFARS/HHSAR hyperlinks
+        try:
+            link_count = DOCXPopulator.inject_far_hyperlinks(doc)
+            if link_count > 0:
+                logger.debug("Injected %d FAR hyperlinks into document", link_count)
+        except Exception as e:
+            logger.warning("FAR hyperlink injection failed (non-fatal): %s", e)
+
         # Save to bytes
         output = io.BytesIO()
         doc.save(output)
@@ -185,6 +224,183 @@ class DOCXPopulator:
                 first_run.text = full_text
             else:
                 para.text = full_text
+
+    @staticmethod
+    def inject_far_hyperlinks(doc) -> int:
+        """Convert FAR/DFARS/HHSAR citations to hyperlinks in the document.
+
+        Scans all paragraphs for regulation citations and converts them
+        to clickable hyperlinks pointing to acquisition.gov.
+
+        Args:
+            doc: python-docx Document object
+
+        Returns:
+            Number of hyperlinks injected
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        count = 0
+
+        def _make_hyperlink_run(part, url: str, text: str, template_run=None):
+            """Create a hyperlink element wrapping a text run."""
+            # Create relationship for the URL
+            r_id = part.relate_to(
+                url,
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                is_external=True,
+            )
+
+            # Create hyperlink element
+            hyperlink = OxmlElement("w:hyperlink")
+            hyperlink.set(qn("r:id"), r_id)
+
+            # Create run with hyperlink styling
+            new_run = OxmlElement("w:r")
+            rPr = OxmlElement("w:rPr")
+
+            # Blue color
+            color = OxmlElement("w:color")
+            color.set(qn("w:val"), "0563C1")  # Standard hyperlink blue
+            rPr.append(color)
+
+            # Underline
+            u = OxmlElement("w:u")
+            u.set(qn("w:val"), "single")
+            rPr.append(u)
+
+            # Copy font settings from template run if provided
+            if template_run is not None:
+                try:
+                    src_rPr = template_run._element.find(qn("w:rPr"))
+                    if src_rPr is not None:
+                        for child in src_rPr:
+                            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+                            # Skip color and underline (we set our own)
+                            if tag not in ("color", "u"):
+                                rPr.append(child.__copy__())
+                except Exception:
+                    pass
+
+            new_run.append(rPr)
+
+            # Text element
+            t = OxmlElement("w:t")
+            t.text = text
+            # Preserve spaces
+            t.set(qn("xml:space"), "preserve")
+            new_run.append(t)
+
+            hyperlink.append(new_run)
+            return hyperlink
+
+        def _process_paragraph(para) -> int:
+            """Process a single paragraph, converting FAR citations to hyperlinks."""
+            injected = 0
+            text = para.text
+            if not text:
+                return 0
+
+            # Find all FAR citations
+            matches = list(_FAR_CITATION_RE.finditer(text))
+            if not matches:
+                return 0
+
+            # For each run, check if it contains a citation
+            for run in list(para.runs):
+                run_text = run.text
+                if not run_text:
+                    continue
+
+                # Find citations in this specific run
+                run_matches = list(_FAR_CITATION_RE.finditer(run_text))
+                if not run_matches:
+                    continue
+
+                # Process matches in reverse order to preserve positions
+                for match in reversed(run_matches):
+                    citation_type = match.group(1).upper()
+                    section = match.group(2)
+                    full_citation = match.group(0)
+                    url = _build_far_url(citation_type, section)
+
+                    start, end = match.start(), match.end()
+                    before = run_text[:start]
+                    after = run_text[end:]
+
+                    # Create hyperlink element
+                    hyperlink = _make_hyperlink_run(
+                        para.part, url, full_citation, template_run=run
+                    )
+
+                    # Get the run's XML element and its parent
+                    run_element = run._element
+                    parent = run_element.getparent()
+                    run_idx = list(parent).index(run_element)
+
+                    # Insert: before_run (if any), hyperlink, after_run (if any)
+                    insert_idx = run_idx
+
+                    if before:
+                        before_run = OxmlElement("w:r")
+                        # Copy formatting
+                        src_rPr = run_element.find(qn("w:rPr"))
+                        if src_rPr is not None:
+                            before_run.append(src_rPr.__copy__())
+                        before_t = OxmlElement("w:t")
+                        before_t.text = before
+                        before_t.set(qn("xml:space"), "preserve")
+                        before_run.append(before_t)
+                        parent.insert(insert_idx, before_run)
+                        insert_idx += 1
+
+                    parent.insert(insert_idx, hyperlink)
+                    insert_idx += 1
+                    injected += 1
+
+                    if after:
+                        after_run = OxmlElement("w:r")
+                        src_rPr = run_element.find(qn("w:rPr"))
+                        if src_rPr is not None:
+                            after_run.append(src_rPr.__copy__())
+                        after_t = OxmlElement("w:t")
+                        after_t.text = after
+                        after_t.set(qn("xml:space"), "preserve")
+                        after_run.append(after_t)
+                        parent.insert(insert_idx, after_run)
+
+                    # Remove original run
+                    parent.remove(run_element)
+
+                    # Update run_text for next iteration (though we break after one)
+                    break  # Process one citation per run, re-scan if more
+
+            return injected
+
+        # Process all paragraphs in main body
+        for para in doc.paragraphs:
+            count += _process_paragraph(para)
+
+        # Process tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        count += _process_paragraph(para)
+
+        # Process headers and footers
+        for section in doc.sections:
+            for header in [section.header, section.first_page_header, section.even_page_header]:
+                if header:
+                    for para in header.paragraphs:
+                        count += _process_paragraph(para)
+            for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+                if footer:
+                    for para in footer.paragraphs:
+                        count += _process_paragraph(para)
+
+        return count
 
     @staticmethod
     def extract_text(docx_bytes: bytes) -> str:
