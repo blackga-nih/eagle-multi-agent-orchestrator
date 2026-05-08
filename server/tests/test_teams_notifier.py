@@ -12,15 +12,6 @@ os.environ.setdefault("TEAMS_WEBHOOK_URL", "https://test-webhook.example.com")
 os.environ.setdefault("TEAMS_WEBHOOK_ENABLED", "true")
 
 
-@pytest.fixture(autouse=True)
-def _reset_client():
-    """Reset the module-level httpx client between tests."""
-    import app.teams_notifier as mod
-    mod._client = None
-    yield
-    mod._client = None
-
-
 @pytest.fixture
 def _reset_rate_limiters():
     """Reset rate limiter tokens to full capacity."""
@@ -34,6 +25,24 @@ def _card_text(payload: dict) -> str:
     return json.dumps(payload)
 
 
+def _patch_async_client(post_return=None, post_side_effect=None):
+    """Build a mock for `httpx.AsyncClient(...)` used as `async with`.
+
+    Returns ``(constructor_mock, post_mock)`` — patch the constructor onto
+    ``app.teams_notifier.httpx.AsyncClient`` and inspect ``post_mock`` for
+    call assertions. Mirrors the per-call client pattern in _send.
+    """
+    inner = AsyncMock()
+    if post_side_effect is not None:
+        inner.post = AsyncMock(side_effect=post_side_effect)
+    else:
+        inner.post = AsyncMock(return_value=post_return)
+    constructor = MagicMock()
+    constructor.return_value.__aenter__ = AsyncMock(return_value=inner)
+    constructor.return_value.__aexit__ = AsyncMock(return_value=None)
+    return constructor, inner.post
+
+
 # ── _send tests ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -44,15 +53,14 @@ async def test_send_success(_reset_rate_limiters):
     mock_response = MagicMock()
     mock_response.status_code = 200
 
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(return_value=mock_response)
+    constructor, post_mock = _patch_async_client(post_return=mock_response)
 
     payload = {"type": "message", "attachments": []}
-    with patch("app.teams_notifier._get_client", return_value=mock_client):
+    with patch("app.teams_notifier.httpx.AsyncClient", constructor):
         await _send(payload, "feedback")
 
-    mock_client.post.assert_called_once()
-    sent = mock_client.post.call_args[1]["json"]
+    post_mock.assert_called_once()
+    sent = post_mock.call_args[1]["json"]
     assert sent["type"] == "message"
 
 
@@ -61,10 +69,9 @@ async def test_send_timeout(_reset_rate_limiters):
     """_send handles httpx.TimeoutException gracefully."""
     from app.teams_notifier import _send
 
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+    constructor, _ = _patch_async_client(post_side_effect=httpx.TimeoutException("timeout"))
 
-    with patch("app.teams_notifier._get_client", return_value=mock_client):
+    with patch("app.teams_notifier.httpx.AsyncClient", constructor):
         await _send({"type": "message"}, "feedback")
 
 
@@ -73,11 +80,14 @@ async def test_send_disabled():
     """_send is a no-op when WEBHOOK_ENABLED is False."""
     from app.teams_notifier import _send
 
-    with patch("app.teams_notifier.WEBHOOK_ENABLED", False):
-        mock_client = AsyncMock()
-        with patch("app.teams_notifier._get_client", return_value=mock_client):
-            await _send({"type": "message"}, "feedback")
-        mock_client.post.assert_not_called()
+    constructor, post_mock = _patch_async_client()
+
+    with patch("app.teams_notifier.WEBHOOK_ENABLED", False), \
+         patch("app.teams_notifier.httpx.AsyncClient", constructor):
+        await _send({"type": "message"}, "feedback")
+
+    constructor.assert_not_called()
+    post_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -90,11 +100,12 @@ async def test_send_rate_limited():
     bucket = mod._rate_limiters["feedback"]
     bucket.tokens = 0.0
 
-    mock_client = AsyncMock()
-    with patch("app.teams_notifier._get_client", return_value=mock_client):
+    constructor, post_mock = _patch_async_client()
+    with patch("app.teams_notifier.httpx.AsyncClient", constructor):
         await _send({"type": "message"}, "feedback")
 
-    mock_client.post.assert_not_called()
+    constructor.assert_not_called()
+    post_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -106,10 +117,9 @@ async def test_send_non_2xx_logs_warning(_reset_rate_limiters):
     mock_response.status_code = 403
     mock_response.text = "Forbidden"
 
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(return_value=mock_response)
+    constructor, _ = _patch_async_client(post_return=mock_response)
 
-    with patch("app.teams_notifier._get_client", return_value=mock_client), \
+    with patch("app.teams_notifier.httpx.AsyncClient", constructor), \
          patch("app.teams_notifier.logger") as mock_logger:
         await _send({"type": "message"}, "feedback")
 
@@ -256,27 +266,29 @@ def test_notify_suspicious_rate_limits():
 
 
 # ── close_notifier_client tests ──────────────────────────────────────
+#
+# After the per-call AsyncClient refactor (no module singleton),
+# close_notifier_client() is a backwards-compat awaitable no-op. These
+# tests verify the shim still resolves and never raises, so existing
+# shutdown handlers don't break.
 
 @pytest.mark.asyncio
-async def test_close_notifier_client():
-    """close_notifier_client closes the httpx client and resets to None."""
-    import app.teams_notifier as mod
+async def test_close_notifier_client_is_awaitable_noop():
+    """close_notifier_client awaits cleanly and returns None."""
+    from app.teams_notifier import close_notifier_client
 
-    mock_client = AsyncMock()
-    mod._client = mock_client
-
-    await mod.close_notifier_client()
-
-    mock_client.aclose.assert_called_once()
-    assert mod._client is None
+    result = await close_notifier_client()
+    assert result is None
 
 
 @pytest.mark.asyncio
-async def test_close_notifier_client_noop_when_none():
-    """close_notifier_client is safe to call when no client exists."""
-    import app.teams_notifier as mod
-    mod._client = None
-    await mod.close_notifier_client()
+async def test_close_notifier_client_safe_to_call_repeatedly():
+    """close_notifier_client is idempotent (safe across multiple shutdowns)."""
+    from app.teams_notifier import close_notifier_client
+
+    await close_notifier_client()
+    await close_notifier_client()
+    await close_notifier_client()
 
 
 # ── teams_cards unit tests ───────────────────────────────────────────

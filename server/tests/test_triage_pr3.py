@@ -13,8 +13,6 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 
-import pytest
-
 # Tests in this repo expect S3_BUCKET set via .env or fixture; set a stub here
 # in case this module is collected before the .env autoload runs.
 os.environ.setdefault("S3_BUCKET", "test-bucket")
@@ -144,11 +142,19 @@ class TestRankingJsonSalvage:
 class TestTeamsNotifierImport:
     """Triage #7: module-level singleton client is gone; per-call AsyncClient instead."""
 
-    def test_no_module_level_singleton(self):
-        # The fix removed the _client global. If a future refactor re-introduces
-        # it, this test fails — surfacing the same regression.
+    def test_no_get_client_function(self):
+        # The fix removed the _get_client() helper that constructed and reused
+        # the singleton AsyncClient. Checking for the absence of `_client` as
+        # a module attribute is too brittle (other tests' fixtures used to
+        # mutate `mod._client = None`, leaving the attribute behind). Checking
+        # for `_get_client` is the right invariant: that's the API that
+        # encoded the singleton pattern, and nothing should re-introduce it.
         from app import teams_notifier
-        assert not hasattr(teams_notifier, "_client") or getattr(teams_notifier, "_client", "absent") == "absent"
+        assert not hasattr(teams_notifier, "_get_client"), (
+            "_get_client() should not exist — the per-call AsyncClient pattern "
+            "creates fresh clients inline via `async with httpx.AsyncClient(...)`. "
+            "If this assertion fails, the singleton helper has been re-introduced."
+        )
 
     def test_close_notifier_client_is_noop(self):
         # Compatibility shim — older callers may still await it.
