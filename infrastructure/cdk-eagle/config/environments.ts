@@ -131,6 +131,12 @@ export const QA_CONFIG: EagleConfig = {
   vpcId: 'vpc-0a3010977e2bca965',
   externalAlbSecurityGroupId: 'sg-02970d6bd45fe8bd4',
   privateSubnetIds: ['subnet-00efa33c26f620963', 'subnet-0c37ceaa073beb491'],
+  // Per-env resource names — must override DEV_CONFIG so QA does not point at
+  // dev buckets/tables. Same class of bug as the vectors-bucket fix in
+  // ff8654f, which only patched vectorsBucketName.
+  documentBucketName: `eagle-documents-${ACCOUNT}-qa`,
+  documentMetadataTableName: 'eagle-document-metadata-qa',
+  evalBucketName: `eagle-eval-artifacts-${ACCOUNT}-qa`,
   vectorsBucketName: `eagle-kb-vectors-${ACCOUNT}-qa`,
   desiredCount: 1,
   maxCount: 2,

@@ -47,7 +47,18 @@ GENERIC_EDIT_ERROR = "Unable to save document changes."
 
 # ── Constants ────────────────────────────────────────────────────────
 
-_S3_BUCKET = os.getenv("S3_BUCKET", "eagle-documents-dev")
+_S3_BUCKET = os.getenv("S3_BUCKET") or os.getenv("DOCUMENT_BUCKET")
+if not _S3_BUCKET:
+    # The literal "eagle-documents-dev" fallback used to live here, but no
+    # bucket with that exact name exists in any account — the real names carry
+    # an account suffix (eagle-documents-{account}-{env}). Silently falling
+    # back to the literal caused uploads to 500 with NoSuchBucket and made
+    # local-vs-deployed misconfiguration hard to spot. Fail at import time
+    # instead so the misconfiguration surfaces in the container logs.
+    raise RuntimeError(
+        "S3_BUCKET (or DOCUMENT_BUCKET) env var is required for document uploads. "
+        "In ECS this is wired by compute-stack.ts; locally set it in server/.env."
+    )
 _BINARY_FILE_EXTENSIONS = {"doc", "docx", "pdf", "xls", "xlsx"}
 _TEXT_FILE_EXTENSIONS = {"md", "txt", "json", "csv", "html"}
 ALLOWED_UPLOAD_MIME_TYPES = {
