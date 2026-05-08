@@ -23,6 +23,17 @@ from typing import Any, Optional, Tuple
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .db_client import get_table, get_s3
+from .package_document_store import (
+    get_document_history,
+    get_document,
+    get_document_by_id as store_get_document_by_id,
+    finalize_document as store_finalize_document,
+)
+from .package_store import get_package, update_package
+from .changelog_store import write_changelog_entry
+from .tools.create_document_support import _append_provenance_metadata
+
 
 def _to_dynamo_safe(value: Any) -> Any:
     """Recursively coerce Python floats to Decimal for DynamoDB put_item.
@@ -43,16 +54,6 @@ def _to_dynamo_safe(value: Any) -> Any:
         return [_to_dynamo_safe(v) for v in value]
     return value
 
-from .db_client import get_table, get_s3
-from .package_document_store import (
-    get_document_history,
-    get_document,
-    get_document_by_id as store_get_document_by_id,
-    finalize_document as store_finalize_document,
-)
-from .package_store import get_package, update_package
-from .changelog_store import write_changelog_entry
-from .tools.create_document_support import _append_provenance_metadata
 
 logger = logging.getLogger("eagle.document_service")
 
