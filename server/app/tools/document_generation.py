@@ -778,7 +778,7 @@ def exec_create_document(
     # in eagle-plugin/tools/tool-definitions.json promises this field
     # so the model can audit structural adherence on the next turn.
     if template_provenance:
-        response["_template_provenance"] = template_provenance
+        response["_template_provenance"] = dict(template_provenance)
     else:
         # Even when no template was applied, tell the model so — silence
         # would let it assume otherwise.
@@ -791,5 +791,28 @@ def exec_create_document(
                 "adherence next time, pass `template_id` explicitly."
             ),
         }
+
+    # ── Tier-3 post-write section-drift validator ────────────────────────
+    # Compare the saved markdown's section structure to the registered
+    # template schema (template_schema.validate_completeness). Surface the
+    # report inline on _template_provenance so the supervisor sees what
+    # sections it skipped or invented, and can self-correct on the next
+    # turn. Observability-only — does not block the call. Silently no-op
+    # for doc_types without a registered TemplateSchema (e.g. the recently
+    # unlocked qasp/sb_review/etc. before their schemas land).
+    try:
+        from app.template_schema import validate_completeness
+
+        report = validate_completeness(doc_type, content)
+        if report.total_sections > 0:
+            response["_template_provenance"]["section_drift"] = {
+                "total_sections": report.total_sections,
+                "filled_sections": report.filled_sections,
+                "missing_sections": list(report.missing_sections),
+                "completeness_pct": report.completeness_pct,
+                "is_complete": report.is_complete,
+            }
+    except Exception as exc:  # noqa: BLE001 — never block the tool on validator
+        logger.debug("section-drift validator failed for %s: %s", doc_type, exc)
 
     return response

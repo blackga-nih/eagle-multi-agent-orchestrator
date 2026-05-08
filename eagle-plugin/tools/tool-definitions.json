@@ -69,7 +69,7 @@
           },
           "template_id": {
             "type": "string",
-            "description": "OPTIONAL but PREFERRED: the template_id of the official template to populate (e.g. 'hhs-streamlined-acquisition-plan-v3', 'nci-igce-commercial-v1'). When set, the tool uses the registered template's section structure as the source of truth and your `content` is interpreted as the populated body for those sections — section adherence is enforced. When omitted, the tool falls back to default-template lookup by doc_type, then to AI-content passthrough; the response includes a `_template_provenance` field naming the template that was actually used so you can confirm structural adherence on the next turn."
+            "description": "OPTIONAL but PREFERRED: the template_id of the official template to populate (e.g. 'hhs-streamlined-acquisition-plan-v3', 'nci-igce-commercial-v1'). When set, the tool uses the registered template's section structure as the source of truth and your `content` is interpreted as the populated body for those sections — section adherence is enforced. When omitted, the tool falls back to default-template lookup by doc_type, then to AI-content passthrough. The response includes a `_template_provenance` field naming the template that was used; if a TemplateSchema is registered for the doc_type, `_template_provenance.section_drift` reports `{total_sections, filled_sections, missing_sections[], completeness_pct, is_complete}`. If completeness is below 70% or missing_sections is non-empty, RE-RUN create_document with `update_existing_key` set to the prior `s3_key` and provide content covering the missing sections."
           },
           "update_existing_key": {
             "type": "string",
