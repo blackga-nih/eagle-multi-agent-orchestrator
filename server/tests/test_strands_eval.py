@@ -244,6 +244,8 @@ _TEST_METADATA: dict[int, dict] = {
     140: {"uc_id": "EAGLE-73", "uc_name": "jira73-bona-fide-needs",        "phase": "jira-qa",  "mvp": "MVP1"},
     141: {"uc_id": "EAGLE-74", "uc_name": "jira74-far16505-exceptions",    "phase": "jira-qa",  "mvp": "MVP1"},
     142: {"uc_id": "EAGLE-76", "uc_name": "jira76-sbir-protest-kb",        "phase": "jira-qa",  "mvp": "MVP1"},
+    # Category 17: Prompt-invariant guardrails (143+)
+    143: {"uc_id": None,       "uc_name": "aip-lh-exclusion-aip",          "phase": "prompt-invariant", "mvp": "MVP1"},
     # Phase 2: Tool chain validation
     43: {"uc_id": None,    "uc_name": "intake-calls-search-far", "phase": "tool-chain",   "mvp": "MVP1"},
     44: {"uc_id": None,    "uc_name": "legal-cites-far-authority","phase": "tool-chain",  "mvp": "MVP1"},
@@ -8518,6 +8520,105 @@ async def test_142_jira76_sbir_protest_kb():
 
 
 # ============================================================
+# Test 143: AIP scenario -- T&M only, no Labor-Hour leakage
+# Prompt-invariant guardrail | Companion to test_supervisor_prompt_invariants.py
+# ============================================================
+#
+# Behavioral counterpart to the static checks in
+# tests/test_supervisor_prompt_invariants.py. The static tests guarantee the
+# rule is in agent.md; this test exercises the live supervisor on a scenario
+# that historically triggered LH leakage (HHS Acquisition Innovation Program
+# support: GSA Professional Services Schedule, labor-based services, scope
+# uncertain, $1.8-2.2M / 24 months). If the supervisor recommends LH or
+# appends "/LH" to T&M, this test fails.
+#
+# Background: commit 04cd419 strengthened the prompt; PR #187 silently
+# reverted it (caught in commit 7bca862). The static test would have caught
+# the prompt revert; this test catches the response-level leakage that can
+# also occur via specialist output, KB excerpts, or FAR cite passthrough
+# even when the prompt is correct.
+
+async def test_143_aip_lh_exclusion():
+    """AIP services scenario: supervisor must recommend T&M only -- never LH."""
+    print("\n" + "=" * 70)
+    print("TEST 143: AIP services scenario -- T&M only, no Labor-Hour leakage")
+    print("=" * 70)
+
+    # Exact prompt provided as the regression fixture. Classic LH-leakage
+    # trigger: GSA PSS + labor-based services + scope-uncertain coaching/
+    # facilitation/training. NIH/NCI institutional rule: T&M only.
+    prompt = (
+        "I need to acquire Acquisition Innovation Program support services for HHS. "
+        "Here's what I know: The requirement is coaching, facilitation, training "
+        "development and delivery, and innovation advisory support for approximately "
+        "500 acquisition workforce members across HHS divisions. We need a vendor "
+        "who can provide acquisition innovation coaches, facilitate Civilian Services "
+        "Acquisition Workshops (CSAWs), develop Innovation Snapshot reference "
+        "materials, run training events, and conduct an annual Acquisition Innovation "
+        "Readiness Survey. Estimated value is $1.8-2.2M. We're looking at a base year "
+        "plus one option year, roughly 24 months total. This is a services requirement "
+        "-- no major IT systems involved. The work is inherently uncertain in scope so "
+        "we can't define exact deliverables upfront, but we can define the types and "
+        "frequency of engagements. I'd like to use the GSA Professional Services "
+        "Schedule if that makes sense. Small business participation matters to us."
+    )
+
+    try:
+        collector = await _collect_sdk_query(prompt, max_turns=10)
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    text = collector.all_text_lower()
+    response_len = len(collector.result_text)
+    print(f"  Response length: {response_len} chars")
+
+    # Must recommend T&M (any common rendering)
+    tm_recommended = any(w in text for w in [
+        "time-and-materials",
+        "time and materials",
+        "time & materials",
+        "t&m",
+    ])
+
+    # Must NOT recommend or mention Labor-Hour. Watch every common variant the
+    # model has historically produced -- especially appendage forms like
+    # "T&M or LH", "T&M/LH", "Time and Materials/Labor Hour".
+    forbidden_phrases = [
+        "labor-hour",
+        "labor hour",      # space variant
+        "t&m/lh",
+        "t&m / lh",
+        "t&m or lh",
+        "t&m or labor",    # "T&M or Labor Hour"
+        "/lh ",            # "T&M/LH " or " /LH "
+        "/lh,",
+        "/lh.",
+        "/lh)",
+        " lh ",            # standalone LH token
+        " lh,",
+        " lh.",
+        " lh)",
+        "(lh)",            # "(LH)" -- the parenthetical alias
+    ]
+    leaks = [p for p in forbidden_phrases if p in text]
+
+    print(f"  T&M recommended: {tm_recommended}")
+    print(f"  LH leakage phrases found: {leaks if leaks else 'none'}")
+
+    if leaks:
+        # Help diagnosis: show the surrounding context for the first leak.
+        first_phrase = leaks[0]
+        idx = text.find(first_phrase)
+        snippet = text[max(0, idx - 80):idx + len(first_phrase) + 80]
+        print(f"  First leak context: ...{snippet}...")
+
+    passed = tm_recommended and not leaks and response_len > 0
+    print(f"  {'PASS' if passed else 'FAIL'} - AIP scenario T&M-only / no LH leakage")
+    return passed
+
+
+# ============================================================
 # Main infrastructure
 # ============================================================
 
@@ -8703,6 +8804,8 @@ test_names = {
     140: "140_jira73_bona_fide_needs",
     141: "141_jira74_far16505_exceptions",
     142: "142_jira76_sbir_protest_kb",
+    # Category 17: Prompt-invariant guardrails (143+)
+    143: "143_aip_lh_exclusion",
 }
 
 
@@ -9010,6 +9113,8 @@ async def _run_test(test_id: int, capture: "CapturingStream", session_id: str = 
         140: ("140_jira73_bona_fide_needs",            test_140_jira73_bona_fide_needs),
         141: ("141_jira74_far16505_exceptions",        test_141_jira74_far16505_exceptions),
         142: ("142_jira76_sbir_protest_kb",            test_142_jira76_sbir_protest_kb),
+        # Category 17: Prompt-invariant guardrails (143+)
+        143: ("143_aip_lh_exclusion",                  test_143_aip_lh_exclusion),
     }
 
     result_key, test_fn = TEST_REGISTRY[test_id]

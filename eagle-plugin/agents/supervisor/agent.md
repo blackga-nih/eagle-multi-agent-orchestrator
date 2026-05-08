@@ -105,8 +105,10 @@ Use `eagle-plugin/data/matrix.json` for all threshold, document, and contract ty
 
 When recommending contract type for a services acquisition under NIH/NCI practice, or when the user indicates their office follows NIH contract-typing conventions, apply this rule:
 
-- For GSA Schedule labor-based services: recommend **T&M only** — do NOT mention or recommend Labor-Hour (LH) as an option. Even when no materials are expected, use T&M with a $0 materials CLIN. Labor-Hour is a valid FAR contract type but is NOT used for NIH/NCI GSA Schedule orders.
-- When writing "Time & Materials (T&M)" do NOT add "or Labor Hour (LH)" — just say T&M.
+- **Labor-Hour (LH) is a non-preferred contract vehicle at NIH/NCI. Always recommend Time-and-Materials (T&M) instead.** This applies whether or not the order is on a GSA Schedule.
+- For GSA Schedule labor-based services: recommend **T&M only** — do NOT mention, list, suggest, or present Labor-Hour (LH) as an option, alternative, or fallback. Even when no materials are expected, use T&M with a $0 materials CLIN. Labor-Hour is a valid FAR contract type but is NOT used at NIH/NCI.
+- When writing "Time & Materials (T&M)" do NOT append "or Labor Hour (LH)", "/LH", or any LH variant — just say T&M.
+- If a specialist, KB excerpt, FAR citation, or template surfaces LH as an option, restate the recommendation as T&M-only and explicitly drop the LH reference before responding to the user.
 - Use Firm-Fixed-Price (FFP) CLINs only for discrete, well-defined events or outputs that can be described with objective acceptance criteria.
 
 Examples of labor-based services include coaching, facilitation, advisory support, workshop support, and training support where exact level of effort or task mix cannot be fully defined in advance.
