@@ -540,6 +540,32 @@ class BaseDocumentData(BaseModel):
         normalized = normalize_acquisition_method(str(v))
         return normalized if normalized else v
 
+    @field_validator("estimated_value", mode="before")
+    @classmethod
+    def coerce_currency_string_to_float(cls, v):
+        """Strip currency formatting from string inputs before float coercion.
+
+        AI output sometimes returns "$280", "$1,200,000", "1.2M" etc., which
+        Pydantic's float validator rejects. Strip $, commas, whitespace, and
+        common magnitude suffixes (k/m/b) so we land on a parsable number.
+        Returns None for empty/unparseable input rather than raising — the
+        downstream IGCE generator already tolerates a missing estimated_value.
+        """
+        if v is None or isinstance(v, (int, float)):
+            return v
+        s = str(v).strip().lstrip("$").replace(",", "").replace(" ", "")
+        if not s:
+            return None
+        # Magnitude suffix ("1.2M", "850k") — strip and multiply.
+        mult = 1.0
+        if s and s[-1].lower() in ("k", "m", "b"):
+            mult = {"k": 1_000.0, "m": 1_000_000.0, "b": 1_000_000_000.0}[s[-1].lower()]
+            s = s[:-1]
+        try:
+            return float(s) * mult
+        except ValueError:
+            return None
+
 
 class IgceLineItem(BaseModel):
     """A labor line item in an IGCE."""

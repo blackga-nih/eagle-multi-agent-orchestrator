@@ -691,6 +691,41 @@ _AI_RANK_MAX_CANDIDATES = 100  # max items to send to LLM for ranking
 # would deprioritize anyway. Cuts primary-lane latency by ~30s.
 
 
+def _salvage_partial_ranking_json(text: str) -> list[dict[str, Any]]:
+    """Recover ranking entries from a truncated/malformed JSON response.
+
+    Triage 04-30 → 05-02 (3 reports, 7+ failures per run) caught Haiku
+    occasionally truncating the ranking array mid-object on 100-doc batches:
+    "Unterminated string", "Expecting value", etc. The bare json.loads()
+    drops the entire ranking and forces a fall-through to deterministic-only.
+
+    Strategy: regex out every {"i":N,"r":"..."} object that DID parse cleanly
+    before the truncation. Order is preserved (rank position == array index).
+    Returns [] if salvage finds nothing.
+
+    This is intentionally conservative — only recovers entries that already
+    look well-formed. We do not try to repair partial entries.
+    """
+    import re
+    salvaged: list[dict[str, Any]] = []
+    # Match {"i": <int>, "r": "<string with no unescaped quotes>"}.
+    # Tolerates whitespace/newlines, optional trailing comma in the source.
+    pattern = re.compile(
+        r'\{\s*"i"\s*:\s*(\d+)\s*,\s*"r"\s*:\s*"((?:\\.|[^"\\])*)"\s*\}',
+        re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        try:
+            idx = int(match.group(1))
+            rationale = match.group(2)
+            # Unescape \" and \\ — leave the rest alone (rationales are short).
+            rationale = rationale.replace('\\"', '"').replace("\\\\", "\\")
+            salvaged.append({"i": idx, "r": rationale})
+        except (ValueError, IndexError):
+            continue
+    return salvaged
+
+
 def _ai_rank_documents(
     query: str,
     keywords: list[str],
@@ -836,7 +871,22 @@ def _ai_rank_documents(
                 result_text = result_text[4:]
             result_text = result_text.strip()
 
-        parsed = json.loads(result_text)
+        try:
+            parsed = json.loads(result_text)
+        except json.JSONDecodeError as parse_err:
+            # Haiku occasionally truncates mid-object on 100-doc batches.
+            # Salvage every cleanly-formed {"i":N,"r":"..."} entry before
+            # giving up — partial ranking is strictly better than none.
+            salvaged = _salvage_partial_ranking_json(result_text)
+            if salvaged:
+                logger.warning(
+                    "knowledge_search AI: JSON parse failed (%s); salvaged %d entries",
+                    parse_err,
+                    len(salvaged),
+                )
+                parsed = salvaged
+            else:
+                raise
         if not isinstance(parsed, list):
             logger.warning(
                 "knowledge_search AI: unexpected response type: %s", type(parsed)

@@ -18,9 +18,30 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Tuple
+from decimal import Decimal
+from typing import Any, Optional, Tuple
 
 from botocore.exceptions import BotoCoreError, ClientError
+
+
+def _to_dynamo_safe(value: Any) -> Any:
+    """Recursively coerce Python floats to Decimal for DynamoDB put_item.
+
+    boto3's DynamoDB resource interface rejects native ``float`` values with
+    ``TypeError: Float types are not supported. Use Decimal types instead.``
+    This walks dicts/lists/tuples and replaces every ``float`` with a
+    ``Decimal`` built from its ``str()`` form (which is lossless for the
+    floats AI codepaths produce — currency amounts and labor rates).
+
+    Use at the persistence boundary on ``item`` before ``table.put_item``.
+    """
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _to_dynamo_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_dynamo_safe(v) for v in value]
+    return value
 
 from .db_client import get_table, get_s3
 from .package_document_store import (
@@ -494,7 +515,9 @@ def _create_document_record(
 
     try:
         table = get_table()
-        table.put_item(Item=item)
+        # DynamoDB rejects native Python floats — coerce on the way in.
+        # Most floats here come from AI-extracted estimated_value / labor rates.
+        table.put_item(Item=_to_dynamo_safe(item))
         return document_id, None
     except (ClientError, BotoCoreError) as e:
         logger.error("Failed to create document record: %s", e)

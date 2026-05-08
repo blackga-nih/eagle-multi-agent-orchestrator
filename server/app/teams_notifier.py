@@ -77,31 +77,32 @@ _rate_limiters: dict[str, _TokenBucket] = {
 }
 
 
-# ── httpx.AsyncClient (lazy-init) ───────────────────────────────────
-
-_client: Optional[httpx.AsyncClient] = None
+# ── Per-call httpx.AsyncClient ──────────────────────────────────────
+#
+# Previously this module held a lazy-init module-level AsyncClient singleton.
+# Triage 05-01 → 05-03 (3 reports) caught a "RuntimeError: Event loop is
+# closed" on the daily-summary scheduler path: the singleton was created on
+# the first request loop, then re-used by the scheduler running on a
+# different (and later closed) loop. httpx binds AsyncClient to the loop
+# that constructed it, so cross-loop reuse blows up.
+#
+# The fix is one fresh AsyncClient per _send() call, scoped via async with,
+# so the client lifetime is always bound to the calling loop. We lose
+# connection pooling, but each notification is a single POST so pooling
+# was never load-bearing here.
 
 # Dedup guard: track the date string of the last sent daily summary
 # so we never send two for the same calendar day from the same process.
 _last_summary_date: Optional[str] = None
 
 
-def _get_client() -> httpx.AsyncClient:
-    global _client
-    if _client is None:
-        _client = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=5),
-            timeout=httpx.Timeout(WEBHOOK_TIMEOUT),
-        )
-    return _client
-
-
 async def close_notifier_client() -> None:
-    """Close the httpx client. Call from app shutdown."""
-    global _client
-    if _client is not None:
-        await _client.aclose()
-        _client = None
+    """No-op kept for backwards-compat — the singleton client is gone.
+
+    App shutdown handlers may still call this; leaving it as an awaitable
+    no-op avoids breaking those call sites until they're audited.
+    """
+    return None
 
 
 # ── Core send ────────────────────────────────────────────────────────
@@ -118,8 +119,12 @@ async def _send(payload: dict, category: str) -> None:
         return
 
     try:
-        client = _get_client()
-        resp = await client.post(WEBHOOK_URL, json=payload)
+        # New client per call — see comment above on why a singleton is wrong here.
+        async with httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=5),
+            timeout=httpx.Timeout(WEBHOOK_TIMEOUT),
+        ) as client:
+            resp = await client.post(WEBHOOK_URL, json=payload)
         if resp.status_code >= 300:
             logger.warning(
                 "Teams notifier non-2xx: category=%s status=%d body=%s",
