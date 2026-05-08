@@ -21,13 +21,17 @@ with open(MATRIX_PATH, 'r') as f:
 
 print('=== Layer A: matrix.json Internal Consistency ===')
 
-# A1: Thresholds strictly ascending
+# A1: Thresholds non-decreasing.
+# Ties are allowed: distinct triggers can legitimately fire at the same
+# dollar value (e.g. "$900K SubK" and "$900K J&A" are both real and both
+# need to be exposed in the modal). What we guard against is downward
+# monotonicity, which would scramble the modal's tier-by-tier rendering.
 thresholds = matrix['thresholds']
 values = [t['value'] for t in thresholds]
 for i in range(1, len(values)):
-    if values[i] <= values[i-1]:
-        issues.append(f'Thresholds not ascending: {values[i-1]} >= {values[i]}')
-if values == sorted(values) and len(values) == len(set(values)):
+    if values[i] < values[i-1]:
+        issues.append(f'Thresholds not ascending: {values[i-1]} > {values[i]}')
+if values == sorted(values):
     print(f'  A1 Thresholds ascending: PASS ({len(thresholds)} tiers)')
 else:
     print(f'  A1 Thresholds ascending: FAIL')
