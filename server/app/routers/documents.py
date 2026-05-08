@@ -53,11 +53,17 @@ if not _S3_BUCKET:
     # bucket with that exact name exists in any account — the real names carry
     # an account suffix (eagle-documents-{account}-{env}). Silently falling
     # back to the literal caused uploads to 500 with NoSuchBucket and made
-    # local-vs-deployed misconfiguration hard to spot. Fail at import time
-    # instead so the misconfiguration surfaces in the container logs.
-    raise RuntimeError(
-        "S3_BUCKET (or DOCUMENT_BUCKET) env var is required for document uploads. "
-        "In ECS this is wired by compute-stack.ts; locally set it in server/.env."
+    # local-vs-deployed misconfiguration hard to spot.
+    #
+    # Don't raise at import time — that would block the whole app from booting
+    # even on environments that never call upload (CI integration health
+    # check, eval-only containers). Instead log loudly and defer to a clean
+    # 503 from api_upload_document below, so health checks pass but uploads
+    # fail fast with a clear message naming the env var.
+    logger.warning(
+        "S3_BUCKET / DOCUMENT_BUCKET env var not set — document uploads "
+        "will return 503 until configured. In ECS this is wired by "
+        "compute-stack.ts; locally set it in server/.env."
     )
 _BINARY_FILE_EXTENSIONS = {"doc", "docx", "pdf", "xls", "xlsx"}
 _TEXT_FILE_EXTENSIONS = {"md", "txt", "json", "csv", "html"}
@@ -708,6 +714,18 @@ async def api_upload_document(
     import hashlib
 
     from ..user_document_store import create_document as create_unified_document
+
+    # Defensive: if neither S3_BUCKET nor DOCUMENT_BUCKET was set when the
+    # module loaded, fail fast with a clear 503 instead of letting boto3
+    # raise NoSuchBucket on a guessed-empty bucket name.
+    if not _S3_BUCKET:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Document service unavailable: S3_BUCKET (or DOCUMENT_BUCKET) "
+                "env var is not configured on this backend instance."
+            ),
+        )
 
     content_type = file.content_type or "application/octet-stream"
     if content_type not in ALLOWED_UPLOAD_MIME_TYPES:
