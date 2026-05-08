@@ -481,7 +481,20 @@ def get_all_doc_types() -> List[str]:
 def get_create_document_types() -> frozenset[str]:
     """Return doc_types supported by create_document tool.
 
-    These types have markdown generators or templates available.
+    These types have markdown generators or templates available, or are
+    accepted in AI-content passthrough mode where the supervisor drafts the
+    full markdown body and the tool persists it.
+
+    Langfuse trace audit (2026-05-08, last 7 days, 50 calls) showed 21 of
+    39 failures came from doc_types that the supervisor was actively
+    requesting (driven by _COMPLIANCE_DOC_TO_SLUG entries) but that this
+    allowlist did not yet include — `qasp` (12 attempts), `sb_review` (3),
+    `priority_sources_checklist` (3), `section_889` (3). The supervisor's
+    drafted content was high-quality and complete; the tool was rejecting
+    it at the gate. Each of those types is registered in
+    package_store._COMPLIANCE_DOC_TO_SLUG, so they're already "allowed
+    package doc_types" — they just weren't allowed at the create-document
+    gate. Adding them here closes the orphan-enum gap.
     """
     return frozenset({
         "sow",
@@ -493,6 +506,7 @@ def get_create_document_types() -> frozenset[str]:
         "eval_criteria",
         "security_checklist",
         "section_508",
+        "section_889",  # Section 889 covered-telecommunications certification
         "cor_certification",
         "contract_type_justification",
         "son_products",
@@ -500,9 +514,12 @@ def get_create_document_types() -> frozenset[str]:
         "purchase_request",
         "price_reasonableness",
         "required_sources",
+        "priority_sources_checklist",  # Required & Priority Sources Checklist
         "subk_plan",
         "subk_review",
         "buy_american",
+        "qasp",  # Quality Assurance Surveillance Plan
+        "sb_review",  # HHS-653 Small Business Review
     })
 
 

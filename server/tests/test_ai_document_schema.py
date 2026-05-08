@@ -418,3 +418,46 @@ class TestHelperFunctions:
         assert "igce" in types
         assert "subk_plan" in types  # Now included after fix
         assert isinstance(types, frozenset)
+
+    def test_get_create_document_types_includes_compliance_matrix_orphans(self):
+        """Doc_types referenced by _COMPLIANCE_DOC_TO_SLUG must also be
+        accepted by create_document — otherwise the supervisor sees them
+        in the compliance matrix, drafts a full document, and the tool
+        rejects the call. Langfuse audit (2026-05-08, last 7 days)
+        showed 21 of 39 create_document failures came from this exact
+        gap on `qasp`, `sb_review`, `priority_sources_checklist`,
+        `section_889`. Test guards against the orphan-enum regression.
+        """
+        types = get_create_document_types()
+        # The 4 orphans that the audit caught
+        assert "qasp" in types, (
+            "qasp missing from create_document allowlist — supervisor "
+            "drafted 20 QASP attempts in the audit window, all rejected"
+        )
+        assert "sb_review" in types
+        assert "priority_sources_checklist" in types
+        assert "section_889" in types
+        # Cross-check: every value in _COMPLIANCE_DOC_TO_SLUG that is also
+        # a generation candidate (i.e. not an evidence artifact like
+        # sam_exclusions_check / fpds_report) must be in the allowlist.
+        from app.package_store import _COMPLIANCE_DOC_TO_SLUG
+        evidence_only = {"sam_exclusions_check", "fpds_report"}
+        for label, slug in _COMPLIANCE_DOC_TO_SLUG.items():
+            if slug in evidence_only:
+                continue
+            # Some slugs like d_f / source_selection_plan / human_subjects /
+            # cor_designation / inherently_governmental / wage_determination
+            # are deliberately not yet wired (Tier-1 generators TBD); skip
+            # them here so the test focuses on the audit-flagged gap.
+            tier_1_pending = {
+                "d_f", "source_selection_plan", "human_subjects",
+                "cor_designation", "inherently_governmental", "wage_determination",
+            }
+            if slug in tier_1_pending:
+                continue
+            assert slug in types, (
+                f"compliance-matrix doc_type {slug!r} (label={label!r}) is "
+                f"not in get_create_document_types() — same orphan-enum "
+                f"pattern as the 2026-05-08 audit. Either add to the "
+                f"allowlist or move to tier_1_pending in this test."
+            )

@@ -33,6 +33,7 @@
             "type": "string",
             "enum": [
               "sow",
+              "pws",
               "igce",
               "market_research",
               "justification",
@@ -40,18 +41,23 @@
               "eval_criteria",
               "security_checklist",
               "section_508",
+              "section_889",
               "cor_certification",
               "contract_type_justification",
               "son_products",
               "son_services",
               "buy_american",
               "subk_plan",
+              "subk_review",
               "conference_request",
               "purchase_request",
               "price_reasonableness",
-              "required_sources"
+              "required_sources",
+              "priority_sources_checklist",
+              "qasp",
+              "sb_review"
             ],
-            "description": "Type of acquisition document to generate. Use canonical values only."
+            "description": "Type of acquisition document to generate. Use canonical values only. Each value is registered in the backend allow-list (server/app/ai_document_schema.py::get_create_document_types) and the package compliance matrix (server/app/package_store.py::_COMPLIANCE_DOC_TO_SLUG)."
           },
           "title": {
             "type": "string",
@@ -60,6 +66,10 @@
           "content": {
             "type": "string",
             "description": "Full document content as markdown. Write complete, section-by-section content using the conversation context before calling this tool. This becomes the saved document body. Cover ALL sections defined in the template schema."
+          },
+          "template_id": {
+            "type": "string",
+            "description": "OPTIONAL but PREFERRED: the template_id of the official template to populate (e.g. 'hhs-streamlined-acquisition-plan-v3', 'nci-igce-commercial-v1'). When set, the tool uses the registered template's section structure as the source of truth and your `content` is interpreted as the populated body for those sections — section adherence is enforced. When omitted, the tool falls back to default-template lookup by doc_type, then to AI-content passthrough; the response includes a `_template_provenance` field naming the template that was actually used so you can confirm structural adherence on the next turn."
           },
           "update_existing_key": {
             "type": "string",

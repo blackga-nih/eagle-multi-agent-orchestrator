@@ -772,4 +772,24 @@ def exec_create_document(
     if template_path:
         response["template_path"] = template_path
 
+    # Template provenance — surfaced so the supervisor can confirm what
+    # template was actually applied (model-supplied template_id vs the
+    # default lookup vs AI-content passthrough). The tool docstring
+    # in eagle-plugin/tools/tool-definitions.json promises this field
+    # so the model can audit structural adherence on the next turn.
+    if template_provenance:
+        response["_template_provenance"] = template_provenance
+    else:
+        # Even when no template was applied, tell the model so — silence
+        # would let it assume otherwise.
+        response["_template_provenance"] = {
+            "template_id": None,
+            "source": source,
+            "note": (
+                "No template was resolved for this doc_type. The model's "
+                "`content` arg was persisted as-is. To enforce section "
+                "adherence next time, pass `template_id` explicitly."
+            ),
+        }
+
     return response
