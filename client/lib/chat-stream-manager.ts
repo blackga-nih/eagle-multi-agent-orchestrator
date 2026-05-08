@@ -22,6 +22,25 @@ import type { StateChangeEntry } from '@/contexts/chat-runtime-context';
 
 const API_URL = '/api/invoke';
 
+/**
+ * SSE watchdog — auto-recovery from a stalled stream.
+ *
+ * If the backend opens an SSE response but stops emitting events (Bedrock
+ * timeout that doesn't close the connection, ALB idle-timeout drop, network
+ * hiccup), the reader.read() loop blocks forever and the runtime's
+ * session.status stays stuck at 'streaming'. Every UI control gated on
+ * `isStreaming` (notably the upload button at simple-chat-interface.tsx:1056
+ * — `disabled={isStreaming}`) is then permanently grayed for that session.
+ *
+ * Watchdog wakes every WATCHDOG_INTERVAL_MS and aborts the stream if no
+ * event has arrived in WATCHDOG_TIMEOUT_MS. The abort uses a unique reason
+ * string the outer catch checks so user-stop and watchdog-timeout are
+ * distinguishable.
+ */
+const WATCHDOG_INTERVAL_MS = 5000;
+const WATCHDOG_TIMEOUT_MS = 60000;
+const WATCHDOG_ABORT_REASON = 'eagle-sse-watchdog-timeout';
+
 /** Known document type prefixes in S3 filenames. */
 const DOC_TYPE_MAP: Record<string, { type: string; label: string }> = {
   ige: { type: 'igce', label: 'Independent Government Cost Estimate' },
@@ -151,6 +170,22 @@ export class ChatStreamManager {
     this._runStream(requestId, streamingMsgId, params, abortController)
       .catch((err) => {
         if (err instanceof Error && err.name === 'AbortError') {
+          // Distinguish user-clicked-stop (idle) from watchdog-timeout (error).
+          // The watchdog calls abort(WATCHDOG_ABORT_REASON); user-stop omits
+          // a reason. Reading signal.reason is supported in modern browsers;
+          // when undefined, fall through to the user-stop branch.
+          if (abortController.signal.reason === WATCHDOG_ABORT_REASON) {
+            dispatch({
+              type: 'generation/error',
+              sessionId,
+              requestId,
+              error:
+                'Stream timed out — no events received from the server for ' +
+                `${WATCHDOG_TIMEOUT_MS / 1000}s. The session has been reset; ` +
+                'send a new message to continue.',
+            });
+            return;
+          }
           // User clicked stop — transition state back to idle
           dispatch({ type: 'generation/complete', sessionId, requestId });
           return;
@@ -603,18 +638,42 @@ export class ChatStreamManager {
       const decoder = new TextDecoder();
       let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            if (data) await processEvent(data);
-          }
+      // Watchdog — see WATCHDOG_TIMEOUT_MS docstring above. Updates on every
+      // chunk that contains at least one `data:` line (i.e. a real SSE event,
+      // not just a keepalive comment), so periodic ALB/proxy heartbeats don't
+      // mask a stalled backend.
+      let lastEventAt = Date.now();
+      const watchdogTimer = setInterval(() => {
+        if (Date.now() - lastEventAt > WATCHDOG_TIMEOUT_MS) {
+          // Idempotent — abort() on an already-aborted controller is a no-op,
+          // and the .catch handler at the call site reads signal.reason.
+          abortController.abort(WATCHDOG_ABORT_REASON);
         }
+      }, WATCHDOG_INTERVAL_MS);
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          let sawDataLine = false;
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              sawDataLine = true;
+              const data = line.slice(6).trim();
+              if (data) await processEvent(data);
+            }
+          }
+          // Only reset the watchdog when we actually parsed a data event.
+          // SSE keepalive comments (`: ping\n\n`) arrive as non-data lines
+          // and shouldn't extend the deadline — otherwise a stalled backend
+          // emitting only ALB-level heartbeats would defeat the watchdog.
+          if (sawDataLine) lastEventAt = Date.now();
+        }
+      } finally {
+        clearInterval(watchdogTimer);
       }
     } else {
       const text = await response.text();
