@@ -166,6 +166,54 @@ def _sanitize_title(title: str, doc_type: str) -> str:
     return title
 
 
+def _attach_template_metadata(
+    response: dict,
+    doc_type: str,
+    content: str,
+    template_provenance: dict | None,
+    source: str,
+) -> None:
+    """Attach _template_provenance + section_drift to a create_document response.
+
+    Both PR #211 (_template_provenance surface) and PR #213 (section_drift
+    validator) need to fire on every successful create_document return path,
+    not just one. This helper unifies them so the package-mode early return
+    and the workspace-mode return path produce the same observability shape.
+
+    Mutates `response` in place. Safe to call on any response dict — never
+    raises; validator failures degrade to silently omitting section_drift.
+    """
+    if template_provenance:
+        response["_template_provenance"] = dict(template_provenance)
+    else:
+        response["_template_provenance"] = {
+            "template_id": None,
+            "source": source,
+            "note": (
+                "No template was resolved for this doc_type. The model's "
+                "`content` arg was persisted as-is. To enforce section "
+                "adherence next time, pass `template_id` explicitly."
+            ),
+        }
+
+    # Tier-3 post-write validator — silently no-op when no schema is registered
+    # (e.g. qasp / sb_review until their schemas land).
+    try:
+        from app.template_schema import validate_completeness
+
+        report = validate_completeness(doc_type, content)
+        if report.total_sections > 0:
+            response["_template_provenance"]["section_drift"] = {
+                "total_sections": report.total_sections,
+                "filled_sections": report.filled_sections,
+                "missing_sections": list(report.missing_sections),
+                "completeness_pct": report.completeness_pct,
+                "is_complete": report.is_complete,
+            }
+    except Exception as exc:  # noqa: BLE001 — never block the tool on validator
+        logger.debug("section-drift validator failed for %s: %s", doc_type, exc)
+
+
 def exec_create_document(
     params: dict[str, Any], tenant_id: str, session_id: str | None = None
 ) -> dict:
@@ -655,6 +703,12 @@ def exec_create_document(
         }
         if template_path:
             response["template_path"] = template_path
+        # Apply the same observability surface as the workspace-mode return
+        # below — _template_provenance + section_drift on every successful
+        # create_document call regardless of mode.
+        _attach_template_metadata(
+            response, doc_type, content, template_provenance, source
+        )
         return response
 
     s3_key = f"eagle/{tenant_id}/{user_id}/documents/{doc_type}_{timestamp}.{ext}"
@@ -772,47 +826,11 @@ def exec_create_document(
     if template_path:
         response["template_path"] = template_path
 
-    # Template provenance — surfaced so the supervisor can confirm what
-    # template was actually applied (model-supplied template_id vs the
-    # default lookup vs AI-content passthrough). The tool docstring
-    # in eagle-plugin/tools/tool-definitions.json promises this field
-    # so the model can audit structural adherence on the next turn.
-    if template_provenance:
-        response["_template_provenance"] = dict(template_provenance)
-    else:
-        # Even when no template was applied, tell the model so — silence
-        # would let it assume otherwise.
-        response["_template_provenance"] = {
-            "template_id": None,
-            "source": source,
-            "note": (
-                "No template was resolved for this doc_type. The model's "
-                "`content` arg was persisted as-is. To enforce section "
-                "adherence next time, pass `template_id` explicitly."
-            ),
-        }
-
-    # ── Tier-3 post-write section-drift validator ────────────────────────
-    # Compare the saved markdown's section structure to the registered
-    # template schema (template_schema.validate_completeness). Surface the
-    # report inline on _template_provenance so the supervisor sees what
-    # sections it skipped or invented, and can self-correct on the next
-    # turn. Observability-only — does not block the call. Silently no-op
-    # for doc_types without a registered TemplateSchema (e.g. the recently
-    # unlocked qasp/sb_review/etc. before their schemas land).
-    try:
-        from app.template_schema import validate_completeness
-
-        report = validate_completeness(doc_type, content)
-        if report.total_sections > 0:
-            response["_template_provenance"]["section_drift"] = {
-                "total_sections": report.total_sections,
-                "filled_sections": report.filled_sections,
-                "missing_sections": list(report.missing_sections),
-                "completeness_pct": report.completeness_pct,
-                "is_complete": report.is_complete,
-            }
-    except Exception as exc:  # noqa: BLE001 — never block the tool on validator
-        logger.debug("section-drift validator failed for %s: %s", doc_type, exc)
+    # Apply the unified observability surface (_template_provenance +
+    # section_drift). Same helper as the package-mode early return above —
+    # both code paths produce the same shape.
+    _attach_template_metadata(
+        response, doc_type, content, template_provenance, source
+    )
 
     return response

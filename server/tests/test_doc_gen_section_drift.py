@@ -129,22 +129,51 @@ class TestActualWiring:
     validator wiring — guards against the wiring being removed in a
     future refactor."""
 
-    def test_document_generation_calls_validate_completeness(self):
-        src = (
+    def _src(self) -> str:
+        return (
             Path(__file__).resolve().parents[1]
             / "app"
             / "tools"
             / "document_generation.py"
         ).read_text(encoding="utf-8")
+
+    def test_document_generation_calls_validate_completeness(self):
+        src = self._src()
         assert "validate_completeness" in src, (
             "document_generation.py must call validate_completeness() to "
-            "populate _template_provenance.section_drift. The wiring lives "
-            "near the response-build site, after _template_provenance is "
-            "set. If this assertion fails, the Tier-3 drift validator has "
-            "been removed."
+            "populate _template_provenance.section_drift. If this assertion "
+            "fails, the Tier-3 drift validator has been removed."
         )
         assert "section_drift" in src, (
             "document_generation.py must surface the drift report under "
             "_template_provenance.section_drift so the supervisor can audit "
             "structural adherence on the next turn."
+        )
+
+    def test_helper_invoked_from_both_return_paths(self):
+        """Regression guard for the package-mode silent-drop bug.
+
+        The Langfuse audit on 2026-05-08 caught _template_provenance
+        and section_drift being silently absent from package-scoped
+        create_document calls because the package-mode early return
+        was a separate code path that bypassed the inline surfacing
+        block. Fix: extracted _attach_template_metadata() and called
+        from both paths. This test asserts the helper exists and is
+        called at least twice — once for each return path.
+        """
+        src = self._src()
+        assert "def _attach_template_metadata(" in src, (
+            "Expected a _attach_template_metadata(...) helper that unifies "
+            "the package-mode and workspace-mode response surfaces."
+        )
+        # Helper must be invoked from at least two call sites — one per
+        # return path. (The function definition itself contains the name
+        # once; we want at least 2 more usages = 3 total occurrences.)
+        usages = src.count("_attach_template_metadata(")
+        assert usages >= 3, (
+            f"_attach_template_metadata must be called from both the "
+            f"package-mode early return and the workspace-mode return path "
+            f"(found {usages} total occurrences, need >= 3 — 1 def + 2 calls). "
+            f"If only 1 call site, package-scoped create_document responses "
+            f"will silently lose _template_provenance again."
         )
