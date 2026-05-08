@@ -211,6 +211,46 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             "package_intake_approved_at_present": True,
         },
     },
+    # ── Doc-gen orphan-enum unlock (PR #211) ────────────────────────────────
+    # Langfuse audit (2026-05-08) found 21/39 create_document failures came
+    # from doc_types in the compliance matrix that weren't in
+    # get_create_document_types(). PR #211 unlocked qasp, sb_review,
+    # priority_sources_checklist, section_889 in the allowlist + plugin
+    # tool def. This scenario exercises one of them end-to-end on the
+    # deployed backend and asserts the orphan-rejection error string is
+    # not in the response.
+    "qasp_orphan_unlock": {
+        "label": "QASP doc-gen orphan unlock (PR #211)",
+        # Slash-bypass auto-creates the package + auto-approves intake in
+        # one turn (same path as slash_bypass scenario), so we land at
+        # create_document with a known doc_type and no multi-turn gate
+        # negotiation. doc_type=qasp was rejected pre-PR-#211; after the
+        # allowlist unlock it must succeed.
+        "query": '/document:QASP "Quality Assurance Surveillance Plan for clinical research support services, $1.5M base + 2 option years"',
+        "expects": {
+            "user_message_must_contain": ["[SLASH_BYPASS_INTAKE_APPROVAL]"],
+            # create_document must actually fire — if the supervisor balks
+            # before reaching it, we're testing nothing.
+            "tool_call_must_include": ["create_document"],
+            # Anti-regression: the exact error string from
+            # tools/document_generation.py:422. If qasp falls back out of
+            # the allowlist, this assertion fails and surfaces the
+            # regression immediately.
+            "response_must_not_contain": [
+                "Unknown document type: qasp",
+                "Unknown document type: sb_review",
+                "Unknown document type: priority_sources_checklist",
+                "Unknown document type: section_889",
+            ],
+            # Light positive signal that the QASP actually got drafted —
+            # response should reference the doc by name in some form.
+            "response_must_contain_any": [
+                "QASP",
+                "Quality Assurance Surveillance Plan",
+                "quality assurance surveillance",
+            ],
+        },
+    },
 }
 
 
