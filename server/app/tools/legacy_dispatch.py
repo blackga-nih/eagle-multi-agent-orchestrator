@@ -35,6 +35,7 @@ from .intake_approval_tools import (
     exec_submit_intake_for_approval,
 )
 from .intake_tools import exec_get_intake_status, exec_intake_workflow
+from .langfuse_tools import exec_langfuse_traces
 from .package_document_tools import (
     exec_document_changelog_search,
     exec_finalize_package,
@@ -99,6 +100,7 @@ def get_tool_dispatch() -> dict[str, ToolHandler]:
         "finalize_package": exec_finalize_package,
         "manage_package": exec_manage_package,
         "research": exec_research,
+        "langfuse_traces": exec_langfuse_traces,
         "submit_intake_for_approval": exec_submit_intake_for_approval,
         "confirm_intake_approval": exec_confirm_intake_approval,
         "batch_generate_documents": exec_batch_generate_documents,
