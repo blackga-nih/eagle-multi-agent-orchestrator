@@ -1,0 +1,267 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'><style>
+@page { size: Letter; margin: 0.75in; }
+body { font-family: -apple-system,'Segoe UI',Helvetica,sans-serif; font-size: 10.5pt; line-height: 1.45; color: #1a1a1a; max-width: 7in; }
+h1 { font-size: 18pt; border-bottom: 2px solid #003366; padding-bottom: 4px; }
+h2 { font-size: 14pt; color: #003366; margin-top: 1.5em; border-bottom: 1px solid #ccc; padding-bottom: 2px; }
+h3 { font-size: 12pt; color: #003366; margin-top: 1em; }
+table { border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 9.5pt; }
+th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+th { background: #f0f4f8; font-weight: 600; }
+code { background: #f4f4f4; padding: 1px 4px; border-radius: 3px; font-size: 9pt; font-family: Consolas,monospace; }
+strong { color: #003366; }
+hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
+</style></head><body><h1>EAGLE QA5 Status — 2026-05-08</h1>
+<p><strong>Epic</strong>: EAGLE-291 "Eagle QA5"
+<strong>Children</strong>: 21 stories, all currently <code>To Do</code> in Jira
+<strong>Method</strong>: cross-referenced each issue against recent commits, this session's PRs (#205–#216), and active tests.</p>
+<hr />
+<h2>Top-line</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Total QA5 stories</td>
+<td>21</td>
+</tr>
+<tr>
+<td><strong>Addressed by recent work</strong></td>
+<td><strong>5</strong></td>
+</tr>
+<tr>
+<td>Partially addressed</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Outstanding</td>
+<td>14</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>✅ Addressed (5)</h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+<th>Closing work</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EAGLE-292</strong></td>
+<td>Generated document has different content as specified template (UC3 — $280K)</td>
+<td><strong>PR #213 + #214</strong> — Tier-3 section-drift validator. <code>_template_provenance.section_drift</code> now reports <code>{total_sections, filled_sections, missing_sections[], completeness_pct, is_complete}</code> on every <code>create_document</code> response (both package-mode and workspace-mode). Supervisor can self-correct.</td>
+</tr>
+<tr>
+<td><strong>EAGLE-293</strong></td>
+<td>UC3-$280K didn't generate Acquisition Plan</td>
+<td><strong>PR #211</strong> unlocked orphan doc_types in <code>get_create_document_types()</code>; <strong>PR #206</strong> fixed the <code>"$280"</code> currency-string parsing that was rejecting AI-extracted estimated_value. Both gates that blocked this UC3 flow are gone. Verified live: 6 successful post-deploy <code>create_document</code> calls including QASP.</td>
+</tr>
+<tr>
+<td><strong>EAGLE-302</strong></td>
+<td>Generated AP section headers differ from specified template</td>
+<td>Same as EAGLE-292 — section_drift validator surfaces exactly which sections are missing/renamed.</td>
+</tr>
+<tr>
+<td><strong>EAGLE-308</strong></td>
+<td>Source summary repeated after follow-up</td>
+<td><strong>PR #196</strong> — <code>fix(chat): sources_summary chip renders last with visual separation</code>. Rendered once, after the prompt.</td>
+</tr>
+<tr>
+<td><strong>EAGLE-316</strong></td>
+<td>Error occurred when clicking on attach button</td>
+<td><strong>PR #216 (this session)</strong> — SSE watchdog. The button was grayed because runtime stayed stuck in <code>status: 'streaming'</code> after a stalled SSE stream (no log entries on either side, matching the symptom). 60s no-event watchdog now aborts the stream and dispatches <code>generation/error</code>, releasing the upload button.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>🟡 Partially addressed (2)</h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+<th>What's done / what's left</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EAGLE-300</strong></td>
+<td>Contract type reasoning is partial vs RO's reasoning</td>
+<td><strong>PR #207</strong> strengthened the supervisor prompt for T&amp;M vs LH (related), with a regression test that exercises the AIP scenario. EAGLE-300 specifically calls out that the supervisor only considered "uncertain in scope" but ignored "we can define types and frequency" — that's a prompt-reasoning depth issue, not the LH gap. The LH guard is in place; the broader reasoning improvement still pending.</td>
+</tr>
+<tr>
+<td><strong>EAGLE-309</strong></td>
+<td>Previous chat interrupted after clicking new chat</td>
+<td>The SSE session-crossover spec exists at <code>.claude/specs/20260506-150700-pbi-sse-session-crossover-fix-v1.md</code>. <strong>PR #216 watchdog</strong> closes the orphan-streaming-state half (any abandoned stream auto-clears in 60s). The deliberate reducer-level guards described in the spec — preventing session-A's <code>onLog</code> and <code>onStateUpdate</code> callbacks from leaking into session-B's panels — are still pending implementation.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>❌ Outstanding (14)</h2>
+<h3>Document quality / format (5)</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EAGLE-294</strong></td>
+<td>UC3-$280K downloaded SOW + Market Research are in MD format instead of PDF/Word</td>
+</tr>
+<tr>
+<td><strong>EAGLE-298</strong></td>
+<td>Subcontracting plan wording not as clear/logical as RO</td>
+</tr>
+<tr>
+<td><strong>EAGLE-301</strong></td>
+<td>Inaccurate NAICS code (Eagle: 541612, RO: 541611)</td>
+</tr>
+<tr>
+<td><strong>EAGLE-303</strong></td>
+<td>Markdown table cells have stray <code>**</code> around text (rendering bug)</td>
+</tr>
+<tr>
+<td><strong>EAGLE-310</strong></td>
+<td>Downloaded filename not per KB usage guide</td>
+</tr>
+</tbody>
+</table>
+<h3>Use-case-specific gaps (3)</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EAGLE-311</strong></td>
+<td>UC13: $450K IT services set-aside — Eagle missing FAR 19.104 GAO/SBA citations + CIO-SP3 SB vehicle recommendation</td>
+</tr>
+<tr>
+<td><strong>EAGLE-312</strong></td>
+<td>UC10: IGCE — Excel has no projected numbers; download is Excel-only, no Word counterpart</td>
+</tr>
+<tr>
+<td><strong>EAGLE-313</strong></td>
+<td>UC4: Competitive range — Eagle adds unnecessary RFO; FAR 15.2 quote less detailed than RO's FAR 15.204-1</td>
+</tr>
+</tbody>
+</table>
+<h3>Supervisor prompt / output quality (3)</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EAGLE-296</strong></td>
+<td>Source summary should exclude template files (currently bundles them as input)</td>
+</tr>
+<tr>
+<td><strong>EAGLE-297</strong></td>
+<td>Used legacy vehicle name "GSA PSS" instead of new "GSA MAS" — supervisor prompt update needed</td>
+</tr>
+<tr>
+<td><strong>EAGLE-299</strong></td>
+<td>Required-documents section: "Required" flag is redundant with section header; Notes column adds noise</td>
+</tr>
+</tbody>
+</table>
+<h3>UI (3)</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EAGLE-295</strong></td>
+<td>Add "Think cube" to display Eagle's reasoning process after input files pulled</td>
+</tr>
+<tr>
+<td><strong>EAGLE-307</strong></td>
+<td>Text got cut off by Web search cube</td>
+</tr>
+<tr>
+<td><strong>EAGLE-317</strong></td>
+<td>Banner updates: rename to "Enhanced Acquisition Guidance and Learning Engine"; remove Eagle icon mid-screen; add username right side</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Cross-reference: this session's PRs</h2>
+<table>
+<thead>
+<tr>
+<th>PR</th>
+<th>Closes / Advances</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>#196 (earlier)</td>
+<td>EAGLE-308</td>
+<td>Sources summary chip ordering</td>
+</tr>
+<tr>
+<td>#206</td>
+<td>EAGLE-293 (partial)</td>
+<td><code>$280</code> parsing unblocks the IGCE that gates UC3 doc-gen</td>
+</tr>
+<tr>
+<td>#207</td>
+<td>EAGLE-300 (partial)</td>
+<td>Stronger LH/T&amp;M supervisor rule</td>
+</tr>
+<tr>
+<td>#211</td>
+<td>EAGLE-293</td>
+<td>Orphan doc_type unlock — UC3 docs now generate</td>
+</tr>
+<tr>
+<td>#213</td>
+<td>EAGLE-292, EAGLE-302</td>
+<td>Section-drift validator</td>
+</tr>
+<tr>
+<td>#214</td>
+<td>EAGLE-292, EAGLE-302</td>
+<td>Drift surfacing on package-mode response (the actual UC3 path)</td>
+</tr>
+<tr>
+<td>#216</td>
+<td>EAGLE-316, EAGLE-309 (partial)</td>
+<td>SSE watchdog — unsticks attach button + clears orphan streams</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Recommended next moves</h2>
+<ol>
+<li><strong>Verify &amp; close 5 in Jira</strong> (EAGLE-292, 293, 302, 308, 316). Each has a concrete closing PR.</li>
+<li><strong>Update partial pair</strong> (EAGLE-300, 309) with current state — mark "in progress, partial" with notes pointing at this session's PRs.</li>
+<li><strong>Group the 14 outstanding</strong> into 4 mini-batches:</li>
+<li><strong>Doc quality batch</strong> (5): EAGLE-294/298/301/303/310 — needs export pipeline + KB content fixes</li>
+<li><strong>UC-specific batch</strong> (3): EAGLE-311/312/313 — supervisor reasoning + KB gaps</li>
+<li><strong>Supervisor prompt batch</strong> (3): EAGLE-296/297/299 — pure prompt edits, fast</li>
+<li><strong>UI batch</strong> (3): EAGLE-295/307/317 — frontend polish</li>
+</ol>
+<p>The supervisor-prompt batch (EAGLE-296/297/299) is the cheapest wins — small prompt edits with regression-test patterns already established this session.</p></body></html>
