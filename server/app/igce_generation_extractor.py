@@ -86,6 +86,21 @@ _PERIOD_RE = re.compile(
     re.IGNORECASE,
 )
 
+_OPTION_YEARS_RE = re.compile(
+    r"(?:base\s*(?:period|year)?\s*(?:\+|plus|and)\s*)?(\d+)\s+option\s+years?",
+    re.IGNORECASE,
+)
+
+_BASE_PLUS_OPTION_RE = re.compile(
+    r"base\s*(?:period|year)?\s*(?:\+|plus|and)\s*(\d+)\s+option",
+    re.IGNORECASE,
+)
+
+_ESCALATION_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*%\s*(?:annual\s*)?(?:escalation|increase|inflation|rate adjustment)",
+    re.IGNORECASE,
+)
+
 # Contract type patterns
 _CONTRACT_TYPE_PATTERNS = [
     (re.compile(r"\b(FFP|firm.fixed.price)\b", re.IGNORECASE), "FFP"),
@@ -191,6 +206,23 @@ def _parse_period_months(text: str) -> int | None:
     if unit.startswith("y"):
         return value * 12
     return value
+
+
+def _parse_option_years(text: str) -> int | None:
+    """Extract number of option years from phrases like base + 2 option years."""
+    for pattern in (_BASE_PLUS_OPTION_RE, _OPTION_YEARS_RE):
+        match = pattern.search(text)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _parse_escalation_rate(text: str) -> float | None:
+    """Extract annual escalation percentage as a decimal."""
+    match = _ESCALATION_RE.search(text)
+    if not match:
+        return None
+    return float(match.group(1)) / 100.0
 
 
 def _parse_contract_type(text: str) -> str | None:
@@ -364,6 +396,8 @@ class IGCEExtractionResult:
     goods_items: List[Dict[str, Any]] = field(default_factory=list)
     contract_type: Optional[str] = None
     period_months: Optional[int] = None
+    option_years: Optional[int] = None
+    escalation_rate: Optional[float] = None
     period_of_performance: Optional[Dict[str, str]] = None
     delivery_date: Optional[str] = None
     estimated_value: Optional[float] = None
@@ -380,6 +414,10 @@ class IGCEExtractionResult:
             result["contract_type"] = self.contract_type
         if self.period_months:
             result["period_months"] = self.period_months
+        if self.option_years:
+            result["option_years"] = self.option_years
+        if self.escalation_rate:
+            result["escalation_rate"] = self.escalation_rate
         if self.period_of_performance:
             result["period_of_performance"] = self.period_of_performance
         if self.delivery_date:
@@ -429,6 +467,8 @@ def extract_igce_data_from_text(text: str) -> IGCEExtractionResult:
 
     # Extract period
     result.period_months = _parse_period_months(text)
+    result.option_years = _parse_option_years(text)
+    result.escalation_rate = _parse_escalation_rate(text)
     result.period_of_performance = _parse_period_of_performance(text)
     result.delivery_date = _parse_delivery_date(text)
 

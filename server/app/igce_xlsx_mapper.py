@@ -193,7 +193,9 @@ class CommercialIGCEWorkbookMapper:
     def _build_total_estimate_fallback_item(
         cls, data: dict[str, Any]
     ) -> IGCEWorkbookItem | None:
-        total = cls._coerce_number(data.get("total_estimate"))
+        total = cls._coerce_number(
+            data.get("total_estimate") or data.get("estimated_value")
+        )
         if total is None:
             return None
         description = (
@@ -288,16 +290,23 @@ class CommercialIGCEWorkbookMapper:
     ) -> None:
         cls._clear_it_services_sheet(sheet)
 
+        option_years = cls._option_year_count(data)
+        escalation_rate = cls._coerce_number(data.get("escalation_rate")) or 0
+
         for row, item in zip(IT_SERVICES_ROWS, cls._compress_items(service_items, len(IT_SERVICES_ROWS))):
             quantity = item.quantity if item.quantity is not None else 0
             rate = item.unit_price if item.unit_price is not None else 0
             sheet[f"A{row}"] = item.description
             sheet[f"B{row}"] = quantity
             sheet[f"C{row}"] = rate
-            for hours_col in ("E", "H", "K", "N"):
-                sheet[f"{hours_col}{row}"] = 0
-            for rate_col in ("F", "I", "L", "O"):
-                sheet[f"{rate_col}{row}"] = 0
+            option_columns = (("E", "F"), ("H", "I"), ("K", "L"), ("N", "O"))
+            for idx, (hours_col, rate_col) in enumerate(option_columns, start=1):
+                if idx <= option_years:
+                    sheet[f"{hours_col}{row}"] = quantity
+                    sheet[f"{rate_col}{row}"] = cls._escalated_rate(rate, escalation_rate, idx)
+                else:
+                    sheet[f"{hours_col}{row}"] = 0
+                    sheet[f"{rate_col}{row}"] = 0
 
         prepared_by = cls._string_value(data.get("prepared_by"))
         if prepared_by and sheet["B2"].value in (None, "", "-"):
@@ -354,6 +363,41 @@ class CommercialIGCEWorkbookMapper:
         for row in IT_GOODS_ROWS:
             for col in ("A", "B", "C", "D", "E", "F"):
                 sheet[f"{col}{row}"] = None
+
+    @classmethod
+    def _option_year_count(cls, data: dict[str, Any]) -> int:
+        explicit = cls._coerce_number(
+            data.get("option_years")
+            or data.get("option_periods")
+            or data.get("option_count")
+        )
+        if explicit is not None:
+            return max(0, min(4, int(explicit)))
+
+        months = cls._coerce_number(data.get("period_months"))
+        if months is not None and months > 12:
+            return max(0, min(4, int((months - 1) // 12)))
+
+        period_text = cls._string_value(data.get("period_of_performance"))
+        if period_text:
+            match = re.search(r"(\d+)\s+option\s+years?", period_text, re.IGNORECASE)
+            if match:
+                return max(0, min(4, int(match.group(1))))
+
+        return 0
+
+    @staticmethod
+    def _escalated_rate(
+        base_rate: float | int | None,
+        escalation_rate: float | int,
+        option_index: int,
+    ) -> float | int:
+        if not isinstance(base_rate, (int, float)):
+            return 0
+        if not escalation_rate:
+            return base_rate
+        value = base_rate * ((1 + float(escalation_rate)) ** option_index)
+        return round(value, 2)
 
     @classmethod
     def _compress_items(
