@@ -1,0 +1,17 @@
+{
+  "template_filename": "Quotation Abstract.docx",
+  "category": "quotation_abstract",
+  "variant": "",
+  "section_clause_map": {},
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 13.106",
+      "title": "Soliciting Competition, Evaluation of Quotations or Offers",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": [
+    "13"
+  ]
+}

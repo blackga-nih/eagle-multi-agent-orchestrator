@@ -1,0 +1,22 @@
+{
+  "template_filename": "hhs_subk_review_form.docx",
+  "category": "subk_review",
+  "variant": "",
+  "section_clause_map": {
+    "1": {
+      "section_title": "HHS SUBCONTRACTING PLAN REVIEW FORM",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 19.705",
+      "title": "Responsibilities of the Contracting Officer",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": [
+    "19"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "template_filename": "Receiving Report Template 20201002.docx",
+  "category": "receiving_report",
+  "variant": "",
+  "section_clause_map": {},
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 46.501",
+      "title": "General — Acceptance",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": [
+    "46"
+  ]
+}

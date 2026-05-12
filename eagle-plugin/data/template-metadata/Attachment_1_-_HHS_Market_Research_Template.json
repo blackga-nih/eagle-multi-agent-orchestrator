@@ -1,0 +1,24 @@
+{
+  "filename": "Attachment 1 - HHS Market Research Template.docx",
+  "format": "docx",
+  "category": "market_research",
+  "variant": "",
+  "sections": [
+    {
+      "number": "1",
+      "title": "TOTAL NUMBER OF SOURCES CONTACTED BY BUSINESS SIZE",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "SYNOPSIS OF BUSINESS SOURCES CONTACTED",
+      "has_table": true,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 2,
+  "sheet_names": [],
+  "parse_error": null
+}

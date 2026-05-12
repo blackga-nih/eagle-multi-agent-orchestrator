@@ -1,0 +1,22 @@
+{
+  "template_filename": "HHS_Streamlined_MR_Template_FY26.txt",
+  "category": "reference_guide",
+  "variant": "mr_template",
+  "section_clause_map": {
+    "1": {
+      "section_title": "PROGRAM/PROJECT INFORMATION",
+      "clauses": []
+    },
+    "3": {
+      "section_title": "BACKGROUND",
+      "clauses": []
+    },
+    "9": {
+      "section_title": "RECOMMENDATIONS",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [],
+  "total_clauses": 0,
+  "far_parts_covered": []
+}

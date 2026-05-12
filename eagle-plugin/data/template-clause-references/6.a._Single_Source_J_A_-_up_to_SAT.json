@@ -1,0 +1,27 @@
+{
+  "template_filename": "6.a. Single Source J&A - up to SAT.docx",
+  "category": "justification",
+  "variant": "single_source_under_sat",
+  "section_clause_map": {},
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 6.302",
+      "title": "Circumstances Permitting Other Than Full and Open Competition",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 6.303",
+      "title": "Justifications (J&A)",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 6.304",
+      "title": "Approval of Justifications",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 3,
+  "far_parts_covered": [
+    "6"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "filename": "4.b. IGE for Services based on Catalog Price.xlsx",
+  "format": "xlsx",
+  "category": "igce",
+  "variant": "services",
+  "sections": [
+    {
+      "number": "1",
+      "title": "Base Period",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "Option Period One",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "3",
+      "title": "Sheet3",
+      "has_table": true,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 3,
+  "sheet_names": [
+    "Base Period",
+    "Option Period One",
+    "Sheet3"
+  ],
+  "parse_error": null
+}

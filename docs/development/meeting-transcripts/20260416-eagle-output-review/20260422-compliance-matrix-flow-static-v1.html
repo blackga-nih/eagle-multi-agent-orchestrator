@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EAGLE Compliance Matrix Flow</title>
+<style>
+  @page { size: letter landscape; margin: 0.35in; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    margin: 0;
+    font: 11pt -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #111827;
+    background: #ffffff;
+  }
+  .page {
+    width: 10.3in;
+    height: 7.8in;
+    page-break-after: always;
+    display: grid;
+    grid-template-columns: 2.8in 1fr;
+    gap: 18px;
+    padding: 16px 20px;
+    overflow: hidden;
+  }
+  .page:last-child { page-break-after: auto; }
+  .cover { grid-template-columns: 1fr; text-align: left; padding: 0.8in 1in; }
+  .cover h1 { font-size: 28pt; margin: 0 0 12px; color: #0f172a; }
+  .cover h2 { font-size: 14pt; margin: 0 0 24px; color: #6366f1; font-weight: 500; }
+  .cover p { font-size: 12pt; line-height: 1.6; color: #374151; max-width: 8in; }
+  .cover ul { font-size: 11pt; line-height: 1.7; color: #374151; }
+  .cover .meta { margin-top: 28px; font-size: 10pt; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 12px; }
+  .sidebar h2 {
+    font-size: 9pt; text-transform: uppercase; letter-spacing: 0.08em;
+    color: #6b7280; margin: 0 0 4px;
+  }
+  .sidebar h1 { font-size: 16pt; margin: 0 0 10px; color: #0f172a; line-height: 1.25; }
+  .sidebar p { font-size: 9.5pt; line-height: 1.5; margin: 0 0 10px; color: #374151; }
+  .sidebar .key-box {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-left: 3px solid #6366f1;
+    padding: 8px 10px; font-size: 8.5pt; line-height: 1.4; margin: 8px 0; border-radius: 3px;
+  }
+  .sidebar .key-box strong { display: block; color: #4f46e5; font-size: 9pt; margin-bottom: 3px; }
+  .sidebar .problem {
+    background: #fef2f2; border-left: 3px solid #ef4444; padding: 6px 8px; margin-bottom: 6px;
+    font-size: 8.5pt; line-height: 1.4; border-radius: 3px;
+  }
+  .sidebar .problem.fixed { background: #ecfdf5; border-left-color: #10b981; }
+  .sidebar .problem strong { display: block; font-size: 9pt; margin-bottom: 2px; color: #0f172a; }
+  .sidebar .problem .fix { color: #047857; font-size: 8pt; margin-top: 3px; }
+  .canvas { position: relative; overflow: hidden; }
+  .canvas svg { width: 100%; height: 100%; display: block; }
+  .footer {
+    position: absolute; bottom: 6px; right: 20px;
+    font-size: 7.5pt; color: #9ca3af;
+  }
+  .legend {
+    position: absolute; bottom: 10px; left: 12px;
+    background: rgba(255,255,255,0.92); border: 1px solid #e5e7eb; padding: 6px 8px;
+    font-size: 7.5pt; border-radius: 4px; line-height: 1.4;
+  }
+  .legend-row { display: flex; align-items: center; gap: 5px; margin-bottom: 2px; }
+  .legend-sw { width: 12px; height: 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15); }
+  .legend-line { width: 18px; height: 0; border-top: 2px solid; }
+  .summary-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px; height: 100%;
+  }
+  .summary-card {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 14px;
+  }
+  .summary-card h3 { margin: 0 0 8px; font-size: 11pt; color: #0f172a; }
+  .summary-card p { margin: 0 0 6px; font-size: 9.5pt; line-height: 1.5; color: #374151; }
+  .summary-card code {
+    font-size: 8.5pt; background: #e0e7ff; color: #3730a3; padding: 1px 5px; border-radius: 3px;
+  }
+  table.fix-table { border-collapse: collapse; width: 100%; font-size: 9pt; }
+  table.fix-table th, table.fix-table td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; vertical-align: top; }
+  table.fix-table th { background: #f3f4f6; font-weight: 600; }
+  table.fix-table code { font-size: 8pt; background: #fef3c7; color: #92400e; padding: 1px 4px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<div class="page cover">
+  <h1>EAGLE Compliance Matrix Flow</h1>
+  <h2>Where the matrix lives today, and where the 4/16 meeting fixes would plug in</h2>
+  <p>
+    This deck maps how <code>eagle-plugin/data/matrix.json</code> feeds every tool in the EAGLE stack — and shows
+    where the two proposals from the April 16 EAGLE-vs-Research-Optimizer review would attach to that existing flow.
+    The goal: keep rules in data (queryable, enforceable) rather than in prompt text (model-interpreted).
+  </p>
+  <ul>
+    <li><strong>Page 2</strong> — Current state: what reads matrix.json today</li>
+    <li><strong>Page 3</strong> — Meeting problems highlighted on the same flow</li>
+    <li><strong>Page 4</strong> — Proposal 1: <code>intake_required_facts</code> + pre-generation gate</li>
+    <li><strong>Page 5</strong> — Proposal 2: <code>budget_semantics</code> (budget-as-ceiling rule)</li>
+    <li><strong>Page 6</strong> — Target state with both proposals wired in</li>
+    <li><strong>Page 7</strong> — Fix matrix: which matrix key closes which meeting issue</li>
+  </ul>
+  <div class="meta">
+    NCI / EAGLE — Greg Black &middot; 2026-04-22 &middot; Source: 20260416-180100-meeting-eagle-output-review-v1.md
+  </div>
+</div>
+
+<!-- ============ SCENE 1: CURRENT ============ -->
+<div class="page">
+  <div class="sidebar">
+    <h2>Scenario 1 of 5</h2>
+    <h1>Current State</h1>
+    <p>
+      <code>matrix.json</code> is loaded once at import time in <code>server/app/compliance_matrix.py</code>.
+      Four tools read from it today: <code>query_compliance_matrix</code>, <code>manage_package</code>,
+      <code>research</code>, and <code>search_far</code>.
+    </p>
+    <div class="key-box">
+      <strong>What's already in matrix.json</strong>
+      thresholds &middot; contract_types &middot; doc_rules
+      &middot; approval_chains &middot; warnings &middot; hhs_nih_docs
+    </div>
+    <p>
+      <strong>The hole:</strong> <code>create_document</code> has no read-arrow into the matrix.
+      It accepts whatever the supervisor sends, with no validation that intake facts were actually collected.
+      That's where docs get generated too early.
+    </p>
+    <p>
+      <strong>Rules that live in prompt (not data):</strong> "DEFAULT TO ACTION",
+      "CHECKLIST-FIRST", "DO THE WORK". These are model-interpreted — the meeting's "should never ask"
+      behaviors are exactly what prompt-only rules fail to prevent.
+    </p>
+  </div>
+  <div class="canvas" id="canvas-1"></div>
+</div>
+
+<!-- ============ SCENE 2: PROBLEMS ============ -->
+<div class="page">
+  <div class="sidebar">
+    <h2>Scenario 2 of 5</h2>
+    <h1>Meeting Problems</h1>
+    <p>Three concrete failures from the 4/16 review, mapped to the places where they originate in the flow.</p>
+    <div class="problem">
+      <strong>1. PWS before cadence</strong>
+      EAGLE generated a PWS before confirming training-event frequency. Intake was incomplete and no gate enforced completeness.
+    </div>
+    <div class="problem">
+      <strong>2. Budget-vs-IGCE reconcile</strong>
+      "Your budget is $2M but IGCE is $450K, what do you want?" Ryan: <em>"That question should never be asked."</em>
+    </div>
+    <div class="problem">
+      <strong>3. Ceiling ballooning</strong>
+      Research Optimizer inflated to $2M when given a budget range. The model treated budget as a target instead of a not-to-exceed ceiling.
+    </div>
+    <p style="margin-top:8px">
+      All three originate between the supervisor's decision to call <code>create_document</code> and the actual document being emitted — the gap where no data-backed rule exists today.
+    </p>
+  </div>
+  <div class="canvas" id="canvas-2"></div>
+</div>
+
+<!-- ============ SCENE 3: INTAKE GATE ============ -->
+<div class="page">
+  <div class="sidebar">
+    <h2>Scenario 3 of 5</h2>
+    <h1>Proposal 1 — Intake Gate</h1>
+    <p>
+      Add a new matrix key <code>intake_required_facts</code> — a per-doc-type list of intake fields that must be present before generation. Add a PRE-GENERATION INTAKE GATE section to <code>supervisor/agent.md</code> that reads it and blocks <code>create_document</code> until facts are collected.
+    </p>
+    <div class="key-box">
+      <strong>matrix.intake_required_facts (new)</strong>
+      pws: [scope, pop, place, event_cadence, deliverable_format]<br>
+      sow: [scope, pop, place, task_breakdown]<br>
+      igce: [scope, pop, labor_cats, budget_ceiling]<br>
+      mrr: [scope, naics, estimated_value_range]<br>
+      acquisition_plan: [scope, igce_value, contract_type, competition]<br>
+      ja: [scope, proposed_contractor, far_6_302_x, sole_source_rationale]
+    </div>
+    <p>
+      The gate batches missing facts into ONE clarifying question, not a drip. Matches <code>oa-intake</code>'s "ask 2–3 at a time" philosophy.
+    </p>
+    <div class="problem fixed">
+      <strong>Fixes issue 1</strong>
+      <code>intake_required_facts.pws.event_cadence</code> blocks PWS generation until cadence is confirmed.
+    </div>
+  </div>
+  <div class="canvas" id="canvas-3"></div>
+</div>
+
+<!-- ============ SCENE 4: BUDGET ============ -->
+<div class="page">
+  <div class="sidebar">
+    <h2>Scenario 4 of 5</h2>
+    <h1>Proposal 2 — Budget Semantics</h1>
+    <p>
+      Add a matrix key <code>budget_semantics</code> that codifies Ryan's rules as data. Add a BUDGET SEMANTICS RULE section to <code>supervisor/agent.md</code> that reads it before any cost-related output.
+    </p>
+    <div class="key-box">
+      <strong>matrix.budget_semantics (new)</strong>
+      budget_is_ceiling: true<br>
+      igce_is_estimated_value: true<br>
+      propagation: "IGCE auto-propagates as estimated_value to AP, J&amp;A, SSP"<br>
+      forbidden_behaviors: [<br>
+      &nbsp;&nbsp;"asking user to reconcile IGCE vs budget",<br>
+      &nbsp;&nbsp;"suggesting scope expansion to consume remaining budget",<br>
+      &nbsp;&nbsp;"inflating quantities/rates to reach a budget target"<br>
+      ]
+    </div>
+    <div class="problem fixed">
+      <strong>Fixes issue 2</strong>
+      forbidden_behaviors[0] directly forbids the reconcile question.
+    </div>
+    <div class="problem fixed">
+      <strong>Fixes issue 3</strong>
+      budget_is_ceiling + forbidden_behaviors[2] stop ceiling ballooning.
+    </div>
+  </div>
+  <div class="canvas" id="canvas-4"></div>
+</div>
+
+<!-- ============ SCENE 5: ALL ============ -->
+<div class="page">
+  <div class="sidebar">
+    <h2>Scenario 5 of 5</h2>
+    <h1>Target State</h1>
+    <p>Both proposals wired in. Matrix is still the single source of truth — all new rules live as data, all tools can read them, the supervisor prompt just points at matrix keys.</p>
+    <div class="key-box">
+      <strong>Changes required</strong>
+      matrix.json: +2 top-level keys<br>
+      supervisor/agent.md: +2 sections (~25 lines each)<br>
+      document-generator/SKILL.md: +1 table column<br>
+      oa-intake/SKILL.md: trim hardcoded Phase 2 lists<br>
+      backend: +1 validator in create_document dispatch
+    </div>
+    <p>
+      <strong>Why matrix, not prompt?</strong> The backend validator can read matrix.json; it can't read prompt text.
+      That means the rule is enforced in code (blocks the bad call), not just suggested in prompt (which the model can override under pressure).
+    </p>
+    <p>
+      <strong>Rollback cost:</strong> revert 1 JSON file + 2 prompt sections. Small blast radius.
+    </p>
+  </div>
+  <div class="canvas" id="canvas-5"></div>
+</div>
+
+<!-- ============ FIX MATRIX ============ -->
+<div class="page cover">
+  <h1 style="font-size:22pt">Fix Matrix</h1>
+  <h2 style="font-size:12pt">Meeting issue → matrix.json key → supervisor section</h2>
+  <table class="fix-table" style="margin-top:16px">
+    <thead>
+      <tr>
+        <th style="width:22%">Meeting Issue (4/16)</th>
+        <th style="width:20%">Today's Cause</th>
+        <th style="width:28%">New matrix.json Key</th>
+        <th style="width:30%">Supervisor Section</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>PWS generated before training-event cadence confirmed</td>
+        <td>No intake-completeness check before <code>create_document</code></td>
+        <td><code>intake_required_facts.pws.event_cadence</code></td>
+        <td>PRE-GENERATION INTAKE GATE — reads matrix, batches missing facts into one question, blocks generation</td>
+      </tr>
+      <tr>
+        <td>"Your budget is $2M but IGCE is $450K, what do you want?"</td>
+        <td>Prompt asks user to reconcile; no rule forbids it</td>
+        <td><code>budget_semantics.forbidden_behaviors[0]</code></td>
+        <td>BUDGET SEMANTICS RULE — explicitly forbids the reconcile question</td>
+      </tr>
+      <tr>
+        <td>RO ballooned IGCE to $2M ceiling when given a budget range</td>
+        <td>Budget treated as target, not ceiling</td>
+        <td><code>budget_semantics.budget_is_ceiling</code> + <code>forbidden_behaviors[1,2]</code></td>
+        <td>BUDGET SEMANTICS RULE — IGCE is authoritative estimated value; budget is checking-account ceiling only</td>
+      </tr>
+      <tr>
+        <td>Stale FAR vs RFO in KB (separate KB sync issue)</td>
+        <td>S3 knowledge base desync</td>
+        <td>— (out of scope for matrix)</td>
+        <td>Action Item #1 — Alvi/WADA diff + re-ingest</td>
+      </tr>
+      <tr>
+        <td>Contract type defaulted to "Labor Hour"</td>
+        <td>Prompt reference; matrix has LH in contract_types</td>
+        <td><code>contract_types.lh.discouraged: true</code> (tiny edit)</td>
+        <td>Existing CONTRACT-TYPE RECOMMENDATION section updated to skip discouraged types</td>
+      </tr>
+      <tr>
+        <td>IGCE missing methodology narrative</td>
+        <td>Template doesn't require it</td>
+        <td>— (template change, not matrix)</td>
+        <td>document-generator/SKILL.md — IGCE template section 2 expanded</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="margin-top:20px; font-size:10pt; color:#6b7280">
+    <strong>Summary:</strong> Three of six meeting issues are fixed by adding two top-level keys to matrix.json and two sections to supervisor/agent.md.
+    The remaining three are scoped to KB sync (Action #1), contract-type data edit, and document-generator template — none of which expand the matrix proposal's blast radius.
+  </p>
+</div>
+
+<!-- ============ SCRIPT: render all 5 canvases as static SVG ============ -->
+<script>
+const LAYER_Y = { user:40, agent:140, tool:320, data:520, output:720 };
+const LAYER_H = { user:50, agent:60, tool:50, data:60, output:50 };
+
+const BASE_NODES = [
+  { id:'user',   layer:'user',  x:520, w:180, label:'User Chat Message', sub:'client chat', color:'#fef3c7' },
+  { id:'super',  layer:'agent', x:480, w:260, label:'Supervisor Agent', sub:'supervisor/agent.md', color:'#dcfce7' },
+  { id:'intake', layer:'agent', x:120, w:180, label:'oa-intake skill', sub:'skills/oa-intake', color:'#dcfce7' },
+  { id:'docgen', layer:'agent', x:900, w:180, label:'document-generator', sub:'skills/document-generator', color:'#dcfce7' },
+  { id:'qcm',    layer:'tool',  x:60,  w:170, label:'query_compliance_matrix', sub:'admin_tools.py', color:'#dbeafe' },
+  { id:'mp',     layer:'tool',  x:250, w:160, label:'manage_package', sub:'package_store.py', color:'#dbeafe' },
+  { id:'res',    layer:'tool',  x:430, w:140, label:'research', sub:'tools/research.py', color:'#dbeafe' },
+  { id:'sf',     layer:'tool',  x:590, w:130, label:'search_far', sub:'far_search.py', color:'#dbeafe' },
+  { id:'cd',     layer:'tool',  x:740, w:160, label:'create_document', sub:'tools/documents.py', color:'#dbeafe' },
+  { id:'gld',    layer:'tool',  x:920, w:160, label:'get_latest_document', sub:'tools/documents.py', color:'#dbeafe' },
+  { id:'web',    layer:'tool',  x:1100,w:80,  label:'web_search', sub:'external', color:'#dbeafe' },
+  { id:'matrix', layer:'data',  x:430, w:280, label:'matrix.json', sub:'eagle-plugin/data/', color:'#fce7f3' },
+  { id:'far',    layer:'data',  x:200, w:160, label:'far-database.json', sub:'', color:'#fce7f3' },
+  { id:'vehicle',layer:'data',  x:20,  w:160, label:'contract-vehicles.json', sub:'', color:'#fce7f3' },
+  { id:'s3',     layer:'data',  x:760, w:200, label:'S3 Knowledge Base', sub:'eagle-knowledge-base/approved', color:'#e9d5ff' },
+  { id:'ddb',    layer:'data',  x:1000,w:180, label:'DynamoDB', sub:'SESSION# / PKG#', color:'#e9d5ff' },
+  { id:'pws',    layer:'output',x:40,  w:140, label:'PWS / SOW', sub:'', color:'#fed7aa' },
+  { id:'igce',   layer:'output',x:200, w:140, label:'IGCE', sub:'', color:'#fed7aa' },
+  { id:'ap',     layer:'output',x:360, w:140, label:'Acquisition Plan', sub:'', color:'#fed7aa' },
+  { id:'mrr',    layer:'output',x:520, w:140, label:'Market Research', sub:'', color:'#fed7aa' },
+  { id:'ja',     layer:'output',x:680, w:140, label:'J&A', sub:'', color:'#fed7aa' },
+  { id:'pr',     layer:'output',x:840, w:140, label:'Purchase Request', sub:'', color:'#fed7aa' },
+];
+const PROPOSED = {
+  gate:  { id:'gate', layer:'tool', x:520, w:200, label:'pre-gen intake gate', sub:'supervisor NEW', color:'#ede9fe', proposed:true },
+  irf:   { id:'irf',  layer:'data', x:430, w:140, label:'intake_required_facts', sub:'matrix.json NEW KEY', color:'#ede9fe', proposed:true },
+  bsem:  { id:'bsem', layer:'data', x:590, w:140, label:'budget_semantics', sub:'matrix.json NEW KEY', color:'#ede9fe', proposed:true },
+};
+
+const BASE_CONNS = [
+  ['user','super','calls'],
+  ['super','intake','calls'],['super','docgen','calls'],
+  ['super','qcm','calls'],['super','mp','calls'],['super','res','calls'],
+  ['super','sf','calls'],['super','cd','calls'],['super','gld','calls'],['super','web','calls'],
+  ['qcm','matrix','reads'],['mp','matrix','reads'],['res','matrix','reads'],
+  ['res','s3','reads'],['sf','far','reads'],['sf','matrix','reads'],
+  ['mp','ddb','reads'],['gld','ddb','reads'],
+  ['cd','pws','emits'],['cd','igce','emits'],['cd','ap','emits'],
+  ['cd','mrr','emits'],['cd','ja','emits'],['cd','pr','emits'],
+];
+
+// Scene configs: which proposed nodes/conns to include, any highlights
+const scenes = {
+  1: { proposed:[], proposedConns:[], highlights:[] }, // current
+  2: { proposed:[], proposedConns:[], highlights:[
+       {nodeId:'pws', label:'Issue 1'},
+       {nodeId:'igce', label:'Issue 2,3'},
+       {nodeId:'cd', label:'Gap', color:'#dc2626'}
+     ] }, // problems
+  3: { proposed:['gate','irf'], proposedConns:[
+       ['super','gate','proposed'],['gate','cd','proposed'],
+       ['gate','irf','proposed'],['gate','ddb','proposed'],
+       ['matrix','irf','proposed'],['docgen','irf','proposed']
+     ], highlights:[{nodeId:'pws', label:'fixed', color:'#10b981'}] },
+  4: { proposed:['bsem'], proposedConns:[
+       ['matrix','bsem','proposed'],['super','bsem','proposed'],['bsem','cd','proposed']
+     ], highlights:[{nodeId:'igce', label:'fixed', color:'#10b981'}] },
+  5: { proposed:['gate','irf','bsem'], proposedConns:[
+       ['super','gate','proposed'],['gate','cd','proposed'],
+       ['gate','irf','proposed'],['gate','ddb','proposed'],
+       ['matrix','irf','proposed'],['docgen','irf','proposed'],
+       ['matrix','bsem','proposed'],['super','bsem','proposed'],['bsem','cd','proposed']
+     ], highlights:[
+       {nodeId:'pws', label:'fixed', color:'#10b981'},
+       {nodeId:'igce', label:'fixed', color:'#10b981'},
+     ] },
+};
+
+function renderScene(sceneNum, containerId){
+  const cfg = scenes[sceneNum];
+  const container = document.getElementById(containerId);
+  const nodes = BASE_NODES.concat(cfg.proposed.map(id=>PROPOSED[id]));
+  const conns = BASE_CONNS.map(c=>({from:c[0],to:c[1],type:c[2]})).concat(
+    cfg.proposedConns.map(c=>({from:c[0],to:c[1],type:c[2]}))
+  );
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox','0 0 1200 830');
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+
+  // defs
+  const defs = document.createElementNS(svgNS,'defs');
+  defs.innerHTML = `
+    <marker id="arr-blue-${sceneNum}" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#3b82f6"/></marker>
+    <marker id="arr-green-${sceneNum}" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#10b981"/></marker>
+    <marker id="arr-amber-${sceneNum}" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#f59e0b"/></marker>
+    <marker id="arr-violet-${sceneNum}" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#8b5cf6"/></marker>
+  `;
+  svg.appendChild(defs);
+
+  // Layer labels
+  const layers = [['User',22],['Agents & Skills',122],['Tools',302],['Data',502],['Documents',702]];
+  layers.forEach(([txt,y])=>{
+    const t = document.createElementNS(svgNS,'text');
+    t.setAttribute('x','8'); t.setAttribute('y',y);
+    t.setAttribute('font-size','10'); t.setAttribute('fill','#6b7280');
+    t.setAttribute('font-weight','600'); t.setAttribute('letter-spacing','1');
+    t.textContent = txt.toUpperCase();
+    svg.appendChild(t);
+  });
+
+  // Conns
+  conns.forEach(c=>{
+    const from = nodes.find(n=>n.id===c.from); const to = nodes.find(n=>n.id===c.to);
+    if (!from || !to) return;
+    const fy = LAYER_Y[from.layer], fh = LAYER_H[from.layer];
+    const ty = LAYER_Y[to.layer],   th = LAYER_H[to.layer];
+    const x1 = from.x + from.w/2, y1 = fy + fh;
+    const x2 = to.x + to.w/2,     y2 = ty;
+    const midY = (y1+y2)/2;
+    let d;
+    if (y2 > y1) d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+    else         d = `M ${x1} ${fy} C ${x1} ${fy-60}, ${x2} ${ty+th+60}, ${x2} ${ty+th}`;
+    const p = document.createElementNS(svgNS,'path');
+    p.setAttribute('d',d); p.setAttribute('fill','none');
+    const style = {
+      reads:    { stroke:'#3b82f6', dash:'none',   marker:`arr-blue-${sceneNum}` },
+      calls:    { stroke:'#10b981', dash:'6,3',    marker:`arr-green-${sceneNum}` },
+      emits:    { stroke:'#f59e0b', dash:'2,3',    marker:`arr-amber-${sceneNum}` },
+      proposed: { stroke:'#8b5cf6', dash:'5,3',    marker:`arr-violet-${sceneNum}` },
+    }[c.type];
+    p.setAttribute('stroke', style.stroke);
+    p.setAttribute('stroke-width', c.type==='proposed' ? '2.2' : '1.6');
+    if (style.dash !== 'none') p.setAttribute('stroke-dasharray', style.dash);
+    p.setAttribute('marker-end', `url(#${style.marker})`);
+    p.setAttribute('opacity','0.85');
+    svg.appendChild(p);
+  });
+
+  // Nodes
+  nodes.forEach(n=>{
+    const y = LAYER_Y[n.layer], h = LAYER_H[n.layer];
+    const r = document.createElementNS(svgNS,'rect');
+    r.setAttribute('x',n.x); r.setAttribute('y',y);
+    r.setAttribute('width',n.w); r.setAttribute('height',h);
+    r.setAttribute('rx','6'); r.setAttribute('ry','6');
+    r.setAttribute('fill',n.color);
+    r.setAttribute('stroke', n.proposed ? '#8b5cf6' : '#0f172a');
+    r.setAttribute('stroke-width', n.proposed ? '2.2' : '1.3');
+    if (n.proposed) r.setAttribute('stroke-dasharray','5,3');
+    svg.appendChild(r);
+    const t1 = document.createElementNS(svgNS,'text');
+    t1.setAttribute('x', n.x + n.w/2); t1.setAttribute('y', y + 20);
+    t1.setAttribute('text-anchor','middle'); t1.setAttribute('font-size','12');
+    t1.setAttribute('font-weight','600'); t1.setAttribute('fill','#0f172a');
+    t1.textContent = n.label;
+    svg.appendChild(t1);
+    if (n.sub){
+      const t2 = document.createElementNS(svgNS,'text');
+      t2.setAttribute('x', n.x + n.w/2); t2.setAttribute('y', y + h - 10);
+      t2.setAttribute('text-anchor','middle'); t2.setAttribute('font-size','9.5');
+      t2.setAttribute('fill','#374151');
+      t2.textContent = n.sub;
+      svg.appendChild(t2);
+    }
+  });
+
+  // Highlights
+  if (cfg.highlights) cfg.highlights.forEach(h=>{
+    const n = nodes.find(x=>x.id===h.nodeId); if (!n) return;
+    const y = LAYER_Y[n.layer];
+    const color = h.color || '#ef4444';
+    const bg = document.createElementNS(svgNS,'rect');
+    const badgeW = h.label.length * 6 + 14;
+    bg.setAttribute('x', n.x + n.w - badgeW + 10);
+    bg.setAttribute('y', y - 11);
+    bg.setAttribute('width', badgeW); bg.setAttribute('height','18');
+    bg.setAttribute('rx','9'); bg.setAttribute('fill',color);
+    svg.appendChild(bg);
+    const t = document.createElementNS(svgNS,'text');
+    t.setAttribute('x', n.x + n.w - badgeW/2 + 10); t.setAttribute('y', y + 2);
+    t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','10');
+    t.setAttribute('fill','#ffffff'); t.setAttribute('font-weight','700');
+    t.textContent = h.label;
+    svg.appendChild(t);
+  });
+
+  container.appendChild(svg);
+
+  // Legend overlay
+  const legend = document.createElement('div');
+  legend.className = 'legend';
+  legend.innerHTML = `
+    <div class="legend-row"><span class="legend-line" style="border-top-color:#10b981; border-top-style:dashed"></span>tool call</div>
+    <div class="legend-row"><span class="legend-line" style="border-top-color:#3b82f6"></span>reads from matrix</div>
+    <div class="legend-row"><span class="legend-line" style="border-top-color:#f59e0b; border-top-style:dotted"></span>emits document</div>
+    ${cfg.proposed.length ? '<div class="legend-row"><span class="legend-line" style="border-top-color:#8b5cf6; border-top-style:dashed"></span>proposed (new)</div>' : ''}
+  `;
+  container.appendChild(legend);
+
+  // Footer
+  const footer = document.createElement('div');
+  footer.className = 'footer';
+  footer.textContent = `EAGLE Compliance Matrix Flow — Scenario ${sceneNum}/5`;
+  container.appendChild(footer);
+}
+
+renderScene(1, 'canvas-1');
+renderScene(2, 'canvas-2');
+renderScene(3, 'canvas-3');
+renderScene(4, 'canvas-4');
+renderScene(5, 'canvas-5');
+</script>
+</body>
+</html>

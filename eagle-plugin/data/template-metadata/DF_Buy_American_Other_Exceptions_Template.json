@@ -1,0 +1,24 @@
+{
+  "filename": "DF_Buy_American_Other_Exceptions_Template.docx",
+  "format": "docx",
+  "category": "buy_american",
+  "variant": "other_exceptions",
+  "sections": [
+    {
+      "number": "1",
+      "title": "INSTRUCTION SHEET",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "FINDINGS",
+      "has_table": false,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 2,
+  "sheet_names": [],
+  "parse_error": null
+}

@@ -1,0 +1,66 @@
+{
+  "filename": "01.C_NCI_OA_Task_Order_Acquisition_Plan.docx",
+  "format": "docx",
+  "category": "acquisition_plan",
+  "variant": "",
+  "sections": [
+    {
+      "number": "1",
+      "title": "Applicable Conditions- FAR 7.105(a)(2),",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "Cost \u2013 FAR 7.105(a)(3), See Attachment #2.",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "3",
+      "title": "Attached is the Independent Government Cost Estimate (IGCE) that explains what the total estimated cost of this procurement inclusive of all options.",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "4",
+      "title": "Capability or Performance \u2013 FAR 7.105(a)(4), Specify the required capabilities or performance characteristics of the supplies or performance standards of the services to be acquired and state how they are related to the need.",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "5",
+      "title": "Delivery or Performance-Period Requirements \u2013 FAR 7.105(a)(5)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "6",
+      "title": "Trade-Offs \u2013 FAR 7.105(a)(6), Discuss the expected consequences of trade-offs among the various cost, capability or performance, and schedule goals that reflects the changing needs and priorities of the program. Note: This section should not discuss trade-offs in relation to source selection.",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "7",
+      "title": "Risks \u2013 FAR 7.105(a)(7), Discuss technical, cost, and schedule risks and describe what efforts are planned or underway to reduce risk and the consequences of failure to achieve goals. If concurrency of development and production is planned, discuss its effects on cost and schedule risks.",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "8",
+      "title": "Acquisition Streamlining \u2013 FAR 7.105(a)(8),",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "9",
+      "title": "OR",
+      "has_table": true,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 9,
+  "sheet_names": [],
+  "parse_error": null
+}

@@ -1,0 +1,50 @@
+{
+  "template_filename": "HHS_AP_Structure_Guide.txt",
+  "category": "reference_guide",
+  "variant": "ap_structure",
+  "section_clause_map": {
+    "1": {
+      "section_title": "HHS ACQUISITION PLAN (AP) TEMPLATE - STRUCTURE GUIDE",
+      "clauses": []
+    },
+    "2": {
+      "section_title": "OVERVIEW",
+      "clauses": []
+    },
+    "3": {
+      "section_title": "SUMMARY INFORMATION SECTION",
+      "clauses": []
+    },
+    "4": {
+      "section_title": "REVIEWS AND APPROVALS",
+      "clauses": []
+    },
+    "5": {
+      "section_title": "SUBMISSION REQUIREMENTS",
+      "clauses": []
+    },
+    "6": {
+      "section_title": "RELATED DOCUMENTS",
+      "clauses": []
+    },
+    "7": {
+      "section_title": "TEMPLATE FORMAT NOTES",
+      "clauses": []
+    },
+    "8": {
+      "section_title": "KEY REGULATORY AUTHORITIES",
+      "clauses": []
+    },
+    "9": {
+      "section_title": "UPDATES AND CURRENCY",
+      "clauses": []
+    },
+    "10": {
+      "section_title": "END OF GUIDE",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [],
+  "total_clauses": 0,
+  "far_parts_covered": []
+}

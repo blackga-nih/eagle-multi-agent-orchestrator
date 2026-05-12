@@ -1,0 +1,27 @@
+{
+  "template_filename": "1.a. AP Under SAT.docx",
+  "category": "acquisition_plan",
+  "variant": "under_sat",
+  "section_clause_map": {},
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 7.103",
+      "title": "Agency-Head Responsibilities",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 7.104",
+      "title": "General Procedures",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 7.105",
+      "title": "Contents of Written Acquisition Plans",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 3,
+  "far_parts_covered": [
+    "7"
+  ]
+}

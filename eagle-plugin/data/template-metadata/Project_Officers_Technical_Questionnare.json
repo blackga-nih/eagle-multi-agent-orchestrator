@@ -1,0 +1,11 @@
+{
+  "filename": "Project_Officers_Technical_Questionnare.pdf",
+  "format": "pdf",
+  "category": "technical_questionnaire",
+  "variant": "",
+  "sections": [],
+  "total_placeholders": 0,
+  "total_sections": 0,
+  "sheet_names": [],
+  "parse_error": "Neither pdfplumber nor PyPDF2 installed"
+}

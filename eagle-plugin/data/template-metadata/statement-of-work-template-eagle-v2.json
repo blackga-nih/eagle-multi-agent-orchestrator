@@ -1,0 +1,126 @@
+{
+  "filename": "statement-of-work-template-eagle-v2.docx",
+  "format": "docx",
+  "category": "sow",
+  "variant": "",
+  "sections": [
+    {
+      "number": "1",
+      "title": "TABLE OF CONTENTS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "INTRODUCTION/OVERVIEW",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "3",
+      "title": "BACKGROUND",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "4",
+      "title": "SCOPE",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "5",
+      "title": "OBJECTIVES",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "6",
+      "title": "REQUIREMENTS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "7",
+      "title": "TASKS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2.1.1",
+      "title": "Project Management",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2.1.2",
+      "title": "[Task_Title]",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2.1.3",
+      "title": "[Task_Title]",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "11",
+      "title": "PERSONNEL QUALIFICATIONS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "12",
+      "title": "SPECIAL REQUIREMENTS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "13",
+      "title": "DELIVERABLES",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "14",
+      "title": "SCHEDULE",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "15",
+      "title": "ASSUMPTIONS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "16",
+      "title": "GOVERNMENT FURNISHED PROPERTY",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "17",
+      "title": "PLACE OF PERFORMANCE",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "18",
+      "title": "TRAVEL",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "19",
+      "title": "SECURITY REQUIREMENTS",
+      "has_table": false,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 19,
+  "sheet_names": [],
+  "parse_error": null
+}

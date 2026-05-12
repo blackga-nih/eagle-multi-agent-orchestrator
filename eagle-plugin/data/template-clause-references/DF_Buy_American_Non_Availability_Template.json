@@ -1,0 +1,26 @@
+{
+  "template_filename": "DF_Buy_American_Non_Availability_Template.docx",
+  "category": "buy_american",
+  "variant": "non_availability",
+  "section_clause_map": {
+    "1": {
+      "section_title": "INSTRUCTION SHEET",
+      "clauses": []
+    },
+    "2": {
+      "section_title": "FINDINGS",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 25.103",
+      "title": "Exceptions — Buy American",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": [
+    "25"
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "template_filename": "statement-of-work-template-eagle-v2.docx",
+  "category": "sow",
+  "variant": "",
+  "section_clause_map": {
+    "1": {
+      "section_title": "TABLE OF CONTENTS",
+      "clauses": []
+    },
+    "2": {
+      "section_title": "INTRODUCTION/OVERVIEW",
+      "clauses": []
+    },
+    "3": {
+      "section_title": "BACKGROUND",
+      "clauses": []
+    },
+    "4": {
+      "section_title": "SCOPE",
+      "clauses": []
+    },
+    "5": {
+      "section_title": "OBJECTIVES",
+      "clauses": []
+    },
+    "6": {
+      "section_title": "REQUIREMENTS",
+      "clauses": []
+    },
+    "7": {
+      "section_title": "TASKS",
+      "clauses": []
+    },
+    "2.1.1": {
+      "section_title": "Project Management",
+      "clauses": []
+    },
+    "2.1.2": {
+      "section_title": "[Task_Title]",
+      "clauses": []
+    },
+    "2.1.3": {
+      "section_title": "[Task_Title]",
+      "clauses": []
+    },
+    "11": {
+      "section_title": "PERSONNEL QUALIFICATIONS",
+      "clauses": []
+    },
+    "12": {
+      "section_title": "SPECIAL REQUIREMENTS",
+      "clauses": []
+    },
+    "13": {
+      "section_title": "DELIVERABLES",
+      "clauses": []
+    },
+    "14": {
+      "section_title": "SCHEDULE",
+      "clauses": []
+    },
+    "15": {
+      "section_title": "ASSUMPTIONS",
+      "clauses": []
+    },
+    "16": {
+      "section_title": "GOVERNMENT FURNISHED PROPERTY",
+      "clauses": []
+    },
+    "17": {
+      "section_title": "PLACE OF PERFORMANCE",
+      "clauses": []
+    },
+    "18": {
+      "section_title": "TRAVEL",
+      "clauses": []
+    },
+    "19": {
+      "section_title": "SECURITY REQUIREMENTS",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 37.6",
+      "title": "Performance-Based Acquisition",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": [
+    "37"
+  ]
+}
