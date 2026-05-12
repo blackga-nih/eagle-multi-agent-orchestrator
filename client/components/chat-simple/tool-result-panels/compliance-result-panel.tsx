@@ -10,6 +10,9 @@ interface DocItem {
   name: string;
   required: boolean;
   note: string;
+  trigger?: string;
+  template?: string;
+  template_hint?: string;
 }
 
 interface ComplianceItem {
@@ -185,41 +188,57 @@ function DocumentsTable({ docs }: { docs: DocItem[] }) {
 
   const required = docs.filter(d => d.required);
   const optional = docs.filter(d => !d.required);
+  const renderTrigger = (d: DocItem) => d.trigger || d.note || 'Policy/checklist requirement';
+  const renderTemplate = (d: DocItem) => d.template || d.template_hint || '—';
 
   return (
-    <div>
-      <SectionHeader label="Documents Required" count={required.length} total={docs.length} />
+    <div className="space-y-3">
+      <SectionHeader label="Documents Required" count={required.length} />
       <div className="border border-gray-200 rounded-lg overflow-hidden">
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="w-8 px-2 py-2"></th>
               <th className="text-left px-3 py-2 font-semibold text-gray-600 uppercase tracking-wider text-[10px]">Document</th>
-              <th className="text-left px-3 py-2 font-semibold text-gray-600 uppercase tracking-wider text-[10px]">Citation / Notes</th>
+              <th className="text-left px-3 py-2 font-semibold text-gray-600 uppercase tracking-wider text-[10px]">Trigger</th>
+              <th className="text-left px-3 py-2 font-semibold text-gray-600 uppercase tracking-wider text-[10px]">Template</th>
             </tr>
           </thead>
           <tbody>
             {required.map((d, i) => (
               <tr key={`req-${i}`} className="border-b border-gray-100 last:border-b-0">
-                <td className="px-2 py-2 text-center">
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-green-100 text-green-700 text-[10px] font-bold">&#x2713;</span>
-                </td>
                 <td className="px-3 py-2 font-medium text-gray-900">{d.name}</td>
-                <td className="px-3 py-2 text-gray-500">{d.note}</td>
-              </tr>
-            ))}
-            {optional.map((d, i) => (
-              <tr key={`opt-${i}`} className="border-b border-gray-100 last:border-b-0 opacity-60">
-                <td className="px-2 py-2 text-center">
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-gray-100 text-gray-400 text-[10px]">&mdash;</span>
-                </td>
-                <td className="px-3 py-2 text-gray-600">{d.name}</td>
-                <td className="px-3 py-2 text-gray-400">{d.note}</td>
+                <td className="px-3 py-2 text-gray-600">{renderTrigger(d)}</td>
+                <td className="px-3 py-2 text-gray-500">{renderTemplate(d)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {optional.length > 0 && (
+        <div>
+          <SectionHeader label="Conditional Documents" count={optional.length} />
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-3 py-2 font-semibold text-gray-600 uppercase tracking-wider text-[10px]">Document</th>
+                  <th className="text-left px-3 py-2 font-semibold text-gray-600 uppercase tracking-wider text-[10px]">Trigger</th>
+                  <th className="text-left px-3 py-2 font-semibold text-gray-600 uppercase tracking-wider text-[10px]">Template</th>
+                </tr>
+              </thead>
+              <tbody>
+                {optional.map((d, i) => (
+                  <tr key={`opt-${i}`} className="border-b border-gray-100 last:border-b-0 opacity-75">
+                    <td className="px-3 py-2 text-gray-700">{d.name}</td>
+                    <td className="px-3 py-2 text-gray-500">{renderTrigger(d)}</td>
+                    <td className="px-3 py-2 text-gray-400">{renderTemplate(d)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -421,6 +440,11 @@ function SectionHeader({ label, count, total }: { label: string; count?: number;
   return (
     <div className="flex items-center gap-2 mb-2">
       <span className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">{label}</span>
+      {count !== undefined && total === undefined && (
+        <span className="text-[10px] text-gray-400">
+          {count}
+        </span>
+      )}
       {count !== undefined && total !== undefined && (
         <span className="text-[10px] text-gray-400">
           {count} required / {total} total

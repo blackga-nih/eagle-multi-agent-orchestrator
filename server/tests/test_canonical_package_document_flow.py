@@ -64,6 +64,68 @@ def test_exec_create_document_routes_package_mode_to_canonical(monkeypatch):
     mock_s3.put_object.assert_not_called()
 
 
+def test_exec_create_document_allows_valid_off_checklist_doc_as_extra(monkeypatch):
+    """Valid off-checklist package docs should generate and surface in extra[]."""
+    from app.tools.document_generation import exec_create_document as _exec_create_document
+
+    class FakeTemplateResult:
+        success = False
+        error = "template unavailable"
+
+    class FakeTemplateService:
+        def __init__(self, tenant_id, user_id, markdown_generators):
+            self.markdown_generators = markdown_generators
+
+        def generate_document(self, doc_type, title, data, output_format, **kwargs):
+            return FakeTemplateResult()
+
+    captured = {}
+
+    def fake_create_package_document_version(**kwargs):
+        captured.update(kwargs)
+        return DocumentResult(
+            success=True,
+            document_id="doc-qasp-1",
+            package_id=kwargs["package_id"],
+            doc_type=kwargs["doc_type"],
+            version=1,
+            status="draft",
+            s3_key="eagle/test-tenant/packages/PKG-2026-0001/qasp/v1/QASP.md",
+        )
+
+    monkeypatch.setattr("app.template_service.TemplateService", FakeTemplateService)
+    monkeypatch.setattr(
+        "app.package_store.get_package_checklist",
+        lambda tenant_id, package_id: {
+            "required": ["sow", "igce"],
+            "completed": [],
+        },
+    )
+    monkeypatch.setattr(
+        "app.document_service.create_package_document_version",
+        fake_create_package_document_version,
+    )
+    monkeypatch.setattr("app.tools.document_generation.get_s3", lambda: mock.MagicMock())
+
+    result = _exec_create_document(
+        {
+            "doc_type": "qasp",
+            "title": "Quality Assurance Surveillance Plan",
+            "package_id": "PKG-2026-0001",
+            "content": "# QASP\n\nDraft",
+        },
+        tenant_id="test-tenant",
+        session_id="test-tenant#advanced#test-user#sess-123",
+    )
+
+    assert "error" not in result
+    assert result["mode"] == "package"
+    assert result["doc_type"] == "qasp"
+    assert result["_checklist_extra"]
+    assert result["_checklist_required"] == ["igce", "sow"]
+    assert captured["doc_type"] == "qasp"
+
+
 def test_title_from_context_ignores_attachment_request_suffix():
     from app.tools.document_generation import _title_from_context
 

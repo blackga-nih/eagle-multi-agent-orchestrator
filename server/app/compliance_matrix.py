@@ -279,10 +279,12 @@ _TYPE_ALIASES: dict[str, str] = {
     "t_and_m": "tm",
     "t&m": "tm",
     "t_m": "tm",
-    # LH
+    # LH remains a valid FAR/matrix type internally; supervisor output applies
+    # the NIH/NCI user-facing preference for T&M terminology where applicable.
     "labor_hour": "lh",
     "labor hour": "lh",
     "labor_hours": "lh",
+    "lh": "lh",
 }
 
 
@@ -362,6 +364,78 @@ def _ja_approval(v: float, is_simplified_sole: bool = False) -> str:
     if v > _JA_HCA:
         return f"HCA + NIH Competition Advocate (${_JA_HCA:,}-${_AP_OA:,}) - FAR 6.304(a)(2)"
     return f"CO or other approval established by OA (<= ${_JA_HCA:,}) - FAR 6.304(a)(1)"
+
+
+_DOC_TEMPLATE_BY_NAME: dict[str, str] = {
+    "Purchase Request": "Purchase Request cover sheet",
+    "Statement of Need (SON)": "Statement of Need template",
+    "SOW / PWS": "PWS/SOW template",
+    "IGCE": "01.D_IGCE_for_Commercial_Organizations.xlsx",
+    "Market Research Report": "Attachment 5-HHS Template-Market Research Report.docx",
+    "Market Research": "Market research documentation",
+    "Acquisition Plan": "HHS Streamlined Acquisition Plan template",
+    "J&A / Justification": "J&A / Limited Sources justification template",
+    "D&F (Determination & Findings)": "D&F template or CO memorandum",
+    "Source Selection Plan": "Source Selection Plan template",
+    "Subcontracting Plan": "HHS SubK Plan Template - updated March 2022.doc",
+    "QASP": "QASP template",
+    "HHS-653 Small Business Review": "HHS-653 Small Business Review form",
+    "IT Security & Privacy Certification": "IT Security & Privacy certification form",
+    "Section 508 ICT Evaluation": "Section 508 ICT evaluation template",
+    "Human Subjects Provisions": "Human Subjects / IRB provisions lookup",
+}
+
+
+def _trigger_for_doc(doc: dict, contract_value: float, is_services: bool) -> str:
+    """Return concise user-facing trigger text for required-documents tables."""
+    name = doc.get("name", "")
+    if not doc.get("required"):
+        return doc.get("note") or "Conditional / not required for this package"
+    if name == "Purchase Request":
+        return "Micro-purchase package"
+    if name == "Statement of Need (SON)":
+        return "Requirement description needed for products or micro-purchase"
+    if name == "SOW / PWS":
+        return (
+            "Services requirement; outcome-based scope under FAR 37.102 / FAR 37.6"
+            if is_services
+            else "Product specifications needed"
+        )
+    if name == "IGCE":
+        return "Required for above-MPT acquisition; labor/category hours and rates needed"
+    if name == "Market Research Report":
+        return "Above SAT; Rule of Two / small-business capability analysis"
+    if name == "Market Research":
+        return "Above MPT; documented market research required"
+    if name == "Acquisition Plan":
+        return "Above MPT" if contract_value <= _SAT else "Above SAT"
+    if name == "J&A / Justification":
+        return doc.get("authority") or "Sole source / limited competition"
+    if name == "D&F (Determination & Findings)":
+        return doc.get("note") or "Contract type or fee arrangement requires D&F"
+    if name == "Source Selection Plan":
+        return "Negotiated procurement above SAT"
+    if name == "Subcontracting Plan":
+        return f"If large-business prime and value > ${_SUBK:,}"
+    if name == "QASP":
+        return "Performance-based services"
+    if name == "HHS-653 Small Business Review":
+        return "Above MPT"
+    if name == "IT Security & Privacy Certification":
+        return "IT acquisition"
+    if name == "Section 508 ICT Evaluation":
+        return "IT acquisition above MPT"
+    if name == "Human Subjects Provisions":
+        return "Human-subjects research or support"
+    return doc.get("note") or "Policy/checklist requirement"
+
+
+def _enrich_document_metadata(docs: list[dict], contract_value: float, is_services: bool) -> None:
+    """Add trigger/template fields while preserving legacy note/template_hint."""
+    for doc in docs:
+        doc.setdefault("trigger", _trigger_for_doc(doc, contract_value, is_services))
+        template = doc.get("template_hint") or _DOC_TEMPLATE_BY_NAME.get(doc.get("name", ""), "—")
+        doc.setdefault("template", template)
 
 
 # ---------------------------------------------------------------------------
@@ -771,6 +845,8 @@ def get_requirements(
             continue
         if v >= above:
             _add_hhs_doc(entry)
+
+    _enrich_document_metadata(docs, v, is_services)
 
     # --- Tier tagging: FAR-core baseline vs supplemental ---
     # Core = FAR-mandated baseline every reader of the chat summary expects.
