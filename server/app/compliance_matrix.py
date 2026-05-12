@@ -829,6 +829,20 @@ def get_requirements(
             }
         )
 
+    if is_sb:
+        compliance.append(
+            {
+                "name": "Small Business Rule of Two / Set-Aside",
+                "status": "required",
+                "note": (
+                    "FAR 19.502-2 — set aside when there is a reasonable "
+                    "expectation of two or more responsible small business "
+                    "offers at fair market prices"
+                ),
+                "confidence": _CONFIDENCE["competition_rule"],
+            }
+        )
+
     # --- Competition Rules ---
     competition = ""
     if m == "micro":
@@ -885,6 +899,18 @@ def get_requirements(
         competition += (
             f" ENHANCED: Detailed evaluation factors + relative importance "
             f"+ post-award notification + debriefing (> ${_IDIQ_ENH:,})."
+        )
+
+    # Small business set-aside is a competitive approach, not a FAR Part 6
+    # exception. Surface the controlling Part 19 rule directly so answer
+    # synthesis does not drift to adjacent SBA administrative sections.
+    if is_sb and m in ("sap", "negotiated"):
+        competition = (
+            "Small business set-aside competitive approach — if market research "
+            "shows a reasonable expectation of offers from two or more responsible "
+            "small business concerns at fair market prices, the acquisition shall "
+            "be set aside under FAR 19.502-2. Document the Rule of Two analysis "
+            "in the market research file."
         )
 
     # 8(a) override — applies on top of the method-based competition rules
@@ -1049,6 +1075,8 @@ def get_requirements(
         related_keywords.extend(["16.505", "task order"])
     if is_8a:
         related_keywords.extend(["19.805", "8(a)"])
+    if is_sb:
+        related_keywords.extend(["19.502-2", "small business", "set-aside"])
     if v > _TINA:
         related_keywords.extend(["15.403", "cost pricing data"])
 

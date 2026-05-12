@@ -192,6 +192,25 @@ class TestGetRequirements:
         assert len(subk) == 1
         assert subk[0]["required"] is False
 
+    def test_small_business_set_aside_uses_rule_of_two_authority(self):
+        """Small business set-aside analysis cites FAR 19.502-2, not adjacent SBA admin sections."""
+        result = get_requirements(
+            450_000,
+            "negotiated",
+            "ffp",
+            flags={"is_it": True, "is_services": True, "is_small_business": True},
+        )
+
+        assert "FAR 19.502-2" in result["competition_rules"]
+        assert "Rule of Two" in result["competition_rules"]
+        assert "19.104" not in result["competition_rules"]
+        assert any(
+            item["name"] == "Small Business Rule of Two / Set-Aside"
+            and "FAR 19.502-2" in item["note"]
+            for item in result["compliance_items"]
+        )
+        assert any(entry["section"] == "19.502-2" for entry in result["_related_far"])
+
 
 # ---------------------------------------------------------------------------
 # 1b. Normalization / alias resolution
