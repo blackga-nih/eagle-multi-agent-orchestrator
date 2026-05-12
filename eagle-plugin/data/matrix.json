@@ -31,6 +31,7 @@
     { "value": 15000,     "label": "$15K MPT",      "short": "$15K",   "triggers": ["micro_purchase_threshold", "competition_not_required"] },
     { "value": 25000,     "label": "$25K Synopsis",  "short": "$25K",   "triggers": ["sam_gov_synopsis_required"] },
     { "value": 150000,    "label": "$150K VETS 4212","short": "$150K",  "triggers": ["vets_4212_affirmative_action_plan"] },
+    { "value": 183000,    "label": "$183K TAA (WTO GPA)", "short": "$183K", "triggers": ["taa_threshold_supplies", "taa_threshold_services", "wto_gpa_threshold"], "_note": "WTO GPA threshold for supplies/services at civilian agencies. Updates every 2 years per FAR 25.402 based on SDR conversion. Verify annually." },
     { "value": 350000,    "label": "$350K SAT",      "short": "$350K",  "triggers": ["simplified_acquisition_threshold", "full_competition_required_above"] },
     { "value": 900000,    "label": "$900K SubK",     "short": "$900K",  "triggers": ["subcontracting_plan_required"] },
     { "value": 900000,    "label": "$900K J&A",      "short": "$900K",  "triggers": ["ja_hca_approval_required"] },
@@ -262,6 +263,41 @@
     },
     "conditional": [
       { "name": "Wage Determination (SCA/SCLS)", "ref": "FAR 22.10", "condition": "is_services", "above": 2500, "note": "Service Contract Labor Standards > $2,500" }
+    ]
+  },
+
+  "baa_taa": {
+    "_note": "Buy American Act / Trade Agreements Act rules. BAA applies to all foreign supplies unless TAA threshold is met AND country is WTO GPA designated. Per FAR 25.103(b)(2)(iii) eff. April 24, 2026, nonavailability waivers require MIAO submission.",
+    "wto_gpa_countries": [
+      "Armenia", "Aruba", "Australia", "Austria", "Belgium", "Bulgaria", "Canada", "Croatia",
+      "Cyprus", "Czech Republic", "Denmark", "Estonia", "Finland", "France", "Germany", "Greece",
+      "Hong Kong", "Hungary", "Iceland", "Ireland", "Israel", "Italy", "Japan", "Korea",
+      "Latvia", "Liechtenstein", "Lithuania", "Luxembourg", "Malta", "Moldova", "Montenegro",
+      "Netherlands", "New Zealand", "North Macedonia", "Norway", "Poland", "Portugal", "Romania",
+      "Singapore", "Slovak Republic", "Slovenia", "Spain", "Sweden", "Switzerland", "Taiwan",
+      "Ukraine", "United Kingdom"
+    ],
+    "threshold": 183000,
+    "_threshold_note": "WTO GPA threshold ~$183K for civilian agencies. Updates every 2 years per FAR 25.402. Verify annually.",
+    "miao_requirement": {
+      "effective_date": "2026-04-24",
+      "authority": "FAR 25.103(b)(2)(iii)",
+      "portal": "MadeinAmerica.gov",
+      "note": "Individual nonavailability waivers must be submitted via MIAO digital portal. CO CANNOT award until MIAO completes review (or waives review, or urgency exception applies).",
+      "timeline_impact_days": 15
+    },
+    "nih_waiver_email": "NIHbuyamericanwaiver@od.nih.gov",
+    "documents_required_baa": [
+      { "name": "Market Research Report (Domestic Source Search)", "note": "Must document dates, sites searched, results of search for domestic sources" },
+      { "name": "BAA D&F (Nonavailability)", "note": "Required when no domestic source exists. Cite FAR 25.103(b) exception." },
+      { "name": "BAA/TAA Checklist (Supplies)", "ref": "HHSAM 325.102-70" }
+    ],
+    "approval_chain_baa": [
+      { "step": 1, "action": "CO prepares D&F for nonavailability exception" },
+      { "step": 2, "action": "HCA approves the D&F" },
+      { "step": 3, "action": "CO submits to MIAO digital portal at MadeinAmerica.gov" },
+      { "step": 4, "action": "Wait for MIAO review completion (add 15 business days)", "blocking": true },
+      { "step": 5, "action": "Submit completed package to NIHbuyamericanwaiver@od.nih.gov" }
     ]
   }
 }

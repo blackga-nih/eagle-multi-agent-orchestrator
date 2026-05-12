@@ -4,6 +4,8 @@
  * Functions for uploading documents and assigning them to packages.
  */
 
+import { getApiErrorMessage, normalizeApiErrorMessage } from '@/lib/api-error';
+
 export interface ClassificationResult {
   doc_type: string;
   confidence: number;
@@ -127,34 +129,23 @@ export async function uploadDocument(
   if (!response.ok) {
     const rawBody = await response.text().catch(() => '');
     let error: {
-      detail?: string;
-      details?: string;
-      error?: string;
-      message?: string;
+      detail?: unknown;
+      details?: unknown;
+      error?: unknown;
+      message?: unknown;
     } = {};
 
     if (rawBody) {
       try {
-        error = JSON.parse(rawBody) as {
-          detail?: string;
-          details?: string;
-          error?: string;
-          message?: string;
-        };
+        error = JSON.parse(rawBody) as typeof error;
       } catch {
-        error = { detail: rawBody.trim() || 'Upload failed' };
+        error = { detail: rawBody };
       }
     } else {
       error = { detail: 'Upload failed' };
     }
 
-    throw new Error(
-      error.detail ||
-        error.details ||
-        error.error ||
-        error.message ||
-        `Upload failed: ${response.status}`,
-    );
+    throw new Error(getApiErrorMessage(error, `Upload failed: ${response.status}`));
   }
 
   return response.json();
@@ -187,34 +178,23 @@ export async function uploadPackageAttachment(
   if (!response.ok) {
     const rawBody = await response.text().catch(() => '');
     let error: {
-      detail?: string;
-      details?: string;
-      error?: string;
-      message?: string;
+      detail?: unknown;
+      details?: unknown;
+      error?: unknown;
+      message?: unknown;
     } = {};
 
     if (rawBody) {
       try {
-        error = JSON.parse(rawBody) as {
-          detail?: string;
-          details?: string;
-          error?: string;
-          message?: string;
-        };
+        error = JSON.parse(rawBody) as typeof error;
       } catch {
-        error = { detail: rawBody.trim() || 'Attachment upload failed' };
+        error = { detail: rawBody };
       }
     } else {
       error = { detail: 'Attachment upload failed' };
     }
 
-    throw new Error(
-      error.detail ||
-        error.details ||
-        error.error ||
-        error.message ||
-        `Attachment upload failed: ${response.status}`,
-    );
+    throw new Error(getApiErrorMessage(error, `Attachment upload failed: ${response.status}`));
   }
 
   return response.json();
@@ -266,13 +246,7 @@ export async function updatePackageAttachment(
       error?: string;
       message?: string;
     };
-    throw new Error(
-      error.detail ||
-        error.details ||
-        error.error ||
-        error.message ||
-        `Attachment update failed: ${response.status}`,
-    );
+    throw new Error(getApiErrorMessage(error, `Attachment update failed: ${response.status}`));
   }
 
   return response.json();
@@ -298,13 +272,7 @@ export async function deletePackageAttachment(
       error?: string;
       message?: string;
     };
-    throw new Error(
-      error.detail ||
-        error.details ||
-        error.error ||
-        error.message ||
-        `Attachment delete failed: ${response.status}`,
-    );
+    throw new Error(getApiErrorMessage(error, `Attachment delete failed: ${response.status}`));
   }
 }
 
@@ -337,13 +305,7 @@ export async function promotePackageAttachment(
       error?: string;
       message?: string;
     };
-    throw new Error(
-      error.detail ||
-        error.details ||
-        error.error ||
-        error.message ||
-        `Attachment promotion failed: ${response.status}`,
-    );
+    throw new Error(getApiErrorMessage(error, `Attachment promotion failed: ${response.status}`));
   }
 
   return response.json();
@@ -379,13 +341,7 @@ export async function assignToPackage(
       error?: string;
       message?: string;
     };
-    throw new Error(
-      error.detail ||
-        error.details ||
-        error.error ||
-        error.message ||
-        `Assignment failed: ${response.status}`,
-    );
+    throw new Error(getApiErrorMessage(error, `Assignment failed: ${response.status}`));
   }
 
   return response.json();
@@ -420,7 +376,9 @@ export async function deletePackage(packageId: string, token?: string | null): P
       detail?: string;
       error?: string;
     };
-    throw new Error(error.detail || error.error || `Delete failed: ${response.status}`);
+    throw new Error(
+      normalizeApiErrorMessage(error.detail || error.error, `Delete failed: ${response.status}`),
+    );
   }
 }
 

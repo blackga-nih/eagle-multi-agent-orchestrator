@@ -3287,6 +3287,35 @@ async def test_37_uc03_sole_source():
 # Excel UC-4 | Jira: TBD | MVP1
 # ============================================================
 
+def _uc04_competitive_range_quality(text: str) -> tuple[dict[str, bool], bool]:
+    """Quality gates for the UC-04 competitive range ticket.
+
+    The KB uses current HHS/RFO FAR 15.204-1 for competitive range and maps
+    legacy FAR 15.306(c) to that section. Generic FAR Part 15 / FAR 15.2
+    citations are not enough for this scenario.
+    """
+    t = (text or "").lower()
+    specific_current = "15.204-1" in t
+    legacy_mapped = "15.306" in t and "15.204-1" in t
+    generic_only = (
+        ("far 15.2" in t or "far part 15" in t)
+        and not specific_current
+        and not legacy_mapped
+    )
+    checks = {
+        "specific_current_citation": specific_current,
+        "most_highly_rated": "most highly rated" in t or "most highly evaluated" in t,
+        "efficient_competition": "efficient competition" in t or "efficiency" in t,
+        "exclusion_notice": "notice" in t or "notify" in t or "excluded offeror" in t,
+        "debriefing": "debrief" in t,
+        "documentation_rationale": (
+            ("document" in t or "documentation" in t)
+            and ("rationale" in t or "determination" in t or "record" in t)
+        ),
+        "not_generic_only_citation": not generic_only,
+    }
+    return checks, all(checks.values())
+
 async def test_38_uc04_competitive_range():
     """UC-04: FAR Part 15 competitive range -- advisory Q&A, no docs generated."""
     print("\n" + "=" * 70)
@@ -4887,8 +4916,8 @@ async def test_64_uc04_competitive_range_e2e():
     try:
         collector = await _collect_sdk_query(
             "We have a $2.1M FAR Part 15 negotiated procurement. "
-            "We received 8 proposals and need to establish a "
-            "competitive range. What are the legal requirements?",
+            "We received 8 proposals and need to establish a competitive range. "
+            "Do we have to keep all offerors in the competitive range?",
             skill_names=["legal-counsel"],
             max_turns=10,
         )
@@ -4901,14 +4930,18 @@ async def test_64_uc04_competitive_range_e2e():
         ind, count = check_indicators(text, {
             "competitive_range": ["competitive range"],
             "discussions": ["discussion", "negotiation"],
-            "far_15": ["far 15", "part 15"],
+            "specific_far_15": ["15.204-1"],
             "evaluation": ["evaluat", "proposal", "criteria"],
             "documentation": ["document", "determin", "record"],
         })
         print(f"  Indicators: {count}/5 -> {ind}")
-        passed = count >= 3
+        quality, quality_passed = _uc04_competitive_range_quality(text)
+        print(f"  UC-04 quality gates -> {quality}")
+        passed = count >= 4 and quality_passed
     else:
-        passed = len(collector.result_text) > 0
+        quality, quality_passed = _uc04_competitive_range_quality(text)
+        print(f"  UC-04 quality gates -> {quality}")
+        passed = len(collector.result_text) > 0 and quality_passed
 
     print(f"  {'PASS' if passed else 'FAIL'} - UC-04 E2E")
     return passed
@@ -7949,15 +7982,19 @@ async def test_132_uc04_competitive_range_multi_turn():
     if _HAS_EVAL_HELPERS:
         ind, count = check_indicators(combined, {
             "competitive_range": ["competitive range", "competitive-range"],
-            "far_15": ["far 15", "far part 15", "15.306", "15.503"],
+            "specific_far_15": ["15.204-1"],
             "narrowing": ["narrow", "exclude", "eliminate", "not required to include"],
             "protest_analysis": ["protest", "debrief", "gao", "challenge", "risk"],
             "multi_turn_context": ["small business", "40%", "memo", "outline", "document"],
         })
         print(f"  Indicators: {count}/5 -> {ind}")
-        passed = count >= 3
+        quality, quality_passed = _uc04_competitive_range_quality(combined)
+        print(f"  UC-04 quality gates -> {quality}")
+        passed = count >= 4 and quality_passed
     else:
-        passed = all(len(c.result_text) > 0 for c in collectors)
+        quality, quality_passed = _uc04_competitive_range_quality(combined)
+        print(f"  UC-04 quality gates -> {quality}")
+        passed = all(len(c.result_text) > 0 for c in collectors) and quality_passed
 
     print(f"  Turns completed: {len(collectors)}/3")
     print(f"  {'PASS' if passed else 'FAIL'} - UC-4 Multi-Turn Competitive Range")

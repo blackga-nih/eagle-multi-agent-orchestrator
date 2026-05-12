@@ -86,7 +86,7 @@ client/test-results/
 
 # Dev-only (not on main)
 notes/
-data/
+/data/
 
 # Legacy directories (kept locally, not tracked)
 nextjs-frontend/

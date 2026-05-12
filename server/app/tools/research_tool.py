@@ -65,6 +65,39 @@ def _detect_method(acquisition_method: str, query: str, contract_value: float) -
     return "sap"
 
 
+def _query_mentions_small_business_set_aside(query: str) -> bool:
+    q = (query or "").lower()
+    return any(
+        phrase in q
+        for phrase in (
+            "rule of two",
+            "rule-of-two",
+            "set aside",
+            "set-aside",
+            "small business",
+        )
+    )
+
+
+def _query_mentions_it_services(query: str) -> tuple[bool, bool]:
+    q = (query or "").lower()
+    inferred_it = any(
+        phrase in q
+        for phrase in (
+            "it service",
+            "it services",
+            "information technology",
+            "software",
+            "network",
+            "cyber",
+            "cio-sp",
+            "nitaac",
+        )
+    )
+    inferred_services = "service" in q or "services" in q
+    return inferred_it, inferred_services
+
+
 _MICRO_PURCHASE_DROP_PREFIXES: tuple[str, ...] = (
     # Protest guidance is irrelevant for FAR 13.2 micro-purchases — there's no
     # competitive selection to protest. UC2.1 review (2026-04-29) flagged that
@@ -180,7 +213,31 @@ def exec_research(
                     fetched_keys.add(s3_key)
                     checklist_content[r.get("title", s3_key)] = result["content"][:20000]
 
-    return {
+    compliance_data = None
+    vehicle_suggestions = None
+    try:
+        from ..compliance_matrix import execute_operation as exec_compliance_matrix
+
+        inferred_it, inferred_services = _query_mentions_it_services(query)
+        compliance_data = exec_compliance_matrix({
+            "operation": "query",
+            "contract_value": contract_value or 100000,
+            "acquisition_method": acquisition_method or method,
+            "is_it": inferred_it,
+            "is_services": inferred_services,
+            "is_small_business": _query_mentions_small_business_set_aside(query),
+        })
+        if inferred_it or inferred_services:
+            vehicle_suggestions = exec_compliance_matrix({
+                "operation": "suggest_vehicle",
+                "is_it": inferred_it,
+                "is_services": inferred_services,
+                "is_small_business": _query_mentions_small_business_set_aside(query),
+            })
+    except Exception:
+        logger.debug("exec_research: compliance enrichment failed", exc_info=True)
+
+    packet = {
         # kb_results is the filtered list — irrelevant docs (e.g. protest
         # guidance for micro-purchases) are dropped before reaching the model.
         "kb_results": kept_results,
@@ -198,3 +255,8 @@ def exec_research(
             "Cite KB documents and checklist references in your response."
         ),
     }
+    if compliance_data:
+        packet["compliance_matrix"] = compliance_data
+    if vehicle_suggestions:
+        packet["vehicle_suggestions"] = vehicle_suggestions
+    return packet

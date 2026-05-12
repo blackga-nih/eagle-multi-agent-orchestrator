@@ -192,6 +192,25 @@ class TestGetRequirements:
         assert len(subk) == 1
         assert subk[0]["required"] is False
 
+    def test_small_business_set_aside_uses_rule_of_two_authority(self):
+        """Small business set-aside analysis cites FAR 19.502-2, not adjacent SBA admin sections."""
+        result = get_requirements(
+            450_000,
+            "negotiated",
+            "ffp",
+            flags={"is_it": True, "is_services": True, "is_small_business": True},
+        )
+
+        assert "FAR 19.502-2" in result["competition_rules"]
+        assert "Rule of Two" in result["competition_rules"]
+        assert "19.104" not in result["competition_rules"]
+        assert any(
+            item["name"] == "Small Business Rule of Two / Set-Aside"
+            and "FAR 19.502-2" in item["note"]
+            for item in result["compliance_items"]
+        )
+        assert any(entry["section"] == "19.502-2" for entry in result["_related_far"])
+
 
 # ---------------------------------------------------------------------------
 # 1b. Normalization / alias resolution
@@ -565,6 +584,86 @@ class TestExecuteOperationFlags:
             "is_manufacturing": True,
         })
         assert "Manufacturing" in result["competition_rules"]
+
+
+# ---------------------------------------------------------------------------
+# 6b. Foreign Supply / BAA / TAA — UC5 scenario
+# ---------------------------------------------------------------------------
+
+class TestForeignSupplyBAATAA:
+    """BAA/TAA determination for foreign supplies (UC5: Italian instrument @ $150K)."""
+
+    def test_uc5_italian_instrument_baa_applies(self):
+        """UC5: $150K Italian research instrument triggers BAA, not TAA."""
+        result = get_requirements(
+            150_000, "sap", "ffp",
+            flags={"is_foreign": True, "country_of_origin": "Italy", "is_services": False}
+        )
+        baa_taa = result.get("baa_taa_determination")
+        assert baa_taa is not None, "baa_taa_determination should be present"
+        assert baa_taa["applies"] == "BAA", "BAA should apply, not TAA"
+        assert baa_taa["requires_waiver"] is True
+        assert "150,000" in baa_taa["reason"]
+        assert "183,000" in baa_taa["reason"]
+
+    def test_uc5_baa_df_in_required_docs(self):
+        """UC5: BAA D&F should be in required documents."""
+        result = get_requirements(
+            150_000, "sap", "ffp",
+            flags={"is_foreign": True, "country_of_origin": "Italy"}
+        )
+        doc_names = [d["name"] for d in result["documents_required"]]
+        assert "BAA D&F (Nonavailability)" in doc_names
+        assert "Market Research Report (Domestic Source Search)" in doc_names
+        assert "BAA/TAA Checklist (Supplies)" in doc_names
+
+    def test_uc5_miao_review_critical(self):
+        """UC5: MIAO review should be marked as CRITICAL compliance item."""
+        result = get_requirements(
+            150_000, "sap", "ffp",
+            flags={"is_foreign": True, "country_of_origin": "Italy"}
+        )
+        miao_items = [c for c in result["compliance_items"] if "MIAO" in c["name"]]
+        assert len(miao_items) == 1, "MIAO Review should be in compliance items"
+        assert miao_items[0]["status"] == "critical"
+        assert miao_items[0]["blocking"] is True
+        assert "MadeinAmerica.gov" in miao_items[0]["note"]
+        assert "CANNOT award" in miao_items[0]["note"]
+
+    def test_uc5_nih_waiver_email_present(self):
+        """UC5: NIH waiver email should be in compliance items."""
+        result = get_requirements(
+            150_000, "sap", "ffp",
+            flags={"is_foreign": True, "country_of_origin": "Italy"}
+        )
+        nih_items = [c for c in result["compliance_items"] if "NIH BAA" in c["name"]]
+        assert len(nih_items) == 1
+        assert "NIHbuyamericanwaiver@od.nih.gov" in nih_items[0]["note"]
+
+    def test_taa_applies_above_threshold_designated_country(self):
+        """Above TAA threshold ($183K) with designated country → TAA applies."""
+        result = get_requirements(
+            200_000, "sap", "ffp",
+            flags={"is_foreign": True, "country_of_origin": "Germany"}
+        )
+        baa_taa = result.get("baa_taa_determination")
+        assert baa_taa["applies"] == "TAA"
+        assert baa_taa["requires_waiver"] is False
+
+    def test_baa_applies_non_designated_country_above_threshold(self):
+        """Above TAA threshold but non-designated country → BAA applies."""
+        result = get_requirements(
+            200_000, "sap", "ffp",
+            flags={"is_foreign": True, "country_of_origin": "China"}
+        )
+        baa_taa = result.get("baa_taa_determination")
+        assert baa_taa["applies"] == "BAA"
+        assert baa_taa["requires_waiver"] is True
+
+    def test_no_baa_taa_when_not_foreign(self):
+        """Domestic supply should not have baa_taa_determination."""
+        result = get_requirements(150_000, "sap", "ffp", flags={"is_foreign": False})
+        assert result.get("baa_taa_determination") is None
 
 
 # ---------------------------------------------------------------------------

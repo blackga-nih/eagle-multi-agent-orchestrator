@@ -1,9 +1,8 @@
 """Tests for ZIP package export (Feature 4)."""
 import asyncio
-import pytest
 import zipfile
 import io
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 
 
 class TestExportPackageZip:
@@ -245,5 +244,53 @@ class TestZipEndpoint:
                         delattr(_main_mod, "get_package")
                     if hasattr(_main_mod, "list_package_documents"):
                         delattr(_main_mod, "list_package_documents")
+
+        asyncio.run(_run())
+
+    def test_package_document_downloads_markdown_sidecar_as_docx(self):
+        """Format-aware document download should export a binary doc's sidecar."""
+        async def _run():
+            from app.cognito_auth import UserContext
+            from app.routers.packages import download_package_document_endpoint
+
+            mock_s3 = MagicMock()
+            mock_body = MagicMock()
+            mock_body.read.return_value = b"# IGCE\n\nCost narrative"
+            mock_s3.get_object.return_value = {"Body": mock_body}
+
+            with (
+                patch(
+                    "app.routers.packages.get_document",
+                    return_value={
+                        "doc_type": "igce",
+                        "title": "IGCE",
+                        "file_type": "xlsx",
+                        "s3_bucket": "bucket",
+                        "s3_key": "igce.xlsx",
+                        "markdown_s3_key": "igce.xlsx.content.md",
+                        "version": 1,
+                    },
+                ),
+                patch("app.db_client.get_s3", return_value=mock_s3),
+                patch(
+                    "app.document_export.export_document",
+                    return_value={
+                        "data": b"PK\x03\x04fake-docx",
+                        "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "filename": "IGCE.docx",
+                    },
+                ),
+            ):
+                response = await download_package_document_endpoint(
+                    package_id="PKG-0001",
+                    doc_type="igce",
+                    format="docx",
+                    user=UserContext(user_id="user1", tenant_id="test"),
+                )
+
+                assert response.media_type.startswith(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                assert response.body.startswith(b"PK\x03\x04")
 
         asyncio.run(_run())

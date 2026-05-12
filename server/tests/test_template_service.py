@@ -434,6 +434,8 @@ class TestXLSXPopulator:
             "delivery_date": "2026-09-30",
             "prepared_by": "EAGLE System",
             "prepared_date": "2026-03-17",
+            "option_years": 2,
+            "escalation_rate": 0.03,
             "line_items": [
                 {
                     "description": "Cloud Architect",
@@ -480,7 +482,11 @@ class TestXLSXPopulator:
         assert services["A12"].value == "Cloud Architect"
         assert services["B12"].value == 2080
         assert services["C12"].value == 175
-        assert services["E12"].value == 0
+        assert services["E12"].value == 2080
+        assert services["F12"].value == 180.25
+        assert services["H12"].value == 2080
+        assert services["I12"].value == 185.66
+        assert services["K12"].value == 0
         assert services["D12"].value == "=B12*C12"
 
         assert goods["B5"].value == "Firm-Fixed-Price"
@@ -499,7 +505,7 @@ class TestXLSXPopulator:
             commercial_igce_xlsx,
             {
                 "description": "Seed Estimate",
-                "total_estimate": "$12,500",
+                "estimated_value": "$12,500",
             },
             {},
         )

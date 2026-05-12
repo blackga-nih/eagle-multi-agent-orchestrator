@@ -139,7 +139,8 @@ export default function ChatUploadButton({
         <div
           className={`
                     absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5
-                    text-xs rounded-lg whitespace-nowrap shadow-lg
+                    max-w-[min(22rem,calc(100vw-2rem))] text-xs rounded-lg
+                    whitespace-normal break-words shadow-lg
                     ${status === 'error' ? 'bg-red-500 text-white' : 'bg-gray-800 text-white'}
                 `}
         >

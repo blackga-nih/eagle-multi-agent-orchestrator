@@ -1080,6 +1080,97 @@ async def get_document_download_url_endpoint(
     return {"download_url": url, "expires_in": expires_in}
 
 
+@router.get("/{package_id}/documents/{doc_type}/download")
+async def download_package_document_endpoint(
+    package_id: str,
+    doc_type: str,
+    format: str = "original",
+    version: Optional[int] = None,
+    user: UserContext = Depends(get_user_from_header),
+):
+    """Download a package document in a requested format.
+
+    Binary package documents, especially IGCE workbooks, can have markdown
+    sidecars. This endpoint exposes those representations without replacing
+    the primary stored artifact download.
+    """
+    from ..db_client import get_s3
+    from ..document_export import export_document
+
+    doc = get_document(user.tenant_id, package_id, doc_type, version)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    requested = (format or "original").lower()
+    if requested == "markdown":
+        requested = "md"
+
+    s3_key = doc.get("s3_key")
+    s3_bucket = doc.get("s3_bucket")
+    file_type = str(doc.get("file_type") or "md").lower()
+    title = doc.get("title") or doc_type
+    safe_title = re.sub(r"[^\w\-]", "_", title)[:50] or doc_type
+
+    if not s3_key or not s3_bucket:
+        raise HTTPException(status_code=404, detail="Document file unavailable")
+
+    s3 = get_s3()
+
+    try:
+        if requested in {"original", file_type} or requested in {"xlsx", "docx"} and requested == file_type:
+            obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+            data = obj["Body"].read()
+            content_types = {
+                "md": "text/markdown",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "pdf": "application/pdf",
+            }
+            return Response(
+                content=data,
+                media_type=content_types.get(file_type, "application/octet-stream"),
+                headers={
+                    "Content-Disposition": (
+                        f'attachment; filename="{safe_title}.{file_type}"'
+                    )
+                },
+            )
+
+        if requested not in {"md", "docx", "pdf"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported format. Use original, xlsx, md, docx, or pdf.",
+            )
+
+        if file_type in {"md", "txt", "html", "json"}:
+            obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+            markdown = obj["Body"].read().decode("utf-8")
+        else:
+            md_key = doc.get("markdown_s3_key") or f"{s3_key}.content.md"
+            try:
+                md_obj = s3.get_object(Bucket=s3_bucket, Key=md_key)
+                markdown = md_obj["Body"].read().decode("utf-8")
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Markdown sidecar unavailable for this document",
+                ) from exc
+
+        exported = export_document(markdown, requested, title)
+        return Response(
+            content=exported["data"],
+            media_type=exported["content_type"],
+            headers={
+                "Content-Disposition": f'attachment; filename="{exported["filename"]}"'
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Package document download failed for %s/%s: %s", package_id, doc_type, exc)
+        raise HTTPException(status_code=500, detail="Document download failed") from exc
+
+
 @router.get("/{package_id}/documents/{doc_type}")
 async def get_document_endpoint(
     package_id: str,

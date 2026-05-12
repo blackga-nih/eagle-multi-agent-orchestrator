@@ -11,6 +11,8 @@ from app.igce_generation_extractor import (
     _parse_hours,
     _parse_money,
     _parse_period_months,
+    _parse_option_years,
+    _parse_escalation_rate,
     _parse_contract_type,
 )
 
@@ -59,6 +61,11 @@ class TestParsingHelpers:
 
     def test_parse_period_months_no_match(self):
         assert _parse_period_months("no period") is None
+
+    def test_parse_options_and_escalation(self):
+        text = "Base year plus 2 option years with 3% annual escalation"
+        assert _parse_option_years(text) == 2
+        assert _parse_escalation_rate(text) == 0.03
 
     def test_parse_contract_type(self):
         assert _parse_contract_type("FFP contract") == "FFP"
@@ -150,6 +157,16 @@ class TestExtractIgceDataFromText:
         assert result.contract_type == "T&M"
         assert result.period_months == 12
         assert result.delivery_date == "2026-09-30"
+
+    def test_extract_option_year_projection_context(self):
+        text = """
+        Base year plus 2 option years with 3% annual escalation.
+        We need 2 cloud architects at $200/hr for 1000 hours each.
+        """
+        result = extract_igce_data_from_text(text)
+
+        assert result.option_years == 2
+        assert result.escalation_rate == 0.03
 
     def test_extract_goods_lines_with_named_products(self):
         text = """
