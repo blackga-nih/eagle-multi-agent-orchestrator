@@ -113,6 +113,22 @@ _MARKDOWN_ONLY_TYPES = frozenset(
         "purchase_request",
         "price_reasonableness",
         "required_sources",
+        # Added by PR A2: 12 markdown-only doc types whose metadata lives in
+        # _index.json.category_metadata. They have no S3 template (most
+        # generate via LLM or are evidence attachments) but downstream callers
+        # (create_document, compliance matrix) still need them recognized.
+        "cor_designation",
+        "d_f",
+        "fpds_report",
+        "funding_doc",
+        "human_subjects",
+        "inherently_governmental",
+        "priority_sources_checklist",
+        "qasp",
+        "sam_exclusions_check",
+        "sb_review",
+        "source_selection_plan",
+        "wage_determination",
     }
 )
 
@@ -288,3 +304,74 @@ def get_all_metadata() -> dict[str, dict[str, Any]]:
     their metadata in one shot rather than calling N accessors.
     """
     return {k: dict(v) for k, v in _CATEGORY_METADATA.items()}
+
+
+# ── System prompts (plugin-data driven, added by PR A3) ───────────────
+#
+# Prompts are stored as plain .md files under eagle-plugin/data/system-prompts/.
+# Each file is named after a canonical slug (sow.md, igce.md, …). The path
+# referenced by category_metadata.system_prompt_key resolves into this dir.
+# Non-engineers can edit prompts via the markdown files without touching code.
+
+_PROMPTS_DIR = Path(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "eagle-plugin",
+        "data",
+        "system-prompts",
+    )
+).resolve()
+
+# Module-level cache so repeated lookups don't re-read disk.
+_PROMPT_CACHE: dict[str, str | None] = {}
+
+
+def get_system_prompt(slug: str) -> str | None:
+    """Return the LLM system prompt for a doc-type, or None if absent.
+
+    Resolution order:
+    1. Use the slug's `system_prompt_key` from category_metadata if set;
+       otherwise fall back to the slug itself.
+    2. Read `<prompts_dir>/<key>.md`. Cache the result.
+    3. Return None if the file doesn't exist.
+
+    Slug normalization is NOT performed here — callers should pass canonical
+    slugs (run `normalize_doc_type()` first if you have raw user input).
+    """
+    if slug in _PROMPT_CACHE:
+        return _PROMPT_CACHE[slug]
+
+    key = get_system_prompt_key(slug) or slug
+    path = _PROMPTS_DIR / f"{key}.md"
+    try:
+        body = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        body = None
+    except UnicodeDecodeError as e:
+        logger.warning("Prompt file %s has invalid encoding: %s", path, e)
+        body = None
+
+    _PROMPT_CACHE[slug] = body
+    return body
+
+
+def list_available_prompts() -> list[str]:
+    """List the slugs that currently have a system-prompt file on disk.
+
+    Useful for diagnostics — e.g., a doctor check that finds doc-types
+    declared with `system_prompt_key` but missing their .md file.
+    """
+    if not _PROMPTS_DIR.is_dir():
+        return []
+    return sorted(p.stem for p in _PROMPTS_DIR.glob("*.md"))
+
+
+def _clear_prompt_cache() -> None:
+    """Test hook: drop the prompt cache so a fresh read happens.
+
+    Production code should never call this — prompts don't change at
+    runtime. Tests use it to verify the disk-load path.
+    """
+    _PROMPT_CACHE.clear()

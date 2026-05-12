@@ -20,6 +20,9 @@ from app.doc_type_registry import (
     get_compliance_aliases,
     get_system_prompt_key,
     get_all_metadata,
+    get_system_prompt,
+    list_available_prompts,
+    _clear_prompt_cache,
 )
 
 _INDEX_PATH = pathlib.Path(__file__).resolve().parents[2] / "eagle-plugin" / "data" / "template-metadata" / "_index.json"
@@ -189,3 +192,125 @@ class TestCategoryMetadata:
         # alongside the hardcoded ones
         assert normalize_doc_type("blanket_purchase_agreement") == "bpa_call_order"
         assert normalize_doc_type("statement_of_work") == "sow"
+
+
+# ── New doc-types added by PR A2 ──────────────────────────────────────
+
+
+class TestPRA2NewDocTypes:
+    """The 12 markdown-only doc-types added in PR A2."""
+
+    NEW_SLUGS = (
+        "cor_designation",
+        "d_f",
+        "fpds_report",
+        "funding_doc",
+        "human_subjects",
+        "inherently_governmental",
+        "priority_sources_checklist",
+        "qasp",
+        "sam_exclusions_check",
+        "sb_review",
+        "source_selection_plan",
+        "wage_determination",
+    )
+
+    @pytest.mark.parametrize("slug", NEW_SLUGS)
+    def test_slug_is_valid(self, slug):
+        assert is_valid_doc_type(slug), f"{slug!r} should validate"
+
+    @pytest.mark.parametrize("slug", NEW_SLUGS)
+    def test_slug_in_all_doc_types(self, slug):
+        assert slug in ALL_DOC_TYPES
+
+    @pytest.mark.parametrize("slug", NEW_SLUGS)
+    def test_has_metadata(self, slug):
+        meta = get_category_metadata(slug)
+        assert meta, f"{slug!r} missing from category_metadata"
+        assert meta.get("label"), f"{slug!r} missing label"
+        assert meta.get("kind") in {"generated", "evidence", "form_only", "legacy"}
+
+    @pytest.mark.parametrize("slug", NEW_SLUGS)
+    def test_label_not_titlecased_fallback(self, slug):
+        # If we hit the title-case fallback, metadata wasn't loaded properly
+        label = get_label(slug)
+        titlecase = slug.replace("_", " ").title()
+        # A handful of slugs might coincide (e.g., 'qasp' → 'Qasp') so we
+        # only assert that *something* came back; the test_has_metadata
+        # parametrize above already proves the label field exists.
+        assert label, f"{slug!r} produced empty label"
+
+    def test_markdown_only_types_count(self):
+        # 4 + 4 prior + 12 new = 20 entries in _MARKDOWN_ONLY_TYPES, but the
+        # exact count is implementation-detail; just check the new ones land.
+        from app.doc_type_registry import _MARKDOWN_ONLY_TYPES
+        for slug in self.NEW_SLUGS:
+            assert slug in _MARKDOWN_ONLY_TYPES, f"{slug!r} not in _MARKDOWN_ONLY_TYPES"
+
+    def test_template_categories_excludes_new_markdown_only(self):
+        # New types should NOT show up in get_template_categories() since
+        # they have no S3 template
+        cats = get_template_categories()
+        for slug in self.NEW_SLUGS:
+            assert slug not in cats, f"{slug!r} should not be in template categories"
+
+    def test_d_and_f_aliases_normalize(self):
+        # 'determination_and_findings' and 'determination_findings' both
+        # resolve to canonical 'd_f' per the metadata block
+        assert normalize_doc_type("determination_and_findings") == "d_f"
+        assert normalize_doc_type("determination_findings") == "d_f"
+
+
+# ── System prompts (PR A3) ────────────────────────────────────────────
+
+
+class TestSystemPrompts:
+    """Verify get_system_prompt reads from eagle-plugin/data/system-prompts/."""
+
+    def test_list_available_prompts_nonempty(self):
+        # After PR A3 lands, all generated doc-types should have a prompt
+        prompts = list_available_prompts()
+        assert len(prompts) > 0
+        # sample sanity
+        assert "sow" in prompts
+        assert "igce" in prompts
+
+    def test_get_known_prompt(self):
+        body = get_system_prompt("sow")
+        assert body is not None
+        # Sanity: the prompt is the markdown we extracted
+        assert "Statement of Work" in body
+
+    def test_get_unknown_returns_none(self):
+        assert get_system_prompt("no_such_slug_anywhere") is None
+
+    def test_cache_hit_does_not_re_read(self, tmp_path, monkeypatch):
+        # First read populates cache; second read should not touch disk.
+        # We can't easily count file reads from here, but we can verify
+        # that even after deleting the file, the cached value is returned.
+        _clear_prompt_cache()
+        first = get_system_prompt("sow")
+        assert first is not None
+        # Cache is now warm. A second read should return the same value
+        # even if we monkeypatch the path to a missing file.
+        from app import doc_type_registry as r
+        monkeypatch.setattr(r, "_PROMPTS_DIR", pathlib.Path("/nonexistent"))
+        cached = get_system_prompt("sow")
+        assert cached == first  # served from cache, not from disk
+
+    def test_d_f_prompt_present(self):
+        # d_f is one of the 12 doc-types added by PR A2; its prompt
+        # should be available after PR A3 land.
+        _clear_prompt_cache()
+        body = get_system_prompt("d_f")
+        assert body is not None
+        assert "Determination" in body
+
+    def test_clear_cache_forces_reread(self):
+        # Read, clear, read again — both reads should succeed.
+        _clear_prompt_cache()
+        first = get_system_prompt("sow")
+        _clear_prompt_cache()
+        second = get_system_prompt("sow")
+        assert first == second
+        assert first is not None

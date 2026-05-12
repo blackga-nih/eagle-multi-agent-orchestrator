@@ -1775,6 +1775,23 @@
       "system_prompt_key": "cor_certification",
       "kind": "generated"
     },
+    "cor_designation": {
+      "label": "COR Designation Letter",
+      "system_prompt_key": "cor_designation",
+      "compliance_display_name": "COR Designation Letter",
+      "kind": "generated",
+      "aliases": []
+    },
+    "d_f": {
+      "label": "Determination & Findings",
+      "aliases": [
+        "determination_and_findings",
+        "determination_findings"
+      ],
+      "system_prompt_key": "d_f",
+      "compliance_display_name": "D&F (Determination & Findings)",
+      "kind": "generated"
+    },
     "eval_criteria": {
       "label": "Evaluation Criteria",
       "aliases": [
@@ -1794,6 +1811,17 @@
       ],
       "kind": "generated"
     },
+    "fpds_report": {
+      "label": "FPDS-NG Report",
+      "kind": "evidence",
+      "compliance_display_name": "FPDS-NG Report",
+      "aliases": []
+    },
+    "funding_doc": {
+      "label": "Funding Document",
+      "kind": "legacy",
+      "aliases": []
+    },
     "gfp_form": {
       "label": "Government-Furnished Property Form",
       "aliases": [
@@ -1801,6 +1829,13 @@
         "government_furnished_property"
       ],
       "kind": "generated"
+    },
+    "human_subjects": {
+      "label": "Human Subjects Provisions",
+      "system_prompt_key": "human_subjects",
+      "compliance_display_name": "Human Subjects Provisions",
+      "kind": "generated",
+      "aliases": []
     },
     "igce": {
       "label": "Independent Government Cost Estimate",
@@ -1813,6 +1848,13 @@
       "system_prompt_key": "igce",
       "compliance_display_name": "IGCE",
       "kind": "generated"
+    },
+    "inherently_governmental": {
+      "label": "Inherently Governmental Certification",
+      "system_prompt_key": "inherently_governmental",
+      "compliance_display_name": "Inherently Governmental Certification",
+      "kind": "generated",
+      "aliases": []
     },
     "justification": {
       "label": "Justification & Approval",
@@ -1854,6 +1896,16 @@
       "kind": "generated",
       "aliases": []
     },
+    "priority_sources_checklist": {
+      "label": "Required & Priority Sources Checklist",
+      "aliases": [
+        "priority_sources",
+        "required_and_priority_sources_checklist"
+      ],
+      "system_prompt_key": "priority_sources_checklist",
+      "compliance_display_name": "Required & Priority Sources Checklist",
+      "kind": "generated"
+    },
     "promotional_item": {
       "label": "Promotional Item Approval",
       "aliases": [
@@ -1874,6 +1926,15 @@
         "performance_work_statement"
       ],
       "system_prompt_key": "pws",
+      "kind": "generated"
+    },
+    "qasp": {
+      "label": "Quality Assurance Surveillance Plan",
+      "aliases": [
+        "quality_assurance_surveillance_plan"
+      ],
+      "system_prompt_key": "qasp",
+      "compliance_display_name": "QASP",
       "kind": "generated"
     },
     "quotation_abstract": {
@@ -1901,6 +1962,22 @@
       "compliance_display_name": "Required Sources Documentation",
       "kind": "generated",
       "aliases": []
+    },
+    "sam_exclusions_check": {
+      "label": "SAM.gov Registration & Exclusions Check",
+      "kind": "evidence",
+      "compliance_display_name": "SAM Registration & Exclusions Check",
+      "aliases": []
+    },
+    "sb_review": {
+      "label": "HHS-653 Small Business Review",
+      "aliases": [
+        "small_business_review",
+        "hhs_653"
+      ],
+      "system_prompt_key": "sb_review",
+      "compliance_display_name": "HHS-653 Small Business Review",
+      "kind": "generated"
     },
     "section_508": {
       "label": "Section 508 Compliance Statement",
@@ -1932,6 +2009,15 @@
         "statement_of_need_services"
       ],
       "system_prompt_key": "son_services",
+      "kind": "generated"
+    },
+    "source_selection_plan": {
+      "label": "Source Selection Plan",
+      "aliases": [
+        "ssp"
+      ],
+      "system_prompt_key": "source_selection_plan",
+      "compliance_display_name": "Source Selection Plan",
       "kind": "generated"
     },
     "sow": {
@@ -1979,6 +2065,13 @@
         "tech_questionnaire"
       ],
       "kind": "generated"
+    },
+    "wage_determination": {
+      "label": "Wage Determination (SCA/SCLS)",
+      "system_prompt_key": "wage_determination",
+      "compliance_display_name": "Wage Determination (SCA/SCLS)",
+      "kind": "generated",
+      "aliases": []
     }
   }
 }
