@@ -5165,6 +5165,9 @@ _AGENT_PROMPT_META: dict[str, dict] = {
             "limited source", "limited source justification",
             # Sole-source / set-aside / J&A — was hallucinating "set-aside requires J&A"
             "sole source", "set-aside", "set aside", "justification", "approval authority",
+            # FAR Part 15 competitive range / discussions — UC-04
+            "competitive range", "15.204-1", "15.306", "most highly rated",
+            "source selection", "discussions",
             # SBIR — Q5 misroute fix; SBIR is FAR 6.102(d), NOT Part 15
             "sbir", "sttr", "phase i", "phase ii", "phase iii",
             "broad agency announcement", "baa",
@@ -5210,6 +5213,14 @@ _FORCED_AGENT_ROUTES: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     # JOFOC / J&A / sole source — compliance-strategist owns the rule, legal owns case law
     (
         ("jofoc", "j&a", "sole source", "set-aside", "set aside"),
+        (
+            f"{_AGENTS_FOLDER_PREFIX}08-COMPLIANCE.txt",
+            f"{_AGENTS_FOLDER_PREFIX}02-legal.txt",
+        ),
+    ),
+    # FAR Part 15 competitive range — compliance owns the rule, legal owns protest risk
+    (
+        ("competitive range", "15.204-1", "15.306", "most highly rated", "discussions"),
         (
             f"{_AGENTS_FOLDER_PREFIX}08-COMPLIANCE.txt",
             f"{_AGENTS_FOLDER_PREFIX}02-legal.txt",
@@ -5693,6 +5704,53 @@ def _build_kb_service_tools(
 
         return "sap"
 
+    def _query_mentions_small_business_set_aside(query: str) -> bool:
+        q = (query or "").lower()
+        return any(
+            phrase in q
+            for phrase in (
+                "rule of two",
+                "rule-of-two",
+                "set aside",
+                "set-aside",
+                "small business",
+            )
+        )
+
+    def _query_mentions_it_services(query: str) -> tuple[bool, bool]:
+        q = (query or "").lower()
+        inferred_it = any(
+            phrase in q
+            for phrase in (
+                "it service",
+                "it services",
+                "information technology",
+                "software",
+                "network",
+                "cyber",
+                "cio-sp",
+                "nitaac",
+            )
+        )
+        inferred_services = "service" in q or "services" in q
+        return inferred_it, inferred_services
+
+    def _competitive_range_keyword_anchor(query: str) -> str:
+        q = (query or "").lower()
+        triggers = (
+            "competitive range",
+            "15.204-1",
+            "15.306",
+            "most highly rated",
+            "discussions",
+        )
+        if not any(t in q for t in triggers):
+            return ""
+        return (
+            "FAR 15.204-1 competitive range most highly rated proposals "
+            "efficient competition NIH 6315-1"
+        )
+
     @tool(name="research")
     def research_tool(
         query: str,
@@ -5774,7 +5832,12 @@ def _build_kb_service_tools(
             secondary_params = {"query": query, "limit": 10}
             if document_type:
                 secondary_params["document_type"] = document_type
-        path_search_input = keyword.strip() if keyword and keyword.strip() else query
+        _auto_keyword_anchor = _competitive_range_keyword_anchor(query)
+        path_search_input = (
+            keyword.strip()
+            if keyword and keyword.strip()
+            else _auto_keyword_anchor or query
+        )
         semantic_enabled = (
             os.environ.get("SEMANTIC_LANE_ENABLED", "true").lower() != "false"
         )
@@ -5991,20 +6054,24 @@ def _build_kb_service_tools(
         compliance_data: dict | None = None
         _threshold_terms = {"threshold", "sat", "mpt", "micro", "simplified", "dollar",
                             "value", "cost", "price", "budget", "sole", "source",
-                            "competition", "approval", "clearance", "j&a", "jofoc"}
+                            "competition", "approval", "clearance", "j&a", "jofoc",
+                            "set-aside", "set aside", "small business", "rule of two"}
         query_lower = query.lower()
         has_value = contract_value > 0
         has_method = bool(acquisition_method)
         has_threshold_term = any(t in query_lower for t in _threshold_terms)
         if has_value or has_method or has_threshold_term:
             try:
+                _inferred_it, _inferred_services = _query_mentions_it_services(query)
+                _small_business_set_aside = _query_mentions_small_business_set_aside(query)
                 cm_params = {
                     "operation": "query",
                     "contract_value": contract_value or 100000,
                     "acquisition_method": acquisition_method or _detect_method(
                         acquisition_method, query, contract_value),
-                    "is_it": is_it,
-                    "is_services": is_services,
+                    "is_it": bool(is_it or _inferred_it),
+                    "is_services": bool(is_services or _inferred_services),
+                    "is_small_business": _small_business_set_aside,
                 }
                 compliance_data = exec_compliance_matrix(cm_params)
             except Exception:
@@ -6114,7 +6181,7 @@ def _build_kb_service_tools(
         # Turn 5; then 6/4/4 and 5/3/3 kept it safe but Gen #2 latency stayed
         # high (38K input tokens → 61s Sonnet). EAGLE-254 cuts to 4/3/3 and
         # 3/2/2 so the total fetched-docs payload stays under ~10K tokens.
-        _keyword_supplied = bool(keyword and keyword.strip())
+        _keyword_supplied = bool((keyword and keyword.strip()) or _auto_keyword_anchor)
         AI_FETCH_BUDGET = 4 if _keyword_supplied else 3
         PATH_FETCH_BUDGET = 3 if _keyword_supplied else 2
         SEMANTIC_FETCH_BUDGET = 3 if _keyword_supplied else 2
@@ -6256,6 +6323,18 @@ def _build_kb_service_tools(
         }
         if compliance_data:
             packet["compliance_matrix"] = compliance_data
+
+        _vehicle_it, _vehicle_services = _query_mentions_it_services(query)
+        if is_it or is_services or _vehicle_it or _vehicle_services:
+            try:
+                packet["vehicle_suggestions"] = exec_compliance_matrix({
+                    "operation": "suggest_vehicle",
+                    "is_it": bool(is_it or _vehicle_it),
+                    "is_services": bool(is_services or _vehicle_services),
+                    "is_small_business": _query_mentions_small_business_set_aside(query),
+                })
+            except Exception:
+                logger.debug("research: vehicle suggestion failed, continuing")
 
         # Agent routing layer — fetch 1–2 relevant specialist prompts from
         # approved/agents/ so every research call visibly routes through
@@ -6731,7 +6810,13 @@ def _build_supervisor_prompt_body(
         "16.507-6(b)(1)-(6) = 16.505(b)(2)(i)(A)-(G), "
         "16.507-6(c) = small business exception. "
         "JEFO approval thresholds (FAR 16.507-6(e)) must include BOTH lower AND upper bounds: "
-        ">SAT to ≤$900K, >$900K to ≤$20M, >$20M to ≤$90M, >$90M.\n\n"
+        ">SAT to ≤$900K, >$900K to ≤$20M, >$20M to ≤$90M, >$90M. "
+        "For FAR Part 15 competitive range questions, cite the specific current "
+        "HHS/RFO section FAR 15.204-1 when supported by KB content. If legacy "
+        "FAR 15.306(c) appears, explain it as a mapping to current/RFO FAR 15.204-1. "
+        "Do not lead with 'RFO' unless the user asks about RFO or the mapping matters, "
+        "and do not use generic FAR 15.2 as the authority when a specific subsection "
+        "is available.\n\n"
         "  DOCUMENT GENERATION — Before calling create_document, ALWAYS state which template "
         "you are using and its S3 path from the knowledge base. For example: "
         "'Using template: SOW_Template.docx (eagle-knowledge-base/approved/templates/SOW_Template.docx)'. "
