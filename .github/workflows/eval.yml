@@ -1,9 +1,16 @@
 name: EAGLE Eval Suite
 
 on:
-  schedule:
-    - cron: '0 6 * * *'   # Daily at 06:00 UTC (2 AM ET)
+  # Daily cron DISABLED 2026-05-12 — eval is expensive ($5-10/full run) and
+  # always-on schedule was running the entire suite every night. Eval is now
+  # manual-only via workflow_dispatch with a required `tests` input.
+  # Re-enable only with an explicit small subset (e.g., cron with tests='1,5,10').
   workflow_dispatch:
+    inputs:
+      tests:
+        description: 'Comma-separated test numbers (e.g., 1,2,3 or 16,17,18,19,20). Empty = error. Never run all by default.'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -53,7 +60,10 @@ jobs:
         EVAL_BUCKET: ${{ steps.s3.outputs.eval-bucket }}
       run: |
         cd server
-        python -m pytest tests/test_eagle_sdk_eval.py -v --tb=short 2>&1 | tee eval-results.txt
+        # Use the script's --tests CLI (NOT pytest discovery) so we never
+        # accidentally run the full suite. Input `tests` is required at
+        # workflow_dispatch time — empty = workflow refuses to start.
+        python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests "${{ inputs.tests }}" 2>&1 | tee eval-results.txt
         echo "Eval exit code: ${PIPESTATUS[0]}"
 
     - name: Upload eval results

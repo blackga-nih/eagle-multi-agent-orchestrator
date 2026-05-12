@@ -415,17 +415,30 @@ e2e WORKFLOW="full":
 
 # ── Eval Suite ──────────────────────────────────────────────
 
-# Run full eval suite (28 tests) with haiku and publish results
-eval:
-    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku
-
-# Run specific eval tests (e.g., just eval-quick 1,2,3)
-eval-quick TESTS:
+# Run specific eval tests (REQUIRED — never run all by default, costs $$$)
+# Examples:
+#   just eval 1,2,3          # three tests
+#   just eval 16,17,18,19,20 # AWS subset (or use `just eval-aws`)
+#   just eval-all            # explicit full-suite (costs ~$5-10, asks for confirmation)
+eval TESTS:
     cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests {{TESTS}}
 
-# Run AWS tool eval tests only (16-20)
+# Alias retained for backwards compat — same as `just eval TESTS`
+eval-quick TESTS: (eval TESTS)
+
+# Run AWS tool eval tests only (16-20) — fixed small subset, safe to invoke
 eval-aws:
     cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests 16,17,18,19,20
+
+# Run the FULL eval suite (all tests) — explicit opt-in, costs $$$
+# Prints cost warning + 5s pause before running.
+# CI: invoked only when deploy.yml workflow_dispatch input run_eval=true.
+eval-all:
+    @echo "WARNING: Running the FULL eval suite — this hits Bedrock for every test."
+    @echo "Estimated cost: \$5-10 per run."
+    @echo "Press Ctrl+C in the next 5 seconds to abort..."
+    @sleep 5
+    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku
 
 # ── Docker Build ────────────────────────────────────────────
 
