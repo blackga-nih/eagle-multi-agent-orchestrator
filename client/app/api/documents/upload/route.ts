@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { parseBackendError } from '@/lib/api-error';
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
 export const runtime = 'nodejs';
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
     } as NodeRequestInit);
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const errorText = await parseBackendError(response);
       console.error(`FastAPI /api/documents/upload error: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Backend error: ${response.status}`, detail: errorText },

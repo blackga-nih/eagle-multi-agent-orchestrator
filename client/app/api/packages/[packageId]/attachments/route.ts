@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { parseBackendError } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,13 +26,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
   try {
     const response = await fetch(url, { method: 'GET', headers });
-    const text = await response.text();
     if (!response.ok) {
       return NextResponse.json(
-        { error: `Backend error: ${response.status}`, detail: text },
+        { error: `Backend error: ${response.status}`, detail: await parseBackendError(response) },
         { status: response.status },
       );
     }
+
+    const text = await response.text();
     return new NextResponse(text, {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -64,13 +66,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       } as NodeRequestInit,
     );
 
-    const text = await response.text();
     if (!response.ok) {
       return NextResponse.json(
-        { error: `Backend error: ${response.status}`, detail: text },
+        { error: `Backend error: ${response.status}`, detail: await parseBackendError(response) },
         { status: response.status },
       );
     }
+
+    const text = await response.text();
 
     return new NextResponse(text, {
       status: 200,
