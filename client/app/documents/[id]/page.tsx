@@ -1767,12 +1767,22 @@ ${docSnippet}`;
   };
 
   // Download handler
-  const handleDownload = async (format: 'docx' | 'pdf') => {
+  const handleDownload = async (format: 'xlsx' | 'docx' | 'pdf' | 'md') => {
     setShowDownloadMenu(false);
     setIsExporting(true);
     setExportError(null);
 
     try {
+      if (format === 'xlsx' && isBinaryDocument && isXlsxDocument && downloadUrl) {
+        const a = window.document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `${documentTitle.replace(/[^a-z0-9]/gi, '_')}.xlsx`;
+        window.document.body.appendChild(a);
+        a.click();
+        window.document.body.removeChild(a);
+        return;
+      }
+
       if (format === 'docx' && isBinaryDocument && isDocxDocument && downloadUrl) {
         const a = window.document.createElement('a');
         a.href = downloadUrl;
@@ -1788,6 +1798,43 @@ ${docSnippet}`;
         'Content-Type': 'application/json',
       };
       if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const packageDocType = documentType || urlPackageInfo.docType;
+      if (packageId && packageDocType) {
+        const query = new URLSearchParams({ format });
+        if (currentVersion !== null) query.set('version', String(currentVersion));
+        const res = await fetch(
+          `/api/packages/${encodeURIComponent(packageId)}/documents/${encodeURIComponent(packageDocType)}/download?${query.toString()}`,
+          { method: 'GET', headers },
+        );
+
+        if (!res.ok) {
+          const detail = await extractResponseError(res);
+          throw new Error(`Download failed (${res.status}): ${detail}`);
+        }
+
+        const blob = await res.blob();
+        if (blob.size === 0) {
+          throw new Error('Download returned an empty file.');
+        }
+
+        const disposition = res.headers.get('content-disposition') || '';
+        const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
+        const fallbackExt = format === 'md' ? 'md' : format;
+        const filename =
+          filenameMatch?.[1] ||
+          `${documentTitle.replace(/[^a-z0-9]/gi, '_')}.${fallbackExt}`;
+
+        const url = URL.createObjectURL(blob);
+        const a = window.document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        window.document.body.appendChild(a);
+        a.click();
+        window.document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
 
       const exportPayload = s3Key
         ? {
@@ -1830,7 +1877,7 @@ ${docSnippet}`;
       const url = URL.createObjectURL(blob);
       const a = window.document.createElement('a');
       a.href = url;
-      const ext = format === 'docx' ? 'docx' : 'pdf';
+      const ext = format === 'md' ? 'md' : format === 'docx' ? 'docx' : 'pdf';
       a.download = `${documentTitle.replace(/[^a-z0-9]/gi, '_')}.${ext}`;
       window.document.body.appendChild(a);
       a.click();
@@ -1917,22 +1964,37 @@ ${docSnippet}`;
                 {showDownloadMenu && (
                   <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden">
                     {isBinaryDocument && isXlsxDocument ? (
-                      downloadUrl ? (
-                        <a
-                          href={downloadUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={() => setShowDownloadMenu(false)}
-                          className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+                      <>
+                        <button
+                          onClick={() => handleDownload('xlsx')}
+                          disabled={!downloadUrl}
+                          className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2 disabled:text-gray-400 disabled:hover:bg-white"
                         >
                           <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                           Download as Excel (.xlsx)
-                        </a>
-                      ) : (
-                        <div className="px-4 py-2.5 text-sm text-gray-400">
-                          Download unavailable
-                        </div>
-                      )
+                        </button>
+                        <button
+                          onClick={() => handleDownload('docx')}
+                          className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100"
+                        >
+                          <FileText className="w-4 h-4 text-blue-600" />
+                          Download as Word (.docx)
+                        </button>
+                        <button
+                          onClick={() => handleDownload('md')}
+                          className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100"
+                        >
+                          <FileText className="w-4 h-4 text-gray-600" />
+                          Download as Markdown (.md)
+                        </button>
+                        <button
+                          onClick={() => handleDownload('pdf')}
+                          className="w-full px-4 py-2.5 text-sm text-left hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100"
+                        >
+                          <FileText className="w-4 h-4 text-red-600" />
+                          Download as PDF (.pdf)
+                        </button>
+                      </>
                     ) : (
                       <>
                         <button
