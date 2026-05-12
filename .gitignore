@@ -54,6 +54,12 @@ infrastructure/terraform/.terraform.lock.hcl
 handoff-claude-*/
 handoff-claude-*.zip
 
+# Local scratch (JSON traces, screenshots, ad-hoc python scripts)
+.tmp/
+scripts/_*.py
+server/.testmondata
+jefo_result.json
+
 # AWS credentials
 .aws/credentials
 
