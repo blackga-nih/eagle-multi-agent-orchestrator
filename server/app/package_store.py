@@ -204,6 +204,13 @@ _CONTRACT_TYPE_ALIASES: dict[str, str] = {
     "time and materials": "tm",
     "time_and_materials": "tm",
     "t&m": "tm",
+    "labor hour": "lh",
+    "labor_hour": "lh",
+    "labor hours": "lh",
+    "labor_hours": "lh",
+    "lh": "lh",
+    "t&m/lh": "tm",
+    "tm/lh": "tm",
 }
 
 

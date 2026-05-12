@@ -60,7 +60,7 @@ Before ANSWERING "what documents do I need?" OR generating ANY document, you MUS
    | SOW/PWS | Always (services) | statement-of-work-template-eagle-v2.docx |
    | IGCE | Always | 01.D_IGCE_for_Commercial_Organizations.xlsx |
    | HHS-653 SB Review Form | >$15K (MPT) | Per AA 2023-02 Amendment 4 |
-   | D&F for T&M/LH | T&M/LH contract | — |
+   | D&F for T&M | T&M contract | — |
    | Subcontracting Plan | >$900K + large business | HHS SubK Plan Template.doc |
    | QASP | Performance-based services | — |
    | Wage Determination (SCA) | Service contract | SAM.gov WD lookup — by state/county |
@@ -105,15 +105,18 @@ Use `eagle-plugin/data/matrix.json` for all threshold, document, and contract ty
 
 When recommending contract type for a services acquisition under NIH/NCI practice, or when the user indicates their office follows NIH contract-typing conventions, apply this rule:
 
-- **Labor-Hour (LH) is a non-preferred contract vehicle at NIH/NCI. Always recommend Time-and-Materials (T&M) instead.** This applies whether or not the order is on a GSA Schedule.
-- For GSA Schedule labor-based services: recommend **T&M only** — do NOT mention, list, suggest, or present Labor-Hour (LH) as an option, alternative, or fallback. Even when no materials are expected, use T&M with a $0 materials CLIN. Labor-Hour is a valid FAR contract type but is NOT used at NIH/NCI.
+- **Labor-Hour (LH) is a non-preferred contract vehicle at NIH/NCI. When a variable labor-based portion cannot be structured as fixed-price, use Time-and-Materials (T&M) terminology instead.** This applies whether or not the order is on a GSA Schedule.
+- For GSA Schedule labor-based services: do NOT mention, list, suggest, or present Labor-Hour (LH) as an option, alternative, or fallback. Even when no materials are expected, use T&M with a $0 materials CLIN. Labor-Hour is a valid FAR contract type but is NOT used at NIH/NCI.
+- This rule does NOT mean "all T&M." First evaluate whether definable services can be structured as FFP unit/event CLINs. Use T&M only for residual variable demand that cannot be estimated or accepted objectively.
 - When writing "Time & Materials (T&M)" do NOT append "or Labor Hour (LH)", "/LH", or any LH variant — just say T&M.
-- If a specialist, KB excerpt, FAR citation, or template surfaces LH as an option, restate the recommendation as T&M-only and explicitly drop the LH reference before responding to the user.
+- If a specialist, KB excerpt, FAR citation, or template surfaces LH as an option, preserve the source meaning but do not carry LH into the final NIH/NCI recommendation. Translate the recommendation to T&M terminology and explain the NIH/NCI practice distinction if needed.
 - Use Firm-Fixed-Price (FFP) CLINs only for discrete, well-defined events or outputs that can be described with objective acceptance criteria.
 
 Examples of labor-based services include coaching, facilitation, advisory support, workshop support, and training support where exact level of effort or task mix cannot be fully defined in advance.
 
 Do NOT present this as a government-wide FAR rule. Present it as an NIH/NCI institutional practice preference unless the user states that broader HHS guidance expressly requires it.
+
+When KB, FAR, or matrix sources mention Labor-Hour, do not deny that LH exists as a FAR contract type. You may acknowledge that FAR recognizes LH, then translate the recommendation for NIH/NCI practice: use T&M terminology, with a $0 materials CLIN when no materials are expected.
 
 If institutional applicability is unclear, say that NIH/NCI practice favors T&M on GSA Schedule labor-based work and note that the user should confirm whether that convention governs this acquisition before finalizing the recommendation.
 
@@ -156,6 +159,8 @@ Tailor the service types to the user's stated requirement (coaching, facilitatio
 - Total contract value establishes a ceiling; orders placed against the schedule
 
 **D&F citation:** Per FAR 16.103(b)(2), no contract type documentation (D&F) is required for FFP other-than-major-systems. No CO D&F needed.
+
+**Hybrid handling:** If only some service areas have definable units/frequencies, recommend a hybrid structure: FFP unit/event pricing for definable workshops, training events, reference products, surveys, or other objective outputs; T&M only for residual on-demand coaching/advisory support whose volume cannot be bounded. If any T&M portion remains, explain that the CO must document why no fixed-price structure is suitable for that portion and obtain the required D&F/approval under FAR 16.601.
 
 Do NOT default to T&M just because the user mentions "uncertain scope." Read the FULL context.
 
