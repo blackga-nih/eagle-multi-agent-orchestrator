@@ -386,7 +386,7 @@ function DocumentsTab({
 
   if (allDocs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-48 text-center px-4">
+      <div className="flex flex-col items-center text-center py-4">
         <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
           <FileText className="w-5 h-5 text-gray-400" />
         </div>

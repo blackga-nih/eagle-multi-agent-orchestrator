@@ -122,14 +122,8 @@ export default function SimpleHeader() {
           />
         </div>
 
-        {/* Center Row 1: branding */}
-        <div className="flex items-center justify-center gap-2">
-          <span className="text-[26px] leading-none">🦅</span>
-          <h1 className="text-lg font-bold tracking-wider text-nci-blue">EAGLE</h1>
-          <p className="text-[11px] text-gray-500 tracking-wide">
-            Enhanced Acquisition Guidance and Learning Engine
-          </p>
-        </div>
+        {/* Center Row 1: empty spacer for grid alignment */}
+        <div />
 
         {/* Right: pills + settings, vertically centered against full banner */}
         <div className="row-span-2 flex items-center justify-end gap-3">
@@ -164,6 +158,12 @@ export default function SimpleHeader() {
             />
             <span className="text-xs text-gray-700">Auth</span>
           </div>
+          {/* User name */}
+          {isAuthenticated && user && (
+            <span className="text-sm font-medium text-gray-700">
+              {user.displayName || user.email?.split('@')[0] || 'User'}
+            </span>
+          )}
           {/* Settings gear */}
           <div className="relative" ref={dropdownRef}>
             <button
