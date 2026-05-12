@@ -958,7 +958,7 @@ export default function SimpleChatInterface() {
             fires with decision=approve. */}
         {packageState.intakeProposal && (
           <div className="bg-amber-50 border-t border-b border-amber-200 px-6 py-3 shrink-0">
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-5xl mx-auto">
               <div className="flex items-start gap-2 mb-2">
                 <span className="text-amber-700 font-medium text-sm">
                   ⏸ Approval needed before drafting
@@ -986,7 +986,7 @@ export default function SimpleChatInterface() {
 
         {/* Input footer */}
         <footer className="bg-white border-t border-[#D8DEE6] px-6 py-3 shrink-0">
-          <div className="max-w-4xl mx-auto">
+          <div className="max-w-5xl mx-auto">
             {error && (
               <div className="mb-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
                 {error}
