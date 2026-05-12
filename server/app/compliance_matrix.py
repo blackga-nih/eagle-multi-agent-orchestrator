@@ -145,6 +145,11 @@ _OAP = _threshold("oap_approval_required")  # $150M
 _METHODS_BY_ID = {m["id"]: m for m in METHODS}
 _TYPES_BY_ID = {t["id"]: t for t in TYPES}
 
+# BAA/TAA data from matrix.json
+_BAA_TAA_DATA: dict = _MATRIX_DATA.get("baa_taa", {})
+_WTO_GPA_COUNTRIES: set[str] = {c.lower() for c in _BAA_TAA_DATA.get("wto_gpa_countries", [])}
+_TAA_THRESHOLD: int = _BAA_TAA_DATA.get("threshold", 183000)
+
 # Phase 6: Confidence scores for matrix output items.
 _CONFIDENCE = {
     "threshold_rule": 0.95,
@@ -399,6 +404,8 @@ def get_requirements(
     is_limited = f.get("is_limited_sources", False)
     is_8a = f.get("is_8a", False)
     is_mfg = f.get("is_manufacturing", False)
+    is_foreign = f.get("is_foreign", False)
+    country_of_origin = f.get("country_of_origin", "").strip().lower()
 
     t_obj = _TYPES_BY_ID.get(t) if t else None
     if not t_obj:
@@ -676,6 +683,49 @@ def get_requirements(
             }
         )
 
+    # --- Foreign Supply / BAA / TAA ---
+    # Determine if BAA or TAA applies based on value and country of origin
+    baa_taa_determination: dict | None = None
+    if is_foreign or country_of_origin:
+        is_designated_country = country_of_origin in _WTO_GPA_COUNTRIES
+        if v >= _TAA_THRESHOLD and is_designated_country:
+            baa_taa_determination = {
+                "applies": "TAA",
+                "reason": f"Value ${v:,} ≥ TAA threshold ${_TAA_THRESHOLD:,} and {country_of_origin.title()} is WTO GPA designated country",
+                "requires_waiver": False,
+            }
+        else:
+            reason_parts = []
+            if v < _TAA_THRESHOLD:
+                reason_parts.append(f"Value ${v:,} < TAA threshold ${_TAA_THRESHOLD:,}")
+            if country_of_origin and not is_designated_country:
+                reason_parts.append(f"{country_of_origin.title()} is not a WTO GPA designated country")
+            baa_taa_determination = {
+                "applies": "BAA",
+                "reason": "; ".join(reason_parts) if reason_parts else "Foreign supply below TAA threshold",
+                "requires_waiver": True,
+                "waiver_type": "nonavailability",
+            }
+            # Add BAA-required documents
+            docs.append({
+                "name": "Market Research Report (Domestic Source Search)",
+                "required": True,
+                "note": "Must document dates, sites searched, and results of search for domestic sources. Required before BAA D&F.",
+                "tier": "core",
+            })
+            docs.append({
+                "name": "BAA D&F (Nonavailability)",
+                "required": True,
+                "note": "Required for foreign supply when no domestic source exists. Cite FAR 25.103(b) exception. Submit to NIHbuyamericanwaiver@od.nih.gov",
+                "tier": "core",
+            })
+            docs.append({
+                "name": "BAA/TAA Checklist (Supplies)",
+                "required": True,
+                "note": "HHSAM 325.102-70",
+                "tier": "core",
+            })
+
     # --- HHS/NIH-specific documents (FRC + PMR) ---
     _hhs_nih = _MATRIX_DATA.get("hhs_nih_docs", {})
     _existing_names = {d["name"] for d in docs}
@@ -840,6 +890,33 @@ def get_requirements(
                     "offers at fair market prices"
                 ),
                 "confidence": _CONFIDENCE["competition_rule"],
+            }
+        )
+
+    # Foreign supply / BAA waiver compliance
+    if baa_taa_determination and baa_taa_determination.get("requires_waiver"):
+        compliance.append(
+            {
+                "name": "MIAO Review Required",
+                "status": "critical",
+                "note": (
+                    "CRITICAL: Per FAR 25.103(b)(2)(iii) eff. April 24, 2026, nonavailability waivers "
+                    "must be submitted via MIAO digital portal at MadeinAmerica.gov. "
+                    "CO CANNOT award until MIAO completes review (or waives review, or urgency exception applies). "
+                    "Add 15 business days to timeline."
+                ),
+                "blocking": True,
+                "timeline_impact_days": 15,
+                "confidence": _CONFIDENCE["threshold_rule"],
+            }
+        )
+        compliance.append(
+            {
+                "name": "NIH BAA Waiver Submission",
+                "status": "required",
+                "note": "Completed BAA waiver package must be submitted to NIHbuyamericanwaiver@od.nih.gov",
+                "email": "NIHbuyamericanwaiver@od.nih.gov",
+                "confidence": _CONFIDENCE["document_requirement"],
             }
         )
 
@@ -1120,6 +1197,7 @@ def get_requirements(
         "approvals_required": approvals,
         "method": m_obj,
         "contract_type": t_obj,
+        "baa_taa_determination": baa_taa_determination,
         "_related_far": _related_far,
         "_verify": {
             "far_citations": far_citations,
@@ -1334,6 +1412,8 @@ def execute_operation(params: dict) -> dict:
                 "is_limited_sources": params.get("is_limited_sources", False),
                 "is_8a": params.get("is_8a", False),
                 "is_manufacturing": params.get("is_manufacturing", False),
+                "is_foreign": params.get("is_foreign", False),
+                "country_of_origin": params.get("country_of_origin", ""),
             },
         )
 
