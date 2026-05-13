@@ -2,6 +2,7 @@
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { sanitizeTables } from '@/lib/markdown-utils';
 
 interface MarkdownRendererProps {
   content: string;
@@ -12,43 +13,6 @@ interface MarkdownRendererProps {
  * Renders markdown content with proper styling.
  * Uses react-markdown with tailwind prose classes.
  */
-/**
- * Sanitize malformed markdown tables:
- * - Collapse rows that are mostly empty cells (| | | | |)
- * - Normalize inconsistent column counts
- * - Remove separator-only rows with no header
- */
-function sanitizeTables(md: string): string {
-  return md.replace(
-    // Match a contiguous block of pipe-table lines
-    /(?:^[|].*[|]\s*$\n?)+/gm,
-    (tableBlock) => {
-      const lines = tableBlock.trim().split('\n');
-      const cleaned: string[] = [];
-      for (const line of lines) {
-        // Strip each cell and check if it has content
-        const cells = line.split('|').slice(1, -1); // drop outer empty strings
-        const hasContent = cells.some((c) => c.trim().length > 0 && !/^[-:]+$/.test(c.trim()));
-        const isSeparator = cells.every((c) => /^[\s-:]*$/.test(c));
-
-        if (isSeparator && cleaned.length > 0) {
-          // Keep separator rows (---|---) only once after a header
-          const prevIsSep =
-            cleaned.length > 0 &&
-            cleaned[cleaned.length - 1]
-              .split('|')
-              .slice(1, -1)
-              .every((c) => /^[\s-:]*$/.test(c));
-          if (!prevIsSep) cleaned.push(line);
-        } else if (hasContent) {
-          cleaned.push(line);
-        }
-        // Skip lines that are entirely empty cells
-      }
-      return cleaned.length > 0 ? cleaned.join('\n') + '\n' : '';
-    },
-  );
-}
 
 /** Shared component overrides for ReactMarkdown — single source of truth for markdown styling. */
 export const markdownComponents = {
