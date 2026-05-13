@@ -665,6 +665,15 @@ def _split_s3_key(s3_key: str) -> tuple[str, str]:
     return s3_key[idx + 1:], s3_key[: idx + 1]
 
 
+def _is_template_source(s3_key: str) -> bool:
+    """Check if an S3 key points to a template file.
+
+    Templates are document-generation tooling, not research sources.
+    They should be filtered from user-facing Sources sections.
+    """
+    return "/templates/" in s3_key
+
+
 def _format_source_line(s3_key: str) -> str:
     """Canonical EAGLE-254 citation line: `` `<filename>` — <directory> ``."""
     filename, directory = _split_s3_key(s3_key)
@@ -673,7 +682,11 @@ def _format_source_line(s3_key: str) -> str:
     return f"- `{filename}`"
 
 
-def _append_kb_sources(text: str, kb_depth: dict) -> str:
+def _append_kb_sources(
+    text: str,
+    kb_depth: dict,
+    surfaced_keys: set[str] | None = None,
+) -> tuple[str, set[str]]:
     """Deterministically emit a canonical ``## Sources`` section when KB docs
     were fetched, replacing any legacy/variant formats the LLM may have
     produced (EAGLE-254 fix for inconsistent citations).
@@ -683,12 +696,32 @@ def _append_kb_sources(text: str, kb_depth: dict) -> str:
     2. Strip any existing ``## Sources`` (any heading level) or
        ``**Sources:**`` block the LLM emitted — we always rebuild it so the
        format is guaranteed.
-    3. Append a canonical ``## Sources`` block listing every fetched doc in
-       ``- `<filename>` — <directory>`` form.
+    3. Filter out template files (doc-generation tooling, not research).
+    4. Only include sources not already surfaced in this session.
+    5. Append a canonical ``## Sources`` (first turn) or ``## Additional Sources``
+       (follow-up turns) block listing new sources in ``- `<filename>` — <directory>`` form.
+
+    Args:
+        text: The response text to append sources to.
+        kb_depth: KB depth tracker with fetched_keys.
+        surfaced_keys: Set of S3 keys already shown in prior turns this session.
+
+    Returns:
+        Tuple of (updated_text, newly_surfaced_keys).
     """
     fetched = kb_depth.get("fetched_keys", set())
     if not fetched:
-        return text
+        return text, set()
+
+    # Filter out templates (doc-generation tooling, not research sources)
+    visible_keys = {k for k in fetched if not _is_template_source(k)}
+
+    # Compute new sources (not yet surfaced this session)
+    already_shown = surfaced_keys or set()
+    new_keys = visible_keys - already_shown
+
+    if not new_keys:
+        return text, set()  # No new visible sources — no section
 
     cleaned = text.rstrip()
 
@@ -713,9 +746,13 @@ def _append_kb_sources(text: str, kb_depth: dict) -> str:
     cleaned = _strip_sources_block(cleaned, _SOURCES_HEADER_RE)
     cleaned = _strip_sources_block(cleaned, _BOLD_SOURCES_RE)
 
-    ordered = sorted(fetched)
+    # Use "Additional Sources" header for follow-up turns
+    is_followup = len(already_shown) > 0
+    header = "## Additional Sources" if is_followup else "## Sources"
+
+    ordered = sorted(new_keys)
     lines = [_format_source_line(k) for k in ordered]
-    return cleaned + "\n\n## Sources\n" + "\n".join(lines) + "\n"
+    return cleaned + f"\n\n{header}\n" + "\n".join(lines) + "\n", new_keys
 
 
 def _get_active_model() -> tuple[str, BedrockModel]:
@@ -7292,7 +7329,7 @@ async def sdk_query(
                 ),
             )
             result = _retry_supervisor(prompt)
-        result_text = _append_kb_sources(str(result), kb_depth)
+        result_text, _ = _append_kb_sources(str(result), kb_depth)
 
         if _root_span is not None:
             try:
@@ -8575,8 +8612,34 @@ async def sdk_query_streaming(
                 "I completed the tool steps but did not receive a final answer text. "
                 f"Tools called: {called}. Please retry your request."
             )
-        # Append KB sources the model failed to cite
-        final_text = _append_kb_sources(final_text, kb_depth)
+        # Append KB sources the model failed to cite (filtered, incremental)
+        # Load previously surfaced keys from session to avoid repeating sources
+        _surfaced_keys: set[str] = set()
+        if session_id:
+            try:
+                from .session_store import get_session, update_session
+                _sess = get_session(session_id, tenant_id, user_id)
+                if _sess and _sess.get("surfaced_source_keys"):
+                    _surfaced_keys = set(_sess["surfaced_source_keys"])
+            except Exception:
+                logger.debug("Failed to load surfaced_source_keys", exc_info=True)
+
+        final_text, _newly_surfaced = _append_kb_sources(
+            final_text, kb_depth, surfaced_keys=_surfaced_keys
+        )
+
+        # Persist newly surfaced keys to session for next turn
+        if session_id and _newly_surfaced:
+            try:
+                from .session_store import update_session
+                _updated_keys = list(_surfaced_keys | _newly_surfaced)
+                update_session(
+                    session_id, tenant_id, user_id,
+                    updates={"surfaced_source_keys": _updated_keys},
+                )
+            except Exception:
+                logger.debug("Failed to save surfaced_source_keys", exc_info=True)
+
         yield {
             "type": "complete",
             "text": final_text,

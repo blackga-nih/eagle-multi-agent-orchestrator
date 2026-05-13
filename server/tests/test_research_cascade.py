@@ -129,10 +129,11 @@ def test_append_kb_sources_emits_canonical_format():
 
     # Case 1 — LLM emitted no Sources at all (Q3 failure mode).
     answer = "Severability determines which fiscal year funds a contract..."
-    out = _append_kb_sources(answer, kb_depth)
+    out, newly_surfaced = _append_kb_sources(answer, kb_depth)
     assert "## Sources" in out
     assert "`appropriations_law_severable_services.txt` — eagle-knowledge-base/approved/compliance-strategist/regulatory-policies/" in out
     assert "`GAO_B-321640_ADA_Bonafide_Need_IDIQ.txt` — eagle-knowledge-base/approved/legal-counselor/appropriations-law/" in out
+    assert len(newly_surfaced) == 2
 
     # Case 2 — LLM emitted legacy `**Sources:**` bold format (old pattern).
     # Must be replaced with canonical H2, not duplicated.
@@ -141,7 +142,7 @@ def test_append_kb_sources_emits_canonical_format():
         "**Sources:**\n"
         "- `eagle-knowledge-base/approved/compliance-strategist/regulatory-policies/appropriations_law_severable_services.txt`\n"
     )
-    out2 = _append_kb_sources(legacy, kb_depth)
+    out2, _ = _append_kb_sources(legacy, kb_depth)
     assert out2.count("## Sources") == 1, "must emit exactly one canonical header"
     assert "**Sources:**" not in out2, "legacy bold header must be stripped"
 
@@ -152,7 +153,7 @@ def test_append_kb_sources_emits_canonical_format():
         "## Sources\n"
         "- HHS PMR Threshold Matrix; HHS GPC Streamlined Guide 2025\n"
     )
-    out3 = _append_kb_sources(wrong_format, kb_depth)
+    out3, _ = _append_kb_sources(wrong_format, kb_depth)
     assert out3.count("## Sources") == 1
     assert "HHS PMR Threshold Matrix; HHS GPC Streamlined Guide" not in out3, (
         "non-canonical title-only line must be stripped"
@@ -160,4 +161,72 @@ def test_append_kb_sources_emits_canonical_format():
     assert "`appropriations_law_severable_services.txt` — " in out3
 
     # Case 4 — no docs fetched → no-op.
-    assert _append_kb_sources("hi", {"fetched_keys": set()}) == "hi"
+    out4, keys4 = _append_kb_sources("hi", {"fetched_keys": set()})
+    assert out4 == "hi"
+    assert keys4 == set()
+
+
+def test_append_kb_sources_filters_templates():
+    """EAGLE-308: Template files are filtered from the Sources section."""
+    from app.strands_agentic_service import _append_kb_sources
+
+    kb_depth = {
+        "fetched_keys": {
+            "eagle-knowledge-base/approved/templates/01.D_IGCE.xlsx",
+            "eagle-knowledge-base/approved/templates/SOW_Template.docx",
+            "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_16.txt",
+        }
+    }
+
+    out, newly_surfaced = _append_kb_sources("Answer text.", kb_depth)
+
+    # Templates should be filtered out
+    assert "IGCE" not in out, "template files must be filtered"
+    assert "SOW_Template" not in out, "template files must be filtered"
+
+    # Actual reference docs should be included
+    assert "FAR_Part_16.txt" in out
+
+    # Only non-template keys should be returned
+    assert len(newly_surfaced) == 1
+    assert "FAR_Part_16.txt" in list(newly_surfaced)[0]
+
+
+def test_append_kb_sources_incremental():
+    """EAGLE-308: Only new sources are shown in follow-up turns."""
+    from app.strands_agentic_service import _append_kb_sources
+
+    kb_depth = {
+        "fetched_keys": {
+            "eagle-knowledge-base/approved/doc1.txt",
+            "eagle-knowledge-base/approved/doc2.txt",
+        }
+    }
+
+    # First turn — both sources shown
+    out1, keys1 = _append_kb_sources("First answer.", kb_depth)
+    assert "## Sources" in out1
+    assert "doc1.txt" in out1
+    assert "doc2.txt" in out1
+    assert len(keys1) == 2
+
+    # Second turn — same sources already surfaced, nothing new
+    out2, keys2 = _append_kb_sources("Second answer.", kb_depth, surfaced_keys=keys1)
+    assert "## Sources" not in out2, "no sources section when all already surfaced"
+    assert "Additional Sources" not in out2
+    assert keys2 == set()
+
+    # Third turn — one new source added
+    kb_depth_new = {
+        "fetched_keys": {
+            "eagle-knowledge-base/approved/doc1.txt",
+            "eagle-knowledge-base/approved/doc2.txt",
+            "eagle-knowledge-base/approved/doc3.txt",
+        }
+    }
+    out3, keys3 = _append_kb_sources("Third answer.", kb_depth_new, surfaced_keys=keys1)
+    assert "## Additional Sources" in out3, "follow-up uses Additional Sources header"
+    assert "doc3.txt" in out3
+    assert "doc1.txt" not in out3, "already-surfaced sources not repeated"
+    assert "doc2.txt" not in out3
+    assert len(keys3) == 1
