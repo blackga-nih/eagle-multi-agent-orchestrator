@@ -50,6 +50,16 @@ infrastructure/terraform/.terraform.lock.hcl
 # Claude Code local settings (contains secrets)
 .claude/settings.local.json
 
+# Claude handoff bundles (large, contains session history — see .claude/skills/claude-handoff/)
+handoff-claude-*/
+handoff-claude-*.zip
+
+# Local scratch (JSON traces, screenshots, ad-hoc python scripts)
+.tmp/
+scripts/_*.py
+server/.testmondata
+jefo_result.json
+
 # AWS credentials
 .aws/credentials
 

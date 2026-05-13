@@ -1,0 +1,17 @@
+{
+  "template_filename": "HHS SubK Plan Template - updated March 2022.doc",
+  "category": "subk_plan",
+  "variant": "",
+  "section_clause_map": {},
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 19.702",
+      "title": "Statutory Requirements for Subcontracting Plans",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": [
+    "19"
+  ]
+}

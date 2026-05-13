@@ -1,0 +1,36 @@
+{
+  "template_filename": "4.b. IGE for Services based on Catalog Price.xlsx",
+  "category": "igce",
+  "variant": "services",
+  "section_clause_map": {
+    "1": {
+      "section_title": "Base Period",
+      "clauses": []
+    },
+    "2": {
+      "section_title": "Option Period One",
+      "clauses": []
+    },
+    "3": {
+      "section_title": "Sheet3",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 36.203",
+      "title": "Government Estimate of Construction Costs",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 15.404",
+      "title": "Proposal Analysis",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 2,
+  "far_parts_covered": [
+    "15",
+    "36"
+  ]
+}

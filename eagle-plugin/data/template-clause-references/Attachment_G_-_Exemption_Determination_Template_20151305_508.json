@@ -1,0 +1,22 @@
+{
+  "template_filename": "Attachment G - Exemption Determination Template 20151305_508.docx",
+  "category": "exemption_determination",
+  "variant": "",
+  "section_clause_map": {
+    "1": {
+      "section_title": "IC",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 5.202",
+      "title": "Exceptions — Synopsizing Contract Actions",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": [
+    "5"
+  ]
+}

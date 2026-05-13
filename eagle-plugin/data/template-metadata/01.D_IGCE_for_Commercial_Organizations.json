@@ -1,0 +1,55 @@
+{
+  "filename": "01.D_IGCE_for_Commercial_Organizations.xlsx",
+  "format": "xlsx",
+  "category": "igce",
+  "variant": "",
+  "sections": [
+    {
+      "number": "1",
+      "title": "IGCE",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "IT Services",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "3",
+      "title": "IT Goods",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "4",
+      "title": "Instructions",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "5",
+      "title": "Sheet2",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "6",
+      "title": "Sheet3",
+      "has_table": true,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 6,
+  "sheet_names": [
+    "IGCE",
+    "IT Services",
+    "IT Goods",
+    "Instructions",
+    "Sheet2",
+    "Sheet3"
+  ],
+  "parse_error": null
+}

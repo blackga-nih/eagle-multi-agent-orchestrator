@@ -5,6 +5,16 @@ normalization, alias resolution, and validation for doc_type values used
 throughout the EAGLE system.
 
 Canonical format: lowercase with underscores (e.g., "acquisition_plan").
+
+Per-category metadata
+---------------------
+Beyond the bare slug set, the registry also exposes per-category metadata
+(label, kind, aliases, compliance display names, system-prompt key) loaded
+from the same _index.json under the ``category_metadata`` block. Consumers
+that need richer metadata than ALL_DOC_TYPES use the ``get_label`` /
+``get_kind`` / ``get_category_metadata`` accessors. The metadata block is
+optional — modules that don't need it keep working with the existing
+ALL_DOC_TYPES / normalize_doc_type / is_valid_doc_type API unchanged.
 """
 
 from __future__ import annotations
@@ -13,6 +23,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("eagle.doc_type_registry")
 
@@ -29,18 +40,25 @@ _INDEX_PATH = os.path.join(
 )
 
 
-def _load_categories_from_index() -> frozenset[str]:
-    """Load category names from the template metadata index file."""
+def _load_index() -> dict[str, Any]:
+    """Load and return the raw _index.json. Returns {} on failure."""
     try:
         path = Path(_INDEX_PATH).resolve()
         with open(path, encoding="utf-8") as f:
-            index = json.load(f)
-        categories = frozenset(index.get("by_category", {}).keys())
-        logger.debug("Loaded %d categories from template index", len(categories))
-        return categories
+            return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
-        logger.warning("Could not load template index: %s — using fallback", e)
+        logger.warning("Could not load template index: %s", e)
+        return {}
+
+
+def _load_categories_from_index() -> frozenset[str]:
+    """Load category names from the template metadata index file."""
+    index = _load_index()
+    if not index:
         return _FALLBACK_DOC_TYPES
+    categories = frozenset(index.get("by_category", {}).keys())
+    logger.debug("Loaded %d categories from template index", len(categories))
+    return categories
 
 
 # Fallback if _index.json is unavailable (e.g., during testing)
@@ -95,6 +113,22 @@ _MARKDOWN_ONLY_TYPES = frozenset(
         "purchase_request",
         "price_reasonableness",
         "required_sources",
+        # Added by PR A2: 12 markdown-only doc types whose metadata lives in
+        # _index.json.category_metadata. They have no S3 template (most
+        # generate via LLM or are evidence attachments) but downstream callers
+        # (create_document, compliance matrix) still need them recognized.
+        "cor_designation",
+        "d_f",
+        "fpds_report",
+        "funding_doc",
+        "human_subjects",
+        "inherently_governmental",
+        "priority_sources_checklist",
+        "qasp",
+        "sam_exclusions_check",
+        "sb_review",
+        "source_selection_plan",
+        "wage_determination",
     }
 )
 
@@ -188,3 +222,156 @@ def is_valid_doc_type(doc_type: str) -> bool:
 def get_template_categories() -> frozenset[str]:
     """Return the set of doc types that have S3 templates (excludes markdown-only types)."""
     return ALL_DOC_TYPES - _MARKDOWN_ONLY_TYPES
+
+
+# ── Category metadata (label / kind / compliance) ─────────────────────
+#
+# Loaded from the `category_metadata` block in _index.json. Optional — if the
+# block is missing or a slug isn't in it, accessors return safe defaults
+# (label = title-cased slug, kind = "generated", etc.).
+
+_CATEGORY_METADATA: dict[str, dict[str, Any]] = (
+    _load_index().get("category_metadata") or {}
+)
+
+
+def _aliases_from_metadata() -> dict[str, str]:
+    """Build alias→canonical map from per-category `aliases` lists in _index.json.
+
+    Augments (does not replace) the hardcoded `_DOC_TYPE_ALIASES` dict above —
+    in case of collision the hardcoded value wins, since that one is the long-
+    standing source of truth and tests assert against it. New aliases in
+    `_index.json` are merged in as an additive layer.
+    """
+    out: dict[str, str] = {}
+    for slug, meta in _CATEGORY_METADATA.items():
+        for alias in meta.get("aliases", []) or []:
+            if alias and alias not in _DOC_TYPE_ALIASES:
+                out[alias] = slug
+    return out
+
+
+# Merge plugin-data aliases under the hardcoded ones. Hardcoded wins on collision.
+_DOC_TYPE_ALIASES = {**_aliases_from_metadata(), **_DOC_TYPE_ALIASES}
+
+
+def get_category_metadata(slug: str) -> dict[str, Any]:
+    """Return the raw metadata dict for a slug, or {} if not in the metadata block.
+
+    The slug must already be canonical — call normalize_doc_type() first if
+    you have a raw user input.
+    """
+    return _CATEGORY_METADATA.get(slug, {})
+
+
+def get_label(slug: str) -> str:
+    """Display label for a doc-type. Falls back to a title-cased slug if absent."""
+    meta = _CATEGORY_METADATA.get(slug, {})
+    if "label" in meta:
+        return meta["label"]
+    return slug.replace("_", " ").title()
+
+
+def get_kind(slug: str) -> str:
+    """Doc-type 'kind' (generated, evidence, form_only, ...). Defaults to 'generated'."""
+    return _CATEGORY_METADATA.get(slug, {}).get("kind", "generated")
+
+
+def get_compliance_display_name(slug: str) -> str | None:
+    """Name as it appears in the HHS compliance matrix, or None if not mapped."""
+    return _CATEGORY_METADATA.get(slug, {}).get("compliance_display_name")
+
+
+def get_compliance_aliases(slug: str) -> list[str]:
+    """Additional names that historically refer to this slug in compliance maps."""
+    return list(_CATEGORY_METADATA.get(slug, {}).get("compliance_aliases") or [])
+
+
+def get_system_prompt_key(slug: str) -> str | None:
+    """Key into the system-prompt store (e.g., 'sow' → 'SOW_PROMPT' constant).
+
+    Returns None if this slug has no associated LLM prompt (form-only doc types,
+    evidence attachments, etc.). PR A3 will land the actual prompt store —
+    this accessor just exposes the key so future migrations don't churn signatures.
+    """
+    return _CATEGORY_METADATA.get(slug, {}).get("system_prompt_key")
+
+
+def get_all_metadata() -> dict[str, dict[str, Any]]:
+    """Return a defensive copy of the full per-category metadata block.
+
+    Useful for downstream callers that want to enumerate all doc-types with
+    their metadata in one shot rather than calling N accessors.
+    """
+    return {k: dict(v) for k, v in _CATEGORY_METADATA.items()}
+
+
+# ── System prompts (plugin-data driven, added by PR A3) ───────────────
+#
+# Prompts are stored as plain .md files under eagle-plugin/data/system-prompts/.
+# Each file is named after a canonical slug (sow.md, igce.md, …). The path
+# referenced by category_metadata.system_prompt_key resolves into this dir.
+# Non-engineers can edit prompts via the markdown files without touching code.
+
+_PROMPTS_DIR = Path(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "eagle-plugin",
+        "data",
+        "system-prompts",
+    )
+).resolve()
+
+# Module-level cache so repeated lookups don't re-read disk.
+_PROMPT_CACHE: dict[str, str | None] = {}
+
+
+def get_system_prompt(slug: str) -> str | None:
+    """Return the LLM system prompt for a doc-type, or None if absent.
+
+    Resolution order:
+    1. Use the slug's `system_prompt_key` from category_metadata if set;
+       otherwise fall back to the slug itself.
+    2. Read `<prompts_dir>/<key>.md`. Cache the result.
+    3. Return None if the file doesn't exist.
+
+    Slug normalization is NOT performed here — callers should pass canonical
+    slugs (run `normalize_doc_type()` first if you have raw user input).
+    """
+    if slug in _PROMPT_CACHE:
+        return _PROMPT_CACHE[slug]
+
+    key = get_system_prompt_key(slug) or slug
+    path = _PROMPTS_DIR / f"{key}.md"
+    try:
+        body = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        body = None
+    except UnicodeDecodeError as e:
+        logger.warning("Prompt file %s has invalid encoding: %s", path, e)
+        body = None
+
+    _PROMPT_CACHE[slug] = body
+    return body
+
+
+def list_available_prompts() -> list[str]:
+    """List the slugs that currently have a system-prompt file on disk.
+
+    Useful for diagnostics — e.g., a doctor check that finds doc-types
+    declared with `system_prompt_key` but missing their .md file.
+    """
+    if not _PROMPTS_DIR.is_dir():
+        return []
+    return sorted(p.stem for p in _PROMPTS_DIR.glob("*.md"))
+
+
+def _clear_prompt_cache() -> None:
+    """Test hook: drop the prompt cache so a fresh read happens.
+
+    Production code should never call this — prompts don't change at
+    runtime. Tests use it to verify the disk-load path.
+    """
+    _PROMPT_CACHE.clear()

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>EAGLE Jira Status Report</title>
+<style>
+@page { size: Letter; margin: 0.75in; }
+body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+       font-size: 10.5pt; line-height: 1.45; color: #1a1a1a; max-width: 7in; }
+h1 { font-size: 18pt; border-bottom: 2px solid #003366; padding-bottom: 4px; }
+h2 { font-size: 14pt; color: #003366; margin-top: 1.5em; border-bottom: 1px solid #ccc; padding-bottom: 2px; }
+h3 { font-size: 12pt; color: #003366; margin-top: 1em; }
+table { border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 9.5pt; }
+th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+th { background: #f0f4f8; font-weight: 600; }
+code { background: #f4f4f4; padding: 1px 4px; border-radius: 3px; font-size: 9pt;
+       font-family: Consolas, 'Courier New', monospace; }
+strong { color: #003366; }
+hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
+</style></head><body>
+<h1 id="eagle-jira-status-report-2026-05-08">EAGLE Jira Status Report — 2026-05-08</h1>
+<p><strong>Source</strong>: <code>https://tracker.nci.nih.gov</code> project <code>EAGLE</code>, 319 total issues.
+<strong>Method</strong>: pulled all issues via REST; cross-referenced each open issue against <code>git log --grep EAGLE-</code> and <code>git grep EAGLE-</code> across <code>server/</code>, <code>client/</code>, and <code>tests/</code>. Strict signal = explicit <code>EAGLE-N</code> reference in a commit message. Weak signal = file-only reference. Excludes 67 nightly-triage auto-tickets (separate cleanup).</p>
+<hr />
+<h2 id="top-line">Top-line</h2>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th>Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Total in EAGLE project</strong></td>
+<td>319</td>
+</tr>
+<tr>
+<td>Nightly-triage auto-tickets (filtered out)</td>
+<td>67</td>
+</tr>
+<tr>
+<td><strong>In scope (non-nightly)</strong></td>
+<td><strong>252</strong></td>
+</tr>
+<tr>
+<td>↳ Closed in Jira (<code>Done</code> / <code>Cancelled</code>)</td>
+<td>85</td>
+</tr>
+<tr>
+<td>↳ <strong>In Progress</strong></td>
+<td>7</td>
+</tr>
+<tr>
+<td>↳ Open + commit explicitly references it (likely-done, Jira hygiene gap)</td>
+<td>13</td>
+</tr>
+<tr>
+<td>↳ Open + only test/spec file references it (weak signal)</td>
+<td>4</td>
+</tr>
+<tr>
+<td>↳ <strong>Outstanding</strong> (no code/commit evidence)</td>
+<td><strong>150</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="in-progress-7">In Progress (7)</h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EAGLE-38</td>
+<td>Define Git Branching Strategy and PR Workflow</td>
+</tr>
+<tr>
+<td>EAGLE-39</td>
+<td>Audit and Standardize Repository Folder Structure</td>
+</tr>
+<tr>
+<td>EAGLE-40</td>
+<td>Review and Harden .gitignore for Multi-Tenant Repo</td>
+</tr>
+<tr>
+<td>EAGLE-41</td>
+<td>Implement Git Hooks for Code Quality Gates</td>
+</tr>
+<tr>
+<td>EAGLE-44</td>
+<td>Implement session persistence for Strands agents using custom DynamoDB SessionMa…</td>
+</tr>
+<tr>
+<td>EAGLE-48</td>
+<td>Replace sync <code>Agent()</code> call with <code>stream_async()</code> for real-time SSE token streaming</td>
+</tr>
+<tr>
+<td>EAGLE-78</td>
+<td>Use knowledge base as the only source unless external lookup is required</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note</strong>: EAGLE-38 through EAGLE-48 all have closing commits (<code>f80e3d2</code>, <code>60c2950</code>, <code>c9d8563</code>) — they're effectively done in code. Only the Jira status hasn't been advanced. See "Likely-done" section below.</p>
+<hr />
+<h2 id="likely-done-commit-explicitly-references-issue-but-jira-still-open-13">Likely-Done (commit explicitly references issue, but Jira still open) — 13</h2>
+<p>These should be closed in Jira after a quick verification.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Status</th>
+<th>Closing commit</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EAGLE-32</strong></td>
+<td>To Do</td>
+<td><code>f80e3d2</code></td>
+<td>Risk-Trigger-Based Specialist Agent Routing</td>
+</tr>
+<tr>
+<td><strong>EAGLE-37</strong></td>
+<td>To Do</td>
+<td><code>f80e3d2</code></td>
+<td>Per-Acquisition Token Cost Tracking and Budget Guardrails</td>
+</tr>
+<tr>
+<td><strong>EAGLE-38</strong></td>
+<td>In Progress</td>
+<td><code>f80e3d2</code></td>
+<td>Define Git Branching Strategy and PR Workflow</td>
+</tr>
+<tr>
+<td><strong>EAGLE-39</strong></td>
+<td>In Progress</td>
+<td><code>f80e3d2</code></td>
+<td>Audit and Standardize Repository Folder Structure</td>
+</tr>
+<tr>
+<td><strong>EAGLE-40</strong></td>
+<td>In Progress</td>
+<td><code>f80e3d2</code></td>
+<td>Review and Harden .gitignore for Multi-Tenant Repo</td>
+</tr>
+<tr>
+<td><strong>EAGLE-41</strong></td>
+<td>In Progress</td>
+<td><code>f80e3d2</code></td>
+<td>Implement Git Hooks for Code Quality Gates</td>
+</tr>
+<tr>
+<td><strong>EAGLE-44</strong></td>
+<td>In Progress</td>
+<td><code>60c2950</code></td>
+<td>Strands DynamoDB SessionManager</td>
+</tr>
+<tr>
+<td><strong>EAGLE-48</strong></td>
+<td>In Progress</td>
+<td><code>c9d8563</code></td>
+<td>Strands <code>stream_async()</code> SSE streaming</td>
+</tr>
+<tr>
+<td>EAGLE-72</td>
+<td>To Do</td>
+<td><code>2b0fc04</code></td>
+<td>Q2 KB search — GAO B-302358</td>
+</tr>
+<tr>
+<td>EAGLE-73</td>
+<td>To Do</td>
+<td><code>2b0fc04</code></td>
+<td>Q3 KB search — Bona Fide Needs</td>
+</tr>
+<tr>
+<td>EAGLE-74</td>
+<td>To Do</td>
+<td><code>1bb4c46</code></td>
+<td>Q4 KB search — fair-opportunity exceptions</td>
+</tr>
+<tr>
+<td>EAGLE-76</td>
+<td>To Do</td>
+<td><code>4391ff2</code></td>
+<td>Q5 KB search — SBIR protest debriefing</td>
+</tr>
+<tr>
+<td>EAGLE-254</td>
+<td>To Do</td>
+<td><code>9b313e3</code></td>
+<td>research tool latency variance + retrieval drift</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="outstanding-150-by-theme">Outstanding (150) — by theme</h2>
+<h3 id="theme-breakdown">Theme breakdown</h3>
+<table>
+<thead>
+<tr>
+<th>Cluster</th>
+<th>Count</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>User feedback</strong> (auto-created)</td>
+<td>52</td>
+<td>38 general, 7 praise, 5 bug, 2 suggestion</td>
+</tr>
+<tr>
+<td>Document generation</td>
+<td>13</td>
+<td>SOW/IGCE/J&amp;A/etc. ergonomics + edge cases</td>
+</tr>
+<tr>
+<td>Use cases</td>
+<td>7</td>
+<td>UC-3 sole source, UC-9 data rights, UC-10 IGCE complex, etc.</td>
+</tr>
+<tr>
+<td>Knowledge base</td>
+<td>5</td>
+<td>New content + retrieval improvements</td>
+</tr>
+<tr>
+<td>Intake flow</td>
+<td>3</td>
+<td>Optimization items from QA session 2026-03-10</td>
+</tr>
+<tr>
+<td>Admin / UI</td>
+<td>3</td>
+<td>Header centering, package-panel rendering, modal polish</td>
+</tr>
+<tr>
+<td>Auth</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>Compliance</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>Eval / test</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>Observability</td>
+<td>1</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="outstanding-by-issue-type">Outstanding by issue type</h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Story</td>
+<td>75</td>
+</tr>
+<tr>
+<td>Task</td>
+<td>61</td>
+</tr>
+<tr>
+<td>Epic</td>
+<td>12</td>
+</tr>
+<tr>
+<td><strong>Bug</strong></td>
+<td><strong>2</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="outstanding-bugs-priority">Outstanding bugs (priority)</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EAGLE-57</strong></td>
+<td>Fix Micro Purchase Document Output</td>
+</tr>
+<tr>
+<td><strong>EAGLE-60</strong></td>
+<td>Fix Document Template Routing</td>
+</tr>
+</tbody>
+</table>
+<p>Note: EAGLE-60 (template routing) intersects with PR #211 / #214 from this session — those PRs unlocked QASP/SB Review/Section 889 doc-types and surfaced template provenance, which is the "template routing" foundation. Likely partially addressed; needs verification.</p>
+<h3 id="outstanding-epics-12">Outstanding epics (12)</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EAGLE-3</td>
+<td>UC-1 Create an acquisition package</td>
+</tr>
+<tr>
+<td>EAGLE-20</td>
+<td>Acquisition Package by Type</td>
+</tr>
+<tr>
+<td>EAGLE-22</td>
+<td>Technical Configuration</td>
+</tr>
+<tr>
+<td>EAGLE-51</td>
+<td>Strands Agents SDK Migration &amp; Stabilization</td>
+</tr>
+<tr>
+<td>EAGLE-54</td>
+<td>Intake Flow Optimization (QA Session 2026-03-10)</td>
+</tr>
+<tr>
+<td>EAGLE-66</td>
+<td>Eagle MVP 1</td>
+</tr>
+<tr>
+<td>EAGLE-67</td>
+<td>Eagle MVP 2</td>
+</tr>
+<tr>
+<td>EAGLE-75</td>
+<td>EAGLE QA 1</td>
+</tr>
+<tr>
+<td>EAGLE-205</td>
+<td>Eagle QA 2</td>
+</tr>
+<tr>
+<td>EAGLE-255</td>
+<td>Eagle QA 3</td>
+</tr>
+<tr>
+<td>EAGLE-271</td>
+<td>Eagle QA 4</td>
+</tr>
+<tr>
+<td>EAGLE-291</td>
+<td>Eagle QA 5</td>
+</tr>
+</tbody>
+</table>
+<p>The 5 "Eagle QA N" epics likely contain the 5 weekly QA-session followups; some of their child stories are in the outstanding 150.</p>
+<hr />
+<h2 id="what-this-session-has-shipped-cross-reference">What this session has shipped (cross-reference)</h2>
+<p>13 PRs merged today (2026-05-08). None of them carried explicit <code>EAGLE-N</code> tags in commit messages, so they don't appear in the "Likely-Done" bucket above. Linkage table:</p>
+<table>
+<thead>
+<tr>
+<th>PR</th>
+<th>Closes Jira-side</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>#205 path bugs</td>
+<td>Triage #1, #4 (nightly cluster — separate cleanup)</td>
+</tr>
+<tr>
+<td>#206 data-validation + flakes</td>
+<td>Triage #6, #7, #8 (nightly)</td>
+</tr>
+<tr>
+<td>#207 LH prompt + tests</td>
+<td>Likely intersects EAGLE-78 ("KB as source of truth") prompt-discipline work</td>
+</tr>
+<tr>
+<td>#208 lint fix (E402)</td>
+<td>Internal</td>
+</tr>
+<tr>
+<td>#209 teams_notifier test refactor</td>
+<td>Internal</td>
+</tr>
+<tr>
+<td>#210 soft S3_BUCKET check</td>
+<td>Internal</td>
+</tr>
+<tr>
+<td>#211 doc-gen orphan unlock + template_id</td>
+<td>Likely closes/advances <strong>EAGLE-60</strong> "Fix Document Template Routing"</td>
+</tr>
+<tr>
+<td>#212 qasp smoke scenario</td>
+<td>Internal</td>
+</tr>
+<tr>
+<td>#213 Tier-3 section-drift validator</td>
+<td>Adjacent to EAGLE-60</td>
+</tr>
+<tr>
+<td>#214 package-mode provenance fix</td>
+<td>Adjacent to EAGLE-60</td>
+</tr>
+<tr>
+<td>#215 matrix consistency</td>
+<td>Internal/infra</td>
+</tr>
+<tr>
+<td>#216 SSE watchdog (upload-button fix)</td>
+<td>No matching Jira; new defensive layer</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation</strong>: tag future PRs with <code>EAGLE-N</code> in the commit message so the strong-evidence classifier picks them up automatically.</p>
+<hr />
+<h2 id="tests-in-place-coverage-map">Tests in place — coverage map</h2>
+<p>What's actively tested (from <code>server/tests/</code> and <code>client/tests/</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Tests</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Doc-generation orphan unlock</strong></td>
+<td><code>test_ai_document_schema.py::test_get_create_document_types_includes_compliance_matrix_orphans</code></td>
+<td>✅ Active</td>
+</tr>
+<tr>
+<td><strong>Section-drift validator</strong></td>
+<td><code>test_doc_gen_section_drift.py</code> (4 cases + source-text guard)</td>
+<td>✅ Active</td>
+</tr>
+<tr>
+<td><strong>Estimated-value parsing + Decimal</strong></td>
+<td><code>test_triage_pr3.py::TestEstimatedValueCoercion</code> (9), <code>TestDynamoSafeCoercion</code> (7)</td>
+<td>✅ Active</td>
+</tr>
+<tr>
+<td><strong>Haiku ranker JSON salvage</strong></td>
+<td><code>test_triage_pr3.py::TestRankingJsonSalvage</code> (5)</td>
+<td>✅ Active</td>
+</tr>
+<tr>
+<td><strong>Teams notifier per-call AsyncClient</strong></td>
+<td><code>test_teams_notifier.py</code> (full rewrite + 3 invariant guards in <code>test_triage_pr3.py</code>)</td>
+<td>✅ Active</td>
+</tr>
+<tr>
+<td><strong>Supervisor LH prompt invariant</strong></td>
+<td><code>test_supervisor_prompt_invariants.py</code> (6 cases)</td>
+<td>✅ Active</td>
+</tr>
+<tr>
+<td><strong>AIP behavioral LH guard</strong></td>
+<td><code>test_strands_eval.py::test_143_aip_lh_exclusion</code></td>
+<td>✅ Active (eval suite)</td>
+</tr>
+<tr>
+<td><strong>5 Jira-QA Q1–Q5 evals</strong></td>
+<td><code>test_strands_eval.py::test_138</code>–<code>142</code> (EAGLE-70..76)</td>
+<td>✅ Active</td>
+</tr>
+<tr>
+<td><strong>Compliance matrix</strong></td>
+<td><code>test_compliance_matrix.py</code> + <code>kb_matrix_analysis.py</code></td>
+<td>✅ Active (PR #215 made script tolerate ties)</td>
+</tr>
+<tr>
+<td><strong>Frontend Playwright E2E</strong></td>
+<td><code>client/tests/</code> (Playwright + e2e-judge skill)</td>
+<td>✅ Active</td>
+</tr>
+<tr>
+<td><strong>Post-deploy smoke</strong></td>
+<td><code>server/tests/post_deploy_smoke.py</code> (8 scenarios incl. new <code>qasp_orphan_unlock</code>)</td>
+<td>✅ Active</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="recommendations">Recommendations</h2>
+<ol>
+<li><strong>Quick win: close 13 likely-done in Jira</strong>. They're ID'd in this report with the closing commit. ~15 min of Jira clicks.</li>
+<li><strong>Tag future PRs with <code>EAGLE-N</code></strong> in commit messages so this report auto-updates.</li>
+<li><strong>Triage the 52 feedback items</strong> — 5 marked <code>bug</code> are highest priority. Most of the 38 <code>general</code> + 7 <code>praise</code> are probably auto-archive candidates.</li>
+<li><strong>Verify EAGLE-60 status</strong> against PR #211/#214 — likely closable.</li>
+<li><strong>Audit the 12 outstanding epics</strong> — many appear to be milestone containers (MVP 1, MVP 2, QA 1–5) whose child stories drive the real work.</li>
+</ol>
+<hr />
+<h2 id="secondary-task-nightly-triage-cleanup">Secondary task — nightly triage cleanup</h2>
+<p>67 issues with summary <code>[Triage] Nightly Fix Plan — {env} — {date}</code>. All auto-created. Cleanup pending — see status update on that workstream.</p>
+</body></html>

@@ -1,0 +1,87 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>EAGLE Retrieval 3-Layer Report</title><style>
+body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; background: #f6f8fa; color: #24292f; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 17px; margin: 24px 0 8px; padding-top: 12px; border-top: 2px solid #d0d7de; }
+h3 { font-size: 14px; margin: 14px 0 6px; color: #57606a; text-transform: uppercase; letter-spacing: .04em; }
+.meta { color: #57606a; font-size: 12px; margin-bottom: 16px; }
+.scenario { background: white; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.scenario h2 { margin-top: 0; border: 0; }
+.q { background: #f6f8fa; padding: 8px 12px; border-left: 3px solid #0969da; font-style: italic; margin-bottom: 12px; font-size: 13px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.col { background: #f6f8fa; border-radius: 6px; padding: 12px; }
+.col h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #57606a; }
+.metric { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; border-bottom: 1px dashed #eaeef2; }
+.metric:last-child { border-bottom: 0; }
+.metric .v { font-weight: 600; font-family: ui-monospace, monospace; }
+.flag { background: #fff8c5; border-left: 3px solid #d4a72c; padding: 6px 10px; margin: 4px 0; font-size: 12px; border-radius: 4px; }
+.flag.bad { background: #ffebe9; border-color: #cf222e; }
+.flag.ok  { background: #dcffe4; border-color: #1a7f37; }
+.code { font-family: ui-monospace, monospace; font-size: 11px; background: #f6f8fa; padding: 1px 4px; border-radius: 3px; }
+.lane { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-right: 4px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table th, table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #eaeef2; }
+table th { background: #f6f8fa; font-weight: 600; }
+.q-list { font-family: ui-monospace, monospace; font-size: 11px; color: #57606a; max-height: 120px; overflow: auto; }
+.summary-table th, .summary-table td { font-size: 12px; }
+.bar { background: #d0d7de; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 2px; }
+.bar > div { height: 100%; background: #0969da; }
+.bar > .red { background: #cf222e; }
+.note-block { background: #f6f8fa; border-radius: 4px; padding: 8px; font-size: 12px; color: #57606a; line-height: 1.5; }
+.kbd { font-family: ui-monospace, monospace; background: #eaeef2; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+</style></head><body><div class="wrap"><h1>EAGLE Retrieval 3-Layer Report</h1>
+<div class="meta">Generated 2026-04-29T18:03:24.681613Z · AWS account 695681773636 (NIH.NCI.CBIIT.EAGLE.NONPROD) · KB bucket <span class="kbd">eagle-knowledge-base</span></div>
+<h2>Summary</h2>
+<table class="summary-table"><tr><th>Question</th><th>Dev</th><th>QA</th><th>RO (manual)</th></tr>
+<tr><td><b>Q4 (2026-04-28) — JEFO $25M IDIQ sole-source</b></td><td>0 surf / 0 read</td><td>—</td><td><small>RO surfaced fewer docs and answered with tighter primary-source grounding. Reviewer flagged: JEFO table missing 2/10 elements per FAR 16.507-6(d)(2); 'SB set-aside JOFOC requires J&amp;A' was incorrectly …</small></td></tr>
+<tr><td><b>Q4 (2026-04-29) — sole source on multi-award IDIQ FAR 16.505</b></td><td>0 surf / 0 read</td><td>—</td><td><small>(no RO comparison run for today's variant)…</small></td></tr>
+<tr><td><b>Q5 — SBIR offeror, debriefing, protest timing</b></td><td>0 surf / 0 read</td><td>0 surf / 0 read</td><td><small>Reviewer (Hash): 'Q5 version is worse — 25 docs pulled and a ton of them irrelevant. I don't like to focus on the RO ones but it was able to answer the question on a fraction of the context.' Reviewer…</small></td></tr>
+<tr><td><b>KB inventory probe — 'show me latest additions to s3 knowledge base'</b></td><td>0 surf / 0 read</td><td>—</td><td><small>(diagnostic — surfaces what the agent can/can't see in S3)…</small></td></tr>
+</table>
+<h2>Top-level findings</h2>
+<div class="flag bad">❌ <b>agent_guidance never loaded in 0/0 traces</b> — supervisor was operating without specialist framework on every analyzed question. Fix: expand keyword table at <span class="kbd">strands_agentic_service.py:4671-4679</span> (compliance-strategist) and <span class="kbd">:4613-4622</span> (legal-counsel) to include <span class="kbd">jefo</span>, <span class="kbd">fair opportunity</span>, <span class="kbd">sbir</span>, <span class="kbd">debriefing</span>, <span class="kbd">idiq</span>, <span class="kbd">16.505</span>, <span class="kbd">16.507</span>.</div><div class="flag bad">❌ <b>Q5 Part-15 misroute confirmed</b> — agent generated research keyword <span class="code">"debriefing preaward 15.505 postaward 15.506..."</span> <i>before</i> any KB lookup. The Part-15 vocabulary in the user's question (debriefing/protest/eliminated offeror) anchored the agent on Part 15, even though SBIR is FAR 6.102(d). Fix: <b>shortcut at intake</b> — detect SBIR / R&D / R&amp;D phrases in the user message and force <span class="kbd">acquisition_method="sbir"</span> + force-load <span class="kbd">compliance-strategist</span> + <span class="kbd">legal-counsel</span> BEFORE the supervisor crafts a research query.</div><div class="flag bad">❌ <b>Agent cannot list <span class="kbd">eagle-knowledge-base</span> from inside</b> — <span class="code">s3_document_ops list eagle-knowledge-base</span> returns "AWS permission denied" (see KB inventory probe trace). The agent fell back to listing <span class="kbd">eagle-documents-695681773636-dev</span> (user-doc bucket, returned 0 files). Fix: grant the ECS task role <span class="kbd">s3:ListBucket</span> on the KB bucket — affects both Dev and QA based on the KB inventory probe.</div><div class="flag">⚠ <b>Search-to-read ratio is low</b> across all questions — typically 30+ candidates surfaced, 3–6 read. This is expected and HEALTHY (Search casts wide, Read narrows) per the 3-layer model. The concern is not the surfaced count — it's when Rank fails to put the RIGHT 6 in the read slots. See per-question detail below.</div><div class="flag">ℹ <b>"S3 bucket with updated instructions"</b> — the KB inventory probe (2026-04-29 13:59 UTC) couldn't directly list the bucket due to the IAM gap above, so the agent reconstructed inventory from prior research results. The single bucket referenced is <span class="kbd">eagle-knowledge-base</span> (account 695681773636). If a separate "new instructions" bucket exists outside this trace stream, it has not yet been queried by the agent — recommend confirming with Brian/team and adding it to <span class="kbd">_AGENTS_FOLDER_PREFIX</span> in <span class="kbd">strands_agentic_service.py:4598</span> if so.</div>
+<h2>Per-question detail</h2>
+<div class="scenario">
+<h2>Q4 (2026-04-28) — JEFO $25M IDIQ sole-source</h2>
+<div class="q">i'm placing a $25m sole-source order on a multi-award idiq and need to prepare a jefo. what's the approval authority and what elements does the JEFO need?</div>
+<div style="font-size:12px;color:#57606a;margin-bottom:8px">Expected: <b>FAR Part 16.5</b></div>
+<div class="cols">
+<div class="col"><h4>Dev</h4><div class="flag bad">Error: HTTP 400</div></div>
+<div class="col"><h4>QA</h4><div class="note-block">(no trace)</div></div>
+<div class="col"><h4>RO (manual notes)</h4><div class="note-block">RO surfaced fewer docs and answered with tighter primary-source grounding. Reviewer flagged: JEFO table missing 2/10 elements per FAR 16.507-6(d)(2); 'SB set-aside JOFOC requires J&amp;A' was incorrectly stated (FAR 6.102-2 says it does NOT).</div></div>
+</div></div>
+<div class="scenario">
+<h2>Q4 (2026-04-29) — sole source on multi-award IDIQ FAR 16.505</h2>
+<div class="q">What are the special rules for issuing a sole source on a multi-award IDIQ under FAR 16.505?</div>
+<div style="font-size:12px;color:#57606a;margin-bottom:8px">Expected: <b>FAR Part 16.5</b></div>
+<div class="cols">
+<div class="col"><h4>Dev</h4><div class="flag bad">Error: HTTP 400</div></div>
+<div class="col"><h4>QA</h4><div class="note-block">(no trace)</div></div>
+<div class="col"><h4>RO (manual notes)</h4><div class="note-block">(no RO comparison run for today's variant)</div></div>
+</div></div>
+<div class="scenario">
+<h2>Q5 — SBIR offeror, debriefing, protest timing</h2>
+<div class="q">An SBIR offeror gets eliminated, then on Day 8 asks for a debriefing and files a protest before the debrief happens. What's the right sequence of events here, what are the timelines...</div>
+<div style="font-size:12px;color:#57606a;margin-bottom:8px">Expected: <b>FAR 6.102(d) (SBIR competitive procedures) + GAO 10-day protest timeliness</b> · Suspected misroute → <b>FAR Part 15</b></div>
+<div class="cols">
+<div class="col"><h4>Dev</h4><div class="flag bad">Error: HTTP 400</div></div>
+<div class="col"><h4>QA</h4><div class="flag bad">Error: HTTP 400</div></div>
+<div class="col"><h4>RO (manual notes)</h4><div class="note-block">Reviewer (Hash): 'Q5 version is worse — 25 docs pulled and a ton of them irrelevant. I don't like to focus on the RO ones but it was able to answer the question on a fraction of the context.' Reviewer (Black): legal instructions need adjusting — the question has Part-15-shaped vocabulary (debriefing/protest/eliminated offeror) so EAGLE pulls Part 15 docs and runs with that, even though SBIR is FAR 6.102(d).</div></div>
+</div></div>
+<div class="scenario">
+<h2>KB inventory probe — 'show me latest additions to s3 knowledge base'</h2>
+<div class="q">show me the latest and most recent additions to s3 knowledge base</div>
+<div style="font-size:12px;color:#57606a;margin-bottom:8px">Expected: <b>(diagnostic)</b></div>
+<div class="cols">
+<div class="col"><h4>Dev</h4><div class="flag bad">Error: HTTP 400</div></div>
+<div class="col"><h4>QA</h4><div class="note-block">(no trace)</div></div>
+<div class="col"><h4>RO (manual notes)</h4><div class="note-block">(diagnostic — surfaces what the agent can/can't see in S3)</div></div>
+</div></div>
+<h2>Recommendations (PR order)</h2>
+<ol>
+<li><b>PR1 — agent_guidance keyword expansion</b> (closes Q4 + Q5 root cause): add <span class="kbd">jefo</span>, <span class="kbd">fair opportunity</span>, <span class="kbd">sbir</span>, <span class="kbd">debriefing</span>, <span class="kbd">idiq</span>, <span class="kbd">16.505</span>, <span class="kbd">16.507</span> to compliance-strategist and legal-counsel keyword tables in <span class="kbd">strands_agentic_service.py:4671-4679, :4613-4622</span>. Bump fetch failures from WARNING to ERROR + emit visible <span class="kbd">agent_route_error</span> SSE card.</li>
+<li><b>PR2 — Pre-research method shortcut for SBIR / Part-vocabulary mismatch</b> (closes Q5 misroute): in the supervisor agent prompt, add an intake-stage classifier block that, BEFORE calling <span class="kbd">research</span>, scans the user message for SBIR / "Phase I/II" / "STTR" / "BAA" patterns. If matched, force <span class="kbd">acquisition_method=sbir</span> in the research call and explicitly append "FAR 6.102(d), GAO 10-day timeliness rule" to the keyword. This pre-empts the Part-15-shaped vocabulary problem at source.</li>
+<li><b>PR3 — KB list IAM grant</b>: add <span class="kbd">s3:ListBucket</span> + <span class="kbd">s3:GetObject</span> on <span class="kbd">eagle-knowledge-base</span> to the ECS task role in <span class="kbd">infrastructure/cdk-eagle/lib/core-stack.ts</span>. Required for any KB-inventory diagnostic skill (Jitong's "ask the prompt what's in the KB" check).</li>
+<li><b>PR4 — JEFO 10-element enforcement</b>: add forcing line to <span class="kbd">eagle-plugin/agents/compliance-strategist/agent.md</span> for FAR 16.507-6(d)(2). Already in <span class="kbd">.claude/specs/20260429-102357-plan-q4-uc21-coworker-feedback-triage-v1.md</span>.</li>
+<li><b>PR5 — Method-aware doc filter</b>: drop protest/J&A docs from research results when <span class="kbd">acquisition_method=micro_purchase</span>. Same spec.</li>
+</ol></div></body></html>

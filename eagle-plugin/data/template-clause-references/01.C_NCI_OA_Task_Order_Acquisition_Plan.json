@@ -1,0 +1,106 @@
+{
+  "template_filename": "01.C_NCI_OA_Task_Order_Acquisition_Plan.docx",
+  "category": "acquisition_plan",
+  "variant": "",
+  "section_clause_map": {
+    "1": {
+      "section_title": "Applicable Conditions- FAR 7.105(a)(2),",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(2)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "2": {
+      "section_title": "Cost – FAR 7.105(a)(3), See Attachment #2.",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(3)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "3": {
+      "section_title": "Attached is the Independent Government Cost Estimate (IGCE) that explains what the total estimated cost of this procurement inclusive of all options.",
+      "clauses": []
+    },
+    "4": {
+      "section_title": "Capability or Performance – FAR 7.105(a)(4), Specify the required capabilities or performance characteristics of the supplies or performance standards of the services to be acquired and state how they are related to the need.",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(4)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "5": {
+      "section_title": "Delivery or Performance-Period Requirements – FAR 7.105(a)(5)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(5)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "6": {
+      "section_title": "Trade-Offs – FAR 7.105(a)(6), Discuss the expected consequences of trade-offs among the various cost, capability or performance, and schedule goals that reflects the changing needs and priorities of the program. Note: This section should not discuss trade-offs in relation to source selection.",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(6)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "7": {
+      "section_title": "Risks – FAR 7.105(a)(7), Discuss technical, cost, and schedule risks and describe what efforts are planned or underway to reduce risk and the consequences of failure to achieve goals. If concurrency of development and production is planned, discuss its effects on cost and schedule risks.",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(7)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "8": {
+      "section_title": "Acquisition Streamlining – FAR 7.105(a)(8),",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(8)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "9": {
+      "section_title": "OR",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 7.103",
+      "title": "Agency-Head Responsibilities",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 7.104",
+      "title": "General Procedures",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 7.105",
+      "title": "Contents of Written Acquisition Plans",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 10,
+  "far_parts_covered": [
+    "7"
+  ]
+}

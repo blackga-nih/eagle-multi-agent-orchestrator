@@ -1,0 +1,1887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NCI/NIH Contract Requirements Matrix Explorer</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232736;
+    --border: #2e3348;
+    --text: #e1e4ed;
+    --text-dim: #8b90a5;
+    --accent: #3b82f6;
+    --accent-dim: #1e3a5f;
+    --green: #22c55e;
+    --green-dim: #14532d;
+    --yellow: #eab308;
+    --yellow-dim: #713f12;
+    --red: #ef4444;
+    --red-dim: #7f1d1d;
+    --orange: #f97316;
+    --orange-dim: #7c2d12;
+    --purple: #a855f7;
+    --purple-dim: #581c87;
+    --gov-blue: #1e40af;
+    --gov-gold: #d4a843;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+  }
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #1e3a5f 0%, #0f1117 100%);
+    border-bottom: 2px solid var(--gov-gold);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .header .seal {
+    width: 36px; height: 36px;
+    background: var(--gov-gold);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 700; color: var(--gov-blue);
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 16px; font-weight: 600; color: var(--gov-gold);
+    letter-spacing: 0.5px;
+  }
+  .header .subtitle { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .header .badge {
+    margin-left: auto;
+    background: var(--accent-dim);
+    color: var(--accent);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  /* Main layout */
+  .main { display: flex; height: calc(100vh - 58px); }
+
+  /* Controls panel */
+  .controls {
+    width: 340px;
+    min-width: 340px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .controls::-webkit-scrollbar { width: 6px; }
+  .controls::-webkit-scrollbar-track { background: transparent; }
+  .controls::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .control-group { display: flex; flex-direction: column; gap: 8px; }
+  .control-group label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+  }
+  .control-group label .far-ref {
+    font-weight: 400;
+    color: var(--accent);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  /* Radio cards */
+  .radio-cards { display: flex; flex-direction: column; gap: 4px; }
+  .radio-card {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: var(--bg);
+  }
+  .radio-card:hover { border-color: var(--accent); background: var(--accent-dim); }
+  .radio-card.selected { border-color: var(--accent); background: var(--accent-dim); }
+  .radio-card.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    border-color: var(--border);
+    background: var(--bg);
+  }
+  .radio-card .dot {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .radio-card.selected .dot {
+    border-color: var(--accent);
+  }
+  .radio-card.selected .dot::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+  .radio-card .rc-label { font-size: 12px; font-weight: 500; }
+  .radio-card .rc-sub { font-size: 10px; color: var(--text-dim); }
+
+  /* Dollar input */
+  .dollar-input-wrap {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .dollar-row {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dollar-row span { font-size: 18px; font-weight: 600; color: var(--gov-gold); }
+  .dollar-row input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 16px;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    font-weight: 600;
+  }
+  .dollar-row input:focus { outline: none; border-color: var(--accent); }
+  .dollar-slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(to right, var(--green), var(--yellow), var(--orange), var(--red));
+    outline: none;
+  }
+  .dollar-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: white;
+    border: 2px solid var(--accent);
+    cursor: pointer;
+  }
+  .threshold-markers {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
+  }
+  .threshold-chip {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-dim);
+  }
+  .threshold-chip:hover { border-color: var(--accent); color: var(--text); }
+  .threshold-chip.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+  /* Toggles */
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0;
+  }
+  .toggle-row span { font-size: 12px; }
+  .toggle {
+    width: 36px; height: 20px;
+    background: var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    background: white;
+    border-radius: 50%;
+    transition: left 0.2s;
+  }
+  .toggle.on::after { left: 18px; }
+
+  /* Presets */
+  .presets { display: flex; flex-wrap: wrap; gap: 4px; }
+  .preset-btn {
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .preset-btn:hover { border-color: var(--gov-gold); color: var(--gov-gold); }
+
+  /* Preview panel */
+  .preview-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .preview-area::-webkit-scrollbar { width: 6px; }
+  .preview-area::-webkit-scrollbar-track { background: transparent; }
+  .preview-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 10px 16px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-header .icon { font-size: 14px; }
+  .card-body { padding: 14px 16px; }
+
+  /* Summary banner */
+  .summary-banner {
+    background: linear-gradient(135deg, var(--accent-dim), var(--surface));
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  .summary-item { text-align: center; }
+  .summary-item .val {
+    font-size: 18px; font-weight: 700; color: var(--gov-gold);
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+  }
+  .summary-item .lbl { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+  /* Warnings */
+  .warning-box {
+    background: var(--yellow-dim);
+    border: 1px solid var(--yellow);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 12px;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .warning-box .wi { flex-shrink: 0; font-size: 16px; }
+  .error-box {
+    background: var(--red-dim);
+    border: 1px solid var(--red);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 12px;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .error-box .wi { flex-shrink: 0; font-size: 16px; }
+
+  /* Risk bar */
+  .risk-bar-container { padding: 4px 0; }
+  .risk-labels {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--text-dim); margin-bottom: 6px;
+  }
+  .risk-bar {
+    height: 24px;
+    border-radius: 4px;
+    display: flex;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .risk-bar .contractor {
+    background: linear-gradient(90deg, var(--green), var(--green));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #000;
+    transition: width 0.3s;
+  }
+  .risk-bar .government {
+    background: linear-gradient(90deg, var(--red), var(--red));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #fff;
+    transition: width 0.3s;
+  }
+
+  /* Checklist */
+  .checklist { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .checklist li {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: 12px; line-height: 1.5;
+  }
+  .checklist li .ck {
+    width: 16px; height: 16px; flex-shrink: 0;
+    border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+    margin-top: 1px;
+  }
+  .ck-req { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+  .ck-opt { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+  .ck-na { background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); opacity: 0.4; }
+
+  .doc-note { font-size: 10px; color: var(--text-dim); margin-left: 24px; }
+
+  /* Approval chain */
+  .approval-chain {
+    display: flex; align-items: center; gap: 0; flex-wrap: wrap;
+  }
+  .approval-node {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px; font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    white-space: nowrap;
+  }
+  .approval-node.active {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+  .approval-node.highlight {
+    border-color: var(--gov-gold);
+    background: rgba(212,168,67,0.15);
+    color: var(--gov-gold);
+  }
+  .approval-arrow {
+    color: var(--text-dim);
+    font-size: 16px;
+    padding: 0 4px;
+  }
+
+  /* Threshold tags */
+  .threshold-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ttag {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .ttag-hit { background: var(--yellow-dim); color: var(--yellow); border: 1px solid var(--yellow); }
+  .ttag-miss { background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); opacity: 0.5; }
+
+  /* Timeline */
+  .timeline-bar {
+    height: 32px;
+    background: var(--bg);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .timeline-fill {
+    height: 100%;
+    border-radius: 5px;
+    display: flex; align-items: center; padding-left: 12px;
+    font-size: 12px; font-weight: 700;
+    transition: width 0.3s;
+  }
+
+  /* Two-col grid */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* Prompt area */
+  .prompt-area {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    max-height: 180px;
+  }
+  .prompt-text {
+    flex: 1;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    overflow-y: auto;
+    max-height: 156px;
+    white-space: pre-wrap;
+  }
+  .copy-btn {
+    padding: 6px 16px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .copy-btn:hover { opacity: 0.9; }
+  .copy-btn.copied { background: var(--green); }
+
+  /* Compliance items */
+  .compliance-list { display: flex; flex-direction: column; gap: 4px; }
+  .compliance-item {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; padding: 4px 0;
+  }
+  .compliance-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .dot-req { background: var(--green); }
+  .dot-cond { background: var(--yellow); }
+  .dot-na { background: var(--border); }
+
+  /* Sections within card body */
+  .section-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-dim); margin: 12px 0 6px 0;
+  }
+  .section-label:first-child { margin-top: 0; }
+
+  /* Fee cap */
+  .fee-caps {
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .fee-cap-tag {
+    font-size: 11px; padding: 4px 10px;
+    border-radius: 4px;
+    background: var(--purple-dim);
+    color: var(--purple);
+    border: 1px solid var(--purple);
+  }
+
+  /* PMR ref */
+  .pmr-ref {
+    font-size: 13px; font-weight: 600;
+    padding: 8px 14px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    display: inline-block;
+  }
+
+  /* ============================================================ */
+  /* TAB NAVIGATION                                                */
+  /* ============================================================ */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    padding: 8px 24px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--gov-gold);
+    border-bottom-color: var(--gov-gold);
+  }
+  .tab-content { display: none; }
+  .tab-content.active { display: flex; }
+
+  /* ============================================================ */
+  /* GRID VIEW                                                     */
+  /* ============================================================ */
+  .grid-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .grid-toolbar {
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .grid-toolbar label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .grid-toolbar .dollar-slider { width: 220px; }
+  .grid-dollar-display {
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    color: var(--gov-gold);
+    min-width: 70px;
+  }
+  .grid-toggle-group {
+    display: flex; gap: 12px; align-items: center;
+  }
+  .grid-toggle-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--text-dim);
+  }
+  .mini-toggle {
+    width: 28px; height: 16px;
+    background: var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .mini-toggle.on { background: var(--accent); }
+  .mini-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    background: white;
+    border-radius: 50%;
+    transition: left 0.2s;
+  }
+  .mini-toggle.on::after { left: 14px; }
+
+  .grid-scroll {
+    flex: 1;
+    overflow: auto;
+    padding: 16px 20px;
+  }
+  .grid-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  .grid-scroll::-webkit-scrollbar-track { background: transparent; }
+  .grid-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .matrix-table {
+    border-collapse: separate;
+    border-spacing: 3px;
+    width: 100%;
+    min-width: 900px;
+  }
+  .matrix-table th {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    padding: 8px 6px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .matrix-table th.row-header {
+    text-align: left;
+    min-width: 160px;
+    padding-left: 10px;
+  }
+  .matrix-table th.col-header {
+    writing-mode: horizontal-tb;
+    max-width: 110px;
+    vertical-align: bottom;
+  }
+  .matrix-table th .th-sub {
+    font-weight: 400;
+    font-size: 9px;
+    color: var(--text-dim);
+    opacity: 0.7;
+    display: block;
+    margin-top: 2px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .matrix-cell {
+    border-radius: 6px;
+    padding: 8px 6px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    vertical-align: top;
+    min-height: 72px;
+    border: 1px solid transparent;
+  }
+  .matrix-cell:hover {
+    border-color: var(--gov-gold);
+    transform: scale(1.03);
+    z-index: 2;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .matrix-cell.invalid {
+    background: var(--bg) !important;
+    cursor: not-allowed;
+    opacity: 0.3;
+  }
+  .matrix-cell.invalid:hover {
+    border-color: var(--border);
+    transform: none;
+    box-shadow: none;
+  }
+
+  .cell-docs {
+    font-size: 16px;
+    font-weight: 800;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    line-height: 1;
+  }
+  .cell-docs-label {
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.8;
+    margin-top: 2px;
+  }
+  .cell-risk-bar {
+    height: 4px;
+    border-radius: 2px;
+    margin: 5px 4px 0 4px;
+    display: flex;
+    overflow: hidden;
+  }
+  .cell-risk-bar .crb-gov {
+    background: rgba(239,68,68,0.7);
+    transition: width 0.2s;
+  }
+  .cell-risk-bar .crb-con {
+    background: rgba(34,197,94,0.7);
+    transition: width 0.2s;
+  }
+  .cell-badges {
+    display: flex;
+    gap: 2px;
+    justify-content: center;
+    margin-top: 4px;
+    flex-wrap: wrap;
+  }
+  .cell-badge {
+    font-size: 7px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .cb-warn { background: rgba(234,179,8,0.25); color: var(--yellow); }
+  .cb-ja { background: rgba(168,85,247,0.25); color: var(--purple); }
+  .cb-df { background: rgba(249,115,22,0.25); color: var(--orange); }
+  .cb-err { background: rgba(239,68,68,0.3); color: var(--red); }
+
+  .cell-na {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-dim);
+    opacity: 0.5;
+  }
+
+  /* Grid legend */
+  .grid-legend {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 8px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: var(--text-dim);
+  }
+  .legend-swatch {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+  }
+
+  /* Detail popover */
+  .cell-popover {
+    display: none;
+    position: fixed;
+    z-index: 100;
+    background: var(--surface);
+    border: 1px solid var(--gov-gold);
+    border-radius: 8px;
+    padding: 14px 16px;
+    width: 320px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    font-size: 12px;
+    max-height: 420px;
+    overflow-y: auto;
+  }
+  .cell-popover.visible { display: block; }
+  .popover-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--gov-gold);
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .popover-section {
+    margin-top: 8px;
+  }
+  .popover-section-title {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .popover-doc {
+    display: flex; align-items: center; gap: 6px;
+    padding: 2px 0;
+    font-size: 11px;
+  }
+  .popover-doc .pd-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .pd-req { background: var(--green); }
+  .pd-opt { background: var(--border); }
+  .popover-warning {
+    background: var(--yellow-dim);
+    border: 1px solid rgba(234,179,8,0.3);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 10px;
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+  .popover-btn {
+    margin-top: 10px;
+    padding: 5px 12px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+  }
+  .popover-btn:hover { opacity: 0.9; }
+
+  /* Grid prompt area */
+  .grid-prompt-area {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="seal">E</div>
+  <div>
+    <h1>Contract Requirements Matrix Explorer</h1>
+    <div class="subtitle">NCI Office of Acquisitions &mdash; HHS/NIH Thresholds (FAC 2025-06)</div>
+  </div>
+  <div class="badge">EAGLE v2</div>
+</div>
+
+<!-- Tab navigation -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('explorer')">Detail Explorer</button>
+  <button class="tab-btn" onclick="switchTab('grid')">2D Grid Matrix</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 1: DETAIL EXPLORER (original)                            -->
+<!-- ============================================================ -->
+<div class="tab-content active" id="tab-explorer" style="height: calc(100vh - 94px);">
+  <div class="main" style="height:100%;">
+    <!-- Controls -->
+    <div class="controls">
+
+      <div class="control-group">
+        <label>Presets</label>
+        <div class="presets">
+          <button class="preset-btn" onclick="applyPreset('micro')">Micro-Purchase</button>
+          <button class="preset-btn" onclick="applyPreset('simple-product')">Simple Product &lt;SAT</button>
+          <button class="preset-btn" onclick="applyPreset('it-services')">IT Services IDIQ</button>
+          <button class="preset-btn" onclick="applyPreset('rd-contract')">R&D Cost-Plus</button>
+          <button class="preset-btn" onclick="applyPreset('large-sole')">Large Sole Source</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>Acquisition Method <span class="far-ref">HOW you buy</span></label>
+        <div class="radio-cards" id="method-cards"></div>
+      </div>
+
+      <div class="control-group">
+        <label>Contract Type <span class="far-ref">HOW you pay</span></label>
+        <div class="radio-cards" id="type-cards"></div>
+      </div>
+
+      <div class="control-group">
+        <label>Estimated Dollar Value</label>
+        <div class="dollar-input-wrap">
+          <div class="dollar-row">
+            <span>$</span>
+            <input type="text" id="dollar-input" value="100,000" oninput="onDollarInput(this)" />
+          </div>
+          <input type="range" class="dollar-slider" id="dollar-slider" min="0" max="22" step="0.01" value="11.5" oninput="onSliderInput(this)" />
+          <div class="threshold-markers" id="threshold-chips"></div>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>Additional Factors</label>
+        <div class="toggle-row">
+          <span>IT Requirement</span>
+          <div class="toggle" id="toggle-it" onclick="toggleFlag('isIT')"></div>
+        </div>
+        <div class="toggle-row">
+          <span>Small Business Awardee</span>
+          <div class="toggle" id="toggle-sb" onclick="toggleFlag('isSB')"></div>
+        </div>
+        <div class="toggle-row">
+          <span>R&D Effort</span>
+          <div class="toggle" id="toggle-rd" onclick="toggleFlag('isRD')"></div>
+        </div>
+        <div class="toggle-row">
+          <span>Human Subjects</span>
+          <div class="toggle" id="toggle-hs" onclick="toggleFlag('isHS')"></div>
+        </div>
+        <div class="toggle-row">
+          <span>Services (not products)</span>
+          <div class="toggle on" id="toggle-svc" onclick="toggleFlag('isServices')"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Preview -->
+    <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+      <div class="preview-area" id="preview"></div>
+
+      <div class="prompt-area">
+        <div class="prompt-text" id="prompt-output"></div>
+        <button class="copy-btn" id="copy-btn" onclick="copyPrompt()">Copy</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 2: 2D GRID MATRIX                                        -->
+<!-- ============================================================ -->
+<div class="tab-content" id="tab-grid" style="height: calc(100vh - 94px); flex-direction: column;">
+  <div class="grid-view">
+    <!-- Toolbar -->
+    <div class="grid-toolbar">
+      <label>Dollar Value</label>
+      <span class="grid-dollar-display" id="grid-dollar-display">$100K</span>
+      <input type="range" class="dollar-slider" id="grid-dollar-slider" min="0" max="22" step="0.01" value="11.5" oninput="onGridSlider(this)" />
+      <div class="grid-toggle-group">
+        <div class="grid-toggle-item">
+          <div class="mini-toggle" id="grid-toggle-it" onclick="gridToggle('isIT')"></div>
+          <span>IT</span>
+        </div>
+        <div class="grid-toggle-item">
+          <div class="mini-toggle" id="grid-toggle-sb" onclick="gridToggle('isSB')"></div>
+          <span>Small Biz</span>
+        </div>
+        <div class="grid-toggle-item">
+          <div class="mini-toggle" id="grid-toggle-rd" onclick="gridToggle('isRD')"></div>
+          <span>R&D</span>
+        </div>
+        <div class="grid-toggle-item">
+          <div class="mini-toggle on" id="grid-toggle-svc" onclick="gridToggle('isServices')"></div>
+          <span>Services</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grid -->
+    <div class="grid-scroll">
+      <table class="matrix-table" id="matrix-table"></table>
+    </div>
+
+    <!-- Legend -->
+    <div class="grid-legend">
+      <div class="legend-item"><div class="legend-swatch" style="background:#14532d;border:1px solid #22c55e;"></div> 1-3 docs (simple)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#422006;border:1px solid #eab308;"></div> 4-6 docs (moderate)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#7c2d12;border:1px solid #f97316;"></div> 7-9 docs (complex)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#7f1d1d;border:1px solid #ef4444;"></div> 10+ docs (heavy)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:var(--bg);border:1px solid var(--border);opacity:0.4;"></div> N/A</div>
+      <div class="legend-item" style="margin-left:auto; font-size:11px; color:var(--text-dim);">Click any cell for full detail</div>
+    </div>
+
+    <!-- Grid prompt -->
+    <div class="grid-prompt-area">
+      <div class="prompt-text" id="grid-prompt-output" style="flex:1;"></div>
+      <button class="copy-btn" id="grid-copy-btn" onclick="copyGridPrompt()">Copy</button>
+    </div>
+  </div>
+
+  <!-- Popover -->
+  <div class="cell-popover" id="cell-popover"></div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+const METHODS = [
+  { id: 'micro',     label: 'Micro-Purchase',       sub: 'FAR 13.2 — up to $15K',         far: '13.2' },
+  { id: 'sap',       label: 'Simplified (SAP)',      sub: 'FAR 13 — $15K to $350K',        far: '13' },
+  { id: 'negotiated',label: 'Negotiated',            sub: 'FAR 15 — above $350K',          far: '15' },
+  { id: 'fss',       label: 'FSS Direct Order',      sub: 'FAR 8.4 — Schedule pricing',    far: '8.4' },
+  { id: 'bpa-est',   label: 'BPA Establishment',     sub: 'FAR 8.4 — Blanket agreement',   far: '8.4' },
+  { id: 'bpa-call',  label: 'BPA Call Order',         sub: 'FAR 8.4 — Order under BPA',     far: '8.4' },
+  { id: 'idiq',      label: 'IDIQ Parent Award',     sub: 'FAR 16.5 — Indefinite delivery', far: '16.5' },
+  { id: 'idiq-order',label: 'IDIQ Task/Delivery Order', sub: 'FAR 16.5 — Order under IDIQ', far: '16.5' },
+  { id: 'sole',      label: 'Sole Source / J&A',      sub: 'FAR 6.3 — Limited competition',  far: '6.3' },
+];
+
+const TYPES = [
+  { id: 'ffp',   label: 'Firm-Fixed-Price (FFP)',      risk: 95, category: 'fp' },
+  { id: 'fp-epa',label: 'FP w/ Economic Price Adj',    risk: 80, category: 'fp' },
+  { id: 'fpi',   label: 'Fixed-Price Incentive (FPI)',  risk: 65, category: 'fp' },
+  { id: 'cpff',  label: 'Cost-Plus-Fixed-Fee (CPFF)',   risk: 25, category: 'cr' },
+  { id: 'cpif',  label: 'Cost-Plus-Incentive-Fee (CPIF)', risk: 35, category: 'cr' },
+  { id: 'cpaf',  label: 'Cost-Plus-Award-Fee (CPAF)',   risk: 20, category: 'cr' },
+  { id: 'tm',    label: 'Time & Materials (T&M)',       risk: 15, category: 'loe' },
+  { id: 'lh',    label: 'Labor-Hour (LH)',              risk: 15, category: 'loe' },
+];
+
+const THRESHOLDS = [
+  { value: 15000,      label: '$15K MPT',     short: '$15K' },
+  { value: 25000,      label: '$25K Synopsis', short: '$25K' },
+  { value: 350000,     label: '$350K SAT',    short: '$350K' },
+  { value: 750000,     label: '$750K SubK',   short: '$750K' },
+  { value: 900000,     label: '$900K J&A',    short: '$900K' },
+  { value: 2500000,    label: '$2.5M TINA',   short: '$2.5M' },
+  { value: 4500000,    label: '$4.5M Congress',short: '$4.5M' },
+  { value: 6000000,    label: '$6M IDIQ Enh', short: '$6M' },
+  { value: 20000000,   label: '$20M AP',      short: '$20M' },
+  { value: 50000000,   label: '$50M HCA',     short: '$50M' },
+  { value: 90000000,   label: '$90M SPE J&A', short: '$90M' },
+  { value: 100000000,  label: '$100M SPE',    short: '$100M' },
+  { value: 150000000,  label: '$150M OAP',    short: '$150M' },
+];
+
+const state = {
+  method: 'sap',
+  type: 'ffp',
+  dollarValue: 100000,
+  isIT: false,
+  isSB: false,
+  isRD: false,
+  isHS: false,
+  isServices: true,
+};
+
+// ============================================================
+// INIT
+// ============================================================
+function init() {
+  renderMethodCards();
+  renderTypeCards();
+  renderThresholdChips();
+  updateAll();
+}
+
+function renderMethodCards() {
+  const el = document.getElementById('method-cards');
+  el.innerHTML = METHODS.map(m => `
+    <div class="radio-card ${state.method===m.id?'selected':''}" data-id="${m.id}" onclick="selectMethod('${m.id}')">
+      <div class="dot"></div>
+      <div><div class="rc-label">${m.label}</div><div class="rc-sub">${m.sub}</div></div>
+    </div>
+  `).join('');
+}
+
+function renderTypeCards() {
+  const el = document.getElementById('type-cards');
+  el.innerHTML = TYPES.map(t => {
+    const disabled = isTypeDisabled(t.id);
+    return `
+    <div class="radio-card ${state.type===t.id?'selected':''} ${disabled?'disabled':''}" data-id="${t.id}" onclick="${disabled?'':'selectType(\''+t.id+'\')'}">
+      <div class="dot"></div>
+      <div><div class="rc-label">${t.label}</div></div>
+    </div>`;
+  }).join('');
+}
+
+function renderThresholdChips() {
+  const el = document.getElementById('threshold-chips');
+  el.innerHTML = THRESHOLDS.map(t => `
+    <div class="threshold-chip ${state.dollarValue>=t.value?'active':''}" onclick="setDollar(${t.value})">${t.short}</div>
+  `).join('');
+}
+
+// ============================================================
+// INTERACTIONS
+// ============================================================
+function selectMethod(id) {
+  state.method = id;
+  renderMethodCards();
+  renderTypeCards();
+  updateAll();
+}
+
+function selectType(id) {
+  if (isTypeDisabled(id)) return;
+  state.type = id;
+  renderTypeCards();
+  updateAll();
+}
+
+function isTypeDisabled(typeId) {
+  // Cost-reimbursement prohibited for commercial/sealed bidding
+  // For micro-purchase, only FFP makes sense
+  if (state.method === 'micro' && typeId !== 'ffp') return true;
+  // FSS orders are fixed-price or T&M only
+  if ((state.method === 'fss' || state.method === 'bpa-call' || state.method === 'bpa-est') &&
+      ['cpff','cpif','cpaf'].includes(typeId)) return true;
+  return false;
+}
+
+function onDollarInput(el) {
+  const raw = el.value.replace(/[^0-9]/g, '');
+  const num = parseInt(raw) || 0;
+  state.dollarValue = num;
+  el.value = num.toLocaleString();
+  // sync slider
+  document.getElementById('dollar-slider').value = dollarToSlider(num);
+  renderThresholdChips();
+  updateAll();
+}
+
+function onSliderInput(el) {
+  const num = sliderToDollar(parseFloat(el.value));
+  state.dollarValue = num;
+  document.getElementById('dollar-input').value = num.toLocaleString();
+  renderThresholdChips();
+  updateAll();
+}
+
+function setDollar(val) {
+  state.dollarValue = val;
+  document.getElementById('dollar-input').value = val.toLocaleString();
+  document.getElementById('dollar-slider').value = dollarToSlider(val);
+  renderThresholdChips();
+  updateAll();
+}
+
+// Logarithmic slider mapping: 0-22 maps to $0-$200M
+function sliderToDollar(v) {
+  if (v <= 0) return 0;
+  return Math.round(Math.pow(10, v / 22 * Math.log10(200000000)));
+}
+function dollarToSlider(d) {
+  if (d <= 0) return 0;
+  return (Math.log10(d) / Math.log10(200000000)) * 22;
+}
+
+function toggleFlag(key) {
+  state[key] = !state[key];
+  const el = document.getElementById('toggle-' + {isIT:'it',isSB:'sb',isRD:'rd',isHS:'hs',isServices:'svc'}[key]);
+  el.classList.toggle('on', state[key]);
+  updateAll();
+}
+
+// ============================================================
+// PRESETS
+// ============================================================
+function applyPreset(name) {
+  const presets = {
+    'micro':         { method:'micro',     type:'ffp', dollarValue:8000,    isIT:false,isSB:false,isRD:false,isHS:false,isServices:false },
+    'simple-product':{ method:'sap',       type:'ffp', dollarValue:150000,  isIT:false,isSB:true, isRD:false,isHS:false,isServices:false },
+    'it-services':   { method:'idiq-order',type:'tm',  dollarValue:2000000, isIT:true, isSB:false,isRD:false,isHS:false,isServices:true },
+    'rd-contract':   { method:'negotiated',type:'cpff',dollarValue:8000000, isIT:false,isSB:false,isRD:true, isHS:true, isServices:true },
+    'large-sole':    { method:'sole',      type:'ffp', dollarValue:25000000,isIT:true, isSB:false,isRD:false,isHS:false,isServices:true },
+  };
+  const p = presets[name];
+  Object.assign(state, p);
+  document.getElementById('dollar-input').value = p.dollarValue.toLocaleString();
+  document.getElementById('dollar-slider').value = dollarToSlider(p.dollarValue);
+  ['it','sb','rd','hs','svc'].forEach(k => {
+    const key = {it:'isIT',sb:'isSB',rd:'isRD',hs:'isHS',svc:'isServices'}[k];
+    document.getElementById('toggle-'+k).classList.toggle('on', state[key]);
+  });
+  renderMethodCards();
+  renderTypeCards();
+  renderThresholdChips();
+  updateAll();
+}
+
+// ============================================================
+// CORE LOGIC
+// ============================================================
+function getRequirements() {
+  const v = state.dollarValue;
+  const m = state.method;
+  const t = state.type;
+  const tObj = TYPES.find(x=>x.id===t);
+  const isCR = tObj.category === 'cr';
+  const isLOE = tObj.category === 'loe';
+  const isFP = tObj.category === 'fp';
+
+  // --- Warnings ---
+  const warnings = [];
+  const errors = [];
+
+  if (isCR) {
+    warnings.push('Cost-reimbursement requires written AP approval, adequate contractor accounting system, and designated COR (FAR 16.301).');
+    if (state.isRD) {
+      warnings.push('CPFF fee cap for R&D: 15% of estimated cost (FAR 16.304).');
+    }
+  }
+  if (isLOE) {
+    warnings.push('T&M/LH is LEAST PREFERRED. CO must prepare D&F that no other contract type is suitable (FAR 16.601).');
+    if (m === 'bpa-est' && v > 350000) {
+      warnings.push('T&M/LH BPAs > 3 years require HCA approval (not just standard D&F).');
+    }
+  }
+  if (t === 'cpaf') {
+    warnings.push('CPAF requires approved award-fee plan before award. Rollover of unearned fee is PROHIBITED (FAR 16.402-2).');
+  }
+  // Cost-plus-percentage-of-cost always prohibited
+  errors.push(null); // placeholder
+
+  // Incompatible combos
+  if (m === 'micro' && v > 15000) {
+    errors.push('Micro-purchase threshold is $15,000 (HHS). Value exceeds MPT.');
+  }
+  if (m === 'sap' && v > 350000) {
+    errors.push('SAP threshold is $350,000 (SAT). Value exceeds SAT — use Negotiated (FAR 15).');
+  }
+
+  // --- Documents ---
+  const docs = [];
+  // Purchase Request — always
+  docs.push({ name: 'Purchase Request', required: true, note: 'FAR 4.803(a)(1)' });
+
+  // SOW/PWS
+  if (m !== 'micro') {
+    docs.push({ name: state.isServices ? 'SOW / PWS' : 'Statement of Need (SON)', required: true,
+      note: state.isServices ? 'Performance-based with QASP (FAR 37.6)' : 'Product specifications' });
+  } else {
+    docs.push({ name: 'SOW / PWS', required: false, note: 'Not required for micro-purchase' });
+  }
+
+  // IGCE
+  docs.push({ name: 'IGCE', required: m !== 'micro', note: v > 350000 ? 'Detailed breakdown required (HHSAM 307.105-71)' : 'Sufficient detail/breakdown' });
+
+  // Market Research
+  if (v > 350000) {
+    docs.push({ name: 'Market Research Report', required: true, note: 'HHS template required (HHSAM 310.000)' });
+  } else if (v > 15000) {
+    docs.push({ name: 'Market Research', required: true, note: 'Documented justification (less formal)' });
+  } else {
+    docs.push({ name: 'Market Research', required: false, note: 'Not required for micro-purchase' });
+  }
+
+  // Acquisition Plan
+  if (v > 350000) {
+    docs.push({ name: 'Acquisition Plan', required: true, note: apApproval(v) });
+  } else {
+    docs.push({ name: 'Acquisition Plan', required: false, note: 'Not required below SAT ($350K)' });
+  }
+
+  // J&A
+  const needsJA = m === 'sole' || (m === 'fss' && v > 350000) || (m === 'bpa-call' && v > 350000);
+  docs.push({ name: 'J&A / Justification', required: needsJA, note: needsJA ? jaApproval(v) : 'Only if sole source / limited competition' });
+
+  // D&F
+  const needsDF = isLOE || (isCR && v > 350000) || t === 'fpi' || t === 'cpaf';
+  docs.push({ name: 'D&F (Determination & Findings)', required: needsDF, note: isLOE ? 'Required: no other type suitable (FAR 16.601)' : isCR ? 'Required for cost-reimbursement' : 'Required for incentive/award-fee' });
+
+  // Source Selection Plan
+  const needsSSP = m === 'negotiated' && v > 350000;
+  docs.push({ name: 'Source Selection Plan', required: needsSSP, note: needsSSP ? 'Evaluation factors with relative importance' : 'N/A for this method' });
+
+  // Subcontracting Plan
+  const needsSubK = v > 750000 && !state.isSB;
+  docs.push({ name: 'Subcontracting Plan', required: needsSubK, note: needsSubK ? 'Required for non-SB > $750K (FAR 19.705)' : state.isSB ? 'Exempt — small business awardee' : 'Below $750K threshold' });
+
+  // QASP
+  const needsQASP = state.isServices && m !== 'micro';
+  docs.push({ name: 'QASP', required: needsQASP, note: needsQASP ? 'Required for performance-based services (FAR 46)' : 'Products / micro-purchase' });
+
+  // SB Review
+  docs.push({ name: 'HHS-653 Small Business Review', required: v > 15000, note: v > 15000 ? 'Required > MPT (AA 2023-02 Amendment 3)' : 'Below MPT' });
+
+  // IT-specific
+  if (state.isIT) {
+    docs.push({ name: 'IT Security & Privacy Certification', required: true, note: 'HHSAM 339.101(c)(1)' });
+    docs.push({ name: 'Section 508 ICT Evaluation', required: v > 15000, note: 'Required for IT > MPT' });
+  }
+
+  // Human Subjects
+  if (state.isHS) {
+    docs.push({ name: 'Human Subjects Provisions', required: true, note: 'HHSAR 370.3, 45 CFR 46' });
+  }
+
+  // --- Thresholds triggered ---
+  const triggered = THRESHOLDS.filter(th => v >= th.value);
+  const notTriggered = THRESHOLDS.filter(th => v < th.value);
+
+  // --- Compliance ---
+  const compliance = [];
+  compliance.push({ name: 'Section 889 Compliance', status: 'req', note: 'FAR 52.204-25 — all solicitations/contracts' });
+  compliance.push({ name: 'BAA/TAA Checklist', status: m !== 'micro' ? 'req' : 'cond', note: 'HHSAM 325.102-70' });
+  compliance.push({ name: 'SAM.gov Synopsis', status: v > 25000 ? 'req' : 'na', note: v > 25000 ? 'Required > $25K (FAR 5.101)' : 'Below $25K' });
+  compliance.push({ name: 'CPARS Evaluation', status: v > 350000 ? 'req' : 'na', note: v > 350000 ? 'Required > SAT' : 'Below SAT' });
+  compliance.push({ name: 'Congressional Notification', status: v > 4500000 ? 'req' : 'na', note: v > 4500000 ? 'Required > $4.5M — email grantfax@hhs.gov' : 'Below $4.5M' });
+  compliance.push({ name: 'Certified Cost/Pricing Data (TINA)', status: v > 2500000 ? 'req' : 'na', note: v > 2500000 ? 'Required > $2.5M (with exceptions)' : 'Below $2.5M' });
+  if (state.isIT) {
+    compliance.push({ name: 'Section 508 ICT Accessibility', status: 'req', note: 'Required for IT acquisitions' });
+    compliance.push({ name: 'IT Security & Privacy Language', status: 'req', note: 'HHSAM Part 339.105' });
+  }
+  if (state.isHS) {
+    compliance.push({ name: 'Human Subjects Protection (45 CFR 46)', status: 'req', note: 'HHSAR 370.3' });
+  }
+  compliance.push({ name: 'Severable Services ≤1yr/period', status: state.isServices ? 'req' : 'na', note: 'FAR 37.106(b), 32.703-3(b)' });
+
+  // --- Competition ---
+  let competition = '';
+  if (m === 'micro') competition = 'Single quote acceptable. Government purchase card preferred.';
+  else if (m === 'sap') competition = v > 25000 ? 'Maximum practicable competition. Minimum 3 sources if practicable. Synopsis on SAM.gov.' : 'Reasonable competition. Minimum 3 sources if practicable.';
+  else if (m === 'negotiated') competition = 'Full and open competition required (FAR Part 6). Synopsis, evaluation factors, source selection.';
+  else if (m === 'fss') competition = v > 350000 ? 'eBuy posting OR RFQ to enough contractors for 3 quotes. Price reduction attempt required.' : 'Consider quotes from at least 3 schedule contractors.';
+  else if (m === 'bpa-est') competition = v > 350000 ? 'eBuy posting to ALL schedule holders OR 3-quote effort. Document award decision.' : 'Seek quotes from at least 3 schedule holders.';
+  else if (m === 'bpa-call') competition = v > 350000 ? 'RFQ to all BPA holders OR limited sources justification. Fair opportunity required.' : 'Fair opportunity to all BPA holders > MPT, or justification.';
+  else if (m === 'idiq') competition = 'Full and open competition for parent contract. Multiple award preference unless exception (FAR 16.504).';
+  else if (m === 'idiq-order') {
+    if (v > 7500000) competition = 'Fair opportunity to all IDIQ holders. Clear requirements, evaluation factors with relative importance, post-award notifications/debriefings.';
+    else if (v > 350000) competition = 'Fair opportunity. Provide fair notice, issue solicitation/RFQ, document award basis.';
+    else competition = 'Fair opportunity. May place without further solicitation if fair consideration documented.';
+  }
+  else if (m === 'sole') competition = 'Exception to competition — FAR 6.302 authority required. Full J&A with CO certification.';
+
+  // Enhanced IDIQ
+  if ((m === 'idiq-order') && v > 6000000) {
+    competition += ' ENHANCED: Detailed evaluation factors + relative importance + post-award notification + debriefing (> $6M).';
+  }
+
+  // --- PMR Checklist ---
+  let pmr = 'HHS PMR Common Requirements';
+  if (m === 'sap' || (m === 'negotiated' && v <= 350000)) pmr = 'HHS PMR SAP Checklist';
+  else if (m === 'negotiated') pmr = 'HHS PMR Negotiated + Common Requirements';
+  else if (m === 'fss') pmr = 'HHS PMR FSS Order Checklist';
+  else if (m === 'bpa-est' || m === 'bpa-call') pmr = 'HHS PMR BPA Checklist';
+  else if (m === 'idiq' || m === 'idiq-order') pmr = 'HHS PMR IDIQ Checklist';
+  else if (m === 'sole') pmr = 'HHS PMR SAP or Negotiated + J&A Requirements';
+  else if (m === 'micro') pmr = 'Micro-Purchase — Minimal file documentation';
+
+  // --- Timeline ---
+  let timeMin = 1, timeMax = 5; // weeks
+  if (m === 'micro') { timeMin = 0; timeMax = 1; }
+  else if (m === 'sap') { timeMin = 2; timeMax = 6; }
+  else if (m === 'negotiated') { timeMin = 12; timeMax = 36; }
+  else if (m === 'fss') { timeMin = 2; timeMax = 8; }
+  else if (m === 'bpa-est') { timeMin = 4; timeMax = 12; }
+  else if (m === 'bpa-call') { timeMin = 1; timeMax = 4; }
+  else if (m === 'idiq') { timeMin = 16; timeMax = 52; }
+  else if (m === 'idiq-order') { timeMin = 2; timeMax = 12; }
+  else if (m === 'sole') { timeMin = 4; timeMax = 16; }
+
+  // Approval escalation adds time
+  if (v > 90000000) { timeMin += 6; timeMax += 8; }
+  else if (v > 50000000) { timeMin += 4; timeMax += 6; }
+  else if (v > 20000000) { timeMin += 2; timeMax += 4; }
+
+  // --- Risk ---
+  const riskPct = tObj.risk;
+
+  // --- Fee caps ---
+  const feeCaps = [];
+  if (isCR) {
+    if (state.isRD) feeCaps.push('R&D: ≤15% of est. cost');
+    feeCaps.push('Other CPFF: ≤10% of est. cost');
+    feeCaps.push('A-E public works: ≤6% of est. construction');
+    feeCaps.push('Cost-plus-%-of-cost: PROHIBITED');
+  }
+
+  return { docs, triggered, notTriggered, compliance, competition, pmr, timeMin, timeMax, riskPct, warnings: warnings.filter(Boolean), errors: errors.filter(Boolean), feeCaps, isCR, isLOE, isFP };
+}
+
+function apApproval(v) {
+  if (v > 150000000) return 'HHS/OAP approval required (> $150M)';
+  if (v > 50000000) return 'HCA-NIH approval required ($50M–$150M)';
+  if (v > 20000000) return 'OA Director approval by HCA ($20M–$50M)';
+  return 'One level above CO (SAT–$20M)';
+}
+
+function jaApproval(v) {
+  if (v > 90000000) return 'SPE through HHS/OAP (> $90M) — FAR 6.304(a)(4)';
+  if (v > 20000000) return 'HCA + additional reviews ($20M–$90M) — FAR 6.304(a)(3)';
+  if (v > 900000) return 'HCA + NIH Competition Advocate ($900K–$20M) — FAR 6.304(a)(2)';
+  return 'CO approval (≤ $900K) — FAR 6.304(a)(1)';
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function updateAll() {
+  renderPreview();
+  updatePrompt();
+}
+
+function renderPreview() {
+  const el = document.getElementById('preview');
+  const r = getRequirements();
+  const v = state.dollarValue;
+  const mObj = METHODS.find(x=>x.id===state.method);
+  const tObj = TYPES.find(x=>x.id===state.type);
+
+  let html = '';
+
+  // Summary banner
+  html += `<div class="summary-banner">
+    <div class="summary-item"><div class="val">${fmtDollar(v)}</div><div class="lbl">Estimated Value</div></div>
+    <div class="summary-item"><div class="val" style="font-size:14px">${mObj.label}</div><div class="lbl">FAR ${mObj.far}</div></div>
+    <div class="summary-item"><div class="val" style="font-size:14px">${tObj.label.split('(')[0].trim()}</div><div class="lbl">${r.isCR?'Cost-Reimbursement':r.isLOE?'Level-of-Effort':'Fixed-Price'}</div></div>
+  </div>`;
+
+  // Errors
+  r.errors.forEach(e => {
+    html += `<div class="error-box"><span class="wi">&#x26D4;</span><div>${e}</div></div>`;
+  });
+  // Warnings
+  r.warnings.forEach(w => {
+    html += `<div class="warning-box"><span class="wi">&#x26A0;</span><div>${w}</div></div>`;
+  });
+
+  // Two-col top section
+  html += '<div class="two-col">';
+
+  // Risk allocation
+  html += `<div class="card">
+    <div class="card-header"><span class="icon">&#x2696;</span> Risk Allocation</div>
+    <div class="card-body">
+      <div class="risk-bar-container">
+        <div class="risk-labels"><span>Government Risk</span><span>Contractor Risk</span></div>
+        <div class="risk-bar">
+          <div class="government" style="width:${100-r.riskPct}%">${100-r.riskPct}%</div>
+          <div class="contractor" style="width:${r.riskPct}%">${r.riskPct}%</div>
+        </div>
+      </div>
+      ${r.feeCaps.length ? '<div class="section-label">Fee Caps</div><div class="fee-caps">'+r.feeCaps.map(f=>`<div class="fee-cap-tag">${f}</div>`).join('')+'</div>' : ''}
+    </div>
+  </div>`;
+
+  // Timeline & approvals
+  html += `<div class="card">
+    <div class="card-header"><span class="icon">&#x23F1;</span> Timeline & Approvals</div>
+    <div class="card-body">
+      <div class="timeline-bar">
+        <div class="timeline-fill" style="width:${Math.min(100,r.timeMax/52*100)}%; background: linear-gradient(90deg, var(--green), ${r.timeMax>20?'var(--red)':r.timeMax>10?'var(--orange)':'var(--yellow)'});">
+          ${r.timeMin}–${r.timeMax} weeks
+        </div>
+      </div>
+      <div class="section-label">AP Approval</div>
+      <div style="font-size:12px; margin-bottom:8px;">${v > 350000 ? apApproval(v) : 'Not required below SAT'}</div>
+      <div class="section-label">J&A Approval (if sole source)</div>
+      <div style="font-size:12px;">${jaApproval(v)}</div>
+    </div>
+  </div>`;
+  html += '</div>'; // end two-col
+
+  // Approval chain visual
+  html += `<div class="card">
+    <div class="card-header"><span class="icon">&#x1F3DB;</span> Approval Authority Chain</div>
+    <div class="card-body">
+      <div class="section-label">Acquisition Plan</div>
+      <div class="approval-chain">
+        ${approvalChainHTML('ap', v)}
+      </div>
+      <div class="section-label" style="margin-top:12px">J&A (Sole Source)</div>
+      <div class="approval-chain">
+        ${approvalChainHTML('ja', v)}
+      </div>
+      <div class="section-label" style="margin-top:12px">Acquisition Strategy</div>
+      <div class="approval-chain">
+        ${approvalChainHTML('as', v)}
+      </div>
+    </div>
+  </div>`;
+
+  // Required Documents
+  html += `<div class="card">
+    <div class="card-header"><span class="icon">&#x1F4CB;</span> Required Documents (${r.docs.filter(d=>d.required).length} of ${r.docs.length})</div>
+    <div class="card-body">
+      <ul class="checklist">
+        ${r.docs.map(d => `
+          <li>
+            <div class="ck ${d.required?'ck-req':'ck-opt'}">${d.required?'&#x2713;':'—'}</div>
+            <div>
+              <div>${d.name}</div>
+              <div class="doc-note">${d.note}</div>
+            </div>
+          </li>
+        `).join('')}
+      </ul>
+    </div>
+  </div>`;
+
+  // Thresholds triggered
+  html += `<div class="card">
+    <div class="card-header"><span class="icon">&#x1F4CA;</span> Dollar Thresholds</div>
+    <div class="card-body">
+      <div class="threshold-tags">
+        ${THRESHOLDS.map(t => `<div class="ttag ${v>=t.value?'ttag-hit':'ttag-miss'}">${v>=t.value?'&#x2713;':'&#x2717;'} ${t.label}</div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+
+  // Two-col: Competition + Compliance
+  html += '<div class="two-col">';
+
+  // Competition
+  html += `<div class="card">
+    <div class="card-header"><span class="icon">&#x1F3AF;</span> Competition Requirements</div>
+    <div class="card-body"><div style="font-size:12px; line-height:1.6;">${r.competition}</div></div>
+  </div>`;
+
+  // Compliance
+  html += `<div class="card">
+    <div class="card-header"><span class="icon">&#x2611;</span> Compliance Clauses</div>
+    <div class="card-body">
+      <div class="compliance-list">
+        ${r.compliance.map(c => `
+          <div class="compliance-item">
+            <div class="compliance-dot ${c.status==='req'?'dot-req':c.status==='cond'?'dot-cond':'dot-na'}"></div>
+            <div>
+              <div>${c.name}</div>
+              <div class="doc-note">${c.note}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </div>`;
+
+  html += '</div>'; // end two-col
+
+  // PMR Checklist
+  html += `<div class="card">
+    <div class="card-header"><span class="icon">&#x1F4D6;</span> Applicable PMR Checklist</div>
+    <div class="card-body"><div class="pmr-ref">${r.pmr}</div></div>
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+function approvalChainHTML(type, v) {
+  const chains = {
+    ap: [
+      { label: 'CO', min: 0, max: 350000 },
+      { label: 'One above CO', min: 350000, max: 20000000 },
+      { label: 'OA Director / HCA', min: 20000000, max: 50000000 },
+      { label: 'HCA-NIH', min: 50000000, max: 150000000 },
+      { label: 'HHS/OAP', min: 150000000, max: Infinity },
+    ],
+    ja: [
+      { label: 'CO', min: 0, max: 900000 },
+      { label: 'HCA + Competition Advocate', min: 900000, max: 20000000 },
+      { label: 'HCA + Reviews', min: 20000000, max: 90000000 },
+      { label: 'SPE / HHS/OAP', min: 90000000, max: Infinity },
+    ],
+    as: [
+      { label: 'OA Director / HCA', min: 0, max: 50000000 },
+      { label: 'HCA-NIH', min: 50000000, max: 100000000 },
+      { label: 'DDM-NIH', min: 100000000, max: 150000000 },
+      { label: 'HHS/OAP', min: 150000000, max: Infinity },
+    ]
+  };
+
+  const chain = chains[type];
+  let activeIdx = 0;
+  for (let i = 0; i < chain.length; i++) {
+    if (v >= chain[i].min) activeIdx = i;
+  }
+
+  return chain.map((node, i) => {
+    const cls = i === activeIdx ? 'highlight' : i < activeIdx ? 'active' : '';
+    const arrow = i < chain.length - 1 ? '<span class="approval-arrow">&#x2192;</span>' : '';
+    return `<div class="approval-node ${cls}">${node.label}</div>${arrow}`;
+  }).join('');
+}
+
+function fmtDollar(v) {
+  if (v >= 1000000000) return '$' + (v/1000000000).toFixed(1) + 'B';
+  if (v >= 1000000) return '$' + (v/1000000).toFixed(1) + 'M';
+  if (v >= 1000) return '$' + (v/1000).toFixed(0) + 'K';
+  return '$' + v.toLocaleString();
+}
+
+// ============================================================
+// PROMPT OUTPUT
+// ============================================================
+function updatePrompt() {
+  const r = getRequirements();
+  const v = state.dollarValue;
+  const mObj = METHODS.find(x=>x.id===state.method);
+  const tObj = TYPES.find(x=>x.id===state.type);
+  const reqDocs = r.docs.filter(d=>d.required).map(d=>d.name);
+  const reqCompliance = r.compliance.filter(c=>c.status==='req').map(c=>c.name);
+
+  const parts = [];
+  parts.push(`Acquisition: ${mObj.label} (FAR ${mObj.far}), ${tObj.label}, estimated ${fmtDollar(v)}.`);
+
+  const flags = [];
+  if (state.isIT) flags.push('IT requirement');
+  if (state.isSB) flags.push('small business awardee');
+  if (state.isRD) flags.push('R&D effort');
+  if (state.isHS) flags.push('human subjects');
+  if (state.isServices) flags.push('services');
+  if (flags.length) parts.push('Factors: ' + flags.join(', ') + '.');
+
+  parts.push(`\nRequired documents (${reqDocs.length}): ${reqDocs.join(', ')}.`);
+  parts.push(`\nApproval: AP — ${v>350000?apApproval(v):'Not required below SAT'}. J&A — ${jaApproval(v)}.`);
+  parts.push(`\nCompetition: ${r.competition}`);
+  parts.push(`\nCompliance: ${reqCompliance.join(', ')}.`);
+  parts.push(`\nPMR Checklist: ${r.pmr}.`);
+  parts.push(`\nTimeline estimate: ${r.timeMin}–${r.timeMax} weeks.`);
+
+  if (r.warnings.length) {
+    parts.push(`\nWarnings: ${r.warnings.join(' ')}`);
+  }
+
+  document.getElementById('prompt-output').textContent = parts.join('\n');
+}
+
+// ============================================================
+// COPY
+// ============================================================
+function copyPrompt() {
+  const text = document.getElementById('prompt-output').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
+// ============================================================
+// TAB SWITCHING
+// ============================================================
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', (tab==='explorer' && i===0) || (tab==='grid' && i===1));
+  });
+  document.getElementById('tab-explorer').classList.toggle('active', tab==='explorer');
+  document.getElementById('tab-grid').classList.toggle('active', tab==='grid');
+  if (tab === 'grid') renderGrid();
+}
+
+// Navigate from grid cell to explorer detail
+function gridToExplorer(methodId, typeId) {
+  state.method = methodId;
+  state.type = typeId;
+  renderMethodCards();
+  renderTypeCards();
+  updateAll();
+  switchTab('explorer');
+}
+
+// ============================================================
+// GRID STATE (shared with main state for flags/dollar)
+// ============================================================
+const gridState = {
+  isIT: false,
+  isSB: false,
+  isRD: false,
+  isHS: false,
+  isServices: true,
+  dollarValue: 100000,
+};
+
+function onGridSlider(el) {
+  const num = sliderToDollar(parseFloat(el.value));
+  gridState.dollarValue = num;
+  document.getElementById('grid-dollar-display').textContent = fmtDollar(num);
+  renderGrid();
+}
+
+function gridToggle(key) {
+  gridState[key] = !gridState[key];
+  const mapping = {isIT:'it',isSB:'sb',isRD:'rd',isServices:'svc'};
+  const el = document.getElementById('grid-toggle-' + mapping[key]);
+  if (el) el.classList.toggle('on', gridState[key]);
+  renderGrid();
+}
+
+// ============================================================
+// GRID CELL COMPUTATION
+// ============================================================
+function getCellData(methodId, typeId) {
+  // Temporarily override state for computation
+  const saved = { ...state };
+  state.method = methodId;
+  state.type = typeId;
+  state.dollarValue = gridState.dollarValue;
+  state.isIT = gridState.isIT;
+  state.isSB = gridState.isSB;
+  state.isRD = gridState.isRD;
+  state.isHS = gridState.isHS;
+  state.isServices = gridState.isServices;
+
+  // Check validity
+  const invalid = isTypeDisabled(typeId);
+  let result = null;
+  if (!invalid) {
+    result = getRequirements();
+  }
+
+  // Restore state
+  Object.assign(state, saved);
+
+  if (invalid) return { invalid: true };
+
+  const reqDocs = result.docs.filter(d => d.required).length;
+  const totalDocs = result.docs.length;
+  const tObj = TYPES.find(x => x.id === typeId);
+
+  return {
+    invalid: false,
+    reqDocs,
+    totalDocs,
+    riskPct: tObj.risk,
+    warnings: result.warnings.length,
+    errors: result.errors.length,
+    hasJA: result.docs.some(d => d.name.includes('J&A') && d.required),
+    hasDF: result.docs.some(d => d.name.includes('D&F') && d.required),
+    timeMin: result.timeMin,
+    timeMax: result.timeMax,
+    isCR: result.isCR,
+    isLOE: result.isLOE,
+    competition: result.competition,
+    pmr: result.pmr,
+    docs: result.docs,
+    compliance: result.compliance,
+    allWarnings: result.warnings,
+  };
+}
+
+function cellColor(reqDocs) {
+  if (reqDocs <= 3) return { bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.3)', text: '#22c55e' };
+  if (reqDocs <= 6) return { bg: 'rgba(234,179,8,0.12)', border: 'rgba(234,179,8,0.3)', text: '#eab308' };
+  if (reqDocs <= 9) return { bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.3)', text: '#f97316' };
+  return { bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.3)', text: '#ef4444' };
+}
+
+// ============================================================
+// GRID RENDER
+// ============================================================
+function renderGrid() {
+  const table = document.getElementById('matrix-table');
+  let html = '';
+
+  // Header row
+  html += '<thead><tr>';
+  html += '<th class="row-header">Method \\ Type</th>';
+  TYPES.forEach(t => {
+    const shortLabel = t.id === 'fp-epa' ? 'FP-EPA' :
+                       t.id === 'fpi' ? 'FPI' :
+                       t.id === 'cpff' ? 'CPFF' :
+                       t.id === 'cpif' ? 'CPIF' :
+                       t.id === 'cpaf' ? 'CPAF' :
+                       t.id === 'tm' ? 'T&M' :
+                       t.id === 'lh' ? 'LH' : 'FFP';
+    const cat = t.category === 'fp' ? 'Fixed-Price' : t.category === 'cr' ? 'Cost-Reimb' : 'Level-of-Effort';
+    html += `<th class="col-header">${shortLabel}<span class="th-sub">${cat}</span></th>`;
+  });
+  html += '</tr></thead>';
+
+  // Body rows
+  html += '<tbody>';
+  METHODS.forEach(m => {
+    html += '<tr>';
+    html += `<th class="row-header">${m.label}<span class="th-sub">FAR ${m.far}</span></th>`;
+    TYPES.forEach(t => {
+      const data = getCellData(m.id, t.id);
+      if (data.invalid) {
+        html += `<td class="matrix-cell invalid"><div class="cell-na">N/A</div></td>`;
+      } else {
+        const clr = cellColor(data.reqDocs);
+        const badges = [];
+        if (data.errors > 0) badges.push('<span class="cell-badge cb-err">ERR</span>');
+        if (data.hasJA) badges.push('<span class="cell-badge cb-ja">J&A</span>');
+        if (data.hasDF) badges.push('<span class="cell-badge cb-df">D&F</span>');
+        if (data.warnings > 0 && data.errors === 0) badges.push('<span class="cell-badge cb-warn">!</span>');
+
+        html += `<td class="matrix-cell" style="background:${clr.bg};border-color:${clr.border};"
+          onmouseenter="showPopover(event,'${m.id}','${t.id}')"
+          onmouseleave="hidePopover()"
+          onclick="gridToExplorer('${m.id}','${t.id}')">
+          <div class="cell-docs" style="color:${clr.text}">${data.reqDocs}</div>
+          <div class="cell-docs-label" style="color:${clr.text}">docs</div>
+          <div class="cell-risk-bar">
+            <div class="crb-gov" style="width:${100-data.riskPct}%"></div>
+            <div class="crb-con" style="width:${data.riskPct}%"></div>
+          </div>
+          <div class="cell-badges">${badges.join('')}</div>
+        </td>`;
+      }
+    });
+    html += '</tr>';
+  });
+  html += '</tbody>';
+
+  table.innerHTML = html;
+  updateGridPrompt();
+}
+
+// ============================================================
+// GRID POPOVER
+// ============================================================
+let popoverTimeout = null;
+
+function showPopover(event, methodId, typeId) {
+  clearTimeout(popoverTimeout);
+  const data = getCellData(methodId, typeId);
+  if (data.invalid) return;
+
+  const mObj = METHODS.find(x => x.id === methodId);
+  const tObj = TYPES.find(x => x.id === typeId);
+  const pop = document.getElementById('cell-popover');
+
+  let html = '';
+  html += `<div class="popover-title">${mObj.label} + ${tObj.label}</div>`;
+  html += `<div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">
+    ${fmtDollar(gridState.dollarValue)} &mdash; ${data.timeMin}-${data.timeMax} wk &mdash;
+    Risk: Gov ${100-data.riskPct}% / Con ${data.riskPct}%
+  </div>`;
+
+  // Docs
+  html += '<div class="popover-section"><div class="popover-section-title">Required Documents</div>';
+  data.docs.forEach(d => {
+    html += `<div class="popover-doc">
+      <div class="pd-dot ${d.required ? 'pd-req' : 'pd-opt'}"></div>
+      <span${d.required ? '' : ' style="opacity:0.5"'}>${d.name}</span>
+    </div>`;
+  });
+  html += '</div>';
+
+  // Competition
+  html += `<div class="popover-section"><div class="popover-section-title">Competition</div>
+    <div style="font-size:11px; line-height:1.5;">${data.competition}</div></div>`;
+
+  // Warnings
+  if (data.allWarnings.length) {
+    html += '<div class="popover-section"><div class="popover-section-title">Warnings</div>';
+    data.allWarnings.forEach(w => {
+      html += `<div class="popover-warning">${w}</div>`;
+    });
+    html += '</div>';
+  }
+
+  html += `<button class="popover-btn" onclick="gridToExplorer('${methodId}','${typeId}')">Open in Detail Explorer</button>`;
+
+  pop.innerHTML = html;
+
+  // Position near mouse
+  const rect = event.target.closest('.matrix-cell').getBoundingClientRect();
+  let left = rect.right + 8;
+  let top = rect.top;
+  // Keep on screen
+  if (left + 330 > window.innerWidth) left = rect.left - 330;
+  if (top + 420 > window.innerHeight) top = window.innerHeight - 430;
+  if (top < 0) top = 8;
+
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+  pop.classList.add('visible');
+}
+
+function hidePopover() {
+  popoverTimeout = setTimeout(() => {
+    document.getElementById('cell-popover').classList.remove('visible');
+  }, 200);
+}
+
+// ============================================================
+// GRID PROMPT
+// ============================================================
+function updateGridPrompt() {
+  const v = gridState.dollarValue;
+  const flags = [];
+  if (gridState.isIT) flags.push('IT');
+  if (gridState.isSB) flags.push('Small Business');
+  if (gridState.isRD) flags.push('R&D');
+  if (gridState.isServices) flags.push('Services');
+
+  // Summarize the grid
+  let validCount = 0, invalidCount = 0;
+  let simplest = null, heaviest = null;
+  METHODS.forEach(m => {
+    TYPES.forEach(t => {
+      const data = getCellData(m.id, t.id);
+      if (data.invalid) { invalidCount++; return; }
+      validCount++;
+      if (!simplest || data.reqDocs < simplest.docs) simplest = { method: m.label, type: t.label, docs: data.reqDocs, time: `${data.timeMin}-${data.timeMax}wk` };
+      if (!heaviest || data.reqDocs > heaviest.docs) heaviest = { method: m.label, type: t.label, docs: data.reqDocs, time: `${data.timeMin}-${data.timeMax}wk` };
+    });
+  });
+
+  const parts = [];
+  parts.push(`Contract Requirements Matrix at ${fmtDollar(v)}. Factors: ${flags.join(', ') || 'none'}.`);
+  parts.push(`${validCount} valid combinations, ${invalidCount} prohibited.`);
+  if (simplest) parts.push(`Simplest: ${simplest.method} + ${simplest.type} (${simplest.docs} docs, ${simplest.time}).`);
+  if (heaviest) parts.push(`Most complex: ${heaviest.method} + ${heaviest.type} (${heaviest.docs} docs, ${heaviest.time}).`);
+
+  document.getElementById('grid-prompt-output').textContent = parts.join('\n');
+}
+
+function copyGridPrompt() {
+  const text = document.getElementById('grid-prompt-output').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('grid-copy-btn');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
+// ============================================================
+// BOOT
+// ============================================================
+init();
+</script>
+</body>
+</html>

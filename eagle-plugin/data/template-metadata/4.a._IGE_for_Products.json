@@ -1,0 +1,34 @@
+{
+  "filename": "4.a. IGE for Products.xlsx",
+  "format": "xlsx",
+  "category": "igce",
+  "variant": "products",
+  "sections": [
+    {
+      "number": "1",
+      "title": "Sheet1",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "Sheet2",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "3",
+      "title": "Sheet3",
+      "has_table": true,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 3,
+  "sheet_names": [
+    "Sheet1",
+    "Sheet2",
+    "Sheet3"
+  ],
+  "parse_error": null
+}

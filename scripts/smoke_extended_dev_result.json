@@ -1,0 +1,171 @@
+{
+  "scenario": "research_source_transparency",
+  "started_at": "2026-05-01T19:13:11.974633+00:00",
+  "finished_at": "2026-05-01T19:16:10.976403+00:00",
+  "backend_url": "http://internal-EagleC-Backe-TxWVQRPzHFsO-1219239040.us-east-1.elb.amazonaws.com",
+  "frontend_url": "http://internal-EagleC-Front-tEErFwOSQs71-1457581412.us-east-1.elb.amazonaws.com",
+  "git_sha": "54abbfef85de",
+  "checks": [
+    {
+      "name": "backend_2xx",
+      "passed": true,
+      "detail": "status=200, elapsed=106.2s"
+    },
+    {
+      "name": "backend_sse_events_parsed",
+      "passed": true,
+      "detail": "534 JSON events from 1068 raw lines"
+    },
+    {
+      "name": "research_tool_invoked",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "research_lane_breakdown_populated",
+      "passed": true,
+      "detail": "lane_breakdown={'path': 6, 'semantic': 3, 'metadata': 15, 'metadata-broad': 2}"
+    },
+    {
+      "name": "research_surfaces_runner_ups",
+      "passed": true,
+      "detail": "total_surfaced=26 (min=4)"
+    },
+    {
+      "name": "research_sources_array_present",
+      "passed": true,
+      "detail": "len(sources)=26"
+    },
+    {
+      "name": "research_sources_rows_well_formed",
+      "passed": true,
+      "detail": "26/26 rows carry ['title', 'lane', 'score_pct', 'read']"
+    },
+    {
+      "name": "frontend_playwright_available",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "frontend_loads",
+      "passed": true,
+      "detail": "EAGLE - NCI Acquisition Assistant"
+    },
+    {
+      "name": "frontend_signin",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "chat_textarea_present",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "stream_completed",
+      "passed": true,
+      "detail": "textarea re-enabled (stream complete)"
+    },
+    {
+      "name": "research_chip_clicked",
+      "passed": true,
+      "detail": "Research chip located + clicked"
+    },
+    {
+      "name": "kb_lane_diversity",
+      "passed": true,
+      "detail": "distinct lanes in sources: ['broadened', 'checklist', 'far', 'metadata', 'path', 'semantic'] (count=6)"
+    },
+    {
+      "name": "thinking_chip_present",
+      "passed": true,
+      "detail": "no thinking chips rendered (EAGLE_THINKING_ENABLED likely false)"
+    }
+  ],
+  "screenshots": [
+    {
+      "name": "01-empty",
+      "path": "/tmp/post_deploy_smoke_shots/research_source_transparency/20260501-191311/01-empty.png",
+      "s3_uri": "s3://eagle-eval-artifacts-695681773636-dev/smoke/research_source_transparency/20260501-191311/01-empty.png"
+    },
+    {
+      "name": "01b-post-signin",
+      "path": "/tmp/post_deploy_smoke_shots/research_source_transparency/20260501-191311/01b-post-signin.png",
+      "s3_uri": "s3://eagle-eval-artifacts-695681773636-dev/smoke/research_source_transparency/20260501-191311/01b-post-signin.png"
+    },
+    {
+      "name": "02-typed",
+      "path": "/tmp/post_deploy_smoke_shots/research_source_transparency/20260501-191311/02-typed.png",
+      "s3_uri": "s3://eagle-eval-artifacts-695681773636-dev/smoke/research_source_transparency/20260501-191311/02-typed.png"
+    },
+    {
+      "name": "03-streaming",
+      "path": "/tmp/post_deploy_smoke_shots/research_source_transparency/20260501-191311/03-streaming.png",
+      "s3_uri": "s3://eagle-eval-artifacts-695681773636-dev/smoke/research_source_transparency/20260501-191311/03-streaming.png"
+    },
+    {
+      "name": "04-complete",
+      "path": "/tmp/post_deploy_smoke_shots/research_source_transparency/20260501-191311/04-complete.png",
+      "s3_uri": "s3://eagle-eval-artifacts-695681773636-dev/smoke/research_source_transparency/20260501-191311/04-complete.png"
+    },
+    {
+      "name": "05-modal-research",
+      "path": "/tmp/post_deploy_smoke_shots/research_source_transparency/20260501-191311/05-modal-research.png",
+      "s3_uri": "s3://eagle-eval-artifacts-695681773636-dev/smoke/research_source_transparency/20260501-191311/05-modal-research.png"
+    },
+    {
+      "name": "06-sources-table",
+      "path": "/tmp/post_deploy_smoke_shots/research_source_transparency/20260501-191311/06-sources-table.png",
+      "s3_uri": "s3://eagle-eval-artifacts-695681773636-dev/smoke/research_source_transparency/20260501-191311/06-sources-table.png"
+    }
+  ],
+  "s3_prefix": "s3://eagle-eval-artifacts-695681773636-dev/smoke/research_source_transparency/20260501-191311/",
+  "backend_response_status": 200,
+  "research_packet_summary": {
+    "fetched_count": 10,
+    "kb_results_count": 16,
+    "lane_breakdown": {
+      "path": 6,
+      "semantic": 3,
+      "metadata": 15,
+      "metadata-broad": 2
+    },
+    "total_surfaced": 26,
+    "sources_len": 26,
+    "agent_guidance_seen": [
+      "legal_counsel"
+    ],
+    "tools_called": [
+      "research",
+      "research",
+      "agent_route",
+      "agent_route"
+    ],
+    "filtered_out_count": null,
+    "first_3_sources": [
+      {
+        "title": "Limited Source Justification (LSJ) Template for GSA Federal Supply Schedule BPA ",
+        "lane": "path",
+        "score_pct": 22,
+        "read": true
+      },
+      {
+        "title": "GAO Decision B-413729: Threat Management Group, LLC - Out-of-Scope Task Order Vi",
+        "lane": "path",
+        "score_pct": 22,
+        "read": true
+      },
+      {
+        "title": "GAO Decision B-410074.3; B-410074.4 - PB&A, Inc.; Environmental Synectics, Inc.-",
+        "lane": "path",
+        "score_pct": 22,
+        "read": true
+      }
+    ],
+    "semantic_hit_count": 6,
+    "semantic_fetched_count": 7,
+    "duration_seconds": 72.33
+  },
+  "error": "",
+  "passed": true
+}

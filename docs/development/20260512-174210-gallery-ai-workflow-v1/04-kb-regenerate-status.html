@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>20260429-200000-report-kb-regenerate-status-v2</title>
+<style>
+  body { font: 11pt/1.5 'Segoe UI', system-ui, -apple-system, sans-serif; color: #1f2328; max-width: 760px; margin: 36px auto; padding: 0 24px; }
+  h1 { font-size: 22pt; border-bottom: 2px solid #d0d7de; padding-bottom: 8px; margin-top: 0; }
+  h2 { font-size: 15pt; border-bottom: 1px solid #d0d7de; padding-bottom: 4px; margin-top: 28px; }
+  h3 { font-size: 13pt; margin-top: 20px; }
+  p, li { font-size: 11pt; }
+  code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: 10pt; font-family: Consolas, 'Courier New', monospace; }
+  pre { background: #f6f8fa; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 9.5pt; }
+  pre code { background: transparent; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 10pt; }
+  th, td { border: 1px solid #d0d7de; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; font-weight: 600; }
+  blockquote { border-left: 3px solid #fdb022; background: #fff8e1; color: #44391b; padding: 10px 14px; margin-left: 0; border-radius: 4px; }
+  blockquote p { margin: 0; }
+  a { color: #0969da; text-decoration: none; }
+  hr { border: 0; border-top: 1px solid #d0d7de; margin: 20px 0; }
+</style></head><body><h1 id="memo-where-we-stand-on-kb-regenerate">Memo: Where We Stand on <code>/kb-regenerate</code></h1>
+<p><strong>Date:</strong> 2026-04-29
+<strong>Author:</strong> Black (with Claude)
+<strong>Audience:</strong> EAGLE team
+<strong>TL;DR:</strong> The <code>/kb-regenerate</code> command exists, works, and is the only thing keeping our KB metadata, checklists, templates, and compliance matrix from silently drifting. It is <strong>not wired into CI</strong> — it only runs when a human invokes the slash command in Claude Code. There is also a bigger problem behind it: KB content authority is split across three buckets (<code>rh-eagle-files</code>, <code>eagle-documents-…/eagle-knowledge-base/</code>, and the S3 Vectors index <code>rh-eagle/eagle-kb-approved</code>), with a measured ~84-doc drift between the source and the dest bucket and <strong>no production runtime code that writes vectors</strong>. We need to (a) close the immediate drift, (b) extend <code>/kb-regenerate</code> to validate the vector-side of that pipeline, and (c) decide whether vectors become the canonical retrieval lane.</p>
+<blockquote>
+<p><strong>Update — same day, 2026-04-29 PM (post-write):</strong> Several memo claims have already been overtaken by work in progress on <code>fix/semantic-lane-iam-titan-embed</code>. (1) The semantic lane wasn't just stale — it was returning <code>[]</code> on every call due to a missing <code>bedrock:InvokeModel</code> grant on <code>amazon.titan-embed-text-v2</code>; fixed in commit <code>f41847a</code> (15:06 EDT). (2) A new env-scoped vectors bucket name has been chosen — <code>eagle-kb-vectors-{account}-{env}</code> — wired into <code>environments.ts</code> and the ECS task env (<code>S3_VECTORS_BUCKET</code> / <code>S3_VECTORS_INDEX</code>); bucket is created <strong>manually via AWS CLI</strong> because S3 Vectors lacks CDK L2 constructs. (3) <code>storage-stack.ts</code> now adds an explicit <code>DenyKnowledgeBaseWrites</code> IAM statement — runtime agent can never <code>Put</code>/<code>Delete</code> under <code>eagle-knowledge-base/*</code>, codifying KB ingestion as Lambda + operator-script only. (4) <code>scripts/migrate-knowledge-base.py</code> is moving to <code>scripts/archive/migrate-knowledge-base.py</code> (not lost). (5) Separate retrieval-quality fix in flight: <code>_FORCED_AGENT_ROUTES</code> + keyword expansion in <code>strands_agentic_service.py</code> to address the Q4/Q5 Part-15 misroute on SBIR / IDIQ-Part-16 queries. Treat the open architectural decisions below as partially resolved — sections #1 (canonical bucket) and #3 (runtime never writes) are decided.</p>
+</blockquote>
+<hr />
+<h2 id="what-it-is">What it is</h2>
+<p>A Claude Code slash command at <code>.claude/commands/kb-regenerate.md</code>, introduced in commit <strong>a522b2d</strong> (2026-04-03) and last updated in <strong>eff6b45</strong> (2026-04-27, Alvee's KB v3 path fix). It runs up to five phases:</p>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Purpose</th>
+<th>What it touches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Orphan purge</td>
+<td>Scan <code>eagle-document-metadata-dev</code>, head-check each <code>s3_key</code>, delete entries whose S3 object is gone</td>
+<td>DynamoDB</td>
+</tr>
+<tr>
+<td>2. Checklist + template validation</td>
+<td><code>head_object</code> every checklist (9) and template (11) the backend hardcodes against</td>
+<td>S3 only — read</td>
+</tr>
+<tr>
+<td>3. Compliance matrix deep analysis</td>
+<td><code>scripts/kb_matrix_analysis.py</code> — three layers: matrix.json internal consistency, backend <code>compliance_matrix.py</code> sync, frontend <code>matrix-data.ts</code> sync (Ctrl+M modal)</td>
+<td>Source files only — read</td>
+</tr>
+<tr>
+<td>4. Metadata regeneration</td>
+<td>Optional, behind <code>--regenerate &lt;key&gt;</code> or <code>--regenerate-all</code>. Invokes <code>eagle-metadata-extractor-dev</code> Lambda asynchronously per S3 object</td>
+<td>Lambda + DynamoDB</td>
+</tr>
+<tr>
+<td>5. Summary report</td>
+<td>Consolidated PASS/FAIL table</td>
+<td>stdout only</td>
+</tr>
+</tbody>
+</table>
+<p>Default invocation runs Phases 1–3 + 5. Phase 4 is opt-in.</p>
+<h2 id="how-to-invoke">How to invoke</h2>
+<p>From inside Claude Code (any session in this repo):</p>
+<pre><code class="language-text">/kb-regenerate                          # full hygiene run (dry orphan delete OFF — will purge)
+/kb-regenerate --dry-run                # report only, deletes nothing
+/kb-regenerate --regenerate &lt;s3-key&gt;    # re-extract metadata for one document
+/kb-regenerate --regenerate-all         # re-extract metadata for every doc under approved/
+</code></pre>
+<p>It needs the <code>eagle</code> AWS SSO profile (us-east-1, account 695681773636 / NONPROD). The command body uses inline <code>python -c "..."</code> blocks invoked via Bash, so any environment that can run <code>boto3</code> against the dev account works.</p>
+<h2 id="is-it-wired-up">Is it wired up?</h2>
+<p><strong>No</strong> — not in the way "wired up" usually means.</p>
+<ul>
+<li>❌ Not in <code>.github/workflows/</code> — no scheduled or PR-triggered run.</li>
+<li>❌ Not in <code>Justfile</code> — no <code>just kb-regenerate</code> recipe.</li>
+<li>❌ Not in <code>server/app/</code> — no API endpoint.</li>
+<li>❌ Not in the deploy pipeline — <code>deploy.yml</code> does not gate on KB integrity.</li>
+<li>✅ Referenced in two docs: the KB v2 migration plan (<code>docs/20260413-100000-plan-kb-v2-migration-v1.md</code>, Phase 4 step 8) and the weekly changelog. Both treat it as a manual cleanup step.</li>
+<li>✅ The Phase 3 helper (<code>scripts/kb_matrix_analysis.py</code>) is a standalone Python script — runnable without Claude.</li>
+</ul>
+<p>In practice that means the only way it executes today is when a developer remembers to type <code>/kb-regenerate</code> in their Claude session. That is fine for the orphan-purge phase (destructive, wants a human), but Phases 2 and 3 are pure validators and should arguably run on every PR that touches <code>eagle-plugin/data/matrix.json</code>, <code>compliance_matrix.py</code>, <code>template_registry.py</code>, <code>knowledge_tools.py</code>, or <code>matrix-data.ts</code>.</p>
+<h2 id="recent-commits-that-bear-on-whether-the-command-needs-enhancement">Recent commits that bear on whether the command needs enhancement</h2>
+<table>
+<thead>
+<tr>
+<th>Commit</th>
+<th>Date</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>a522b2d</code></td>
+<td>2026-04-03</td>
+<td>Created <code>/kb-regenerate</code> and <code>kb_matrix_analysis.py</code>. Established the 5-phase shape.</td>
+</tr>
+<tr>
+<td><code>af83106</code></td>
+<td>2026-04-02</td>
+<td>Compliance matrix Phases 2e–6 landed: <code>_CONFIDENCE</code>, <code>_extract_far_citations</code>, <code>_verify</code>, <code>get_template_fields</code>, <code>_related_far</code>. <strong>Phase 3 of kb-regenerate does not yet check confidence-dict consistency or <code>_verify</code> output shape.</strong></td>
+</tr>
+<tr>
+<td><code>e39b567</code></td>
+<td>2026-04-09 (est.)</td>
+<td>Added new matrix keys: <code>intake_required_facts</code>, <code>budget_semantics</code>. <strong>Phase 3 layer-A does not yet validate these new top-level keys.</strong></td>
+</tr>
+<tr>
+<td><code>e12fcdd</code> / <code>d14a41d</code></td>
+<td>mid-Apr</td>
+<td>Tier compliance docs (core vs supplemental). New schema fields under <code>doc_rules</code>. <strong>Layer A check should grow accordingly.</strong></td>
+</tr>
+<tr>
+<td><code>7ebbf7a</code></td>
+<td>mid-Apr</td>
+<td>Semantic retrieval Lane 1e (S3 Vectors + Titan v2). <strong>Nothing in kb-regenerate validates vector index sync against <code>eagle-documents</code> bucket — when a doc is deleted from S3, its vector lingers.</strong></td>
+</tr>
+<tr>
+<td><code>eff6b45</code></td>
+<td>2026-04-27</td>
+<td>KB v3 path migration. Hardcoded paths in kb-regenerate's CHECKLISTS / TEMPLATES lists had to be hand-edited in lockstep with <code>knowledge_tools.py:BUILTIN_KB_ENTRIES</code>. <strong>This is a maintenance smell — both lists are duplicates of the same source of truth.</strong></td>
+</tr>
+<tr>
+<td><code>cf0d3bb</code> / <code>8213928</code></td>
+<td>2026-04-26 → 2026-04-28</td>
+<td>Per-lane source transparency + lane breakdown modal. Adds new SSE wire-shape (<code>lane</code>, <code>score</code>, <code>lane_breakdown</code>). Surface area where matrix→frontend drift would now be user-visible.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="bigger-picture-the-s3-vectors-canonical-source-problem">Bigger picture: the S3 Vectors / canonical-source problem</h2>
+<p>Investigation today (separate Claude session, verified against the live AWS account) surfaced a structural issue that the current <code>/kb-regenerate</code> does not catch. KB content authority is split across <strong>three buckets that no production code keeps in sync</strong>:</p>
+<pre><code>rh-eagle-files                                 ← manually edited, 343 objects
+        │  (one-time copy via scripts/migrate-knowledge-base.py,
+        │   tracked in git but currently deleted on this branch
+        │   and known stale — 84-doc drift)
+        ▼
+eagle-documents-{acct}-{env}/                  ← 259 objects (last write 2026-04-28)
+   eagle-knowledge-base/approved/
+        │  (read by the metadata + path retrieval lanes via
+        │   knowledge_tools.py; written manually only)
+        ▼
+rh-eagle/eagle-kb-approved (S3 Vectors index)  ← STATIC. Seeded externally.
+                                                  Queried by Lane 1e (semantic).
+                                                  No in-app PutVectors anywhere.
+</code></pre>
+<p>Specifically:
+- <strong><code>scripts/migrate-knowledge-base.py</code></strong> (committed in <code>27ce3bc</code>, 2026-03-04) is the one-shot batch that copies <code>rh-eagle-files</code> → <code>eagle-documents-…/eagle-knowledge-base/</code>. It is currently <em>deleted in the working tree on <code>fix/semantic-lane-iam-titan-embed</code></em> — visible via <code>git status</code> — which means anyone branching from there loses the migration tool. The drift is real: <strong>84 docs (~25%) live on the source but not the dest.</strong>
+- <strong><code>server/scripts/backfill_s3_vectors.py</code></strong> (committed in <code>664dfa7</code>, mid-Apr) is the matching one-shot for vectors — chunks docs, embeds via Bedrock Titan v2, upserts into <code>rh-eagle/eagle-kb-approved</code>. Idempotent, but <strong>manual</strong>. There is no <code>PutVectors</code> anywhere in <code>server/app/</code> runtime code.
+- The metadata-extraction Lambda exists at <code>infrastructure/cdk-eagle/lambda/metadata-extraction/</code> (writes DynamoDB, <strong>not vectors</strong>). To make vectors update automatically on doc upload, this Lambda would need an embed step bolted on.</p>
+<p><strong>Net effect:</strong> today, retrieval freshness on the semantic lane depends entirely on whoever last ran <code>backfill_s3_vectors.py</code>, and we don't have telemetry telling us when that was. The metadata/path lanes depend on whoever last ran <code>migrate-knowledge-base.py</code>. Both are invisible to <code>/kb-regenerate</code> Phase 1's orphan purge, which only checks DynamoDB ↔ <code>eagle-documents</code> consistency.</p>
+<h3 id="architectural-decisions-still-open">Architectural decisions still open</h3>
+<ol>
+<li><strong>Canonical source bucket.</strong> Pick one — <code>eagle-knowledge-base-{account}-{env}</code> (env-scoped, matches our convention) or one bucket with <code>pending/</code>/<code>approved/</code> prefixes mirroring the metadata-extraction Lambda's S3-event shape.</li>
+<li><strong>Reprocess execution model.</strong> Drop-and-trigger via S3 event → Lambda (embeds + writes vectors + moves to <code>approved/</code>), or scheduled daily re-embed job over the source bucket.</li>
+<li><strong>Retrieval architecture.</strong> Vectors as primary with metadata/path as fallback, or full cutover? And do agent-prompt files (<code>approved/agents/02-legal.txt</code>, fetched directly by S3 key via <code>knowledge_fetch</code>) move to vectors too, or stay direct-fetch?</li>
+<li><strong>Migration sequence.</strong> One-shot cutover, or run vectors alongside the existing lanes for a sprint?</li>
+</ol>
+<p>These belong in a proper plan spec — not this memo — but <code>/kb-regenerate</code> enhancements should anticipate the answer.</p>
+<h2 id="suggested-enhancements-rough-priority-order">Suggested enhancements (rough priority order)</h2>
+<ol>
+<li><strong>De-duplicate the checklist + template lists.</strong> Phase 2 hardcodes 9 checklists and 11 templates. The same lists live in <code>server/app/tools/knowledge_tools.py</code> (<code>BUILTIN_KB_ENTRIES</code>) and <code>server/app/template_registry.py</code> (<code>TEMPLATE_REGISTRY</code>). Have Phase 2 import from those modules instead. KB v3 only had to touch four files because of this duplication; next migration shouldn't.</li>
+<li><strong>Teach Phase 3 about new matrix keys.</strong> Add Layer-A validators for <code>intake_required_facts</code> and <code>budget_semantics</code> (commit <code>e39b567</code>), and core-vs-supplemental tier fields (commit <code>e12fcdd</code>).</li>
+<li><strong>Add a Phase 3D: <code>_CONFIDENCE</code> and <code>_verify</code> shape check.</strong> Confirm every doc/compliance/approval entry in <code>get_requirements()</code> output carries a <code>confidence</code> field (Phase 6 from the matrix overhaul) and that <code>_verify.far_citations</code> is non-empty when applicable. Could be a 30-line property-style assertion.</li>
+<li><strong>New Phase 6 — three-bucket sync audit.</strong> This is the big one. The phase should:</li>
+<li>Diff <code>rh-eagle-files</code> ↔ <code>eagle-documents-…/eagle-knowledge-base/approved/</code> and report the drift count + missing keys (today: 343 vs 259 = 84 missing).</li>
+<li>Diff S3 keys ↔ S3 Vectors index entries in <code>rh-eagle/eagle-kb-approved</code> and flag (a) orphan vectors whose source doc is gone and (b) source docs with no vector entry.</li>
+<li>Surface the <strong>last-modified timestamp</strong> of the most recent vector upsert, since today we have no signal on vector freshness.</li>
+<li>All read-only — never auto-purges vectors. Bumping is a separate, opt-in action.</li>
+<li><strong>New flag <code>--reembed &lt;s3-key&gt;</code> / <code>--reembed-all</code>.</strong> Wraps <code>server/scripts/backfill_s3_vectors.py</code>, mirroring how Phase 4 wraps the metadata Lambda. Gives us one consistent tool for "make the indexes match the source."</li>
+<li><strong>New flag <code>--migrate-source</code> (or wrap the existing script).</strong> Makes <code>scripts/migrate-knowledge-base.py</code> invocable from inside <code>/kb-regenerate</code> so it stops being an undiscoverable, sometimes-deleted file. Also: get that script restored on this branch and committed back to main so it doesn't disappear again.</li>
+<li><strong>De-duplicate the checklist + template lists.</strong> Phase 2 hardcodes 9 checklists and 11 templates. The same lists live in <code>server/app/tools/knowledge_tools.py</code> (<code>BUILTIN_KB_ENTRIES</code>) and <code>server/app/template_registry.py</code> (<code>TEMPLATE_REGISTRY</code>). Have Phase 2 import from those modules instead. KB v3 only had to touch four files because of this duplication; next migration shouldn't.</li>
+<li><strong>Teach Phase 3 about new matrix keys.</strong> Add Layer-A validators for <code>intake_required_facts</code> and <code>budget_semantics</code> (commit <code>e39b567</code>), and core-vs-supplemental tier fields (commit <code>e12fcdd</code>).</li>
+<li><strong>Add a Phase 3D: <code>_CONFIDENCE</code> and <code>_verify</code> shape check.</strong> Confirm every doc/compliance/approval entry in <code>get_requirements()</code> output carries a <code>confidence</code> field (Phase 6 from the matrix overhaul) and that <code>_verify.far_citations</code> is non-empty when applicable. Could be a 30-line property-style assertion.</li>
+<li><strong>Wire Phases 2, 3, and 6-audit into CI.</strong> They are read-only and fast. Make a <code>just kb-validate</code> recipe that runs them, plus a GitHub Action that runs on PRs touching the trigger files. The drift number + vector-staleness number become PR comments. Phases 1, 4, 5, and 6 stay manual / opt-in.</li>
+<li><strong>Add a <code>--qa</code> / <code>--prod</code> flag.</strong> Hardcoded constants reference <code>eagle-document-metadata-dev</code> and <code>eagle-documents-695681773636-dev</code>. QA and prod accounts will need their own values; today the command can only target dev.</li>
+</ol>
+<h2 id="recommended-next-action">Recommended next action</h2>
+<p>Two parallel tracks:</p>
+<p><strong>Track A — close immediate drift (today / tomorrow).</strong>
+1. Restore <code>scripts/migrate-knowledge-base.py</code> on this branch (<code>git checkout HEAD -- scripts/migrate-knowledge-base.py</code>) so it isn't lost.
+2. Run <code>/kb-regenerate --dry-run</code> against dev to baseline orphan count and surface any KB v3 path issues we missed.
+3. Run <code>scripts/migrate-knowledge-base.py</code> (manually for now) to close the 84-doc gap between source and dest.
+4. Run <code>server/scripts/backfill_s3_vectors.py</code> to refresh the vector index against the post-migration <code>eagle-documents</code> corpus.</p>
+<p><strong>Track B — write the architecture pivot plan.</strong> Open <code>.claude/specs/{ts}-plan-vectors-as-canonical-retrieval-v1.md</code> capturing the four open architectural decisions above. Decide whether vectors become primary retrieval and whether the metadata-extraction Lambda absorbs an embed step, before we commit to enhancement #4 (Phase 6 audit) and #5/#6 (re-embed / migrate flags) on <code>/kb-regenerate</code>. Those enhancements need to know what the steady-state pipeline looks like.</p>
+<h2 id="files-referenced-in-this-memo">Files referenced in this memo</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.claude/commands/kb-regenerate.md</code></td>
+<td>The command itself</td>
+</tr>
+<tr>
+<td><code>scripts/kb_matrix_analysis.py</code></td>
+<td>Phase 3 helper</td>
+</tr>
+<tr>
+<td><code>server/app/compliance_matrix.py</code></td>
+<td>Backend matrix code (Layer B in Phase 3)</td>
+</tr>
+<tr>
+<td><code>server/app/tools/knowledge_tools.py</code></td>
+<td><code>BUILTIN_KB_ENTRIES</code> source of truth for checklists</td>
+</tr>
+<tr>
+<td><code>server/app/template_registry.py</code></td>
+<td><code>TEMPLATE_REGISTRY</code> source of truth for templates</td>
+</tr>
+<tr>
+<td><code>eagle-plugin/data/matrix.json</code></td>
+<td>Compliance matrix source of truth (Layer A in Phase 3)</td>
+</tr>
+<tr>
+<td><code>client/components/contract-matrix/matrix-data.ts</code></td>
+<td>Frontend mirror (Layer C in Phase 3)</td>
+</tr>
+<tr>
+<td><code>scripts/migrate-knowledge-base.py</code></td>
+<td>One-shot copy from <code>rh-eagle-files</code> → <code>eagle-documents-…/eagle-knowledge-base/</code>. Tracked in <code>27ce3bc</code>, currently deleted on <code>fix/semantic-lane-iam-titan-embed</code>.</td>
+</tr>
+<tr>
+<td><code>server/scripts/backfill_s3_vectors.py</code></td>
+<td>One-shot vector backfill (Bedrock Titan Embed v2 → <code>rh-eagle/eagle-kb-approved</code>). Idempotent. Manual.</td>
+</tr>
+<tr>
+<td><code>infrastructure/cdk-eagle/lambda/metadata-extraction/handler.py</code></td>
+<td>Existing Lambda — writes DynamoDB metadata, <strong>does not embed</strong>. Candidate to absorb the embed step.</td>
+</tr>
+<tr>
+<td><code>docs/20260413-100000-plan-kb-v2-migration-v1.md</code></td>
+<td>Earlier migration plan that calls <code>/kb-regenerate</code> as Step 8</td>
+</tr>
+</tbody>
+</table></body></html>

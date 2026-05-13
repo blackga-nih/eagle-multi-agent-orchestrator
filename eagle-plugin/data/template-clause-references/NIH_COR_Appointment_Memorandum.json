@@ -1,0 +1,23 @@
+{
+  "template_filename": "NIH COR Appointment Memorandum.docx",
+  "category": "cor_certification",
+  "variant": "",
+  "section_clause_map": {},
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 1.602-2",
+      "title": "Responsibilities of Contracting Officers",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 42.202",
+      "title": "Assignment of Contract Administration",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 2,
+  "far_parts_covered": [
+    "1",
+    "42"
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "filename": "HHS_AP_Structure_Guide.txt",
+  "format": "txt",
+  "category": "reference_guide",
+  "variant": "ap_structure",
+  "sections": [
+    {
+      "number": "1",
+      "title": "HHS ACQUISITION PLAN (AP) TEMPLATE - STRUCTURE GUIDE",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "OVERVIEW",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "3",
+      "title": "SUMMARY INFORMATION SECTION",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "4",
+      "title": "REVIEWS AND APPROVALS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "5",
+      "title": "SUBMISSION REQUIREMENTS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "6",
+      "title": "RELATED DOCUMENTS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "7",
+      "title": "TEMPLATE FORMAT NOTES",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "8",
+      "title": "KEY REGULATORY AUTHORITIES",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "9",
+      "title": "UPDATES AND CURRENCY",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "10",
+      "title": "END OF GUIDE",
+      "has_table": false,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 10,
+  "sheet_names": [],
+  "parse_error": null
+}

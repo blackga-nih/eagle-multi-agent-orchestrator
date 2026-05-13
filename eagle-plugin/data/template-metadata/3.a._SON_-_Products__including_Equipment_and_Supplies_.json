@@ -1,0 +1,90 @@
+{
+  "filename": "3.a. SON - Products (including Equipment and Supplies).docx",
+  "format": "docx",
+  "category": "son_products",
+  "variant": "",
+  "sections": [
+    {
+      "number": "1.0",
+      "title": "TITLE",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2.0",
+      "title": "BACKGROUND",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "3.0",
+      "title": "OBJECTIVES",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "4",
+      "title": "TECHNICAL REQUIREMENTS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "4.1",
+      "title": "PRODUCT FEATURES/SALIENT CHARACTERISTICS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "4.2",
+      "title": "TRAINING",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "4.3",
+      "title": "SPECIAL ORDER REQUIREMENTS",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "5.0",
+      "title": "TYPE OF ORDER",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "6.0",
+      "title": "PRICE SCHEDULE",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "10",
+      "title": "SCHDULE OF THE CHARGES FOR THE BASIC AWARD PERIOD",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "7.0",
+      "title": "DELIVERY / INSTALLATION",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "7.1",
+      "title": "CONTRACTING OFFICERS REPRESENTATIVE OR TECHNICAL POINT OF CONTACT",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "8.0",
+      "title": "WARRANTY",
+      "has_table": true,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 13,
+  "sheet_names": [],
+  "parse_error": null
+}

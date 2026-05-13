@@ -189,6 +189,8 @@ The `eagle-eval-artifacts-{account}-{env}` bucket (provisioned by
 | Eval suite | `/experts:eval:question` |
 | Architecture diagrams | `docs/architecture/` |
 | Implementation specs | `.claude/specs/` |
+| Hand off env to co-worker | `/claude-handoff` (bundles `~/.claude/` config + scrubbed session JSONLs into a portable folder; see `.claude/skills/claude-handoff/`) |
+| Search/inspect session history | `/pp-claude-sessions` query CLI (stdlib Python, read-only over a handoff bundle's `session-history/jsonl/` or any `~/.claude/projects/<encoded>/`; see `.claude/skills/pp-claude-sessions/`) |
 
 **Expert system**: `.claude/commands/experts/{domain}/` — 9 domains: `frontend` · `backend` · `aws` · `claude-sdk` · `deployment` · `cloudwatch` · `eval` · `git` · `tac`. Run `/experts:{domain}:plan` to plan, `/experts:{domain}:self-improve` after significant changes.
 

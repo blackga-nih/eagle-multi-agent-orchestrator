@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>EAGLE Document Schema Explorer</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #151b24;
+    --panel-2: #1c2330;
+    --border: #2a3341;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #7ee787;
+    --accent-2: #79c0ff;
+    --warn: #ffa657;
+    --pink: #ff7b72;
+    --violet: #d2a8ff;
+    --req: #f85149;
+    --ok: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.5 system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+    height: 100%;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: 100vh;
+  }
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .main {
+    display: grid;
+    grid-template-rows: 1fr auto;
+    overflow: hidden;
+  }
+  .preview {
+    overflow-y: auto;
+    padding: 20px 28px;
+  }
+  .promptbar {
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+    padding: 14px 20px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  h1 { font-size: 15px; margin: 0 0 4px 0; letter-spacing: .3px; }
+  h2 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin: 18px 0 8px 0; font-weight: 600; }
+  h3 { font-size: 13px; margin: 0 0 8px 0; color: var(--accent-2); font-weight: 600; }
+  .subtle { color: var(--muted); font-size: 11px; }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+
+  /* Preset row */
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .preset {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .preset:hover { border-color: var(--accent-2); }
+  .preset.active { background: var(--accent-2); color: #0d1117; border-color: var(--accent-2); }
+
+  /* Doc type picker */
+  .group-label {
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 10px 2px 4px;
+  }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all .1s;
+  }
+  .chip:hover { border-color: var(--accent-2); }
+  .chip.active {
+    background: var(--accent-2);
+    color: #0d1117;
+    border-color: var(--accent-2);
+    font-weight: 600;
+  }
+  .chip.typed::after {
+    content: "●";
+    color: var(--accent);
+    margin-left: 4px;
+    font-size: 9px;
+  }
+  .chip.templated::before {
+    content: "▣";
+    color: var(--violet);
+    margin-right: 4px;
+    font-size: 9px;
+  }
+  .chip.active.typed::after { color: #0d1117; }
+  .chip.active.templated::before { color: #0d1117; }
+
+  /* Toggles */
+  .toggles { display: grid; gap: 6px; margin-top: 8px; }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+  }
+  .toggle input { margin: 0; }
+
+  /* Legend */
+  .legend {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.8;
+  }
+  .legend .dot { display: inline-block; width: 8px; }
+
+  /* Preview layers */
+  .layer {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .layer-head {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .layer-title { display: flex; align-items: center; gap: 10px; }
+  .layer-body { padding: 14px 16px; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .pill.ok { background: rgba(63,185,80,.15); color: var(--accent); }
+  .pill.warn { background: rgba(255,166,87,.15); color: var(--warn); }
+  .pill.info { background: rgba(121,192,255,.15); color: var(--accent-2); }
+  .pill.violet { background: rgba(210,168,255,.15); color: var(--violet); }
+  .pill.muted { background: rgba(139,148,158,.15); color: var(--muted); }
+  .pill.pink { background: rgba(255,123,114,.15); color: var(--pink); }
+
+  table.fields {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  table.fields th {
+    text-align: left;
+    font-weight: 600;
+    padding: 8px 10px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  table.fields td {
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(42,51,65,.5);
+    vertical-align: top;
+  }
+  table.fields tr:last-child td { border-bottom: 0; }
+  table.fields tr.shared td { color: var(--muted); }
+  table.fields tr.shared .field-name { color: var(--muted); }
+  .field-name { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .field-type { color: var(--violet); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+  .placeholder { color: var(--accent); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+  .arrow { color: var(--muted); padding: 0 6px; }
+  .alias { color: var(--warn); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+
+  /* Prompt output */
+  .prompt {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    color: var(--text);
+    max-height: 160px;
+    overflow-y: auto;
+  }
+  .copy-btn {
+    background: var(--accent-2);
+    color: #0d1117;
+    border: 0;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 12px;
+    align-self: stretch;
+    white-space: nowrap;
+  }
+  .copy-btn:hover { filter: brightness(1.1); }
+  .copy-btn.copied { background: var(--accent); }
+
+  .headline { font-size: 18px; margin: 0 0 6px 0; }
+  .headline .type-label { color: var(--accent); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .meta-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 20px 0; }
+
+  /* ── Print layout ─────────────────────────────────────────────────── */
+  @media print {
+    @page { size: letter; margin: 0.5in; }
+    html, body { height: auto; background: #fff; color: #000; }
+    .app { display: block; height: auto; }
+    .sidebar {
+      background: #fff; color: #000;
+      border: 0; border-bottom: 1px solid #999;
+      overflow: visible; height: auto;
+      padding: 0 0 16px 0;
+      margin-bottom: 20px;
+      page-break-after: avoid;
+    }
+    .main { display: block; overflow: visible; height: auto; }
+    .preview { overflow: visible; padding: 0; height: auto; }
+    .promptbar {
+      position: relative; page-break-before: always;
+      background: #fff; border: 1px solid #999; border-radius: 6px;
+      margin-top: 20px; padding: 14px;
+    }
+    .prompt {
+      background: #f5f5f5; color: #000; border-color: #999;
+      max-height: none; overflow: visible;
+    }
+    .copy-btn { display: none; }
+
+    h1, h2, h3 { color: #000; }
+    .subtle, .group-label, table.fields th { color: #555; }
+
+    .layer {
+      background: #fff; border: 1px solid #999;
+      page-break-inside: avoid;
+      margin-bottom: 12px;
+    }
+    .layer-head { background: #f0f0f0; border-bottom-color: #999; }
+    table.fields td { border-bottom-color: #ddd; }
+    table.fields tr.shared td, table.fields tr.shared .field-name { color: #888; }
+
+    .field-name { color: #000; }
+    .field-type { color: #6f42c1; }
+    .placeholder { color: #0a7f3f; }
+    .alias { color: #b35900; }
+    .headline .type-label { color: #0a7f3f; }
+
+    .pill {
+      border: 1px solid #999;
+      background: #fff !important;
+      color: #000 !important;
+    }
+    .legend { background: #fafafa; border-color: #ccc; }
+    .chip {
+      background: #fff; color: #000; border-color: #bbb;
+    }
+    .chip.active {
+      background: #000 !important; color: #fff !important; border-color: #000 !important;
+    }
+    .preset { background: #fff; color: #000; border-color: #bbb; }
+    .preset.active { background: #000; color: #fff; border-color: #000; }
+
+    /* Hide controls that don't make sense on paper */
+    .toggles, #presets { display: none; }
+
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <h1>EAGLE Document Schema</h1>
+    <div class="subtle">Four schema layers for each doc type.</div>
+
+    <h2>Preset</h2>
+    <div class="presets" id="presets">
+      <button class="preset" data-type="sow">Statement of Work</button>
+      <button class="preset" data-type="igce">IGCE</button>
+      <button class="preset" data-type="justification">J&amp;A</button>
+      <button class="preset" data-type="acquisition_plan">Acquisition Plan</button>
+      <button class="preset" data-type="market_research">Market Research</button>
+    </div>
+
+    <h2>Doc type</h2>
+    <div id="doctypes"></div>
+
+    <h2>Display</h2>
+    <div class="toggles">
+      <label class="toggle"><input type="checkbox" id="showShared" checked /> Show shared base fields</label>
+      <label class="toggle"><input type="checkbox" id="showAliases" checked /> Show field aliases</label>
+      <label class="toggle"><input type="checkbox" id="showDocAliases" /> Show doc_type aliases</label>
+      <label class="toggle"><input type="checkbox" id="groupByLayer" checked /> Separate layers</label>
+    </div>
+
+    <div class="legend">
+      <div><span class="dot" style="color:var(--violet)">▣</span> Has docx/xlsx template</div>
+      <div><span class="dot" style="color:var(--accent)">●</span> Has typed Pydantic model</div>
+      <div><span class="subtle">Others fall back to BaseDocumentData with extra="allow"</span></div>
+    </div>
+  </aside>
+
+  <section class="main">
+    <div class="preview" id="preview"></div>
+    <div class="promptbar">
+      <div class="prompt" id="prompt"></div>
+      <button class="copy-btn" id="copyBtn">Copy Prompt</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// DATA — extracted from server/app/ai_document_schema.py + template_registry.py
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BASE_FIELDS = [
+  { name: "title",                 type: "str"   },
+  { name: "description",           type: "str"   },
+  { name: "estimated_value",       type: "float" },
+  { name: "period_of_performance", type: "str"   },
+  { name: "contract_type",         type: "enum"  },
+  { name: "acquisition_method",    type: "enum"  },
+  { name: "competition",           type: "str"   },
+];
+
+// Per-doc-type extensions (from DOC_TYPE_MODELS)
+const TYPED_MODELS = {
+  sow: [
+    { name: "deliverables",          type: "list[str|dict]" },
+    { name: "tasks",                 type: "list[str|dict]" },
+    { name: "place_of_performance",  type: "str" },
+    { name: "security_requirements", type: "str" },
+  ],
+  igce: [
+    { name: "line_items",       type: "list[IgceLineItem]",  desc: "desc/rate/hours/qty/total" },
+    { name: "goods_items",      type: "list[IgceGoodsItem]", desc: "product_name/qty/unit_price/total" },
+    { name: "period_months",    type: "int" },
+    { name: "delivery_date",    type: "str" },
+    { name: "overhead_rate",    type: "float" },
+    { name: "contingency_rate", type: "float" },
+  ],
+  market_research: [
+    { name: "naics_code",          type: "str" },
+    { name: "vendors_identified",  type: "list[str|dict]" },
+    { name: "market_conditions",   type: "str" },
+    { name: "set_aside",           type: "str" },
+    { name: "conclusion",          type: "str" },
+  ],
+  justification: [
+    { name: "authority",           type: "str" },
+    { name: "contractor",          type: "str" },
+    { name: "rationale",           type: "str" },
+    { name: "efforts_to_compete",  type: "str" },
+  ],
+  acquisition_plan: [
+    { name: "funding_by_fy", type: "dict[str, float]" },
+    { name: "milestones",    type: "list[dict]" },
+    { name: "set_aside",     type: "str" },
+  ],
+};
+
+// Template placeholder maps (data_field → {{PLACEHOLDER}}) from TEMPLATE_REGISTRY
+const PLACEHOLDERS = {
+  sow: {
+    s3: "statement-of-work-template-eagle-v2.docx", type: "docx",
+    map: {
+      title: "{{PROJECT_TITLE}}",
+      description: "{{DESCRIPTION}}",
+      period_of_performance: "{{PERIOD_OF_PERFORMANCE}}",
+      deliverables: "{{DELIVERABLES}}",
+      tasks: "{{TASKS}}",
+      place_of_performance: "{{PLACE_OF_PERFORMANCE}}",
+      security_requirements: "{{SECURITY_REQUIREMENTS}}",
+    },
+  },
+  pws: {
+    s3: "statement-of-work-template-eagle-v2.docx", type: "docx",
+    note: "Reuses SOW template skeleton — distinct doc_type, performance-based content",
+    map: {
+      title: "{{PROJECT_TITLE}}",
+      description: "{{DESCRIPTION}}",
+      period_of_performance: "{{PERIOD_OF_PERFORMANCE}}",
+      deliverables: "{{DELIVERABLES}}",
+      tasks: "{{TASKS}}",
+      place_of_performance: "{{PLACE_OF_PERFORMANCE}}",
+      security_requirements: "{{SECURITY_REQUIREMENTS}}",
+    },
+  },
+  igce: {
+    s3: "01.D_IGCE_for_Commercial_Organizations.xlsx", type: "xlsx",
+    map: {
+      title: "{{PROJECT_TITLE}}",
+      contractor_name: "{{CONTRACTOR_NAME}}",
+      total_estimate: "{{TOTAL_ESTIMATE}}",
+      line_items: "{{LINE_ITEMS}}",
+      prepared_by: "{{PREPARED_BY}}",
+      prepared_date: "{{PREPARED_DATE}}",
+    },
+  },
+  market_research: {
+    s3: "HHS_Streamlined_Market_Research_Template_FY26.docx", type: "docx",
+    map: {
+      title: "{{PROJECT_TITLE}}",
+      description: "{{REQUIREMENT_DESCRIPTION}}",
+      market_conditions: "{{MARKET_CONDITIONS}}",
+      vendors_identified: "{{VENDORS_IDENTIFIED}}",
+      set_aside_recommendation: "{{SET_ASIDE_RECOMMENDATION}}",
+      conclusion: "{{CONCLUSION}}",
+    },
+  },
+  justification: {
+    s3: "Justification_and_Approval_Over_350K_Template.docx", type: "docx",
+    map: {
+      title: "{{PROJECT_TITLE}}",
+      authority: "{{AUTHORITY_CITED}}",
+      contractor: "{{CONTRACTOR_NAME}}",
+      estimated_value: "{{ESTIMATED_VALUE}}",
+      rationale: "{{RATIONALE}}",
+      efforts_to_compete: "{{EFFORTS_TO_COMPETE}}",
+    },
+  },
+  acquisition_plan: {
+    s3: "HHS Streamlined Acquisition Plan Template.docx", type: "docx",
+    map: {
+      title: "{{PROJECT_TITLE}}",
+      description: "{{REQUIREMENT_DESCRIPTION}}",
+      estimated_value: "{{ESTIMATED_VALUE}}",
+      period_of_performance: "{{PERIOD_OF_PERFORMANCE}}",
+      competition: "{{COMPETITION_STRATEGY}}",
+      contract_type: "{{CONTRACT_TYPE}}",
+      set_aside: "{{SET_ASIDE}}",
+      funding_by_fy: "{{FUNDING_TABLE}}",
+    },
+  },
+  cor_certification: {
+    s3: "NIH COR Appointment Memorandum.docx", type: "docx",
+    map: {
+      nominee_name: "{{COR_NAME}}",
+      nominee_title: "{{COR_TITLE}}",
+      nominee_org: "{{COR_ORGANIZATION}}",
+      nominee_phone: "{{COR_PHONE}}",
+      nominee_email: "{{COR_EMAIL}}",
+      fac_cor_level: "{{FAC_COR_LEVEL}}",
+      contract_number: "{{CONTRACT_NUMBER}}",
+    },
+  },
+  son_products:       { s3: "3.a. SON - Products (including Equipment and Supplies).docx", type: "docx", map: {} },
+  son_services:       { s3: "3.b. SON - Services based on Catalog Pricing.docx", type: "docx", map: {} },
+  buy_american:       { s3: "DF_Buy_American_Non_Availability_Template.docx", type: "docx", map: {} },
+  subk_plan:          { s3: "HHS SubK Plan Template - updated March 2022.doc", type: "doc", map: {} },
+  conference_request: { s3: "Attachment A - NIH Conference or Conference Grant Request and Approval 20151404_508.docx", type: "docx", map: {} },
+};
+
+// Field name aliases (FIELD_NAME_ALIASES)
+const FIELD_ALIASES = {
+  competition: ["competition_type", "competition_strategy", "full_open"],
+  period_of_performance: ["contract_period", "duration", "pop", "performance_period"],
+  estimated_value: ["estimated_cost", "budget", "total_value"],
+  total_estimate: ["total_cost"],
+  description: ["requirement", "requirement_description", "objective", "requirement_summary", "scope"],
+  contractor: ["contractor_name", "vendor", "vendor_name"],
+  set_aside: ["set_aside_recommendation", "set_aside_type", "small_business"],
+  authority: ["authority_cited", "far_authority", "justification_authority"],
+  rationale: ["justification_rationale"],
+  vendors_identified: ["vendors", "vendor_list"],
+  market_conditions: ["market_analysis"],
+};
+
+// Doc type aliases (DOC_TYPE_ALIASES, condensed)
+const DOC_ALIASES = {
+  igce:             ["ige", "independent_government_estimate", "independent_government_cost_estimate", "cost_estimate"],
+  sow:              ["statement_of_work"],
+  pws:              ["performance_work_statement"],
+  acquisition_plan: ["ap", "acq_plan", "source_selection_plan", "ssp"],
+  justification:    ["j_a", "j&a", "ja", "sole_source", "sole_source_justification"],
+  market_research:  ["mr", "mrr"],
+  son_products:     ["son", "statement_of_need", "statement_of_need_products"],
+  son_services:     ["statement_of_need_services"],
+  cor_certification:["cor", "cor_appointment"],
+  subk_plan:        ["subcontracting_plan", "sub_k_plan"],
+  subk_review:      ["subcontracting_review", "sub_k_review"],
+  buy_american:     ["baa", "buy_american_act"],
+  bpa_call_order:   ["bpa", "blanket_purchase_agreement"],
+  eval_criteria:    ["section_l", "instructions_to_offerors", "section_m", "evaluation_factors", "evaluation_criteria"],
+  d_f:              ["determination_and_findings", "determination_findings"],
+  qasp:             ["quality_assurance_surveillance_plan"],
+  sb_review:        ["small_business_review", "hhs_653"],
+};
+
+// Grouping + metadata for doc types
+const DOC_GROUPS = {
+  "Core (backend-generatable)": [
+    "sow", "pws", "igce", "market_research", "acquisition_plan",
+    "justification", "eval_criteria", "security_checklist", "section_508",
+    "cor_certification", "contract_type_justification", "son_products",
+    "son_services", "purchase_request",
+  ],
+  "Micro-purchase": ["price_reasonableness", "required_sources"],
+  "Template / form": [
+    "subk_plan", "subk_review", "buy_american", "conference_request",
+    "conference_waiver", "bpa_call_order", "gfp_form", "srb_request",
+    "quotation_abstract", "receiving_report", "technical_questionnaire",
+    "promotional_item", "exemption_determination", "mandatory_use_waiver",
+    "reference_guide",
+  ],
+  "Frontend-only (no backend support)": [
+    "funding_doc", "d_f", "qasp", "source_selection_plan", "sb_review", "human_subjects",
+  ],
+};
+
+// Display names
+const DISPLAY = {
+  sow: "Statement of Work",
+  pws: "Performance Work Statement",
+  igce: "IGCE",
+  market_research: "Market Research",
+  acquisition_plan: "Acquisition Plan",
+  justification: "Justification & Approval (J&A)",
+  eval_criteria: "Evaluation Criteria",
+  security_checklist: "Security Checklist",
+  section_508: "Section 508 Compliance",
+  cor_certification: "COR Appointment",
+  contract_type_justification: "Contract Type Justification",
+  son_products: "Statement of Need — Products",
+  son_services: "Statement of Need — Services",
+  purchase_request: "Purchase Request",
+  price_reasonableness: "Price Reasonableness",
+  required_sources: "Required Sources",
+  subk_plan: "Subcontracting Plan",
+  subk_review: "Subcontracting Review",
+  buy_american: "Buy American Determination",
+  conference_request: "Conference Request",
+  conference_waiver: "Conference Waiver",
+  bpa_call_order: "BPA Call Order",
+  gfp_form: "GFP Form",
+  srb_request: "SRB Request",
+  quotation_abstract: "Quotation Abstract",
+  receiving_report: "Receiving Report",
+  technical_questionnaire: "Technical Questionnaire",
+  promotional_item: "Promotional Item",
+  exemption_determination: "Exemption Determination",
+  mandatory_use_waiver: "Mandatory Use Waiver",
+  reference_guide: "Reference Guide",
+  funding_doc: "Funding Document",
+  d_f: "Determination & Findings",
+  qasp: "QASP",
+  source_selection_plan: "Source Selection Plan",
+  sb_review: "Small Business Review",
+  human_subjects: "Human Subjects",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DEFAULTS = {
+  docType: "sow",
+  showShared: true,
+  showAliases: true,
+  showDocAliases: false,
+  groupByLayer: true,
+};
+const state = { ...DEFAULTS };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER — doc type picker
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderDocTypes() {
+  const host = document.getElementById("doctypes");
+  host.innerHTML = "";
+  for (const [group, types] of Object.entries(DOC_GROUPS)) {
+    const lbl = document.createElement("div");
+    lbl.className = "group-label";
+    lbl.textContent = group;
+    host.appendChild(lbl);
+    const row = document.createElement("div");
+    row.className = "chip-row";
+    for (const t of types) {
+      const chip = document.createElement("button");
+      chip.className = "chip";
+      if (t === state.docType) chip.classList.add("active");
+      if (TYPED_MODELS[t]) chip.classList.add("typed");
+      if (PLACEHOLDERS[t]) chip.classList.add("templated");
+      chip.textContent = t;
+      chip.title = DISPLAY[t] || t;
+      chip.addEventListener("click", () => {
+        state.docType = t;
+        updateAll();
+      });
+      row.appendChild(chip);
+    }
+    host.appendChild(row);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER — preview layers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderPreview() {
+  const host = document.getElementById("preview");
+  const dt = state.docType;
+  const typed = TYPED_MODELS[dt];
+  const tpl = PLACEHOLDERS[dt];
+  const docAliases = DOC_ALIASES[dt] || [];
+  const classification = classify(dt);
+
+  const parts = [];
+
+  // Headline
+  parts.push(`
+    <h1 class="headline"><span class="type-label">${dt}</span> — ${escapeHtml(DISPLAY[dt] || dt)}</h1>
+    <div class="meta-row">
+      <span class="pill ${typed ? 'ok' : 'muted'}">${typed ? 'Typed model' : 'Base only (extra=allow)'}</span>
+      <span class="pill ${tpl ? 'violet' : 'muted'}">${tpl ? `Template (${tpl.type})` : 'No template'}</span>
+      <span class="pill ${classification.pillClass}">${classification.label}</span>
+    </div>
+  `);
+
+  // Layer 1 — Pydantic model
+  parts.push(layer(
+    "1. Pydantic model",
+    typed ? "pill ok" : "pill muted",
+    typed ? `${typed.length} extra field${typed.length===1?'':'s'}` : 'falls through to BaseDocumentData',
+    buildPydanticLayer(dt, typed),
+  ));
+
+  // Layer 2 — Template placeholders
+  parts.push(layer(
+    "2. Template placeholder map",
+    tpl ? "pill violet" : "pill muted",
+    tpl ? `${Object.keys(tpl.map).length} placeholder${Object.keys(tpl.map).length===1?'':'s'}` : 'markdown/form only',
+    buildPlaceholderLayer(tpl),
+  ));
+
+  // Layer 3 — Field aliases
+  if (state.showAliases) {
+    parts.push(layer(
+      "3. Field name aliases",
+      "pill warn",
+      "AI/user input → canonical",
+      buildAliasLayer(dt, typed),
+    ));
+  }
+
+  // Layer 4 — Doc type aliases
+  if (state.showDocAliases) {
+    parts.push(layer(
+      "4. Doc type aliases",
+      docAliases.length ? "pill warn" : "pill muted",
+      docAliases.length ? `${docAliases.length} alias${docAliases.length===1?'':'es'}` : 'no aliases',
+      buildDocAliasLayer(dt, docAliases),
+    ));
+  }
+
+  host.innerHTML = parts.join("");
+}
+
+function classify(dt) {
+  const CORE = DOC_GROUPS["Core (backend-generatable)"];
+  const MICRO = DOC_GROUPS["Micro-purchase"];
+  const FORM = DOC_GROUPS["Template / form"];
+  const FE = DOC_GROUPS["Frontend-only (no backend support)"];
+  if (CORE.includes(dt))  return { label: "core", pillClass: "pill ok" };
+  if (MICRO.includes(dt)) return { label: "micro-purchase", pillClass: "pill info" };
+  if (FORM.includes(dt))  return { label: "form template", pillClass: "pill violet" };
+  if (FE.includes(dt))    return { label: "frontend-only", pillClass: "pill pink" };
+  return { label: "unknown", pillClass: "pill muted" };
+}
+
+function layer(title, pillClass, pillText, body) {
+  return `
+    <section class="layer">
+      <div class="layer-head">
+        <div class="layer-title">
+          <h3 style="margin:0">${title}</h3>
+          <span class="${pillClass}">${pillText}</span>
+        </div>
+      </div>
+      <div class="layer-body">${body}</div>
+    </section>
+  `;
+}
+
+function buildPydanticLayer(dt, typed) {
+  const rows = [];
+  if (state.showShared) {
+    for (const f of BASE_FIELDS) {
+      rows.push(fieldRow(f.name, `Optional[${f.type}]`, "shared — BaseDocumentData", true));
+    }
+  }
+  if (typed) {
+    for (const f of typed) {
+      rows.push(fieldRow(f.name, `Optional[${f.type}]`, f.desc || `specific to ${dt}`, false));
+    }
+  } else {
+    rows.push(`<tr><td colspan="3" class="empty">No typed model — extra keys allowed via <code>extra="allow"</code>. Validation is best-effort only.</td></tr>`);
+  }
+  return `
+    <table class="fields">
+      <thead><tr><th style="width:30%">Field</th><th style="width:30%">Type</th><th>Notes</th></tr></thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+    <p class="subtle" style="margin-top:10px">All fields are <code>Optional</code>. "Required" is enforced at the template and UI layer, not by Pydantic.</p>
+  `;
+}
+
+function fieldRow(name, type, note, isShared) {
+  return `
+    <tr class="${isShared ? 'shared' : ''}">
+      <td class="field-name">${name}</td>
+      <td class="field-type">${type}</td>
+      <td class="subtle">${note}</td>
+    </tr>
+  `;
+}
+
+function buildPlaceholderLayer(tpl) {
+  if (!tpl) {
+    return `<div class="empty">No docx/xlsx template registered. Output is rendered from markdown by create_document.</div>`;
+  }
+  const entries = Object.entries(tpl.map);
+  if (entries.length === 0) {
+    return `
+      <p class="subtle" style="margin:0 0 10px 0"><code>${escapeHtml(tpl.s3)}</code></p>
+      <div class="empty">Template has no placeholder map yet — content is inserted directly without field-level substitution.</div>
+    `;
+  }
+  const rows = entries.map(([field, ph]) =>
+    `<tr>
+      <td class="field-name">${field}</td>
+      <td><span class="arrow">→</span><span class="placeholder">${escapeHtml(ph)}</span></td>
+    </tr>`
+  ).join("");
+  const note = tpl.note ? `<p class="subtle" style="margin:0 0 10px 0"><strong>Note:</strong> ${tpl.note}</p>` : "";
+  return `
+    <p class="subtle" style="margin:0 0 10px 0"><code>${escapeHtml(tpl.s3)}</code></p>
+    ${note}
+    <table class="fields">
+      <thead><tr><th style="width:40%">Data field</th><th>Placeholder</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function buildAliasLayer(dt, typed) {
+  const typedNames = new Set((typed || []).map(f => f.name));
+  const baseNames = new Set(BASE_FIELDS.map(f => f.name));
+  const relevant = {};
+  for (const [canonical, aliases] of Object.entries(FIELD_ALIASES)) {
+    if (typedNames.has(canonical) || baseNames.has(canonical) || canonical === "total_estimate") {
+      relevant[canonical] = aliases;
+    }
+  }
+  if (Object.keys(relevant).length === 0) {
+    return `<div class="empty">No field aliases apply to this doc type's fields.</div>`;
+  }
+  const rows = Object.entries(relevant).map(([canonical, aliases]) =>
+    `<tr>
+      <td>${aliases.map(a => `<span class="alias">${a}</span>`).join(", ")}</td>
+      <td><span class="arrow">→</span><span class="field-name">${canonical}</span></td>
+    </tr>`
+  ).join("");
+  return `
+    <p class="subtle" style="margin:0 0 10px 0">AI / user input is normalized via <code>normalize_and_validate_document_payload()</code> before it reaches the model.</p>
+    <table class="fields">
+      <thead><tr><th style="width:55%">Alias</th><th>Canonical</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function buildDocAliasLayer(dt, aliases) {
+  if (aliases.length === 0) {
+    return `<div class="empty">No known doc_type aliases for <code>${dt}</code>.</div>`;
+  }
+  const chips = aliases.map(a => `<span class="alias">${escapeHtml(a)}</span>`).join(" ");
+  return `
+    <p class="subtle" style="margin:0 0 10px 0">These strings in AI output get normalized to <code>${dt}</code>:</p>
+    <div style="display:flex; flex-wrap:wrap; gap:6px">${chips}</div>
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER — prompt
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderPrompt() {
+  const dt = state.docType;
+  const typed = TYPED_MODELS[dt];
+  const tpl = PLACEHOLDERS[dt];
+  const cls = classify(dt);
+
+  const lines = [];
+  lines.push(`Show me how to build a valid create_document payload for an EAGLE "${dt}" (${DISPLAY[dt] || dt}).`);
+
+  const layerBits = [];
+
+  // Describe the Pydantic model
+  if (typed) {
+    const typedFields = typed.map(f => f.name).join(", ");
+    layerBits.push(`the typed ${dt} model extends BaseDocumentData with: ${typedFields}`);
+  } else {
+    layerBits.push(`it falls through to BaseDocumentData (no typed model), so extra keys are allowed but not validated`);
+  }
+
+  // Describe the template layer
+  if (tpl) {
+    const phFields = Object.keys(tpl.map);
+    if (phFields.length > 0) {
+      layerBits.push(`the ${tpl.type} template "${tpl.s3}" needs these fields populated: ${phFields.join(", ")}`);
+    } else {
+      layerBits.push(`the ${tpl.type} template "${tpl.s3}" has no placeholder map (content is inserted directly)`);
+    }
+  } else if (cls.label === "frontend-only") {
+    layerBits.push(`this doc type is frontend-only today — no backend generator or template exists`);
+  } else if (cls.label === "form template") {
+    layerBits.push(`this is a form-only template (FORM_TEMPLATES) — no AI content generation`);
+  } else {
+    layerBits.push(`no docx/xlsx template is registered, so create_document emits markdown`);
+  }
+
+  // Shared fields
+  if (state.showShared) {
+    layerBits.push(`the shared base fields are ${BASE_FIELDS.map(f => f.name).join(", ")}`);
+  }
+
+  // Aliases
+  if (state.showAliases) {
+    layerBits.push(`remember that AI input goes through normalize_and_validate_document_payload, so aliases like "requirement" → "description" and "pop" → "period_of_performance" are resolved automatically`);
+  }
+
+  if (state.showDocAliases && DOC_ALIASES[dt] && DOC_ALIASES[dt].length) {
+    const ex = DOC_ALIASES[dt].slice(0, 3).join(", ");
+    layerBits.push(`doc_type aliases (${ex}${DOC_ALIASES[dt].length > 3 ? ", …" : ""}) normalize to "${dt}"`);
+  }
+
+  lines.push(`Key facts: ${layerBits.join("; ")}.`);
+  lines.push(`Reference files: server/app/ai_document_schema.py (canonical enums + Pydantic models), server/app/template_registry.py (placeholder_map), server/app/template_schema.py (section-level schema).`);
+  lines.push(`Give me a minimal and a fully-populated example payload, and explain which fields are effectively required (i.e., needed by the template or the frontend) vs. truly optional.`);
+
+  document.getElementById("prompt").textContent = lines.join("\n\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WIRE UP
+// ─────────────────────────────────────────────────────────────────────────────
+
+function updateAll() {
+  // Update preset state
+  for (const btn of document.querySelectorAll("#presets .preset")) {
+    btn.classList.toggle("active", btn.dataset.type === state.docType);
+  }
+  renderDocTypes();
+  renderPreview();
+  renderPrompt();
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Bind presets
+document.querySelectorAll("#presets .preset").forEach(btn => {
+  btn.addEventListener("click", () => {
+    state.docType = btn.dataset.type;
+    updateAll();
+  });
+});
+
+// Bind toggles
+document.getElementById("showShared").addEventListener("change", e => { state.showShared = e.target.checked; updateAll(); });
+document.getElementById("showAliases").addEventListener("change", e => { state.showAliases = e.target.checked; updateAll(); });
+document.getElementById("showDocAliases").addEventListener("change", e => { state.showDocAliases = e.target.checked; updateAll(); });
+document.getElementById("groupByLayer").addEventListener("change", e => { state.groupByLayer = e.target.checked; updateAll(); });
+
+// Copy button
+document.getElementById("copyBtn").addEventListener("click", async () => {
+  const text = document.getElementById("prompt").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById("copyBtn");
+    btn.classList.add("copied");
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.classList.remove("copied"); btn.textContent = "Copy Prompt"; }, 1400);
+  } catch (e) {
+    alert("Copy failed — select the text manually.");
+  }
+});
+
+updateAll();
+</script>
+</body>
+</html>

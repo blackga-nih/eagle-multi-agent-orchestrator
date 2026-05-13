@@ -1,0 +1,192 @@
+{
+  "filename": "1.b AP Above SAT.docx",
+  "format": "docx",
+  "category": "acquisition_plan",
+  "variant": "above_sat",
+  "sections": [
+    {
+      "number": "1",
+      "title": "Acquisition Plan (AP) Template Summary Information",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "2",
+      "title": "Additional Guidance",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "3",
+      "title": "Statement of Need - FAR 7.105(a)(1)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "4",
+      "title": "Technical and Contractual History",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "5",
+      "title": "Acquisition Alternatives",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "6",
+      "title": "Applicable Conditions - FAR7.105(a)(2)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "7",
+      "title": "Cost - FAR 7.105(a)(3)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "8",
+      "title": "Capability or Performance - FAR 7.105(a)(4)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "9",
+      "title": "Delivery or Performance-Period Requirements - FAR7.105(a)(5)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "10",
+      "title": "Trade-Offs \u2013 FAR 7.105(a)(6)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "11",
+      "title": "Risks \u2013 FAR 7.105(a)(7)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "12",
+      "title": "Acquisition Streamlining \u2013 FAR 7.105(a)(8)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "13",
+      "title": "Sources - FAR7.105(b)(1)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "14",
+      "title": "Competition - FAR 7.105(b)(2) and FAR 7.102",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "15",
+      "title": "Contract Type Selection\u2013 FAR 7.105(b)(3)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "16",
+      "title": "No additional guidance.",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "17",
+      "title": "Acquisition Considerations\u2013 FAR 7.105(b)(5)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "18",
+      "title": "Budgeting and Funding\u2013 FAR 7.105(b)(6)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "19",
+      "title": "Product or Service Descriptions\u2013 FAR 7.105(b)(7)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "20",
+      "title": "Priorities, Allocations, and Allotments\u2013 FAR 7.105(b)(8)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "21",
+      "title": "Contractor versus Government Performance\u2013 FAR 7.105(b)(9)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "22",
+      "title": "Inherently Governmental Functions\u2013 FAR 7.105(b)(10)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "23",
+      "title": "Management Information Requirements\u2013 FAR 7.105(b)(11)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "24",
+      "title": "Make or Buy\u2013 FAR 7.105(b)(12)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "25",
+      "title": "Test and Evaluation\u2013 FAR 7.105(b)(13)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "26",
+      "title": "Government \u2013Furnished Property \u2013 FAR 7.105(b)(15)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "27",
+      "title": "Government-Furnished Information\u2013 FAR 7.105(b)(16)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "28",
+      "title": "No additional guidance.",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "29",
+      "title": "Contract Administration \u2013 FAR 7.105(b)(19)",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "30",
+      "title": "Milestones for the Procurement Cycle - FAR 7.105(b)(21)",
+      "has_table": true,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 30,
+  "sheet_names": [],
+  "parse_error": null
+}

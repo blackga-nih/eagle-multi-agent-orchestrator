@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>20260428-021152-report-q4-q5-rerun-langfuse-v1</title>
+<style>
+@page {
+  size: Letter;
+  margin: 0.6in 0.7in;
+}
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: #1f2328;
+  max-width: none;
+  margin: 0;
+}
+h1 { font-size: 22pt; border-bottom: 2px solid #d0d7de; padding-bottom: 0.2em; margin: 0.2em 0 0.6em; }
+h2 { font-size: 16pt; border-bottom: 1px solid #d0d7de; padding-bottom: 0.15em; margin-top: 1.4em; }
+h3 { font-size: 13pt; margin-top: 1.2em; }
+h4 { font-size: 11.5pt; margin-top: 1em; }
+p, ul, ol { margin: 0.4em 0; }
+code {
+  font-family: "Cascadia Code", "Consolas", "Menlo", monospace;
+  font-size: 9pt;
+  background: #f6f8fa;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  border: 1px solid #eaeef2;
+}
+pre {
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 8.5pt;
+  page-break-inside: avoid;
+}
+pre code { background: none; border: none; padding: 0; font-size: inherit; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 9.5pt;
+  margin: 0.6em 0;
+  page-break-inside: avoid;
+}
+th, td {
+  border: 1px solid #d0d7de;
+  padding: 5px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #f6f8fa; font-weight: 600; }
+tr:nth-child(even) td { background: #fbfbfb; }
+blockquote {
+  border-left: 3px solid #d0d7de;
+  margin: 0.6em 0;
+  padding: 0 0.9em;
+  color: #4b5158;
+  page-break-inside: avoid;
+}
+a { color: #0969da; text-decoration: none; }
+hr { border: 0; border-top: 1px solid #d0d7de; margin: 1.4em 0; }
+ul, ol { padding-left: 1.6em; }
+li { margin: 0.15em 0; }
+img { max-width: 100%; }
+
+/* Page-break controls — keep tables and code together where possible */
+h1, h2, h3 { page-break-after: avoid; }
+table, pre, blockquote { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+<h1 id="q4q5-kb-fix-validation-cross-environment-trace-review">Q4/Q5 KB-Fix Validation — Cross-Environment Trace Review</h1>
+<p><strong>Date:</strong> 2026-04-28
+<strong>Window analyzed:</strong> 2026-04-23 → 2026-04-28 (5 days)
+<strong>Sources:</strong> Langfuse Cloud (<code>cmmsqvi2406aead071t0zhl7f</code>) + direct deployed-backend reruns from devbox
+<strong>For review:</strong> 2026-04-29 team meeting</p>
+<hr />
+<h2 id="executive-summary">Executive Summary</h2>
+<p><strong>Headline:</strong> The deployed DEV environment <strong>passes both Q4 and Q5</strong> on Ryan's flagged defects. Earlier alarming "Q4 regressed" results were against <code>main</code> checked out locally, which is <strong>behind</strong> what's deployed to DEV. The deployed code has an unmerged "RFO mapping" feature that explicitly bridges legacy FAR 16.507-6 to current FAR 16.505(b)(2)(i) — exactly what Ryan asked for.</p>
+<p><strong>Status by question (final, after pivot to deployed reruns):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Q</th>
+<th>Ryan's flags</th>
+<th>Deployed DEV (04-28)</th>
+<th>Local <code>main</code> (04-28)</th>
+<th>QA3 baseline (04-23)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Q4</strong></td>
+<td>① SAM.gov posting, ② Small-biz carve-out</td>
+<td><strong>✅ both fixed</strong> + cites FAR 16.507-6</td>
+<td>❌ regressed on both</td>
+<td>❌ both present</td>
+</tr>
+<tr>
+<td><strong>Q5</strong></td>
+<td>"used Part 15 instead of Part 9"</td>
+<td><strong>✅ correctly identifies SBIR as FAR 6.102(d)</strong></td>
+<td>✅ partial</td>
+<td>❌ Part 15 walked through</td>
+</tr>
+</tbody>
+</table>
+<p><strong>What changed between yesterday's QA4 traces and today's deployed-DEV behavior:</strong>
+- Ryan's KB updates synced (yesterday) — necessary but not sufficient
+- An <strong>unmerged feature branch</strong> with RFO mapping was deployed to DEV today (Hash: <em>"redeploying with a few minor agent updates"</em>) — this is the actual fix
+- That branch is the source of the new "🟢 RFO Applied" annotations and the agent-prompt SBIR/BAA carve-out logic</p>
+<p><strong>What we built along the way (standing capability):</strong>
+- <code>just dev-rerun-q4-q5</code> — one command, your laptop → SSM → devbox → deployed DEV ALB → Bedrock → results back to local. No VPN. ~5 min round-trip.
+- <code>just qa-rerun-q4-q5</code> — same shape against QA backend. <strong>Currently blocked</strong> by a security-group / listener issue: QA backend ALB unreachable from devbox subnet (target group is healthy, ECS is alive, but devbox curl times out at 25s). Separate from the Q4/Q5 work.
+- <code>server/tests/eval_query_orchestrator.py</code> — the harness that runs on the devbox; sibling of the existing <code>e2e_judge_orchestrator.py</code>. Optional Cognito auth via <code>EAGLE_TEST_EMAIL</code>/<code>PASSWORD</code>.</p>
+<p><strong>Asks for tomorrow</strong> — see §12.</p>
+<hr />
+<h2 id="tldr-cross-cut-comparison">TL;DR (cross-cut comparison)</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>KB resync took?</th>
+<th>Deployed DEV verdict</th>
+<th>Local main verdict</th>
+<th>Old QA3/QA4 verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Q4</strong> — sole source on multi-award IDIQ</td>
+<td>Yes (3 reruns 04-27)</td>
+<td>✅ PASS — cites FAR 16.507-6 mapping, 14-day posting, small-biz exempt</td>
+<td>❌ FAIL on all three</td>
+<td>❌ FAIL on both flags</td>
+</tr>
+<tr>
+<td><strong>Q5</strong> — SBIR debrief + protest</td>
+<td>Yes (today's local + deployed reruns)</td>
+<td>✅ PASS — SBIR as FAR 6.102(d), GAO B-414514, 10-day rule</td>
+<td>✅ partial — SBIR carve-out OK but no Part 9/9.x</td>
+<td>n/a (not rerun)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Side-effect win:</strong> the EAGLE-254 research-tool refactor (PR #157/#158, merged 04-24) shows up in every post-04-24 trace — research tool wall time <strong>dropped from 132s → 11s, a ~12× speedup</strong> with full KB sub-span observability (<code>kb_search_primary/secondary/path/semantic</code> + <code>s3_fetch_docs</code>) now exposed in Langfuse.</p>
+<hr />
+<h2 id="1-run-inventory">1. Run Inventory</h2>
+<p>All 5 traces below are reproducible from the Langfuse REST API (<code>/api/public/traces/{id}</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Trace ID</th>
+<th>Timestamp (UTC)</th>
+<th>Env</th>
+<th style="text-align: right;">Wall Time</th>
+<th style="text-align: right;">Cost</th>
+<th>Model</th>
+<th style="text-align: right;">Observations</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Q4 QA3 baseline</strong></td>
+<td><code>78d416ed7aee7b8258845b5df7c0ea92</code></td>
+<td>2026-04-23 21:52:01</td>
+<td>dev</td>
+<td style="text-align: right;">158.6s</td>
+<td style="text-align: right;">$0.4213</td>
+<td>claude-sonnet-4-6</td>
+<td style="text-align: right;">6</td>
+</tr>
+<tr>
+<td><strong>Q4 QA4 run 1</strong> (qa)</td>
+<td><code>f5d57da34a3a32c77fc2002420d9e0d8</code></td>
+<td>2026-04-27 14:21:06</td>
+<td>qa</td>
+<td style="text-align: right;">188.4s</td>
+<td style="text-align: right;">$0.4109</td>
+<td>claude-sonnet-4-6</td>
+<td style="text-align: right;">6</td>
+</tr>
+<tr>
+<td><strong>Q4 QA4 run 2</strong> (dev)</td>
+<td><code>74ebf7f42441d3da8ce563874aff4ac6</code></td>
+<td>2026-04-27 14:21:55</td>
+<td>dev</td>
+<td style="text-align: right;">36.8s</td>
+<td style="text-align: right;">$0.1630</td>
+<td>claude-sonnet-4-6</td>
+<td style="text-align: right;">12</td>
+</tr>
+<tr>
+<td><strong>Q4 QA4 run 3</strong> (qa)</td>
+<td><code>a8b181a80f86025af90801dbe82be449</code></td>
+<td>2026-04-27 19:56:14</td>
+<td>qa</td>
+<td style="text-align: right;"><strong>34.0s</strong></td>
+<td style="text-align: right;"><strong>$0.1114</strong></td>
+<td>claude-sonnet-4-6</td>
+<td style="text-align: right;">12</td>
+</tr>
+<tr>
+<td><strong>Q5 baseline</strong></td>
+<td><code>38f2f31830b03f2e2a6af1177ce97016</code></td>
+<td>2026-04-23 22:01:30</td>
+<td>dev</td>
+<td style="text-align: right;">195.9s</td>
+<td style="text-align: right;">$0.3175</td>
+<td>claude-sonnet-4-6</td>
+<td style="text-align: right;">7</td>
+</tr>
+</tbody>
+</table>
+<p>User: <code>24a8d478-20a1-7087-e1a3-56a38d733592</code> (Ryan/Hash session) on all five runs.
+Tenant: <code>default</code> · Tier: <code>free</code> · Service: <code>strands-agents 1.26.0</code> · OTEL SDK 1.41.0.</p>
+<p>Direct Langfuse links (replace project ID if region differs):</p>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>https://us.cloud.langfuse.com/project/cmmsqvi2406aead071t0zhl7f/traces/78d416ed7aee7b8258845b5df7c0ea92
+https://us.cloud.langfuse.com/project/cmmsqvi2406aead071t0zhl7f/traces/f5d57da34a3a32c77fc2002420d9e0d8
+https://us.cloud.langfuse.com/project/cmmsqvi2406aead071t0zhl7f/traces/74ebf7f42441d3da8ce563874aff4ac6
+https://us.cloud.langfuse.com/project/cmmsqvi2406aead071t0zhl7f/traces/a8b181a80f86025af90801dbe82be449
+https://us.cloud.langfuse.com/project/cmmsqvi2406aead071t0zhl7f/traces/38f2f31830b03f2e2a6af1177ce97016
+</code></pre></div>
+
+<hr />
+<h2 id="2-wall-time-cost-trajectory">2. Wall-Time / Cost Trajectory</h2>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>Q4 wall time across 4 runs
+
+  200s ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  QA4 run 1  (188s)  old research tool
+  160s ┤■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■           QA3 baseline (159s) old research tool
+  120s ┤
+   80s ┤
+   40s ┤■■■■■■■■■                                  QA4 run 2  (37s)  new research tool
+   34s ┤■■■■■■■■                                   QA4 run 3  (34s)  new research tool
+</code></pre></div>
+
+<p><strong>Cost per Q4 run</strong> (5.5× reduction QA3 → QA4-run3):</p>
+<table>
+<thead>
+<tr>
+<th>Run</th>
+<th style="text-align: right;">Cost</th>
+<th style="text-align: right;">vs. QA3</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>QA3 baseline</td>
+<td style="text-align: right;">$0.4213</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td>QA4 run 1 (qa, pre-deploy)</td>
+<td style="text-align: right;">$0.4109</td>
+<td style="text-align: right;">-2%</td>
+</tr>
+<tr>
+<td>QA4 run 2 (dev, post-deploy)</td>
+<td style="text-align: right;">$0.1630</td>
+<td style="text-align: right;"><strong>-61%</strong></td>
+</tr>
+<tr>
+<td>QA4 run 3 (qa, post-deploy)</td>
+<td style="text-align: right;">$0.1114</td>
+<td style="text-align: right;"><strong>-74%</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The discontinuity between QA4 run 1 (188s, $0.41, 6 obs) and runs 2–3 (~35s, ~$0.13, 12 obs) is not noise — it's the EAGLE-254 deploy landing on dev/qa between 14:22 and 19:56 UTC.</p>
+<hr />
+<h2 id="3-proof-observation-tree-diff-qa3-vs-qa4">3. Proof: Observation-Tree Diff (QA3 vs QA4)</h2>
+<p>This is hard evidence that <strong>two different things changed today</strong>: (a) the KB content, and (b) the research tool implementation.</p>
+<h3 id="qa3-baseline-04-23-6-observations-opaque-research-tool">QA3 baseline (04-23) — 6 observations, opaque research tool</h3>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>[AGENT]      invoke_agent Strands Agents       158.6s
+└─ [SPAN]   execute_event_loop_cycle          158.4s
+   ├─ [GEN] chat                                22.2s    (planning)
+   ├─ [TOOL] research                          132.3s   ← black box
+   └─ [GEN] chat                                 2.7s    (final)
+</code></pre></div>
+
+<h3 id="qa4-run-3-04-27-1956-12-observations-decomposed-research-tool">QA4 run 3 (04-27 19:56) — 12 observations, decomposed research tool</h3>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>[AGENT]      invoke_agent Strands Agents        34.0s
+└─ [SPAN]   execute_event_loop_cycle            33.9s
+   ├─ [GEN] chat                                 19.1s   (planning)
+   ├─ [TOOL] research                            11.1s   ← now a span tree
+   │   ├─ [SPAN] kb_search_primary                3.2s
+   │   ├─ [SPAN] kb_search_secondary              2.7s
+   │   ├─ [SPAN] kb_search_path                   0.6s
+   │   ├─ [SPAN] kb_search_semantic               0.1s
+   │   ├─ [SPAN] kb_search_checklist              3.4s
+   │   └─ [SPAN] s3_fetch_docs                    0.5s
+   └─ [GEN] chat                                  3.0s   (final)
+</code></pre></div>
+
+<p>This matches what shipped in commits <code>348a5f6</code> (PR #157) and <code>e1953a6</code> (PR #158, <em>"fetched doc excluded from kb_results"</em>) on Friday 2026-04-24. <strong>The traces confirm those changes are live in qa as of 19:56 UTC on 04-27.</strong></p>
+<p>QA4 run 1 (14:21 qa, 188s) still shows the old 6-observation shape — the qa deploy had not yet rolled. QA4 run 3 at 19:56 shows the new 12-observation shape with <code>kb_search_*</code> and <code>s3_fetch_docs</code> sub-spans.</p>
+<h3 id="q5-baseline-observation-tree-04-23-old-tool-7-obs">Q5 baseline observation tree (04-23) — old tool, 7 obs</h3>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>[AGENT] invoke_agent Strands Agents             195.9s
+└─ [SPAN] execute_event_loop_cycle              195.7s
+   ├─ [GEN] chat                                 62.5s
+   ├─ [TOOL] search_far                           0.0s
+   ├─ [TOOL] research                           128.6s   ← old black-box tool
+   └─ [GEN] chat                                  3.3s
+</code></pre></div>
+
+<p>Q5 has not been rerun since this baseline.</p>
+<hr />
+<h2 id="4-did-the-kb-fix-resolve-ryans-two-q4-flags">4. Did the KB Fix Resolve Ryan's Two Q4 Flags?</h2>
+<p>Ryan's two flagged defects (Teams chat, 04-27):</p>
+<blockquote>
+<ol>
+<li><em>"in the JEFO vs J&amp;A table it shows sam.gov posting not required. posting is required within 14 days of award under FAR 16.507-6f"</em></li>
+<li><em>"It also listed a small business set aside under FAR 19.505 as an exception to fair opportunity. in FAR 16.507-6 small business is a carve out that is explicitly exempt from the exception process"</em></li>
+</ol>
+</blockquote>
+<h3 id="defect-1-samgov-posting">Defect ① — SAM.gov posting</h3>
+<table>
+<thead>
+<tr>
+<th>Run</th>
+<th>What the model said</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>QA3 (04-23)</td>
+<td>"<strong>SAM.gov posting</strong> | Not required" <em>(in JEFO vs J&amp;A comparison table)</em></td>
+<td>❌ wrong</td>
+</tr>
+<tr>
+<td>QA4 r1 (qa)</td>
+<td>(omits SAM.gov posting entirely)</td>
+<td>❌ silent</td>
+</tr>
+<tr>
+<td>QA4 r2 (dev)</td>
+<td>"&gt; $7M ... posted to SAM.gov, approved at appropriate level"</td>
+<td>❌ partial</td>
+</tr>
+<tr>
+<td>QA4 r3 (qa)</td>
+<td>"JEFOs for orders &gt; $7M must be posted to SAM.gov for <strong>5 days</strong> (unless urgency exception applies)"</td>
+<td>❌ still wrong</td>
+</tr>
+</tbody>
+</table>
+<p>Ryan's authority: <strong>FAR 16.507-6(f)</strong> requires posting <strong>within 14 days of award</strong> for <em>all</em> JEFOs (no $7M floor, no 5-day window).
+Verbatim QA3 source citation: <em>"FAR Part 16 RFO 2025 (<code>eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_16_IDIQ_Comprehensive_RFO_2025.txt</code>)"</em> — model claims this source backs "not required," but Ryan's audit of those KB files shows the opposite.</p>
+<p><strong>This is a model defect, not a KB defect.</strong> The KB fix improved Run 3's framing but did not surface FAR 16.507-6 anywhere in the answer. Across all 4 Q4 traces, <strong>the model never cites FAR 16.507-6</strong> — it consistently grounds in <code>FAR 16.505(b)(2)</code>, which is the legacy section Hash flagged.</p>
+<h3 id="defect-2-small-business-carve-out-far-19505">Defect ② — Small Business carve-out (FAR 19.505)</h3>
+<table>
+<thead>
+<tr>
+<th>Run</th>
+<th>What the model said</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>QA3 (04-23)</td>
+<td>"(F) Small Business Set-Aside | Order set aside for small business concerns under FAR 19.505" <em>(listed as exception (F))</em></td>
+<td>❌ wrong framing</td>
+</tr>
+<tr>
+<td>QA4 r1 (qa)</td>
+<td>Same — listed as exception (F), no caveat</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>QA4 r2 (dev)</td>
+<td>"(F) ... CO may set aside an order for small business concerns within the pool" — still listed as one of seven exceptions</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>QA4 r3 (qa)</td>
+<td>"(F) Small Business Set-Aside | ... <strong>no JEFO needed</strong>, entirely exempt from the exception process" <em>and</em> a separate paragraph: <em>"No JEFO required. The fair opportunity process doesn't apply at all."</em></td>
+<td>⚠️ partial</td>
+</tr>
+</tbody>
+</table>
+<p>QA4 run 3 is <strong>semantically correct</strong> — it now states small-business set-asides bypass the JEFO process entirely — but it still labels the carve-out as "Exception (F)" rather than recategorizing it. Ryan's correction reads it as a category error: small-business is a <em>carve-out</em>, not an <em>exception</em>. The KB resync moved the model in the right direction but did not eliminate the structural mislabeling.</p>
+<h3 id="source-citation-evidence">Source-citation evidence</h3>
+<p>QA3 baseline explicitly cites all four files Ryan updated:</p>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>Sources:
+- FAR Part 16 RFO 2025 (eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_16_IDIQ_Comprehensive_RFO_2025.txt)
+- NIH J&amp;A Desk Guide (eagle-knowledge-base/approved/legal-counselor/protest-guidance/JA_Desk_Guide_January_2025_Updated.txt)        ← Ryan updated this
+- HHS PMR IDIQ Checklist (eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt)              ← Ryan updated this
+- HCA/SPE Approval Thresholds (eagle-knowledge-base/approved/supervisor-core/core-procedures/HCA_SPE_Approval_Thresholds_Updated.txt) ← Ryan updated this
+</code></pre></div>
+
+<p>QA4 run 3 omits the explicit source list — a visible regression in citation transparency between QA3 and QA4 (likely tied to the EAGLE-254 payload-shrink that capped <code>kb_results</code> at 8 with dedup).</p>
+<hr />
+<h2 id="5-q5-status">5. Q5 Status</h2>
+<p>Last and only Q5 trace: <code>38f2f31830b03f2e2a6af1177ce97016</code> (2026-04-23, 195.9s, $0.3175).</p>
+<p>The baseline answer extensively cites <strong>FAR Part 15</strong> (negotiation procedures) and walks the user through pre-award vs post-award debrief flow under 15.505/15.506. Ryan flagged this as wrong: <em>"long story short it used part 15 instead of 9"</em> and <em>"these guides didn't have any information regarding caveats for SBIR"</em>.</p>
+<p>Ryan's KB fix (04-27) added SBIR/BAA caveats to:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>KB path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GAO_Bid_Protests_Essential_Guide_for_COs.txt</code></td>
+<td><code>legal-counselor/protest-guidance/</code></td>
+</tr>
+<tr>
+<td><code>FAR_Part_15_Negotiation_RFO_2025.txt</code></td>
+<td><code>compliance-strategist/FAR-guidance/</code></td>
+</tr>
+<tr>
+<td><code>NIH_6033_2_Stay_Provisions_Protests.txt</code></td>
+<td><code>legal-counselor/protest-guidance/</code></td>
+</tr>
+<tr>
+<td><code>FC_33_Protests_Disputes_Appeals.txt</code></td>
+<td><code>legal-counselor/protest-guidance/</code></td>
+</tr>
+<tr>
+<td><code>NIH_6315_1_RD_Contracts_Part2_Evaluation_Award.txt</code></td>
+<td><code>compliance-strategist/NIH-policies/</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>No Q5 rerun has been recorded since the KB resync.</strong> Cannot confirm whether the new SBIR/BAA caveats successfully redirected the model to FAR Part 9 + the SBIR-specific protest framework.</p>
+<hr />
+<h2 id="6-side-effect-win-eagle-254-performance-observability">6. Side-Effect Win: EAGLE-254 Performance + Observability</h2>
+<p>Not the original ticket, but the traces prove this shipped and is paying dividends:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Pre-deploy (04-23)</th>
+<th style="text-align: right;">Post-deploy (04-27 19:56)</th>
+<th style="text-align: right;">Δ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>research</code> tool wall time</td>
+<td style="text-align: right;">132.3s</td>
+<td style="text-align: right;">11.1s</td>
+<td style="text-align: right;"><strong>-92%</strong></td>
+</tr>
+<tr>
+<td>Total trace wall time</td>
+<td style="text-align: right;">158.6s</td>
+<td style="text-align: right;">34.0s</td>
+<td style="text-align: right;"><strong>-79%</strong></td>
+</tr>
+<tr>
+<td>Total cost per Q4 query</td>
+<td style="text-align: right;">$0.4213</td>
+<td style="text-align: right;">$0.1114</td>
+<td style="text-align: right;"><strong>-74%</strong></td>
+</tr>
+<tr>
+<td>KB sub-span visibility</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">6 named spans</td>
+<td style="text-align: right;">new</td>
+</tr>
+</tbody>
+</table>
+<p>The new sub-spans (<code>kb_search_primary</code>, <code>_secondary</code>, <code>_path</code>, <code>_semantic</code>, <code>_checklist</code>, <code>s3_fetch_docs</code>) make it possible to attribute future regressions to specific retrieval stages — directly enabling the diagnostic plan in §7.</p>
+<hr />
+<h2 id="7-improvement-plan">7. Improvement Plan</h2>
+<p>The traces tell us the remaining Q4 defects are <strong>agent-prompt / grounding bugs, not KB bugs</strong>. The KB fix mitigated framing but didn't fix the wrong FAR section. Plan is bucketed by what kind of fix is required.</p>
+<h3 id="71-immediate-confirm-q5-fix-held-24-48h">7.1 Immediate — Confirm Q5 fix held (24-48h)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Action</th>
+<th>Owner</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Rerun Q5 (<code>SBIR offeror gets eliminated…</code>) against qa</td>
+<td>eval pipeline</td>
+<td>New trace within 7d window, latency ≤ 60s, FAR Part 9 + SBIR caveat present</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Diff Q5 baseline vs new run, focus on FAR section coverage</td>
+<td>reviewer</td>
+<td>Confirm Part 9 / SBIR carve-out language appears</td>
+</tr>
+<tr>
+<td>3</td>
+<td>If still cites Part 15, escalate to 7.3 (model fix)</td>
+<td>TL</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="72-q4-land-the-verbatim-far-section-the-model-is-missing">7.2 Q4 — Land the verbatim FAR section the model is missing</h3>
+<p>The model has never once cited FAR 16.507-6 in 4 traces. Two parallel options:</p>
+<p><strong>Option A — KB-side (low cost, fast)</strong></p>
+<ol>
+<li>Audit <code>FAR_Part_16_IDIQ_Comprehensive_RFO_2025.txt</code> and confirm FAR 16.507-6(f) language is verbatim and prominent.</li>
+<li>If absent or buried, add a section header that the embedding model will hit on "JEFO posting", "SAM.gov posting", "FAR 16.507-6f", "14 days of award".</li>
+<li>Reupload to both buckets (<code>eagle-documents-695681773636-dev</code> + RO bucket), trigger Bedrock KB sync.</li>
+<li>Rerun Q4 — pass criterion: response cites <strong>FAR 16.507-6(f)</strong> explicitly and gives <strong>14 days post-award</strong> as the posting rule.</li>
+</ol>
+<p><strong>Option B — Agent-prompt side (higher confidence, more work)</strong></p>
+<ol>
+<li>Add a constraint to the legal-counselor and compliance-strategist agent prompts: <em>"For multi-award IDIQ JEFO posting, cite FAR 16.507-6(f), not FAR 16.505. Posting is required within 14 days of award for all JEFOs above the SAT, regardless of value."</em></li>
+<li>Add a unit test in the eval suite (<code>server/tests/</code>) that asserts the citation appears in the response for this question.</li>
+<li>Same pass criterion as Option A.</li>
+</ol>
+<p>Recommend running A first; if the next rerun still says "5 days" or omits 16.507-6, escalate to B.</p>
+<h3 id="73-q4-reframe-small-business-carve-out">7.3 Q4 — Reframe Small Business carve-out</h3>
+<p>QA4 run 3 already says the right <em>thing</em> but in the wrong <em>structure</em> (still labels it Exception (F)). Cheap fix:</p>
+<ol>
+<li>Add to <code>compliance-strategist</code> agent prompt: <em>"FAR 19.505 small-business set-asides are a carve-out from the fair-opportunity requirement, not an enumerated exception under FAR 16.505(b)(2)(i). Do not list set-asides as exception (F); list them in a separate carve-out section."</em></li>
+<li>Add eval assertion: response must NOT contain the substring "Exception (F)" or "exception (F)" when paired with "small business".</li>
+</ol>
+<h3 id="74-restore-source-citations-regression">7.4 Restore source citations regression</h3>
+<p>QA3 emitted explicit <code>eagle-knowledge-base/approved/...</code> source paths; QA4 run 3 dropped them. EAGLE-254 capped <code>kb_results</code> at 8 + dedup, which likely truncated the citation block.</p>
+<ol>
+<li>Inspect <code>kb_results</code> payload contract from PR #157 — confirm citations are still emitted to the model context even after dedup.</li>
+<li>Add response-side check: every Q4/Q5 answer must include at least 3 source paths.</li>
+</ol>
+<h3 id="75-add-kb-resync-trigger-automation">7.5 Add KB-resync trigger automation</h3>
+<p>Hash flagged in chat: <em>"Still in process of making a trigger to auto detect changes in KB and kick off a script that deals with the metadata we gather"</em>.</p>
+<ol>
+<li>CDK: S3 EventBridge rule on <code>eagle-documents-695681773636-dev</code> <code>s3:ObjectCreated:*</code>.</li>
+<li>Lambda target: invoke Bedrock KB ingestion job + emit a CloudWatch metric <code>EAGLE/KB/ResyncTriggered</code>.</li>
+<li>Slack/Teams notification on completion with file delta.</li>
+<li>Removes manual "Brian uploads → tell Jitong → Jitong resyncs" loop.</li>
+</ol>
+<h3 id="76-continuous-regression-harness-for-q4q5">7.6 Continuous regression harness for Q4/Q5</h3>
+<p>The chat history shows Ryan/Hash are running ad-hoc reruns and producing manual comparison docs (<code>Q4 Eagle Responses QA3 and QA4 Comparison new.docx</code>). This belongs in the eval suite.</p>
+<ol>
+<li>Add <code>test_q4_idiq_sole_source</code> and <code>test_q5_sbir_protest</code> to <code>server/tests/test_strands_eval.py</code> with the assertions from 7.2 and 7.3.</li>
+<li>Wire into CI on every push to qa via <code>.github/workflows/deploy.yml</code>.</li>
+<li>Auto-publish Langfuse trace URLs into the GH Actions summary so reviewers don't have to hunt for them.</li>
+</ol>
+<h3 id="priority-sequencing">Priority / sequencing</h3>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>P0 (today):       7.1 — rerun Q5
+P0 (this week):   7.2A — KB content audit + reupload
+P1 (this week):   7.3 — agent prompt for small-business carve-out
+                  7.4 — citation-block regression check
+P1 (this sprint): 7.6 — eval-suite test cases
+P2 (next sprint): 7.5 — auto-resync trigger
+</code></pre></div>
+
+<hr />
+<h2 id="8-methodology-notes">8. Methodology Notes</h2>
+<p>All numbers in this report came from the Langfuse REST API:</p>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>GET<span style="color: #BBB"> </span>/api/public/traces?fromTimestamp<span style="color: #666">=</span>&lt;iso8601&gt;&amp;<span style="color: #19177C">limit</span><span style="color: #666">=100</span>&amp;<span style="color: #19177C">page</span><span style="color: #666">=</span>N
+GET<span style="color: #BBB"> </span>/api/public/traces/<span style="color: #666">{</span>trace_id<span style="color: #666">}</span>
+GET<span style="color: #BBB"> </span>/api/public/observations?traceId<span style="color: #666">={</span>trace_id<span style="color: #666">}</span>
+</code></pre></div>
+
+<p>Auth: HTTP Basic with <code>LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY</code> from <code>server/.env</code>.
+No mocking — every assertion above is reproducible by hitting the same endpoints with the same trace IDs.</p>
+<p>Raw trace + observation JSON for the 5 traces is staged at <code>/tmp/lf_q4_q5_full.json</code> (not committed; regenerable from trace IDs in §1).</p>
+<hr />
+<h2 id="9-qa5-re-test-results-post-resync-local-rerun">9. QA5 Re-Test Results (post-resync, local rerun)</h2>
+<p><strong>Run timestamp:</strong> 2026-04-28 06:23 UTC
+<strong>Method:</strong> Local execution against the same Bedrock + same KB Ryan resynced (no VPN, no FastAPI server). Driver: <code>server/scripts/rerun_q4_q5.py</code> calls <code>strands_agentic_service.sdk_query</code> directly.
+<strong>Traces emitted to:</strong> Same Langfuse project as QA3/QA4.</p>
+<h3 id="91-new-trace-inventory">9.1 New trace inventory</h3>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Trace ID</th>
+<th style="text-align: right;">Latency</th>
+<th style="text-align: right;">Cost</th>
+<th>Tokens</th>
+<th style="text-align: right;">Tools</th>
+<th style="text-align: right;">Obs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q4 local rerun</td>
+<td><code>f8550f0457d1205b8c5a71b818aaea78</code></td>
+<td style="text-align: right;"><strong>36.9s</strong></td>
+<td style="text-align: right;">$0.1604</td>
+<td>(sdk usage 0/0)</td>
+<td style="text-align: right;">research × 1</td>
+<td style="text-align: right;">11</td>
+</tr>
+<tr>
+<td>Q5 local rerun</td>
+<td><code>6ff588e5131c58091b80cc19abad7493</code></td>
+<td style="text-align: right;"><strong>56.6s</strong></td>
+<td style="text-align: right;">$0.2491</td>
+<td>(sdk usage 0/0)</td>
+<td style="text-align: right;">research × 1</td>
+<td style="text-align: right;">13</td>
+</tr>
+</tbody>
+</table>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>https://us.cloud.langfuse.com/project/cmmsqvi2406aead071t0zhl7f/traces/f8550f0457d1205b8c5a71b818aaea78
+https://us.cloud.langfuse.com/project/cmmsqvi2406aead071t0zhl7f/traces/6ff588e5131c58091b80cc19abad7493
+</code></pre></div>
+
+<p>Tags: <code>Q4 / Q5</code>, <code>env:local</code>, <code>host:NCI-02347248-L</code>. Sessions: <code>local-rerun-Q4_rerun_post_kb_resync-ecd5435c</code> and <code>local-rerun-Q5_rerun_post_kb_resync-69e51da2</code>.</p>
+<h3 id="92-wall-time-trajectory-q4">9.2 Wall-time trajectory (Q4)</h3>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>QA3 baseline   2026-04-23 21:52  159s  $0.4213   old research tool, KB-as-was
+QA4 r1 qa      2026-04-27 14:21  188s  $0.4109   old research tool, KB resynced (cold)
+QA4 r2 dev     2026-04-27 14:22   37s  $0.1630   new research tool, KB resynced
+QA4 r3 qa      2026-04-27 19:56   34s  $0.1114   new research tool, KB resynced (warm)
+QA5 local      2026-04-28 06:23   37s  $0.1604   new research tool, KB resynced (local)
+</code></pre></div>
+
+<p>Local rerun matches QA4-r3's profile (~35s, ~$0.13, 11-12 obs with sub-spans). The EAGLE-254 sub-spans (<code>kb_search_primary/secondary/path/semantic</code> + <code>s3_fetch_docs</code>) are present in the local trace too, confirming the local agent is on the same code path as the deployed qa stack.</p>
+<h3 id="93-q4-verdict-regressed">9.3 Q4 verdict — REGRESSED</h3>
+<p>The local rerun is <strong>worse</strong> than QA4 run 3 on both of Ryan's flagged defects, and introduces a new defect.</p>
+<table>
+<thead>
+<tr>
+<th>Defect</th>
+<th>QA3 (04-23)</th>
+<th>QA4 r3 (04-27)</th>
+<th>QA5 local (04-28)</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>① SAM.gov posting / FAR 16.507-6</td>
+<td>"Not required"</td>
+<td>"&gt;$7M, 5 days"</td>
+<td><strong>omitted entirely</strong></td>
+<td>❌ regression</td>
+</tr>
+<tr>
+<td>② Small Business carve-out</td>
+<td>listed as Exception (F)</td>
+<td>"(F) … no JEFO needed, exempt"</td>
+<td>"(F) Small Business Set-Aside per FAR 19.505" <em>(no caveat)</em></td>
+<td>❌ regression</td>
+</tr>
+<tr>
+<td>③ JEFO ≠ J&amp;A distinction (new)</td>
+<td>clearly distinguished</td>
+<td>clearly distinguished</td>
+<td><strong>conflated</strong>: <em>"you must prepare a written Justification &amp; Approval (J&amp;A) citing the applicable exception"</em></td>
+<td>❌ new defect</td>
+</tr>
+</tbody>
+</table>
+<p>Verbatim from QA5 local Q4 response:</p>
+<blockquote>
+<p>"<strong>Documentation Threshold:</strong> For orders <strong>over $7.5M</strong> (civilian agencies) / <strong>$15M</strong> (DoD), you must prepare a written Justification &amp; Approval (J&amp;A) citing the applicable exception."</p>
+</blockquote>
+<p>This is the wrong document type — JEFO under FAR 16.505, not a J&amp;A under FAR Part 6. QA3 had this distinction right; the local rerun lost it.</p>
+<p><strong>Source-path evidence — KB retrieval missed Ryan's updated files:</strong></p>
+<table>
+<thead>
+<tr>
+<th>File Ryan updated 04-27</th>
+<th style="text-align: center;">Cited by QA3?</th>
+<th style="text-align: center;">Cited by QA5 local?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>JA_Desk_Guide_January_2025_Updated.txt</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>HHS_PMR_IDIQ_Checklist.txt</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>HCA_SPE_Approval_Thresholds_Updated.txt</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+</tbody>
+</table>
+<p>Instead the QA5 local run pulled <strong>8 different files</strong>, several of which are off-topic (<code>07-policy-analyst.txt</code>, <code>appropriations_law_IDIQ_funding.txt</code>, <code>GAO_B-321640_ADA_Bonafide_Need_IDIQ.txt</code>). The retriever surfaced approval-thresholds + appropriations content in place of the JEFO/J&amp;A guidance Ryan curated. This is consistent with EAGLE-254's <code>kb_results</code> cap-at-8 + dedup logic squeezing out the high-relevance JEFO files when other 16.505/IDIQ chunks score similarly.</p>
+<h3 id="94-q5-verdict-major-win">9.4 Q5 verdict — MAJOR WIN</h3>
+<p>The local rerun fixes Ryan's "Part 15 instead of Part 9" complaint cleanly.</p>
+<table>
+<thead>
+<tr>
+<th>Behavior</th>
+<th>Q5 baseline (04-23)</th>
+<th>Q5 local rerun (04-28)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Treats SBIR as a FAR Part 15 acquisition by default</td>
+<td>❌ yes</td>
+<td>✅ no</td>
+</tr>
+<tr>
+<td>Cites the SBIR carve-out from competitive proposals</td>
+<td>❌ no</td>
+<td>✅ yes — <em>"FAR 6.102(d), not competitive proposals under FAR Part 15"</em></td>
+</tr>
+<tr>
+<td>Cites controlling case law</td>
+<td>partial</td>
+<td>✅ <em>GAO B-414514 (Global Aerospace)</em></td>
+</tr>
+<tr>
+<td>Distinguishes "required" vs "voluntary" debrief for stay window</td>
+<td>❌ no</td>
+<td>✅ yes — <em>"5-day debrief window doesn't apply to SBIR unless agency voluntarily adopted FAR Part 15 debrief procedures"</em></td>
+</tr>
+<tr>
+<td>Cites Ryan's updated KB files</td>
+<td>n/a</td>
+<td>✅ <code>FC_33_Protests_Disputes_Appeals.txt</code>, <code>NIH_6033_2_Stay_Provisions_Protests.txt</code></td>
+</tr>
+<tr>
+<td>Covers CICA stay nuance (10-day-from-award, HCA override, DASAMP approval)</td>
+<td>partial</td>
+<td>✅ comprehensive</td>
+</tr>
+</tbody>
+</table>
+<p>Verbatim from QA5 local Q5 response:</p>
+<blockquote>
+<p>"SBIR is procured under <strong>'other competitive procedures'</strong> (FAR 6.102(d)), <strong>not</strong> competitive proposals under FAR Part 15. This is the fork in the road for everything that follows. The mandatory debriefing rules of FAR 15.505 (pre-award) and 15.506/15.301 (post-award) do not attach to SBIR by default. GAO confirmed this in <strong>B-414514, Global Aerospace</strong> — SBIR protests run on the general 10-day-from-knowledge rule (4 C.F.R. § 21.2(a)(2)), not the debriefing-triggered clock."</p>
+</blockquote>
+<p>This is exactly the distinction Ryan said the baseline missed. The KB caveats Ryan added (<em>"don't apply to SBIR or BAAs where appropriate"</em>) directly drove the agent to the correct framework. <strong>Ryan's Q5 fix worked.</strong></p>
+<p>Two minor gaps remaining for Q5:
+- Does not explicitly cite FAR Part 9 (the original framework Ryan wanted). The model went straight to FAR 6.102(d) instead, which is arguably a stronger answer but doesn't match Ryan's exact mental model.
+- Does not mention BAA (Broad Agency Announcement) explicitly even though Ryan's KB caveats name BAAs. May be a follow-on test case.</p>
+<h3 id="95-updated-priorities">9.5 Updated priorities</h3>
+<p>The Q4 regression changes the plan in §7.</p>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Item</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P0 NOW</strong></td>
+<td>Investigate why QA5 local Q4 didn't pull <code>JA_Desk_Guide_January_2025_Updated.txt</code> / <code>HHS_PMR_IDIQ_Checklist.txt</code> / <code>HCA_SPE_Approval_Thresholds_Updated.txt</code></td>
+<td>new — retriever ranked them out</td>
+</tr>
+<tr>
+<td><strong>P0 NOW</strong></td>
+<td>File <code>EAGLE-</code> ticket for JEFO ↔ J&amp;A conflation regression</td>
+<td>new — was correct in QA3, lost in QA5</td>
+</tr>
+<tr>
+<td>P0 was</td>
+<td>Rerun Q5</td>
+<td>✅ done — passes</td>
+</tr>
+<tr>
+<td>P0 was</td>
+<td>Audit <code>FAR_Part_16_IDIQ_Comprehensive_RFO_2025.txt</code> for verbatim FAR 16.507-6(f)</td>
+<td>still required — model never cites it across <strong>5 runs</strong></td>
+</tr>
+<tr>
+<td>P1</td>
+<td>Land <code>test_q4_idiq_sole_source</code> and <code>test_q5_sbir_protest</code> eval assertions</td>
+<td>promoted to P0 — would have caught the regression today</td>
+</tr>
+</tbody>
+</table>
+<h3 id="96-diagnostic-next-steps-for-the-q4-regression">9.6 Diagnostic next steps for the Q4 regression</h3>
+<ol>
+<li><strong>Confirm the deployed qa stack still gets the right answer.</strong> The QA4-r3 trace at 19:56 UTC was on the deployed qa code; QA5 local was on <code>main</code>. If the deployed qa answer is still good, the regression is local-only and may be checkout-state. If qa is also regressed, EAGLE-254's payload-shrink (PR #157, commit <code>05a5373</code>) is suspect — it capped <code>kb_results</code> at 8 with dedup.</li>
+<li><strong>Run <code>kb_search_primary</code> directly</strong> with the Q4 prompt and inspect the top-K hits — verify the JEFO-relevant files are even in the candidate set before dedup.</li>
+<li><strong>Compare the prompt sent to the LLM</strong> between QA4-r3 and QA5 local — the chat span input would show whether the JEFO-relevant chunks made it into the context window.</li>
+</ol>
+<h3 id="97-reproducer">9.7 Reproducer</h3>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>aws<span style="color: #BBB"> </span>sso<span style="color: #BBB"> </span>login<span style="color: #BBB"> </span>--profile<span style="color: #BBB"> </span>eagle
+<span style="color: #008000">cd</span><span style="color: #BBB"> </span>server
+<span style="color: #19177C">AWS_PROFILE</span><span style="color: #666">=</span>eagle<span style="color: #BBB"> </span><span style="color: #19177C">AWS_DEFAULT_REGION</span><span style="color: #666">=</span>us-east-1<span style="color: #BBB"> </span>python<span style="color: #BBB"> </span>scripts/rerun_q4_q5.py
+</code></pre></div>
+
+<p>Outputs:
+- Stdout: streaming text + tool-use markers + final wall time per question
+- <code>/tmp/rerun_q4_q5_results.json</code>: structured result for downstream consumers
+- Langfuse: 2 new traces (one per question), tagged <code>Q4</code>/<code>Q5</code> + <code>env:local</code></p>
+<p>Total runtime: ~110 seconds.</p>
+<hr />
+<h2 id="10-pivot-reruns-against-the-deployed-dev-backend-the-actual-answer">10. Pivot — Reruns Against the Deployed DEV Backend (the actual answer)</h2>
+<p><strong>Why this section exists:</strong> §9's "Q4 regressed" verdict was correct <em>for <code>main</code> running locally</em>, but <code>main</code> is <strong>not what's deployed</strong>. Hash's chat note — <em>"redeploying the app with a few minor agent updates"</em> — was a separate unmerged feature branch deployed to DEV. The deployed code passes Ryan's flags; local <code>main</code> doesn't. This section captures that evidence.</p>
+<h3 id="101-new-traces-deployed-dev-no-auth">10.1 New traces (deployed DEV, no auth)</h3>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Method</th>
+<th style="text-align: right;">Wall</th>
+<th style="text-align: right;">Cost</th>
+<th>Tools</th>
+<th style="text-align: right;">HTTP</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Q4 deployed DEV (curl)</strong></td>
+<td>direct curl from devbox via SSM</td>
+<td style="text-align: right;">58.7s</td>
+<td style="text-align: right;">n/a</td>
+<td>inferred from response</td>
+<td style="text-align: right;">200</td>
+<td>first probe</td>
+</tr>
+<tr>
+<td><strong>Q5 deployed DEV (curl)</strong></td>
+<td>direct curl from devbox via SSM</td>
+<td style="text-align: right;">134.7s</td>
+<td style="text-align: right;">$0.1924</td>
+<td><code>search_far</code>, <code>research</code>, <code>s3_document_ops</code></td>
+<td style="text-align: right;">200</td>
+<td>first probe</td>
+</tr>
+<tr>
+<td><strong>Q4 via <code>just dev-rerun-q4-q5</code></strong></td>
+<td>SSM → devbox → orchestrator → ALB</td>
+<td style="text-align: right;">67.7s</td>
+<td style="text-align: right;">$0.1706</td>
+<td><code>search_far</code>, <code>research</code></td>
+<td style="text-align: right;">200</td>
+<td>harness</td>
+</tr>
+<tr>
+<td><strong>Q5 via <code>just dev-rerun-q4-q5</code></strong></td>
+<td>SSM → devbox → orchestrator → ALB</td>
+<td style="text-align: right;">140.1s</td>
+<td style="text-align: right;">n/a</td>
+<td>n/a</td>
+<td style="text-align: right;"><strong>502</strong> (ALB idle timeout — see §10.4)</td>
+<td>harness</td>
+</tr>
+</tbody>
+</table>
+<p>Backend ALB: <code>internal-EagleC-Backe-TxWVQRPzHFsO-1219239040.us-east-1.elb.amazonaws.com</code>
+Stack: ECS Fargate <code>eagle-backend-dev</code> in cluster <code>eagle-dev</code> (1/1 desired/running, target group <code>EagleC-Backe-ROKXA7QHNXJW</code> healthy).</p>
+<h3 id="102-q4-deployed-dev-verdict-pass">10.2 Q4 deployed DEV — verdict: ✅ PASS</h3>
+<p>Verbatim from the response (this is the version Ryan needs to see):</p>
+<blockquote>
+<p><strong>🟢 RFO Applied</strong> — RFO 16.507-6(b)(1)–(7) = FAR 16.505(b)(2)(i)(A)–(G); RFO renumbers but does not change the substance of these exceptions.</p>
+<p>"(F) Small Business Set-Aside | 16.505(b)(2)(i)(F) | Order set aside for small business concerns under FAR Part 19 — <strong>NO JEFO required</strong> (see special rule below)"</p>
+<p>"🟢 RFO Applied — RFO 16.507-6(c) = FAR 16.505(b)(2)(i)(F): Small business set-asides are <strong>entirely exempt</strong> from the JEFO process."</p>
+<p>"After award, the JEFO must be posted to <strong>SAM.gov</strong>:
+- <strong>General rule: Post within 14 days of order award</strong>
+- Urgency exception (A): Post within 30 days after award"</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Ryan's flag</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>① "JEFO vs J&amp;A table shows sam.gov posting not required"</td>
+<td>✅ Now: <em>"Post within 14 days of order award"</em> + 30-day SAM.gov posting window for elevated approvals</td>
+</tr>
+<tr>
+<td>② "Small business listed as exception (F), not as carve-out exempt from JEFO"</td>
+<td>✅ Now: <em>"NO JEFO required"</em> and <em>"entirely exempt from the JEFO process"</em></td>
+</tr>
+<tr>
+<td>③ Bonus: model never cites FAR 16.507-6</td>
+<td>✅ Now: explicit RFO ↔ FAR mapping in green-circle annotations throughout</td>
+</tr>
+</tbody>
+</table>
+<h3 id="103-q5-deployed-dev-verdict-pass">10.3 Q5 deployed DEV — verdict: ✅ PASS</h3>
+<p>From the 134.7s direct-curl probe (Q5 needs the deployed backend, not local main):</p>
+<blockquote>
+<p><strong>GAO B-414514, Global Aerospace (2017):</strong> GAO held that the FAR 15.505/15.506 debriefing timeliness rules <strong>do not apply to SBIR solicitations</strong> because SBIR is conducted under "other competitive procedures," not competitive proposals. The 10-day protest clock runs from when the protester knew or should have known of the basis — <strong>not from the debriefing date</strong>.</p>
+<p><strong>The KB's <em>Legal Counselor</em> agent instructions confirm this explicitly:</strong>
+<em>"SBIR/BAA distinction: SBIR protests follow 10-day rule from knowledge of basis — not from debriefing. SBIR is 'other competitive procedures' under FAR 6.102(d), not competitive proposals under FAR Part 15. Debriefing timeliness rules for competitive proposals don't apply."</em></p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Ryan's flag</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Used Part 15 instead of Part 9"</td>
+<td>✅ Now: explicitly identifies SBIR as <strong>FAR 6.102(d) "other competitive procedures"</strong> with same RFO renumbering note (legacy 15.505 → 15.206-2, legacy 15.506 → 15.301)</td>
+</tr>
+<tr>
+<td>Implicit: SBIR/BAA carve-out from debrief timeliness</td>
+<td>✅ Cites GAO B-414514 + agent prompt directly</td>
+</tr>
+<tr>
+<td>Pre-award vs post-award debrief stay analysis</td>
+<td>✅ Day-by-day timeliness table; CICA stay covered with HCA override + DASAMP path</td>
+</tr>
+</tbody>
+</table>
+<h3 id="104-why-the-harness-q5-returned-502">10.4 Why the harness Q5 returned 502</h3>
+<p>The orchestrator's Q5 took 140.1s, and the ALB returned a 502 — almost certainly an idle-timeout cutoff. The earlier direct curl took 134.7s and succeeded. SBIR analysis runs at the edge of the ALB's idle window. Two fixes:</p>
+<ol>
+<li><strong>Bump backend ALB idle timeout from default to 300s</strong> — single CDK change in <code>infrastructure/cdk-eagle/lib/compute-stack.ts</code>. Recommended before colleagues rerun this against any complex chat.</li>
+<li><strong>Use the streaming endpoint</strong> <code>/api/chat/stream</code> — keeps the connection alive with SSE keepalives. The orchestrator currently hits <code>/api/chat</code> (REST). Streaming variant is a 30-line addition.</li>
+</ol>
+<p>The Q5 evidence above is from the direct curl (the 134.7s success), so the verdict stands; the harness regression is infrastructure-flaky, not model-broken.</p>
+<h3 id="105-what-changed-in-the-deployed-dev-environment-vs-main">10.5 What changed in the deployed DEV environment vs <code>main</code></h3>
+<p>The deployed DEV code includes features that are <strong>not in <code>main</code></strong> as of commit <code>7a5573f</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Visible in</th>
+<th>Found in <code>main</code>?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"🟢 RFO Applied" annotations linking RFO 16.507-6 ↔ FAR 16.505</td>
+<td>every Q4/Q5 deployed response</td>
+<td>❌ no</td>
+</tr>
+<tr>
+<td>HHS Class Deviation 2026-01 RFO renumbering logic</td>
+<td>quoted by name in agent output</td>
+<td>❌ no</td>
+</tr>
+<tr>
+<td>Agent-prompt SBIR/BAA carve-out instructions ("don't apply to SBIR or BAAs where appropriate")</td>
+<td>quoted verbatim by Q5 deployed response</td>
+<td>❌ no</td>
+</tr>
+<tr>
+<td>Wider tool palette in retrieval (<code>s3_document_ops</code> shows up alongside <code>research</code>)</td>
+<td>Q5 deployed</td>
+<td>partial</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Implication:</strong> there is a feature branch that needs to be identified, reviewed, and merged into <code>main</code>. Hash's "minor agent updates" line in the Teams thread is presumably this. Action item in §12.</p>
+<hr />
+<h2 id="11-standing-capability-just-dev-rerun-q4-q5-and-how-it-works">11. Standing Capability — <code>just dev-rerun-q4-q5</code> (and how it works)</h2>
+<p>What we built today, beyond the report itself.</p>
+<h3 id="111-two-independent-harnesses-both-kept">11.1 Two independent harnesses (both kept)</h3>
+<table>
+<thead>
+<tr>
+<th>Harness</th>
+<th>Tests</th>
+<th>Auth</th>
+<th>Status today</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pattern A</strong> — <code>just dev-rerun-q4-q5</code> / <code>just qa-rerun-q4-q5</code></td>
+<td>The currently <strong>deployed</strong> backend ALB</td>
+<td>Cognito JWT (optional, only needed when DEV_MODE off)</td>
+<td>DEV ✅ working; QA ❌ blocked by SG</td>
+</tr>
+<tr>
+<td><strong>Pattern B</strong> — <code>just devbox-q4-q5 BRANCH</code></td>
+<td>A <strong>branch's code</strong> built fresh on the devbox via docker-compose</td>
+<td>DEV_MODE bypass</td>
+<td>Blocked by <code>requirements.txt</code> conflict on <code>main</code> (see §11.4)</td>
+</tr>
+</tbody>
+</table>
+<p>Both are useful — A answers "is what users see right now correct?", B answers "does this branch fix it before merge?".</p>
+<h3 id="112-the-pattern-a-round-trip">11.2 The Pattern A round-trip</h3>
+<div class="codehilite" style="background: #f8f8f8"><pre style="line-height: 125%;"><span></span><code>your laptop                 devbox (i-0390c06d166d18926)              deployed DEV ALB
+    │                                  │                                       │
+    │  just dev-rerun-q4-q5            │                                       │
+    │ ────────────────────────────►    │                                       │
+    │                                  │  python3.12 -m tests.eval_query_     │
+    │  SSM send-command:               │      orchestrator                    │
+    │  1) git sync origin/main         │  POST /api/chat ───────────────►    │
+    │  2) stage orchestrator.py        │                                       │
+    │     (base64 over SSM)            │                       (Bedrock + KB)  │
+    │  3) pip install httpx boto3      │                                       │
+    │  4) run orchestrator             │  ◄─────────────  HTTP 200 + JSON      │
+    │  5) base64 result file           │                                       │
+    │ ◄─── pull /tmp/...json over SSM  │                                       │
+    │                                  │                                       │
+    │  Local: /tmp/eval_dev_q4_q5.json │                                       │
+</code></pre></div>
+
+<p>No VPN. No public ALB. No Cognito redirect dance for DEV (DEV_MODE=true). Total wall time: 4-5 min for two questions.</p>
+<h3 id="113-files-changed-added-today">11.3 Files changed / added today</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Type</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>server/tests/eval_query_orchestrator.py</code></td>
+<td>new</td>
+<td>Devbox-side runner: POSTs Q4/Q5 to <code>&lt;base-url&gt;/api/chat</code>, optional Cognito auth, JSON output</td>
+</tr>
+<tr>
+<td><code>server/scripts/rerun_q4_q5.py</code></td>
+<td>extended</td>
+<td>Added <code>--target</code> flag for HTTP mode (was: local-only); shared question registry + verdict heuristics</td>
+</tr>
+<tr>
+<td><code>scripts/_remote_eval_query.py</code></td>
+<td>new</td>
+<td>Laptop-side driver: SSM round-trip — git sync, stage orchestrator, run, pull results</td>
+</tr>
+<tr>
+<td><code>scripts/devbox_deploy.py</code></td>
+<td>extended</td>
+<td>Phase 1.5 <code>_bootstrap_env_file</code> — writes minimal <code>.env</code> and <code>~/.aws</code> on the devbox (so docker-compose has what it needs); fixed stale <code>REPO_URL</code> (was <code>gblack686/sample-multi-tenant-agent-core-app</code>, now <code>CBIIT/sm_eagle</code>)</td>
+</tr>
+<tr>
+<td><code>justfile</code></td>
+<td>extended</td>
+<td>New recipes: <code>devbox-q4-q5</code>, <code>dev-rerun-q4-q5</code>, <code>qa-rerun-q4-q5</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>None pushed yet.</strong> All on local checkout <code>7a5573f</code>. PR-ready.</p>
+<h3 id="114-known-issues-uncovered-along-the-way">11.4 Known issues uncovered along the way</h3>
+<ol>
+<li><strong><code>requirements.txt</code> dep conflict</strong> — <code>boto3==1.34.0</code> vs <code>bedrock-agentcore&gt;=1.42.86</code>. Build fails on any fresh <code>pip install -r requirements.txt</code>. Pattern B can't validate anything until this is unpinned. <em>(Side issue, separate from Q4/Q5.)</em></li>
+<li><strong>QA backend ALB unreachable from devbox</strong> — curl returns <code>000</code> even at 25s timeout though the target group is healthy and ECS task is running. Either security group misses the devbox subnet or listener misconfigured. Blocks <code>just qa-rerun-q4-q5</code>. <em>(Likely 5-min infra fix.)</em></li>
+<li><strong>Backend ALB idle timeout</strong> — defaults around 140s on the DEV stack; SBIR/Q5-class queries can exceed it (134s success vs 140s 502). Bump to 300s, or move harness to <code>/api/chat/stream</code>.</li>
+<li><strong>Devbox stale state</strong> — first deploy needed bootstrap (no <code>.env</code>, no <code>~/.aws</code>). Now baked into <code>cmd_deploy</code> Phase 1.5 so subsequent runs are clean.</li>
+<li><strong>Devbox python pinning</strong> — system has <code>python3</code> (3.9) and <code>python3.12</code>. <code>pip3</code> installs to 3.12. Orchestrator now pins <code>python3.12</code> explicitly.</li>
+</ol>
+<hr />
+<h2 id="12-action-items-for-2026-04-29-review">12. Action Items for 2026-04-29 Review</h2>
+<p>Ordered by impact. Owner column suggested, not assigned.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Owner</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Identify the unmerged DEV-deployed feature branch</strong> that adds RFO mapping + agent-prompt SBIR/BAA carve-out, and decide on a merge path.</td>
+<td>Hash / TL</td>
+<td>Branch named, PR opened, target milestone set</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Reply to Ryan with the deployed DEV evidence</strong> (this report's §10), confirming both Q4 and Q5 fixes hold in deployed environment.</td>
+<td>TL</td>
+<td>Ryan unblocked on Q4/Q5 sign-off</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Fix QA backend ALB security group</strong> so devbox can curl it. Then run <code>EAGLE_TEST_EMAIL=blackga@nih.gov EAGLE_TEST_PASSWORD=… just qa-rerun-q4-q5</code> to confirm parity.</td>
+<td>DevOps</td>
+<td>QA verdict captured, comparable to DEV verdict</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Bump backend ALB idle timeout to 300s</strong> in <code>compute-stack.ts</code> for both DEV and QA stacks.</td>
+<td>DevOps</td>
+<td>No more 502s on long chats</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Unpin <code>boto3</code> in <code>requirements.txt</code></strong> (or upgrade to <code>&gt;=1.42.86</code>) — blocks <code>pip install</code>, breaks fresh container builds, blocks Pattern B.</td>
+<td>Backend</td>
+<td>Branch builds work locally and on devbox</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Land Q4 + Q5 as eval-suite tests</strong> in <code>server/tests/test_strands_eval.py</code>. Today's whole conversation existed because there was no automated guard.</td>
+<td>QA</td>
+<td>CI catches future regressions; manual reruns optional</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Auto-resync KB on S3 upload</strong> (Hash's existing project) — closes the "Brian uploads → email Jitong → resync" loop and prevents the kind of staleness behind Q4/Q5 in the first place.</td>
+<td>Backend</td>
+<td>KB always synced within minutes of Ryan's edits</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>PR the today's harness</strong> (<code>server/tests/eval_query_orchestrator.py</code> + <code>scripts/_remote_eval_query.py</code> + just recipes) — standing capability, not specific to Q4/Q5.</td>
+<td>Me</td>
+<td>Reproducible harness lives in source</td>
+</tr>
+</tbody>
+</table>
+<h3 id="discussion-topics">Discussion topics</h3>
+<ul>
+<li><strong>Is "deploy unmerged branches to DEV" the team's pattern?</strong> Today's surprise was that DEV was ahead of <code>main</code>. Worth aligning on whether DEV should always == <code>main</code> + active feature branch, or whether merge-first-deploy-second is the policy.</li>
+<li><strong><code>main</code> regression risk</strong> — local main answers Q4 <em>worse</em> than QA3 from a week ago. Either we treat <code>main</code> as broken until the RFO branch lands, or we accept that "deployed != main" is permanent. Item #1 forces this conversation.</li>
+<li><strong>Eval suite gap</strong> — three weeks, three rerun cycles, no automated assertion that Q4 says "14 days" or Q5 says "FAR 6.102(d)". Item #6 closes this.</li>
+</ul>
+<h3 id="what-we-have-to-show-tomorrow">What we have to show tomorrow</h3>
+<ul>
+<li>Six Langfuse trace IDs from before (§1) + two new deployed-DEV traces from today's harness — full evidence chain</li>
+<li>Side-by-side response excerpts (§10.2, §10.3) showing exactly the language Ryan flagged becoming exactly the language Ryan asked for</li>
+<li>A working <code>just dev-rerun-q4-q5</code> command anyone with <code>aws sso login --profile eagle</code> can run themselves to reproduce</li>
+</ul>
+<hr />
+<p><em>Updated 2026-04-28 by <code>blackga@nih.gov</code> via <code>eagle</code> SSO profile. Local checkout <code>7a5573f</code>. Devbox <code>i-0390c06d166d18926</code> running. Harness committed locally, not yet pushed.</em></p>
+</body>
+</html>

@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>EAGLE Team Presentation Builder</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b0f17;
+    --panel: #111826;
+    --panel-2: #0e1420;
+    --border: #1e2a3d;
+    --text: #e7ecf3;
+    --muted: #8895a9;
+    --accent: #5aa0ff;
+    --accent-2: #ffb454;
+    --good: #4ade80;
+    --bad: #f87171;
+    --navy: #0a2540;
+    --slide-bg: #0f172a;
+    --slide-fg: #f8fafc;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    height: 100vh; overflow: hidden;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+      "controls preview"
+      "controls prompt";
+    height: 100vh;
+    gap: 1px;
+    background: var(--border);
+  }
+  /* Controls */
+  .controls {
+    grid-area: controls;
+    background: var(--panel);
+    padding: 20px;
+    overflow-y: auto;
+  }
+  .controls h1 {
+    font-size: 16px; margin: 0 0 4px 0; letter-spacing: -0.01em;
+  }
+  .controls .sub {
+    font-size: 12px; color: var(--muted); margin-bottom: 20px;
+  }
+  .group {
+    border-top: 1px solid var(--border);
+    padding: 16px 0 4px 0;
+  }
+  .group:first-of-type { border-top: 0; padding-top: 0; }
+  .group-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  label.field {
+    display: block;
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  label.field .lbl { display:block; margin-bottom: 4px; color: var(--muted); }
+  select, input[type=text] {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 6px;
+    font: inherit;
+  }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .range-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .toggle {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle input { margin: 0; accent-color: var(--accent); }
+  .toggle.on { border-color: var(--accent); background: #162238; }
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .preset {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .preset:hover { border-color: var(--accent); color: var(--accent); }
+  /* Preview */
+  .preview {
+    grid-area: preview;
+    background: var(--panel-2);
+    padding: 20px 24px;
+    overflow-y: auto;
+  }
+  .preview-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .preview-header h2 { font-size: 13px; font-weight: 500; margin: 0; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .slide-counter { font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .slide-list { display: flex; flex-direction: column; gap: 14px; }
+  .slide {
+    background: var(--slide-bg);
+    color: var(--slide-fg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px 28px;
+    aspect-ratio: 16/9;
+    min-height: 280px;
+    position: relative;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .slide .num {
+    position: absolute; top: 10px; right: 14px;
+    font: 10px ui-monospace, Menlo, Consolas, monospace;
+    color: rgba(255,255,255,0.3);
+  }
+  .slide .kicker {
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 6px;
+  }
+  .slide h3 {
+    margin: 0 0 14px 0;
+    font-size: 26px; font-weight: 600; letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+  .slide ul { margin: 0 0 0 18px; padding: 0; }
+  .slide li { margin-bottom: 8px; font-size: 14px; line-height: 1.45; }
+  .slide .foot {
+    margin-top: auto; padding-top: 10px;
+    font: 10px ui-monospace, Menlo, Consolas, monospace;
+    color: rgba(255,255,255,0.35);
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+  .slide .big-num { font-size: 48px; font-weight: 700; color: var(--accent); line-height: 1; }
+  .slide .stat-row { display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap; }
+  .slide .stat { display:flex; flex-direction: column; }
+  .slide .stat .n { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1; }
+  .slide .stat .l { font-size: 11px; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+  .slide code { background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  /* Theme variants */
+  .slide.theme-navy { background: var(--navy); }
+  .slide.theme-light { background: #f8fafc; color: #0f172a; }
+  .slide.theme-light h3 { color: #0f172a; }
+  .slide.theme-light .kicker { color: #2563eb; }
+  .slide.theme-light .foot { color: rgba(15,23,42,0.5); border-top-color: rgba(15,23,42,0.1); }
+  .slide.theme-light code { background: rgba(15,23,42,0.08); }
+  .slide.theme-light .big-num, .slide.theme-light .stat .n { color: #2563eb; }
+  .slide.theme-light .stat .l { color: rgba(15,23,42,0.6); }
+  /* Prompt area */
+  .prompt {
+    grid-area: prompt;
+    background: var(--panel);
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    max-height: 250px;
+    display: flex; flex-direction: column;
+  }
+  .prompt-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  .prompt-header h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+  .copy-btn {
+    background: var(--accent); color: white; border: none;
+    padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer;
+    font-weight: 500;
+  }
+  .copy-btn:hover { background: #4a8fee; }
+  .copy-btn.copied { background: var(--good); }
+  #promptText {
+    font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    background: var(--panel-2);
+    color: var(--text);
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    overflow-y: auto;
+    flex: 1;
+    white-space: pre-wrap;
+    max-height: 180px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="controls">
+    <h1>EAGLE Presentation Builder</h1>
+    <div class="sub">Turn the README, infra, and weekly changelog into a slide deck for your team.</div>
+
+    <div class="group">
+      <div class="group-title">Presets</div>
+      <div class="presets">
+        <button class="preset" data-preset="leadership">Leadership 5-min</button>
+        <button class="preset" data-preset="engineering">Engineering deep dive</button>
+        <button class="preset" data-preset="sprint">Sprint demo</button>
+        <button class="preset" data-preset="onboarding">New team member</button>
+        <button class="preset" data-preset="langfuse">Langfuse spotlight</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">Framing</div>
+      <label class="field">
+        <span class="lbl">Audience</span>
+        <select id="audience">
+          <option value="engineering">Engineering team</option>
+          <option value="leadership">Leadership / stakeholders</option>
+          <option value="mixed">Mixed (eng + biz)</option>
+          <option value="new">New team member</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="lbl">Depth</span>
+        <select id="depth">
+          <option value="high">High-level (no jargon)</option>
+          <option value="balanced" selected>Balanced</option>
+          <option value="technical">Technical deep dive</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="lbl">Tone</span>
+        <select id="tone">
+          <option value="professional" selected>Professional</option>
+          <option value="casual">Casual</option>
+          <option value="formal">Formal</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="lbl">Length — <span id="lenLabel">8 slides</span></span>
+        <input type="range" id="length" min="5" max="14" value="8" />
+        <div class="range-row"><span>5</span><span>14</span></div>
+      </label>
+      <label class="field">
+        <span class="lbl">Theme</span>
+        <select id="theme">
+          <option value="dark" selected>Dark slate</option>
+          <option value="navy">NCI navy</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="lbl">Highlight focus</span>
+        <select id="focus">
+          <option value="balanced" selected>Balanced (no single focus)</option>
+          <option value="langfuse">Langfuse observability</option>
+          <option value="eval">Evaluation suite</option>
+          <option value="resilience">Model resilience / circuit breaker</option>
+          <option value="compliance">Compliance matrix</option>
+          <option value="docs">Document pipeline</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="group">
+      <div class="group-title">Sections to include</div>
+      <div class="toggles" id="sections">
+        <label class="toggle"><input type="checkbox" data-sec="title" checked/> Title</label>
+        <label class="toggle"><input type="checkbox" data-sec="what" checked/> What EAGLE is</label>
+        <label class="toggle"><input type="checkbox" data-sec="arch" checked/> Architecture</label>
+        <label class="toggle"><input type="checkbox" data-sec="stack" checked/> Tech stack</label>
+        <label class="toggle"><input type="checkbox" data-sec="langfuse" checked/> Langfuse</label>
+        <label class="toggle"><input type="checkbox" data-sec="eval" checked/> Eval suite</label>
+        <label class="toggle"><input type="checkbox" data-sec="resilience"/> Model resilience</label>
+        <label class="toggle"><input type="checkbox" data-sec="compliance"/> Compliance matrix</label>
+        <label class="toggle"><input type="checkbox" data-sec="docs"/> Document pipeline</label>
+        <label class="toggle"><input type="checkbox" data-sec="weeks" checked/> Weekly progress</label>
+        <label class="toggle"><input type="checkbox" data-sec="infra"/> Infrastructure</label>
+        <label class="toggle"><input type="checkbox" data-sec="gaps"/> Known gaps</label>
+        <label class="toggle"><input type="checkbox" data-sec="cta" checked/> Call to action</label>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">Options</div>
+      <label class="field toggle" style="display:flex;">
+        <input type="checkbox" id="commits" checked/> Include commit SHA citations
+      </label>
+      <label class="field toggle" style="display:flex;">
+        <input type="checkbox" id="metrics" checked/> Include metric callouts (142 tests, V9 250/260, etc.)
+      </label>
+      <label class="field toggle" style="display:flex;">
+        <input type="checkbox" id="links" /> Suggest Langfuse + file path links in speaker notes
+      </label>
+    </div>
+  </aside>
+
+  <main class="preview">
+    <div class="preview-header">
+      <h2>Slide preview</h2>
+      <div class="slide-counter" id="counter">0 slides</div>
+    </div>
+    <div class="slide-list" id="slideList"></div>
+  </main>
+
+  <section class="prompt">
+    <div class="prompt-header">
+      <h3>Generated prompt for Claude</h3>
+      <button class="copy-btn" id="copyBtn">Copy prompt</button>
+    </div>
+    <div id="promptText"></div>
+  </section>
+</div>
+
+<script>
+const DEFAULTS = {
+  audience: "engineering",
+  depth: "balanced",
+  tone: "professional",
+  length: 8,
+  theme: "dark",
+  focus: "balanced",
+  commits: true,
+  metrics: true,
+  links: false,
+  sections: {
+    title: true, what: true, arch: true, stack: true,
+    langfuse: true, eval: true, resilience: false,
+    compliance: false, docs: false, weeks: true,
+    infra: false, gaps: false, cta: true
+  }
+};
+
+const state = JSON.parse(JSON.stringify(DEFAULTS));
+
+// === Slide content library =======================================
+// Pulls real content from README.md, docs/infra.md, weekly-changelog.md.
+function slideContent(key, depth) {
+  const deep = depth === "technical";
+  const hi = depth === "high";
+
+  const lib = {
+    title: {
+      kicker: "Internal briefing",
+      h: "EAGLE — Enhanced Acquisition Guidance & Lifecycle Engine",
+      bullets: [
+        "Multi-tenant AI acquisition assistant for the NCI Office of Acquisitions",
+        hi ? "Helps contracting officers navigate federal procurement end-to-end" : "FAR/DFARS guidance, compliance routing, SOW / IGCE / AP / J&A / SON generation",
+        deep ? "Strands Agents SDK supervisor + 7 specialists over BedrockModel, SSE-streamed to Next.js" : "Built on Strands Agents SDK + Amazon Bedrock, Next.js UI"
+      ],
+      foot: "README.md · docs/infra.md · docs/development/weekly-changelog.md"
+    },
+    what: {
+      kicker: "What EAGLE is",
+      h: hi ? "An AI teammate for contracting officers" : "Supervisor + specialist subagents, one orchestration path",
+      bullets: hi ? [
+        "Sits inside the Office of Acquisitions workflow",
+        "Answers FAR/DFARS questions, routes to the right method + vehicle",
+        "Drafts the SOW, IGCE, AP, J&A, SON packages from a conversation"
+      ] : [
+        "Single active orchestration: server/app/strands_agentic_service.py",
+        "Supervisor routes intent → one of 7 specialists with a fresh context window",
+        "Plugin at eagle-plugin/ is source of truth: 1 supervisor + 7 specialists + 8 skills",
+        deep ? "Legacy agentic_service.py / sdk_agentic_service.py deleted ed61255 (−5,500 lines)" : "Legacy services deleted (−5,500 lines cleanup)"
+      ],
+      foot: "eagle-plugin/plugin.json"
+    },
+    arch: {
+      kicker: "Architecture",
+      h: "How a request flows through EAGLE",
+      bullets: [
+        "User → Cognito JWT (tenant_id, user_id, tier)",
+        "Next.js → FastAPI /api/chat/stream (SSE) → Strands sdk_query_streaming()",
+        "Supervisor → specialist via @tool with fresh context window",
+        "Specialist → Bedrock (circuit breaker picks healthy model)",
+        deep ? "MultiAgentStreamWriter emits text / tool_use / tool_result / agent_status / state_update" : "Streamed back to the browser via use-agent-stream.ts",
+        "Session + cost persisted to DynamoDB; trace mirrored to Langfuse"
+      ],
+      foot: "server/app/streaming_routes.py · stream_protocol.py"
+    },
+    stack: {
+      kicker: "Tech stack",
+      h: "What it runs on",
+      bullets: [
+        "Frontend: Next.js 15 (App Router, TS, Tailwind) on ECS Fargate",
+        "Backend: FastAPI + Strands Agents SDK on ECS Fargate",
+        "Models: Amazon Bedrock — Sonnet 4.6 / 4.5 / 4.0, Haiku 4.5, Nova Pro",
+        "Data: DynamoDB single-table (16+ entities), S3 (docs + eval artifacts)",
+        "Infra: AWS CDK, 6 stacks (Core, Storage, Compute, CiCd, Eval, Backup)",
+        "Observability: Langfuse + CloudWatch + SNS + Teams"
+      ],
+      foot: "docs/infra.md"
+    },
+    langfuse: {
+      kicker: "Observability",
+      h: "Langfuse is the nervous system",
+      bullets: [
+        "Every agent turn, subagent handoff, tool call, and cost is a span",
+        "Host us.cloud.langfuse.com — dev project cmmsqvi2406aead071t0zhl7f",
+        "In-app admin viewer at /admin/traces (client/app/admin/traces/page.tsx)",
+        deep ? "Parent-span wrap fix for Strands context detach (875294f)" : "Fixes Strands OTel context detach so traces actually nest",
+        "Error classification: infra / config / app — drives P0/P1/P2 triage",
+        "Cognito username is Langfuse userId → every trace filterable by operator"
+      ],
+      foot: "server/app/telemetry/langfuse_client.py"
+    },
+    eval: {
+      kicker: "Quality gates",
+      h: "Five layered quality tools",
+      bullets: [
+        "142-test Strands eval suite (test_strands_eval.py) — behavior source of truth",
+        "baseline-questions skill: Q1–Q14 · V9 = 250/260 (96%)",
+        "MVP1 eval 4-tier ladder: unit → integration → full eval → E2E",
+        "e2e-judge: Playwright + Bedrock Sonnet vision QA on screenshots",
+        "Nightly triage: Langfuse + CloudWatch + DDB feedback, auto-commits fix plan"
+      ],
+      foot: "server/tests/test_strands_eval.py · .claude/skills/"
+    },
+    resilience: {
+      kicker: "Reliability",
+      h: "Model circuit breaker — never a dead chat",
+      bullets: [
+        "4-model chain: Sonnet 4.6 → 4.5 → 4.0 → Haiku 4.5 → Nova Pro",
+        "45s TTFT timeout, then automatic Haiku fallback (0eec536)",
+        "States: CLOSED → OPEN (2 consecutive fails) → HALF_OPEN (120s recovery)",
+        "Nightly TTFT probe validates all 4 models (36a947c)",
+        "Prompt caching enabled across all models (90c44a5)"
+      ],
+      foot: "ModelCircuitBreaker · strands_agentic_service.py"
+    },
+    compliance: {
+      kicker: "Compliance matrix",
+      h: "Deterministic decision tree for the cascade",
+      bullets: [
+        "query_compliance_matrix tool — threshold → method → vehicle → documents",
+        "8(a) and J&A paths; unified thresholds",
+        "KB-first cascade enforced after Langfuse showed 79% violation rate",
+        "c51a346 flipped the cascade from soft-guidance to hard-enforced",
+        deep ? "Composite research tool: dynamic KB + checklist in one call (7d3e8ac)" : "Single composite research tool replaces ad-hoc cascades"
+      ],
+      foot: "eagle-plugin/data/matrix.json"
+    },
+    docs: {
+      kicker: "Document pipeline",
+      h: "Native Office, AI-driven editing",
+      bullets: [
+        "Native DOCX/XLSX preview + AI editing across the app (1b6a0be)",
+        "IGCE position-based Excel cell population, preserves live formulas (8ce77ab)",
+        "Bedrock Converse document blocks for native PDF parsing (25783a8)",
+        "22 template categories with markdown persistence",
+        "All doc-gen now routes through supervisor (20d8a0b) — fast path removed",
+        "Branded DOCX/PDF export with FAR/DFARS citation styling"
+      ],
+      foot: "server/app/tools/document_tools.py"
+    },
+    weeks: {
+      kicker: "Shipped recently",
+      h: "10 weeks, 607 commits, Jan 26 → Apr 8",
+      bullets: [
+        "Feb 16 — 6 CDK stacks + unified DynamoDB eagle table + Justfile",
+        "Feb 23 — Strands Agents SDK POC + EC2 runner standard deploy",
+        "Mar 2 — Strands migration lands; two-queue SSE gone",
+        "Mar 16 — Langfuse OTEL + admin trace viewer + error classification",
+        "Mar 23 — QA environment + /triage skill + nightly triage GHA",
+        "Mar 30 — Circuit breaker + Feedback→JIRA→Teams + baseline skill",
+        "Apr 6 — Prompt caching + V9 baseline 250/260 + Sources tab"
+      ],
+      foot: "docs/development/weekly-changelog.md"
+    },
+    infra: {
+      kicker: "Infrastructure",
+      h: "6 CDK stacks, single region, single account",
+      bullets: [
+        "EagleCoreStack — VPC, Cognito, IAM, eagle DynamoDB table",
+        "EagleStorageStack — S3 documents bucket, metadata Lambda",
+        "EagleComputeStack — ECR, ECS cluster, ALB, auto-scaling",
+        "EagleCiCdStack — GitHub OIDC deploy role (no static keys)",
+        "EagleEvalStack — eval bucket, CloudWatch dashboards, SNS alerts",
+        "EagleBackupStack — AWS Backup: hourly DDB, daily S3 (d56f85a)"
+      ],
+      foot: "infrastructure/cdk-eagle/lib/"
+    },
+    gaps: {
+      kicker: "Known gaps",
+      h: "What we still need to clean up",
+      bullets: [
+        ".env.example missing Langfuse vars — must be added manually",
+        "CLAUDE.md stale: says 5 skills / 4 stacks, reality is 8 / 6",
+        "Justfile description says 28 eval tests — real count is 142",
+        "pytest server/tests/ halts on test_strands_eval.py argparse at import time",
+        "Windows: ruff binary not on PATH — use python -m ruff check app/"
+      ],
+      foot: "Tracked in weekly-changelog.md"
+    },
+    cta: {
+      kicker: "Get involved",
+      h: "Where to plug in",
+      bullets: [
+        "Read — README.md, docs/infra.md, docs/development/weekly-changelog.md",
+        "Run — `just dev-local-sso eagle` then open localhost:3000",
+        "Eval — `just eval-quick 1,2` to run specific eval tests",
+        "Trace — admin dashboard → /admin/traces (or Langfuse UI directly)",
+        "Feedback — Ctrl+J in the chat → goes straight to JIRA + Teams",
+        "Questions? — Expert system in .claude/commands/experts/"
+      ],
+      foot: "Happy to demo any section live"
+    }
+  };
+  return lib[key];
+}
+
+// === Metric-heavy slide variant (for leadership decks) ==============
+function metricsSlide() {
+  return {
+    kicker: "By the numbers",
+    h: "EAGLE today",
+    stats: [
+      { n: "607", l: "commits in 10 weeks" },
+      { n: "142", l: "eval tests" },
+      { n: "250/260", l: "V9 baseline score" },
+      { n: "6", l: "CDK stacks" },
+      { n: "4+1", l: "model fallback chain" },
+      { n: "8", l: "skills · 7 specialists" }
+    ],
+    foot: "Jan 26 – Apr 8, 2026"
+  };
+}
+
+// === Render =======================================================
+function render() {
+  const list = document.getElementById("slideList");
+  list.innerHTML = "";
+  const order = [
+    "title","what","arch","stack","langfuse","eval",
+    "resilience","compliance","docs","weeks","infra","gaps","cta"
+  ];
+  // Build selected list respecting section toggles
+  let selected = order.filter(k => state.sections[k]);
+
+  // Apply focus — move the focused section up near the front
+  if (state.focus !== "balanced") {
+    const focusKey = state.focus;
+    if (selected.includes(focusKey)) {
+      selected = selected.filter(k => k !== focusKey);
+      // insert after arch if arch present, else after title
+      const anchor = selected.indexOf("arch") >= 0 ? "arch" : "title";
+      const idx = selected.indexOf(anchor);
+      selected.splice(idx + 1, 0, focusKey);
+    }
+  }
+
+  // Enforce length — trim or pad. Insert a metrics slide if metrics on and we have space.
+  let slides = selected.slice(0, state.length);
+  if (state.metrics && !slides.includes("metrics") && slides.length < state.length) {
+    // metrics slide goes after title
+    const titleIdx = slides.indexOf("title");
+    slides.splice(titleIdx + 1, 0, "metrics");
+    slides = slides.slice(0, state.length);
+  }
+
+  document.getElementById("counter").textContent = `${slides.length} slide${slides.length === 1 ? "" : "s"}`;
+
+  slides.forEach((k, i) => {
+    const c = k === "metrics" ? metricsSlide() : slideContent(k, state.depth);
+    if (!c) return;
+    const el = document.createElement("div");
+    el.className = `slide theme-${state.theme}`;
+    let inner = `<div class="num">${String(i+1).padStart(2,"0")} / ${String(slides.length).padStart(2,"0")}</div>`;
+    inner += `<div class="kicker">${c.kicker}</div>`;
+    inner += `<h3>${c.h}</h3>`;
+    if (c.stats) {
+      inner += `<div class="stat-row">` +
+        c.stats.map(s => `<div class="stat"><div class="n">${s.n}</div><div class="l">${s.l}</div></div>`).join("") +
+        `</div>`;
+    } else if (c.bullets) {
+      inner += `<ul>` + c.bullets.map(b => `<li>${b}</li>`).join("") + `</ul>`;
+    }
+    if (c.foot) inner += `<div class="foot">${c.foot}</div>`;
+    el.innerHTML = inner;
+    list.appendChild(el);
+  });
+
+  updatePrompt(slides);
+}
+
+// === Prompt output ================================================
+function updatePrompt(slides) {
+  const secs = slides.map(k => ({
+    title: "Title",
+    metrics: "By-the-numbers metrics",
+    what: "What EAGLE is",
+    arch: "Architecture / request flow",
+    stack: "Tech stack",
+    langfuse: "Langfuse observability",
+    eval: "Evaluation suite",
+    resilience: "Model resilience / circuit breaker",
+    compliance: "Compliance matrix",
+    docs: "Document pipeline",
+    weeks: "Weekly progress (10 weeks, 607 commits)",
+    infra: "Infrastructure (6 CDK stacks)",
+    gaps: "Known gaps",
+    cta: "Call to action / how to get involved"
+  }[k])).filter(Boolean);
+
+  const audienceLabel = {
+    engineering: "the EAGLE engineering team",
+    leadership: "NCI leadership / non-engineering stakeholders",
+    mixed: "a mixed audience of engineers and business stakeholders",
+    new: "a new team member who is joining the EAGLE project"
+  }[state.audience];
+
+  const depthLabel = {
+    high: "Keep it high-level — avoid jargon, focus on outcomes, no code or file paths.",
+    balanced: "Balance outcomes with enough technical substance that engineers don't feel talked down to.",
+    technical: "Go technical — file paths, class names, SSE event names, commit SHAs are welcome."
+  }[state.depth];
+
+  const toneLabel = {
+    professional: "Professional but warm — no marketing fluff.",
+    casual: "Casual and conversational, like a standup.",
+    formal: "Formal — suitable for a steering committee."
+  }[state.tone];
+
+  const focusLine = state.focus === "balanced" ? "" :
+    `Put extra weight on the ${{
+      langfuse: "Langfuse observability",
+      eval: "evaluation suite",
+      resilience: "model resilience and circuit breaker",
+      compliance: "compliance matrix",
+      docs: "document pipeline"
+    }[state.focus]} section — it is the single most important thing for this audience.`;
+
+  const commitLine = state.commits
+    ? "Include commit SHA citations (short form like 875294f, 90c44a5) where relevant so engineers can jump to the source."
+    : "Skip commit SHAs — keep the text clean.";
+
+  const metricLine = state.metrics
+    ? "Include a by-the-numbers slide with: 607 commits in 10 weeks, 142 eval tests, V9 baseline 250/260 (96%), 6 CDK stacks, 4+1 model fallback chain, 8 skills + 7 specialists."
+    : "Skip hard metrics — focus on narrative.";
+
+  const linkLine = state.links
+    ? "In speaker notes, suggest Langfuse project links (us.cloud.langfuse.com/project/cmmsqvi2406aead071t0zhl7f) and relevant file paths from the repo."
+    : "";
+
+  const parts = [
+    `Build a ${slides.length}-slide presentation about EAGLE for ${audienceLabel}.`,
+    `${depthLabel} ${toneLabel}`,
+    focusLine,
+    ``,
+    `EAGLE is a multi-tenant AI acquisition assistant for the NCI Office of Acquisitions, built on the Strands Agents SDK with a supervisor + 7 specialist subagents running on Amazon Bedrock (Claude Sonnet 4.6 / Haiku 4.5), fronted by a Next.js chat UI with SSE streaming, and observable end-to-end via Langfuse. Single orchestration path: server/app/strands_agentic_service.py.`,
+    ``,
+    `Source docs in the repo: README.md, docs/infra.md, docs/development/weekly-changelog.md. Pull concrete facts from those — do not invent numbers.`,
+    ``,
+    `Slide order:`,
+    ...secs.map((s, i) => `  ${i+1}. ${s}`),
+    ``,
+    commitLine,
+    metricLine,
+    linkLine,
+    ``,
+    `Theme: ${state.theme === "navy" ? "NCI navy background, light text" : state.theme === "light" ? "light background, dark text" : "dark slate background, light text"}. Use short bullets (5–6 per slide max). Include brief speaker notes under each slide.`,
+    `Output as a Marp-compatible markdown file (docs/development/eagle-presentation.md) with YAML front-matter for theme.`
+  ].filter(Boolean);
+
+  document.getElementById("promptText").textContent = parts.join("\n");
+}
+
+// === Wiring =======================================================
+function bind() {
+  document.getElementById("audience").addEventListener("change", e => { state.audience = e.target.value; render(); });
+  document.getElementById("depth").addEventListener("change", e => { state.depth = e.target.value; render(); });
+  document.getElementById("tone").addEventListener("change", e => { state.tone = e.target.value; render(); });
+  document.getElementById("theme").addEventListener("change", e => { state.theme = e.target.value; render(); });
+  document.getElementById("focus").addEventListener("change", e => { state.focus = e.target.value; render(); });
+  const lenEl = document.getElementById("length");
+  lenEl.addEventListener("input", e => {
+    state.length = parseInt(e.target.value);
+    document.getElementById("lenLabel").textContent = `${state.length} slides`;
+    render();
+  });
+  document.getElementById("commits").addEventListener("change", e => { state.commits = e.target.checked; render(); });
+  document.getElementById("metrics").addEventListener("change", e => { state.metrics = e.target.checked; render(); });
+  document.getElementById("links").addEventListener("change", e => { state.links = e.target.checked; render(); });
+
+  document.querySelectorAll('#sections input[type=checkbox]').forEach(cb => {
+    cb.addEventListener("change", e => {
+      const key = e.target.dataset.sec;
+      state.sections[key] = e.target.checked;
+      e.target.closest(".toggle").classList.toggle("on", e.target.checked);
+      render();
+    });
+    // initialize .on class
+    cb.closest(".toggle").classList.toggle("on", cb.checked);
+  });
+
+  document.querySelectorAll(".preset").forEach(btn => {
+    btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
+  });
+
+  document.getElementById("copyBtn").addEventListener("click", () => {
+    navigator.clipboard.writeText(document.getElementById("promptText").textContent).then(() => {
+      const b = document.getElementById("copyBtn");
+      b.textContent = "Copied!"; b.classList.add("copied");
+      setTimeout(() => { b.textContent = "Copy prompt"; b.classList.remove("copied"); }, 1500);
+    });
+  });
+}
+
+function applyPreset(name) {
+  const presets = {
+    leadership: {
+      audience: "leadership", depth: "high", tone: "formal", length: 6,
+      theme: "navy", focus: "balanced", commits: false, metrics: true, links: false,
+      sections: { title:1, what:1, arch:0, stack:0, langfuse:1, eval:1, resilience:0,
+        compliance:0, docs:0, weeks:1, infra:0, gaps:0, cta:1 }
+    },
+    engineering: {
+      audience: "engineering", depth: "technical", tone: "professional", length: 12,
+      theme: "dark", focus: "langfuse", commits: true, metrics: true, links: true,
+      sections: { title:1, what:1, arch:1, stack:1, langfuse:1, eval:1, resilience:1,
+        compliance:1, docs:1, weeks:1, infra:1, gaps:1, cta:1 }
+    },
+    sprint: {
+      audience: "mixed", depth: "balanced", tone: "casual", length: 7,
+      theme: "dark", focus: "balanced", commits: true, metrics: true, links: false,
+      sections: { title:1, what:0, arch:0, stack:0, langfuse:1, eval:1, resilience:1,
+        compliance:0, docs:1, weeks:1, infra:0, gaps:1, cta:1 }
+    },
+    onboarding: {
+      audience: "new", depth: "balanced", tone: "casual", length: 10,
+      theme: "dark", focus: "balanced", commits: true, metrics: false, links: true,
+      sections: { title:1, what:1, arch:1, stack:1, langfuse:1, eval:1, resilience:0,
+        compliance:1, docs:1, weeks:0, infra:1, gaps:1, cta:1 }
+    },
+    langfuse: {
+      audience: "engineering", depth: "technical", tone: "professional", length: 8,
+      theme: "dark", focus: "langfuse", commits: true, metrics: true, links: true,
+      sections: { title:1, what:0, arch:1, stack:0, langfuse:1, eval:1, resilience:0,
+        compliance:0, docs:0, weeks:1, infra:0, gaps:1, cta:1 }
+    }
+  };
+  const p = presets[name]; if (!p) return;
+  Object.assign(state, { ...p });
+  state.sections = { ...p.sections };
+  // reflect in UI
+  document.getElementById("audience").value = state.audience;
+  document.getElementById("depth").value = state.depth;
+  document.getElementById("tone").value = state.tone;
+  document.getElementById("theme").value = state.theme;
+  document.getElementById("focus").value = state.focus;
+  document.getElementById("length").value = state.length;
+  document.getElementById("lenLabel").textContent = `${state.length} slides`;
+  document.getElementById("commits").checked = state.commits;
+  document.getElementById("metrics").checked = state.metrics;
+  document.getElementById("links").checked = state.links;
+  document.querySelectorAll('#sections input[type=checkbox]').forEach(cb => {
+    cb.checked = !!state.sections[cb.dataset.sec];
+    cb.closest(".toggle").classList.toggle("on", cb.checked);
+  });
+  render();
+}
+
+bind();
+render();
+</script>
+</body>
+</html>

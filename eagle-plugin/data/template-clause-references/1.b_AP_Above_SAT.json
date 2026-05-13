@@ -1,0 +1,297 @@
+{
+  "template_filename": "1.b AP Above SAT.docx",
+  "category": "acquisition_plan",
+  "variant": "above_sat",
+  "section_clause_map": {
+    "1": {
+      "section_title": "Acquisition Plan (AP) Template Summary Information",
+      "clauses": []
+    },
+    "2": {
+      "section_title": "Additional Guidance",
+      "clauses": []
+    },
+    "3": {
+      "section_title": "Statement of Need - FAR 7.105(a)(1)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(1)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "4": {
+      "section_title": "Technical and Contractual History",
+      "clauses": []
+    },
+    "5": {
+      "section_title": "Acquisition Alternatives",
+      "clauses": []
+    },
+    "6": {
+      "section_title": "Applicable Conditions - FAR7.105(a)(2)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(2)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "7": {
+      "section_title": "Cost - FAR 7.105(a)(3)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(3)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "8": {
+      "section_title": "Capability or Performance - FAR 7.105(a)(4)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(4)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "9": {
+      "section_title": "Delivery or Performance-Period Requirements - FAR7.105(a)(5)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(5)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "10": {
+      "section_title": "Trade-Offs – FAR 7.105(a)(6)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(6)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "11": {
+      "section_title": "Risks – FAR 7.105(a)(7)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(7)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "12": {
+      "section_title": "Acquisition Streamlining – FAR 7.105(a)(8)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(a)(8)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "13": {
+      "section_title": "Sources - FAR7.105(b)(1)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(1)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "14": {
+      "section_title": "Competition - FAR 7.105(b)(2) and FAR 7.102",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(2)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        },
+        {
+          "clause_number": "FAR 7.102",
+          "title": "Policy — Acquisition Planning",
+          "applicability": "required"
+        }
+      ]
+    },
+    "15": {
+      "section_title": "Contract Type Selection– FAR 7.105(b)(3)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(3)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "16": {
+      "section_title": "No additional guidance.",
+      "clauses": []
+    },
+    "17": {
+      "section_title": "Acquisition Considerations– FAR 7.105(b)(5)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(5)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "18": {
+      "section_title": "Budgeting and Funding– FAR 7.105(b)(6)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(6)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "19": {
+      "section_title": "Product or Service Descriptions– FAR 7.105(b)(7)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(7)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "20": {
+      "section_title": "Priorities, Allocations, and Allotments– FAR 7.105(b)(8)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(8)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "21": {
+      "section_title": "Contractor versus Government Performance– FAR 7.105(b)(9)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(9)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "22": {
+      "section_title": "Inherently Governmental Functions– FAR 7.105(b)(10)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(10)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "23": {
+      "section_title": "Management Information Requirements– FAR 7.105(b)(11)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(11)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "24": {
+      "section_title": "Make or Buy– FAR 7.105(b)(12)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(12)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "25": {
+      "section_title": "Test and Evaluation– FAR 7.105(b)(13)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(13)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "26": {
+      "section_title": "Government –Furnished Property – FAR 7.105(b)(15)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(15)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "27": {
+      "section_title": "Government-Furnished Information– FAR 7.105(b)(16)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(16)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "28": {
+      "section_title": "No additional guidance.",
+      "clauses": []
+    },
+    "29": {
+      "section_title": "Contract Administration – FAR 7.105(b)(19)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(19)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    },
+    "30": {
+      "section_title": "Milestones for the Procurement Cycle - FAR 7.105(b)(21)",
+      "clauses": [
+        {
+          "clause_number": "FAR 7.105(b)(21)",
+          "title": "Contents of Written Acquisition Plans",
+          "applicability": "required"
+        }
+      ]
+    }
+  },
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 7.103",
+      "title": "Agency-Head Responsibilities",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 7.104",
+      "title": "General Procedures",
+      "applicability": "required"
+    },
+    {
+      "clause_number": "FAR 7.105",
+      "title": "Contents of Written Acquisition Plans",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 28,
+  "far_parts_covered": [
+    "7"
+  ]
+}

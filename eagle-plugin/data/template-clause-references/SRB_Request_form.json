@@ -1,0 +1,15 @@
+{
+  "template_filename": "SRB Request form.docx",
+  "category": "srb_request",
+  "variant": "",
+  "section_clause_map": {},
+  "template_level_clauses": [
+    {
+      "clause_number": "HHSAR 307.104",
+      "title": "Systems Review Board Requirements",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": []
+}

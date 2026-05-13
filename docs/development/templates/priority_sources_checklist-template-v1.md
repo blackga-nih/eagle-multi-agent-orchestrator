@@ -1,0 +1,45 @@
+# Required & Priority Sources Checklist — Template
+
+**Purpose**: The Required & Priority Sources Checklist documents the FAR Part 8 priority-of-use analysis for a proposed acquisition. It demonstrates that each required and priority source was checked IN ORDER and records the substantive reason every higher-priority source was rejected before proceeding to a lower one. The completed checklist supports the Card Holder / Contracting Officer's source-selection decision and serves as the audit trail for AbilityOne and UNICOR mandatory-consideration compliance.
+
+**Authority**: FAR Part 8 (Required Sources of Supplies and Services), FAR 8.002(a)(1) (priority-of-use order), FAR 8.6 (Federal Prison Industries / UNICOR), FAR 8.7 (AbilityOne), FAR 8.4 (Federal Supply Schedules), FAR 8.003 (GSA Commercial Platforms), HHS supplemental guidance.
+
+**Audience**: Card Holder / Contracting Officer (signs the determination), AbilityOne / UNICOR (mandatory consideration above MPT), Strategic Sourcing reviewer (BIC vehicle confirmation).
+
+You are an NCI federal acquisition specialist. Generate a Required & Priority Sources Checklist in markdown format per FAR Part 8 priority-of-use rules and HHS supplemental guidance.
+
+## Required Sections
+1. CHECKLIST HEADER — Requirement title, estimated value, requestor, contracting officer / card holder, date
+2. REQUIREMENT SUMMARY — 2-3 sentence description of the supply or service and any applicable threshold (micro-purchase, SAT)
+3. PRIORITY-OF-USE CHECKLIST — 8-row table covering each FAR Part 8 source IN ORDER with Checked / Result / Reference columns, citing the controlling FAR subsection per row
+4. AbilityOne / UNICOR DETERMINATION — Mandatory consideration for items on the AbilityOne Procurement List or UNICOR schedule above the micro-purchase threshold; document waiver number if a non-mandatory source is used
+5. STRATEGIC SOURCING / BIC NOTE — Identify any applicable Best-In-Class (BIC) vehicle (e.g., NIH CIO-CS, NITAAC, OASIS+, GSA MAS BIC) and document rationale if a non-BIC vehicle is selected
+6. FINDING — Explicit statement identifying which priority source was selected and the FAR Part 8 subsection that authorizes its use
+7. SIGNATURE — Card holder / contracting officer signature block, date
+
+## Worked Example — Section 3 Priority-of-Use Checklist
+
+**Requirement**: Office supplies < $10K micro-purchase (general office consumables — paper, toner, pens) for NCI Shady Grove building.
+
+| # | Priority Source | Checked? | Result | Reference / Justification |
+|---|-----------------|----------|--------|---------------------------|
+| 1 | Agency inventory / NIH storeroom (FAR 8.002(a)(1)(i)) | Yes | Not stocked — current NIH self-service store inventory does not carry the required toner SKU | NIH Self-Service Store query 2026-05-04 |
+| 2 | Excess from other federal agencies (FAR 8.002(a)(1)(ii)) | Yes | No matching excess listings | GSAXcess search 2026-05-04 |
+| 3 | Federal Prison Industries / UNICOR (FAR 8.002(a)(1)(iii) / 8.6) | Yes | UNICOR catalog does not list the specific toner SKU; paper available but already covered by AbilityOne | UNICOR catalog 2026-05-04 |
+| 4 | AbilityOne / NIB-NISH (FAR 8.002(a)(1)(iv) / 8.7) | Yes | Paper and pens ON the Procurement List — MANDATORY source; toner not on Procurement List | AbilityOne Procurement List lookup 2026-05-04 |
+| 5 | Wholesale supply (DLA, GSA Global Supply) (FAR 8.002(a)(1)(v)) | [Contracting Officer to complete: GSA Global Supply check] | | |
+| 6 | Mandatory FSS (FAR 8.002(a)(1)(vi) / 8.4) | [Contracting Officer to complete: FSS check] | | |
+| 7 | Optional sources — FSS / GWACs / BPAs / GSA Commercial Platforms (FAR 8.4 / 8.003) | [Contracting Officer to complete] | | |
+| 8 | Commercial sources (FAR Part 12 / 13) | [Contracting Officer to complete] | | |
+
+**Determination**: AbilityOne is the mandatory source for paper and pens; toner will be acquired from FSS after FSS check is documented.
+
+## Rules
+- Sources MUST be checked IN ORDER per FAR 8.002(a)(1) — document the substantive reason each higher-priority source was rejected before proceeding to a lower one; "not checked" or boilerplate "N/A" is insufficient
+- AbilityOne and UNICOR consideration is MANDATORY for purchases above the micro-purchase threshold when the item is on the Procurement List or UNICOR schedule — a waiver number is required to bypass
+- GSA Commercial Platforms (FAR 8.003, NDAA 2018) are an OPTIONAL priority-7 source — note when applicable but do not treat as mandatory
+- Below the micro-purchase threshold (FAR 13.2), some sources (e.g., UNICOR) may be marked N/A with a brief written rationale, but AbilityOne consideration remains best practice
+- If information is missing, write "[Contracting Officer to complete: <what's needed>]"
+- Do NOT paste raw user messages or chat responses into the document
+- Include "DRAFT — Generated {date}" in header metadata where {date} is today's date
+- End with: *This document was generated by EAGLE — NCI Acquisition Assistant*

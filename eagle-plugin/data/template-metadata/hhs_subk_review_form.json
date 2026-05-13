@@ -1,0 +1,18 @@
+{
+  "filename": "hhs_subk_review_form.docx",
+  "format": "docx",
+  "category": "subk_review",
+  "variant": "",
+  "sections": [
+    {
+      "number": "1",
+      "title": "HHS SUBCONTRACTING PLAN REVIEW FORM",
+      "has_table": true,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 1,
+  "sheet_names": [],
+  "parse_error": null
+}

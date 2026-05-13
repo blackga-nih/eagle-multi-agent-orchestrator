@@ -1,0 +1,849 @@
+[
+  {
+    "type": "text",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "content": "",
+    "timestamp": "2026-05-01T19:13:12.943220+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Reasoning...",
+      "detail": ""
+    },
+    "timestamp": "2026-05-01T19:13:12.943340+00:00"
+  },
+  {
+    "type": "tool_use",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_use": {
+      "name": "research",
+      "input": {},
+      "tool_use_id": "tooluse_nXTI9LLUwyUxbd5GhClyOa"
+    },
+    "timestamp": "2026-05-01T19:13:16.992415+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Running research...",
+      "detail": "research"
+    },
+    "timestamp": "2026-05-01T19:13:16.993568+00:00"
+  },
+  {
+    "type": "tool_use",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_use": {
+      "name": "research",
+      "input": {
+        "query": "sole source exception to fair opportunity multi-award IDIQ FAR 16.505",
+        "contract_value": 0,
+        "acquisition_method": "idiq-order",
+        "is_it": false,
+        "is_services": false
+      },
+      "tool_use_id": "tooluse_nXTI9LLUwyUxbd5GhClyOa"
+    },
+    "timestamp": "2026-05-01T19:13:17.831762+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Still working...",
+      "detail": "model_generating"
+    },
+    "timestamp": "2026-05-01T19:13:25.867642+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Still working...",
+      "detail": "model_generating"
+    },
+    "timestamp": "2026-05-01T19:13:33.895184+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Still working...",
+      "detail": "model_generating"
+    },
+    "timestamp": "2026-05-01T19:13:41.917249+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Still working...",
+      "detail": "model_generating"
+    },
+    "timestamp": "2026-05-01T19:13:49.943566+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Still working...",
+      "detail": "model_generating"
+    },
+    "timestamp": "2026-05-01T19:13:57.970845+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Still working...",
+      "detail": "model_generating"
+    },
+    "timestamp": "2026-05-01T19:14:05.987667+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Still working...",
+      "detail": "model_generating"
+    },
+    "timestamp": "2026-05-01T19:14:14.004150+00:00"
+  },
+  {
+    "type": "agent_status",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "metadata": {
+      "status": "Still working...",
+      "detail": "model_generating"
+    },
+    "timestamp": "2026-05-01T19:14:22.030069+00:00"
+  },
+  {
+    "type": "tool_use",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_use": {
+      "name": "agent_route",
+      "input": {
+        "agent_key": "compliance_strategist",
+        "label": "Compliance Strategist",
+        "icon": "\u2705",
+        "s3_key": "eagle-knowledge-base/approved/agents/08-COMPLIANCE.txt"
+      },
+      "tool_use_id": "agent_route_b0480e7b4221"
+    },
+    "timestamp": "2026-05-01T19:14:29.955409+00:00"
+  },
+  {
+    "type": "tool_result",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_result": {
+      "name": "agent_route",
+      "result": {
+        "agent_key": "compliance_strategist",
+        "label": "Compliance Strategist",
+        "s3_key": "eagle-knowledge-base/approved/agents/08-COMPLIANCE.txt",
+        "chars_read": 0
+      },
+      "tool_use_id": "agent_route_b0480e7b4221"
+    },
+    "timestamp": "2026-05-01T19:14:29.955973+00:00"
+  },
+  {
+    "type": "tool_use",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_use": {
+      "name": "agent_route",
+      "input": {
+        "agent_key": "legal_counsel",
+        "label": "Legal Counsel",
+        "icon": "\u2696\ufe0f",
+        "s3_key": "eagle-knowledge-base/approved/agents/02-legal.txt"
+      },
+      "tool_use_id": "agent_route_fbc7753e6a41"
+    },
+    "timestamp": "2026-05-01T19:14:29.956325+00:00"
+  },
+  {
+    "type": "tool_result",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_result": {
+      "name": "agent_route",
+      "result": {
+        "agent_key": "legal_counsel",
+        "label": "Legal Counsel",
+        "s3_key": "eagle-knowledge-base/approved/agents/02-legal.txt",
+        "chars_read": 18422
+      },
+      "tool_use_id": "agent_route_fbc7753e6a41"
+    },
+    "timestamp": "2026-05-01T19:14:29.956617+00:00"
+  },
+  {
+    "type": "tool_result",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_result": {
+      "name": "research",
+      "result": {
+        "kb_results_count": 16,
+        "fetched_count": 10,
+        "semantic_hit_count": 6,
+        "semantic_fetched_count": 7,
+        "lane_breakdown": {
+          "path": 6,
+          "semantic": 3,
+          "metadata": 15,
+          "metadata-broad": 2
+        },
+        "total_surfaced": 26,
+        "sources": [
+          {
+            "title": "Limited Source Justification (LSJ) Template for GSA Federal Supply Schedule BPA Call Orders",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/LSJ-GSA-BPA-CallOrders.docx",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: source, order (2/9 terms)",
+            "read": true
+          },
+          {
+            "title": "GAO Decision B-413729: Threat Management Group, LLC - Out-of-Scope Task Order Violated CICA",
+            "s3_key": "eagle-knowledge-base/approved/legal-counselor/case-law/scope/GAO_B-413729_Out_of_Scope_Task_Order_Violated_CICA.txt",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: task, order (2/9 terms)",
+            "read": true
+          },
+          {
+            "title": "GAO Decision B-410074.3; B-410074.4 - PB&A, Inc.; Environmental Synectics, Inc.--Costs: Task Order Consolidation Analysis Requirement",
+            "s3_key": "eagle-knowledge-base/approved/legal-counselor/case-law/consolidation/GAO_B-410074_Task_Order_Consolidation_Analysis.txt",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: task, order (2/9 terms)",
+            "read": true
+          },
+          {
+            "title": "NIH_FAQ_Developing_Acquisitions.txt",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/core-procedures/NIH_FAQ_Developing_Acquisitions.txt",
+            "lane": "semantic",
+            "score": 0.747,
+            "score_pct": 75,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "08-COMPLIANCE.txt",
+            "s3_key": "eagle-knowledge-base/approved/agents/08-COMPLIANCE.txt",
+            "lane": "semantic",
+            "score": 0.717,
+            "score_pct": 72,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "FAR_Part_19_Small_Business_RFO_2025.txt",
+            "s3_key": "eagle-knowledge-base/approved/market-intelligence/small-business/FAR_Part_19_Small_Business_RFO_2025.txt",
+            "lane": "semantic",
+            "score": 0.712,
+            "score_pct": 71,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "FAR Part 16 IDIQ Comprehensive RFO 2025 - Subparts 16.5-16.7: Indefinite-Delivery, T&M, and Agreements",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_16_IDIQ_Comprehensive_RFO_2025.txt",
+            "lane": "metadata",
+            "score": 1.0,
+            "score_pct": 100,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "FAR Part 16 - Types of Contracts (RFO 2025)",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_16_Contract_Types_RFO_2025.txt",
+            "lane": "metadata",
+            "score": 0.818,
+            "score_pct": 82,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "NIH Justification and Approval (J&A) Desk Guide",
+            "s3_key": "eagle-knowledge-base/approved/legal-counselor/protest-guidance/JA_Desk_Guide_January_2025_Updated.txt",
+            "lane": "metadata",
+            "score": 0.818,
+            "score_pct": 82,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "Task Order Acquisition Plan (TOAP) Template - National Cancer Institute, Office of Acquisitions",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/01.C_NCI_OA_Task_Order_Acquisition_Plan.docx",
+            "lane": "metadata",
+            "score": 0.727,
+            "score_pct": 73,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "NIH Acquisition Glossary",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/core-procedures/NIH_Acquisition_Glossary.txt",
+            "lane": "metadata",
+            "score": 0.727,
+            "score_pct": 73,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHS Template - Sole Source Justification (SSJ) under FAR Part 8.4",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/Attachment 4-HHS Template - SSJ under FAR part 8.4.docx",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHS Template - Request for Exception to OFPP Required Use Policy (RFO FAR 8.104)",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/Attachment 7- HHS Template- Request for Exception OFPP Required Use.docx",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHSAM Part 308 -- Required Sources of Supplies and Services",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/HHSAR-guidance/HHSAM_308_Required_Sources_2026.txt",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHS Acquisition Document Review Guide: Supporting Documentation Requirements Matrix",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/regulatory-policies/HHS_Document_Review_Guide_Supporting_Docs_Matrix.txt",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "Template for Individual or Class Determination and Findings (D&F) For Domestic Nonavailability Exceptions to the Buy American Statute",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/DF_Buy_American_Non_Availability_Template.docx",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "ACQuipedia - Competition and Responsibility",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/ACQuipedia_Competition_Responsibility.txt",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "FAR Companion - Part 8 Required Sources and Category Management (Version 3.0)",
+            "s3_key": "eagle-knowledge-base/approved/market-intelligence/vehicle-information/FC_8_12_Commercial_Category_Management.txt",
+            "lane": "metadata",
+            "score": 0.545,
+            "score_pct": 55,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "Appropriations Law: IDIQ Contract Funding - Special Rules for Guaranteed Minimums and Task Order Timing",
+            "s3_key": "eagle-knowledge-base/approved/shared/appropriations_law_IDIQ_funding.txt",
+            "lane": "metadata",
+            "score": 0.545,
+            "score_pct": 55,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "FAR Part 5 - Publicizing Contract Actions (RFO 2025)",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_5_Publicizing_RFO_2025.txt",
+            "lane": "metadata",
+            "score": 0.545,
+            "score_pct": 55,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHS PMR Threshold-Based Requirements Matrix",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Threshold_Matrix.txt",
+            "lane": "metadata",
+            "score": 0.545,
+            "score_pct": 55,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "FAR Part 6 - Competition Requirements (RFO 2025)",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_6_Competition_RFO_2025.txt",
+            "lane": "metadata-broad",
+            "score": 0.562,
+            "score_pct": 56,
+            "rationale": "FAR Part 6 competition guidance covers sole source justifications, approval thresholds, and other-than-full-and-open competition authorities.",
+            "read": false
+          },
+          {
+            "title": "HCA and SPE Approval Thresholds and Review Instructions",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/core-procedures/HCA_SPE_Approval_Thresholds_Updated.txt",
+            "lane": "metadata-broad",
+            "score": 0.438,
+            "score_pct": 44,
+            "rationale": "HCA/SPE approval thresholds document covers J&A approval levels and sole source justification procedures for acquisitions.",
+            "read": false
+          },
+          {
+            "title": "HHS PMR IDIQ Contract and Order Checklists",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: idiq, order (2/9 terms)",
+            "read": false
+          },
+          {
+            "title": "GAO Decision B-302358: Bureau of Customs and Border Protection - IDIQ Minimum Obligation Timing and Recording Statute",
+            "s3_key": "eagle-knowledge-base/approved/legal-counselor/appropriations-law/GAO_B-302358_IDIQ_Min_Fund.txt",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: idiq, order (2/9 terms)",
+            "read": false
+          },
+          {
+            "title": "HHS/NIH Sole Source Justification (SSJ) Template for Non-FSS Acquisitions Not Exceeding the Simplified Acquisition Threshold",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/6.a. Single Source J&A - up to SAT.docx",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: sole, source (2/9 terms)",
+            "read": false
+          }
+        ],
+        "checklists_loaded": [
+          "HHS PMR IDIQ Contract and Order Checklists",
+          "NIH File Reviewer's Checklist (FRC) - OALM Acquisition Compliance Review Standards",
+          "NIH Acquisition File Checklists - Authoritative Merged Version (OAG-FY25-01 with 2025 and 2026 Corrections Applied)",
+          "HHS PMR Common Requirements Across All Contract Types"
+        ],
+        "detected_method": "idiq-order",
+        "compliance_matrix_included": true,
+        "agents_routed": [
+          "legal_counsel"
+        ],
+        "duration_seconds": 72.33
+      },
+      "tool_use_id": "tooluse_nXTI9LLUwyUxbd5GhClyOa"
+    },
+    "timestamp": "2026-05-01T19:14:29.956918+00:00"
+  },
+  {
+    "type": "text",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "content": "Here",
+    "timestamp": "2026-05-01T19:14:33.643105+00:00"
+  },
+  {
+    "type": "text",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "content": "'s the complete",
+    "timestamp": "2026-05-01T19:14:33.663122+00:00"
+  },
+  {
+    "type": "tool_use",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_use": {
+      "name": "research",
+      "input": {},
+      "tool_use_id": "tooluse_nXTI9LLUwyUxbd5GhClyOa"
+    },
+    "timestamp": "2026-05-01T19:13:16.992415+00:00"
+  },
+  {
+    "type": "tool_use",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_use": {
+      "name": "research",
+      "input": {
+        "query": "sole source exception to fair opportunity multi-award IDIQ FAR 16.505",
+        "contract_value": 0,
+        "acquisition_method": "idiq-order",
+        "is_it": false,
+        "is_services": false
+      },
+      "tool_use_id": "tooluse_nXTI9LLUwyUxbd5GhClyOa"
+    },
+    "timestamp": "2026-05-01T19:13:17.831762+00:00"
+  },
+  {
+    "type": "tool_use",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_use": {
+      "name": "agent_route",
+      "input": {
+        "agent_key": "compliance_strategist",
+        "label": "Compliance Strategist",
+        "icon": "\u2705",
+        "s3_key": "eagle-knowledge-base/approved/agents/08-COMPLIANCE.txt"
+      },
+      "tool_use_id": "agent_route_b0480e7b4221"
+    },
+    "timestamp": "2026-05-01T19:14:29.955409+00:00"
+  },
+  {
+    "type": "tool_result",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_result": {
+      "name": "agent_route",
+      "result": {
+        "agent_key": "compliance_strategist",
+        "label": "Compliance Strategist",
+        "s3_key": "eagle-knowledge-base/approved/agents/08-COMPLIANCE.txt",
+        "chars_read": 0
+      },
+      "tool_use_id": "agent_route_b0480e7b4221"
+    },
+    "timestamp": "2026-05-01T19:14:29.955973+00:00"
+  },
+  {
+    "type": "tool_use",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_use": {
+      "name": "agent_route",
+      "input": {
+        "agent_key": "legal_counsel",
+        "label": "Legal Counsel",
+        "icon": "\u2696\ufe0f",
+        "s3_key": "eagle-knowledge-base/approved/agents/02-legal.txt"
+      },
+      "tool_use_id": "agent_route_fbc7753e6a41"
+    },
+    "timestamp": "2026-05-01T19:14:29.956325+00:00"
+  },
+  {
+    "type": "tool_result",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_result": {
+      "name": "agent_route",
+      "result": {
+        "agent_key": "legal_counsel",
+        "label": "Legal Counsel",
+        "s3_key": "eagle-knowledge-base/approved/agents/02-legal.txt",
+        "chars_read": 18422
+      },
+      "tool_use_id": "agent_route_fbc7753e6a41"
+    },
+    "timestamp": "2026-05-01T19:14:29.956617+00:00"
+  },
+  {
+    "type": "tool_result",
+    "agent_id": "eagle",
+    "agent_name": "EAGLE Acquisition Assistant",
+    "tool_result": {
+      "name": "research",
+      "result": {
+        "kb_results_count": 16,
+        "fetched_count": 10,
+        "semantic_hit_count": 6,
+        "semantic_fetched_count": 7,
+        "lane_breakdown": {
+          "path": 6,
+          "semantic": 3,
+          "metadata": 15,
+          "metadata-broad": 2
+        },
+        "total_surfaced": 26,
+        "sources": [
+          {
+            "title": "Limited Source Justification (LSJ) Template for GSA Federal Supply Schedule BPA Call Orders",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/LSJ-GSA-BPA-CallOrders.docx",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: source, order (2/9 terms)",
+            "read": true
+          },
+          {
+            "title": "GAO Decision B-413729: Threat Management Group, LLC - Out-of-Scope Task Order Violated CICA",
+            "s3_key": "eagle-knowledge-base/approved/legal-counselor/case-law/scope/GAO_B-413729_Out_of_Scope_Task_Order_Violated_CICA.txt",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: task, order (2/9 terms)",
+            "read": true
+          },
+          {
+            "title": "GAO Decision B-410074.3; B-410074.4 - PB&A, Inc.; Environmental Synectics, Inc.--Costs: Task Order Consolidation Analysis Requirement",
+            "s3_key": "eagle-knowledge-base/approved/legal-counselor/case-law/consolidation/GAO_B-410074_Task_Order_Consolidation_Analysis.txt",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: task, order (2/9 terms)",
+            "read": true
+          },
+          {
+            "title": "NIH_FAQ_Developing_Acquisitions.txt",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/core-procedures/NIH_FAQ_Developing_Acquisitions.txt",
+            "lane": "semantic",
+            "score": 0.747,
+            "score_pct": 75,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "08-COMPLIANCE.txt",
+            "s3_key": "eagle-knowledge-base/approved/agents/08-COMPLIANCE.txt",
+            "lane": "semantic",
+            "score": 0.717,
+            "score_pct": 72,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "FAR_Part_19_Small_Business_RFO_2025.txt",
+            "s3_key": "eagle-knowledge-base/approved/market-intelligence/small-business/FAR_Part_19_Small_Business_RFO_2025.txt",
+            "lane": "semantic",
+            "score": 0.712,
+            "score_pct": 71,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "FAR Part 16 IDIQ Comprehensive RFO 2025 - Subparts 16.5-16.7: Indefinite-Delivery, T&M, and Agreements",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_16_IDIQ_Comprehensive_RFO_2025.txt",
+            "lane": "metadata",
+            "score": 1.0,
+            "score_pct": 100,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "FAR Part 16 - Types of Contracts (RFO 2025)",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_16_Contract_Types_RFO_2025.txt",
+            "lane": "metadata",
+            "score": 0.818,
+            "score_pct": 82,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "NIH Justification and Approval (J&A) Desk Guide",
+            "s3_key": "eagle-knowledge-base/approved/legal-counselor/protest-guidance/JA_Desk_Guide_January_2025_Updated.txt",
+            "lane": "metadata",
+            "score": 0.818,
+            "score_pct": 82,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "Task Order Acquisition Plan (TOAP) Template - National Cancer Institute, Office of Acquisitions",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/01.C_NCI_OA_Task_Order_Acquisition_Plan.docx",
+            "lane": "metadata",
+            "score": 0.727,
+            "score_pct": 73,
+            "rationale": "",
+            "read": true
+          },
+          {
+            "title": "NIH Acquisition Glossary",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/core-procedures/NIH_Acquisition_Glossary.txt",
+            "lane": "metadata",
+            "score": 0.727,
+            "score_pct": 73,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHS Template - Sole Source Justification (SSJ) under FAR Part 8.4",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/Attachment 4-HHS Template - SSJ under FAR part 8.4.docx",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHS Template - Request for Exception to OFPP Required Use Policy (RFO FAR 8.104)",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/Attachment 7- HHS Template- Request for Exception OFPP Required Use.docx",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHSAM Part 308 -- Required Sources of Supplies and Services",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/HHSAR-guidance/HHSAM_308_Required_Sources_2026.txt",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHS Acquisition Document Review Guide: Supporting Documentation Requirements Matrix",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/regulatory-policies/HHS_Document_Review_Guide_Supporting_Docs_Matrix.txt",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "Template for Individual or Class Determination and Findings (D&F) For Domestic Nonavailability Exceptions to the Buy American Statute",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/DF_Buy_American_Non_Availability_Template.docx",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "ACQuipedia - Competition and Responsibility",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/ACQuipedia_Competition_Responsibility.txt",
+            "lane": "metadata",
+            "score": 0.636,
+            "score_pct": 64,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "FAR Companion - Part 8 Required Sources and Category Management (Version 3.0)",
+            "s3_key": "eagle-knowledge-base/approved/market-intelligence/vehicle-information/FC_8_12_Commercial_Category_Management.txt",
+            "lane": "metadata",
+            "score": 0.545,
+            "score_pct": 55,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "Appropriations Law: IDIQ Contract Funding - Special Rules for Guaranteed Minimums and Task Order Timing",
+            "s3_key": "eagle-knowledge-base/approved/shared/appropriations_law_IDIQ_funding.txt",
+            "lane": "metadata",
+            "score": 0.545,
+            "score_pct": 55,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "FAR Part 5 - Publicizing Contract Actions (RFO 2025)",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_5_Publicizing_RFO_2025.txt",
+            "lane": "metadata",
+            "score": 0.545,
+            "score_pct": 55,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "HHS PMR Threshold-Based Requirements Matrix",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/checklists/HHS_PMR_Threshold_Matrix.txt",
+            "lane": "metadata",
+            "score": 0.545,
+            "score_pct": 55,
+            "rationale": "",
+            "read": false
+          },
+          {
+            "title": "FAR Part 6 - Competition Requirements (RFO 2025)",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/FAR-guidance/FAR_Part_6_Competition_RFO_2025.txt",
+            "lane": "metadata-broad",
+            "score": 0.562,
+            "score_pct": 56,
+            "rationale": "FAR Part 6 competition guidance covers sole source justifications, approval thresholds, and other-than-full-and-open competition authorities.",
+            "read": false
+          },
+          {
+            "title": "HCA and SPE Approval Thresholds and Review Instructions",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/core-procedures/HCA_SPE_Approval_Thresholds_Updated.txt",
+            "lane": "metadata-broad",
+            "score": 0.438,
+            "score_pct": 44,
+            "rationale": "HCA/SPE approval thresholds document covers J&A approval levels and sole source justification procedures for acquisitions.",
+            "read": false
+          },
+          {
+            "title": "HHS PMR IDIQ Contract and Order Checklists",
+            "s3_key": "eagle-knowledge-base/approved/compliance-strategist/PMR-checklists/HHS_PMR_IDIQ_Checklist.txt",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: idiq, order (2/9 terms)",
+            "read": false
+          },
+          {
+            "title": "GAO Decision B-302358: Bureau of Customs and Border Protection - IDIQ Minimum Obligation Timing and Recording Statute",
+            "s3_key": "eagle-knowledge-base/approved/legal-counselor/appropriations-law/GAO_B-302358_IDIQ_Min_Fund.txt",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: idiq, order (2/9 terms)",
+            "read": false
+          },
+          {
+            "title": "HHS/NIH Sole Source Justification (SSJ) Template for Non-FSS Acquisitions Not Exceeding the Simplified Acquisition Threshold",
+            "s3_key": "eagle-knowledge-base/approved/supervisor-core/essential-templates/6.a. Single Source J&A - up to SAT.docx",
+            "lane": "path",
+            "score": 0.222,
+            "score_pct": 22,
+            "rationale": "Path/title token match: sole, source (2/9 terms)",
+            "read": false
+          }
+        ],
+        "checklists_loaded": [
+          "HHS PMR IDIQ Contract and Order Checklists",
+          "NIH File Reviewer's Checklist (FRC) - OALM Acquisition Compliance Review Standards",
+          "NIH Acquisition File Checklists - Authoritative Merged Version (OAG-FY25-01 with 2025 and 2026 Corrections Applied)",
+          "HHS PMR Common Requirements Across All Contract Types"
+        ],
+        "detected_method": "idiq-order",
+        "compliance_matrix_included": true,
+        "agents_routed": [
+          "legal_counsel"
+        ],
+        "duration_seconds": 72.33
+      },
+      "tool_use_id": "tooluse_nXTI9LLUwyUxbd5GhClyOa"
+    },
+    "timestamp": "2026-05-01T19:14:29.956918+00:00"
+  }
+]

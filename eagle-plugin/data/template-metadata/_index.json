@@ -1,0 +1,2077 @@
+{
+  "total_templates": 36,
+  "by_category": {
+    "acquisition_plan": [
+      "01.C_NCI_OA_Task_Order_Acquisition_Plan.docx",
+      "1.a. AP Under SAT.docx",
+      "1.b AP Above SAT.docx",
+      "Attch #1 - HHS Streamlined Acquisition Plan MS WORD Template_fillable_ver 2025.05.07_FINAL VERSION.docx",
+      "HHS Streamlined Acquisition Plan Template.docx",
+      "Streamlined Acquisition Plan (S-AP).docx"
+    ],
+    "igce": [
+      "01.D_IGCE_for_Commercial_Organizations.xlsx",
+      "4.a. IGE for Products.xlsx",
+      "4.b. IGE for Services based on Catalog Price.xlsx"
+    ],
+    "son_products": [
+      "3.a. SON - Products (including Equipment and Supplies).docx"
+    ],
+    "son_services": [
+      "3.b. SON - Services based on Catalog Pricing.docx"
+    ],
+    "justification": [
+      "6.a. Single Source J&A - up to SAT.docx",
+      "Justification_and_Approval_Over_350K_Template.docx"
+    ],
+    "market_research": [
+      "Attachment 1 - HHS Market Research Template.docx",
+      "FY26 Streamlined Market Research Report.docx",
+      "HHS_Streamlined_Market_Research_Template_FY26.docx"
+    ],
+    "conference_request": [
+      "Attachment A - NIH Conference or Conference Grant Request and Approval 20151404_508.docx"
+    ],
+    "conference_waiver": [
+      "Attachment B - NIH Conference Request for Waiver 20151004_508.docx"
+    ],
+    "promotional_item": [
+      "Attachment D - Promotional Item Approval Form 20172112_508.docx"
+    ],
+    "exemption_determination": [
+      "Attachment G - Exemption Determination Template 20151305_508.docx"
+    ],
+    "mandatory_use_waiver": [
+      "DF for Mandatory-Use Waiver Template - Draft.pdf"
+    ],
+    "buy_american": [
+      "DF_Buy_American_Non_Availability_Template.docx",
+      "DF_Buy_American_Other_Exceptions_Template.docx"
+    ],
+    "gfp_form": [
+      "GFP Form.pdf"
+    ],
+    "subk_plan": [
+      "HHS SubK Plan Template - updated March 2022.doc"
+    ],
+    "reference_guide": [
+      "HHS_AP_Structure_Guide.txt",
+      "HHS_Streamlined_MR_Template_FY26.txt"
+    ],
+    "bpa_call_order": [
+      "LSJ-GSA-BPA-CallOrders.docx"
+    ],
+    "cor_certification": [
+      "NIH COR Appointment Memorandum.docx"
+    ],
+    "technical_questionnaire": [
+      "Project_Officers_Technical_Questionnare.pdf"
+    ],
+    "quotation_abstract": [
+      "Quotation Abstract.docx"
+    ],
+    "receiving_report": [
+      "Receiving Report Template 20201002.docx"
+    ],
+    "srb_request": [
+      "SRB Request form.docx"
+    ],
+    "subk_review": [
+      "hhs_subk_review_form.docx"
+    ],
+    "sow": [
+      "statement-of-work-template-eagle-v2.docx",
+      "statement-of-work-template-eagle.docx"
+    ]
+  },
+  "templates": [
+    {
+      "filename": "01.C_NCI_OA_Task_Order_Acquisition_Plan.docx",
+      "format": "docx",
+      "category": "acquisition_plan",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "Applicable Conditions- FAR 7.105(a)(2),",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "Cost – FAR 7.105(a)(3), See Attachment #2.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "Attached is the Independent Government Cost Estimate (IGCE) that explains what the total estimated cost of this procurement inclusive of all options.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "Capability or Performance – FAR 7.105(a)(4), Specify the required capabilities or performance characteristics of the supplies or performance standards of the services to be acquired and state how they are related to the need.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5",
+          "title": "Delivery or Performance-Period Requirements – FAR 7.105(a)(5)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6",
+          "title": "Trade-Offs – FAR 7.105(a)(6), Discuss the expected consequences of trade-offs among the various cost, capability or performance, and schedule goals that reflects the changing needs and priorities of the program. Note: This section should not discuss trade-offs in relation to source selection.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7",
+          "title": "Risks – FAR 7.105(a)(7), Discuss technical, cost, and schedule risks and describe what efforts are planned or underway to reduce risk and the consequences of failure to achieve goals. If concurrency of development and production is planned, discuss its effects on cost and schedule risks.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "8",
+          "title": "Acquisition Streamlining – FAR 7.105(a)(8),",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "9",
+          "title": "OR",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 9,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "01.D_IGCE_for_Commercial_Organizations.xlsx",
+      "format": "xlsx",
+      "category": "igce",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "IGCE",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "IT Services",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "IT Goods",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "Instructions",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "5",
+          "title": "Sheet2",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "6",
+          "title": "Sheet3",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 6,
+      "sheet_names": [
+        "IGCE",
+        "IT Services",
+        "IT Goods",
+        "Instructions",
+        "Sheet2",
+        "Sheet3"
+      ],
+      "parse_error": null
+    },
+    {
+      "filename": "1.a. AP Under SAT.docx",
+      "format": "docx",
+      "category": "acquisition_plan",
+      "variant": "under_sat",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "1.b AP Above SAT.docx",
+      "format": "docx",
+      "category": "acquisition_plan",
+      "variant": "above_sat",
+      "sections": [
+        {
+          "number": "1",
+          "title": "Acquisition Plan (AP) Template Summary Information",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "Additional Guidance",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "Statement of Need - FAR 7.105(a)(1)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "Technical and Contractual History",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5",
+          "title": "Acquisition Alternatives",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6",
+          "title": "Applicable Conditions - FAR7.105(a)(2)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7",
+          "title": "Cost - FAR 7.105(a)(3)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "8",
+          "title": "Capability or Performance - FAR 7.105(a)(4)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "9",
+          "title": "Delivery or Performance-Period Requirements - FAR7.105(a)(5)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "10",
+          "title": "Trade-Offs – FAR 7.105(a)(6)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "11",
+          "title": "Risks – FAR 7.105(a)(7)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "12",
+          "title": "Acquisition Streamlining – FAR 7.105(a)(8)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "13",
+          "title": "Sources - FAR7.105(b)(1)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "14",
+          "title": "Competition - FAR 7.105(b)(2) and FAR 7.102",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "15",
+          "title": "Contract Type Selection– FAR 7.105(b)(3)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "16",
+          "title": "No additional guidance.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "17",
+          "title": "Acquisition Considerations– FAR 7.105(b)(5)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "18",
+          "title": "Budgeting and Funding– FAR 7.105(b)(6)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "19",
+          "title": "Product or Service Descriptions– FAR 7.105(b)(7)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "20",
+          "title": "Priorities, Allocations, and Allotments– FAR 7.105(b)(8)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "21",
+          "title": "Contractor versus Government Performance– FAR 7.105(b)(9)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "22",
+          "title": "Inherently Governmental Functions– FAR 7.105(b)(10)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "23",
+          "title": "Management Information Requirements– FAR 7.105(b)(11)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "24",
+          "title": "Make or Buy– FAR 7.105(b)(12)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "25",
+          "title": "Test and Evaluation– FAR 7.105(b)(13)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "26",
+          "title": "Government –Furnished Property – FAR 7.105(b)(15)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "27",
+          "title": "Government-Furnished Information– FAR 7.105(b)(16)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "28",
+          "title": "No additional guidance.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "29",
+          "title": "Contract Administration – FAR 7.105(b)(19)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "30",
+          "title": "Milestones for the Procurement Cycle - FAR 7.105(b)(21)",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 30,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "3.a. SON - Products (including Equipment and Supplies).docx",
+      "format": "docx",
+      "category": "son_products",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1.0",
+          "title": "TITLE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2.0",
+          "title": "BACKGROUND",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3.0",
+          "title": "OBJECTIVES",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "TECHNICAL REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4.1",
+          "title": "PRODUCT FEATURES/SALIENT CHARACTERISTICS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4.2",
+          "title": "TRAINING",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4.3",
+          "title": "SPECIAL ORDER REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5.0",
+          "title": "TYPE OF ORDER",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6.0",
+          "title": "PRICE SCHEDULE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "10",
+          "title": "SCHDULE OF THE CHARGES FOR THE BASIC AWARD PERIOD",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7.0",
+          "title": "DELIVERY / INSTALLATION",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7.1",
+          "title": "CONTRACTING OFFICERS REPRESENTATIVE OR TECHNICAL POINT OF CONTACT",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "8.0",
+          "title": "WARRANTY",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 13,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "3.b. SON - Services based on Catalog Pricing.docx",
+      "format": "docx",
+      "category": "son_services",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1.0",
+          "title": "TITLE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2.0",
+          "title": "BACKGROUND",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3.0",
+          "title": "OBJECTIVES",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "TECHNICAL REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4.1",
+          "title": "PRODUCT FEATURES/SALIENT CHARACTERISTICS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4.3",
+          "title": "SPECIAL ORDER REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5.0",
+          "title": "TYPE OF ORDER",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6.0",
+          "title": "PRICE SCHEDULE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "9",
+          "title": "SCHDULE OF THE CHARGES FOR THE BASIC AWARD PERIOD",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7.0",
+          "title": "PERIOD OF PERFORMANCE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7.1",
+          "title": "PLACE OF PERFORMANCE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7.2",
+          "title": "CONTRACTING OFFICERS REPRESENTATIVE OR TECHNICAL POINT OF CONTACT",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 12,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "4.a. IGE for Products.xlsx",
+      "format": "xlsx",
+      "category": "igce",
+      "variant": "products",
+      "sections": [
+        {
+          "number": "1",
+          "title": "Sheet1",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "Sheet2",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "Sheet3",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 3,
+      "sheet_names": [
+        "Sheet1",
+        "Sheet2",
+        "Sheet3"
+      ],
+      "parse_error": null
+    },
+    {
+      "filename": "4.b. IGE for Services based on Catalog Price.xlsx",
+      "format": "xlsx",
+      "category": "igce",
+      "variant": "services",
+      "sections": [
+        {
+          "number": "1",
+          "title": "Base Period",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "Option Period One",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "Sheet3",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 3,
+      "sheet_names": [
+        "Base Period",
+        "Option Period One",
+        "Sheet3"
+      ],
+      "parse_error": null
+    },
+    {
+      "filename": "6.a. Single Source J&A - up to SAT.docx",
+      "format": "docx",
+      "category": "justification",
+      "variant": "single_source_under_sat",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Attachment 1 - HHS Market Research Template.docx",
+      "format": "docx",
+      "category": "market_research",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "TOTAL NUMBER OF SOURCES CONTACTED BY BUSINESS SIZE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "SYNOPSIS OF BUSINESS SOURCES CONTACTED",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 2,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Attachment A - NIH Conference or Conference Grant Request and Approval 20151404_508.docx",
+      "format": "docx",
+      "category": "conference_request",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Attachment B - NIH Conference Request for Waiver 20151004_508.docx",
+      "format": "docx",
+      "category": "conference_waiver",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Attachment D - Promotional Item Approval Form 20172112_508.docx",
+      "format": "docx",
+      "category": "promotional_item",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Attachment G - Exemption Determination Template 20151305_508.docx",
+      "format": "docx",
+      "category": "exemption_determination",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "IC",
+          "has_table": false,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 1,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Attch #1 - HHS Streamlined Acquisition Plan MS WORD Template_fillable_ver 2025.05.07_FINAL VERSION.docx",
+      "format": "docx",
+      "category": "acquisition_plan",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "Acquisition Plan (AP) Template Summary Information",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "Additional Guidance",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "Statement of Need - FAR 7.105(a)(1)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "Technical and Contractual History",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5",
+          "title": "Acquisition Alternatives",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6",
+          "title": "Applicable Conditions - FAR7.105(a)(2)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7",
+          "title": "Cost - FAR 7.105(a)(3)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "8",
+          "title": "Capability or Performance - FAR 7.105(a)(4)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "9",
+          "title": "Delivery or Performance-Period Requirements - FAR7.105(a)(5)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "10",
+          "title": "Trade-Offs – FAR 7.105(a)(6)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "11",
+          "title": "Risks – FAR 7.105(a)(7)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "12",
+          "title": "Acquisition Streamlining – FAR 7.105(a)(8)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "13",
+          "title": "Sources - FAR7.105(b)(1)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "14",
+          "title": "Competition - FAR 7.105(b)(2) and FAR 7.102",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "15",
+          "title": "Contract Type Selection– FAR 7.105(b)(3)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "16",
+          "title": "No additional guidance.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "17",
+          "title": "Acquisition Considerations– FAR 7.105(b)(5)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "18",
+          "title": "Budgeting and Funding– FAR 7.105(b)(6)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "19",
+          "title": "Product or Service Descriptions– FAR 7.105(b)(7)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "20",
+          "title": "Priorities, Allocations, and Allotments– FAR 7.105(b)(8)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "21",
+          "title": "Contractor versus Government Performance– FAR 7.105(b)(9)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "22",
+          "title": "Inherently Governmental Functions– FAR 7.105(b)(10)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "23",
+          "title": "Management Information Requirements– FAR 7.105(b)(11)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "24",
+          "title": "Make or Buy– FAR 7.105(b)(12)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "25",
+          "title": "Test and Evaluation– FAR 7.105(b)(13)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "26",
+          "title": "Government –Furnished Property – FAR 7.105(b)(15)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "27",
+          "title": "Government-Furnished Information– FAR 7.105(b)(16)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "28",
+          "title": "No additional guidance.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "29",
+          "title": "Contract Administration – FAR 7.105(b)(19)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "30",
+          "title": "Milestones for the Procurement Cycle - FAR 7.105(b)(21)",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 30,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "DF for Mandatory-Use Waiver Template - Draft.pdf",
+      "format": "pdf",
+      "category": "mandatory_use_waiver",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": "Neither pdfplumber nor PyPDF2 installed"
+    },
+    {
+      "filename": "DF_Buy_American_Non_Availability_Template.docx",
+      "format": "docx",
+      "category": "buy_american",
+      "variant": "non_availability",
+      "sections": [
+        {
+          "number": "1",
+          "title": "INSTRUCTION SHEET",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "FINDINGS",
+          "has_table": false,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 2,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "DF_Buy_American_Other_Exceptions_Template.docx",
+      "format": "docx",
+      "category": "buy_american",
+      "variant": "other_exceptions",
+      "sections": [
+        {
+          "number": "1",
+          "title": "INSTRUCTION SHEET",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "FINDINGS",
+          "has_table": false,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 2,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "FY26 Streamlined Market Research Report.docx",
+      "format": "docx",
+      "category": "market_research",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "TEMPLATE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "TO BE COMPLETED BY THE CONTRACTING OFFICER",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 2,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "GFP Form.pdf",
+      "format": "pdf",
+      "category": "gfp_form",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": "Neither pdfplumber nor PyPDF2 installed"
+    },
+    {
+      "filename": "HHS Streamlined Acquisition Plan Template.docx",
+      "format": "docx",
+      "category": "acquisition_plan",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "Acquisition Plan (AP) Template Summary Information",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "Additional Guidance",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "Statement of Need - FAR 7.105(a)(1)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "Technical and Contractual History",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5",
+          "title": "Acquisition Alternatives",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6",
+          "title": "Applicable Conditions - FAR7.105(a)(2)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7",
+          "title": "Cost - FAR 7.105(a)(3)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "8",
+          "title": "Capability or Performance - FAR 7.105(a)(4)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "9",
+          "title": "Delivery or Performance-Period Requirements - FAR7.105(a)(5)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "10",
+          "title": "Trade-Offs – FAR 7.105(a)(6)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "11",
+          "title": "Risks – FAR 7.105(a)(7)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "12",
+          "title": "Acquisition Streamlining – FAR 7.105(a)(8)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "13",
+          "title": "Sources - FAR7.105(b)(1)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "14",
+          "title": "Competition - FAR 7.105(b)(2) and FAR 7.102",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "15",
+          "title": "Contract Type Selection– FAR 7.105(b)(3)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "16",
+          "title": "No additional guidance.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "17",
+          "title": "Acquisition Considerations– FAR 7.105(b)(5)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "18",
+          "title": "Budgeting and Funding– FAR 7.105(b)(6)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "19",
+          "title": "Product or Service Descriptions– FAR 7.105(b)(7)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "20",
+          "title": "Priorities, Allocations, and Allotments– FAR 7.105(b)(8)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "21",
+          "title": "Contractor versus Government Performance– FAR 7.105(b)(9)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "22",
+          "title": "Inherently Governmental Functions– FAR 7.105(b)(10)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "23",
+          "title": "Management Information Requirements– FAR 7.105(b)(11)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "24",
+          "title": "Make or Buy– FAR 7.105(b)(12)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "25",
+          "title": "Test and Evaluation– FAR 7.105(b)(13)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "26",
+          "title": "Government –Furnished Property – FAR 7.105(b)(15)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "27",
+          "title": "Government-Furnished Information– FAR 7.105(b)(16)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "28",
+          "title": "No additional guidance.",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "29",
+          "title": "Contract Administration – FAR 7.105(b)(19)",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "30",
+          "title": "Milestones for the Procurement Cycle - FAR 7.105(b)(21)",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 30,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "HHS SubK Plan Template - updated March 2022.doc",
+      "format": "doc",
+      "category": "subk_plan",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": "Could not parse .doc (antiword/textract unavailable)"
+    },
+    {
+      "filename": "HHS_AP_Structure_Guide.txt",
+      "format": "txt",
+      "category": "reference_guide",
+      "variant": "ap_structure",
+      "sections": [
+        {
+          "number": "1",
+          "title": "HHS ACQUISITION PLAN (AP) TEMPLATE - STRUCTURE GUIDE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "OVERVIEW",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "SUMMARY INFORMATION SECTION",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "REVIEWS AND APPROVALS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5",
+          "title": "SUBMISSION REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6",
+          "title": "RELATED DOCUMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7",
+          "title": "TEMPLATE FORMAT NOTES",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "8",
+          "title": "KEY REGULATORY AUTHORITIES",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "9",
+          "title": "UPDATES AND CURRENCY",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "10",
+          "title": "END OF GUIDE",
+          "has_table": false,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 10,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "HHS_Streamlined_MR_Template_FY26.txt",
+      "format": "txt",
+      "category": "reference_guide",
+      "variant": "mr_template",
+      "sections": [
+        {
+          "number": "1",
+          "title": "STREAMLINED MARKET RESEARCH REPORT",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "1",
+          "title": "PROGRAM/PROJECT INFORMATION",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "BACKGROUND",
+          "has_table": true,
+          "placeholders": []
+        },
+        {
+          "number": "9",
+          "title": "RECOMMENDATIONS",
+          "has_table": false,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 4,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "HHS_Streamlined_Market_Research_Template_FY26.docx",
+      "format": "docx",
+      "category": "market_research",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "TEMPLATE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "TO BE COMPLETED BY THE CONTRACTING OFFICER",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 2,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Justification_and_Approval_Over_350K_Template.docx",
+      "format": "docx",
+      "category": "justification",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "LSJ-GSA-BPA-CallOrders.docx",
+      "format": "docx",
+      "category": "bpa_call_order",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "NIH COR Appointment Memorandum.docx",
+      "format": "docx",
+      "category": "cor_certification",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Project_Officers_Technical_Questionnare.pdf",
+      "format": "pdf",
+      "category": "technical_questionnaire",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": "Neither pdfplumber nor PyPDF2 installed"
+    },
+    {
+      "filename": "Quotation Abstract.docx",
+      "format": "docx",
+      "category": "quotation_abstract",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Receiving Report Template 20201002.docx",
+      "format": "docx",
+      "category": "receiving_report",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "SRB Request form.docx",
+      "format": "docx",
+      "category": "srb_request",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "Streamlined Acquisition Plan (S-AP).docx",
+      "format": "docx",
+      "category": "acquisition_plan",
+      "variant": "",
+      "sections": [],
+      "total_placeholders": 0,
+      "total_sections": 0,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "hhs_subk_review_form.docx",
+      "format": "docx",
+      "category": "subk_review",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "HHS SUBCONTRACTING PLAN REVIEW FORM",
+          "has_table": true,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 1,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "statement-of-work-template-eagle-v2.docx",
+      "format": "docx",
+      "category": "sow",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "TABLE OF CONTENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "INTRODUCTION/OVERVIEW",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "BACKGROUND",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "SCOPE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5",
+          "title": "OBJECTIVES",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6",
+          "title": "REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7",
+          "title": "TASKS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2.1.1",
+          "title": "Project Management",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2.1.2",
+          "title": "[Task_Title]",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2.1.3",
+          "title": "[Task_Title]",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "11",
+          "title": "PERSONNEL QUALIFICATIONS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "12",
+          "title": "SPECIAL REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "13",
+          "title": "DELIVERABLES",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "14",
+          "title": "SCHEDULE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "15",
+          "title": "ASSUMPTIONS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "16",
+          "title": "GOVERNMENT FURNISHED PROPERTY",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "17",
+          "title": "PLACE OF PERFORMANCE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "18",
+          "title": "TRAVEL",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "19",
+          "title": "SECURITY REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 19,
+      "sheet_names": [],
+      "parse_error": null
+    },
+    {
+      "filename": "statement-of-work-template-eagle.docx",
+      "format": "docx",
+      "category": "sow",
+      "variant": "",
+      "sections": [
+        {
+          "number": "1",
+          "title": "TABLE OF CONTENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2",
+          "title": "INTRODUCTION/OVERVIEW",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "3",
+          "title": "BACKGROUND",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "4",
+          "title": "SCOPE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "5",
+          "title": "OBJECTIVES",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "6",
+          "title": "REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "7",
+          "title": "TASKS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2.1.1",
+          "title": "Project Management",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2.1.2",
+          "title": "[Task Title]",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "2.1.3",
+          "title": "[Task Title]",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "11",
+          "title": "PERSONNEL QUALIFICATIONS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "12",
+          "title": "SPECIAL REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "13",
+          "title": "DELIVERABLES",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "14",
+          "title": "SCHEDULE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "15",
+          "title": "ASSUMPTIONS",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "16",
+          "title": "GOVERNMENT FURNISHED PROPERTY",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "17",
+          "title": "PLACE OF PERFORMANCE",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "18",
+          "title": "TRAVEL",
+          "has_table": false,
+          "placeholders": []
+        },
+        {
+          "number": "19",
+          "title": "SECURITY REQUIREMENTS",
+          "has_table": false,
+          "placeholders": []
+        }
+      ],
+      "total_placeholders": 0,
+      "total_sections": 19,
+      "sheet_names": [],
+      "parse_error": null
+    }
+  ],
+  "category_metadata": {
+    "acquisition_plan": {
+      "label": "Acquisition Plan",
+      "aliases": [
+        "ap",
+        "acq_plan"
+      ],
+      "system_prompt_key": "acquisition_plan",
+      "compliance_display_name": "Acquisition Plan",
+      "kind": "generated"
+    },
+    "bpa_call_order": {
+      "label": "BPA Call Order",
+      "aliases": [
+        "bpa",
+        "blanket_purchase_agreement"
+      ],
+      "kind": "generated"
+    },
+    "buy_american": {
+      "label": "Buy American Act Determination",
+      "aliases": [
+        "baa",
+        "buy_american_act"
+      ],
+      "system_prompt_key": "buy_american",
+      "kind": "generated"
+    },
+    "conference_request": {
+      "label": "Conference Request & Approval",
+      "aliases": [
+        "conference",
+        "conf_request"
+      ],
+      "kind": "generated"
+    },
+    "conference_waiver": {
+      "label": "Conference Waiver",
+      "aliases": [
+        "conf_waiver"
+      ],
+      "kind": "generated"
+    },
+    "contract_type_justification": {
+      "label": "Contract Type Justification",
+      "system_prompt_key": "contract_type_justification",
+      "kind": "generated",
+      "aliases": []
+    },
+    "cor_certification": {
+      "label": "COR Certification",
+      "aliases": [
+        "cor",
+        "cor_appointment"
+      ],
+      "system_prompt_key": "cor_certification",
+      "kind": "generated"
+    },
+    "cor_designation": {
+      "label": "COR Designation Letter",
+      "system_prompt_key": "cor_designation",
+      "compliance_display_name": "COR Designation Letter",
+      "kind": "generated",
+      "aliases": []
+    },
+    "d_f": {
+      "label": "Determination & Findings",
+      "aliases": [
+        "determination_and_findings",
+        "determination_findings"
+      ],
+      "system_prompt_key": "d_f",
+      "compliance_display_name": "D&F (Determination & Findings)",
+      "kind": "generated"
+    },
+    "eval_criteria": {
+      "label": "Evaluation Criteria",
+      "aliases": [
+        "section_l",
+        "instructions_to_offerors",
+        "section_m",
+        "evaluation_factors",
+        "evaluation_criteria"
+      ],
+      "system_prompt_key": "eval_criteria",
+      "kind": "generated"
+    },
+    "exemption_determination": {
+      "label": "Exemption Determination",
+      "aliases": [
+        "exemption"
+      ],
+      "kind": "generated"
+    },
+    "fpds_report": {
+      "label": "FPDS-NG Report",
+      "kind": "evidence",
+      "compliance_display_name": "FPDS-NG Report",
+      "aliases": []
+    },
+    "funding_doc": {
+      "label": "Funding Document",
+      "kind": "legacy",
+      "aliases": []
+    },
+    "gfp_form": {
+      "label": "Government-Furnished Property Form",
+      "aliases": [
+        "gfp",
+        "government_furnished_property"
+      ],
+      "kind": "generated"
+    },
+    "human_subjects": {
+      "label": "Human Subjects Provisions",
+      "system_prompt_key": "human_subjects",
+      "compliance_display_name": "Human Subjects Provisions",
+      "kind": "generated",
+      "aliases": []
+    },
+    "igce": {
+      "label": "Independent Government Cost Estimate",
+      "aliases": [
+        "ige",
+        "independent_government_estimate",
+        "independent_government_cost_estimate",
+        "cost_estimate"
+      ],
+      "system_prompt_key": "igce",
+      "compliance_display_name": "IGCE",
+      "kind": "generated"
+    },
+    "inherently_governmental": {
+      "label": "Inherently Governmental Certification",
+      "system_prompt_key": "inherently_governmental",
+      "compliance_display_name": "Inherently Governmental Certification",
+      "kind": "generated",
+      "aliases": []
+    },
+    "justification": {
+      "label": "Justification & Approval",
+      "aliases": [
+        "j_a",
+        "j&a",
+        "ja",
+        "sole_source",
+        "sole_source_justification"
+      ],
+      "system_prompt_key": "justification",
+      "compliance_display_name": "J&A / Justification",
+      "kind": "generated"
+    },
+    "mandatory_use_waiver": {
+      "label": "Mandatory-Use Waiver",
+      "aliases": [
+        "mandatory_waiver"
+      ],
+      "kind": "generated"
+    },
+    "market_research": {
+      "label": "Market Research Report",
+      "aliases": [
+        "mr",
+        "mrr"
+      ],
+      "system_prompt_key": "market_research",
+      "compliance_display_name": "Market Research Report",
+      "compliance_aliases": [
+        "Market Research"
+      ],
+      "kind": "generated"
+    },
+    "price_reasonableness": {
+      "label": "Price Reasonableness Determination",
+      "system_prompt_key": "price_reasonableness",
+      "compliance_display_name": "Price Reasonableness Determination",
+      "kind": "generated",
+      "aliases": []
+    },
+    "priority_sources_checklist": {
+      "label": "Required & Priority Sources Checklist",
+      "aliases": [
+        "priority_sources",
+        "required_and_priority_sources_checklist"
+      ],
+      "system_prompt_key": "priority_sources_checklist",
+      "compliance_display_name": "Required & Priority Sources Checklist",
+      "kind": "generated"
+    },
+    "promotional_item": {
+      "label": "Promotional Item Approval",
+      "aliases": [
+        "promo_item"
+      ],
+      "kind": "generated"
+    },
+    "purchase_request": {
+      "label": "Purchase Request",
+      "system_prompt_key": "purchase_request",
+      "compliance_display_name": "Purchase Request",
+      "kind": "generated",
+      "aliases": []
+    },
+    "pws": {
+      "label": "Performance Work Statement",
+      "aliases": [
+        "performance_work_statement"
+      ],
+      "system_prompt_key": "pws",
+      "kind": "generated"
+    },
+    "qasp": {
+      "label": "Quality Assurance Surveillance Plan",
+      "aliases": [
+        "quality_assurance_surveillance_plan"
+      ],
+      "system_prompt_key": "qasp",
+      "compliance_display_name": "QASP",
+      "kind": "generated"
+    },
+    "quotation_abstract": {
+      "label": "Quotation Abstract",
+      "aliases": [
+        "quotation"
+      ],
+      "kind": "generated"
+    },
+    "receiving_report": {
+      "label": "Receiving Report",
+      "aliases": [
+        "receiving"
+      ],
+      "kind": "generated"
+    },
+    "reference_guide": {
+      "label": "Reference Guide",
+      "kind": "generated",
+      "aliases": []
+    },
+    "required_sources": {
+      "label": "Required Sources Check",
+      "system_prompt_key": "required_sources",
+      "compliance_display_name": "Required Sources Documentation",
+      "kind": "generated",
+      "aliases": []
+    },
+    "sam_exclusions_check": {
+      "label": "SAM.gov Registration & Exclusions Check",
+      "kind": "evidence",
+      "compliance_display_name": "SAM Registration & Exclusions Check",
+      "aliases": []
+    },
+    "sb_review": {
+      "label": "HHS-653 Small Business Review",
+      "aliases": [
+        "small_business_review",
+        "hhs_653"
+      ],
+      "system_prompt_key": "sb_review",
+      "compliance_display_name": "HHS-653 Small Business Review",
+      "kind": "generated"
+    },
+    "section_508": {
+      "label": "Section 508 Compliance Statement",
+      "system_prompt_key": "section_508",
+      "compliance_display_name": "Section 508 ICT Evaluation",
+      "kind": "generated",
+      "aliases": []
+    },
+    "security_checklist": {
+      "label": "IT Security Checklist",
+      "system_prompt_key": "security_checklist",
+      "compliance_display_name": "IT Security & Privacy Certification",
+      "kind": "generated",
+      "aliases": []
+    },
+    "son_products": {
+      "label": "Statement of Need — Products",
+      "aliases": [
+        "son",
+        "statement_of_need",
+        "statement_of_need_products"
+      ],
+      "system_prompt_key": "son_products",
+      "kind": "generated"
+    },
+    "son_services": {
+      "label": "Statement of Need — Services",
+      "aliases": [
+        "statement_of_need_services"
+      ],
+      "system_prompt_key": "son_services",
+      "kind": "generated"
+    },
+    "source_selection_plan": {
+      "label": "Source Selection Plan",
+      "aliases": [
+        "ssp"
+      ],
+      "system_prompt_key": "source_selection_plan",
+      "compliance_display_name": "Source Selection Plan",
+      "kind": "generated"
+    },
+    "sow": {
+      "label": "Statement of Work",
+      "aliases": [
+        "statement_of_work"
+      ],
+      "system_prompt_key": "sow",
+      "compliance_display_name": "SOW / PWS",
+      "compliance_aliases": [
+        "Statement of Need (SON)"
+      ],
+      "kind": "generated"
+    },
+    "srb_request": {
+      "label": "Source Review Board Request",
+      "aliases": [
+        "srb",
+        "source_review_board"
+      ],
+      "kind": "generated"
+    },
+    "subk_plan": {
+      "label": "Subcontracting Plan",
+      "aliases": [
+        "subcontracting_plan",
+        "sub_k_plan"
+      ],
+      "system_prompt_key": "subk_plan",
+      "compliance_display_name": "Subcontracting Plan",
+      "kind": "generated"
+    },
+    "subk_review": {
+      "label": "Subcontracting Plan Review",
+      "aliases": [
+        "subcontracting_review",
+        "sub_k_review"
+      ],
+      "system_prompt_key": "subk_review",
+      "kind": "generated"
+    },
+    "technical_questionnaire": {
+      "label": "Project Officer's Technical Questionnaire",
+      "aliases": [
+        "tech_questionnaire"
+      ],
+      "kind": "generated"
+    },
+    "wage_determination": {
+      "label": "Wage Determination (SCA/SCLS)",
+      "system_prompt_key": "wage_determination",
+      "compliance_display_name": "Wage Determination (SCA/SCLS)",
+      "kind": "generated",
+      "aliases": []
+    }
+  }
+}

@@ -31,5 +31,6 @@ pyyaml>=6.0
 websockets>=12.0
 watchtower>=3.0.0
 pytest>=8.0.0
+moto[s3,dynamodb]>=5.0.0
 # Eval video recording: install separately with `pip install playwright>=1.40.0`
 # Not included here — prevents unnecessary 46MB download in container builds

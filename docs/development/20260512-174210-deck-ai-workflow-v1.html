@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EAGLE — How I Use AI to Amplify My Workflow</title>
+<style>
+:root {
+  --bg: #0b0f17;
+  --panel: #131826;
+  --panel-2: #0e1420;
+  --border: #1f2937;
+  --text: #e7ecf3;
+  --muted: #94a3b8;
+  --accent: #5aa0ff;
+  --accent-2: #ffb454;
+  --good: #4ade80;
+  --bad: #f87171;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg); color: var(--text);
+  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  height: 100vh; overflow: hidden;
+}
+.deck {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  grid-template-rows: 1fr auto;
+  grid-template-areas: "nav slide" "nav controls";
+  height: 100vh;
+}
+nav.thumbs {
+  grid-area: nav;
+  background: var(--panel-2);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 12px 0;
+}
+.thumb {
+  display: block;
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thumb:hover { background: var(--panel); color: var(--text); }
+.thumb.active {
+  border-left-color: var(--accent);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+}
+.thumb .n { color: var(--accent); margin-right: 6px; font-weight: 700; }
+main.stage {
+  grid-area: slide;
+  overflow-y: auto;
+  padding: 48px 64px;
+  position: relative;
+}
+.slide { display: none; max-width: 1000px; margin: 0 auto; }
+.slide.active { display: block; }
+.slide h1 {
+  font-size: 34px;
+  margin: 0 0 8px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.slide h1 .accent { color: var(--accent); }
+.slide h2 {
+  font-size: 22px;
+  margin: 32px 0 12px;
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.slide h3 {
+  font-size: 16px;
+  margin: 20px 0 8px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.slide .subtitle {
+  font-size: 17px;
+  color: var(--muted);
+  margin: 0 0 28px;
+}
+.slide p { font-size: 16px; line-height: 1.6; }
+.slide ul, .slide ol { padding-left: 24px; line-height: 1.7; }
+.slide li { margin-bottom: 4px; }
+.slide code {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--accent);
+}
+.slide pre {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: 16px 20px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.slide pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+}
+.slide table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 14px;
+}
+.slide th, .slide td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.slide th { background: var(--panel); color: var(--accent-2); font-weight: 600; }
+.slide tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+.callout {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-2);
+  padding: 14px 18px;
+  border-radius: 6px;
+  margin: 18px 0;
+  font-size: 14px;
+}
+.callout strong { color: var(--accent-2); }
+.big-num {
+  font-size: 64px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  margin: 8px 0;
+}
+.kicker {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 16px 0; }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin: 16px 0; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+.card .label { font-size: 11px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.08em; }
+.card .val { font-size: 24px; font-weight: 700; margin: 6px 0; }
+.card.accent { border-left: 3px solid var(--accent); }
+.card.accent2 { border-left: 3px solid var(--accent-2); }
+.card.good { border-left: 3px solid var(--good); }
+.flywheel-ascii {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  padding: 14px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.flywheel-ascii .hi { color: var(--accent); font-weight: 600; }
+.notes {
+  background: var(--panel-2);
+  border-top: 1px solid var(--border);
+  padding: 14px 24px;
+  font-size: 13px;
+  color: var(--muted);
+  max-height: 120px;
+  overflow-y: auto;
+}
+.notes.hidden { display: none; }
+.notes-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-2);
+  margin-bottom: 4px;
+}
+.controls {
+  grid-area: controls;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.controls button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.controls button:hover { border-color: var(--accent); color: var(--accent); }
+.controls .counter { font-variant-numeric: tabular-nums; margin-left: auto; }
+.tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: rgba(90,160,255,0.15);
+  color: var(--accent);
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tag.orange { background: rgba(255,180,84,0.15); color: var(--accent-2); }
+.tag.good { background: rgba(74,222,128,0.15); color: var(--good); }
+@media print {
+  .deck { display: block; height: auto; }
+  nav.thumbs, .controls, .notes { display: none; }
+  main.stage { padding: 20px; overflow: visible; }
+  .slide { display: block !important; page-break-after: always; max-width: 100%; }
+}
+</style>
+</head>
+<body>
+<div class="deck">
+
+  <nav class="thumbs" id="thumbs"></nav>
+
+  <main class="stage" id="stage">
+
+    <!-- SLIDE 01 -->
+    <section class="slide active">
+      <div class="kicker">EAGLE Team Talk · 2026-05-12</div>
+      <h1>How I Use <span class="accent">AI</span> to Amplify My Workflow</h1>
+      <p class="subtitle">Two AI layers, five flywheels, one Justfile — and what it means for the team.</p>
+      <div class="row" style="margin-top: 40px;">
+        <div class="card accent">
+          <div class="label">Layer 1 — Application</div>
+          <div class="val">EAGLE</div>
+          <p style="color: var(--muted); margin: 0;">The product we build for NCI</p>
+        </div>
+        <div class="card accent2">
+          <div class="label">Layer 2 — Cognitive</div>
+          <div class="val">Claude Code</div>
+          <p style="color: var(--muted); margin: 0;">How I operate EAGLE day-to-day</p>
+        </div>
+      </div>
+      <p style="margin-top: 32px;">— Greg Black</p>
+    </section>
+
+    <!-- SLIDE 02 -->
+    <section class="slide">
+      <div class="kicker">The argument in one slide</div>
+      <h1>The system <span class="accent">compounds</span>.</h1>
+      <p class="subtitle">Faster code → better EAGLE → faster team output → ... → repeat.</p>
+      <ul>
+        <li><strong>Layer 1</strong> (EAGLE) helps users with federal acquisition tasks.</li>
+        <li><strong>Layer 2</strong> (my coding env) helps <em>me</em> build EAGLE faster.</li>
+        <li>Every <code>expertise.md</code> file written today saves a future hour.</li>
+        <li>Every overnight flywheel removes a recurring task from my morning.</li>
+      </ul>
+      <div class="callout">
+        <strong>The team unlock:</strong> the second layer is <em>transferable</em>. <code>just handoff agent</code> onboards a new AI in ~2 minutes; <code>just handoff human</code> bundles the env for a co-worker.
+      </div>
+    </section>
+
+    <!-- SLIDE 03 -->
+    <section class="slide">
+      <h1>What is <span class="accent">EAGLE</span>?</h1>
+      <p class="subtitle">Multi-tenant AI assistant for NCI contracting officers</p>
+      <h3>What it does</h3>
+      <ul>
+        <li>Answers federal acquisition questions (FAR/DFARS authority)</li>
+        <li>Generates ~10 document types — SOW, IGCE, AP, J&amp;A, EVAL, 508, COR, CTJ, FUND</li>
+        <li>Routes to 9 specialist agents (legal, market intel, policy, compliance, tech, finance, public interest)</li>
+        <li>Tier-gated: basic / advanced / premium</li>
+      </ul>
+      <h3>Tech</h3>
+      <p>FastAPI · Next.js · Strands SDK (boto3-native Bedrock) · DynamoDB · S3 · ECS Fargate · Cognito</p>
+    </section>
+
+    <!-- SLIDE 04 -->
+    <section class="slide">
+      <h1>EAGLE Architecture</h1>
+      <pre><code>User → Next.js (chat-simple/) → POST /api/chat
+                                       ↓
+                       strands_agentic_service.py (Strands SDK)
+                                       ↓
+                          Supervisor agent
+                                       ↓
+        ┌──────────────────────────┴──────────────────────────┐
+        ↓             ↓              ↓             ↓           ↓
+   legal-counsel  market-intel  policy-*  tech-translator  finance-advisor
+   compliance-strategist               public-interest
+                                       ↓
+                          Tool dispatch (oa-intake, document-generator,
+                                         ingest-document, compliance, ...)
+                                       ↓
+                          SSE → use-agent-stream.ts → chat UI</code></pre>
+      <p style="font-size: 13px; color: var(--muted); margin-top: 12px;">Key files: <code>server/app/strands_agentic_service.py</code> · <code>eagle-plugin/plugin.json</code> · <code>eagle-plugin/agents/*/agent.md</code></p>
+    </section>
+
+    <!-- SLIDE 05 -->
+    <section class="slide">
+      <h1>The Operational Surface: <code>just</code></h1>
+      <p class="subtitle">One file, 75 recipes, one entry point for dev/test/deploy/eval</p>
+      <h3>Daily-driver 12 (covers 80% of work)</h3>
+      <table>
+        <tr><td><code>just dev-local</code></td><td>Local stack, hot reload</td></tr>
+        <tr><td><code>just lint</code></td><td>ruff + tsc</td></tr>
+        <tr><td><code>just test</code></td><td>Backend pytest</td></tr>
+        <tr><td><code>just smoke</code></td><td>Playwright integration</td></tr>
+        <tr><td><code>just deploy-ci main</code></td><td>Trigger GH Actions deploy</td></tr>
+        <tr><td><code>just dev-smoke-deployed</code></td><td>Post-deploy validation</td></tr>
+        <tr><td><code>just eval</code></td><td>142-test eval suite</td></tr>
+        <tr><td><code>just status</code></td><td>ECS health + ALB URLs</td></tr>
+        <tr><td><code>just langfuse-report-today</code></td><td>HTML rollup</td></tr>
+        <tr><td><code>just check-aws</code></td><td>AWS health probe</td></tr>
+        <tr><td><code>just kill-stale</code></td><td>Emergency port cleanup</td></tr>
+        <tr><td><code>just registry</code></td><td><strong>NEW</strong> — categorized discovery surface</td></tr>
+      </table>
+    </section>
+
+    <!-- SLIDE 06 -->
+    <section class="slide">
+      <h1>The <span class="accent">New</span> Discovery Surface</h1>
+      <p class="subtitle">Built today — for the next dev <em>and</em> the next AI agent</p>
+      <pre><code>$ just registry
+
+QUICKSTART
+  Start coding:        just dev-local
+  Run tests:           just test  +  just smoke
+  Ship to dev:         just deploy-ci main
+
+JUST RECIPES (terminal)
+  Discovery:           registry  docs  smoke-list
+  Dev:                 dev-local  dev-up  dev-backend  kill-stale
+  MVP1 ladder:         mvp1  mvp1-quick  mvp1-full  mvp1-visual
+  Baseline:            baseline [VERSION]  baseline-list
+  ...
+
+CLAUDE CODE SKILLS (run with /skill-name)
+  Workflow:            /plan  /build  /review  /ship  /fix
+  Diagnostics:         /triage  /kb-regenerate  /on-track
+  Reports:             /scribe  /excalidraw  /langfuse-analytics
+  ...
+
+EXPERTS (run /experts:DOMAIN:CMD)
+  Core:                aws  backend  frontend  deployment  git
+  ...</code></pre>
+      <p style="font-size: 13px; color: var(--muted);">Categorized. Memorable. Self-discoverable. The agent-onboarding recipe (<code>just handoff agent</code>) points new AI sessions here first.</p>
+    </section>
+
+    <!-- SLIDE 07 -->
+    <section class="slide">
+      <h1>The Validation Ladder</h1>
+      <p class="subtitle">Six levels. Each PR runs the minimum required for its change type.</p>
+      <table>
+        <tr><th>Level</th><th>What</th><th>Time</th><th>Required for</th></tr>
+        <tr><td><strong>L1</strong></td><td>Lint (ruff + tsc)</td><td>~30s</td><td>Every commit</td></tr>
+        <tr><td><strong>L2</strong></td><td>Unit tests (pytest)</td><td>~2 min</td><td>Backend logic changes</td></tr>
+        <tr><td><strong>L3</strong></td><td>Integration smoke (Playwright)</td><td>~25s</td><td>Frontend UI</td></tr>
+        <tr><td><strong>L4</strong></td><td>CDK synth</td><td>~10s</td><td>Infra changes</td></tr>
+        <tr><td><strong>L5</strong></td><td>Docker stack integration</td><td>~5 min</td><td>Pre-PR</td></tr>
+        <tr><td><strong>L6</strong></td><td>Full eval suite (Bedrock)</td><td>~30 min</td><td>Agent changes</td></tr>
+      </table>
+      <p>Commands: <code>just validate</code> (L1-L5) · <code>just validate-full</code> (L1-L6) · <code>just ci</code> (CI subset)</p>
+    </section>
+
+    <!-- SLIDE 08 -->
+    <section class="slide">
+      <h1>Cognitive Layer: <span class="accent">Experts</span></h1>
+      <p class="subtitle">Frozen mental models — I never re-explain context</p>
+      <p>15 expert domains. Each is a directory at <code>.claude/commands/experts/{domain}/</code> with one <code>expertise.md</code> (~50KB of curated knowledge) and 4 commands:</p>
+      <div class="row3">
+        <div class="card accent"><div class="label">/question</div><p style="font-size: 13px; color: var(--muted); margin: 6px 0 0;">Query without modifying. Fastest path to context.</p></div>
+        <div class="card accent2"><div class="label">/plan</div><p style="font-size: 13px; color: var(--muted); margin: 6px 0 0;">Plan a change using the expertise.</p></div>
+        <div class="card good"><div class="label">/maintenance</div><p style="font-size: 13px; color: var(--muted); margin: 6px 0 0;">Health checks, validate state.</p></div>
+        <div class="card"><div class="label">/self-improve</div><p style="font-size: 13px; color: var(--muted); margin: 6px 0 0;">Update expertise.md after a successful change.</p></div>
+      </div>
+      <h3>The 15 domains</h3>
+      <p><strong>Core:</strong> aws · backend · frontend · deployment · git</p>
+      <p><strong>Specialized:</strong> cloudwatch · test · eval · claude-sdk · strands · sse · hooks · tac</p>
+      <p><strong>Playground:</strong> playground · document-playground</p>
+    </section>
+
+    <!-- SLIDE 09 -->
+    <section class="slide">
+      <h1>Cognitive Layer: <span class="accent">Skills</span></h1>
+      <p class="subtitle">50+ named workflows, invoked as <code>/skill-name</code></p>
+      <table>
+        <tr><th>Category</th><th>Examples</th></tr>
+        <tr><td>Operations</td><td>sync · pull-remote · check-aws · check-langfuse-logs · pid</td></tr>
+        <tr><td>QA / Eval</td><td>baseline-questions · mvp1-eval · e2e-judge · agent-browser · triage</td></tr>
+        <tr><td>Reports</td><td>scribe · langfuse-analytics · excalidraw · document-generator · playground</td></tr>
+        <tr><td>Knowledge</td><td>s3-knowledge-base-sync · kb-regenerate · obsidian-vault · jira-*</td></tr>
+        <tr><td>Workflow</td><td>plan · build · review · ship · fix · loop · schedule · parallel_subagents</td></tr>
+        <tr><td>Handoff</td><td>claude-handoff (built 2026-05-08)</td></tr>
+        <tr><td>Planning (GSD)</td><td>30+ gsd-* skills for structured ideation/planning/execution</td></tr>
+      </table>
+    </section>
+
+    <!-- SLIDE 10 -->
+    <section class="slide">
+      <h1>The <code>/plan</code> → <code>/build</code> → <code>/review</code> → <code>/ship</code> Loop</h1>
+      <p class="subtitle">70+ dated artifacts in <code>.claude/specs/</code> — a permanent decision record</p>
+      <pre><code>┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐
+│ /plan   │──▶│ /build  │──▶│ /review │──▶│ /ship   │
+│         │   │         │   │         │   │         │
+│ Writes  │   │ Reads,  │   │ Reads   │   │ Lint +  │
+│ spec to │   │ imple-  │   │ diff,   │   │ Jira +  │
+│ specs/  │   │ ments,  │   │ flags   │   │ push +  │
+│         │   │ valid.  │   │ risks   │   │ monitor │
+└─────────┘   └─────────┘   └─────────┘   └─────────┘</code></pre>
+      <p>Recent spec evidence:</p>
+      <ul style="font-family: ui-monospace; font-size: 13px;">
+        <li>20260505-plan-doc-registry-ssot-v1.md</li>
+        <li>20260427-plan-triage-fixes-v1.md (one of 15 triage iterations)</li>
+        <li>20260310-plan-skills-optimization-v1.md</li>
+        <li>20260302-plan-strands-poc-v1.md</li>
+      </ul>
+    </section>
+
+    <!-- SLIDE 11 (Flywheels intro) -->
+    <section class="slide">
+      <h1>Flywheels — the <span class="accent">overnight</span> compounding</h1>
+      <p class="subtitle">5 self-improving loops. Each one means I wake up to diagnoses, not investigations.</p>
+      <ol>
+        <li><strong>Nightly triage</strong> — 1 AM PST, cross-source bug discovery</li>
+        <li><strong>Eval + expert self-improve</strong> — 2 AM ET, agent prompt tuning</li>
+        <li><strong>Morning report</strong> — 8 AM ET weekday, Teams Adaptive Card</li>
+        <li><strong>Post-deploy smoke</strong> — on each deploy, 6 scenarios</li>
+        <li><strong>Expert self-improve</strong> — manual, after each ship → cumulative <code>expertise.md</code></li>
+      </ol>
+      <div class="callout">
+        <strong>The keystone insight:</strong> Each loop's output becomes the next loop's input. Today's commits become tonight's triage corpus, become tomorrow's fix plans.
+      </div>
+    </section>
+
+    <!-- SLIDE 12 (Triage flywheel detail) -->
+    <section class="slide">
+      <h1>Flywheel 1: <span class="accent">Nightly Triage</span></h1>
+      <p class="subtitle">cron 0 9 * * * (1 AM PST) — runs against dev + qa matrix</p>
+<div class="flywheel-ascii"><span class="hi">GitHub Actions cron 0 9 * * *</span>
+        │
+        ▼ matrix [dev, qa]
+<span class="hi">Claude Code CLI → /triage full</span>
+   │              │              │
+   ▼              ▼              ▼
+DynamoDB     CloudWatch    Langfuse traces
+feedback     error logs    (failures)
+   │              │              │
+   └──────────────┴──────────────┘
+                  ▼
+       <span class="hi">Root-cause classification (5 levers)</span>
+                  ▼
+  ┌──────────────────────────────────────┐
+  │ docs/development/{ts}-report-*.html  │ ← diagnostic
+  │ .claude/specs/{ts}-plan-triage-*.md  │ ← actionable
+  └────────────────┬─────────────────────┘
+                   ▼
+              human implements next day
+                   ▼
+        git commit → next night learns</div>
+      <p style="font-size: 13px; color: var(--muted); margin-top: 12px;">Evidence: 15+ dated triage plans in <code>.claude/specs/</code> over the past 6 weeks.</p>
+    </section>
+
+    <!-- SLIDE 13 (Eval flywheel) -->
+    <section class="slide">
+      <h1>Flywheel 2: <span class="accent">Eval</span> + Self-Improve</h1>
+      <p class="subtitle">cron 0 6 * * * (2 AM ET) — 142-test eval drives code edits</p>
+<div class="flywheel-ascii"><span class="hi">cron 0 6 * * * (eval.yml)</span>
+        ▼
+test_strands_eval.py (142 tests, haiku)
+        ▼
+<span class="hi">Failure classification by 5 levers:</span>
+  Lever 1: Agent prompts          → edit agent.md
+  Lever 2: Skill workflows        → edit SKILL.md
+  Lever 3: Supervisor routing     → edit supervisor
+  Lever 4: Trigger patterns (YAML) → edit frontmatter
+  Lever 5: Context budget         → edit MAX_SKILL_PROMPT_CHARS
+        ▼
+<span class="hi">/experts:eval:self-improve --fix</span>
+        ▼ (writes CODE, not docs)
+Re-run affected tests → validate
+        ▼
+eval_aws_publisher.py → S3 + Langfuse
+        ▼
+expertise.md updated (cumulative)</div>
+      <p style="font-size: 13px; color: var(--muted); margin-top: 12px;">Closed loop: eval failures → code edits → re-validated → published. Not just a report — actual fixes.</p>
+    </section>
+
+    <!-- SLIDE 14 (Other flywheels) -->
+    <section class="slide">
+      <h1>Flywheels 3-5</h1>
+      <h3>Morning Report (8 AM ET weekdays)</h3>
+      <p>git log + Langfuse 24h → Teams Adaptive Card → standup-ready. Local equivalent: <code>just morning-report</code>.</p>
+      <h3>Post-Deploy Smoke (on each deploy)</h3>
+      <p>6 scenarios (research_source_transparency, jefo_q4, sbir_q5, uc21_microscope, kb_inventory_diagnostic, qasp_orphan_unlock). SSM into VPC-internal devbox → Playwright + SSE validation → S3 upload. Run locally with <code>just dev-smoke-deployed &lt;scenario&gt;</code>.</p>
+      <h3>Expert Self-Improve (manual, after each ship)</h3>
+      <p>Each of 15 experts has a <code>self-improve</code> command that updates <code>expertise.md</code> with patterns-that-worked, patterns-to-avoid, and tips. <strong>Community learning</strong> embedded in the agent system.</p>
+    </section>
+
+    <!-- SLIDE 15 (Productivity multipliers) -->
+    <section class="slide">
+      <h1>Real Speedups</h1>
+      <p class="subtitle">Tasks I actually do, before vs after</p>
+      <table>
+        <tr><th>Task</th><th>Manual</th><th>AI-amplified</th><th>Speedup</th></tr>
+        <tr><td>Session triage (1 session)</td><td>30-45 min</td><td>2 min (<code>just triage-session</code>)</td><td><strong>15-22x</strong></td></tr>
+        <tr><td>Baseline eval (14 Q + judge)</td><td>90-120 min</td><td>5-8 min (<code>just baseline</code>)</td><td><strong>12-24x</strong></td></tr>
+        <tr><td>MVP1 ladder</td><td>60-90 min</td><td>8-12 min (<code>just mvp1-full</code>)</td><td><strong>6-10x</strong></td></tr>
+        <tr><td>Deploy with validation</td><td>45-60 min</td><td>8-12 min (<code>/ship</code>)</td><td><strong>4-7x</strong></td></tr>
+        <tr><td>Expert context transfer</td><td>2-4 hr</td><td>2 min (read expertise.md)</td><td><strong>60-120x</strong></td></tr>
+        <tr><td>5 sessions diagnosed parallel</td><td>60+ min serial</td><td>5 min (<code>/parallel_subagents</code>)</td><td><strong>12-15x</strong></td></tr>
+        <tr><td>Generate ops dashboard</td><td>30-60 min</td><td>1 min (<code>just langfuse-report-html</code>)</td><td><strong>30-60x</strong></td></tr>
+      </table>
+    </section>
+
+    <!-- SLIDE 16 (The numbers) -->
+    <section class="slide">
+      <h1>The big numbers</h1>
+      <div class="row3">
+        <div class="card accent">
+          <div class="label">Expert mental models</div>
+          <div class="big-num">15</div>
+          <p style="font-size: 13px; color: var(--muted);">Each ~50KB of curated context. <code>/experts:DOMAIN:question</code></p>
+        </div>
+        <div class="card accent2">
+          <div class="label">Named skills</div>
+          <div class="big-num">50+</div>
+          <p style="font-size: 13px; color: var(--muted);">Invoke as <code>/skill-name</code>. Each saves 10+ min per use.</p>
+        </div>
+        <div class="card good">
+          <div class="label">Justfile recipes</div>
+          <div class="big-num">75</div>
+          <p style="font-size: 13px; color: var(--muted);">12 cover 80% of daily work. <code>just registry</code> for the map.</p>
+        </div>
+      </div>
+      <div class="row3" style="margin-top: 12px;">
+        <div class="card">
+          <div class="label">Dated specs</div>
+          <div class="big-num">70+</div>
+          <p style="font-size: 13px; color: var(--muted);">Permanent decision record in <code>.claude/specs/</code></p>
+        </div>
+        <div class="card">
+          <div class="label">Flywheels running</div>
+          <div class="big-num">5</div>
+          <p style="font-size: 13px; color: var(--muted);">Triage, eval, morning report, smoke, expert self-improve</p>
+        </div>
+        <div class="card">
+          <div class="label">HTML reports last month</div>
+          <div class="big-num">15+</div>
+          <p style="font-size: 13px; color: var(--muted);">See the gallery: 12 curated examples</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 17 (Gallery showcase) -->
+    <section class="slide">
+      <h1>The Gallery</h1>
+      <p class="subtitle">12 AI-generated reports from the past month. Open them.</p>
+      <p>Located at: <code>docs/development/20260512-174210-gallery-ai-workflow-v1/index.html</code></p>
+      <table>
+        <tr><th>#</th><th>Artifact</th><th>Generator</th></tr>
+        <tr><td>02</td><td>Langfuse 24h KPI Dashboard</td><td><span class="tag orange">/langfuse-analytics</span></td></tr>
+        <tr><td>03</td><td>Retrieval 3-Layer Audit</td><td><span class="tag orange">scripts/retrieval_report.py</span></td></tr>
+        <tr><td>04</td><td>KB Regenerate Status Memo</td><td><span class="tag orange">/kb-regenerate</span></td></tr>
+        <tr><td>05</td><td>Jira Project Status (319 issues)</td><td><span class="tag orange">/jira-commit-matcher</span></td></tr>
+        <tr><td>07</td><td>Document Schema Explorer</td><td><span class="tag orange">/document-playground</span></td></tr>
+        <tr><td>08</td><td>Compliance Matrix Flow (interactive)</td><td><span class="tag orange">/document-playground</span></td></tr>
+        <tr><td>12</td><td>Langfuse Trace Viewer</td><td><span class="tag orange">/experts:playground</span></td></tr>
+      </table>
+      <p style="font-size: 13px; color: var(--muted);">Design language emerged from <code>eagle_presentation_builder.html</code> — dark navy + accent blue + accent orange. Reused across all artifacts for consistency.</p>
+    </section>
+
+    <!-- SLIDE 18 (Handoff) -->
+    <section class="slide">
+      <h1>Handoff &amp; Onboarding</h1>
+      <p class="subtitle">The system is designed to be transferable.</p>
+      <div class="row">
+        <div class="card accent">
+          <div class="label">For a new HUMAN</div>
+          <h3 style="margin-top: 4px;"><code>just handoff human</code></h3>
+          <p style="font-size: 13px;">Bundles <code>~/.claude/</code> config (sanitized), scrubbed session JSONLs, readable HTML transcripts, auto-generated setup guide. Recipient: <code>cd bundle && just setup</code>.</p>
+        </div>
+        <div class="card accent2">
+          <div class="label">For a new AGENT</div>
+          <h3 style="margin-top: 4px;"><code>just handoff agent</code></h3>
+          <p style="font-size: 13px;">Prints 7-step checklist: read CLAUDE.md → <code>just registry</code> → <code>just docs</code> → relevant <code>expertise.md</code> → recent specs → <code>just status</code> → <code>just check-aws</code>. Oriented in &lt;2 min.</p>
+        </div>
+      </div>
+      <h3>Make your own skills</h3>
+      <p>Anyone on the team can run <code>/skill-creator</code> to scaffold a new skill with proper YAML frontmatter and script structure. Take a recurring 30-min task and automate it.</p>
+    </section>
+
+    <!-- SLIDE 19 (Demo intro) -->
+    <section class="slide">
+      <h1>Live Demo (6 minutes)</h1>
+      <p class="subtitle">Stop reading slides. Show the thing.</p>
+      <ol style="line-height: 1.9;">
+        <li><strong>0:00-0:30</strong> — <code>just status</code> (deployed state)</li>
+        <li><strong>0:30-1:00</strong> — <code>just registry</code> (discovery surface)</li>
+        <li><strong>1:00-1:30</strong> — <code>just langfuse-report-today</code> (live HTML)</li>
+        <li><strong>1:30-3:00</strong> — <code>/triage &lt;session-id&gt;</code> in Claude Code <span class="tag">wow moment</span></li>
+        <li><strong>3:00-3:30</strong> — open the generated fix plan</li>
+        <li><strong>3:30-4:30</strong> — <code>just mvp1-quick</code> (Tier 1 eval)</li>
+        <li><strong>4:30-5:30</strong> — open the gallery <code>index.html</code></li>
+        <li><strong>5:30-6:00</strong> — Q&amp;A pivot</li>
+      </ol>
+      <p style="font-size: 13px; color: var(--muted);">Full runbook with failsafes: <code>docs/development/20260512-174210-runbook-ai-workflow-demo-v1.md</code></p>
+    </section>
+
+    <!-- SLIDE 20 (The Q&A pivot) -->
+    <section class="slide">
+      <h1>The Q&amp;A Pivot</h1>
+      <div class="callout" style="border-left-color: var(--accent); font-size: 18px; padding: 24px 28px;">
+        <strong style="color: var(--accent);">"What would <em>you</em> automate if you had this system?</strong> <br><br>
+        Imagine a 30-minute task you do weekly. Could you turn it into a skill?"
+      </div>
+      <p>Each answer is a feature request. Catalog them after the talk — they become the next 10 skills.</p>
+      <p style="margin-top: 24px;">Take 5 ideas. Pick the most universally painful one. Build it tomorrow with <code>/skill-creator</code>.</p>
+    </section>
+
+    <!-- SLIDE 21 (Anticipated Q&A 1) -->
+    <section class="slide">
+      <h1>FAQ — Part 1</h1>
+      <h3>How is this different from GitHub Copilot?</h3>
+      <p>Copilot is autocomplete inside an editor. This is <strong>workflow</strong> automation — multi-step skills that read logs, write specs, run tests, generate reports, update Jira. Different layer.</p>
+      <h3>What does this cost us in API spend?</h3>
+      <p>Each triage: ~$0.02-0.05 in Bedrock. Langfuse: free up to 50K traces/mo, then ~$0.0001/trace. Total: under $40/month for the cognitive layer at current pace.</p>
+      <h3>Could non-engineers on the team use this?</h3>
+      <p>For most workflows: type <code>/skill-name</code> in Claude Code. The plan→build→review→ship loop is the only meta-pattern to learn. <code>just registry</code> is the discovery surface for everything else.</p>
+    </section>
+
+    <!-- SLIDE 22 (Anticipated Q&A 2) -->
+    <section class="slide">
+      <h1>FAQ — Part 2</h1>
+      <h3>What if Claude Code goes down?</h3>
+      <p>Justfile recipes that wrap actual scripts (langfuse-report, baseline, e2e-judge, deploy, morning-report) work without Claude Code. The print-and-point recipes (triage-session, kb-*, check-*) tell you what to invoke but need Claude. ~60% of recipes work standalone.</p>
+      <h3>How long did this take to build?</h3>
+      <p>~6-8 weeks of incremental work, intermixed with EAGLE feature development. Each expert / skill was added when a recurring task became annoying enough to automate. Not a "drop everything" effort — additive.</p>
+      <h3>What's next?</h3>
+      <p>Real Excalidraw diagrams for each flywheel · QA hardening skill (we identified this gap today) · skill-creator workshop for the team · per-domain skill libraries (legal-counsel could have its own skill family)</p>
+    </section>
+
+    <!-- SLIDE 23 (Recommendations) -->
+    <section class="slide">
+      <h1>What I'd ask the team to try</h1>
+      <ol>
+        <li><strong>Read CLAUDE.md</strong> in this repo. (10 minutes.)</li>
+        <li><strong>Run <code>just registry</code></strong>. Skim every category.</li>
+        <li><strong>Pick one expert relevant to your work</strong>. Read its <code>expertise.md</code>. (20 minutes.)</li>
+        <li><strong>Identify ONE 30-minute task you do weekly.</strong> Try wrapping it as a skill via <code>/skill-creator</code>. (1-2 hours first time.)</li>
+        <li><strong>Pair with me on your first <code>/plan</code> → <code>/build</code> → <code>/review</code> → <code>/ship</code></strong>. Reach out — happy to do this 1:1.</li>
+      </ol>
+      <div class="callout"><strong>Success metric:</strong> if you save 30 min in week 1, you'll save 5 hours in month 1, and the compounding starts.</div>
+    </section>
+
+    <!-- SLIDE 24 (Resources) -->
+    <section class="slide">
+      <h1>Resources</h1>
+      <h3>This presentation</h3>
+      <ul style="font-family: ui-monospace; font-size: 13px;">
+        <li>SOP doc: <code>docs/development/20260512-174210-report-ai-workflow-sop-v1.md</code></li>
+        <li>This deck: <code>docs/development/20260512-174210-deck-ai-workflow-v1.html</code></li>
+        <li>HTML gallery: <code>docs/development/20260512-174210-gallery-ai-workflow-v1/index.html</code></li>
+        <li>Demo runbook: <code>docs/development/20260512-174210-runbook-ai-workflow-demo-v1.md</code></li>
+      </ul>
+      <h3>Live in the repo</h3>
+      <ul style="font-family: ui-monospace; font-size: 13px;">
+        <li><code>CLAUDE.md</code> — operational guide</li>
+        <li><code>Justfile</code> — 75 recipes (run <code>just registry</code>)</li>
+        <li><code>.claude/commands/experts/*/expertise.md</code> — 15 mental models</li>
+        <li><code>.claude/skills/*/SKILL.md</code> — 50+ workflows</li>
+        <li><code>.claude/specs/</code> — 70+ dated decision records</li>
+      </ul>
+      <h3>Schedule a 1:1</h3>
+      <p>If you want to pair on adding your first skill, message me. ~1 hour to take a recurring task and wrap it.</p>
+    </section>
+
+    <!-- SLIDE 25 (Closing) -->
+    <section class="slide" style="display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 80vh; text-align: center;">
+      <div class="kicker">EAGLE · 2026-05-12</div>
+      <h1 style="font-size: 56px;">Faster code →<br>better EAGLE →<br><span class="accent">faster team.</span></h1>
+      <p class="subtitle" style="margin-top: 24px;">Run <code>just registry</code> after this talk.</p>
+      <p style="margin-top: 48px; color: var(--muted);">— Greg Black</p>
+    </section>
+
+  </main>
+
+  <div class="controls">
+    <button id="prev">← Prev</button>
+    <button id="next">Next →</button>
+    <button id="notes-toggle">Notes</button>
+    <button id="print">Print/PDF</button>
+    <span class="counter"><span id="cur">1</span> / <span id="total">25</span></span>
+  </div>
+
+</div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const thumbsEl = document.getElementById('thumbs');
+const stage = document.getElementById('stage');
+const cur = document.getElementById('cur');
+const total = document.getElementById('total');
+total.textContent = slides.length;
+
+const titles = [
+  'Title', 'The argument', 'What is EAGLE', 'Architecture', 'Justfile SOP',
+  'Discovery surface', 'Validation ladder', 'Experts', 'Skills', 'Spec workflow',
+  'Flywheels intro', 'Triage flywheel', 'Eval flywheel', 'Flywheels 3-5', 'Speedups table',
+  'The big numbers', 'Gallery', 'Handoff', 'Live demo', 'Q&A pivot',
+  'FAQ 1', 'FAQ 2', 'What to try', 'Resources', 'Closing'
+];
+
+slides.forEach((slide, i) => {
+  const thumb = document.createElement('div');
+  thumb.className = 'thumb' + (i === 0 ? ' active' : '');
+  thumb.innerHTML = `<span class="n">${String(i+1).padStart(2,'0')}</span>${titles[i] || 'Slide '+(i+1)}`;
+  thumb.addEventListener('click', () => goTo(i));
+  thumbsEl.appendChild(thumb);
+});
+
+let idx = 0;
+function goTo(i) {
+  if (i < 0 || i >= slides.length) return;
+  slides[idx].classList.remove('active');
+  document.querySelectorAll('.thumb')[idx].classList.remove('active');
+  idx = i;
+  slides[idx].classList.add('active');
+  document.querySelectorAll('.thumb')[idx].classList.add('active');
+  cur.textContent = idx + 1;
+  stage.scrollTop = 0;
+}
+
+document.getElementById('prev').addEventListener('click', () => goTo(idx - 1));
+document.getElementById('next').addEventListener('click', () => goTo(idx + 1));
+document.getElementById('print').addEventListener('click', () => window.print());
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); goTo(idx + 1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(idx - 1); }
+  else if (e.key === 'Home') { goTo(0); }
+  else if (e.key === 'End') { goTo(slides.length - 1); }
+});
+</script>
+
+</body>
+</html>

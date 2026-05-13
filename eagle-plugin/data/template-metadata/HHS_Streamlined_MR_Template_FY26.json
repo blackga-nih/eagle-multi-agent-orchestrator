@@ -1,0 +1,36 @@
+{
+  "filename": "HHS_Streamlined_MR_Template_FY26.txt",
+  "format": "txt",
+  "category": "reference_guide",
+  "variant": "mr_template",
+  "sections": [
+    {
+      "number": "1",
+      "title": "STREAMLINED MARKET RESEARCH REPORT",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "1",
+      "title": "PROGRAM/PROJECT INFORMATION",
+      "has_table": false,
+      "placeholders": []
+    },
+    {
+      "number": "3",
+      "title": "BACKGROUND",
+      "has_table": true,
+      "placeholders": []
+    },
+    {
+      "number": "9",
+      "title": "RECOMMENDATIONS",
+      "has_table": false,
+      "placeholders": []
+    }
+  ],
+  "total_placeholders": 0,
+  "total_sections": 4,
+  "sheet_names": [],
+  "parse_error": null
+}

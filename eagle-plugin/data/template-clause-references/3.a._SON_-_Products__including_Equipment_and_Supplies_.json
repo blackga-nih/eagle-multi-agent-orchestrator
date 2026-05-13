@@ -1,0 +1,70 @@
+{
+  "template_filename": "3.a. SON - Products (including Equipment and Supplies).docx",
+  "category": "son_products",
+  "variant": "",
+  "section_clause_map": {
+    "1.0": {
+      "section_title": "TITLE",
+      "clauses": []
+    },
+    "2.0": {
+      "section_title": "BACKGROUND",
+      "clauses": []
+    },
+    "3.0": {
+      "section_title": "OBJECTIVES",
+      "clauses": []
+    },
+    "4": {
+      "section_title": "TECHNICAL REQUIREMENTS",
+      "clauses": []
+    },
+    "4.1": {
+      "section_title": "PRODUCT FEATURES/SALIENT CHARACTERISTICS",
+      "clauses": []
+    },
+    "4.2": {
+      "section_title": "TRAINING",
+      "clauses": []
+    },
+    "4.3": {
+      "section_title": "SPECIAL ORDER REQUIREMENTS",
+      "clauses": []
+    },
+    "5.0": {
+      "section_title": "TYPE OF ORDER",
+      "clauses": []
+    },
+    "6.0": {
+      "section_title": "PRICE SCHEDULE",
+      "clauses": []
+    },
+    "10": {
+      "section_title": "SCHDULE OF THE CHARGES FOR THE BASIC AWARD PERIOD",
+      "clauses": []
+    },
+    "7.0": {
+      "section_title": "DELIVERY / INSTALLATION",
+      "clauses": []
+    },
+    "7.1": {
+      "section_title": "CONTRACTING OFFICERS REPRESENTATIVE OR TECHNICAL POINT OF CONTACT",
+      "clauses": []
+    },
+    "8.0": {
+      "section_title": "WARRANTY",
+      "clauses": []
+    }
+  },
+  "template_level_clauses": [
+    {
+      "clause_number": "FAR 11.002",
+      "title": "Policy for Describing Agency Needs",
+      "applicability": "required"
+    }
+  ],
+  "total_clauses": 1,
+  "far_parts_covered": [
+    "11"
+  ]
+}

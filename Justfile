@@ -25,8 +25,8 @@ setup: cdk-install _cdk-bootstrap cdk-deploy deploy create-users check-aws
     @echo ""
     @echo "=== Setup complete! ==="
     @echo "Run 'just urls' to see your live application URLs."
-    @echo "Test user:  testuser@example.com / EagleTest2024!"
-    @echo "Admin user: admin@example.com / EagleAdmin2024!"
+    @echo "Test user:  eagle-qa@nih.gov / Eagle2026!"
+    @echo "Admins:     10 NIH accounts promoted to nci-admins (premium tier)"
 
 # Create test + admin Cognito users with required tenant attributes
 create-users:
@@ -415,17 +415,30 @@ e2e WORKFLOW="full":
 
 # ── Eval Suite ──────────────────────────────────────────────
 
-# Run full eval suite (28 tests) with haiku and publish results
-eval:
-    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku
-
-# Run specific eval tests (e.g., just eval-quick 1,2,3)
-eval-quick TESTS:
+# Run specific eval tests (REQUIRED — never run all by default, costs $$$)
+# Examples:
+#   just eval 1,2,3          # three tests
+#   just eval 16,17,18,19,20 # AWS subset (or use `just eval-aws`)
+#   just eval-all            # explicit full-suite (costs ~$5-10, asks for confirmation)
+eval TESTS:
     cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests {{TESTS}}
 
-# Run AWS tool eval tests only (16-20)
+# Alias retained for backwards compat — same as `just eval TESTS`
+eval-quick TESTS: (eval TESTS)
+
+# Run AWS tool eval tests only (16-20) — fixed small subset, safe to invoke
 eval-aws:
     cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku --tests 16,17,18,19,20
+
+# Run the FULL eval suite (all tests) — explicit opt-in, costs $$$
+# Prints cost warning + 5s pause before running.
+# CI: invoked only when deploy.yml workflow_dispatch input run_eval=true.
+eval-all:
+    @echo "WARNING: Running the FULL eval suite — this hits Bedrock for every test."
+    @echo "Estimated cost: \$5-10 per run."
+    @echo "Press Ctrl+C in the next 5 seconds to abort..."
+    @sleep 5
+    cd server && python3 -u tests/test_eagle_sdk_eval.py --model haiku
 
 # ── Docker Build ────────────────────────────────────────────
 
@@ -1000,3 +1013,290 @@ logs-qa SERVICE="backend":
 # QA live URLs
 urls-qa:
     EAGLE_ENV=qa just urls
+
+# ── Registry & Discoverability ─────────────────────────────
+# Entry point for new developers AND new AI agents picking up this codebase.
+# Run `just registry` first to see the full command/skill/expert map.
+
+# Categorized print of every operational entry point — recipes, skills, experts, flywheels
+registry:
+    #!/usr/bin/env bash
+    cat <<'EOF'
+    =========================================================================
+    EAGLE Operational Registry — entry points for humans and agents
+    =========================================================================
+
+    QUICKSTART
+      Start coding:        just dev-local
+      Run tests:           just test  +  just smoke
+      Ship to dev:         just deploy-ci main
+      Status check:        just status
+      Daily rollup:        just langfuse-report-today
+
+    JUST RECIPES (run from terminal — `just <name>`)
+      Discovery:           registry  docs  smoke-list  --list
+      Dev:                 dev-local  dev-up  dev-backend  dev-frontend  kill-stale
+      Test:                test  smoke  smoke-ui  dev-smoke  e2e  eval  eval-aws
+      MVP1 ladder:         mvp1  mvp1-quick  mvp1-full  mvp1-visual
+      Baseline:            baseline [VERSION]  baseline-list
+      Smoke (deployed):    dev-smoke-deployed  qa-smoke-deployed  dev-smoke-triage
+      Deploy:              deploy  deploy-backend  deploy-frontend  deploy-ci  ship
+      Devbox:              devbox-deploy  devbox-tunnel  devbox-health  devbox-ship
+      Diagnostics:         triage-session SESSION_ID  check-cloudwatch  check-langfuse  check-envs
+      Analytics:           langfuse-report  langfuse-report-today  langfuse-report-html
+      KB ops:              kb-sync  kb-regenerate
+      Visual QA:           e2e-judge [URL]
+      Onboarding:          handoff [human|agent]
+      Health:              on-track  morning-report  status  urls  check-aws  check-sso
+
+    CLAUDE CODE SKILLS (run in Claude Code with /skill-name)
+      Workflow:            /plan  /build  /review  /ship  /fix  /test  /simplify
+      Discovery:           /on-track  /pid  /check-aws  /check-envs
+                           /check-cloudwatch-logs  /check-langfuse-logs
+      Diagnostics:         /triage  /kb-regenerate
+      Reports:             /scribe  /excalidraw  /langfuse-analytics  /baseline-questions
+      Eval:                /mvp1-eval  /e2e-judge
+      Knowledge:           /s3-knowledge-base-sync  /obsidian-vault
+      Jira:                /jira  /jira-commit-matcher  /jira-story-writer  /jira-sync
+      Handoff:             /claude-handoff
+      Automation:          /loop  /schedule  /parallel_subagents
+      Planning (GSD):      /gsd-add-todo  /gsd-discuss-phase  /gsd-plan-phase  /gsd-execute-phase
+
+    EXPERTS (run /experts:DOMAIN:CMD where CMD = plan|maintenance|question|self-improve)
+      Core:                aws  backend  frontend  deployment  git
+      Specialized:         cloudwatch  test  eval  claude-sdk  strands  sse  hooks  tac
+      Playgrounds:         playground  document-playground
+
+    FLYWHEELS (scheduled GitHub Actions — see .github/workflows/)
+      Nightly triage:      cron 0 9  * * *    → docs/development/{ts}-report-triage-*.html
+      Eval suite:          cron 0 6  * * *    → server/tests/eval_aws_publisher.py
+      Morning report:      cron 0 13 * * 1-5  → Teams Adaptive Card
+      Post-deploy smoke:   on workflow_run    → S3 eval-artifacts bucket
+
+    SOURCE-OF-TRUTH FILES (read these first if new)
+      Operational guide:   CLAUDE.md
+      Quickstart:          README.md
+      Plan archive:        .claude/specs/             (70+ dated plans)
+      Expert knowledge:    .claude/commands/experts/*/expertise.md
+      Skill definitions:   .claude/skills/*/SKILL.md
+      Architecture:        docs/architecture/diagrams/
+      Past reports:        docs/development/
+
+    Next steps for a new agent:   just handoff agent
+    Bundle env for a new human:   just handoff human
+    =========================================================================
+    EOF
+
+# Print the documentation tree map
+docs:
+    @echo "EAGLE Documentation Map:"
+    @echo "  README.md                        Quickstart, env setup, common commands"
+    @echo "  CLAUDE.md                        Operational guide for agents (post-deploy smoke, validation)"
+    @echo "  docs/architecture/diagrams/      Excalidraw + Mermaid system diagrams"
+    @echo "  docs/development/                Reports, memos, meeting notes (timestamped)"
+    @echo "  .claude/specs/                   Implementation plans (70+ dated artifacts)"
+    @echo "  .claude/commands/experts/{D}/    Expert mental models (expertise.md) + 4 commands each"
+    @echo "  .claude/skills/{S}/SKILL.md      Skill definitions with frontmatter triggers"
+    @echo "  eagle-plugin/plugin.json         Active agents + skills manifest"
+    @echo "  Justfile                         75+ recipes (run 'just registry' for categorized list)"
+
+# List available post-deploy smoke scenarios (source: server/tests/post_deploy_smoke.py SCENARIOS)
+smoke-list:
+    @echo "Post-deploy smoke scenarios:"
+    @echo "  research_source_transparency   Q4 research-source transparency check (default)"
+    @echo "  jefo_q4                        FAR 16.507-6(d)(2) citations / competitor analysis"
+    @echo "  sbir_q5                        SBIR protest scenario"
+    @echo "  uc21_microscope                UC 2.1 micro-purchase scenario"
+    @echo "  kb_inventory_diagnostic        KB retrieval inventory check"
+    @echo "  qasp_orphan_unlock             QASP orphan doc-type unlock"
+    @echo ""
+    @echo "Usage:"
+    @echo "  just dev-smoke-deployed <scenario>      # against dev"
+    @echo "  just qa-smoke-deployed <scenario>       # against qa (with --auth)"
+    @echo "  just dev-smoke-triage                   # run all 5 in sequence"
+    @echo ""
+    @echo "Source of truth: server/tests/post_deploy_smoke.py SCENARIOS dict"
+
+# ── MVP1 Eval Ladder ───────────────────────────────────────
+# Tier 1: unit tests (~30s, no AWS)
+# Tier 2: Strands integration (~2 min, needs Bedrock)
+# Tier 3: full eval suite (~10 min, needs Bedrock)
+# Tier 4: Playwright + visual QA (~5 min, needs deployed env)
+# Config: .claude/skills/mvp1-eval/config.json (per-repo paths)
+
+# Tier 1 only — fastest gate, no AWS creds needed
+mvp1-quick:
+    @echo "=== MVP1 Tier 1: unit tests ==="
+    cd server && python -m pytest tests/test_compliance_matrix.py tests/test_chat_kb_flow.py tests/test_canonical_package_document_flow.py tests/test_document_pipeline.py -v
+
+# Tier 1 + 2 — unit tests + Strands integration (default mvp1 invocation)
+mvp1: mvp1-quick
+    @echo ""
+    @echo "=== MVP1 Tier 2: Strands integration ==="
+    cd server && python -m pytest tests/test_strands_multi_agent.py tests/test_strands_poc.py tests/test_strands_service_integration.py -v
+
+# Tier 1 + 2 + 3 — adds full Strands eval suite (needs AWS creds)
+mvp1-full: mvp1
+    @echo ""
+    @echo "=== MVP1 Tier 3: full Strands eval suite ==="
+    cd server && python3 -u tests/test_strands_eval.py --model haiku
+
+# Tier 1-4 — adds Playwright + e2e-judge visual QA (interactive in Claude Code)
+mvp1-visual: mvp1-full
+    @echo ""
+    @echo "=== MVP1 Tier 4: visual QA via e2e-judge ==="
+    @echo "For full Tier 4 visual orchestration, run in Claude Code:"
+    @echo "  /mvp1-eval --visual"
+    @echo ""
+    @echo "Or run e2e-judge directly:  just e2e-judge"
+
+# ── Baseline Questions ─────────────────────────────────────
+# Excel-driven 14-question eval against running EAGLE server.
+# Captures responses, judges against previous version, generates HTML report.
+
+# Run baseline questions (VERSION = column tag in Use Case List.xlsx, e.g., v6, v7)
+baseline VERSION="latest":
+    python3 .claude/skills/baseline-questions/scripts/run_baseline.py --version {{VERSION}}
+
+# Show available baseline version columns from the workbook
+baseline-list:
+    @echo "Baseline versions live in 'Use Case List.xlsx' (repo root)."
+    @echo "Each column 'v1', 'v2', 'v3'... captures a baseline run."
+    @echo ""
+    @echo "Latest column is auto-detected when you run:  just baseline"
+    @echo "Or specify explicitly:                         just baseline v6"
+    @echo ""
+    @echo "Source: .claude/skills/baseline-questions/scripts/run_baseline.py"
+
+# ── Diagnostics (Claude Code Skills) ───────────────────────
+# These wrap interactive Claude Code skills. The Justfile recipes print the
+# invocation pattern; run the actual diagnostic inside Claude Code.
+
+# Per-session triage: DynamoDB feedback + CloudWatch errors + Langfuse traces
+triage-session SESSION_ID:
+    @echo "Per-session diagnostic triage — interactive Claude Code skill."
+    @echo ""
+    @echo "Run in Claude Code:"
+    @echo "  /triage {{SESSION_ID}}"
+    @echo ""
+    @echo "Cross-references DynamoDB feedback, CloudWatch errors, and Langfuse traces."
+    @echo "Outputs:  .claude/specs/{ts}-plan-triage-{{SESSION_ID}}-v1.md"
+    @echo ""
+    @echo "For ALL recent sessions (smoke triage):  just dev-smoke-triage"
+
+# Scan ECS log groups for errors over last N hours
+check-cloudwatch HOURS="24" ENV="dev":
+    @echo "Open Claude Code and run:"
+    @echo "  /check-cloudwatch-logs --hours {{HOURS}} --env {{ENV}}"
+    @echo ""
+    @echo "Or run hourly in a /loop: /loop 1h /check-cloudwatch-logs"
+
+# Scan Langfuse for errors / latency outliers over WINDOW
+check-langfuse WINDOW="24h":
+    @echo "Open Claude Code and run:"
+    @echo "  /check-langfuse-logs --window {{WINDOW}}"
+    @echo ""
+    @echo "For a full analytical rollup:  just langfuse-report-today"
+
+# Broad env check — AWS + Langfuse + Cognito + Bedrock + S3 + DynamoDB + Teams + GitHub
+check-envs:
+    @echo "Comprehensive env credential check (interactive)."
+    @echo ""
+    @echo "Open Claude Code and run:"
+    @echo "  /check-envs"
+    @echo ""
+    @echo "Or for just AWS resources:  just check-aws"
+    @echo "Or for just SSO + Bedrock:  just check-sso"
+
+# ── Knowledge Base Ops ─────────────────────────────────────
+
+# Sync S3 upstream KB → local KB + DynamoDB metadata + compliance matrix
+kb-sync:
+    @echo "Open Claude Code and run:"
+    @echo "  /s3-knowledge-base-sync"
+
+# Rebuild KB index, purge orphan metadata, validate checklists
+kb-regenerate:
+    @echo "Open Claude Code and run:"
+    @echo "  /kb-regenerate"
+    @echo ""
+    @echo "Combines: orphan-metadata purge + checklist validation + compliance matrix analysis"
+
+# ── Visual QA (e2e-judge) ──────────────────────────────────
+
+# Screenshot-based vision QA — Playwright + Bedrock Sonnet judge
+# URL defaults to current dev ALB. Override for QA: URL=$(EAGLE_ENV=qa just urls | grep Frontend | awk '{print $2}')
+e2e-judge URL="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "{{URL}}" ]; then
+        URL=$(python3 -c "import boto3; c=boto3.client('elbv2',region_name='us-east-1'); lbs=c.describe_load_balancers()['LoadBalancers']; print('http://'+next(lb['DNSName'] for lb in lbs if 'Front' in lb['LoadBalancerName']))")
+    else
+        URL="{{URL}}"
+    fi
+    echo "=== e2e-judge against $URL ==="
+    echo "For full visual QA orchestration, run in Claude Code:"
+    echo "  /e2e-judge"
+    echo ""
+    echo "Or invoke the orchestrator directly:"
+    echo "  cd server && python3 tests/e2e_judge_orchestrator.py --base-url $URL"
+
+# ── Onboarding & Handoff ───────────────────────────────────
+
+# Hand off context — to a human co-worker or to a new AI agent
+# MODE = human (default, bundle env via /claude-handoff) | agent (print onboarding checklist)
+handoff MODE="human":
+    #!/usr/bin/env bash
+    case "{{MODE}}" in
+      human)
+        echo "=== Human handoff — bundle sanitized Claude Code environment ==="
+        echo ""
+        echo "Open Claude Code and run:"
+        echo "  /claude-handoff"
+        echo ""
+        echo "This bundles:"
+        echo "  - ~/.claude config (sanitized)"
+        echo "  - Session JSONLs scrubbed via .claude/skills/claude-handoff/scrub-jsonl.py"
+        echo "  - Readable HTML transcripts"
+        echo "  - Auto-generated setup guide"
+        echo ""
+        echo "Skill spec: .claude/skills/claude-handoff/SKILL.md"
+        ;;
+      agent)
+        echo "=== Agent onboarding checklist ==="
+        echo ""
+        echo "New agent picking up this codebase? Follow these steps:"
+        echo ""
+        echo "  1. Read CLAUDE.md                      (operational guide, validation ladder)"
+        echo "  2. Run: just registry                  (full command + skill + expert map)"
+        echo "  3. Run: just docs                      (doc tree map)"
+        echo "  4. Read .claude/commands/experts/{domain}/expertise.md for relevant domains"
+        echo "  5. Skim recent .claude/specs/          (last 5-10 dated entries)"
+        echo "  6. Run: just status                    (see deployed state)"
+        echo "  7. Run: just check-aws                 (verify AWS access)"
+        echo ""
+        echo "Validation ladder: ruff check / npx tsc / pytest / playwright / cdk synth"
+        echo "Key source files:"
+        echo "  server/app/strands_agentic_service.py  (Strands SDK supervisor)"
+        echo "  server/app/streaming_routes.py         (SSE endpoint)"
+        echo "  eagle-plugin/plugin.json               (active agents + skills)"
+        echo "  eagle-plugin/agents/*/agent.md         (agent prompts)"
+        ;;
+      *)
+        echo "Unknown mode '{{MODE}}'. Valid: human | agent"
+        exit 1
+        ;;
+    esac
+
+# ── Project Health ─────────────────────────────────────────
+
+# Scan Jira + git history + branch state against MVP milestones
+on-track:
+    @echo "Open Claude Code and run:"
+    @echo "  /on-track"
+    @echo ""
+    @echo "Scans Jira + git history + branch state against MVP milestones."
+
+# Generate the daily morning report locally (the same script GH Actions runs at 8am ET)
+morning-report:
+    python3 scripts/morning_report.py

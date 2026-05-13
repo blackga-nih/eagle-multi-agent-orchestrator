@@ -1,0 +1,53 @@
+{
+  "status": "ok",
+  "elapsed_s": 43.9,
+  "session_id": "5e081a3c-ddbe-42db-b919-1a8a4445961f",
+  "user_id": "perf-test-704ee286",
+  "tools": [
+    "research",
+    "agent_route"
+  ],
+  "response_chars": 1951,
+  "response_first_300": "Also checking for NIH BPA coverage on Zeiss microscopes:Good \u2014 I have everything I need. The NIH BPA list shows a **\"Medical/Scientific Equipment & Instruments\"** category with multiple vendors. Zeiss is not listed as having a direct NIH BPA, but the NIH BPA commodity list includes Carl Zeiss under ",
+  "timeline": [
+    {
+      "t": 4.33,
+      "evt": "tool_use",
+      "name": "research"
+    },
+    {
+      "t": 14.49,
+      "evt": "tool_use",
+      "name": "agent_route"
+    },
+    {
+      "t": 14.49,
+      "evt": "tool_result",
+      "name": "agent_route"
+    },
+    {
+      "t": 14.49,
+      "evt": "tool_result",
+      "name": "agent_route"
+    },
+    {
+      "t": 14.49,
+      "evt": "tool_result",
+      "name": "research"
+    },
+    {
+      "t": 26.77,
+      "evt": "tool_result",
+      "name": "agent_route"
+    },
+    {
+      "t": 26.77,
+      "evt": "tool_result",
+      "name": "research"
+    },
+    {
+      "t": 43.86,
+      "evt": "complete"
+    }
+  ]
+}
