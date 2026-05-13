@@ -21,6 +21,12 @@ const nextConfig = {
         source: '/ws/:path*',
         destination: `${backendUrl}/ws/:path*`,
       },
+      // Auth router lives on FastAPI (Entra OIDC + local session JWT).
+      // No Next.js Route Handlers cover /api/auth/*, so proxy directly.
+      {
+        source: '/api/auth/:path*',
+        destination: `${backendUrl}/api/auth/:path*`,
+      },
     ];
   },
 };

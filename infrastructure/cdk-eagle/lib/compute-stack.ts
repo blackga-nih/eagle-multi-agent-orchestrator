@@ -5,6 +5,7 @@ import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { EagleConfig } from '../config/environments';
 
@@ -12,8 +13,8 @@ export interface EagleComputeStackProps extends cdk.StackProps {
   config: EagleConfig;
   vpc: ec2.IVpc;
   appRole: iam.Role;
-  userPoolId: string;
-  userPoolClientId: string;
+  entraClientSecret: secretsmanager.ISecret;
+  jwtSigningKeySecret: secretsmanager.ISecret;
   documentBucketName: string;
   metadataTableName: string;
 }
@@ -70,6 +71,12 @@ export class EagleComputeStack extends cdk.Stack {
       containerName: 'eagle-backend',
       image: ecs.ContainerImage.fromEcrRepository(this.backendRepo),
       portMappings: [{ containerPort: 8000 }],
+      secrets: {
+        // Sourced from Secrets Manager at task start. Never embedded in the
+        // task definition or CloudFormation template.
+        ENTRA_CLIENT_SECRET: ecs.Secret.fromSecretsManager(props.entraClientSecret),
+        JWT_SIGNING_KEY: ecs.Secret.fromSecretsManager(props.jwtSigningKeySecret),
+      },
       environment: {
         EAGLE_SESSIONS_TABLE: config.eagleTableName,
         S3_BUCKET: props.documentBucketName,
@@ -82,8 +89,18 @@ export class EagleComputeStack extends cdk.Stack {
         EAGLE_ENV: config.env,
         EAGLE_ENVIRONMENT: config.env,
         EAGLE_BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6',
-        COGNITO_USER_POOL_ID: props.userPoolId,
-        COGNITO_CLIENT_ID: props.userPoolClientId,
+        // Microsoft Entra OIDC config (per-environment app registration).
+        ENTRA_TENANT_ID: config.entraTenantId,
+        ENTRA_CLIENT_ID: config.entraClientId,
+        ENTRA_REDIRECT_URI: config.entraRedirectUri,
+        ENTRA_POST_LOGIN_PATH: config.entraPostLoginPath,
+        // Public base URL the browser sees (CBIIT external ALB hostname).
+        // Used by auth router to compute post-login redirects. Falls back to
+        // empty string at synth if EAGLE_EXTERNAL_HOSTNAME_<ENV> is unset;
+        // the backend then defaults to http://localhost:3000 (dev-only path).
+        FRONTEND_BASE_URL: config.externalFrontendHostname
+          ? `https://${config.externalFrontendHostname}`
+          : '',
         DOCUMENT_BUCKET: props.documentBucketName,
         METADATA_TABLE: props.metadataTableName,
         // S3 Vectors — semantic retrieval lane (knowledge_tools.py:1247-1248).
@@ -204,9 +221,6 @@ export class EagleComputeStack extends cdk.Stack {
         HOSTNAME: '0.0.0.0',
         PORT: '3000',
         NODE_ENV: 'production',
-        NEXT_PUBLIC_COGNITO_USER_POOL_ID: props.userPoolId,
-        NEXT_PUBLIC_COGNITO_CLIENT_ID: props.userPoolClientId,
-        NEXT_PUBLIC_COGNITO_REGION: config.region,
       },
       logging: ecs.LogDrivers.awsLogs({
         logGroup: frontendLogGroup,
@@ -287,6 +301,22 @@ export class EagleComputeStack extends cdk.Stack {
     });
 
     frontendService.attachToApplicationTargetGroup(frontendTargetGroup);
+
+    // Also register with the CBIIT-managed external ALB's target group so
+    // that ALB sees current task IPs on every deploy. The ALB itself is
+    // owned outside CDK — we only import the target group by ARN. Before
+    // this, the external TG had manually-pinned IPs that went stale when
+    // ECS rotated tasks, leaving the public HTTPS URL with unhealthy
+    // targets. Adding LoadBalancers to an existing ECS service is a
+    // replacement update in CloudFormation; expect a brief outage on
+    // first deploy as the new service stands up.
+    if (config.externalFrontendTargetGroupArn) {
+      const externalFrontendTg = elbv2.ApplicationTargetGroup.fromTargetGroupAttributes(
+        this, 'ExternalFrontendTargetGroup',
+        { targetGroupArn: config.externalFrontendTargetGroupArn },
+      );
+      frontendService.attachToApplicationTargetGroup(externalFrontendTg);
+    }
 
     // ── Auto-Scaling ─────────────────────────────────────────
     const backendScaling = backendService.autoScaleTaskCount({

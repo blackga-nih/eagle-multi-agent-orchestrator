@@ -594,11 +594,11 @@ def create_streaming_router(
     ):
         """Send message to EAGLE agent and receive a streaming SSE response.
 
-        Uses EAGLE cognito_auth (DEV_MODE-aware). Accepts the same request
-        body as POST /api/chat. The response is delivered as a stream of
-        text/event-stream SSE events following the StreamEvent protocol.
+        Uses the EAGLE Entra session JWT (DEV_MODE-aware). Accepts the same
+        request body as POST /api/chat. The response is delivered as a stream
+        of text/event-stream SSE events following the StreamEvent protocol.
         """
-        # Authenticate using EAGLE cognito_auth (supports DEV_MODE bypass)
+        # Authenticate using the local session JWT (supports DEV_MODE bypass)
         user, error = extract_user_context(authorization)
         if REQUIRE_AUTH and user.user_id == "anonymous":
             raise HTTPException(

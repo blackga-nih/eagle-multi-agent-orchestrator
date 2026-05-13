@@ -81,7 +81,7 @@ from .routers.templates import (
 from .routers.user import router as user_router
 from .routers.workspaces import router as workspaces_router
 from .routers.dependencies import get_user_from_header, get_session_context
-from .cognito_auth import UserContext
+from .auth import UserContext, auth_router
 
 from .error_webhook import notify_error, notify_debug_event, close_webhook_client
 from .teams_notifier import (
@@ -436,6 +436,7 @@ async def api_chat(
 # Cache reload ownership now lives in the admin router, which clears
 # _plugin_cache, _prompt_cache, _config_cache, and _template_cache.
 streaming_router = create_streaming_router(subscription_service)
+app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(analytics_router)
 app.include_router(chat_router)

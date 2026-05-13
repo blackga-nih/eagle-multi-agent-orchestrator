@@ -81,17 +81,25 @@ class AWSConfig:
 
 @dataclass(frozen=True)
 class AuthConfig:
-    """Authentication and authorization configuration."""
+    """Authentication configuration — Microsoft Entra OIDC + local session JWT."""
 
     require_auth: bool = _bool("REQUIRE_AUTH", "false")
     dev_mode: bool = _bool("DEV_MODE", "false")
     dev_user_id: str = os.getenv("DEV_USER_ID", "dev-user")
     dev_tenant_id: str = os.getenv("DEV_TENANT_ID", "dev-tenant")
-    cognito_region: str = os.getenv(
-        "COGNITO_REGION", os.getenv("AWS_REGION", "us-east-1")
+
+    # Entra OIDC app registration (per-environment values).
+    entra_tenant_id: str = os.getenv("ENTRA_TENANT_ID", "")
+    entra_client_id: str = os.getenv("ENTRA_CLIENT_ID", "")
+    entra_client_secret: str = os.getenv("ENTRA_CLIENT_SECRET", "")
+    entra_redirect_uri: str = os.getenv(
+        "ENTRA_REDIRECT_URI", "http://localhost:8000/api/auth/callback"
     )
-    cognito_user_pool_id: str = os.getenv("COGNITO_USER_POOL_ID", "")
-    cognito_client_id: str = os.getenv("COGNITO_CLIENT_ID", "")
+    entra_post_login_path: str = os.getenv("ENTRA_POST_LOGIN_PATH", "/chat")
+
+    # Local HS256 session token signing.
+    jwt_signing_key: str = os.getenv("JWT_SIGNING_KEY", os.getenv("JWT_SECRET_KEY", ""))
+    jwt_expire_minutes: int = _int("JWT_EXPIRE_MINUTES", 480)
 
 
 @dataclass(frozen=True)
@@ -248,10 +256,14 @@ def validate() -> list[str]:
     warnings = []
 
     # Auth validation
-    if auth.require_auth and not auth.cognito_user_pool_id:
-        warnings.append("REQUIRE_AUTH=true but COGNITO_USER_POOL_ID not set")
-    if auth.require_auth and not auth.cognito_client_id:
-        warnings.append("REQUIRE_AUTH=true but COGNITO_CLIENT_ID not set")
+    if auth.require_auth and not auth.entra_client_id:
+        warnings.append("REQUIRE_AUTH=true but ENTRA_CLIENT_ID not set")
+    if auth.require_auth and not auth.entra_tenant_id:
+        warnings.append("REQUIRE_AUTH=true but ENTRA_TENANT_ID not set")
+    if auth.require_auth and not auth.entra_client_secret:
+        warnings.append("REQUIRE_AUTH=true but ENTRA_CLIENT_SECRET not set")
+    if auth.require_auth and not auth.jwt_signing_key:
+        warnings.append("REQUIRE_AUTH=true but JWT_SIGNING_KEY not set")
 
     # Telemetry validation
     if telemetry.langfuse_public_key and not telemetry.langfuse_secret_key:

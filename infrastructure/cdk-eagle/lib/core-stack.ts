@@ -1,9 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { EagleConfig } from '../config/environments';
 
@@ -14,8 +14,8 @@ export interface EagleCoreStackProps extends cdk.StackProps {
 export class EagleCoreStack extends cdk.Stack {
   public readonly vpc: ec2.IVpc;
   public readonly appRole: iam.Role;
-  public readonly userPool: cognito.UserPool;
-  public readonly userPoolClient: cognito.UserPoolClient;
+  public readonly entraClientSecret: secretsmanager.ISecret;
+  public readonly jwtSigningKeySecret: secretsmanager.ISecret;
 
   constructor(scope: Construct, id: string, props: EagleCoreStackProps) {
     super(scope, id, props);
@@ -61,51 +61,22 @@ export class EagleCoreStack extends cdk.Stack {
       vpcId: 'vpc-09def43fcabfa4df6',
     });
 
-    // ── Cognito User Pool ────────────────────────────────────
-    this.userPool = new cognito.UserPool(this, 'UserPool', {
-      userPoolName: `eagle-users-${config.env}`,
-      signInAliases: { email: true },
-      autoVerify: { email: true },
-      selfSignUpEnabled: true,
-      standardAttributes: {
-        email: { required: true, mutable: true },
-        givenName: { required: true, mutable: true },
-        familyName: { required: true, mutable: true },
-      },
-      customAttributes: {
-        tenant_id: new cognito.StringAttribute({
-          minLen: 1,
-          maxLen: 50,
-          mutable: true,
-        }),
-        subscription_tier: new cognito.StringAttribute({
-          minLen: 1,
-          maxLen: 20,
-          mutable: true,
-        }),
-      },
-      passwordPolicy: {
-        minLength: 8,
-        requireLowercase: true,
-        requireUppercase: true,
-        requireDigits: true,
-        requireSymbols: false,
-      },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-
-    this.userPoolClient = this.userPool.addClient('AppClient', {
-      userPoolClientName: `eagle-app-client-${config.env}`,
-      authFlows: {
-        userPassword: true,
-        userSrp: true,
-        adminUserPassword: true,
-      },
-      generateSecret: false,
-      accessTokenValidity: cdk.Duration.hours(1),
-      idTokenValidity: cdk.Duration.hours(1),
-      refreshTokenValidity: cdk.Duration.days(30),
-    });
+    // ── Auth secrets (Microsoft Entra OIDC) ──────────────────
+    // Two Secrets Manager entries:
+    //   - eagle/{env}/entra-client-secret: app reg client_secret string
+    //   - eagle/{env}/jwt-signing-key: HS256 key for local session JWTs
+    // Secret values are populated out-of-band (`aws secretsmanager
+    // put-secret-value`); CDK only references them by ARN so the secret
+    // payload never lands in CloudFormation templates.
+    // ARNs may be supplied with or without the 6-char Secrets Manager suffix.
+    // ``fromSecretPartialArn`` accepts either form and grants by-name policies
+    // that work for both the canonical ARN and any version of it.
+    this.entraClientSecret = secretsmanager.Secret.fromSecretPartialArn(
+      this, 'EntraClientSecret', config.entraClientSecretArn,
+    );
+    this.jwtSigningKeySecret = secretsmanager.Secret.fromSecretPartialArn(
+      this, 'JwtSigningKeySecret', config.jwtSigningKeySecretArn,
+    );
 
     // ── CloudWatch Log Groups ────────────────────────────────
     const appLogGroup = new logs.LogGroup(this, 'AppLogGroup', {
@@ -225,17 +196,9 @@ export class EagleCoreStack extends cdk.Stack {
       ],
     }));
 
-    // Cognito: User management
-    this.appRole.addToPolicy(new iam.PolicyStatement({
-      actions: [
-        'cognito-idp:GetUser',
-        'cognito-idp:AdminGetUser',
-        'cognito-idp:CreateGroup',
-        'cognito-idp:AdminAddUserToGroup',
-        'cognito-idp:ListUsers',
-      ],
-      resources: [this.userPool.userPoolArn],
-    }));
+    // Secrets Manager: read Entra client_secret + JWT signing key at startup.
+    this.entraClientSecret.grantRead(this.appRole);
+    this.jwtSigningKeySecret.grantRead(this.appRole);
 
     // ── Knowledge Base — S3 Vectors store (READ-ONLY) ────────
     // The semantic search lane (knowledge_tools.py:_get_s3vectors_client) issues
@@ -296,13 +259,13 @@ export class EagleCoreStack extends cdk.Stack {
       description: 'EAGLE DEV VPC (imported)',
       exportName: `eagle-vpc-id-${config.env}`,
     });
-    new cdk.CfnOutput(this, 'UserPoolId', {
-      value: this.userPool.userPoolId,
-      exportName: `eagle-user-pool-id-${config.env}`,
+    new cdk.CfnOutput(this, 'EntraClientSecretArn', {
+      value: this.entraClientSecret.secretArn,
+      exportName: `eagle-entra-client-secret-arn-${config.env}`,
     });
-    new cdk.CfnOutput(this, 'UserPoolClientId', {
-      value: this.userPoolClient.userPoolClientId,
-      exportName: `eagle-user-pool-client-id-${config.env}`,
+    new cdk.CfnOutput(this, 'JwtSigningKeySecretArn', {
+      value: this.jwtSigningKeySecret.secretArn,
+      exportName: `eagle-jwt-signing-key-arn-${config.env}`,
     });
     new cdk.CfnOutput(this, 'AppRoleArn', {
       value: this.appRole.roleArn,

@@ -159,8 +159,9 @@ export default function SidebarNav() {
   const tierLabel = user?.tier ? user.tier.charAt(0).toUpperCase() + user.tier.slice(1) : 'Free';
 
   const handleSignOut = async () => {
+    // signOut() hard-navigates to /api/auth/logout (which 302s to Entra OIDC
+    // logout). No client-side router push needed.
     await signOut();
-    router.push('/login/');
   };
 
   const NavLink = ({ item }: { item: NavItem }) => (

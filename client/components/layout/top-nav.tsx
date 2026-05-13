@@ -104,8 +104,9 @@ export default function TopNav() {
   const displayName = user?.displayName || user?.email || 'User';
 
   const handleSignOut = async () => {
+    // signOut() does a hard navigation to /api/auth/logout (which 302s to
+    // Entra's OIDC logout). No client-side router push needed afterward.
     await signOut();
-    router.push('/login/');
   };
 
   return (

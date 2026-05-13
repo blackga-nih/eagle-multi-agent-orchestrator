@@ -6,8 +6,17 @@ export interface EagleConfig {
   // Networking (import existing VPC)
   vpcId: string;
 
-  // External ALB (pre-provisioned, e.g. QA ALB in a different VPC)
+  // External ALB (CBIIT-managed, HTTPS, pre-provisioned).
+  // CDK does not own the ALB but:
+  //   - opens the frontend task SG to the ALB's SG (via externalAlbSecurityGroupId)
+  //   - registers the frontend ECS service with the ALB's target group so
+  //     ECS auto-syncs task IPs on every deploy (fixes the stale-IP-target
+  //     problem the previous manual-pinning setup had).
+  //   - exposes the public hostname so backend can build absolute URLs
+  //     (FRONTEND_BASE_URL, ENTRA_REDIRECT_URI).
   externalAlbSecurityGroupId?: string;
+  externalFrontendTargetGroupArn?: string;
+  externalFrontendHostname?: string;
 
   // Explicit subnet IDs (when VPC has mixed subnet types CDK can't distinguish)
   privateSubnetIds?: string[];
@@ -56,6 +65,18 @@ export interface EagleConfig {
   // CI/CD
   githubOwner: string;
   githubRepo: string;
+
+  // Microsoft Entra OIDC (replaces Cognito).
+  // App registration is per-environment; secrets live in AWS Secrets Manager
+  // under entraClientSecretArn / jwtSigningKeySecretArn.
+  entraTenantId: string;
+  entraClientId: string;
+  entraRedirectUri: string;
+  entraPostLoginPath: string;
+  /** Secrets Manager secret holding the Entra app reg client_secret (string). */
+  entraClientSecretArn: string;
+  /** Secrets Manager secret holding the HS256 signing key for local session JWTs. */
+  jwtSigningKeySecretArn: string;
 }
 
 const ACCOUNT = process.env.CDK_DEFAULT_ACCOUNT || process.env.AWS_ACCOUNT_ID || '';
@@ -111,6 +132,26 @@ export const DEV_CONFIG: EagleConfig = {
   githubOwner: 'CBIIT',
   githubRepo: 'sm_eagle',
 
+  // Microsoft Entra (NIH tenant) — populate via env vars at synth time.
+  // Per-env app registrations and Secrets Manager entries are provisioned
+  // out-of-band (the EAGLE Entra app reg is already created).
+  entraTenantId: process.env.EAGLE_ENTRA_TENANT_ID || '',
+  entraClientId: process.env.EAGLE_ENTRA_CLIENT_ID || '',
+  entraRedirectUri: process.env.EAGLE_ENTRA_REDIRECT_URI || '',
+  entraPostLoginPath: '/chat',
+  entraClientSecretArn:
+    process.env.EAGLE_ENTRA_CLIENT_SECRET_ARN ||
+    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:eagle/dev/entra-client-secret`,
+  jwtSigningKeySecretArn:
+    process.env.EAGLE_JWT_SIGNING_KEY_ARN ||
+    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:eagle/dev/jwt-signing-key`,
+
+  // CBIIT-managed external front-door — EAGLE-DEV-ALB (HTTPS, *.cancer.gov cert).
+  // SG already permits the frontend task SG on :3000 (verified out-of-band).
+  externalAlbSecurityGroupId: 'sg-0f426290543115077',
+  externalFrontendTargetGroupArn:
+    'arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-DEV-FRONTEND-IP/0e76ba2b0ab49d0c',
+  externalFrontendHostname: process.env.EAGLE_EXTERNAL_HOSTNAME_DEV || '',
 };
 
 export const STAGING_CONFIG: EagleConfig = {
@@ -140,6 +181,21 @@ export const QA_CONFIG: EagleConfig = {
   vectorsBucketName: `eagle-kb-vectors-${ACCOUNT}-qa`,
   desiredCount: 1,
   maxCount: 2,
+  entraClientSecretArn:
+    process.env.EAGLE_ENTRA_CLIENT_SECRET_ARN_QA ||
+    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:eagle/qa/entra-client-secret`,
+  jwtSigningKeySecretArn:
+    process.env.EAGLE_JWT_SIGNING_KEY_ARN_QA ||
+    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:eagle/qa/jwt-signing-key`,
+
+  // CBIIT-managed external front-door — EAGLE-QA-ALB (HTTPS, *.cancer.gov cert).
+  externalFrontendTargetGroupArn:
+    'arn:aws:elasticloadbalancing:us-east-1:695681773636:targetgroup/EAGLE-QA-FRONTEND-IP/152273fb8d5cd028',
+  externalFrontendHostname: process.env.EAGLE_EXTERNAL_HOSTNAME_QA || '',
+
+  // QA redirect URI overrides the DEV inherited value so each env points
+  // Entra back at its own ALB after sign-in.
+  entraRedirectUri: process.env.EAGLE_ENTRA_REDIRECT_URI_QA || '',
 };
 
 export const PROD_CONFIG: EagleConfig = {

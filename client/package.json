@@ -19,7 +19,6 @@
     "@aws-sdk/client-cloudwatch-logs": "^3.986.0",
     "@excalidraw/excalidraw": "^0.18.0",
     "@hookform/resolvers": "^3.9.1",
-    "amazon-cognito-identity-js": "^6.3.12",
     "clsx": "^2.1.1",
     "html2canvas": "^1.4.1",
     "idb": "^8.0.3",

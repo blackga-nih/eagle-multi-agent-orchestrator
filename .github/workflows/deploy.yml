@@ -293,6 +293,15 @@ jobs:
       run: cd ${{ env.CDK_DIR }} && npm ci
 
     - name: CDK Synth
+      env:
+        # Microsoft Entra OIDC config + CBIIT external ALB hostnames per env.
+        # Stored as GitHub Actions repo variables (gh variable list).
+        EAGLE_ENTRA_TENANT_ID: ${{ vars.EAGLE_ENTRA_TENANT_ID }}
+        EAGLE_ENTRA_CLIENT_ID: ${{ vars.EAGLE_ENTRA_CLIENT_ID }}
+        EAGLE_ENTRA_REDIRECT_URI: ${{ vars.EAGLE_ENTRA_REDIRECT_URI }}
+        EAGLE_ENTRA_REDIRECT_URI_QA: ${{ vars.EAGLE_ENTRA_REDIRECT_URI_QA }}
+        EAGLE_EXTERNAL_HOSTNAME_DEV: ${{ vars.EAGLE_EXTERNAL_HOSTNAME_DEV }}
+        EAGLE_EXTERNAL_HOSTNAME_QA: ${{ vars.EAGLE_EXTERNAL_HOSTNAME_QA }}
       run: |
         ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
         export CDK_DEFAULT_ACCOUNT=$ACCOUNT
@@ -473,6 +482,16 @@ jobs:
       run: cd ${{ env.CDK_DIR }} && npm ci
 
     - name: CDK Deploy
+      env:
+        # Same Entra/hostname vars as CDK Synth — `cdk deploy` re-synthesizes,
+        # so they must be present here too or the task def lands with empty
+        # values.
+        EAGLE_ENTRA_TENANT_ID: ${{ vars.EAGLE_ENTRA_TENANT_ID }}
+        EAGLE_ENTRA_CLIENT_ID: ${{ vars.EAGLE_ENTRA_CLIENT_ID }}
+        EAGLE_ENTRA_REDIRECT_URI: ${{ vars.EAGLE_ENTRA_REDIRECT_URI }}
+        EAGLE_ENTRA_REDIRECT_URI_QA: ${{ vars.EAGLE_ENTRA_REDIRECT_URI_QA }}
+        EAGLE_EXTERNAL_HOSTNAME_DEV: ${{ vars.EAGLE_EXTERNAL_HOSTNAME_DEV }}
+        EAGLE_EXTERNAL_HOSTNAME_QA: ${{ vars.EAGLE_EXTERNAL_HOSTNAME_QA }}
       run: |
         cd ${{ env.CDK_DIR }}
         # EagleComputeStack carries the dev ECS task definition (env vars,

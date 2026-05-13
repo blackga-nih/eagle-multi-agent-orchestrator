@@ -1,73 +1,62 @@
-"""
-Admin Authentication Service
-Manages admin user privileges and tenant-specific admin access
+"""Admin authorization helpers.
+
+Source of truth for "is this user an admin" is the ``is_admin`` claim on the
+local session JWT, which was populated at OIDC callback time from the
+``USER#<email>`` DynamoDB profile. Multi-tenant admin scoping collapses to
+"admin within their own tenant" — there is no per-tenant admin matrix in v1.
 """
 
-from fastapi import HTTPException, Depends
-from typing import Dict, List
-import boto3
-import os
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from fastapi import Depends, HTTPException
+
 from app.auth import get_current_user
 
 
 class AdminAuthService:
-    """Admin authentication using Cognito Groups"""
+    """Lightweight helper retained for the few existing call sites.
 
-    def __init__(self):
-        region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-        self.cognito_client = boto3.client("cognito-idp", region_name=region)
-        self.user_pool_id = os.getenv("COGNITO_USER_POOL_ID")
+    The legacy implementation queried Cognito groups; the new model reads
+    ``is_admin`` and ``tenant_id`` straight off the resolved user dict.
+    """
 
-    def is_tenant_admin(self, user_context: Dict[str, str], tenant_id: str) -> bool:
-        """Check if user is admin using Cognito Groups"""
-        # Check cognito:groups claim in JWT
-        user_groups = user_context.get("cognito:groups", [])
-        user_tenant = user_context.get("tenant_id", "")
-
-        # Must be same tenant and in admin group
-        admin_group = f"{tenant_id}-admins"
-        return user_tenant == tenant_id and admin_group in user_groups
-
-    def get_admin_tenants(self, user_groups: List[str]) -> List[str]:
-        """Get list of tenants where user has admin access from Cognito groups"""
-        admin_tenants = []
-        for group in user_groups:
-            if group.endswith("-admins"):
-                tenant_id = group.replace("-admins", "")
-                admin_tenants.append(tenant_id)
-        return admin_tenants
-
-
-# Admin dependency for FastAPI endpoints
-async def get_admin_user(current_user: dict = Depends(get_current_user)) -> Dict:
-    """Dependency to verify admin access using Cognito Groups"""
-    admin_service = AdminAuthService()
-
-    user_groups = current_user.get("cognito:groups", [])
-    admin_tenants = admin_service.get_admin_tenants(user_groups)
-
-    if not admin_tenants:
-        raise HTTPException(
-            status_code=403, detail="Admin access required - no admin groups found"
+    @staticmethod
+    def is_tenant_admin(user_context: Dict[str, Any], tenant_id: str) -> bool:
+        return bool(user_context.get("is_admin")) and (
+            user_context.get("tenant_id") == tenant_id
         )
 
+    @staticmethod
+    def get_admin_tenants(user_context: Dict[str, Any]) -> List[str]:
+        if user_context.get("is_admin") and user_context.get("tenant_id"):
+            return [str(user_context["tenant_id"])]
+        return []
+
+
+async def get_admin_user(
+    current_user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """FastAPI dependency that fails 403 unless the caller is an admin."""
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    admin_tenants = AdminAuthService.get_admin_tenants(current_user)
     return {
         **current_user,
         "admin_tenants": admin_tenants,
-        "admin_groups": user_groups,
-        "is_admin": True,
+        "admin_groups": [f"{t}-admins" for t in admin_tenants],
     }
 
 
 async def verify_tenant_admin(
-    tenant_id: str, current_user: dict = Depends(get_current_user)
-) -> Dict:
-    """Verify admin access for specific tenant"""
-    admin_service = AdminAuthService()
-
-    if not admin_service.is_tenant_admin(current_user, tenant_id):
+    tenant_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Dependency that asserts admin access for a specific tenant."""
+    if not AdminAuthService.is_tenant_admin(current_user, tenant_id):
         raise HTTPException(
             status_code=403, detail=f"Admin access required for tenant {tenant_id}"
         )
-
     return current_user

@@ -1,7 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 
 interface AuthGuardProps {
@@ -9,21 +7,18 @@ interface AuthGuardProps {
 }
 
 /**
- * AuthGuard wraps protected routes and redirects unauthenticated users to the
- * login page.  While the auth state is being resolved it renders a centered
- * loading spinner so the underlying page never flashes in an unprotected state.
+ * AuthGuard wraps protected routes. Unauthenticated users never see the
+ * children — the AuthProvider auto-redirects to `/api/auth/login` (which
+ * 302s to Entra) on mount, preserving the originally requested path so we
+ * land back on it after the OIDC round-trip.
+ *
+ * This component just renders a loading spinner while the auth state
+ * resolves and stays out of the way once it has.
  */
 export default function AuthGuard({ children }: AuthGuardProps) {
   const { isLoading, isAuthenticated } = useAuth();
-  const router = useRouter();
 
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push('/login/');
-    }
-  }, [isLoading, isAuthenticated, router]);
-
-  if (isLoading) {
+  if (isLoading || !isAuthenticated) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="flex flex-col items-center gap-3">
@@ -32,13 +27,6 @@ export default function AuthGuard({ children }: AuthGuardProps) {
         </div>
       </div>
     );
-  }
-
-  if (!isAuthenticated) {
-    // Redirect is handled by the useEffect above.  Render nothing while the
-    // navigation transition is in progress to prevent a flash of the
-    // protected content.
-    return null;
   }
 
   return <>{children}</>;

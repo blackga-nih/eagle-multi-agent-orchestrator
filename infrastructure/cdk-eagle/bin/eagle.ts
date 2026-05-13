@@ -42,7 +42,7 @@ const core = new EagleCoreStack(app, 'EagleCoreStack', {
   env,
   synthesizer,
   config: DEV_CONFIG,
-  description: 'EAGLE Core — VPC, Cognito, IAM, storage imports',
+  description: 'EAGLE Core — VPC, Entra/JWT secrets, IAM, storage imports',
 });
 
 // Storage stack depends on Core for appRole
@@ -55,15 +55,15 @@ const storage = new EagleStorageStack(app, 'EagleStorageStack', {
 });
 storage.addDependency(core);
 
-// Compute stack depends on Core for VPC, IAM role, Cognito IDs + Storage for bucket/table names
+// Compute stack depends on Core for VPC, IAM role, Entra/JWT secrets + Storage for bucket/table names
 const compute = new EagleComputeStack(app, 'EagleComputeStack', {
   env,
   synthesizer,
   config: DEV_CONFIG,
   vpc: core.vpc,
   appRole: core.appRole,
-  userPoolId: core.userPool.userPoolId,
-  userPoolClientId: core.userPoolClient.userPoolClientId,
+  entraClientSecret: core.entraClientSecret,
+  jwtSigningKeySecret: core.jwtSigningKeySecret,
   documentBucketName: storage.documentBucket.bucketName,
   metadataTableName: storage.metadataTable.tableName,
   description: 'EAGLE Compute — ECS Fargate, ECR, ALB',
@@ -108,8 +108,8 @@ const qaCompute = new EagleComputeStack(app, 'EagleComputeStackQA', {
   config: QA_CONFIG,
   vpc: qaVpc,
   appRole: core.appRole,
-  userPoolId: core.userPool.userPoolId,
-  userPoolClientId: core.userPoolClient.userPoolClientId,
+  entraClientSecret: core.entraClientSecret,
+  jwtSigningKeySecret: core.jwtSigningKeySecret,
   documentBucketName: storage.documentBucket.bucketName,
   metadataTableName: storage.metadataTable.tableName,
   description: 'EAGLE QA Compute — ECS Fargate in QA VPC',
