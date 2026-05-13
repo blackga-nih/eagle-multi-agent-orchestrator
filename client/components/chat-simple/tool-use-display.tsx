@@ -566,12 +566,12 @@ export default function ToolUseDisplay({
         data-testid="tool-chip"
         onClick={() => setModalOpen(true)}
         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs
-                    cursor-pointer transition-colors select-none ${chipClasses(status)}`}
+                    cursor-pointer transition-colors select-none max-w-full min-w-0 ${chipClasses(status)}`}
       >
         <span className="text-sm leading-none shrink-0" role="img" aria-label={chipLabel}>
           {meta.icon}
         </span>
-        <span className="font-medium text-gray-700 whitespace-nowrap">{chipLabel}</span>
+        <span className="font-medium text-gray-700 truncate max-w-[180px]">{chipLabel}</span>
         {streamingInput && status !== 'done' ? (
           <span className="text-[10px] text-blue-500 truncate max-w-[120px]">
             Writing... (

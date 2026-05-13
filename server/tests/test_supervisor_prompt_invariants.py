@@ -41,11 +41,15 @@ class TestLaborHourExclusion:
             "called out as insufficient because the model treats it as 'LH is still an option'."
         )
 
-    def test_tm_only_directive_present(self, supervisor_prompt: str) -> None:
-        # Must explicitly say T&M only for GSA Schedule labor-based services.
-        assert "T&M only" in supervisor_prompt, (
-            "supervisor prompt no longer contains the explicit 'T&M only' directive for "
-            "GSA Schedule labor-based services. Restore the strong wording from commit 04cd419."
+    def test_tm_replaces_lh_without_forcing_all_tm(self, supervisor_prompt: str) -> None:
+        # EAGLE-210 removes LH terminology; EAGLE-300 still requires FFP/hybrid analysis.
+        assert "use t&m only for residual variable demand" in supervisor_prompt.lower(), (
+            "supervisor prompt must replace LH with T&M only for the residual variable "
+            "portion, not force the whole acquisition into T&M."
+        )
+        assert "This rule does NOT mean \"all T&M.\"" in supervisor_prompt, (
+            "supervisor prompt must explicitly prevent the NIH LH rule from becoming "
+            "a blanket all-T&M recommendation."
         )
 
     def test_forbids_mentioning_lh_as_option(self, supervisor_prompt: str) -> None:
@@ -69,20 +73,19 @@ class TestLaborHourExclusion:
         )
 
     def test_leakage_cleanup_rule_present(self, supervisor_prompt: str) -> None:
-        # Must instruct the supervisor to drop LH references that leak in from
-        # specialists, KB excerpts, FAR cites, or templates (e.g. "T&M/LH" in
-        # compliance-strategist/agent.md, "FAR 52.232-7 Payments under T&M/LH").
+        # Must instruct the supervisor to preserve FAR/KB source meaning while
+        # translating final NIH/NCI recommendations away from LH terminology.
         prompt_lower = supervisor_prompt.lower()
         has_cleanup_rule = (
             ("specialist" in prompt_lower or "kb" in prompt_lower)
-            and "drop" in prompt_lower
+            and "translate" in prompt_lower
             and "lh" in prompt_lower
         )
         assert has_cleanup_rule, (
-            "supervisor prompt no longer instructs the supervisor to strip LH references "
-            "that leak in from downstream sources (specialist output, KB, FAR cites, templates). "
+            "supervisor prompt no longer instructs the supervisor to translate LH references "
+            "from downstream sources into NIH/NCI T&M recommendation language. "
             "Without this rule, LH reappears via 'T&M/LH' in compliance-strategist or "
-            "FAR 52.232-7 citations. Restore the leakage-cleanup bullet."
+            "FAR 52.232-7 citations."
         )
 
     def test_weak_phrasing_not_present(self, supervisor_prompt: str) -> None:
@@ -96,3 +99,28 @@ class TestLaborHourExclusion:
             "'LH is still an option'). This usually means a recent PR reverted the "
             "strengthened wording. Re-strengthen per commit 04cd419 / 7bca862."
         )
+
+
+class TestRequiredDocumentsFormat:
+    """EAGLE-299 required-documents table contract."""
+
+    def test_required_documents_use_trigger_template(self, supervisor_prompt: str) -> None:
+        assert "| Document | Trigger | Template |" in supervisor_prompt
+        assert "| Required?" not in supervisor_prompt
+        assert "D&F for T&M/LH" not in supervisor_prompt
+        assert "| D&F for T&M | T&M contract |" in supervisor_prompt
+
+
+class TestAipContractTypeReasoning:
+    """EAGLE-300 AIP scenario contract-type reasoning invariants."""
+
+    def test_uncertain_scope_with_types_frequency_uses_unit_pricing_rule(
+        self, supervisor_prompt: str
+    ) -> None:
+        prompt_lower = supervisor_prompt.lower()
+        assert "uncertain scope but" in prompt_lower
+        assert "types/frequency" in prompt_lower or "types and frequency" in prompt_lower
+        assert "ffp unit/event pricing" in prompt_lower
+        assert "service type breakdown" in prompt_lower
+        assert "hybrid structure" in prompt_lower
+        assert "t&m only for residual" in prompt_lower

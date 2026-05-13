@@ -109,7 +109,7 @@ export default function StateChangeCard({ entry }: StateChangeCardProps) {
       <button
         data-testid="state-change-card"
         onClick={() => setShowDetail(true)}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-[#D8DEE6] bg-white hover:bg-gray-50 transition-colors cursor-pointer text-left max-w-xs"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-[#D8DEE6] bg-white hover:bg-gray-50 transition-colors cursor-pointer text-left max-w-xs min-w-0"
       >
         <span className="text-sm flex-shrink-0">{meta.icon}</span>
         <span className="text-[11px] font-medium text-[#003366] truncate">{meta.label}</span>

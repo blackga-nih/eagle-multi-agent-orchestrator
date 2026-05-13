@@ -4,8 +4,6 @@ Validates: get_requirements(), search_far(), suggest_vehicle(), execute_operatio
 and module-level constants. Pure Python — no AWS dependencies or mocking needed.
 """
 
-import pytest
-
 from app.compliance_matrix import (
     METHODS,
     THRESHOLD_TIERS,
@@ -211,6 +209,27 @@ class TestGetRequirements:
         )
         assert any(entry["section"] == "19.502-2" for entry in result["_related_far"])
 
+    def test_required_documents_include_trigger_and_template(self):
+        """EAGLE-299: required-doc rows expose why required and the template source."""
+        result = get_requirements(
+            2_000_000,
+            "fss",
+            "tm",
+            flags={"is_services": True, "is_small_business": False},
+        )
+
+        required_docs = [d for d in result["documents_required"] if d["required"]]
+        assert required_docs
+        for doc in required_docs:
+            assert doc.get("trigger"), f"missing trigger for {doc['name']}"
+            assert doc.get("template"), f"missing template for {doc['name']}"
+
+        docs_by_name = {d["name"]: d for d in result["documents_required"]}
+        assert "Services requirement" in docs_by_name["SOW / PWS"]["trigger"]
+        assert docs_by_name["IGCE"]["template"] == "01.D_IGCE_for_Commercial_Organizations.xlsx"
+        assert "Rule of Two" in docs_by_name["Market Research Report"]["trigger"]
+        assert "HHS SubK Plan Template" in docs_by_name["Subcontracting Plan"]["template"]
+
 
 # ---------------------------------------------------------------------------
 # 1b. Normalization / alias resolution
@@ -280,6 +299,12 @@ class TestNormalization:
 
     def test_labor_hour_resolves_to_lh(self):
         result = get_requirements(200_000, "sap", "labor_hour")
+        assert result["errors"] == []
+        assert result["contract_type"]["id"] == "lh"
+
+    def test_lh_abbreviation_remains_valid_far_type(self):
+        """EAGLE-210 does not erase LH from FAR/matrix taxonomy."""
+        result = get_requirements(200_000, "sap", "lh")
         assert result["errors"] == []
         assert result["contract_type"]["id"] == "lh"
 
@@ -375,6 +400,10 @@ class TestNormalizeFunctions:
 
     def test_normalize_type_alias(self):
         assert _normalize_type("firm_fixed_price") == "ffp"
+
+    def test_normalize_type_lh_internal_taxonomy(self):
+        assert _normalize_type("labor hour") == "lh"
+        assert _normalize_type("lh") == "lh"
 
     def test_normalize_type_none_for_unknown(self):
         assert _normalize_type("nonexistent") is None

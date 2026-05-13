@@ -13,6 +13,7 @@ import ThinkingChip from './thinking-chip';
 import { ToolCallsByMessageId, TrackedToolCall } from './simple-chat-interface';
 import { CodeResult } from '@/lib/client-tools';
 import { ThinkingBlock } from '@/types/stream';
+import { preprocessMarkdown } from '@/lib/markdown-utils';
 
 /** Shared markdown components — defined once, reused across all messages. */
 const mdComponents = {
@@ -71,11 +72,13 @@ const remarkPlugins = [remarkGfm];
 /**
  * Memoized markdown renderer for completed (non-streaming) messages.
  * Prevents re-parsing on every parent render when only other messages update.
+ * Applies table sanitization (EAGLE-303) before rendering.
  */
 const MemoizedMarkdown = memo(function MemoizedMarkdown({ content }: { content: string }) {
+  const sanitized = useMemo(() => preprocessMarkdown(content), [content]);
   return (
     <ReactMarkdown remarkPlugins={remarkPlugins} components={mdComponents}>
-      {content}
+      {sanitized}
     </ReactMarkdown>
   );
 });
@@ -83,9 +86,11 @@ const MemoizedMarkdown = memo(function MemoizedMarkdown({ content }: { content: 
 /**
  * Streaming-optimized markdown: splits on paragraph boundaries so only the
  * last (actively growing) block re-renders. Completed blocks are memoized.
+ * Applies table sanitization (EAGLE-303) before rendering.
  */
 const StreamingMarkdown = memo(function StreamingMarkdown({ content }: { content: string }) {
-  const blocks = content.split(/\n\n+/);
+  const sanitized = preprocessMarkdown(content);
+  const blocks = sanitized.split(/\n\n+/);
   return (
     <>
       {blocks.map((block, i) => {

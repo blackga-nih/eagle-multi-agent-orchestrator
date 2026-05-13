@@ -347,7 +347,10 @@ def exec_create_document(
                 companion and companion in completed_set
             )
 
-            # Not on the required checklist → hard error with list to guide the agent.
+            # Not on the required checklist → allow the valid package document,
+            # but mark it as off-checklist. The canonical document service keeps
+            # off-script docs out of completed required progress and surfaces
+            # them in checklist.extra[] for optional user promotion.
             if (
                 required
                 and doc_type not in required
@@ -356,21 +359,18 @@ def exec_create_document(
                 and not companion_in_completed
             ):
                 logger.info(
-                    "Checklist guardrail blocked %s for package %s — not in required list",
+                    "Checklist guardrail allowing off-checklist %s for package %s",
                     doc_type,
                     package_id,
                 )
-                return {
-                    "error": (
-                        f"doc_type '{doc_type}' is not in the required checklist "
-                        f"for package {package_id}. Call manage_package("
-                        f"operation='checklist', package_id='{package_id}') to see "
-                        "the required documents, then only generate documents "
-                        "on that list."
-                    ),
-                    "required": sorted(required),
-                    "completed": sorted(completed_set),
-                }
+                data["_checklist_extra"] = (
+                    f"'{doc_type}' is not on the required checklist for package "
+                    f"{package_id}. Generate it as an extra package document; "
+                    "do not mark it complete against required progress unless "
+                    "the user later promotes it into the checklist."
+                )
+                data["_checklist_required"] = sorted(required)
+                data["_checklist_completed"] = sorted(completed_set)
 
             # Already completed → warn and point the agent at update_existing_key.
             # Does not block — lets the agent proceed if the user explicitly
@@ -703,6 +703,10 @@ def exec_create_document(
         }
         if template_path:
             response["template_path"] = template_path
+        if data.get("_checklist_extra"):
+            response["_checklist_extra"] = data["_checklist_extra"]
+            response["_checklist_required"] = data.get("_checklist_required", [])
+            response["_checklist_completed"] = data.get("_checklist_completed", [])
         # Apply the same observability surface as the workspace-mode return
         # below — _template_provenance + section_drift on every successful
         # create_document call regardless of mode.
