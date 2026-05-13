@@ -500,11 +500,22 @@ jobs:
         # when S3_VECTORS_BUCKET / S3_VECTORS_INDEX added in ff8654f never
         # deployed, leaving vectors search pointing at the decommissioned
         # rh-eagle bucket and silently AccessDenied'ing.
-        STACKS="EagleCoreStack EagleCiCdStack EagleStorageStack EagleComputeStack EagleEvalStack EagleBackupStack"
+        # Two-phase deploy so cross-stack CFN export removals work:
+        # Phase 1 — Compute (and ComputeQA on qa) so their templates drop
+        # ImportValue references to exports Core is about to delete (this
+        # bit the Cognito → Entra migration on 2026-05-13: CFN refused to
+        # remove the UserPool exports while Compute still imported them).
+        # Using one cdk-deploy invocation per stack with --exclusively so
+        # CDK cannot reorder by dependency.
+        # Phase 2 — Core + remaining stacks (export deletion is safe now).
+        COMPUTE_STACKS="EagleComputeStack"
         if [ "${{ needs.setup.outputs.env_name }}" = "qa" ]; then
-          STACKS="$STACKS EagleComputeStackQA"
+          COMPUTE_STACKS="$COMPUTE_STACKS EagleComputeStackQA"
         fi
-        npx cdk deploy $STACKS \
+        for s in $COMPUTE_STACKS; do
+          npx cdk deploy "$s" --exclusively --require-approval never
+        done
+        npx cdk deploy EagleCiCdStack EagleStorageStack EagleCoreStack EagleEvalStack EagleBackupStack \
           --exclusively --require-approval never --outputs-file outputs.json
 
   # ── Build & Push Backend Container ─────────────────────────
