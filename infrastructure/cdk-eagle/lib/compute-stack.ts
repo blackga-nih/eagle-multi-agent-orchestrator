@@ -304,14 +304,29 @@ export class EagleComputeStack extends cdk.Stack {
 
     frontendService.attachToApplicationTargetGroup(frontendTargetGroup);
 
-    // CBIIT external target-group attachment intentionally removed for the
-    // diag/y-exec-enabled probe. The previous deploy stalled because new
-    // tasks failed the CBIIT TG's health check on `/` and we could not see
-    // what the route was actually returning. This branch ships with the
-    // attachment dropped so the rolling deploy completes; with ECS Exec
-    // enabled (above) we can shell into the new task post-deploy and curl
-    // localhost:3000 directly to find out what `/` does. Re-attach in a
-    // follow-up PR once the root cause is understood.
+    // Register the frontend ECS service with the CBIIT-managed external
+    // ALB's target group. The ALB itself is owned outside CDK — we only
+    // import the target group by ARN. ECS auto-syncs current task IPs to
+    // it on every deploy.
+    //
+    // The earlier attempt at this attachment failed health checks because
+    // the CBIIT ALB SG was missing an egress rule for tcp/3000 (the ALB
+    // could not actually reach the task even though the task SG allowed
+    // inbound). That root-cause was diagnosed via the diag/y-exec-enabled
+    // ECS Exec probe on 2026-05-14 and fixed out-of-band with
+    //     aws ec2 authorize-security-group-egress
+    //       --group-id sg-0f426290543115077
+    //       --ip-permissions IpProtocol=tcp,FromPort=3000,ToPort=3000,
+    //                        UserIdGroupPairs=[{GroupId=sg-090c049bf095c18d9}]
+    // (rule sgr-09dcd437f58396499). With that in place the attachment
+    // works and CBIIT TG health checks pass.
+    if (config.externalFrontendTargetGroupArn) {
+      const externalFrontendTg = elbv2.ApplicationTargetGroup.fromTargetGroupAttributes(
+        this, 'ExternalFrontendTargetGroup',
+        { targetGroupArn: config.externalFrontendTargetGroupArn },
+      );
+      frontendService.attachToApplicationTargetGroup(externalFrontendTg);
+    }
 
     // ── Auto-Scaling ─────────────────────────────────────────
     const backendScaling = backendService.autoScaleTaskCount({
