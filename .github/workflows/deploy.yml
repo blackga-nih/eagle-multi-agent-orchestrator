@@ -660,16 +660,25 @@ jobs:
         role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: Derive ECR URI and Cognito values
+    - name: Derive ECR URI and backend URL for frontend build
       id: config
       run: |
         ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
         echo "uri=${ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/${{ needs.setup.outputs.frontend_ecr }}" >> $GITHUB_OUTPUT
 
-        CORE=$(aws cloudformation describe-stacks --stack-name EagleCoreStack \
-          --query "Stacks[0].Outputs" --output json)
-        echo "user-pool-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolId") | .OutputValue')" >> $GITHUB_OUTPUT
-        echo "client-id=$(echo $CORE | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue')" >> $GITHUB_OUTPUT
+        # Backend ALB URL is needed at BUILD time, not just runtime — Next.js
+        # standalone output bakes rewrites() into routes-manifest.json at
+        # `next build`. Without this, /api/auth/* rewrites resolve to
+        # localhost:8000 in the baked manifest and the Entra callback
+        # cannot reach FastAPI (root cause of 2026-05-14 dev failure).
+        STACK_NAME="EagleComputeStack"
+        if [ "${{ needs.setup.outputs.env_name }}" = "qa" ]; then
+          STACK_NAME="EagleComputeStackQA"
+        fi
+        BACKEND_URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+          --query "Stacks[0].Outputs[?OutputKey=='BackendUrl'].OutputValue" --output text)
+        echo "backend-url=$BACKEND_URL" >> $GITHUB_OUTPUT
+        echo "Backend URL for frontend build: $BACKEND_URL"
 
     - name: Login to ECR
       uses: aws-actions/amazon-ecr-login@183a1442edf41672e66566b7fc560e297a290896  # v2.1.1
@@ -687,9 +696,7 @@ jobs:
           ${{ steps.config.outputs.uri }}:${{ github.sha }}
           ${{ steps.config.outputs.uri }}:latest
         build-args: |
-          NEXT_PUBLIC_COGNITO_USER_POOL_ID=${{ steps.config.outputs.user-pool-id }}
-          NEXT_PUBLIC_COGNITO_CLIENT_ID=${{ steps.config.outputs.client-id }}
-          NEXT_PUBLIC_COGNITO_REGION=${{ env.AWS_REGION }}
+          FASTAPI_URL=${{ steps.config.outputs.backend-url }}
         cache-from: type=gha,scope=frontend
         cache-to: type=gha,mode=max,scope=frontend
 

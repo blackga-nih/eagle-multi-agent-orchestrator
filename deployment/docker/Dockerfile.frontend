@@ -15,10 +15,15 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY client/ ./
 
-# Build-time env vars (NEXT_PUBLIC_* are baked in at build)
-ARG NEXT_PUBLIC_COGNITO_USER_POOL_ID
-ARG NEXT_PUBLIC_COGNITO_CLIENT_ID
-ARG NEXT_PUBLIC_COGNITO_REGION=us-east-1
+# Build-time env vars. Next.js standalone output bakes rewrites() into
+# routes-manifest.json at build, so FASTAPI_URL MUST be set as a build
+# arg — runtime task-def env vars are not consulted by the standalone
+# server when serving the baked rewrites. Without this the /api/auth/*
+# and /ws/* rewrites fall back to http://localhost:8000 and proxy
+# requests get ECONNREFUSED at runtime (root cause of the Entra
+# callback failure observed 2026-05-14).
+ARG FASTAPI_URL=http://localhost:8000
+ENV FASTAPI_URL=$FASTAPI_URL
 
 RUN npm run build
 
