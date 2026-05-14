@@ -139,12 +139,16 @@ export const DEV_CONFIG: EagleConfig = {
   entraClientId: process.env.EAGLE_ENTRA_CLIENT_ID || '',
   entraRedirectUri: process.env.EAGLE_ENTRA_REDIRECT_URI || '',
   entraPostLoginPath: '/chat',
+  // Complete ARN (with 6-char Secrets Manager suffix) is REQUIRED — see
+  // `core-stack.ts` (the partial-ARN form leaks an IAM/task-def mismatch
+  // that fails the ECS task with AccessDenied at startup, observed
+  // 2026-05-13 in run 25825912427).
   entraClientSecretArn:
     process.env.EAGLE_ENTRA_CLIENT_SECRET_ARN ||
-    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:eagle/dev/entra-client-secret`,
+    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:eagle/dev/entra-client-secret-sJv2P4`,
   jwtSigningKeySecretArn:
     process.env.EAGLE_JWT_SIGNING_KEY_ARN ||
-    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:eagle/dev/jwt-signing-key`,
+    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:eagle/dev/jwt-signing-key-8xvoN8`,
 
   // CBIIT-managed external front-door — EAGLE-DEV-ALB (HTTPS, *.cancer.gov cert).
   // SG already permits the frontend task SG on :3000 (verified out-of-band).

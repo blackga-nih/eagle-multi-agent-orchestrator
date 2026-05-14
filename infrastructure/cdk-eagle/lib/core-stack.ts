@@ -68,13 +68,19 @@ export class EagleCoreStack extends cdk.Stack {
     // Secret values are populated out-of-band (`aws secretsmanager
     // put-secret-value`); CDK only references them by ARN so the secret
     // payload never lands in CloudFormation templates.
-    // ARNs may be supplied with or without the 6-char Secrets Manager suffix.
-    // ``fromSecretPartialArn`` accepts either form and grants by-name policies
-    // that work for both the canonical ARN and any version of it.
-    this.entraClientSecret = secretsmanager.Secret.fromSecretPartialArn(
+    //
+    // ARNs MUST be the complete ARN (with the 6-char Secrets Manager suffix
+    // like `-sJv2P4`). Earlier code used `fromSecretPartialArn`, which
+    // generates an IAM policy with a `-??????` 6-char wildcard appended,
+    // but emits the partial ARN in the ECS task def `ValueFrom`. ECS then
+    // calls Secrets Manager with the partial ARN and IAM evaluates against
+    // the wildcard-suffixed resource — those don't match and the task
+    // gets AccessDenied. `fromSecretCompleteArn` uses the full ARN for
+    // both the task def and the policy resource, so they line up.
+    this.entraClientSecret = secretsmanager.Secret.fromSecretCompleteArn(
       this, 'EntraClientSecret', config.entraClientSecretArn,
     );
-    this.jwtSigningKeySecret = secretsmanager.Secret.fromSecretPartialArn(
+    this.jwtSigningKeySecret = secretsmanager.Secret.fromSecretCompleteArn(
       this, 'JwtSigningKeySecret', config.jwtSigningKeySecretArn,
     );
 
