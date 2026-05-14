@@ -445,8 +445,15 @@ class TestChatEndpointHonorsJwt:
         assert a_entry["user_id"] == "alice-iso"
         assert b_entry["user_id"] == "bob-iso"
 
-    def test_chat_without_auth_header_falls_back_to_dev_user(self, chat_app):
-        """Sanity check: the permissive path (no header) still works."""
+    def test_chat_without_auth_header_falls_back_to_anonymous(self, chat_app):
+        """Sanity check: the permissive path (no header) still works.
+
+        Updated for Entra: unauthenticated requests now resolve to the
+        ``UserContext.anonymous()`` shape unless ``DEV_MODE=true`` is set
+        at module-load time. The dev-user fallback used to happen
+        unconditionally on the Cognito path; under Entra it's gated on
+        DEV_MODE so production never silently mints a synthetic identity.
+        """
         app, _ = chat_app
 
         with TestClient(app) as client:
@@ -463,5 +470,5 @@ class TestChatEndpointHonorsJwt:
             e for e in get_telemetry_log() if e.get("session_id") == "ses-no-auth"
         ]
         assert entries
-        assert entries[-1]["user_id"] == "dev-user"
-        assert entries[-1]["tenant_id"] == "dev-tenant"
+        assert entries[-1]["user_id"] == "anonymous"
+        assert entries[-1]["tenant_id"] == "default"
