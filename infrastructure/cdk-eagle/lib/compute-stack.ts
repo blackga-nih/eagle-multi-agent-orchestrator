@@ -206,6 +206,7 @@ export class EagleComputeStack extends cdk.Stack {
       securityGroups: [backendServiceSG],
       vpcSubnets: subnetSelection,
       assignPublicIp: false,
+      enableExecuteCommand: true,
     });
 
     backendService.attachToApplicationTargetGroup(backendTargetGroup);
@@ -298,25 +299,19 @@ export class EagleComputeStack extends cdk.Stack {
       securityGroups: [frontendServiceSG],
       vpcSubnets: subnetSelection,
       assignPublicIp: false,
+      enableExecuteCommand: true,
     });
 
     frontendService.attachToApplicationTargetGroup(frontendTargetGroup);
 
-    // Also register with the CBIIT-managed external ALB's target group so
-    // that ALB sees current task IPs on every deploy. The ALB itself is
-    // owned outside CDK — we only import the target group by ARN. Before
-    // this, the external TG had manually-pinned IPs that went stale when
-    // ECS rotated tasks, leaving the public HTTPS URL with unhealthy
-    // targets. Adding LoadBalancers to an existing ECS service is a
-    // replacement update in CloudFormation; expect a brief outage on
-    // first deploy as the new service stands up.
-    if (config.externalFrontendTargetGroupArn) {
-      const externalFrontendTg = elbv2.ApplicationTargetGroup.fromTargetGroupAttributes(
-        this, 'ExternalFrontendTargetGroup',
-        { targetGroupArn: config.externalFrontendTargetGroupArn },
-      );
-      frontendService.attachToApplicationTargetGroup(externalFrontendTg);
-    }
+    // CBIIT external target-group attachment intentionally removed for the
+    // diag/y-exec-enabled probe. The previous deploy stalled because new
+    // tasks failed the CBIIT TG's health check on `/` and we could not see
+    // what the route was actually returning. This branch ships with the
+    // attachment dropped so the rolling deploy completes; with ECS Exec
+    // enabled (above) we can shell into the new task post-deploy and curl
+    // localhost:3000 directly to find out what `/` does. Re-attach in a
+    // follow-up PR once the root cause is understood.
 
     // ── Auto-Scaling ─────────────────────────────────────────
     const backendScaling = backendService.autoScaleTaskCount({
