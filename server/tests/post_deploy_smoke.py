@@ -6,6 +6,19 @@ backend wire contract for the research tool, drives the frontend chat UI
 end-to-end, captures screenshots at key moments, and uploads everything to
 the eval-artifacts S3 bucket so reviewers can audit a deploy without VPN.
 
+⚠️  ENTRA REFACTOR PENDING (2026-05-14).
+    The auth path here is still Cognito-coupled (cognito_login() in this
+    file, Cognito sign-in form Playwright in the frontend probe). After
+    the Entra OIDC migration (PR #233), all auth-gated scenarios in
+    SCENARIOS will fail because cognito_login() can't mint a session
+    against Entra. Until refactored, use the lightweight wire-check at
+    `scripts/entra_smoke.sh` (`just entra-smoke`) for post-deploy
+    validation — it ECS-Execs into a running frontend task and probes
+    /api/auth/login on both the proxy and the backend, confirming the
+    redirect lands on login.microsoftonline.com. The full Playwright
+    flow needs an Entra-aware auth helper (e.g. ROPC against the NIH
+    tenant if allowed, or a pre-minted session token loaded as a cookie).
+
 Pattern alignment:
 - Sibling of e2e_judge_orchestrator (Playwright + vision) and the Q4/Q5
   rerun harness (deployed-backend probes).
@@ -19,7 +32,7 @@ Usage (on the devbox):
         --scenario research_source_transparency \
         --upload
 
-Optional auth (when DEV_MODE is off):
+Optional auth (when DEV_MODE is off) — STALE, pending Entra refactor:
     EAGLE_TEST_EMAIL=... EAGLE_TEST_PASSWORD=... COGNITO_CLIENT_ID=... \
         python -m tests.post_deploy_smoke ... --auth
 

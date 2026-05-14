@@ -133,9 +133,25 @@ dev-smoke-ui: dev-up smoke-ui
 # CLAUDE.md > Post-Deploy Smoke. Use it after every meaningful deploy.
 #
 # Usage:
-#   just dev-smoke-deployed                                    # default scenario
-#   just dev-smoke-deployed research_source_transparency       # explicit
-#   just qa-smoke-deployed research_source_transparency        # qa env
+#   just entra-smoke                            # fast no-auth wire-check (dev)
+#   just entra-smoke qa                         # same against qa
+#   just dev-smoke-deployed                     # full Playwright smoke (TODO: Entra-refactor)
+#   just dev-smoke-deployed research_source_transparency
+#   just qa-smoke-deployed research_source_transparency
+#
+# entra-smoke is the canonical post-Entra-cutover smoke: ECS Exec into a
+# running frontend task and probe /api/auth/login on both the frontend
+# proxy and the backend, plus / and /api/health. Validates that
+# rewrites() resolved to the backend URL (not the localhost fallback)
+# and that the backend's Entra OIDC config is complete (redirect goes
+# to login.microsoftonline.com). Takes ~5s and needs only AWS creds +
+# SSM Session Manager plugin — no devbox, no Playwright, no VPN.
+entra-smoke ENV="dev":
+    bash scripts/entra_smoke.sh {{ENV}}
+
+# Full Playwright smoke (auth-gated scenarios). Currently still Cognito-
+# coupled — Entra refactor pending. Use entra-smoke for post-deploy
+# validation until that's done. Tracked as a follow-up.
 dev-smoke-deployed SCENARIO="research_source_transparency":
     python scripts/_remote_post_deploy_smoke.py --env dev --scenario {{SCENARIO}}
 
